@@ -16,7 +16,38 @@ import type {
  */
 
 const notImplemented = (method: string) =>
-  Promise.reject(new Error(`${method}: Not implemented yet (Phase 2)`))
+  Promise.reject(new Error(`${method}: Not implemented yet`))
+
+/** Helper to create a stub adapter with standard not-implemented methods */
+function createStubAdapter(config: MarketplaceAdapter['config']): MarketplaceAdapter {
+  return {
+    config,
+    async testConnection(_credentials: MarketplaceCredentials) {
+      return { success: false, error: 'Not implemented yet' }
+    },
+    async authenticate() {
+      return notImplemented('authenticate') as never
+    },
+    async getOrders(_since: Date): Promise<NormalizedOrder[]> {
+      return notImplemented('getOrders') as never
+    },
+    async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
+      return notImplemented('getClaimsOrders') as never
+    },
+    async uploadInvoice(_orderId: string, _invoice: InvoiceData) {
+      return notImplemented('uploadInvoice') as never
+    },
+    async getProducts(): Promise<NormalizedProduct[]> {
+      return notImplemented('getProducts') as never
+    },
+    async registerProduct(_product: NormalizedProduct) {
+      return notImplemented('registerProduct') as never
+    },
+    async updateProduct(_id: string, _product: Partial<NormalizedProduct>) {
+      return notImplemented('updateProduct') as never
+    },
+  }
+}
 
 const coupangAdapter: MarketplaceAdapter = {
   config: {
@@ -240,6 +271,158 @@ const ohouseAdapter: MarketplaceAdapter = {
   },
 }
 
+// --- Tier 1: Cafe24, CJ온스타일, 카카오선물하기, 카카오톡스토어 ---
+
+const cafe24Adapter = createStubAdapter({
+  id: 'cafe24',
+  name: 'Cafe24',
+  authType: 'oauth2',
+  rateLimitPerSecond: 40,
+  requiredCredentials: ['client_id', 'client_secret', 'mall_id'],
+})
+
+const cjonestyleAdapter = createStubAdapter({
+  id: 'cjonestyle',
+  name: 'CJ온스타일',
+  authType: 'api_key',
+  rateLimitPerSecond: 30,
+  requiredCredentials: ['api_key', 'seller_code'],
+})
+
+const kakaoGiftAdapter = createStubAdapter({
+  id: 'kakao-gift',
+  name: '카카오선물하기',
+  authType: 'api_key',
+  rateLimitPerSecond: 30,
+  requiredCredentials: ['api_key', 'store_id'],
+})
+
+const kakaoStoreAdapter = createStubAdapter({
+  id: 'kakao-store',
+  name: '카카오톡스토어',
+  authType: 'api_key',
+  rateLimitPerSecond: 30,
+  requiredCredentials: ['api_key', 'store_id'],
+})
+
+// --- Tier 2: 도매꾹, 온채널, 오너클랜, 신세계몰, 에이블리 ---
+
+const domeggookAdapter = createStubAdapter({
+  id: 'domeggook',
+  name: '도매꾹',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const onchannelAdapter = createStubAdapter({
+  id: 'onchannel',
+  name: '온채널',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'shop_id'],
+})
+
+const ownerclanAdapter = createStubAdapter({
+  id: 'ownerclan',
+  name: '오너클랜',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const ssgmallAdapter = createStubAdapter({
+  id: 'ssgmall',
+  name: '신세계몰',
+  authType: 'api_key',
+  rateLimitPerSecond: 30,
+  requiredCredentials: ['api_key', 'vendor_id'],
+})
+
+const ablyAdapter = createStubAdapter({
+  id: 'ably',
+  name: '에이블리',
+  authType: 'api_key',
+  rateLimitPerSecond: 30,
+  requiredCredentials: ['api_key', 'shop_id'],
+})
+
+// --- Tier 3A: 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B ---
+
+const hyundaiHmallAdapter = createStubAdapter({
+  id: 'hyundai-hmall',
+  name: '현대홈쇼핑',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const nsmallAdapter = createStubAdapter({
+  id: 'nsmall',
+  name: 'NS홈쇼핑',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'vendor_code'],
+})
+
+const domesinAdapter = createStubAdapter({
+  id: 'domesin',
+  name: '도매의신',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const domechangoAdapter = createStubAdapter({
+  id: 'domechango',
+  name: '도매창고',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const bananaB2bAdapter = createStubAdapter({
+  id: 'banana-b2b',
+  name: '바나나B2B',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'partner_id'],
+})
+
+// --- Tier 3B: 올웨이즈, 텐바이텐, 토스쇼핑, 투비즈온 ---
+
+const alwaysAdapter = createStubAdapter({
+  id: 'always',
+  name: '올웨이즈',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const tenByTenAdapter = createStubAdapter({
+  id: '10x10',
+  name: '텐바이텐',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'shop_id'],
+})
+
+const tossShoppingAdapter = createStubAdapter({
+  id: 'toss-shopping',
+  name: '토스쇼핑',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const tobizonAdapter = createStubAdapter({
+  id: 'tobizon',
+  name: '투비즈온',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'partner_id'],
+})
+
 export function registerDefaultAdapters() {
   if (!marketplaceRegistry.has('coupang')) {
     marketplaceRegistry.register(coupangAdapter)
@@ -258,6 +441,64 @@ export function registerDefaultAdapters() {
   }
   if (!marketplaceRegistry.has('ohouse')) {
     marketplaceRegistry.register(ohouseAdapter)
+  }
+  // Tier 1
+  if (!marketplaceRegistry.has('cafe24')) {
+    marketplaceRegistry.register(cafe24Adapter)
+  }
+  if (!marketplaceRegistry.has('cjonestyle')) {
+    marketplaceRegistry.register(cjonestyleAdapter)
+  }
+  if (!marketplaceRegistry.has('kakao-gift')) {
+    marketplaceRegistry.register(kakaoGiftAdapter)
+  }
+  if (!marketplaceRegistry.has('kakao-store')) {
+    marketplaceRegistry.register(kakaoStoreAdapter)
+  }
+  // Tier 2
+  if (!marketplaceRegistry.has('domeggook')) {
+    marketplaceRegistry.register(domeggookAdapter)
+  }
+  if (!marketplaceRegistry.has('onchannel')) {
+    marketplaceRegistry.register(onchannelAdapter)
+  }
+  if (!marketplaceRegistry.has('ownerclan')) {
+    marketplaceRegistry.register(ownerclanAdapter)
+  }
+  if (!marketplaceRegistry.has('ssgmall')) {
+    marketplaceRegistry.register(ssgmallAdapter)
+  }
+  if (!marketplaceRegistry.has('ably')) {
+    marketplaceRegistry.register(ablyAdapter)
+  }
+  // Tier 3A
+  if (!marketplaceRegistry.has('hyundai-hmall')) {
+    marketplaceRegistry.register(hyundaiHmallAdapter)
+  }
+  if (!marketplaceRegistry.has('nsmall')) {
+    marketplaceRegistry.register(nsmallAdapter)
+  }
+  if (!marketplaceRegistry.has('domesin')) {
+    marketplaceRegistry.register(domesinAdapter)
+  }
+  if (!marketplaceRegistry.has('domechango')) {
+    marketplaceRegistry.register(domechangoAdapter)
+  }
+  if (!marketplaceRegistry.has('banana-b2b')) {
+    marketplaceRegistry.register(bananaB2bAdapter)
+  }
+  // Tier 3B
+  if (!marketplaceRegistry.has('always')) {
+    marketplaceRegistry.register(alwaysAdapter)
+  }
+  if (!marketplaceRegistry.has('10x10')) {
+    marketplaceRegistry.register(tenByTenAdapter)
+  }
+  if (!marketplaceRegistry.has('toss-shopping')) {
+    marketplaceRegistry.register(tossShoppingAdapter)
+  }
+  if (!marketplaceRegistry.has('tobizon')) {
+    marketplaceRegistry.register(tobizonAdapter)
   }
 }
 

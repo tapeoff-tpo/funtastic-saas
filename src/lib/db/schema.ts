@@ -6,7 +6,14 @@ import {
   pgEnum,
   varchar,
   jsonb,
+  boolean,
+  integer,
+  numeric,
+  uniqueIndex,
+  index,
 } from 'drizzle-orm/pg-core'
+
+// ─── Phase 1: Marketplace Connections ───────────────────────────
 
 export const connectionStatusEnum = pgEnum('connection_status', [
   'connected',
@@ -39,6 +46,137 @@ export const marketplaceConnections = pgTable('marketplace_connections', {
     .defaultNow()
     .notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+// ─── Phase 2: Order Management ──────────────────────────────────
+
+export const orderStatusEnum = pgEnum('order_status', [
+  'new',
+  'confirmed',
+  'preparing',
+  'shipped',
+  'delivering',
+  'delivered',
+  'cancelled',
+])
+
+export const claimTypeEnum = pgEnum('claim_type', [
+  'cancel',
+  'return',
+  'exchange',
+])
+
+export const claimStatusEnum = pgEnum('claim_status', [
+  'requested',
+  'processing',
+  'completed',
+  'rejected',
+])
+
+export const orders = pgTable(
+  'orders',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    connectionId: uuid('connection_id')
+      .notNull()
+      .references(() => marketplaceConnections.id),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceOrderId: varchar('marketplace_order_id', { length: 200 }).notNull(),
+    status: orderStatusEnum('status').notNull().default('new'),
+    previousStatus: orderStatusEnum('previous_status'),
+    buyerName: varchar('buyer_name', { length: 200 }).notNull(),
+    buyerPhone: varchar('buyer_phone', { length: 50 }),
+    recipientName: varchar('recipient_name', { length: 200 }).notNull(),
+    recipientPhone: varchar('recipient_phone', { length: 50 }),
+    shippingAddress: jsonb('shipping_address').$type<{
+      zipCode: string
+      address1: string
+      address2?: string
+    }>(),
+    orderedAt: timestamp('ordered_at', { withTimezone: true }).notNull(),
+    totalAmount: numeric('total_amount', { precision: 12, scale: 2 }).notNull(),
+    isHeld: boolean('is_held').notNull().default(false),
+    holdReason: text('hold_reason'),
+    heldAt: timestamp('held_at', { withTimezone: true }),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
+    marketplaceStatus: varchar('marketplace_status', { length: 100 }),
+    collectedAt: timestamp('collected_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('orders_marketplace_unique').on(
+      table.marketplaceId,
+      table.marketplaceOrderId,
+    ),
+    index('orders_user_status').on(table.userId, table.status),
+    index('orders_ordered_at').on(table.orderedAt),
+  ],
+)
+
+export const orderItems = pgTable('order_items', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  marketplaceItemId: varchar('marketplace_item_id', { length: 200 }),
+  productName: text('product_name').notNull(),
+  optionText: text('option_text'),
+  quantity: integer('quantity').notNull().default(1),
+  unitPrice: numeric('unit_price', { precision: 12, scale: 2 }).notNull(),
+  sku: varchar('sku', { length: 100 }),
+})
+
+export const claims = pgTable(
+  'claims',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id),
+    userId: uuid('user_id').notNull(),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceClaimId: varchar('marketplace_claim_id', { length: 200 }).notNull(),
+    claimType: claimTypeEnum('claim_type').notNull(),
+    claimStatus: claimStatusEnum('claim_status').notNull().default('requested'),
+    reason: text('reason'),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('claims_marketplace_unique').on(
+      table.marketplaceId,
+      table.marketplaceClaimId,
+    ),
+    index('claims_order_id').on(table.orderId),
+  ],
+)
+
+export const jobLogs = pgTable('job_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  jobType: varchar('job_type', { length: 50 }).notNull(),
+  marketplaceId: varchar('marketplace_id', { length: 50 }),
+  connectionId: uuid('connection_id'),
+  status: varchar('status', { length: 20 }).notNull().default('queued'),
+  ordersCollected: integer('orders_collected'),
+  claimsCollected: integer('claims_collected'),
+  errorMessage: text('error_message'),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
 })

@@ -3,6 +3,7 @@ import type {
   MarketplaceAdapter,
   MarketplaceCredentials,
   NormalizedOrder,
+  NormalizedClaim,
   NormalizedProduct,
   InvoiceData,
 } from '../types'
@@ -32,6 +33,9 @@ const coupangAdapter: MarketplaceAdapter = {
   async getOrders(_since: Date): Promise<NormalizedOrder[]> {
     return notImplemented('getOrders') as never
   },
+  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
+    return notImplemented('getClaimsOrders') as never
+  },
   async uploadInvoice(
     _orderId: string,
     _invoice: InvoiceData
@@ -59,6 +63,9 @@ const naverAdapter: MarketplaceAdapter = {
   },
   async getOrders(_since: Date): Promise<NormalizedOrder[]> {
     return notImplemented('getOrders') as never
+  },
+  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
+    return notImplemented('getClaimsOrders') as never
   },
   async uploadInvoice(
     _orderId: string,

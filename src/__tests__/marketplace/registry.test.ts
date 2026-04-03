@@ -22,6 +22,9 @@ function createMockAdapter(overrides: Partial<MarketplaceAdapter['config']> = {}
     async getOrders(_since: Date) {
       return []
     },
+    async getClaimsOrders(_since: Date) {
+      return []
+    },
     async uploadInvoice(_orderId: string, _invoice: unknown) {
       return { success: true }
     },

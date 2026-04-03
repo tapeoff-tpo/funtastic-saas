@@ -6,6 +6,8 @@
  * and registering with the registry.
  */
 
+import type { OrderStatus } from '@/lib/orders/types'
+
 /** Known marketplace IDs with autocomplete, but extensible for custom marketplaces */
 export type MarketplaceId =
   | 'coupang'
@@ -31,14 +33,50 @@ export interface MarketplaceCredentials {
   [key: string]: string
 }
 
-/** Normalized order shape — expanded in Phase 2 */
-export interface NormalizedOrder {
-  orderId: string
-  marketplaceId: MarketplaceId
-  [key: string]: unknown
+/** Normalized order item from marketplace */
+export interface NormalizedOrderItem {
+  marketplaceItemId: string
+  productName: string
+  optionText?: string
+  quantity: number
+  unitPrice: number
+  sku?: string
 }
 
-/** Normalized product shape — expanded in Phase 5 */
+/** Normalized order shape -- fully typed for Phase 2 adapters */
+export interface NormalizedOrder {
+  marketplaceOrderId: string
+  marketplaceId: MarketplaceId
+  marketplaceStatus: string
+  status: OrderStatus
+  buyerName: string
+  buyerPhone?: string
+  recipientName: string
+  recipientPhone?: string
+  shippingAddress: {
+    zipCode: string
+    address1: string
+    address2?: string
+  }
+  items: NormalizedOrderItem[]
+  orderedAt: Date
+  totalAmount: number
+  rawData: Record<string, unknown>
+}
+
+/** Normalized claim from marketplace (per D-02) */
+export interface NormalizedClaim {
+  marketplaceClaimId: string
+  marketplaceId: MarketplaceId
+  marketplaceOrderId: string
+  claimType: 'cancel' | 'return' | 'exchange'
+  claimStatus: 'requested' | 'processing' | 'completed' | 'rejected'
+  reason?: string
+  requestedAt: Date
+  rawData: Record<string, unknown>
+}
+
+/** Normalized product shape -- expanded in Phase 5 */
 export interface NormalizedProduct {
   productId: string
   marketplaceId: MarketplaceId
@@ -64,9 +102,10 @@ export interface MarketplaceAdapter {
     expiresAt?: Date
   }>
 
-  // Phase 2+ methods — declared in interface, implementations throw 'Not implemented' until Phase 2
+  // Phase 2+ methods
   authenticate(): Promise<{ success: boolean; expiresAt?: Date }>
   getOrders(since: Date): Promise<NormalizedOrder[]>
+  getClaimsOrders(since: Date): Promise<NormalizedClaim[]>
   uploadInvoice(
     orderId: string,
     invoice: InvoiceData

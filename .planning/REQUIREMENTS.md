@@ -11,9 +11,9 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **FOUND-01**: 시스템 관리자가 이메일/비밀번호로 로그인할 수 있다
 - [x] **FOUND-02**: 로그인 세션이 브라우저 새로고침 후에도 유지된다
-- [ ] **FOUND-03**: 관리자가 마켓플레이스별 API 인증정보(키/시크릿)를 등록하고 관리할 수 있다
+- [x] **FOUND-03**: 관리자가 마켓플레이스별 API 인증정보(키/시크릿)를 등록하고 관리할 수 있다
 - [x] **FOUND-04**: 등록된 API 인증정보가 암호화되어 안전하게 저장된다
-- [ ] **FOUND-05**: 마켓플레이스 연동 상태(정상/오류/만료)를 대시보드에서 확인할 수 있다
+- [x] **FOUND-05**: 마켓플레이스 연동 상태(정상/오류/만료)를 대시보드에서 확인할 수 있다
 
 ### Order Management (주문관리)
 
@@ -122,9 +122,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 |-------------|-------|--------|
 | FOUND-01 | Phase 1 | Complete |
 | FOUND-02 | Phase 1 | Complete |
-| FOUND-03 | Phase 1 | Pending |
+| FOUND-03 | Phase 1 | Complete |
 | FOUND-04 | Phase 1 | Complete |
-| FOUND-05 | Phase 1 | Pending |
+| FOUND-05 | Phase 1 | Complete |
 | ORD-01 | Phase 2 | Pending |
 | ORD-02 | Phase 2 | Pending |
 | ORD-03 | Phase 2 | Pending |

@@ -104,10 +104,10 @@ Plans:
 **Plans:** 5 plans
 Plans:
 - [x] 05-01-PLAN.md — Product schema, types, queries, CRUD actions with variant-inventory linking (PROD-01, PROD-05)
-- [ ] 05-02-PLAN.md — Reverse collection: expand NormalizedProduct, implement adapter getProducts(), import logic (PROD-04)
+- [x] 05-02-PLAN.md — Reverse collection: expand NormalizedProduct, implement adapter getProducts(), import logic (PROD-04)
 - [x] 05-03-PLAN.md — Category mapping CRUD and product sync to marketplaces via adapter (PROD-02, PROD-03)
 - [ ] 05-04-PLAN.md — Excel bulk import/export for products with round-trip compatibility (DATA-02)
-- [ ] 05-05-PLAN.md — Product management UI: list, create/edit forms, category mapping, import page + checkpoint (all PROD + DATA-02)
+- [x] 05-05-PLAN.md — Product management UI: list, create/edit forms, category mapping, import page + checkpoint (all PROD + DATA-02)
 **UI hint**: yes
 
 ### Phase 6: Marketplace Expansion

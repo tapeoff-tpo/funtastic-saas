@@ -342,8 +342,100 @@ const esmHandlers = [
 ]
 
 // ============================================================================
+// Ohouse Mock Data
+// ============================================================================
+
+export const MOCK_OHOUSE_ORDERS = [
+  {
+    orderId: 'OH-20260402-001',
+    productName: '오늘의집 테스트 상품 A',
+    quantity: 2,
+    buyerName: '김오하우스',
+    buyerPhone: '010-1234-5678',
+    receiverName: '이수령',
+    receiverPhone: '010-8765-4321',
+    receiverZipcode: '06134',
+    receiverAddress: '서울특별시 강남구 테헤란로 789',
+    receiverAddressDetail: '10층 1001호',
+    orderDate: '2026-04-02T10:00:00Z',
+    orderStatus: 'PAID',
+    paymentAmount: 59800,
+    options: '색상: 네이비',
+    sellerItemCode: 'SKU-OH001',
+  },
+  {
+    orderId: 'OH-20260402-002',
+    productName: '오늘의집 테스트 상품 B',
+    quantity: 1,
+    buyerName: '박구매',
+    buyerPhone: '010-9999-8888',
+    receiverName: '최배송',
+    receiverPhone: '010-7777-6666',
+    receiverZipcode: '48060',
+    receiverAddress: '부산광역시 해운대구 우동 456',
+    receiverAddressDetail: '',
+    orderDate: '2026-04-02T11:00:00Z',
+    orderStatus: 'SHIPPED',
+    paymentAmount: 35000,
+    options: '',
+    sellerItemCode: 'SKU-OH002',
+  },
+]
+
+export const MOCK_OHOUSE_CLAIMS = [
+  {
+    claimId: 'CLM-OH-001',
+    orderId: 'OH-20260402-001',
+    claimType: 'RETURN',
+    claimStatus: 'REQUESTED',
+    reason: '색상 불일치',
+    createdAt: '2026-04-02T15:00:00Z',
+  },
+]
+
+// ============================================================================
+// Ohouse Handlers
+// ============================================================================
+
+const ohouseHandlers = [
+  http.get('https://openapi.ohou.se/api/v1/orders', () => {
+    return HttpResponse.json({
+      success: true,
+      message: 'OK',
+      data: MOCK_OHOUSE_ORDERS,
+    })
+  }),
+
+  http.get('https://openapi.ohou.se/api/v1/claims', () => {
+    return HttpResponse.json({
+      success: true,
+      message: 'OK',
+      data: MOCK_OHOUSE_CLAIMS,
+    })
+  }),
+
+  http.post('https://openapi.ohou.se/api/v1/orders/:orderId/invoice', () => {
+    return HttpResponse.json({
+      success: true,
+      message: 'OK',
+      data: null,
+    })
+  }),
+
+  http.get('https://openapi.ohou.se/api/v1/products', () => {
+    return HttpResponse.json({
+      success: true,
+      message: 'OK',
+      data: [
+        { productId: 'PROD-OH-001', name: '오늘의집 상품 1', price: 29900, status: 'ACTIVE' },
+      ],
+    })
+  }),
+]
+
+// ============================================================================
 // Export all handlers
 // ============================================================================
 
-export const handlers = [...coupangHandlers, ...naverHandlers, ...esmHandlers]
-export { coupangHandlers, naverHandlers, esmHandlers }
+export const handlers = [...coupangHandlers, ...naverHandlers, ...esmHandlers, ...ohouseHandlers]
+export { coupangHandlers, naverHandlers, esmHandlers, ohouseHandlers }

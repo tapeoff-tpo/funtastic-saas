@@ -15,6 +15,7 @@ export type MarketplaceId =
   | 'elevenst'
   | 'gmarket'
   | 'auction'
+  | 'ohouse'
   | (string & {})
 
 export type ConnectionStatus = 'connected' | 'error' | 'expired' | 'disconnected'

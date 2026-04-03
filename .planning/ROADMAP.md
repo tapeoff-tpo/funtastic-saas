@@ -119,7 +119,11 @@ Plans:
   2. Orders from 지마켓 and 옥션 (via ESM unified API) are collected and invoices can be uploaded via API
   3. Orders from 오늘의집 are collected and invoices can be uploaded via API
   4. All 5 marketplace adapters show correct health status on the dashboard
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 06-01-PLAN.md — 11번가 adapter: API key auth, XML parsing, order/claims/invoice (MKT-03)
+- [ ] 06-02-PLAN.md — ESM adapter: unified Gmarket/Auction API, single adapter with site_type (MKT-04)
+- [ ] 06-03-PLAN.md — 오늘의집 adapter + register all new adapters in configs.ts (MKT-05)
 
 ## Progress
 
@@ -134,4 +138,4 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 3. Shipping & Invoice Processing | 1/5 | Executing | - |
 | 4. Inventory Management | 0/2 | Not started | - |
 | 5. Product Management & Data | 0/5 | Not started | - |
-| 6. Marketplace Expansion | 0/TBD | Not started | - |
+| 6. Marketplace Expansion | 0/3 | Not started | - |

@@ -52,7 +52,7 @@ describe('exportToCarrierExcel', () => {
 
     // Read back the generated Excel
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(buffer)
+    await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     const ws = wb.worksheets[0]
 
     expect(ws.name).toBe('CJ대한통운')
@@ -72,7 +72,7 @@ describe('exportToCarrierExcel', () => {
     const buffer = await exportToCarrierExcel(testOrders as any[], testTemplate)
 
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(buffer)
+    await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     const ws = wb.worksheets[0]
 
     // Data rows start at row 2

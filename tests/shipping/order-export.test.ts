@@ -37,7 +37,7 @@ describe('exportOrdersToExcel', () => {
     expect(buffer).toBeInstanceOf(Buffer)
 
     const wb = new ExcelJS.Workbook()
-    await wb.xlsx.load(buffer)
+    await wb.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     const ws = wb.worksheets[0]
 
     // Only 3 selected columns

@@ -69,13 +69,14 @@ const invoiceRowSchema = z.object({
  * based on configurable column mapping.
  */
 export async function parseInvoiceExcel(
-  buffer: Buffer,
+  buffer: Buffer | ArrayBuffer | Uint8Array,
   columnMapping?: Partial<ColumnMapping>,
 ): Promise<ParseResult> {
   const mapping = { ...DEFAULT_MAPPING, ...columnMapping }
 
   const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(buffer)
+  // ExcelJS types don't account for Node.js 24+ Buffer changes
+  await workbook.xlsx.load(buffer as ExcelJS.Buffer)
 
   const worksheet = workbook.worksheets[0]
   if (!worksheet) {

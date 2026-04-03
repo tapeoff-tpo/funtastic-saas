@@ -101,6 +101,10 @@ Recent decisions affecting current work:
 - [Phase 05]: importExcelAction stubbed pending 05-04 excel module completion
 - [Phase 06]: Single EsmAdapter class serves both Gmarket and Auction via site_type constructor param
 
+### Roadmap Evolution
+
+- Phase 7 added: 추가 마켓플레이스 연동 (도매꾹, 온채널, 오너클랜, Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B, 신세계몰, 에이블리, 올웨이즈, 카카오선물하기, 카카오톡스토어, 텐바이텐, 토스쇼핑, 투비즈온)
+
 ### Pending Todos
 
 None yet.

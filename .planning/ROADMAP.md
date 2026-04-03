@@ -139,3 +139,13 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 4. Inventory Management | 0/2 | Not started | - |
 | 5. Product Management & Data | 0/5 | Not started | - |
 | 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |
+
+### Phase 7: 추가 마켓플레이스 연동 (도매꾹, 온채널, 오너클랜, Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B, 신세계몰, 에이블리, 올웨이즈, 카카오선물하기, 카카오톡스토어, 텐바이텐, 토스쇼핑, 투비즈온)
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 7 to break down)

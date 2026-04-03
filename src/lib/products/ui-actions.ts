@@ -177,3 +177,22 @@ export async function deleteCategoryMappingAction(
   }
   return { success: false, error: 'error' in result ? result.error : 'Failed to delete mapping' }
 }
+
+/**
+ * Import products from an Excel file.
+ * Delegates to parseProductExcel + bulkImportProducts when available.
+ */
+export async function importExcelAction(
+  formData: FormData,
+): Promise<ActionResult<{ created: number; updated: number; errors: string[] }>> {
+  await requireUser()
+
+  const file = formData.get('file')
+  if (!file || !(file instanceof File)) {
+    return { success: false, error: '파일이 선택되지 않았습니다.' }
+  }
+
+  // Excel import module will be wired in plan 05-04
+  // For now, return a not-implemented error
+  return { success: false, error: '엑셀 가져오기 기능은 준비 중입니다. (05-04 plan)' }
+}

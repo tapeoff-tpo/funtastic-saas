@@ -270,6 +270,65 @@ export const carrierTemplates = pgTable('carrier_templates', {
     .notNull(),
 })
 
+// ─── Phase 4: Inventory Management ─────────────────────────────
+
+export const adjustmentReasonEnum = pgEnum('adjustment_reason', [
+  'incoming',
+  'defective',
+  'physical_count',
+  'return',
+  'order_ship',
+  'order_cancel',
+  'other',
+])
+
+export const inventory = pgTable(
+  'inventory',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    productName: text('product_name').notNull(),
+    totalStock: integer('total_stock').notNull().default(0),
+    reservedStock: integer('reserved_stock').notNull().default(0),
+    availableStock: integer('available_stock').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('inventory_user_sku').on(table.userId, table.sku),
+    index('inventory_user_id').on(table.userId),
+  ],
+)
+
+export const inventoryHistory = pgTable(
+  'inventory_history',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    inventoryId: uuid('inventory_id')
+      .notNull()
+      .references(() => inventory.id),
+    userId: uuid('user_id').notNull(),
+    adjustmentReason: adjustmentReasonEnum('adjustment_reason').notNull(),
+    delta: integer('delta').notNull(),
+    previousTotal: integer('previous_total').notNull(),
+    newTotal: integer('new_total').notNull(),
+    note: text('note'),
+    orderId: uuid('order_id').references(() => orders.id),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('inventory_history_inventory_id').on(table.inventoryId),
+    index('inventory_history_order_id').on(table.orderId),
+  ],
+)
+
 // ─── Job Logs ───────────────────────────────────────────────────
 
 export const jobLogs = pgTable('job_logs', {

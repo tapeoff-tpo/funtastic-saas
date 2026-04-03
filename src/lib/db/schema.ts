@@ -132,6 +132,7 @@ export const orderItems = pgTable('order_items', {
   quantity: integer('quantity').notNull().default(1),
   unitPrice: numeric('unit_price', { precision: 12, scale: 2 }).notNull(),
   sku: varchar('sku', { length: 100 }),
+  fulfillmentCode: varchar('fulfillment_code', { length: 50 }).default('normal'),
 })
 
 export const claims = pgTable(
@@ -164,6 +165,112 @@ export const claims = pgTable(
     index('claims_order_id').on(table.orderId),
   ],
 )
+
+// ─── Phase 3: Shipping & Invoice Processing ────────────────────
+
+export const uploadStatusEnum = pgEnum('upload_status', [
+  'pending',
+  'uploading',
+  'uploaded',
+  'failed',
+  'confirmed',
+])
+
+export const shipmentGroupStatusEnum = pgEnum('shipment_group_status', [
+  'suggested',
+  'confirmed',
+  'rejected',
+  'shipped',
+])
+
+export const shipments = pgTable(
+  'shipments',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id),
+    userId: uuid('user_id').notNull(),
+    trackingNumber: varchar('tracking_number', { length: 100 }).notNull(),
+    carrierId: varchar('carrier_id', { length: 50 }).notNull(),
+    carrierName: varchar('carrier_name', { length: 100 }).notNull(),
+    uploadStatus: uploadStatusEnum('upload_status').notNull().default('pending'),
+    marketplaceUploadError: text('marketplace_upload_error'),
+    uploadAttempts: integer('upload_attempts').notNull().default(0),
+    lastUploadAt: timestamp('last_upload_at', { withTimezone: true }),
+    shippedAt: timestamp('shipped_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('shipments_order_id').on(table.orderId),
+    index('shipments_upload_status').on(table.uploadStatus),
+  ],
+)
+
+export const shipmentItems = pgTable('shipment_items', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  shipmentId: uuid('shipment_id')
+    .notNull()
+    .references(() => shipments.id, { onDelete: 'cascade' }),
+  orderItemId: uuid('order_item_id')
+    .notNull()
+    .references(() => orderItems.id),
+  quantity: integer('quantity').notNull().default(1),
+})
+
+export const shipmentGroups = pgTable('shipment_groups', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  groupKey: varchar('group_key', { length: 200 }).notNull(),
+  status: shipmentGroupStatusEnum('status').notNull().default('suggested'),
+  fulfillmentCode: varchar('fulfillment_code', { length: 50 }).notNull().default('normal'),
+  maxPackQuantity: integer('max_pack_quantity').notNull().default(10),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+export const shipmentGroupOrders = pgTable('shipment_group_orders', {
+  shipmentGroupId: uuid('shipment_group_id')
+    .notNull()
+    .references(() => shipmentGroups.id, { onDelete: 'cascade' }),
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id),
+}, (table) => [
+  // Composite primary key via unique index
+  uniqueIndex('shipment_group_orders_pk').on(table.shipmentGroupId, table.orderId),
+])
+
+export const carrierTemplates = pgTable('carrier_templates', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  carrierId: varchar('carrier_id', { length: 50 }).notNull(),
+  name: varchar('name', { length: 200 }).notNull(),
+  columns: jsonb('columns').$type<Array<{
+    header: string
+    field: string
+    width: number
+    required: boolean
+  }>>().notNull(),
+  isDefault: boolean('is_default').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
+// ─── Job Logs ───────────────────────────────────────────────────
 
 export const jobLogs = pgTable('job_logs', {
   id: uuid('id').defaultRandom().primaryKey(),

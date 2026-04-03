@@ -32,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A new marketplace adapter can be added by implementing a TypeScript interface without modifying existing code
 **Plans:** 3 plans
 Plans:
-- [ ] 01-01-PLAN.md — Setup deps, Drizzle schema, auth middleware, login page (FOUND-01, FOUND-02)
+- [x] 01-01-PLAN.md — Setup deps, Drizzle schema, auth middleware, login page (FOUND-01, FOUND-02)
 - [ ] 01-02-PLAN.md — Marketplace adapter types, registry, Vault SQL functions, credential API (MKT-06, FOUND-04)
 - [ ] 01-03-PLAN.md — Sidebar layout, health dashboard, credential management UI (FOUND-03, FOUND-05)
 **UI hint**: yes

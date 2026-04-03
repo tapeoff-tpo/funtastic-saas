@@ -7,31 +7,36 @@
 import { Worker } from 'bullmq'
 import { connection } from './src/lib/jobs/connection'
 import { processOrderCollection } from './src/lib/jobs/workers/order-collector'
+import { createInvoiceUploadWorker } from './src/lib/jobs/workers/invoice-uploader'
 import { scheduleAllCollections } from './src/lib/jobs/queues'
 
 // Ensure marketplace adapters are registered
 import './src/lib/marketplace/adapters/configs'
 
-const worker = new Worker('order-collection', processOrderCollection, {
+// Order collection worker
+const orderCollectionWorker = new Worker('order-collection', processOrderCollection, {
   connection,
   concurrency: 2,
 })
 
-worker.on('completed', (job) => {
+orderCollectionWorker.on('completed', (job) => {
   console.log(
-    `[Worker] Job ${job.id} completed: ${JSON.stringify(job.returnvalue)}`
+    `[Worker] Order collection job ${job.id} completed: ${JSON.stringify(job.returnvalue)}`
   )
 })
 
-worker.on('failed', (job, error) => {
+orderCollectionWorker.on('failed', (job, error) => {
   console.error(
-    `[Worker] Job ${job?.id} failed: ${error.message}`
+    `[Worker] Order collection job ${job?.id} failed: ${error.message}`
   )
 })
 
-worker.on('error', (error) => {
-  console.error(`[Worker] Error: ${error.message}`)
+orderCollectionWorker.on('error', (error) => {
+  console.error(`[Worker] Order collection error: ${error.message}`)
 })
+
+// Invoice upload worker
+const invoiceUploadWorker = createInvoiceUploadWorker()
 
 // Schedule all active marketplace connections on startup
 scheduleAllCollections()
@@ -40,10 +45,15 @@ scheduleAllCollections()
     console.error(`[Worker] Failed to schedule collections: ${err.message}`)
   )
 
+console.log('[Worker] Invoice upload worker started')
+
 // Graceful shutdown
 async function shutdown(signal: string) {
   console.log(`[Worker] Received ${signal}, shutting down gracefully...`)
-  await worker.close()
+  await Promise.all([
+    orderCollectionWorker.close(),
+    invoiceUploadWorker.close(),
+  ])
   process.exit(0)
 }
 

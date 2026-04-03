@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import { connection } from './connection'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
+import type { InvoiceUploadJobData } from '@/lib/shipping/types'
 
 /** Job data shape for order collection jobs */
 export interface OrderCollectionJobData {
@@ -62,6 +63,37 @@ export async function scheduleAllCollections(): Promise<void> {
 
   console.log(
     `[Queue] Scheduled order collection for ${activeConnections.length} active connections`
+  )
+}
+
+// ─── Invoice Upload Queue ────────────────────────────────────────
+
+/** Queue for invoice upload jobs to marketplace APIs */
+export const invoiceUploadQueue = new Queue<InvoiceUploadJobData>(
+  'invoice-upload',
+  { connection },
+)
+
+/**
+ * Add a single invoice upload job to the queue.
+ *
+ * Job options:
+ * - attempts: 3 (per D-02 retry policy)
+ * - backoff: exponential starting at 5s
+ * - removeOnComplete/Fail: keep last N for debugging
+ */
+export async function queueInvoiceUploadJob(
+  data: InvoiceUploadJobData,
+): Promise<void> {
+  await invoiceUploadQueue.add(
+    `upload-${data.shipmentId}`,
+    data,
+    {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 5000 },
+      removeOnComplete: { count: 100 },
+      removeOnFail: { count: 200 },
+    },
   )
 }
 

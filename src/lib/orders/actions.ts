@@ -10,6 +10,7 @@ import { orders } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import type { OrderStatus } from './types'
 import { isValidTransition } from './types'
+import { deductForOrder, restoreForOrder } from '@/lib/inventory/actions'
 
 type ActionResult = { success: boolean; error?: string }
 
@@ -26,6 +27,7 @@ export async function updateOrderStatus(
     const [order] = await tx
       .select({
         id: orders.id,
+        userId: orders.userId,
         status: orders.status,
         isHeld: orders.isHeld,
       })
@@ -56,6 +58,16 @@ export async function updateOrderStatus(
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId))
+
+    // Inventory hooks: auto-deduct on ship, auto-restore on cancel from shipped/delivering
+    if (newStatus === 'shipped') {
+      await deductForOrder(tx, order.userId, orderId)
+    } else if (
+      newStatus === 'cancelled' &&
+      (order.status === 'shipped' || order.status === 'delivering')
+    ) {
+      await restoreForOrder(tx, order.userId, orderId)
+    }
 
     return { success: true }
   })

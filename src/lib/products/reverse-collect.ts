@@ -179,7 +179,7 @@ async function importSingleProduct(
         costPrice: mp.costPrice != null ? String(mp.costPrice) : null,
         categoryId: mp.categoryId ?? null,
         status: 'active',
-        images: mp.images.length > 0 ? mp.images : null,
+        images: mp.images && mp.images.length > 0 ? mp.images : null,
         metadata: { sourceConnectionId: connectionId },
       })
       .returning({ id: products.id })
@@ -187,7 +187,7 @@ async function importSingleProduct(
     // Create variants
     const createdVariantSkus: string[] = []
 
-    if (mp.variants.length > 0) {
+    if (mp.variants && mp.variants.length > 0) {
       for (let idx = 0; idx < mp.variants.length; idx++) {
         const v = mp.variants[idx]
         const variantSku = v.sku || `${internalSku}-V${idx + 1}`
@@ -196,7 +196,7 @@ async function importSingleProduct(
           productId: product.id,
           sku: variantSku,
           optionName: v.optionName ?? null,
-          optionValues: Object.keys(v.optionValues).length > 0 ? v.optionValues : null,
+          optionValues: v.optionValues && Object.keys(v.optionValues).length > 0 ? v.optionValues : null,
           priceAdjustment: String(v.price - mp.price),
           sortOrder: idx,
         })

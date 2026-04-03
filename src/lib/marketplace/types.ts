@@ -102,20 +102,26 @@ export interface NormalizedProduct {
   name: string
   description?: string
   price: number
-  sku: string
+  sku?: string
   categoryId?: string
   marketplaceCategoryId?: string
   images?: Array<{ url: string; sortOrder: number }>
   variants?: Array<{
-    sku: string
+    sku?: string
     optionName?: string
     optionValues?: Record<string, string>
     price: number
-    isActive: boolean
+    isActive?: boolean
+    stockQuantity?: number
+    marketplaceVariantId?: string
+    [key: string]: unknown
   }>
   metadata?: Record<string, unknown>
   [key: string]: unknown
 }
+
+/** Extracted variant type for adapter use */
+export type NormalizedProductVariant = NonNullable<NormalizedProduct['variants']>[number]
 
 /** Invoice data for upload */
 export interface InvoiceData {

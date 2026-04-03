@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Inventory Management** - Central stock tracking with automatic deduction/restoration on order events
 - [ ] **Phase 5: Product Management & Data** - Product listing across marketplaces with category mapping and bulk operations
 - [x] **Phase 6: Marketplace Expansion** - Add 11번가, 지마켓/옥션, 오늘의집 adapters to complete top-5 coverage (completed 2026-04-03)
-- [ ] **Phase 7: 추가 마켓플레이스 연동** - Add 18 additional marketplace adapters (Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매꾹, 온채널, 오너클랜 등)
+- [x] **Phase 7: 추가 마켓플레이스 연동** - Add 18 additional marketplace adapters (Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매꾹, 온채널, 오너클랜 등)
 
 ## Phase Details
 
@@ -136,13 +136,13 @@ Plans:
   3. MarketplaceId type includes all 24 marketplace IDs
   4. Tier 1/2 adapters (Cafe24, CJ온스타일, 카카오, 도매꾹, 온채널, 오너클랜, 신세계몰, 에이블리) have best-effort API implementations
   5. Tier 3 adapters have stub implementations with TODO markers for future API integration
-**Plans:** 1/5 plans executed
+**Plans:** 5/5 plans complete
 Plans:
-- [ ] 07-01-PLAN.md — Tier 1 adapters: Cafe24 (OAuth2), CJ온스타일, 카카오선물하기, 카카오톡스토어 (MKT-V2)
-- [ ] 07-02-PLAN.md — Tier 2 adapters: 도매꾹 (XML+JSON), 온채널, 오너클랜, 신세계몰, 에이블리 (MKT-V2)
-- [ ] 07-03-PLAN.md — Tier 3a stubs: 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B (MKT-V2)
+- [x] 07-01-PLAN.md — Tier 1 adapters: Cafe24 (OAuth2), CJ온스타일, 카카오선물하기, 카카오톡스토어 (MKT-V2)
+- [x] 07-02-PLAN.md — Tier 2 adapters: 도매꾹 (XML+JSON), 온채널, 오너클랜, 신세계몰, 에이블리 (MKT-V2)
+- [x] 07-03-PLAN.md — Tier 3a stubs: 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B (MKT-V2)
 - [x] 07-04-PLAN.md — Tier 3b stubs: 올웨이즈, 텐바이텐, 토스쇼핑, 투비즈온 (MKT-V2)
-- [ ] 07-05-PLAN.md — Register all 18 in configs.ts + update MarketplaceId type (MKT-V2)
+- [x] 07-05-PLAN.md — Register all 18 in configs.ts + update MarketplaceId type (MKT-V2)
 
 ## Progress
 
@@ -158,4 +158,4 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 4. Inventory Management | 0/2 | Not started | - |
 | 5. Product Management & Data | 0/5 | Not started | - |
 | 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |
-| 7. 추가 마켓플레이스 연동 | 1/5 | In Progress|  |
+| 7. 추가 마켓플레이스 연동 | 5/5 | Complete   | 2026-04-03 |

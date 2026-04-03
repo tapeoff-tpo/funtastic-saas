@@ -183,6 +183,65 @@ export const MOCK_NAVER_CLAIM_PRODUCT_ORDERS = {
 }
 
 // ============================================================================
+// ESM Mock Data (Gmarket + Auction)
+// ============================================================================
+
+export const MOCK_ESM_ORDERS = [
+  {
+    orderNo: 'ESM-G-20260402-001',
+    siteType: 'G' as const,
+    orderItemSeq: 'ITEM-001',
+    itemName: '지마켓 테스트 상품 1',
+    orderQty: 2,
+    buyerName: '김지마켓',
+    buyerPhone: '010-1234-5678',
+    receiverName: '이배송',
+    receiverPhone: '010-8765-4321',
+    receiverZipcode: '06134',
+    receiverAddress: '서울특별시 강남구 테헤란로 456',
+    receiverAddressDetail: '7층 701호',
+    orderDate: '2026-04-02T10:00:00Z',
+    orderStatus: 'PAYMENT_COMPLETE',
+    sellPrice: 15000,
+    payAmount: 30000,
+    sellerItemCode: 'SKU-G001',
+    optionInfo: '색상: 블루 / 사이즈: M',
+  },
+  {
+    orderNo: 'ESM-A-20260402-002',
+    siteType: 'A' as const,
+    orderItemSeq: 'ITEM-002',
+    itemName: '옥션 테스트 상품 2',
+    orderQty: 1,
+    buyerName: '박옥션',
+    buyerPhone: '010-9999-8888',
+    receiverName: '최수령',
+    receiverPhone: '010-7777-6666',
+    receiverZipcode: '48060',
+    receiverAddress: '부산광역시 해운대구 우동 789',
+    receiverAddressDetail: '',
+    orderDate: '2026-04-02T11:00:00Z',
+    orderStatus: 'DELIVERING',
+    sellPrice: 25000,
+    payAmount: 25000,
+    sellerItemCode: 'SKU-A001',
+    optionInfo: '',
+  },
+]
+
+export const MOCK_ESM_CLAIMS = [
+  {
+    claimNo: 'CLM-ESM-001',
+    orderNo: 'ESM-G-20260402-001',
+    siteType: 'G' as const,
+    claimType: 'RETURN',
+    claimStatus: 'CLAIM_REQUESTED',
+    claimReason: '상품 하자',
+    claimDate: '2026-04-02T15:00:00Z',
+  },
+]
+
+// ============================================================================
 // Coupang Handlers
 // ============================================================================
 
@@ -239,120 +298,46 @@ const naverHandlers = [
 ]
 
 // ============================================================================
-// 11st Mock Data
+// ESM Handlers
 // ============================================================================
 
-export const MOCK_ELEVENST_ORDERS = [
-  {
-    ordNo: 'E2026040200001',
-    ordPrdSeq: '1',
-    prdNm: '11번가 테스트 상품 A',
-    ordQty: 2,
-    buyerNm: '김열한',
-    buyerPhone: '010-1111-1111',
-    rcvrNm: '박수령',
-    rcvrPhone: '010-2222-2222',
-    rcvrZipCd: '04524',
-    rcvrBaseAddr: '서울특별시 중구 남대문로 120',
-    rcvrDtlAddr: '5층 501호',
-    ordDt: '2026-04-02T10:30:00',
-    ordStCd: '202',
-    selPrice: 15900,
-    dlvNo: '',
-    optNm: '색상: 화이트',
-  },
-  {
-    ordNo: 'E2026040200002',
-    ordPrdSeq: '1',
-    prdNm: '11번가 테스트 상품 B',
-    ordQty: 1,
-    buyerNm: '이구매',
-    buyerPhone: '010-3333-3333',
-    rcvrNm: '최배달',
-    rcvrPhone: '010-4444-4444',
-    rcvrZipCd: '48058',
-    rcvrBaseAddr: '부산광역시 해운대구 센텀중앙로 90',
-    rcvrDtlAddr: '',
-    ordDt: '2026-04-02T11:00:00',
-    ordStCd: '303',
-    selPrice: 29000,
-    dlvNo: 'TRACK123456',
-  },
-]
+const esmHandlers = [
+  http.get('https://etapi.ebaykorea.com/api/v1/orders', ({ request }) => {
+    const url = new URL(request.url)
+    const siteType = url.searchParams.get('siteType')
 
-export const MOCK_ELEVENST_CLAIMS = [
-  {
-    clmNo: 'CLM20260402001',
-    ordNo: 'E2026040200001',
-    clmTypCd: 'RTN',
-    clmStCd: '100',
-    clmRsnCont: '사이즈 불일치',
-    clmDt: '2026-04-02T15:00:00',
-  },
-]
+    const filtered = siteType
+      ? MOCK_ESM_ORDERS.filter((o) => o.siteType === siteType)
+      : MOCK_ESM_ORDERS
 
-/** Build XML string for 11st order list response */
-function buildElevenstOrdersXml() {
-  const ordersXml = MOCK_ELEVENST_ORDERS.map((o) => `
-    <order>
-      <ordNo>${o.ordNo}</ordNo>
-      <ordPrdSeq>${o.ordPrdSeq}</ordPrdSeq>
-      <prdNm>${o.prdNm}</prdNm>
-      <ordQty>${o.ordQty}</ordQty>
-      <buyerNm>${o.buyerNm}</buyerNm>
-      <buyerPhone>${o.buyerPhone}</buyerPhone>
-      <rcvrNm>${o.rcvrNm}</rcvrNm>
-      <rcvrPhone>${o.rcvrPhone}</rcvrPhone>
-      <rcvrZipCd>${o.rcvrZipCd}</rcvrZipCd>
-      <rcvrBaseAddr>${o.rcvrBaseAddr}</rcvrBaseAddr>
-      <rcvrDtlAddr>${o.rcvrDtlAddr}</rcvrDtlAddr>
-      <ordDt>${o.ordDt}</ordDt>
-      <ordStCd>${o.ordStCd}</ordStCd>
-      <selPrice>${o.selPrice}</selPrice>
-      <dlvNo>${o.dlvNo}</dlvNo>
-      ${o.optNm ? `<optNm>${o.optNm}</optNm>` : ''}
-    </order>`).join('')
-
-  return `<?xml version="1.0" encoding="UTF-8"?><orders>${ordersXml}</orders>`
-}
-
-/** Build XML string for 11st claims response */
-function buildElevenstClaimsXml() {
-  const claimsXml = MOCK_ELEVENST_CLAIMS.map((c) => `
-    <claim>
-      <clmNo>${c.clmNo}</clmNo>
-      <ordNo>${c.ordNo}</ordNo>
-      <clmTypCd>${c.clmTypCd}</clmTypCd>
-      <clmStCd>${c.clmStCd}</clmStCd>
-      <clmRsnCont>${c.clmRsnCont}</clmRsnCont>
-      <clmDt>${c.clmDt}</clmDt>
-    </claim>`).join('')
-
-  return `<?xml version="1.0" encoding="UTF-8"?><claims>${claimsXml}</claims>`
-}
-
-// ============================================================================
-// 11st Handlers
-// ============================================================================
-
-const elevenstHandlers = [
-  http.get('https://openapi.11st.co.kr/openapi/v3/orders', () => {
-    return new HttpResponse(buildElevenstOrdersXml(), {
-      headers: { 'Content-Type': 'application/xml;charset=UTF-8' },
+    return HttpResponse.json({
+      resultCode: '0',
+      resultMessage: 'OK',
+      data: filtered,
     })
   }),
 
-  http.get('https://openapi.11st.co.kr/openapi/v3/claims', () => {
-    return new HttpResponse(buildElevenstClaimsXml(), {
-      headers: { 'Content-Type': 'application/xml;charset=UTF-8' },
+  http.get('https://etapi.ebaykorea.com/api/v1/claims', ({ request }) => {
+    const url = new URL(request.url)
+    const siteType = url.searchParams.get('siteType')
+
+    const filtered = siteType
+      ? MOCK_ESM_CLAIMS.filter((c) => c.siteType === siteType)
+      : MOCK_ESM_CLAIMS
+
+    return HttpResponse.json({
+      resultCode: '0',
+      resultMessage: 'OK',
+      data: filtered,
     })
   }),
 
-  http.post('https://openapi.11st.co.kr/openapi/v3/orders/:orderId/delivery', () => {
-    return new HttpResponse(
-      `<?xml version="1.0" encoding="UTF-8"?><result><resultCode>200</resultCode><resultMessage>OK</resultMessage></result>`,
-      { headers: { 'Content-Type': 'application/xml;charset=UTF-8' } },
-    )
+  http.post('https://etapi.ebaykorea.com/api/v1/orders/:orderId/delivery', () => {
+    return HttpResponse.json({
+      resultCode: '0',
+      resultMessage: 'OK',
+      data: null,
+    })
   }),
 ]
 
@@ -360,5 +345,5 @@ const elevenstHandlers = [
 // Export all handlers
 // ============================================================================
 
-export const handlers = [...coupangHandlers, ...naverHandlers, ...elevenstHandlers]
-export { coupangHandlers, naverHandlers, elevenstHandlers }
+export const handlers = [...coupangHandlers, ...naverHandlers, ...esmHandlers]
+export { coupangHandlers, naverHandlers, esmHandlers }

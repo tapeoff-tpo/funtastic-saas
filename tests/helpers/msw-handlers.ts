@@ -183,6 +183,65 @@ export const MOCK_NAVER_CLAIM_PRODUCT_ORDERS = {
 }
 
 // ============================================================================
+// ESM Mock Data (Gmarket + Auction)
+// ============================================================================
+
+export const MOCK_ESM_ORDERS = [
+  {
+    orderNo: 'ESM-G-20260402-001',
+    siteType: 'G' as const,
+    orderItemSeq: 'ITEM-001',
+    itemName: '지마켓 테스트 상품 1',
+    orderQty: 2,
+    buyerName: '김지마켓',
+    buyerPhone: '010-1234-5678',
+    receiverName: '이배송',
+    receiverPhone: '010-8765-4321',
+    receiverZipcode: '06134',
+    receiverAddress: '서울특별시 강남구 테헤란로 456',
+    receiverAddressDetail: '7층 701호',
+    orderDate: '2026-04-02T10:00:00Z',
+    orderStatus: 'PAYMENT_COMPLETE',
+    sellPrice: 15000,
+    payAmount: 30000,
+    sellerItemCode: 'SKU-G001',
+    optionInfo: '색상: 블루 / 사이즈: M',
+  },
+  {
+    orderNo: 'ESM-A-20260402-002',
+    siteType: 'A' as const,
+    orderItemSeq: 'ITEM-002',
+    itemName: '옥션 테스트 상품 2',
+    orderQty: 1,
+    buyerName: '박옥션',
+    buyerPhone: '010-9999-8888',
+    receiverName: '최수령',
+    receiverPhone: '010-7777-6666',
+    receiverZipcode: '48060',
+    receiverAddress: '부산광역시 해운대구 우동 789',
+    receiverAddressDetail: '',
+    orderDate: '2026-04-02T11:00:00Z',
+    orderStatus: 'DELIVERING',
+    sellPrice: 25000,
+    payAmount: 25000,
+    sellerItemCode: 'SKU-A001',
+    optionInfo: '',
+  },
+]
+
+export const MOCK_ESM_CLAIMS = [
+  {
+    claimNo: 'CLM-ESM-001',
+    orderNo: 'ESM-G-20260402-001',
+    siteType: 'G' as const,
+    claimType: 'RETURN',
+    claimStatus: 'CLAIM_REQUESTED',
+    claimReason: '상품 하자',
+    claimDate: '2026-04-02T15:00:00Z',
+  },
+]
+
+// ============================================================================
 // Coupang Handlers
 // ============================================================================
 
@@ -239,8 +298,52 @@ const naverHandlers = [
 ]
 
 // ============================================================================
+// ESM Handlers
+// ============================================================================
+
+const esmHandlers = [
+  http.get('https://etapi.ebaykorea.com/api/v1/orders', ({ request }) => {
+    const url = new URL(request.url)
+    const siteType = url.searchParams.get('siteType')
+
+    const filtered = siteType
+      ? MOCK_ESM_ORDERS.filter((o) => o.siteType === siteType)
+      : MOCK_ESM_ORDERS
+
+    return HttpResponse.json({
+      resultCode: '0',
+      resultMessage: 'OK',
+      data: filtered,
+    })
+  }),
+
+  http.get('https://etapi.ebaykorea.com/api/v1/claims', ({ request }) => {
+    const url = new URL(request.url)
+    const siteType = url.searchParams.get('siteType')
+
+    const filtered = siteType
+      ? MOCK_ESM_CLAIMS.filter((c) => c.siteType === siteType)
+      : MOCK_ESM_CLAIMS
+
+    return HttpResponse.json({
+      resultCode: '0',
+      resultMessage: 'OK',
+      data: filtered,
+    })
+  }),
+
+  http.post('https://etapi.ebaykorea.com/api/v1/orders/:orderId/delivery', () => {
+    return HttpResponse.json({
+      resultCode: '0',
+      resultMessage: 'OK',
+      data: null,
+    })
+  }),
+]
+
+// ============================================================================
 // Export all handlers
 // ============================================================================
 
-export const handlers = [...coupangHandlers, ...naverHandlers]
-export { coupangHandlers, naverHandlers }
+export const handlers = [...coupangHandlers, ...naverHandlers, ...esmHandlers]
+export { coupangHandlers, naverHandlers, esmHandlers }

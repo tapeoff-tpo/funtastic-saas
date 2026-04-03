@@ -86,7 +86,7 @@ Plans:
   4. Admin can manually adjust stock with a recorded reason (incoming stock, defective, physical count, etc.)
 **Plans:** 2 plans
 Plans:
-- [ ] 04-01-PLAN.md — Inventory schema, types, queries, stock adjustment actions, order status hooks (INV-01, INV-02, INV-03, INV-04)
+- [x] 04-01-PLAN.md — Inventory schema, types, queries, stock adjustment actions, order status hooks (INV-01, INV-02, INV-03, INV-04)
 - [ ] 04-02-PLAN.md — Inventory management UI: data table, stock set/adjust dialogs, audit history viewer (INV-01, INV-04)
 **UI hint**: yes
 

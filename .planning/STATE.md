@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-04-03T06:07:37.520Z"
-last_activity: 2026-04-03
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-04-03T06:41:10Z"
+last_activity: 2026-04-03 -- Phase 04 plan 01 completed
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 13
-  completed_plans: 13
-  percent: 62
+  total_plans: 15
+  completed_plans: 14
+  percent: 67
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-03)
 
 **Core value:** 마켓플레이스 주문을 수집하고 송장을 업로드하는 것이 막힘없이 동작 = 사방넷 끊기
-**Current focus:** Phase 02 — order-collection-dashboard
+**Current focus:** Phase 04 — inventory-management
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-03
+Phase: 04 (inventory-management) — EXECUTING
+Plan: 2 of 2
+Status: Executing Phase 04
+Last activity: 2026-04-03 -- Completed 04-01-PLAN.md
 
-Progress: [######....] 62%
+Progress: [######*...] 67%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [######....] 62%
 | Phase 03 P01 | 4min | 2 tasks | 6 files |
 | Phase 03 P04 | 6min | 2 tasks | 10 files |
 | Phase 03 P05 | 9min | 3 tasks | 18 files |
+| Phase 04 P01 | 3min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,9 @@ Recent decisions affecting current work:
 - [Phase 03]: Shared getNestedValue helper between carrier and order export modules
 - [Phase 03]: ShippingActions rendered inside DataTable for access to TanStack row selection state
 - [Phase 03]: Invoice status uses latest shipment record per order (by createdAt)
+- [Phase 04]: DrizzleTransaction type derived from db.transaction callback parameter
+- [Phase 04]: deductForOrder/restoreForOrder skip missing SKUs with warning, not failure
+- [Phase 04]: restoreForClaim is standalone transaction, separate from order status flow
 
 ### Pending Todos
 
@@ -102,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-03T06:06:52.444Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-04-03T06:41:10Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None

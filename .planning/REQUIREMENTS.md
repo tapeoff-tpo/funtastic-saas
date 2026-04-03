@@ -46,10 +46,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Inventory (재고관리 — 기본)
 
-- [ ] **INV-01**: 중앙 재고 수량을 관리할 수 있다 (상품별 총 재고)
-- [ ] **INV-02**: 주문 발생 시 재고가 자동으로 차감된다
-- [ ] **INV-03**: 반품/취소 시 재고가 자동으로 복구된다
-- [ ] **INV-04**: 수동으로 재고를 조정하고 사유(입고, 불량, 실사 등)를 기록할 수 있다
+- [x] **INV-01**: 중앙 재고 수량을 관리할 수 있다 (상품별 총 재고)
+- [x] **INV-02**: 주문 발생 시 재고가 자동으로 차감된다
+- [x] **INV-03**: 반품/취소 시 재고가 자동으로 복구된다
+- [x] **INV-04**: 수동으로 재고를 조정하고 사유(입고, 불량, 실사 등)를 기록할 수 있다
 
 ### Excel & Data (엑셀/데이터)
 
@@ -145,10 +145,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROD-03 | Phase 5 | Pending |
 | PROD-04 | Phase 5 | Pending |
 | PROD-05 | Phase 5 | Pending |
-| INV-01 | Phase 4 | Pending |
-| INV-02 | Phase 4 | Pending |
-| INV-03 | Phase 4 | Pending |
-| INV-04 | Phase 4 | Pending |
+| INV-01 | Phase 4 | Complete |
+| INV-02 | Phase 4 | Complete |
+| INV-03 | Phase 4 | Complete |
+| INV-04 | Phase 4 | Complete |
 | DATA-01 | Phase 3 | Complete |
 | DATA-02 | Phase 5 | Pending |
 | MKT-01 | Phase 2 | Complete |

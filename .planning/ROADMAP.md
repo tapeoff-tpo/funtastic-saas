@@ -144,6 +144,24 @@ Plans:
 - [x] 07-04-PLAN.md — Tier 3b stubs: 올웨이즈, 텐바이텐, 토스쇼핑, 투비즈온 (MKT-V2)
 - [x] 07-05-PLAN.md — Register all 18 in configs.ts + update MarketplaceId type (MKT-V2)
 
+## Backlog
+
+### Phase 999.1: OAuth2 마켓플레이스 인앱 연동 (BACKLOG)
+
+**Goal:** 셀러가 API 키 복붙 대신 "연동하기" 버튼 클릭으로 마켓플레이스 연결. 네이버/Cafe24 등 OAuth2 지원 마켓에 인앱 연동 플로우 구현.
+**Requirements:** TBD
+**Plans:** 0 plans
+**When:** 셀러 서비스화 단계에서 진행 (자체 사용 안정화 이후)
+
+**Scope:**
+- 네이버 커머스API 파트너 등록 + OAuth2 콜백 플로우
+- Cafe24 OAuth2 연동
+- 토큰 자동 갱신 로직
+- API 키 방식 마켓은 현행 유지 (복붙)
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
 ## Progress
 
 **Execution Order:**

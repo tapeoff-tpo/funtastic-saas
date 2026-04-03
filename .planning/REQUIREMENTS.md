@@ -29,7 +29,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **SHIP-01**: 송장번호를 마켓플레이스 API로 자동 업로드할 수 있다
 - [x] **SHIP-02**: 엑셀 파일로 송장번호를 일괄 업로드할 수 있다
-- [ ] **SHIP-03**: 송장 출력(배송 라벨)을 일괄 인쇄할 수 있다
+- [x] **SHIP-03**: 송장 출력(배송 라벨)을 일괄 인쇄할 수 있다
 - [x] **SHIP-04**: 같은 구매자/주소의 주문을 합포장으로 묶을 수 있다 (출고편집코드 기반 자동분리 + 최대합포장수량 설정 포함)
 - [x] **SHIP-05**: 합포장 대상 주문을 자동으로 감지하고 제안할 수 있다 (냉동/상온, 대형/소형 등 출고편집코드 기반 분리 포함)
 - [x] **SHIP-06**: 하나의 주문을 여러 배송으로 분할할 수 있다
@@ -134,7 +134,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ORD-07 | Phase 2 | Complete |
 | SHIP-01 | Phase 3 | Complete |
 | SHIP-02 | Phase 3 | Complete |
-| SHIP-03 | Phase 3 | Pending |
+| SHIP-03 | Phase 3 | Complete |
 | SHIP-04 | Phase 3 | Complete |
 | SHIP-05 | Phase 3 | Complete |
 | SHIP-06 | Phase 3 | Complete |

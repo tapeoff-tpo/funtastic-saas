@@ -3,14 +3,15 @@ import type { Job } from 'bullmq'
 import type { OrderCollectionJobData } from '@/lib/jobs/queues'
 import type { NormalizedClaim } from '@/lib/marketplace/types'
 
-// Mock db module
-const mockInsert = vi.fn().mockReturnValue({
-  values: vi.fn().mockReturnValue({
-    onConflictDoUpdate: vi.fn().mockReturnValue({
-      returning: vi.fn().mockResolvedValue([{ id: 'order-uuid-1' }]),
-    }),
-  }),
-})
+// Mock db module — supports both .values().returning() and .values().onConflictDoUpdate().returning()
+function createValuesChain() {
+  const returning = vi.fn().mockResolvedValue([{ id: 'order-uuid-1' }])
+  const onConflictDoUpdate = vi.fn().mockReturnValue({ returning })
+  const values = vi.fn().mockReturnValue({ onConflictDoUpdate, returning })
+  return { values, onConflictDoUpdate, returning }
+}
+
+const mockInsert = vi.fn().mockImplementation(() => createValuesChain())
 
 const mockDelete = vi.fn().mockReturnValue({
   where: vi.fn().mockResolvedValue(undefined),
@@ -31,15 +32,26 @@ vi.mock('@/lib/db', () => ({
 }))
 
 vi.mock('@/lib/db/schema', () => ({
-  orders: { marketplaceId: 'marketplace_id', marketplaceOrderId: 'marketplace_order_id' },
+  orders: {
+    id: 'id',
+    marketplaceId: 'marketplace_id',
+    marketplaceOrderId: 'marketplace_order_id',
+  },
   orderItems: { orderId: 'order_id' },
-  claims: { marketplaceId: 'marketplace_id', marketplaceClaimId: 'marketplace_claim_id' },
-  jobLogs: {},
+  claims: {
+    marketplaceId: 'marketplace_id',
+    marketplaceClaimId: 'marketplace_claim_id',
+  },
+  jobLogs: { id: 'id' },
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({
   readCredential: vi.fn().mockResolvedValue('mock-credential-value'),
 }))
+
+// Shared mock adapter
+const mockGetOrders = vi.fn().mockResolvedValue([])
+const mockGetClaimsOrders = vi.fn().mockResolvedValue([])
 
 vi.mock('@/lib/marketplace/registry', () => ({
   marketplaceRegistry: {
@@ -51,6 +63,8 @@ vi.mock('@/lib/marketplace/registry', () => ({
         rateLimitPerSecond: 100,
         requiredCredentials: ['access_key', 'secret_key', 'vendor_id'],
       },
+      getOrders: (...args: unknown[]) => mockGetOrders(...args),
+      getClaimsOrders: (...args: unknown[]) => mockGetClaimsOrders(...args),
     }),
     has: vi.fn().mockReturnValue(true),
   },
@@ -82,31 +96,20 @@ function createMockJob(
 describe('claims collection in processOrderCollection', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockInsert.mockReturnValue({
-      values: vi.fn().mockReturnValue({
-        onConflictDoUpdate: vi.fn().mockReturnValue({
-          returning: vi.fn().mockResolvedValue([{ id: 'order-uuid-1' }]),
-        }),
-      }),
-    })
+    mockInsert.mockImplementation(() => createValuesChain())
+    mockGetOrders.mockResolvedValue([])
+    mockGetClaimsOrders.mockResolvedValue([])
     mockSelectFrom.mockReturnValue({
       where: vi.fn().mockResolvedValue([{ id: 'order-uuid-1' }]),
     })
   })
 
   it('should UPSERT claims with correct fields', async () => {
+    mockGetClaimsOrders.mockResolvedValue([sampleClaim])
+
     const { processOrderCollection } = await import(
       '@/lib/jobs/workers/order-collector'
     )
-    const mockAdapter = {
-      config: { requiredCredentials: ['access_key'] },
-      getOrders: vi.fn().mockResolvedValue([]),
-      getClaimsOrders: vi.fn().mockResolvedValue([sampleClaim]),
-    }
-    vi.spyOn(
-      await import('@/lib/jobs/workers/order-collector'),
-      'createAdapter'
-    ).mockReturnValue(mockAdapter as never)
 
     const job = createMockJob({
       marketplaceId: 'coupang',
@@ -117,22 +120,15 @@ describe('claims collection in processOrderCollection', () => {
     const result = await processOrderCollection(job)
 
     expect(result.claimsCollected).toBe(1)
-    expect(mockAdapter.getClaimsOrders).toHaveBeenCalled()
+    expect(mockGetClaimsOrders).toHaveBeenCalled()
   })
 
   it('should look up orderId from marketplace order ID for claims', async () => {
+    mockGetClaimsOrders.mockResolvedValue([sampleClaim])
+
     const { processOrderCollection } = await import(
       '@/lib/jobs/workers/order-collector'
     )
-    const mockAdapter = {
-      config: { requiredCredentials: ['access_key'] },
-      getOrders: vi.fn().mockResolvedValue([]),
-      getClaimsOrders: vi.fn().mockResolvedValue([sampleClaim]),
-    }
-    vi.spyOn(
-      await import('@/lib/jobs/workers/order-collector'),
-      'createAdapter'
-    ).mockReturnValue(mockAdapter as never)
 
     const job = createMockJob({
       marketplaceId: 'coupang',
@@ -150,19 +146,11 @@ describe('claims collection in processOrderCollection', () => {
     mockSelectFrom.mockReturnValue({
       where: vi.fn().mockResolvedValue([]),
     })
+    mockGetClaimsOrders.mockResolvedValue([sampleClaim])
 
     const { processOrderCollection } = await import(
       '@/lib/jobs/workers/order-collector'
     )
-    const mockAdapter = {
-      config: { requiredCredentials: ['access_key'] },
-      getOrders: vi.fn().mockResolvedValue([]),
-      getClaimsOrders: vi.fn().mockResolvedValue([sampleClaim]),
-    }
-    vi.spyOn(
-      await import('@/lib/jobs/workers/order-collector'),
-      'createAdapter'
-    ).mockReturnValue(mockAdapter as never)
 
     const job = createMockJob({
       marketplaceId: 'coupang',

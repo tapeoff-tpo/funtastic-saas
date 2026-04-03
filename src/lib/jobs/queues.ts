@@ -71,7 +71,7 @@ export async function scheduleAllCollections(): Promise<void> {
 export async function removeSchedule(connectionId: string): Promise<void> {
   const repeatableJobs = await orderCollectionQueue.getRepeatableJobs()
   const job = repeatableJobs.find(
-    (j: { id?: string; key: string }) => j.id === `collect-${connectionId}`
+    (j) => j.id === `collect-${connectionId}`
   )
   if (job) {
     await orderCollectionQueue.removeRepeatableByKey(job.key)

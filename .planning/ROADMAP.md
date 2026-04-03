@@ -72,14 +72,16 @@ Decimal phases appear between their surrounding integers in numeric order.
 **UI hint**: yes
 
 ### Phase 5: Product Management & Data
-**Goal**: Admin can register products and push them to multiple marketplaces with correct category mapping, and bulk-manage products via Excel
+**Goal**: Admin can import existing marketplace products, register new products with options/variants, push to multiple marketplaces with category mapping, and bulk-manage via Excel
 **Depends on**: Phase 1
-**Requirements**: PROD-01, PROD-02, PROD-03, DATA-02
+**Requirements**: PROD-01, PROD-02, PROD-03, PROD-04, PROD-05, DATA-02
 **Success Criteria** (what must be TRUE):
-  1. Admin can create a product and publish it to Coupang and Naver in one operation
-  2. Admin can map internal product categories to marketplace-specific category trees
-  3. Admin can edit product info (price, title, description) and push changes to connected marketplaces
-  4. Admin can bulk-register or bulk-update products via Excel upload
+  1. Admin can import existing products from connected marketplaces into the internal product DB (reverse collection)
+  2. Admin can create a product with options/variants (size, color) and publish to Coupang and Naver in one operation
+  3. Admin can map internal product categories to marketplace-specific category trees
+  4. Admin can edit product info (price, title, description) and push changes to connected marketplaces
+  5. Admin can manage per-option inventory (stock tracked at variant level)
+  6. Admin can bulk-register or bulk-update products via Excel upload
 **Plans**: TBD
 **UI hint**: yes
 

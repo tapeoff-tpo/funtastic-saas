@@ -30,17 +30,19 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **SHIP-01**: 송장번호를 마켓플레이스 API로 자동 업로드할 수 있다
 - [ ] **SHIP-02**: 엑셀 파일로 송장번호를 일괄 업로드할 수 있다
 - [ ] **SHIP-03**: 송장 출력(배송 라벨)을 일괄 인쇄할 수 있다
-- [ ] **SHIP-04**: 같은 구매자/주소의 주문을 합포장으로 묶을 수 있다
-- [ ] **SHIP-05**: 합포장 대상 주문을 자동으로 감지하고 제안할 수 있다
+- [ ] **SHIP-04**: 같은 구매자/주소의 주문을 합포장으로 묶을 수 있다 (출고편집코드 기반 자동분리 + 최대합포장수량 설정 포함)
+- [ ] **SHIP-05**: 합포장 대상 주문을 자동으로 감지하고 제안할 수 있다 (냉동/상온, 대형/소형 등 출고편집코드 기반 분리 포함)
 - [ ] **SHIP-06**: 하나의 주문을 여러 배송으로 분할할 수 있다
 - [ ] **SHIP-07**: 처리된 주문을 택배사 양식에 맞는 엑셀로 내보낼 수 있다
 - [ ] **SHIP-08**: 엑셀 내보내기 양식을 택배사별로 커스터마이징할 수 있다
 
-### Product Management (상품관리 — 기본)
+### Product Management (상품관리)
 
 - [ ] **PROD-01**: 상품을 등록하고 여러 마켓플레이스에 일괄 등록할 수 있다
 - [ ] **PROD-02**: 내부 카테고리를 마켓플레이스별 카테고리에 매핑할 수 있다
 - [ ] **PROD-03**: 등록된 상품의 기본정보(가격, 제목, 설명)를 수정하고 마켓에 반영할 수 있다
+- [ ] **PROD-04**: 연동된 마켓플레이스에서 기존 등록 상품을 가져와 내부 상품 DB에 매핑할 수 있다 (역수집)
+- [ ] **PROD-05**: 상품 옵션/변형(사이즈, 컬러 등)을 관리하고 옵션별 재고를 추적할 수 있다
 
 ### Inventory (재고관리 — 기본)
 
@@ -75,7 +77,7 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ### Advanced Product Management
 
-- **PROD-V2-01**: 옵션/변형(사이즈, 컬러) 관리
+- **PROD-V2-01**: 마켓별 옵션 자동 매칭 (플레이오토 수준의 옵션 체계 매핑)
 - **PROD-V2-02**: 마켓별 상세 필드 커스터마이징
 
 ### Differentiators
@@ -141,6 +143,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | PROD-01 | Phase 5 | Pending |
 | PROD-02 | Phase 5 | Pending |
 | PROD-03 | Phase 5 | Pending |
+| PROD-04 | Phase 5 | Pending |
+| PROD-05 | Phase 5 | Pending |
 | INV-01 | Phase 4 | Pending |
 | INV-02 | Phase 4 | Pending |
 | INV-03 | Phase 4 | Pending |
@@ -155,10 +159,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MKT-06 | Phase 1 | Pending |
 
 **Coverage:**
-- v1 requirements: 35 total
-- Mapped to phases: 35
+- v1 requirements: 37 total
+- Mapped to phases: 37
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-03*
-*Last updated: 2026-04-03 after roadmap creation*
+*Last updated: 2026-04-03 after gap analysis (added PROD-04 역수집, PROD-05 옵션관리, SHIP-04/05 합포장 고도화)*

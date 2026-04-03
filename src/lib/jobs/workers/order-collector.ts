@@ -30,14 +30,14 @@ export function createAdapter(
   switch (marketplaceId) {
     case 'coupang':
       return new CoupangAdapter({
-        accessKey: credentials.accessKey ?? credentials.access_key ?? '',
-        secretKey: credentials.secretKey ?? credentials.secret_key ?? '',
-        vendorId: credentials.vendorId ?? credentials.vendor_id ?? '',
+        access_key: credentials.access_key ?? credentials.accessKey ?? '',
+        secret_key: credentials.secret_key ?? credentials.secretKey ?? '',
+        vendor_id: credentials.vendor_id ?? credentials.vendorId ?? '',
       })
     case 'naver':
       return new NaverAdapter({
-        clientId: credentials.clientId ?? credentials.client_id ?? '',
-        clientSecret: credentials.clientSecret ?? credentials.client_secret ?? '',
+        client_id: credentials.client_id ?? credentials.clientId ?? '',
+        client_secret: credentials.client_secret ?? credentials.clientSecret ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

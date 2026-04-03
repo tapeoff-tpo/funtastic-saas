@@ -122,7 +122,7 @@ Plans:
 **Plans:** 3 plans
 Plans:
 - [ ] 06-01-PLAN.md — 11번가 adapter: API key auth, XML parsing, order/claims/invoice (MKT-03)
-- [ ] 06-02-PLAN.md — ESM adapter: unified Gmarket/Auction API, single adapter with site_type (MKT-04)
+- [x] 06-02-PLAN.md — ESM adapter: unified Gmarket/Auction API, single adapter with site_type (MKT-04)
 - [ ] 06-03-PLAN.md — 오늘의집 adapter + register all new adapters in configs.ts (MKT-05)
 
 ## Progress

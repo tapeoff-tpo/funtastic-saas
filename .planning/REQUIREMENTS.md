@@ -39,8 +39,8 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Product Management (상품관리)
 
 - [x] **PROD-01**: 상품을 등록하고 여러 마켓플레이스에 일괄 등록할 수 있다
-- [ ] **PROD-02**: 내부 카테고리를 마켓플레이스별 카테고리에 매핑할 수 있다
-- [ ] **PROD-03**: 등록된 상품의 기본정보(가격, 제목, 설명)를 수정하고 마켓에 반영할 수 있다
+- [x] **PROD-02**: 내부 카테고리를 마켓플레이스별 카테고리에 매핑할 수 있다
+- [x] **PROD-03**: 등록된 상품의 기본정보(가격, 제목, 설명)를 수정하고 마켓에 반영할 수 있다
 - [ ] **PROD-04**: 연동된 마켓플레이스에서 기존 등록 상품을 가져와 내부 상품 DB에 매핑할 수 있다 (역수집)
 - [x] **PROD-05**: 상품 옵션/변형(사이즈, 컬러 등)을 관리하고 옵션별 재고를 추적할 수 있다
 
@@ -141,8 +141,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SHIP-07 | Phase 3 | Complete |
 | SHIP-08 | Phase 3 | Complete |
 | PROD-01 | Phase 5 | Complete |
-| PROD-02 | Phase 5 | Pending |
-| PROD-03 | Phase 5 | Pending |
+| PROD-02 | Phase 5 | Complete |
+| PROD-03 | Phase 5 | Complete |
 | PROD-04 | Phase 5 | Pending |
 | PROD-05 | Phase 5 | Complete |
 | INV-01 | Phase 4 | Complete |

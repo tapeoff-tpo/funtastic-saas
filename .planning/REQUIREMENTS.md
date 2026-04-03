@@ -118,47 +118,47 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FOUND-01 | TBD | Pending |
-| FOUND-02 | TBD | Pending |
-| FOUND-03 | TBD | Pending |
-| FOUND-04 | TBD | Pending |
-| FOUND-05 | TBD | Pending |
-| ORD-01 | TBD | Pending |
-| ORD-02 | TBD | Pending |
-| ORD-03 | TBD | Pending |
-| ORD-04 | TBD | Pending |
-| ORD-05 | TBD | Pending |
-| ORD-06 | TBD | Pending |
-| ORD-07 | TBD | Pending |
-| SHIP-01 | TBD | Pending |
-| SHIP-02 | TBD | Pending |
-| SHIP-03 | TBD | Pending |
-| SHIP-04 | TBD | Pending |
-| SHIP-05 | TBD | Pending |
-| SHIP-06 | TBD | Pending |
-| SHIP-07 | TBD | Pending |
-| SHIP-08 | TBD | Pending |
-| PROD-01 | TBD | Pending |
-| PROD-02 | TBD | Pending |
-| PROD-03 | TBD | Pending |
-| INV-01 | TBD | Pending |
-| INV-02 | TBD | Pending |
-| INV-03 | TBD | Pending |
-| INV-04 | TBD | Pending |
-| DATA-01 | TBD | Pending |
-| DATA-02 | TBD | Pending |
-| MKT-01 | TBD | Pending |
-| MKT-02 | TBD | Pending |
-| MKT-03 | TBD | Pending |
-| MKT-04 | TBD | Pending |
-| MKT-05 | TBD | Pending |
-| MKT-06 | TBD | Pending |
+| FOUND-01 | Phase 1 | Pending |
+| FOUND-02 | Phase 1 | Pending |
+| FOUND-03 | Phase 1 | Pending |
+| FOUND-04 | Phase 1 | Pending |
+| FOUND-05 | Phase 1 | Pending |
+| ORD-01 | Phase 2 | Pending |
+| ORD-02 | Phase 2 | Pending |
+| ORD-03 | Phase 2 | Pending |
+| ORD-04 | Phase 2 | Pending |
+| ORD-05 | Phase 2 | Pending |
+| ORD-06 | Phase 2 | Pending |
+| ORD-07 | Phase 2 | Pending |
+| SHIP-01 | Phase 3 | Pending |
+| SHIP-02 | Phase 3 | Pending |
+| SHIP-03 | Phase 3 | Pending |
+| SHIP-04 | Phase 3 | Pending |
+| SHIP-05 | Phase 3 | Pending |
+| SHIP-06 | Phase 3 | Pending |
+| SHIP-07 | Phase 3 | Pending |
+| SHIP-08 | Phase 3 | Pending |
+| PROD-01 | Phase 5 | Pending |
+| PROD-02 | Phase 5 | Pending |
+| PROD-03 | Phase 5 | Pending |
+| INV-01 | Phase 4 | Pending |
+| INV-02 | Phase 4 | Pending |
+| INV-03 | Phase 4 | Pending |
+| INV-04 | Phase 4 | Pending |
+| DATA-01 | Phase 3 | Pending |
+| DATA-02 | Phase 5 | Pending |
+| MKT-01 | Phase 2 | Pending |
+| MKT-02 | Phase 2 | Pending |
+| MKT-03 | Phase 6 | Pending |
+| MKT-04 | Phase 6 | Pending |
+| MKT-05 | Phase 6 | Pending |
+| MKT-06 | Phase 1 | Pending |
 
 **Coverage:**
 - v1 requirements: 35 total
-- Mapped to phases: 0
-- Unmapped: 35 ⚠️
+- Mapped to phases: 35
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-03*
-*Last updated: 2026-04-03 after initial definition*
+*Last updated: 2026-04-03 after roadmap creation*

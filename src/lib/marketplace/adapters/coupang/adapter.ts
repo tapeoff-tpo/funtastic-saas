@@ -17,6 +17,7 @@ import type {
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createCoupangClient } from './client'
 import { mapCoupangStatus, mapCoupangClaimStatus } from './status-map'
+import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import type { CoupangOrderSheet, CoupangOrderSheetsResponse, CoupangReturnRequestsResponse } from './types'
 
 const COUPANG_CONFIG: MarketplaceConfig = {
@@ -120,8 +121,36 @@ export class CoupangAdapter implements MarketplaceAdapter {
     }
   }
 
-  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
-    throw new Error('uploadInvoice: Not implemented (Phase 3)')
+  async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+    const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/orders/invoices`
+
+    try {
+      const response = await this.client.put(path, {
+        json: {
+          vendorId: this.vendorId,
+          orderSheetInvoiceApplyDtos: [
+            {
+              shipmentBoxId: invoice.shipmentBoxId,
+              orderId,
+              vendorItemId: invoice.vendorItemId,
+              deliveryCompanyCode: mapCarrierCode('coupang', invoice.carrierId),
+              invoiceNumber: invoice.trackingNumber,
+              splitShipping: false,
+              preSplitShipped: false,
+              estimatedShippingDate: undefined,
+            },
+          ],
+        },
+      }).json<{ code: string; message: string }>()
+
+      if (response.code === '200' || response.code === 'SUCCESS') {
+        return { success: true }
+      }
+
+      return { success: false, error: response.message || `Upload failed with code: ${response.code}` }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {

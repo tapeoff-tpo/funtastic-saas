@@ -21,6 +21,7 @@ import type {
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createNaverClient } from './client'
 import { mapNaverStatus, mapNaverClaimStatus, NAVER_CLAIM_TYPE_MAP } from './status-map'
+import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import type { NaverLastChangedStatusesResponse, NaverProductOrderDetailResponse, NaverProductOrder } from './types'
 
 const NAVER_CONFIG: MarketplaceConfig = {
@@ -111,8 +112,50 @@ export class NaverAdapter implements MarketplaceAdapter {
     }
   }
 
-  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
-    throw new Error('uploadInvoice: Not implemented (Phase 3)')
+  async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Step 1: Place-order confirmation if required
+      if (invoice.requiresConfirmation) {
+        const confirmResponse = await this.naverClient.client.post(
+          'external/v1/pay-order/seller/product-orders/place-order',
+          { json: { productOrderIds: [orderId] } },
+        ).json<{
+          data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
+        }>()
+
+        if (confirmResponse.data.failProductOrderIds?.includes(orderId)) {
+          return { success: false, error: `Place-order confirmation failed for ${orderId}` }
+        }
+      }
+
+      // Step 2: Dispatch with tracking info
+      const dispatchResponse = await this.naverClient.client.post(
+        'external/v1/pay-order/seller/product-orders/dispatch',
+        {
+          json: {
+            dispatchProductOrders: [
+              {
+                productOrderId: orderId,
+                deliveryMethod: 'DELIVERY',
+                deliveryCompanyCode: mapCarrierCode('naver', invoice.carrierId),
+                trackingNumber: invoice.trackingNumber,
+                dispatchDate: new Date().toISOString(),
+              },
+            ],
+          },
+        },
+      ).json<{
+        data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
+      }>()
+
+      if (dispatchResponse.data.failProductOrderIds?.includes(orderId)) {
+        return { success: false, error: `Dispatch failed for ${orderId}` }
+      }
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {

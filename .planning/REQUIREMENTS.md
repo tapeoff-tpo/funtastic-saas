@@ -28,13 +28,13 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Shipping & Invoice (배송/송장)
 
 - [x] **SHIP-01**: 송장번호를 마켓플레이스 API로 자동 업로드할 수 있다
-- [ ] **SHIP-02**: 엑셀 파일로 송장번호를 일괄 업로드할 수 있다
+- [x] **SHIP-02**: 엑셀 파일로 송장번호를 일괄 업로드할 수 있다
 - [ ] **SHIP-03**: 송장 출력(배송 라벨)을 일괄 인쇄할 수 있다
 - [x] **SHIP-04**: 같은 구매자/주소의 주문을 합포장으로 묶을 수 있다 (출고편집코드 기반 자동분리 + 최대합포장수량 설정 포함)
 - [x] **SHIP-05**: 합포장 대상 주문을 자동으로 감지하고 제안할 수 있다 (냉동/상온, 대형/소형 등 출고편집코드 기반 분리 포함)
 - [x] **SHIP-06**: 하나의 주문을 여러 배송으로 분할할 수 있다
-- [ ] **SHIP-07**: 처리된 주문을 택배사 양식에 맞는 엑셀로 내보낼 수 있다
-- [ ] **SHIP-08**: 엑셀 내보내기 양식을 택배사별로 커스터마이징할 수 있다
+- [x] **SHIP-07**: 처리된 주문을 택배사 양식에 맞는 엑셀로 내보낼 수 있다
+- [x] **SHIP-08**: 엑셀 내보내기 양식을 택배사별로 커스터마이징할 수 있다
 
 ### Product Management (상품관리)
 
@@ -53,7 +53,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Excel & Data (엑셀/데이터)
 
-- [ ] **DATA-01**: 주문 목록을 커스터마이징 가능한 엑셀로 내보낼 수 있다
+- [x] **DATA-01**: 주문 목록을 커스터마이징 가능한 엑셀로 내보낼 수 있다
 - [ ] **DATA-02**: 상품을 엑셀로 일괄 등록/수정할 수 있다
 
 ### Marketplace Adapters (마켓플레이스 어댑터)
@@ -133,13 +133,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ORD-06 | Phase 2 | Complete |
 | ORD-07 | Phase 2 | Complete |
 | SHIP-01 | Phase 3 | Complete |
-| SHIP-02 | Phase 3 | Pending |
+| SHIP-02 | Phase 3 | Complete |
 | SHIP-03 | Phase 3 | Pending |
 | SHIP-04 | Phase 3 | Complete |
 | SHIP-05 | Phase 3 | Complete |
 | SHIP-06 | Phase 3 | Complete |
-| SHIP-07 | Phase 3 | Pending |
-| SHIP-08 | Phase 3 | Pending |
+| SHIP-07 | Phase 3 | Complete |
+| SHIP-08 | Phase 3 | Complete |
 | PROD-01 | Phase 5 | Pending |
 | PROD-02 | Phase 5 | Pending |
 | PROD-03 | Phase 5 | Pending |
@@ -149,7 +149,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INV-02 | Phase 4 | Pending |
 | INV-03 | Phase 4 | Pending |
 | INV-04 | Phase 4 | Pending |
-| DATA-01 | Phase 3 | Pending |
+| DATA-01 | Phase 3 | Complete |
 | DATA-02 | Phase 5 | Pending |
 | MKT-01 | Phase 2 | Complete |
 | MKT-02 | Phase 2 | Complete |

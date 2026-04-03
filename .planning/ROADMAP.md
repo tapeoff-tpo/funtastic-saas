@@ -103,7 +103,7 @@ Plans:
   6. Admin can bulk-register or bulk-update products via Excel upload
 **Plans:** 5 plans
 Plans:
-- [ ] 05-01-PLAN.md — Product schema, types, queries, CRUD actions with variant-inventory linking (PROD-01, PROD-05)
+- [x] 05-01-PLAN.md — Product schema, types, queries, CRUD actions with variant-inventory linking (PROD-01, PROD-05)
 - [ ] 05-02-PLAN.md — Reverse collection: expand NormalizedProduct, implement adapter getProducts(), import logic (PROD-04)
 - [ ] 05-03-PLAN.md — Category mapping CRUD and product sync to marketplaces via adapter (PROD-02, PROD-03)
 - [ ] 05-04-PLAN.md — Excel bulk import/export for products with round-trip compatibility (DATA-02)

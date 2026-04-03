@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-04-03T06:48:41.248Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-04-03T07:02:29.467Z"
 last_activity: 2026-04-03
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 15
-  completed_plans: 15
+  total_plans: 20
+  completed_plans: 16
   percent: 62
 ---
 
@@ -61,6 +61,7 @@ Progress: [######....] 62%
 | Phase 03 P04 | 6min | 2 tasks | 10 files |
 | Phase 03 P05 | 9min | 3 tasks | 18 files |
 | Phase 04 P02 | 3min | 3 tasks | 5 files |
+| Phase 05-01 P01 | 4min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,7 @@ Recent decisions affecting current work:
 - [Phase 03]: ShippingActions rendered inside DataTable for access to TanStack row selection state
 - [Phase 03]: Invoice status uses latest shipment record per order (by createdAt)
 - [Phase 04]: Manual adjustment reasons only in UI (excludes system reasons order_ship/order_cancel)
+- [Phase 05-01]: Variant SKU links to inventory via setStock; soft delete preserves history; variants deactivated not deleted
 
 ### Pending Todos
 
@@ -104,6 +106,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-03T06:48:12.593Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-04-03T07:02:29.464Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None

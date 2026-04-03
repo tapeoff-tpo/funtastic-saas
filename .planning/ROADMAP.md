@@ -140,7 +140,7 @@ Plans:
 Plans:
 - [ ] 07-01-PLAN.md — Tier 1 adapters: Cafe24 (OAuth2), CJ온스타일, 카카오선물하기, 카카오톡스토어 (MKT-V2)
 - [ ] 07-02-PLAN.md — Tier 2 adapters: 도매꾹 (XML+JSON), 온채널, 오너클랜, 신세계몰, 에이블리 (MKT-V2)
-- [ ] 07-03-PLAN.md — Tier 3a stubs: 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B (MKT-V2)
+- [x] 07-03-PLAN.md — Tier 3a stubs: 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B (MKT-V2)
 - [ ] 07-04-PLAN.md — Tier 3b stubs: 올웨이즈, 텐바이텐, 토스쇼핑, 투비즈온 (MKT-V2)
 - [ ] 07-05-PLAN.md — Register all 18 in configs.ts + update MarketplaceId type (MKT-V2)
 

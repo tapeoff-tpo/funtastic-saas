@@ -76,11 +76,30 @@ export interface NormalizedClaim {
   rawData: Record<string, unknown>
 }
 
-/** Normalized product shape -- expanded in Phase 5 */
+/** Normalized product variant from marketplace */
+export interface NormalizedProductVariant {
+  marketplaceVariantId: string
+  optionName: string          // e.g., "빨강/L"
+  optionValues: Record<string, string>  // e.g., { color: "빨강", size: "L" }
+  price: number
+  sku?: string
+  stockQuantity?: number
+}
+
+/** Normalized product shape -- fully typed for Phase 5 adapters */
 export interface NormalizedProduct {
   productId: string
   marketplaceId: MarketplaceId
-  [key: string]: unknown
+  name: string
+  description?: string
+  price: number
+  costPrice?: number
+  images: { url: string; sortOrder: number }[]
+  categoryId?: string
+  categoryName?: string
+  variants: NormalizedProductVariant[]
+  status: string   // marketplace-native status
+  rawData: Record<string, unknown>
 }
 
 /** Invoice data for upload */

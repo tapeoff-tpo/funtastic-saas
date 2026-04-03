@@ -18,7 +18,14 @@ import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createCoupangClient } from './client'
 import { mapCoupangStatus, mapCoupangClaimStatus } from './status-map'
 import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
-import type { CoupangOrderSheet, CoupangOrderSheetsResponse, CoupangReturnRequestsResponse } from './types'
+import type {
+  CoupangOrderSheet,
+  CoupangOrderSheetsResponse,
+  CoupangReturnRequestsResponse,
+  CoupangSellerProduct,
+  CoupangSellerProductItem,
+  CoupangSellerProductsResponse,
+} from './types'
 
 const COUPANG_CONFIG: MarketplaceConfig = {
   id: 'coupang',
@@ -154,7 +161,92 @@ export class CoupangAdapter implements MarketplaceAdapter {
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    throw new Error('getProducts: Not implemented (Phase 5)')
+    const path = `v2/providers/seller_api/apis/api/v1/marketplace/seller-products`
+    const allProducts: NormalizedProduct[] = []
+    let nextToken: string | undefined
+
+    try {
+      do {
+        const searchParams: Record<string, string | number> = {
+          vendorId: this.vendorId,
+          maxPerPage: 50,
+        }
+        if (nextToken) {
+          searchParams.nextToken = nextToken
+        }
+
+        const response = await this.client.get(path, { searchParams })
+          .json<CoupangSellerProductsResponse>()
+
+        if (response.code !== '200' && response.code !== 'SUCCESS') {
+          throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
+        }
+
+        for (const product of response.data || []) {
+          allProducts.push(this.normalizeProduct(product))
+        }
+
+        nextToken = response.nextToken
+      } while (nextToken)
+
+      return allProducts
+    } catch (error) {
+      if (error instanceof MarketplaceApiError) throw error
+      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
+        throw new MarketplaceAuthError('coupang', 'HMAC authentication failed')
+      }
+      throw new MarketplaceApiError('coupang', 500, error instanceof Error ? error.message : 'Unknown error')
+    }
+  }
+
+  private normalizeProduct(product: CoupangSellerProduct): NormalizedProduct {
+    // Collect all images from items, deduped by cdnPath
+    const imageSet = new Map<string, { url: string; sortOrder: number }>()
+    let sortOrder = 0
+    for (const item of product.items) {
+      for (const img of item.images || []) {
+        if (!imageSet.has(img.cdnPath)) {
+          imageSet.set(img.cdnPath, { url: img.cdnPath, sortOrder: sortOrder++ })
+        }
+      }
+    }
+
+    // Use the first item's sale price as the base price
+    const basePrice = product.items[0]?.salePrice ?? 0
+
+    return {
+      productId: String(product.sellerProductId),
+      marketplaceId: 'coupang',
+      name: product.sellerProductName,
+      description: undefined,
+      price: basePrice,
+      costPrice: undefined,
+      images: Array.from(imageSet.values()),
+      categoryId: product.displayCategoryCode ? String(product.displayCategoryCode) : undefined,
+      categoryName: undefined,
+      variants: product.items.map((item) => this.normalizeProductVariant(item)),
+      status: product.statusName,
+      rawData: product as unknown as Record<string, unknown>,
+    }
+  }
+
+  private normalizeProductVariant(item: CoupangSellerProductItem): import('../../types').NormalizedProductVariant {
+    const optionValues: Record<string, string> = {}
+    const optionParts: string[] = []
+
+    for (const attr of item.attributes || []) {
+      optionValues[attr.attributeTypeName] = attr.valueName
+      optionParts.push(attr.valueName)
+    }
+
+    return {
+      marketplaceVariantId: String(item.vendorItemId),
+      optionName: optionParts.join('/') || item.itemName,
+      optionValues,
+      price: item.salePrice,
+      sku: item.externalVendorSku || undefined,
+      stockQuantity: undefined, // Coupang doesn't include stock in product list
+    }
   }
 
   private normalizeOrder(sheet: CoupangOrderSheet): NormalizedOrder {

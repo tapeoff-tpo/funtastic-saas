@@ -22,7 +22,13 @@ import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createNaverClient } from './client'
 import { mapNaverStatus, mapNaverClaimStatus, NAVER_CLAIM_TYPE_MAP } from './status-map'
 import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
-import type { NaverLastChangedStatusesResponse, NaverProductOrderDetailResponse, NaverProductOrder } from './types'
+import type {
+  NaverLastChangedStatusesResponse,
+  NaverProductOrderDetailResponse,
+  NaverProductOrder,
+  NaverChannelProduct,
+  NaverProductsResponse,
+} from './types'
 
 const NAVER_CONFIG: MarketplaceConfig = {
   id: 'naver',
@@ -159,7 +165,84 @@ export class NaverAdapter implements MarketplaceAdapter {
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    throw new Error('getProducts: Not implemented (Phase 5)')
+    const allProducts: NormalizedProduct[] = []
+    let page = 1
+    const size = 100
+
+    try {
+      let hasMore = true
+      while (hasMore) {
+        const response = await this.naverClient.client.get('v2/products', {
+          searchParams: { page, size },
+        }).json<NaverProductsResponse>()
+
+        for (const product of response.contents || []) {
+          allProducts.push(this.normalizeProduct(product))
+        }
+
+        hasMore = page < response.totalPages
+        page++
+      }
+
+      return allProducts
+    } catch (error) {
+      if (error instanceof MarketplaceApiError || error instanceof MarketplaceAuthError) throw error
+      throw new MarketplaceApiError('naver', 500, error instanceof Error ? error.message : 'Unknown error')
+    }
+  }
+
+  private normalizeProduct(product: NaverChannelProduct): NormalizedProduct {
+    // Collect images: representative + optional
+    const images: { url: string; sortOrder: number }[] = []
+    if (product.representativeImage) {
+      images.push({ url: product.representativeImage.url, sortOrder: 0 })
+    }
+    for (const img of product.optionalImages || []) {
+      images.push({ url: img.url, sortOrder: img.imageOrder })
+    }
+
+    // Map option combinations to variants
+    const variants = (product.optionCombinations || []).map((opt) => {
+      const optionValues: Record<string, string> = {}
+      const optionParts: string[] = []
+
+      if (opt.optionName1) {
+        optionValues['option1'] = opt.optionName1
+        optionParts.push(opt.optionName1)
+      }
+      if (opt.optionName2) {
+        optionValues['option2'] = opt.optionName2
+        optionParts.push(opt.optionName2)
+      }
+      if (opt.optionName3) {
+        optionValues['option3'] = opt.optionName3
+        optionParts.push(opt.optionName3)
+      }
+
+      return {
+        marketplaceVariantId: String(opt.id),
+        optionName: optionParts.join('/') || product.name,
+        optionValues,
+        price: opt.price,
+        sku: opt.sellerManagerCode || undefined,
+        stockQuantity: opt.stockQuantity,
+      } satisfies import('../../types').NormalizedProductVariant
+    })
+
+    return {
+      productId: String(product.channelProductNo),
+      marketplaceId: 'naver',
+      name: product.name,
+      description: product.detailContent || undefined,
+      price: product.salePrice,
+      costPrice: undefined,
+      images,
+      categoryId: product.categoryId || undefined,
+      categoryName: product.wholeCategoryName || undefined,
+      variants,
+      status: product.statusType,
+      rawData: product as unknown as Record<string, unknown>,
+    }
   }
 
   /**

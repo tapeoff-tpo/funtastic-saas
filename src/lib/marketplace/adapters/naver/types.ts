@@ -50,3 +50,52 @@ export interface NaverLastChangedStatusesResponse {
 export interface NaverProductOrderDetailResponse {
   data: NaverProductOrder[]
 }
+
+// ─── Product API Types ──────────────────────────────────────────
+
+/** Option combination for a Naver channel product */
+export interface NaverProductOptionCombination {
+  id: number
+  optionName1: string
+  optionName2?: string
+  optionName3?: string
+  stockQuantity: number
+  price: number
+  usable: boolean
+  sellerManagerCode?: string  // seller's SKU
+}
+
+/** Image info from Naver product */
+export interface NaverProductImage {
+  url: string
+  imageOrder: number
+}
+
+/** A single channel product from Naver Commerce API */
+export interface NaverChannelProduct {
+  originProductNo: number
+  channelProductNo: number
+  name: string
+  statusType: string  // SALE, SUSPENSION, CLOSE, PROHIBITION, DELETE, WAIT
+  salePrice: number
+  stockQuantity: number
+  channelProductDisplayStatusType?: string
+  categoryId?: string
+  wholeCategoryName?: string
+  representativeImage?: NaverProductImage
+  optionalImages?: NaverProductImage[]
+  detailContent?: string
+  sellerManagementCode?: string
+  optionCombinations?: NaverProductOptionCombination[]
+  createdDate?: string
+  lastModifiedDate?: string
+}
+
+/** Response from GET /v2/products (Naver Commerce API) */
+export interface NaverProductsResponse {
+  contents: NaverChannelProduct[]
+  totalElements: number
+  totalPages: number
+  size: number
+  page: number
+}

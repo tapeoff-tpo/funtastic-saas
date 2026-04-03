@@ -50,8 +50,8 @@ Plans:
 **Plans:** 5 plans
 Plans:
 - [x] 02-01-PLAN.md — DB schema (orders/claims/job_logs), order types, queries, status/hold business logic (ORD-04, ORD-06, ORD-07)
-- [x] 02-02-PLAN.md — Coupang HMAC adapter + Naver OAuth adapter with order/claims collection (MKT-01, MKT-02)
-- [ ] 02-03-PLAN.md — BullMQ + Redis infrastructure, order collection worker, Docker Compose (ORD-01, ORD-05)
+- [ ] 02-02-PLAN.md — Coupang HMAC adapter + Naver OAuth adapter with order/claims collection (MKT-01, MKT-02)
+- [x] 02-03-PLAN.md — BullMQ + Redis infrastructure, order collection worker, Docker Compose (ORD-01, ORD-05)
 - [ ] 02-04-PLAN.md — Order dashboard UI with TanStack Table, nuqs filters, server-side pagination (ORD-02, ORD-03)
 - [ ] 02-05-PLAN.md — Status management UI, hold/release dialog, claims filter, bulk actions + checkpoint (ORD-04, ORD-05, ORD-06, ORD-07)
 **UI hint**: yes

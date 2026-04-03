@@ -17,11 +17,11 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Order Management (주문관리)
 
-- [ ] **ORD-01**: 연동된 마켓플레이스에서 주문을 자동으로 수집할 수 있다 (스케줄 기반)
+- [x] **ORD-01**: 연동된 마켓플레이스에서 주문을 자동으로 수집할 수 있다 (스케줄 기반)
 - [ ] **ORD-02**: 모든 마켓플레이스의 주문을 하나의 통합 대시보드에서 조회할 수 있다
 - [ ] **ORD-03**: 주문을 마켓플레이스, 날짜, 상태, 상품명, 주문번호, 구매자명으로 필터링/검색할 수 있다
 - [x] **ORD-04**: 주문 상태를 관리할 수 있다 (신규→확인→출고대기→출고완료→배송중→배송완료)
-- [ ] **ORD-05**: 마켓플레이스에서 취소/반품/교환 클레임을 자동 수집할 수 있다
+- [x] **ORD-05**: 마켓플레이스에서 취소/반품/교환 클레임을 자동 수집할 수 있다
 - [x] **ORD-06**: 문제 주문을 보류 처리하고 사유를 기록할 수 있다
 - [x] **ORD-07**: 보류된 주문을 해제하고 정상 처리 흐름으로 복귀시킬 수 있다
 
@@ -125,11 +125,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FOUND-03 | Phase 1 | Complete |
 | FOUND-04 | Phase 1 | Complete |
 | FOUND-05 | Phase 1 | Complete |
-| ORD-01 | Phase 2 | Pending |
+| ORD-01 | Phase 2 | Complete |
 | ORD-02 | Phase 2 | Pending |
 | ORD-03 | Phase 2 | Pending |
 | ORD-04 | Phase 2 | Complete |
-| ORD-05 | Phase 2 | Pending |
+| ORD-05 | Phase 2 | Complete |
 | ORD-06 | Phase 2 | Complete |
 | ORD-07 | Phase 2 | Complete |
 | SHIP-01 | Phase 3 | Pending |

@@ -76,10 +76,25 @@ export interface NormalizedClaim {
   rawData: Record<string, unknown>
 }
 
-/** Normalized product shape -- expanded in Phase 5 */
+/** Normalized product shape for sync to marketplaces */
 export interface NormalizedProduct {
   productId: string
   marketplaceId: MarketplaceId
+  name: string
+  description?: string
+  price: number
+  sku: string
+  categoryId?: string
+  marketplaceCategoryId?: string
+  images?: Array<{ url: string; sortOrder: number }>
+  variants?: Array<{
+    sku: string
+    optionName?: string
+    optionValues?: Record<string, string>
+    price: number
+    isActive: boolean
+  }>
+  metadata?: Record<string, unknown>
   [key: string]: unknown
 }
 
@@ -111,4 +126,13 @@ export interface MarketplaceAdapter {
     invoice: InvoiceData
   ): Promise<{ success: boolean; error?: string }>
   getProducts(): Promise<NormalizedProduct[]>
+
+  // Phase 5: Product registration and sync
+  registerProduct(
+    product: NormalizedProduct
+  ): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }>
+  updateProduct(
+    marketplaceProductId: string,
+    product: Partial<NormalizedProduct>
+  ): Promise<{ success: boolean; error?: string }>
 }

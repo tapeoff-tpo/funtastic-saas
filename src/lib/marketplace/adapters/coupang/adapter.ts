@@ -157,6 +157,119 @@ export class CoupangAdapter implements MarketplaceAdapter {
     throw new Error('getProducts: Not implemented (Phase 5)')
   }
 
+  async registerProduct(product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
+    const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/products`
+
+    try {
+      const payload = this.buildCoupangProductPayload(product)
+
+      const response = await this.client.post(path, {
+        json: payload,
+      }).json<{ code: string; message: string; data?: { productId: number } }>()
+
+      if (response.code === '200' || response.code === 'SUCCESS') {
+        return {
+          success: true,
+          marketplaceProductId: response.data?.productId ? String(response.data.productId) : undefined,
+        }
+      }
+
+      return { success: false, error: response.message || `Registration failed with code: ${response.code}` }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  }
+
+  async updateProduct(marketplaceProductId: string, product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
+    const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/products/${marketplaceProductId}`
+
+    try {
+      const payload = this.buildCoupangProductPayload(product as NormalizedProduct)
+
+      const response = await this.client.put(path, {
+        json: payload,
+      }).json<{ code: string; message: string }>()
+
+      if (response.code === '200' || response.code === 'SUCCESS') {
+        return { success: true }
+      }
+
+      return { success: false, error: response.message || `Update failed with code: ${response.code}` }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  }
+
+  /**
+   * Build Coupang-specific product payload from NormalizedProduct.
+   * Maps internal fields to Coupang WING API product registration format.
+   */
+  private buildCoupangProductPayload(product: Partial<NormalizedProduct>) {
+    return {
+      displayCategoryCode: product.marketplaceCategoryId ?? product.categoryId,
+      sellerProductName: product.name,
+      vendorId: this.vendorId,
+      saleStartedAt: new Date().toISOString(),
+      saleEndedAt: '2099-01-01T00:00:00',
+      brand: '',
+      generalProductName: product.name,
+      productGroup: '',
+      deliveryChargeType: 'FREE',
+      deliveryCharge: 0,
+      freeShipOverAmount: 0,
+      deliveryChargeOnReturn: 5000,
+      remoteAreaDeliverable: 'N',
+      unionDeliveryType: 'UNION_DELIVERY',
+      returnCenterCode: '',
+      returnChargeName: '',
+      companyContactNumber: '',
+      returnZipCode: '',
+      returnAddress: '',
+      returnAddressDetail: '',
+      returnCharge: 5000,
+      returnChargeVendor: 'VENDOR',
+      afterServiceInformation: '',
+      afterServiceContactNumber: '',
+      outboundShippingPlaceCode: 0,
+      vendorUserId: '',
+      requested: false,
+      items: (product.variants || []).map((v) => ({
+        itemName: v.optionName || product.name,
+        originalPrice: v.price,
+        salePrice: v.price,
+        maximumBuyCount: 999,
+        maximumBuyForPerson: 0,
+        outboundShippingTimeDay: 2,
+        unitCount: 1,
+        adultOnly: 'EVERYONE',
+        taxType: 'TAX',
+        parallelImported: 'NOT_PARALLEL_IMPORTED',
+        overseasPurchased: 'NOT_OVERSEAS_PURCHASED',
+        externalVendorSku: v.sku,
+        barcode: '',
+        emptyBarcode: true,
+        images: (product.images || []).map((img) => ({
+          imageOrder: img.sortOrder,
+          imageType: img.sortOrder === 0 ? 'REPRESENTATIVE' : 'DETAIL',
+          vendorPath: img.url,
+        })),
+        notices: [],
+        attributes: [],
+        contents: [
+          {
+            contentsType: 'TEXT',
+            contentDetails: [
+              {
+                content: product.description || '',
+                detailType: 'TEXT',
+              },
+            ],
+          },
+        ],
+      })),
+    }
+  }
+
   private normalizeOrder(sheet: CoupangOrderSheet): NormalizedOrder {
     return {
       marketplaceOrderId: String(sheet.orderId),

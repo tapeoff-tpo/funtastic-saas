@@ -162,6 +162,122 @@ export class NaverAdapter implements MarketplaceAdapter {
     throw new Error('getProducts: Not implemented (Phase 5)')
   }
 
+  async registerProduct(product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
+    try {
+      const payload = this.buildNaverProductPayload(product)
+
+      const response = await this.naverClient.client.post(
+        'external/v2/products',
+        { json: payload },
+      ).json<{
+        code: string
+        message: string
+        data?: { smartstoreChannelProductNo: number; originProductNo: number }
+      }>()
+
+      if (response.data?.originProductNo) {
+        return {
+          success: true,
+          marketplaceProductId: String(response.data.originProductNo),
+        }
+      }
+
+      return { success: false, error: response.message || 'Product registration failed' }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  }
+
+  async updateProduct(marketplaceProductId: string, product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const payload = this.buildNaverProductPayload(product as NormalizedProduct)
+
+      const response = await this.naverClient.client.put(
+        `external/v2/products/origin-products/${marketplaceProductId}`,
+        { json: payload },
+      ).json<{ code: string; message: string }>()
+
+      if (response.code === '200' || !response.code) {
+        return { success: true }
+      }
+
+      return { success: false, error: response.message || 'Product update failed' }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  }
+
+  /**
+   * Build Naver Commerce API product payload from NormalizedProduct.
+   * Maps internal fields to Naver's product registration format.
+   */
+  private buildNaverProductPayload(product: Partial<NormalizedProduct>) {
+    return {
+      originProduct: {
+        statusType: 'SALE',
+        saleType: 'NEW',
+        leafCategoryId: product.marketplaceCategoryId ?? product.categoryId,
+        name: product.name,
+        detailContent: product.description || '',
+        images: {
+          representativeImage: product.images?.[0]
+            ? { url: product.images[0].url }
+            : undefined,
+          optionalImages: (product.images || []).slice(1).map((img) => ({
+            url: img.url,
+          })),
+        },
+        salePrice: product.price ?? 0,
+        stockQuantity: 999,
+        deliveryInfo: {
+          deliveryType: 'DELIVERY',
+          deliveryAttributeType: 'NORMAL',
+          deliveryFee: {
+            deliveryFeeType: 'FREE',
+            baseFee: 0,
+          },
+        },
+        detailAttribute: {
+          naverShoppingSearchInfo: {
+            manufacturerName: '',
+            brandName: '',
+            modelName: product.name,
+          },
+          afterServiceInfo: {
+            afterServiceTelephoneNumber: '',
+            afterServiceGuideContent: '',
+          },
+          originAreaInfo: {
+            originAreaCode: '00',
+            content: '상세설명참조',
+          },
+        },
+        ...(product.variants && product.variants.length > 0
+          ? {
+              optionInfo: {
+                optionCombinationGroupNames: {
+                  optionGroupName1: product.variants[0]?.optionName || '옵션',
+                },
+                optionCombinations: product.variants.map((v, idx) => ({
+                  optionName1: Object.values(v.optionValues || {})[0] || v.sku,
+                  stockQuantity: 999,
+                  price: v.price,
+                  usable: v.isActive,
+                  sellerManagerCode: v.sku,
+                  id: idx + 1,
+                })),
+              },
+            }
+          : {}),
+      },
+      smartstoreChannelProduct: {
+        channelProductName: product.name,
+        storeKeepExclusiveProduct: false,
+        naverShoppingRegistration: true,
+      },
+    }
+  }
+
   /**
    * Fetch changed product order IDs from the lastChangedStatuses endpoint.
    */

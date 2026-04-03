@@ -60,7 +60,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Excel & Data (엑셀/데이터)
 
 - [x] **DATA-01**: 주문 목록을 커스터마이징 가능한 엑셀로 내보낼 수 있다
-- [ ] **DATA-02**: 상품을 엑셀로 일괄 등록/수정할 수 있다
+- [x] **DATA-02**: 상품을 엑셀로 일괄 등록/수정할 수 있다
 
 ### Marketplace Adapters (마켓플레이스 어댑터)
 
@@ -162,7 +162,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INV-03 | Phase 4 | Complete |
 | INV-04 | Phase 4 | Complete |
 | DATA-01 | Phase 3 | Complete |
-| DATA-02 | Phase 5 | Pending |
+| DATA-02 | Phase 5 | Complete |
 | MKT-01 | Phase 2 | Complete |
 | MKT-02 | Phase 2 | Complete |
 | MKT-03 | Phase 6 | Pending |

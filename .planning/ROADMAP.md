@@ -49,7 +49,7 @@ Plans:
   5. Admin can hold a problematic order with a reason and later release it back to normal flow
 **Plans:** 5 plans
 Plans:
-- [ ] 02-01-PLAN.md — DB schema (orders/claims/job_logs), order types, queries, status/hold business logic (ORD-04, ORD-06, ORD-07)
+- [x] 02-01-PLAN.md — DB schema (orders/claims/job_logs), order types, queries, status/hold business logic (ORD-04, ORD-06, ORD-07)
 - [ ] 02-02-PLAN.md — Coupang HMAC adapter + Naver OAuth adapter with order/claims collection (MKT-01, MKT-02)
 - [ ] 02-03-PLAN.md — BullMQ + Redis infrastructure, order collection worker, Docker Compose (ORD-01, ORD-05)
 - [ ] 02-04-PLAN.md — Order dashboard UI with TanStack Table, nuqs filters, server-side pagination (ORD-02, ORD-03)
@@ -115,7 +115,7 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation & Marketplace Infrastructure | 3/3 | Complete | - |
-| 2. Order Collection & Dashboard | 0/5 | Planning complete | - |
+| 2. Order Collection & Dashboard | 1/5 | Executing | - |
 | 3. Shipping & Invoice Processing | 0/TBD | Not started | - |
 | 4. Inventory Management | 0/TBD | Not started | - |
 | 5. Product Management & Data | 0/TBD | Not started | - |

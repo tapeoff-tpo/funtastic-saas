@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 3: Shipping & Invoice Processing** - Invoice upload, combined shipping, Excel export -- the 사방넷 switching trigger
 - [ ] **Phase 4: Inventory Management** - Central stock tracking with automatic deduction/restoration on order events
 - [ ] **Phase 5: Product Management & Data** - Product listing across marketplaces with category mapping and bulk operations
-- [ ] **Phase 6: Marketplace Expansion** - Add 11번가, 지마켓/옥션, 오늘의집 adapters to complete top-5 coverage
+- [x] **Phase 6: Marketplace Expansion** - Add 11번가, 지마켓/옥션, 오늘의집 adapters to complete top-5 coverage (completed 2026-04-03)
 
 ## Phase Details
 
@@ -119,11 +119,11 @@ Plans:
   2. Orders from 지마켓 and 옥션 (via ESM unified API) are collected and invoices can be uploaded via API
   3. Orders from 오늘의집 are collected and invoices can be uploaded via API
   4. All 5 marketplace adapters show correct health status on the dashboard
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 Plans:
-- [ ] 06-01-PLAN.md — 11번가 adapter: API key auth, XML parsing, order/claims/invoice (MKT-03)
+- [x] 06-01-PLAN.md — 11번가 adapter: API key auth, XML parsing, order/claims/invoice (MKT-03)
 - [x] 06-02-PLAN.md — ESM adapter: unified Gmarket/Auction API, single adapter with site_type (MKT-04)
-- [ ] 06-03-PLAN.md — 오늘의집 adapter + register all new adapters in configs.ts (MKT-05)
+- [x] 06-03-PLAN.md — 오늘의집 adapter + register all new adapters in configs.ts (MKT-05)
 
 ## Progress
 
@@ -138,4 +138,4 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 3. Shipping & Invoice Processing | 1/5 | Executing | - |
 | 4. Inventory Management | 0/2 | Not started | - |
 | 5. Product Management & Data | 0/5 | Not started | - |
-| 6. Marketplace Expansion | 0/3 | Not started | - |
+| 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |

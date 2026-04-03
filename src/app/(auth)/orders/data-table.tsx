@@ -11,6 +11,7 @@ import {
 import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
 import { BulkActionBar } from './status-actions'
+import { ShippingActions } from './shipping-actions'
 
 interface DataTableProps {
   data: OrderRow[]
@@ -64,6 +65,9 @@ export function DataTable({ data, total, pageSize, page }: DataTableProps) {
 
   return (
     <div className="space-y-4">
+      {/* Shipping action buttons */}
+      <ShippingActions selectedOrderIds={selectedIds} />
+
       {/* Bulk action bar (floating, shown when rows selected) */}
       <BulkActionBar
         selectedIds={selectedIds}

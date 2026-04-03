@@ -14,6 +14,27 @@ const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
   exchange: '교환',
 }
 
+/** Invoice upload status labels */
+const INVOICE_STATUS_LABELS: Record<InvoiceUploadStatus, string> = {
+  pending: '대기',
+  uploading: '업로드중',
+  uploaded: '완료',
+  failed: '실패',
+  confirmed: '확인됨',
+}
+
+/** Invoice status badge variant */
+const INVOICE_STATUS_VARIANT: Record<InvoiceUploadStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+  pending: 'outline',
+  uploading: 'default',
+  uploaded: 'secondary',
+  failed: 'destructive',
+  confirmed: 'secondary',
+}
+
+/** Invoice upload status type */
+type InvoiceUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed' | 'confirmed'
+
 /** Row shape for the order table (matches getOrders return) */
 export interface OrderRow {
   id: string
@@ -26,6 +47,8 @@ export interface OrderRow {
   isHeld: boolean
   holdReason?: string | null
   claimType?: ClaimType | null
+  invoiceStatus?: InvoiceUploadStatus | null
+  trackingNumber?: string | null
   items: {
     productName: string
     optionText: string | null
@@ -193,6 +216,29 @@ export const columns: ColumnDef<OrderRow>[] = [
       return `${num.toLocaleString('ko-KR')}원`
     },
     size: 110,
+  },
+  // 송장상태
+  {
+    id: 'invoiceStatus',
+    header: '송장상태',
+    cell: ({ row }) => {
+      const invoiceStatus = row.original.invoiceStatus
+      const trackingNumber = row.original.trackingNumber
+      if (!invoiceStatus) return <span className="text-muted-foreground">-</span>
+      return (
+        <div className="flex flex-col gap-0.5">
+          <Badge variant={INVOICE_STATUS_VARIANT[invoiceStatus]}>
+            {INVOICE_STATUS_LABELS[invoiceStatus]}
+          </Badge>
+          {trackingNumber && (
+            <span className="font-mono text-xs text-muted-foreground">
+              {trackingNumber}
+            </span>
+          )}
+        </div>
+      )
+    },
+    size: 120,
   },
   // 액션
   {

@@ -7,6 +7,10 @@ import {
   releaseOrder,
   bulkUpdateStatus,
 } from '@/lib/orders/actions'
+import {
+  queueInvoiceUpload,
+  bulkQueueInvoiceUpload,
+} from '@/lib/shipping/actions'
 import type { OrderStatus } from '@/lib/orders/types'
 
 /**
@@ -59,6 +63,35 @@ export async function bulkChangeStatusAction(
   newStatus: OrderStatus,
 ): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
   const result = await bulkUpdateStatus(orderIds, newStatus)
+  revalidatePath('/orders')
+  return result
+}
+
+/**
+ * Server action: upload invoice for a single order.
+ * Queues invoice upload via BullMQ worker.
+ */
+export async function uploadInvoiceAction(
+  orderId: string,
+  trackingNumber: string,
+  carrierId: string,
+): Promise<{ success: boolean; error?: string }> {
+  // TODO: Get userId from auth session in production
+  const userId = 'placeholder-user-id'
+  const result = await queueInvoiceUpload(orderId, trackingNumber, carrierId, userId)
+  revalidatePath('/orders')
+  return result
+}
+
+/**
+ * Server action: bulk upload invoices for multiple orders.
+ */
+export async function bulkUploadInvoiceAction(
+  orders: Array<{ orderId: string; trackingNumber: string; carrierId: string }>,
+): Promise<{ queued: number; errors: Array<{ orderId: string; error: string }> }> {
+  // TODO: Get userId from auth session in production
+  const userId = 'placeholder-user-id'
+  const result = await bulkQueueInvoiceUpload(orders, userId)
   revalidatePath('/orders')
   return result
 }

@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/lib/db'
-import { orders, orderItems, claims } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters } from './types'
@@ -132,6 +132,26 @@ export async function getOrders(filters: OrderFilters = {}) {
       )
   }
 
+  // Fetch shipments for these orders to get invoice status
+  let shipmentRows: (typeof shipments.$inferSelect)[] = []
+  if (orderIds.length > 0) {
+    shipmentRows = await db
+      .select()
+      .from(shipments)
+      .where(
+        sql`${shipments.orderId} IN ${orderIds}`,
+      )
+  }
+
+  // Map latest shipment per order
+  const shipmentByOrderId = new Map<string, typeof shipments.$inferSelect>()
+  for (const shipment of shipmentRows) {
+    const existing = shipmentByOrderId.get(shipment.orderId)
+    if (!existing || shipment.createdAt > existing.createdAt) {
+      shipmentByOrderId.set(shipment.orderId, shipment)
+    }
+  }
+
   // Group items by orderId
   const itemsByOrderId = new Map<string, (typeof orderItems.$inferSelect)[]>()
   for (const item of items) {
@@ -148,12 +168,17 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  // Combine orders with items and claim type
-  const ordersWithItems = orderRows.map((order) => ({
-    ...order,
-    claimType: claimTypeByOrderId.get(order.id) ?? null,
-    items: itemsByOrderId.get(order.id) ?? [],
-  }))
+  // Combine orders with items, claim type, and shipment info
+  const ordersWithItems = orderRows.map((order) => {
+    const shipment = shipmentByOrderId.get(order.id)
+    return {
+      ...order,
+      claimType: claimTypeByOrderId.get(order.id) ?? null,
+      invoiceStatus: shipment?.uploadStatus ?? null,
+      trackingNumber: shipment?.trackingNumber ?? null,
+      items: itemsByOrderId.get(order.id) ?? [],
+    }
+  })
 
   // Get total count (with claim join if filtering)
   let countResult: { value: number } | undefined

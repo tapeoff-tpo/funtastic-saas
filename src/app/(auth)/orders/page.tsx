@@ -62,6 +62,8 @@ export default async function OrdersPage({
     isHeld: o.isHeld,
     holdReason: o.holdReason,
     claimType: o.claimType as OrderRow['claimType'],
+    invoiceStatus: o.invoiceStatus as OrderRow['invoiceStatus'],
+    trackingNumber: o.trackingNumber,
     items: o.items.map((item) => ({
       productName: item.productName,
       optionText: item.optionText,

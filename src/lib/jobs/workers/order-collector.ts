@@ -9,7 +9,8 @@ import {
   jobLogs,
 } from '@/lib/db/schema'
 import { readCredential } from '@/lib/supabase/admin'
-import { marketplaceRegistry } from '@/lib/marketplace/registry'
+import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
+import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import type {
   MarketplaceAdapter,
   NormalizedOrder,
@@ -19,20 +20,28 @@ import type {
 /**
  * Create a marketplace adapter instance with credentials.
  *
- * Uses the registry to get the adapter config, then reads credentials
- * from Vault and returns the adapter for use in the worker context.
- *
- * NOTE: Current adapters are stubs (Phase 1). Real implementations will be
- * added per-marketplace in later phases. The worker is designed to work
- * with any adapter that implements the MarketplaceAdapter interface.
+ * Instantiates the correct adapter class based on marketplaceId,
+ * passing the Vault-retrieved credentials for API authentication.
  */
 export function createAdapter(
   marketplaceId: string,
-  _credentials: Record<string, string>
+  credentials: Record<string, string>
 ): Pick<MarketplaceAdapter, 'config' | 'getOrders' | 'getClaimsOrders'> {
-  // Get adapter from registry (includes config + method implementations)
-  const adapter = marketplaceRegistry.get(marketplaceId)
-  return adapter
+  switch (marketplaceId) {
+    case 'coupang':
+      return new CoupangAdapter({
+        accessKey: credentials.accessKey ?? credentials.access_key ?? '',
+        secretKey: credentials.secretKey ?? credentials.secret_key ?? '',
+        vendorId: credentials.vendorId ?? credentials.vendor_id ?? '',
+      })
+    case 'naver':
+      return new NaverAdapter({
+        clientId: credentials.clientId ?? credentials.client_id ?? '',
+        clientSecret: credentials.clientSecret ?? credentials.client_secret ?? '',
+      })
+    default:
+      throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)
+  }
 }
 
 /**

@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-04-03T07:08:43.368Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-04-03T07:09:06.220Z"
 last_activity: 2026-04-03
 progress:
   total_phases: 6
@@ -61,7 +61,7 @@ Progress: [######....] 62%
 | Phase 03 P04 | 6min | 2 tasks | 10 files |
 | Phase 03 P05 | 9min | 3 tasks | 18 files |
 | Phase 04 P02 | 3min | 3 tasks | 5 files |
-| Phase 05 P02 | 4min | 2 tasks | 6 files |
+| Phase 05 P03 | 4min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -92,8 +92,8 @@ Recent decisions affecting current work:
 - [Phase 03]: ShippingActions rendered inside DataTable for access to TanStack row selection state
 - [Phase 03]: Invoice status uses latest shipment record per order (by createdAt)
 - [Phase 04]: Manual adjustment reasons only in UI (excludes system reasons order_ship/order_cancel)
-- [Phase 05]: Auto-generate internal SKU from marketplace prefix + productId (CPG-12345, NVR-67890)
-- [Phase 05]: Idempotent reverse collection via productMarketplaceLinks unique constraint check
+- [Phase 05]: Store only leaf category mapping not full marketplace category tree
+- [Phase 05]: Failed product registrations stored with placeholder marketplace product ID for retry
 
 ### Pending Todos
 
@@ -107,6 +107,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-03T07:08:43.365Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-04-03T07:09:06.217Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None

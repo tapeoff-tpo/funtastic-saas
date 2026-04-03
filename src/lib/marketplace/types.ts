@@ -76,30 +76,26 @@ export interface NormalizedClaim {
   rawData: Record<string, unknown>
 }
 
-/** Normalized product variant from marketplace */
-export interface NormalizedProductVariant {
-  marketplaceVariantId: string
-  optionName: string          // e.g., "빨강/L"
-  optionValues: Record<string, string>  // e.g., { color: "빨강", size: "L" }
-  price: number
-  sku?: string
-  stockQuantity?: number
-}
-
-/** Normalized product shape -- fully typed for Phase 5 adapters */
+/** Normalized product shape for sync to marketplaces */
 export interface NormalizedProduct {
   productId: string
   marketplaceId: MarketplaceId
   name: string
   description?: string
   price: number
-  costPrice?: number
-  images: { url: string; sortOrder: number }[]
+  sku: string
   categoryId?: string
-  categoryName?: string
-  variants: NormalizedProductVariant[]
-  status: string   // marketplace-native status
-  rawData: Record<string, unknown>
+  marketplaceCategoryId?: string
+  images?: Array<{ url: string; sortOrder: number }>
+  variants?: Array<{
+    sku: string
+    optionName?: string
+    optionValues?: Record<string, string>
+    price: number
+    isActive: boolean
+  }>
+  metadata?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 /** Invoice data for upload */
@@ -130,4 +126,13 @@ export interface MarketplaceAdapter {
     invoice: InvoiceData
   ): Promise<{ success: boolean; error?: string }>
   getProducts(): Promise<NormalizedProduct[]>
+
+  // Phase 5: Product registration and sync
+  registerProduct(
+    product: NormalizedProduct
+  ): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }>
+  updateProduct(
+    marketplaceProductId: string,
+    product: Partial<NormalizedProduct>
+  ): Promise<{ success: boolean; error?: string }>
 }

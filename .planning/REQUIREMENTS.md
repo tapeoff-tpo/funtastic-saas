@@ -58,8 +58,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Marketplace Adapters (마켓플레이스 어댑터)
 
-- [ ] **MKT-01**: 쿠팡 API 연동 (주문수집, 송장업로드, 상품등록)
-- [ ] **MKT-02**: 네이버 스마트스토어 API 연동 (주문수집, 송장업로드, 상품등록)
+- [x] **MKT-01**: 쿠팡 API 연동 (주문수집, 송장업로드, 상품등록)
+- [x] **MKT-02**: 네이버 스마트스토어 API 연동 (주문수집, 송장업로드, 상품등록)
 - [ ] **MKT-03**: 11번가 API 연동 (주문수집, 송장업로드, 상품등록)
 - [ ] **MKT-04**: 지마켓/옥션(ESM) API 연동 (주문수집, 송장업로드, 상품등록)
 - [ ] **MKT-05**: 오늘의집 API 연동 (주문수집, 송장업로드)
@@ -151,8 +151,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | INV-04 | Phase 4 | Pending |
 | DATA-01 | Phase 3 | Pending |
 | DATA-02 | Phase 5 | Pending |
-| MKT-01 | Phase 2 | Pending |
-| MKT-02 | Phase 2 | Pending |
+| MKT-01 | Phase 2 | Complete |
+| MKT-02 | Phase 2 | Complete |
 | MKT-03 | Phase 6 | Pending |
 | MKT-04 | Phase 6 | Pending |
 | MKT-05 | Phase 6 | Pending |

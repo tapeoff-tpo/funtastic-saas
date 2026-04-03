@@ -85,14 +85,29 @@ export async function getOrders(filters: OrderFilters = {}) {
   const sortColumn = getSortColumn(filters.sort)
   const sortDir = filters.order === 'asc' ? asc(sortColumn) : desc(sortColumn)
 
-  // Fetch orders
-  const orderRows = await db
-    .select()
-    .from(orders)
-    .where(whereClause)
-    .orderBy(sortDir)
-    .limit(pageSize)
-    .offset(offset)
+  // When filtering by claimType, join with claims table
+  let orderRows: (typeof orders.$inferSelect)[]
+  if (filters.claimType) {
+    conditions.push(eq(claims.claimType, filters.claimType))
+    const whereWithClaim = conditions.length > 0 ? and(...conditions) : undefined
+    orderRows = await db
+      .selectDistinctOn([orders.id])
+      .from(orders)
+      .innerJoin(claims, eq(claims.orderId, orders.id))
+      .where(whereWithClaim)
+      .orderBy(sortDir)
+      .limit(pageSize)
+      .offset(offset)
+      .then((rows) => rows.map((r) => r.orders))
+  } else {
+    orderRows = await db
+      .select()
+      .from(orders)
+      .where(whereClause)
+      .orderBy(sortDir)
+      .limit(pageSize)
+      .offset(offset)
+  }
 
   // Fetch items for these orders
   const orderIds = orderRows.map((o) => o.id)
@@ -106,6 +121,17 @@ export async function getOrders(filters: OrderFilters = {}) {
       )
   }
 
+  // Fetch claims for these orders to get claimType
+  let claimRows: (typeof claims.$inferSelect)[] = []
+  if (orderIds.length > 0) {
+    claimRows = await db
+      .select()
+      .from(claims)
+      .where(
+        sql`${claims.orderId} IN ${orderIds}`,
+      )
+  }
+
   // Group items by orderId
   const itemsByOrderId = new Map<string, (typeof orderItems.$inferSelect)[]>()
   for (const item of items) {
@@ -114,17 +140,38 @@ export async function getOrders(filters: OrderFilters = {}) {
     itemsByOrderId.set(item.orderId, existing)
   }
 
-  // Combine orders with items
+  // Map first claim type per order
+  const claimTypeByOrderId = new Map<string, string>()
+  for (const claim of claimRows) {
+    if (!claimTypeByOrderId.has(claim.orderId)) {
+      claimTypeByOrderId.set(claim.orderId, claim.claimType)
+    }
+  }
+
+  // Combine orders with items and claim type
   const ordersWithItems = orderRows.map((order) => ({
     ...order,
+    claimType: claimTypeByOrderId.get(order.id) ?? null,
     items: itemsByOrderId.get(order.id) ?? [],
   }))
 
-  // Get total count
-  const [countResult] = await db
-    .select({ value: count() })
-    .from(orders)
-    .where(whereClause)
+  // Get total count (with claim join if filtering)
+  let countResult: { value: number } | undefined
+  if (filters.claimType) {
+    const countConditions = buildOrderWhereClause(filters)
+    countConditions.push(eq(claims.claimType, filters.claimType))
+    const countWhere = countConditions.length > 0 ? and(...countConditions) : undefined
+    ;[countResult] = await db
+      .select({ value: count(orders.id) })
+      .from(orders)
+      .innerJoin(claims, eq(claims.orderId, orders.id))
+      .where(countWhere)
+  } else {
+    ;[countResult] = await db
+      .select({ value: count() })
+      .from(orders)
+      .where(whereClause)
+  }
 
   return {
     orders: ordersWithItems,

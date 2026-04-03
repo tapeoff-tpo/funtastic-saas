@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-table'
 import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
+import { BulkActionBar } from './status-actions'
 
 interface DataTableProps {
   data: OrderRow[]
@@ -50,8 +51,25 @@ export function DataTable({ data, total, pageSize, page }: DataTableProps) {
 
   const selectedCount = Object.keys(rowSelection).length
 
+  // Extract selected order IDs for bulk actions
+  const selectedIds = useMemo(() => {
+    return Object.keys(rowSelection)
+      .filter((key) => rowSelection[key])
+      .map((key) => {
+        const row = table.getRow(key)
+        return row?.original?.id
+      })
+      .filter(Boolean) as string[]
+  }, [rowSelection, table])
+
   return (
     <div className="space-y-4">
+      {/* Bulk action bar (floating, shown when rows selected) */}
+      <BulkActionBar
+        selectedIds={selectedIds}
+        onClear={() => setRowSelection({})}
+      />
+
       {/* Toolbar: column toggle + selected count */}
       <div className="flex items-center justify-between">
         <div className="text-sm text-muted-foreground">

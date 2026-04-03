@@ -7,8 +7,10 @@ import {
 import { getOrders } from '@/lib/orders/queries'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
+import { ClaimsFilter } from './claims-filter'
 import type { OrderRow } from './columns'
 import type { OrderFilters as OrderFiltersParams } from '@/lib/orders/types'
+import type { ClaimType } from '@/lib/orders/types'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -25,6 +27,7 @@ const searchParamsCache = createSearchParamsCache({
   dateTo: parseAsString,
   sort: parseAsString,
   order: parseAsString,
+  claimType: parseAsString,
 })
 
 export default async function OrdersPage({
@@ -44,6 +47,7 @@ export default async function OrdersPage({
     dateTo: params.dateTo ?? undefined,
     sort: params.sort ?? undefined,
     order: (params.order as 'asc' | 'desc') ?? undefined,
+    claimType: (params.claimType ?? undefined) as ClaimType | undefined,
   })
 
   // Map DB rows to OrderRow shape
@@ -56,6 +60,8 @@ export default async function OrdersPage({
     orderedAt: o.orderedAt,
     totalAmount: o.totalAmount,
     isHeld: o.isHeld,
+    holdReason: o.holdReason,
+    claimType: o.claimType as OrderRow['claimType'],
     items: o.items.map((item) => ({
       productName: item.productName,
       optionText: item.optionText,
@@ -72,6 +78,11 @@ export default async function OrdersPage({
           전체 {total.toLocaleString('ko-KR')}건의 주문
         </p>
       </div>
+
+      {/* Claims filter tabs */}
+      <Suspense>
+        <ClaimsFilter />
+      </Suspense>
 
       {/* Filters */}
       <Suspense>

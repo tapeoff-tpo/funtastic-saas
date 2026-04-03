@@ -3,7 +3,16 @@
 import type { ColumnDef } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
-import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
+import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType } from '@/lib/orders/types'
+import { StatusDropdown } from './status-actions'
+import { HoldDialog } from './hold-dialog'
+
+/** Claim type Korean labels */
+const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+  cancel: '취소',
+  return: '반품',
+  exchange: '교환',
+}
 
 /** Row shape for the order table (matches getOrders return) */
 export interface OrderRow {
@@ -15,6 +24,8 @@ export interface OrderRow {
   orderedAt: Date | string
   totalAmount: string
   isHeld: boolean
+  holdReason?: string | null
+  claimType?: ClaimType | null
   items: {
     productName: string
     optionText: string | null
@@ -138,18 +149,27 @@ export const columns: ColumnDef<OrderRow>[] = [
     cell: ({ row }) => {
       const status = row.getValue('status') as OrderStatus
       const isHeld = row.original.isHeld
+      const holdReason = row.original.holdReason
+      const claimType = row.original.claimType
       return (
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <Badge variant={STATUS_VARIANT[status]}>
             {ORDER_STATUS_LABELS[status]}
           </Badge>
           {isHeld && (
-            <Badge variant="destructive">보류</Badge>
+            <Badge variant="destructive" title={holdReason ?? undefined}>
+              보류
+            </Badge>
+          )}
+          {claimType && (
+            <Badge variant="outline" className="border-orange-300 text-orange-700">
+              {CLAIM_TYPE_LABELS[claimType]}
+            </Badge>
           )}
         </div>
       )
     },
-    size: 120,
+    size: 160,
   },
   // 주문일
   {
@@ -173,5 +193,30 @@ export const columns: ColumnDef<OrderRow>[] = [
       return `${num.toLocaleString('ko-KR')}원`
     },
     size: 110,
+  },
+  // 액션
+  {
+    id: 'actions',
+    header: '',
+    cell: ({ row }) => {
+      const order = row.original
+      return (
+        <div className="flex items-center gap-1">
+          <StatusDropdown
+            orderId={order.id}
+            currentStatus={order.status}
+            isHeld={order.isHeld}
+          />
+          <HoldDialog
+            orderId={order.id}
+            isHeld={order.isHeld}
+            holdReason={order.holdReason}
+          />
+        </div>
+      )
+    },
+    enableSorting: false,
+    enableHiding: false,
+    size: 180,
   },
 ]

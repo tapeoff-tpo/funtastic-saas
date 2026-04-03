@@ -30,7 +30,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Admin can register API credentials for a marketplace and they are stored encrypted (not readable in DB)
   3. Admin can see a dashboard showing each connected marketplace's status (connected/error/expired)
   4. A new marketplace adapter can be added by implementing a TypeScript interface without modifying existing code
-**Plans**: TBD
+**Plans:** 3 plans
+Plans:
+- [ ] 01-01-PLAN.md — Setup deps, Drizzle schema, auth middleware, login page (FOUND-01, FOUND-02)
+- [ ] 01-02-PLAN.md — Marketplace adapter types, registry, Vault SQL functions, credential API (MKT-06, FOUND-04)
+- [ ] 01-03-PLAN.md — Sidebar layout, health dashboard, credential management UI (FOUND-03, FOUND-05)
 **UI hint**: yes
 
 ### Phase 2: Order Collection & Dashboard
@@ -104,7 +108,7 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation & Marketplace Infrastructure | 0/TBD | Not started | - |
+| 1. Foundation & Marketplace Infrastructure | 0/3 | Planning complete | - |
 | 2. Order Collection & Dashboard | 0/TBD | Not started | - |
 | 3. Shipping & Invoice Processing | 0/TBD | Not started | - |
 | 4. Inventory Management | 0/TBD | Not started | - |

@@ -18,6 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Inventory Management** - Central stock tracking with automatic deduction/restoration on order events
 - [ ] **Phase 5: Product Management & Data** - Product listing across marketplaces with category mapping and bulk operations
 - [x] **Phase 6: Marketplace Expansion** - Add 11번가, 지마켓/옥션, 오늘의집 adapters to complete top-5 coverage (completed 2026-04-03)
+- [ ] **Phase 7: 추가 마켓플레이스 연동** - Add 18 additional marketplace adapters (Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매꾹, 온채널, 오너클랜 등)
 
 ## Phase Details
 
@@ -125,10 +126,28 @@ Plans:
 - [x] 06-02-PLAN.md — ESM adapter: unified Gmarket/Auction API, single adapter with site_type (MKT-04)
 - [x] 06-03-PLAN.md — 오늘의집 adapter + register all new adapters in configs.ts (MKT-05)
 
+### Phase 7: 추가 마켓플레이스 연동
+**Goal**: 18 additional marketplace adapters are created and registered, expanding coverage from 6 to 24 marketplaces -- Tier 1/2 with full implementations, Tier 3 with stub adapters ready for API integration
+**Depends on**: Phase 6
+**Requirements**: MKT-V2
+**Success Criteria** (what must be TRUE):
+  1. All 18 new marketplace adapters exist with the standard 4-file pattern (adapter.ts, client.ts, types.ts, status-map.ts)
+  2. All 18 are registered in configs.ts and appear in the marketplace registry
+  3. MarketplaceId type includes all 24 marketplace IDs
+  4. Tier 1/2 adapters (Cafe24, CJ온스타일, 카카오, 도매꾹, 온채널, 오너클랜, 신세계몰, 에이블리) have best-effort API implementations
+  5. Tier 3 adapters have stub implementations with TODO markers for future API integration
+**Plans:** 5 plans
+Plans:
+- [ ] 07-01-PLAN.md — Tier 1 adapters: Cafe24 (OAuth2), CJ온스타일, 카카오선물하기, 카카오톡스토어 (MKT-V2)
+- [ ] 07-02-PLAN.md — Tier 2 adapters: 도매꾹 (XML+JSON), 온채널, 오너클랜, 신세계몰, 에이블리 (MKT-V2)
+- [ ] 07-03-PLAN.md — Tier 3a stubs: 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B (MKT-V2)
+- [ ] 07-04-PLAN.md — Tier 3b stubs: 올웨이즈, 텐바이텐, 토스쇼핑, 투비즈온 (MKT-V2)
+- [ ] 07-05-PLAN.md — Register all 18 in configs.ts + update MarketplaceId type (MKT-V2)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
 Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, Phase 5 depends on Phase 1).
 
 | Phase | Plans Complete | Status | Completed |
@@ -139,13 +158,4 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 4. Inventory Management | 0/2 | Not started | - |
 | 5. Product Management & Data | 0/5 | Not started | - |
 | 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |
-
-### Phase 7: 추가 마켓플레이스 연동 (도매꾹, 온채널, 오너클랜, Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B, 신세계몰, 에이블리, 올웨이즈, 카카오선물하기, 카카오톡스토어, 텐바이텐, 토스쇼핑, 투비즈온)
-
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 6
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (run /gsd:plan-phase 7 to break down)
+| 7. 추가 마켓플레이스 연동 | 0/5 | Not started | - |

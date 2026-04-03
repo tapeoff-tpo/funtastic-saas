@@ -239,8 +239,126 @@ const naverHandlers = [
 ]
 
 // ============================================================================
+// 11st Mock Data
+// ============================================================================
+
+export const MOCK_ELEVENST_ORDERS = [
+  {
+    ordNo: 'E2026040200001',
+    ordPrdSeq: '1',
+    prdNm: '11번가 테스트 상품 A',
+    ordQty: 2,
+    buyerNm: '김열한',
+    buyerPhone: '010-1111-1111',
+    rcvrNm: '박수령',
+    rcvrPhone: '010-2222-2222',
+    rcvrZipCd: '04524',
+    rcvrBaseAddr: '서울특별시 중구 남대문로 120',
+    rcvrDtlAddr: '5층 501호',
+    ordDt: '2026-04-02T10:30:00',
+    ordStCd: '202',
+    selPrice: 15900,
+    dlvNo: '',
+    optNm: '색상: 화이트',
+  },
+  {
+    ordNo: 'E2026040200002',
+    ordPrdSeq: '1',
+    prdNm: '11번가 테스트 상품 B',
+    ordQty: 1,
+    buyerNm: '이구매',
+    buyerPhone: '010-3333-3333',
+    rcvrNm: '최배달',
+    rcvrPhone: '010-4444-4444',
+    rcvrZipCd: '48058',
+    rcvrBaseAddr: '부산광역시 해운대구 센텀중앙로 90',
+    rcvrDtlAddr: '',
+    ordDt: '2026-04-02T11:00:00',
+    ordStCd: '303',
+    selPrice: 29000,
+    dlvNo: 'TRACK123456',
+  },
+]
+
+export const MOCK_ELEVENST_CLAIMS = [
+  {
+    clmNo: 'CLM20260402001',
+    ordNo: 'E2026040200001',
+    clmTypCd: 'RTN',
+    clmStCd: '100',
+    clmRsnCont: '사이즈 불일치',
+    clmDt: '2026-04-02T15:00:00',
+  },
+]
+
+/** Build XML string for 11st order list response */
+function buildElevenstOrdersXml() {
+  const ordersXml = MOCK_ELEVENST_ORDERS.map((o) => `
+    <order>
+      <ordNo>${o.ordNo}</ordNo>
+      <ordPrdSeq>${o.ordPrdSeq}</ordPrdSeq>
+      <prdNm>${o.prdNm}</prdNm>
+      <ordQty>${o.ordQty}</ordQty>
+      <buyerNm>${o.buyerNm}</buyerNm>
+      <buyerPhone>${o.buyerPhone}</buyerPhone>
+      <rcvrNm>${o.rcvrNm}</rcvrNm>
+      <rcvrPhone>${o.rcvrPhone}</rcvrPhone>
+      <rcvrZipCd>${o.rcvrZipCd}</rcvrZipCd>
+      <rcvrBaseAddr>${o.rcvrBaseAddr}</rcvrBaseAddr>
+      <rcvrDtlAddr>${o.rcvrDtlAddr}</rcvrDtlAddr>
+      <ordDt>${o.ordDt}</ordDt>
+      <ordStCd>${o.ordStCd}</ordStCd>
+      <selPrice>${o.selPrice}</selPrice>
+      <dlvNo>${o.dlvNo}</dlvNo>
+      ${o.optNm ? `<optNm>${o.optNm}</optNm>` : ''}
+    </order>`).join('')
+
+  return `<?xml version="1.0" encoding="UTF-8"?><orders>${ordersXml}</orders>`
+}
+
+/** Build XML string for 11st claims response */
+function buildElevenstClaimsXml() {
+  const claimsXml = MOCK_ELEVENST_CLAIMS.map((c) => `
+    <claim>
+      <clmNo>${c.clmNo}</clmNo>
+      <ordNo>${c.ordNo}</ordNo>
+      <clmTypCd>${c.clmTypCd}</clmTypCd>
+      <clmStCd>${c.clmStCd}</clmStCd>
+      <clmRsnCont>${c.clmRsnCont}</clmRsnCont>
+      <clmDt>${c.clmDt}</clmDt>
+    </claim>`).join('')
+
+  return `<?xml version="1.0" encoding="UTF-8"?><claims>${claimsXml}</claims>`
+}
+
+// ============================================================================
+// 11st Handlers
+// ============================================================================
+
+const elevenstHandlers = [
+  http.get('https://openapi.11st.co.kr/openapi/v3/orders', () => {
+    return new HttpResponse(buildElevenstOrdersXml(), {
+      headers: { 'Content-Type': 'application/xml;charset=UTF-8' },
+    })
+  }),
+
+  http.get('https://openapi.11st.co.kr/openapi/v3/claims', () => {
+    return new HttpResponse(buildElevenstClaimsXml(), {
+      headers: { 'Content-Type': 'application/xml;charset=UTF-8' },
+    })
+  }),
+
+  http.post('https://openapi.11st.co.kr/openapi/v3/orders/:orderId/delivery', () => {
+    return new HttpResponse(
+      `<?xml version="1.0" encoding="UTF-8"?><result><resultCode>200</resultCode><resultMessage>OK</resultMessage></result>`,
+      { headers: { 'Content-Type': 'application/xml;charset=UTF-8' } },
+    )
+  }),
+]
+
+// ============================================================================
 // Export all handlers
 // ============================================================================
 
-export const handlers = [...coupangHandlers, ...naverHandlers]
-export { coupangHandlers, naverHandlers }
+export const handlers = [...coupangHandlers, ...naverHandlers, ...elevenstHandlers]
+export { coupangHandlers, naverHandlers, elevenstHandlers }

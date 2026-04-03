@@ -15,6 +15,7 @@ const xmlParser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   trimValues: true,
+  parseTagValue: false, // Keep all values as strings to preserve codes like '202', '303'
 })
 
 /**

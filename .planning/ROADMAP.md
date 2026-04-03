@@ -84,7 +84,10 @@ Plans:
   2. When an order ships, inventory is automatically decremented (atomically, no race conditions)
   3. When an order is cancelled or returned, inventory is automatically restored
   4. Admin can manually adjust stock with a recorded reason (incoming stock, defective, physical count, etc.)
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 04-01-PLAN.md — Inventory schema, types, queries, stock adjustment actions, order status hooks (INV-01, INV-02, INV-03, INV-04)
+- [ ] 04-02-PLAN.md — Inventory management UI: data table, stock set/adjust dialogs, audit history viewer (INV-01, INV-04)
 **UI hint**: yes
 
 ### Phase 5: Product Management & Data
@@ -123,6 +126,6 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 1. Foundation & Marketplace Infrastructure | 3/3 | Complete | - |
 | 2. Order Collection & Dashboard | 5/5 | Complete | - |
 | 3. Shipping & Invoice Processing | 1/5 | Executing | - |
-| 4. Inventory Management | 0/TBD | Not started | - |
+| 4. Inventory Management | 0/2 | Not started | - |
 | 5. Product Management & Data | 0/TBD | Not started | - |
 | 6. Marketplace Expansion | 0/TBD | Not started | - |

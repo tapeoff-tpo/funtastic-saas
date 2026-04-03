@@ -329,6 +329,125 @@ export const inventoryHistory = pgTable(
   ],
 )
 
+// ─── Phase 5: Product Management ────────────────────────────────
+
+export const productStatusEnum = pgEnum('product_status', [
+  'draft',
+  'active',
+  'inactive',
+  'deleted',
+])
+
+export const products = pgTable(
+  'products',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    internalSku: varchar('internal_sku', { length: 100 }).notNull(),
+    name: text('name').notNull(),
+    description: text('description'),
+    basePrice: numeric('base_price', { precision: 12, scale: 2 }).notNull(),
+    costPrice: numeric('cost_price', { precision: 12, scale: 2 }),
+    categoryId: varchar('category_id', { length: 100 }),
+    status: productStatusEnum('status').notNull().default('draft'),
+    images: jsonb('images').$type<Array<{ url: string; sortOrder: number }>>(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('products_user_sku').on(table.userId, table.internalSku),
+    index('products_user_status').on(table.userId, table.status),
+  ],
+)
+
+export const productVariants = pgTable(
+  'product_variants',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    optionName: varchar('option_name', { length: 200 }),
+    optionValues: jsonb('option_values').$type<Record<string, string>>(),
+    priceAdjustment: numeric('price_adjustment', { precision: 12, scale: 2 })
+      .notNull()
+      .default('0'),
+    isActive: boolean('is_active').notNull().default(true),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('product_variants_product_sku').on(table.productId, table.sku),
+  ],
+)
+
+export const productMarketplaceLinks = pgTable(
+  'product_marketplace_links',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    variantId: uuid('variant_id').references(() => productVariants.id),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceProductId: varchar('marketplace_product_id', { length: 200 }).notNull(),
+    marketplaceCategoryId: varchar('marketplace_category_id', { length: 200 }),
+    syncStatus: varchar('sync_status', { length: 50 }).notNull().default('synced'),
+    lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
+    lastSyncError: text('last_sync_error'),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('product_marketplace_links_unique').on(
+      table.marketplaceId,
+      table.marketplaceProductId,
+    ),
+    index('product_marketplace_links_product').on(table.productId),
+  ],
+)
+
+export const categoryMappings = pgTable(
+  'category_mappings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    internalCategory: varchar('internal_category', { length: 200 }).notNull(),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceCategoryId: varchar('marketplace_category_id', { length: 200 }).notNull(),
+    marketplaceCategoryName: text('marketplace_category_name'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    uniqueIndex('category_mappings_unique').on(
+      table.userId,
+      table.internalCategory,
+      table.marketplaceId,
+    ),
+  ],
+)
+
 // ─── Job Logs ───────────────────────────────────────────────────
 
 export const jobLogs = pgTable('job_logs', {

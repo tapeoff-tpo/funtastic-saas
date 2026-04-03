@@ -1,0 +1,124 @@
+'use client'
+
+import type { ColumnDef } from '@tanstack/react-table'
+import { Badge } from '@/components/ui/badge'
+import { PRODUCT_STATUS_LABELS, type ProductStatus } from '@/lib/products/types'
+
+/** Row shape for the product table */
+export interface ProductRow {
+  id: string
+  internalSku: string
+  name: string
+  categoryId: string | null
+  basePrice: string
+  status: ProductStatus
+  variantCount: number
+  updatedAt: Date | string
+}
+
+/** Status badge color mapping */
+const STATUS_VARIANT: Record<ProductStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+  draft: 'outline',
+  active: 'default',
+  inactive: 'secondary',
+  deleted: 'destructive',
+}
+
+export const columns: ColumnDef<ProductRow>[] = [
+  // Checkbox column
+  {
+    id: 'select',
+    header: ({ table }) => (
+      <input
+        type="checkbox"
+        checked={table.getIsAllPageRowsSelected()}
+        onChange={table.getToggleAllPageRowsSelectedHandler()}
+        aria-label="전체 선택"
+        className="h-4 w-4 rounded border-gray-300"
+      />
+    ),
+    cell: ({ row }) => (
+      <input
+        type="checkbox"
+        checked={row.getIsSelected()}
+        onChange={row.getToggleSelectedHandler()}
+        aria-label="행 선택"
+        className="h-4 w-4 rounded border-gray-300"
+      />
+    ),
+    enableSorting: false,
+    enableHiding: false,
+    size: 40,
+  },
+  // 상품코드
+  {
+    accessorKey: 'internalSku',
+    header: '상품코드',
+    cell: ({ row }) => (
+      <span className="font-mono text-sm">
+        {row.getValue('internalSku')}
+      </span>
+    ),
+    size: 140,
+  },
+  // 상품명
+  {
+    accessorKey: 'name',
+    header: '상품명',
+    cell: ({ row }) => (
+      <div className="max-w-[300px] truncate" title={row.getValue('name')}>
+        {row.getValue('name')}
+      </div>
+    ),
+    size: 300,
+  },
+  // 카테고리
+  {
+    accessorKey: 'categoryId',
+    header: '카테고리',
+    cell: ({ row }) => {
+      const cat = row.getValue('categoryId') as string | null
+      return cat ? (
+        <span className="text-sm">{cat}</span>
+      ) : (
+        <span className="text-muted-foreground">-</span>
+      )
+    },
+    size: 140,
+  },
+  // 판매가
+  {
+    accessorKey: 'basePrice',
+    header: '판매가',
+    cell: ({ row }) => {
+      const price = Number(row.getValue('basePrice'))
+      if (Number.isNaN(price)) return '-'
+      return `${price.toLocaleString('ko-KR')}원`
+    },
+    size: 110,
+  },
+  // 상태
+  {
+    accessorKey: 'status',
+    header: '상태',
+    cell: ({ row }) => {
+      const status = row.getValue('status') as ProductStatus
+      return (
+        <Badge variant={STATUS_VARIANT[status]}>
+          {PRODUCT_STATUS_LABELS[status]}
+        </Badge>
+      )
+    },
+    size: 100,
+  },
+  // 옵션수
+  {
+    accessorKey: 'variantCount',
+    header: '옵션수',
+    cell: ({ row }) => {
+      const count = row.getValue('variantCount') as number
+      return <span className="text-sm">{count}</span>
+    },
+    size: 80,
+  },
+]

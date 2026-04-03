@@ -69,7 +69,7 @@ Plans:
 **Plans:** 5 plans
 Plans:
 - [x] 03-01-PLAN.md — Shipping types, carrier codes, Drizzle schema extensions, base queries (SHIP-01, SHIP-04, SHIP-06)
-- [ ] 03-02-PLAN.md — Coupang/Naver uploadInvoice() implementation, BullMQ invoice worker, server actions (SHIP-01)
+- [x] 03-02-PLAN.md — Coupang/Naver uploadInvoice() implementation, BullMQ invoice worker, server actions (SHIP-01)
 - [ ] 03-03-PLAN.md — Combined shipping detection algorithm, order splitting, shipment group queries (SHIP-04, SHIP-05, SHIP-06)
 - [ ] 03-04-PLAN.md — Excel import/export, carrier templates, order list export (SHIP-02, SHIP-07, SHIP-08, DATA-01)
 - [ ] 03-05-PLAN.md — Shipping UI: dashboard actions, combined shipping page, template mgmt, print labels (all SHIP + DATA-01)

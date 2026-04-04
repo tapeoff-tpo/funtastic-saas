@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
         marketplaceId,
         displayName: config.name,
         authType: config.authType,
-        status: 'disconnected',
+        status: 'connected',
         vaultSecretNames,
       })
       .onConflictDoUpdate({

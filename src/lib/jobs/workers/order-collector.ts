@@ -46,25 +46,22 @@ export function createAdapter(
 }
 
 /**
- * Process a single order collection job.
- *
- * 1. Creates a job log entry (status=running)
- * 2. Reads credentials from Vault
- * 3. Creates marketplace adapter
- * 4. Fetches orders and UPSERTs into DB (dedup via unique constraint)
- * 5. Fetches claims and UPSERTs into DB
- * 6. Updates job log with results
+ * Standalone order collection — no BullMQ dependency.
+ * Used by both the BullMQ worker and the manual collection API route.
  */
-export async function processOrderCollection(
-  job: Job<OrderCollectionJobData>
-): Promise<{ ordersCollected: number; claimsCollected: number }> {
-  const { marketplaceId, connectionId, userId } = job.data
+export async function collectOrdersForConnection(params: {
+  marketplaceId: string
+  connectionId: string
+  userId: string
+  jobType?: string
+}): Promise<{ ordersCollected: number; claimsCollected: number }> {
+  const { marketplaceId, connectionId, userId, jobType = 'order-collection' } = params
 
   // 1. Create job log entry
   const [jobLog] = await db
     .insert(jobLogs)
     .values({
-      jobType: 'order-collection',
+      jobType,
       marketplaceId,
       connectionId,
       status: 'running',
@@ -134,7 +131,7 @@ export async function processOrderCollection(
       .insert(jobLogs)
       .values({
         id: jobLog.id,
-        jobType: 'order-collection',
+        jobType,
         marketplaceId,
         connectionId,
         status: 'completed',
@@ -161,7 +158,7 @@ export async function processOrderCollection(
       .insert(jobLogs)
       .values({
         id: jobLog.id,
-        jobType: 'order-collection',
+        jobType,
         marketplaceId,
         connectionId,
         status: 'failed',
@@ -179,6 +176,15 @@ export async function processOrderCollection(
 
     throw error
   }
+}
+
+/**
+ * BullMQ job handler — delegates to collectOrdersForConnection.
+ */
+export async function processOrderCollection(
+  job: Job<OrderCollectionJobData>
+): Promise<{ ordersCollected: number; claimsCollected: number }> {
+  return collectOrdersForConnection(job.data)
 }
 
 /**

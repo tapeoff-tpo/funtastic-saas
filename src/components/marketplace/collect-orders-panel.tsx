@@ -89,9 +89,12 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
           `${successes.length}개 성공 (${totalOrders}건), ${failures.length}개 실패`
         )
       } else {
-        toast.error(
-          `주문 수집 실패: ${failures.map((f: { marketplaceId: string }) => f.marketplaceId).join(', ')}`
-        )
+        const failureMessages = failures
+          .map((f: { marketplaceId: string; error?: string }) =>
+            f.error ? `${f.marketplaceId}: ${f.error}` : f.marketplaceId
+          )
+          .join('\n')
+        toast.error(`주문 수집 실패\n${failureMessages}`)
       }
     } catch {
       toast.error('주문 수집 중 오류가 발생했습니다')

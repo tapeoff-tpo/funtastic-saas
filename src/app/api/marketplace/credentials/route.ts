@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
         set: {
           displayName: config.name,
           authType: config.authType,
+          status: 'connected',
           vaultSecretNames,
           updatedAt: new Date(),
         },

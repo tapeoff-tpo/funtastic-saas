@@ -7,6 +7,7 @@ import {
   orderItems,
   claims,
   jobLogs,
+  marketplaceConnections,
 } from '@/lib/db/schema'
 import { readCredential } from '@/lib/supabase/admin'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
@@ -74,13 +75,24 @@ export async function collectOrdersForConnection(params: {
   let claimsCollected = 0
 
   try {
-    // 2. Read credentials from Vault
+    // 2. Look up connection to get storeAlias
+    const [connection] = await db
+      .select({ storeAlias: marketplaceConnections.storeAlias })
+      .from(marketplaceConnections)
+      .where(eq(marketplaceConnections.id, connectionId))
+      .limit(1)
+
+    const storeAlias = connection?.storeAlias ?? 'default'
+    const aliasTag = storeAlias === 'default' ? '' : `_${storeAlias}`
+
+    // 3. Read credentials from Vault (with alias suffix if non-default store)
     const adapterConfig = marketplaceRegistry.get(marketplaceId)
     const requiredCreds = adapterConfig.config.requiredCredentials
     const credentials: Record<string, string> = {}
 
     for (const credKey of requiredCreds) {
-      const value = await readCredential(marketplaceId, userId, credKey)
+      const vaultKey = `${credKey}${aliasTag}`
+      const value = await readCredential(marketplaceId, userId, vaultKey)
       if (!value) {
         throw new Error(
           `Missing credential "${credKey}" for ${marketplaceId} (user: ${userId})`

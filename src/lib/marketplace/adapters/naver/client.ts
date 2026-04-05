@@ -6,7 +6,7 @@
  * automatically authenticated with Bearer token.
  */
 
-import ky from 'ky'
+import { createHmac } from 'crypto'
 import { MarketplaceAuthError } from '../../errors'
 import type { NaverTokenResponse } from './types'
 
@@ -45,12 +45,18 @@ export function createNaverClient(clientId: string, clientSecret: string) {
 
     // Request new token
     try {
+      const timestamp = Date.now().toString()
+      const sign = createHmac('sha256', clientSecret)
+        .update(`${clientId}_${timestamp}`)
+        .digest('base64')
+
       const res = await fetch(NAVER_TOKEN_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: clientId,
-          client_secret: clientSecret,
+          timestamp,
+          client_secret_sign: sign,
           grant_type: 'client_credentials',
           type: 'SELF',
         }).toString(),

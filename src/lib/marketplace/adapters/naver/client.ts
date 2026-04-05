@@ -7,6 +7,7 @@
  */
 
 import { createHmac } from 'crypto'
+import ky from 'ky'
 import { MarketplaceAuthError } from '../../errors'
 import type { NaverTokenResponse } from './types'
 

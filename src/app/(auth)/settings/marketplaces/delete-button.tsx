@@ -6,11 +6,11 @@ import { deleteMarketplaceConnection } from './actions'
 import { Button } from '@/components/ui/button'
 
 interface DeleteConnectionButtonProps {
-  marketplaceId: string
+  connectionId: string
 }
 
 export function DeleteConnectionButton({
-  marketplaceId,
+  connectionId,
 }: DeleteConnectionButtonProps) {
   const [state, formAction, isPending] = useActionState(
     deleteMarketplaceConnection,
@@ -27,7 +27,7 @@ export function DeleteConnectionButton({
 
   return (
     <form action={formAction}>
-      <input type="hidden" name="marketplace_id" value={marketplaceId} />
+      <input type="hidden" name="connection_id" value={connectionId} />
       <Button
         type="submit"
         variant="destructive"

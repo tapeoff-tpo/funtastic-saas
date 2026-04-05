@@ -33,6 +33,7 @@ export const marketplaceConnections = pgTable('marketplace_connections', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull(),
   marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+  storeAlias: varchar('store_alias', { length: 100 }).notNull().default('default'),
   displayName: text('display_name').notNull(),
   authType: authTypeEnum('auth_type').notNull(),
   status: connectionStatusEnum('status').notNull().default('disconnected'),
@@ -48,7 +49,11 @@ export const marketplaceConnections = pgTable('marketplace_connections', {
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .notNull(),
-})
+}, (table) => [
+  uniqueIndex('marketplace_connections_user_market_alias').on(
+    table.userId, table.marketplaceId, table.storeAlias
+  ),
+])
 
 // ─── Phase 2: Order Management ──────────────────────────────────
 

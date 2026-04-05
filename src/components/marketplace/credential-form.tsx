@@ -82,14 +82,20 @@ export function CredentialForm({ marketplaces }: CredentialFormProps) {
             </select>
           </div>
 
-          {selectedMarketplace?.isConnected && (
-            <p className="rounded-md bg-amber-50 p-3 text-sm text-amber-700">
-              이미 연결됨 — 재등록하면 기존 인증정보가 덮어씌워집니다.
-            </p>
-          )}
-
           {selectedMarketplace && (
             <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="store_alias">스토어 별칭</Label>
+                <Input
+                  id="store_alias"
+                  name="store_alias"
+                  placeholder="예: 일오삼공 1of30 (같은 몰에 여러 스토어 등록 시 구분용)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  같은 마켓플레이스에 여러 스토어를 등록할 때 구분용으로 입력하세요. 비워두면 기본값으로 등록됩니다.
+                </p>
+              </div>
+
               {selectedMarketplace.requiredCredentials.map((credKey) => (
                 <div key={credKey} className="space-y-1">
                   <Label htmlFor={credKey}>

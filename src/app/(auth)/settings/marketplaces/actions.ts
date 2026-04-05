@@ -34,6 +34,7 @@ export async function registerMarketplaceCredentials(
     return { error: '유효하지 않은 마켓플레이스입니다.' }
   }
 
+  const storeAlias = (formData.get('store_alias') as string)?.trim() || 'default'
   const config = marketplaceRegistry.get(marketplaceId).config
   const vaultNames: string[] = []
 
@@ -45,12 +46,14 @@ export async function registerMarketplaceCredentials(
     }
   }
 
-  // Store each credential in Vault
+  // Store each credential in Vault (include alias in key to avoid collisions)
+  const aliasTag = storeAlias === 'default' ? '' : `_${storeAlias}`
   try {
     for (const credKey of config.requiredCredentials) {
       const value = formData.get(credKey) as string
-      const name = `mkt_${user.id}_${marketplaceId}_${credKey}`
-      await storeCredential(marketplaceId, user.id, credKey, value.trim())
+      const vaultKey = `${credKey}${aliasTag}`
+      const name = `mkt_${user.id}_${marketplaceId}_${vaultKey}`
+      await storeCredential(marketplaceId, user.id, vaultKey, value.trim())
       vaultNames.push(name)
     }
   } catch (err) {
@@ -59,7 +62,11 @@ export async function registerMarketplaceCredentials(
     }
   }
 
-  // Check if connection already exists
+  // Upsert connection (unique on userId + marketplaceId + storeAlias)
+  const displayName = storeAlias === 'default'
+    ? config.name
+    : `${config.name} (${storeAlias})`
+
   try {
     const existing = await db
       .select()
@@ -67,7 +74,8 @@ export async function registerMarketplaceCredentials(
       .where(
         and(
           eq(marketplaceConnections.userId, user.id),
-          eq(marketplaceConnections.marketplaceId, marketplaceId)
+          eq(marketplaceConnections.marketplaceId, marketplaceId),
+          eq(marketplaceConnections.storeAlias, storeAlias)
         )
       )
       .limit(1)
@@ -76,8 +84,9 @@ export async function registerMarketplaceCredentials(
       await db
         .update(marketplaceConnections)
         .set({
+          displayName,
           vaultSecretNames: vaultNames,
-          status: 'disconnected',
+          status: 'connected',
           updatedAt: new Date(),
         })
         .where(eq(marketplaceConnections.id, existing[0].id))
@@ -85,9 +94,10 @@ export async function registerMarketplaceCredentials(
       await db.insert(marketplaceConnections).values({
         userId: user.id,
         marketplaceId,
-        displayName: config.name,
+        storeAlias,
+        displayName,
         authType: config.authType,
-        status: 'disconnected',
+        status: 'connected',
         vaultSecretNames: vaultNames,
       })
     }
@@ -99,7 +109,7 @@ export async function registerMarketplaceCredentials(
 
   revalidatePath('/dashboard')
   revalidatePath('/settings/marketplaces')
-  return { success: true, message: `${config.name} 인증정보가 저장되었습니다.` }
+  return { success: true, message: `${displayName} 인증정보가 저장되었습니다.` }
 }
 
 export async function deleteMarketplaceConnection(
@@ -116,9 +126,9 @@ export async function deleteMarketplaceConnection(
     return { error: '인증이 필요합니다.' }
   }
 
-  const marketplaceId = formData.get('marketplace_id') as string
-  if (!marketplaceId) {
-    return { error: '마켓플레이스 ID가 필요합니다.' }
+  const connectionId = formData.get('connection_id') as string
+  if (!connectionId) {
+    return { error: '연결 ID가 필요합니다.' }
   }
 
   const connections = await db
@@ -127,7 +137,7 @@ export async function deleteMarketplaceConnection(
     .where(
       and(
         eq(marketplaceConnections.userId, user.id),
-        eq(marketplaceConnections.marketplaceId, marketplaceId)
+        eq(marketplaceConnections.id, connectionId)
       )
     )
     .limit(1)
@@ -138,13 +148,12 @@ export async function deleteMarketplaceConnection(
 
   const connection = connections[0]
 
-  // Delete vault secrets
+  // Delete vault secrets using stored names
   try {
-    if (marketplaceRegistry.has(marketplaceId)) {
-      const config = marketplaceRegistry.get(marketplaceId).config
-      for (const credKey of config.requiredCredentials) {
-        await deleteCredential(marketplaceId, user.id, credKey)
-      }
+    for (const secretName of connection.vaultSecretNames) {
+      const parts = secretName.split('_')
+      const credKey = parts.slice(3).join('_')
+      await deleteCredential(connection.marketplaceId, user.id, credKey)
     }
   } catch (err) {
     return {

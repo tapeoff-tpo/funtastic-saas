@@ -58,7 +58,7 @@ export default async function MarketplaceSettingsPage() {
                   <span className="font-medium">{conn.displayName}</span>
                   <StatusBadge status={conn.status as ConnectionStatus} />
                 </div>
-                <DeleteConnectionButton marketplaceId={conn.marketplaceId} />
+                <DeleteConnectionButton connectionId={conn.id} />
               </div>
             ))}
           </div>

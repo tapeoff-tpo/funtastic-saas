@@ -12,6 +12,7 @@ import { readCredential } from '@/lib/supabase/admin'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
+import '@/lib/marketplace/adapters/configs'
 import type {
   MarketplaceAdapter,
   NormalizedOrder,

@@ -45,16 +45,23 @@ export function createNaverClient(clientId: string, clientSecret: string) {
 
     // Request new token
     try {
-      const response = await ky.post(NAVER_TOKEN_URL, {
+      const res = await fetch(NAVER_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           client_id: clientId,
           client_secret: clientSecret,
           grant_type: 'client_credentials',
           type: 'SELF',
-        }),
-        timeout: 10_000,
-      }).json<NaverTokenResponse>()
+        }).toString(),
+      })
 
+      if (!res.ok) {
+        const body = await res.text()
+        throw new Error(`${res.status} ${res.statusText}: ${body}`)
+      }
+
+      const response = await res.json() as NaverTokenResponse
       state.accessToken = response.access_token
       state.tokenExpiresAt = now + (response.expires_in * 1000)
 

@@ -49,7 +49,7 @@ export function createNaverClient(clientId: string, clientSecret: string) {
       const timestamp = Date.now().toString()
       const sign = createHmac('sha256', clientSecret)
         .update(`${clientId}_${timestamp}`)
-        .digest('base64')
+        .digest('base64url')
 
       const res = await fetch(NAVER_TOKEN_URL, {
         method: 'POST',

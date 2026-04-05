@@ -46,12 +46,12 @@ export function createNaverClient(clientId: string, clientSecret: string) {
     // Request new token
     try {
       const response = await ky.post(NAVER_TOKEN_URL, {
-        searchParams: {
+        body: new URLSearchParams({
           client_id: clientId,
           client_secret: clientSecret,
           grant_type: 'client_credentials',
           type: 'SELF',
-        },
+        }),
         timeout: 10_000,
       }).json<NaverTokenResponse>()
 

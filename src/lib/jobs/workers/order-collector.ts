@@ -92,9 +92,7 @@ export async function collectOrdersForConnection(params: {
 
     for (const credKey of requiredCreds) {
       const vaultKey = `${credKey}${aliasTag}`
-      console.log(`[OrderCollector] Reading vault key: "${vaultKey}" for ${marketplaceId}`)
       const value = await readCredential(marketplaceId, userId, vaultKey)
-      console.log(`[OrderCollector] Vault result for "${vaultKey}":`, value ? `found (${value.slice(0, 6)}...)` : 'NOT FOUND (null)')
       if (!value) {
         throw new Error(
           `Missing credential "${credKey}" for ${marketplaceId} (user: ${userId})`
@@ -132,13 +130,17 @@ export async function collectOrdersForConnection(params: {
     }
 
     // 5. Fetch claims (per D-09: collected alongside orders)
-    const normalizedClaims = await adapter.getClaimsOrders(since)
-
-    for (const claim of normalizedClaims) {
-      const wasUpserted = await upsertClaim(claim, userId)
-      if (wasUpserted) {
-        claimsCollected++
+    try {
+      const normalizedClaims = await adapter.getClaimsOrders(since)
+      for (const claim of normalizedClaims) {
+        const wasUpserted = await upsertClaim(claim, userId)
+        if (wasUpserted) {
+          claimsCollected++
+        }
       }
+    } catch (claimError) {
+      console.warn(`[OrderCollector] Claims collection failed for ${marketplaceId}:`, claimError instanceof Error ? claimError.message : claimError)
+      // Don't let claims failure block order collection success
     }
 
     // 6. Update job log with success

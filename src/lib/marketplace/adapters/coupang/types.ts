@@ -39,7 +39,7 @@ export interface CoupangOrderSheet {
 
 /** Response from GET /v2/providers/openapi/apis/api/v5/vendors/{vendorId}/ordersheets */
 export interface CoupangOrderSheetsResponse {
-  code: string
+  code: number | string
   message: string
   data: CoupangOrderSheet[]
 }
@@ -59,7 +59,7 @@ export interface CoupangReturnRequest {
 
 /** Response from GET /v2/providers/openapi/apis/api/v4/vendors/{vendorId}/returnRequests */
 export interface CoupangReturnRequestsResponse {
-  code: string
+  code: number | string
   message: string
   data: CoupangReturnRequest[]
 }

@@ -51,15 +51,17 @@ export class CoupangAdapter implements MarketplaceAdapter {
       // Make a lightweight call with a 1-minute window to verify credentials
       const now = new Date()
       const oneMinAgo = new Date(now.getTime() - 60_000)
-      const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets`
+      const fmt = (d: Date) => {
+        const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+        const yyyy = kst.getUTCFullYear()
+        const MM = String(kst.getUTCMonth() + 1).padStart(2, '0')
+        const dd = String(kst.getUTCDate()).padStart(2, '0')
+        return `${yyyy}-${MM}-${dd}+09:00`
+      }
+      const qs = `createdAtFrom=${encodeURIComponent(fmt(oneMinAgo))}&createdAtTo=${encodeURIComponent(fmt(now))}&status=ACCEPT&maxPerPage=1`
+      const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
 
-      await this.client.get(path, {
-        searchParams: {
-          createdAtFrom: oneMinAgo.toISOString(),
-          createdAtTo: now.toISOString(),
-          maxPerPage: 1,
-        },
-      }).json()
+      await this.client.get(path).json()
 
       return { success: true }
     } catch (error) {
@@ -76,18 +78,24 @@ export class CoupangAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
     const now = new Date()
-    const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets`
+
+    // Coupang API requires KST date: yyyy-MM-dd+09:00 (date only, no time)
+    const fmt = (d: Date) => {
+      const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+      const yyyy = kst.getUTCFullYear()
+      const MM = String(kst.getUTCMonth() + 1).padStart(2, '0')
+      const dd = String(kst.getUTCDate()).padStart(2, '0')
+      return `${yyyy}-${MM}-${dd}+09:00`
+    }
+
+    const qs = `createdAtFrom=${encodeURIComponent(fmt(since))}&createdAtTo=${encodeURIComponent(fmt(now))}&status=ACCEPT&maxPerPage=50`
+    const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
 
     try {
-      const response = await this.client.get(path, {
-        searchParams: {
-          createdAtFrom: since.toISOString(),
-          createdAtTo: now.toISOString(),
-          maxPerPage: 50,
-        },
-      }).json<CoupangOrderSheetsResponse>()
+      const response = await this.client.get(path).json<CoupangOrderSheetsResponse>()
 
-      if (response.code !== '200' && response.code !== 'SUCCESS') {
+      const codeStr = String(response.code)
+      if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
         throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
       }
 
@@ -107,26 +115,33 @@ export class CoupangAdapter implements MarketplaceAdapter {
 
   async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
     const now = new Date()
-    const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/returnRequests`
+    // returnRequests v4 uses plain date: yyyy-MM-dd (no timezone)
+    const fmt = (d: Date) => {
+      const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+      const yyyy = kst.getUTCFullYear()
+      const MM = String(kst.getUTCMonth() + 1).padStart(2, '0')
+      const dd = String(kst.getUTCDate()).padStart(2, '0')
+      return `${yyyy}-${MM}-${dd}`
+    }
+    const qs = `createdAtFrom=${fmt(since)}&createdAtTo=${fmt(now)}&status=RECEIPT&maxPerPage=50`
+    const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/returnRequests?${qs}`
 
     try {
-      const response = await this.client.get(path, {
-        searchParams: {
-          createdAtFrom: since.toISOString(),
-          createdAtTo: now.toISOString(),
-          maxPerPage: 50,
-        },
-      }).json<CoupangReturnRequestsResponse>()
+      const response = await this.client.get(path).json<CoupangReturnRequestsResponse>()
 
-      if (response.code !== '200' && response.code !== 'SUCCESS') {
+      const codeStr = String(response.code)
+      if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
         throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
       }
 
       return (response.data || []).map((req) => this.normalizeClaim(req))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('coupang', 'HMAC authentication failed')
+      if (error instanceof Error && 'response' in error) {
+        const res = (error as unknown as { response: Response }).response
+        const body = await res.text().catch(() => '')
+        console.error('[Coupang] getClaimsOrders error response:', res.status, body)
+        throw new MarketplaceApiError('coupang', res.status, `${res.status}: ${body}`)
       }
       throw new MarketplaceApiError('coupang', 500, error instanceof Error ? error.message : 'Unknown error')
     }

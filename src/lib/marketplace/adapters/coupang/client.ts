@@ -39,7 +39,7 @@ export function generateCoupangAuth(
   secretKey: string
 ): string {
   const datetime = formatCoupangDatetime(new Date())
-  const message = `${datetime}\n${method}\n${path}\n${query}`
+  const message = `${datetime}${method}${path}${query}`
   const signature = createHmac('sha256', secretKey)
     .update(message)
     .digest('hex')
@@ -51,7 +51,7 @@ export function generateCoupangAuth(
  * Create a ky HTTP client pre-configured for Coupang API calls.
  * Automatically signs each request with HMAC-SHA256.
  */
-export function createCoupangClient(accessKey: string, secretKey: string) {
+export function createCoupangClient(accessKey: string, secretKey: string, vendorId: string) {
   return ky.create({
     prefixUrl: COUPANG_API_BASE,
     hooks: {
@@ -64,6 +64,7 @@ export function createCoupangClient(accessKey: string, secretKey: string) {
 
           const auth = generateCoupangAuth(method, path, query, accessKey, secretKey)
           request.headers.set('Authorization', auth)
+          request.headers.set('X-Requested-By', vendorId)
           request.headers.set('Content-Type', 'application/json;charset=UTF-8')
         },
       ],

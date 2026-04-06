@@ -39,10 +39,10 @@ const NAVER_CONFIG: MarketplaceConfig = {
 }
 
 /** Order-related lastChangedType values */
-const ORDER_CHANGED_TYPES = 'PAYED,DELIVERED,PURCHASE_DECIDED,DELIVERING'
+const ORDER_CHANGED_TYPES = ['PAYED', 'DELIVERING', 'DELIVERED', 'PURCHASE_DECIDED']
 
 /** Claim-related lastChangedType values */
-const CLAIM_CHANGED_TYPES = 'CANCEL,RETURN,EXCHANGE'
+const CLAIM_CHANGED_TYPES = ['CLAIM_REQUESTED', 'CLAIM_COMPLETED', 'COLLECT_DONE']
 
 export class NaverAdapter implements MarketplaceAdapter {
   readonly config = NAVER_CONFIG
@@ -103,14 +103,10 @@ export class NaverAdapter implements MarketplaceAdapter {
 
   async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
     try {
-      // Step 1: Get changed claim IDs
       const changedIds = await this.fetchChangedIds(since, CLAIM_CHANGED_TYPES)
       if (changedIds.length === 0) return []
 
-      // Step 2: Fetch full product order details
       const productOrders = await this.fetchProductOrderDetails(changedIds)
-
-      // Step 3: Normalize to NormalizedClaim[]
       return productOrders.map((po) => this.normalizeClaim(po))
     } catch (error) {
       if (error instanceof MarketplaceApiError || error instanceof MarketplaceAuthError) throw error
@@ -364,25 +360,50 @@ export class NaverAdapter implements MarketplaceAdapter {
   /**
    * Fetch changed product order IDs from the lastChangedStatuses endpoint.
    */
-  private async fetchChangedIds(since: Date, lastChangedType: string): Promise<string[]> {
+  private async fetchChangedIds(since: Date, lastChangedTypes: string[]): Promise<string[]> {
     const now = new Date()
 
-    const response = await this.naverClient.client.get('v1/pay-order/seller/product-orders/last-changed-statuses', {
-      searchParams: {
-        lastChangedFrom: since.toISOString(),
-        lastChangedTo: now.toISOString(),
-        lastChangedType,
-      },
-    }).json<NaverLastChangedStatusesResponse>()
+    // Naver API max window is 1 hour — split into 1-hour chunks
+    const HOUR_MS = 60 * 60 * 1000
+    const allIds: string[] = []
+    let chunkStart = since
 
-    return (response.data?.lastChangeStatuses || []).map((s) => s.productOrderId)
+    while (chunkStart < now) {
+      const chunkEnd = new Date(Math.min(chunkStart.getTime() + HOUR_MS, now.getTime()))
+
+      const params = new URLSearchParams({
+        lastChangedFrom: chunkStart.toISOString(),
+        lastChangedTo: chunkEnd.toISOString(),
+      })
+      for (const t of lastChangedTypes) {
+        params.append('lastChangedType', t)
+      }
+
+      try {
+        const response = await this.naverClient.client.get(
+          `external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`
+        ).json<NaverLastChangedStatusesResponse>()
+        const ids = (response.data?.lastChangeStatuses || []).map((s) => s.productOrderId)
+        allIds.push(...ids)
+      } catch (err: unknown) {
+        if (err && typeof err === 'object' && 'response' in err) {
+          const body = await (err as { response: Response }).response.text()
+          throw new Error(`Naver API error: ${body}`)
+        }
+        throw err
+      }
+
+      chunkStart = chunkEnd
+    }
+
+    return [...new Set(allIds)]
   }
 
   /**
    * Fetch full product order details by IDs in batch.
    */
   private async fetchProductOrderDetails(productOrderIds: string[]): Promise<NaverProductOrder[]> {
-    const response = await this.naverClient.client.post('v1/pay-order/seller/product-orders/query', {
+    const response = await this.naverClient.client.post('external/v1/pay-order/seller/product-orders/query', {
       json: { productOrderIds },
     }).json<NaverProductOrderDetailResponse>()
 
@@ -390,48 +411,51 @@ export class NaverAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrder(po: NaverProductOrder): NormalizedOrder {
+    const { order, productOrder } = po
+    const addr = productOrder.shippingAddress
     return {
-      marketplaceOrderId: po.productOrderId,
+      marketplaceOrderId: productOrder.productOrderId,
       marketplaceId: 'naver',
-      marketplaceStatus: po.productOrderStatus,
-      status: mapNaverStatus(po.productOrderStatus),
-      buyerName: po.ordererName,
-      buyerPhone: po.ordererTel || undefined,
-      recipientName: po.ordererName, // Naver uses orderer as recipient in most cases
-      recipientPhone: po.ordererTel || undefined,
-      shippingAddress: {
-        zipCode: po.shippingAddress.zipCode,
-        address1: po.shippingAddress.baseAddress,
-        address2: po.shippingAddress.detailedAddress || undefined,
-      },
+      marketplaceStatus: productOrder.productOrderStatus,
+      status: mapNaverStatus(productOrder.productOrderStatus),
+      buyerName: order.ordererName,
+      buyerPhone: order.ordererTel || undefined,
+      recipientName: addr?.name ?? order.ordererName,
+      recipientPhone: addr?.tel1 || order.ordererTel || undefined,
+      shippingAddress: addr ? {
+        zipCode: addr.zipCode ?? '',
+        address1: addr.baseAddress ?? '',
+        address2: addr.detailedAddress || undefined,
+      } : undefined,
       items: [
         {
-          marketplaceItemId: po.productOrderId,
-          productName: po.productName,
-          optionText: po.optionInfo || undefined,
-          quantity: po.quantity,
-          unitPrice: po.unitPrice,
+          marketplaceItemId: productOrder.productOrderId,
+          productName: productOrder.productName,
+          optionText: productOrder.productOption || undefined,
+          quantity: productOrder.quantity,
+          unitPrice: productOrder.unitPrice,
         },
       ],
-      orderedAt: new Date(po.paymentDate),
-      totalAmount: po.totalPaymentAmount,
+      orderedAt: order.paymentDate ? new Date(order.paymentDate) : new Date(order.orderDate),
+      totalAmount: productOrder.totalPaymentAmount,
       rawData: po as unknown as Record<string, unknown>,
     }
   }
 
   private normalizeClaim(po: NaverProductOrder): NormalizedClaim {
-    const claimType = po.claimType
-      ? (NAVER_CLAIM_TYPE_MAP[po.claimType] || 'cancel')
+    const { order, productOrder } = po
+    const claimType = productOrder.claimType
+      ? (NAVER_CLAIM_TYPE_MAP[productOrder.claimType] || 'cancel')
       : 'cancel'
 
     return {
-      marketplaceClaimId: po.productOrderId,
+      marketplaceClaimId: productOrder.productOrderId,
       marketplaceId: 'naver',
-      marketplaceOrderId: po.orderId,
+      marketplaceOrderId: productOrder.productOrderId,
       claimType,
-      claimStatus: po.claimStatus ? mapNaverClaimStatus(po.claimStatus) : 'requested',
-      reason: po.claimReason || undefined,
-      requestedAt: new Date(po.paymentDate),
+      claimStatus: productOrder.claimStatus ? mapNaverClaimStatus(productOrder.claimStatus) : 'requested',
+      reason: productOrder.claimReason || undefined,
+      requestedAt: order.paymentDate ? new Date(order.paymentDate) : new Date(order.orderDate),
       rawData: po as unknown as Record<string, unknown>,
     }
   }

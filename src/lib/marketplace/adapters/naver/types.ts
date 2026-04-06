@@ -12,27 +12,34 @@ export interface NaverTokenResponse {
   token_type: string
 }
 
-/** Product order from Naver Commerce API detail query */
+/** Product order from Naver Commerce API detail query (nested structure) */
 export interface NaverProductOrder {
-  productOrderId: string
-  orderId: string
-  productOrderStatus: string
-  quantity: number
-  unitPrice: number
-  productName: string
-  optionInfo?: string
-  ordererName: string
-  ordererTel?: string
-  shippingAddress: {
-    zipCode: string
-    baseAddress: string
-    detailedAddress?: string
+  order: {
+    orderId: string
+    orderDate: string
+    ordererName: string
+    ordererTel?: string
+    paymentDate?: string
   }
-  paymentDate: string
-  totalPaymentAmount: number
-  claimType?: string
-  claimStatus?: string
-  claimReason?: string
+  productOrder: {
+    productOrderId: string
+    productOrderStatus: string
+    quantity: number
+    unitPrice: number
+    productName: string
+    productOption?: string
+    totalPaymentAmount: number
+    shippingAddress?: {
+      name?: string
+      tel1?: string
+      zipCode: string
+      baseAddress: string
+      detailedAddress?: string
+    }
+    claimType?: string
+    claimStatus?: string
+    claimReason?: string
+  }
 }
 
 /** Response from GET /v1/pay-order/seller/product-orders/last-changed-statuses */

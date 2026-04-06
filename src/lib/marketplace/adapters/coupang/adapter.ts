@@ -42,7 +42,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
   private readonly vendorId: string
 
   constructor(credentials: { access_key: string; secret_key: string; vendor_id: string }) {
-    this.client = createCoupangClient(credentials.access_key, credentials.secret_key)
+    this.client = createCoupangClient(credentials.access_key, credentials.secret_key, credentials.vendor_id)
     this.vendorId = credentials.vendor_id
   }
 
@@ -94,8 +94,12 @@ export class CoupangAdapter implements MarketplaceAdapter {
       return (response.data || []).map((sheet) => this.normalizeOrder(sheet))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('coupang', 'HMAC authentication failed')
+      // Extract actual API response for debugging
+      if (error instanceof Error && 'response' in error) {
+        const res = (error as unknown as { response: Response }).response
+        const body = await res.text().catch(() => '')
+        console.error('[Coupang] getOrders error response:', res.status, body)
+        throw new MarketplaceApiError('coupang', res.status, `${res.status}: ${body}`)
       }
       throw new MarketplaceApiError('coupang', 500, error instanceof Error ? error.message : 'Unknown error')
     }

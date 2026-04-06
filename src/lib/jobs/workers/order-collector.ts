@@ -92,7 +92,9 @@ export async function collectOrdersForConnection(params: {
 
     for (const credKey of requiredCreds) {
       const vaultKey = `${credKey}${aliasTag}`
+      console.log(`[OrderCollector] Reading vault key: "${vaultKey}" for ${marketplaceId}`)
       const value = await readCredential(marketplaceId, userId, vaultKey)
+      console.log(`[OrderCollector] Vault result for "${vaultKey}":`, value ? `found (${value.slice(0, 6)}...)` : 'NOT FOUND (null)')
       if (!value) {
         throw new Error(
           `Missing credential "${credKey}" for ${marketplaceId} (user: ${userId})`
@@ -105,7 +107,7 @@ export async function collectOrdersForConnection(params: {
     const adapter = createAdapter(marketplaceId, credentials)
 
     // 4. Fetch orders (15-minute overlap window for safety)
-    const since = new Date(Date.now() - 15 * 60 * 1000)
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     const normalizedOrders = await adapter.getOrders(since)
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)

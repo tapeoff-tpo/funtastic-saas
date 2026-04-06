@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db'
 import { orders, orderItems, claims, shipments } from '@/lib/db/schema'
-import { eq, and, or, ilike, gte, lte, desc, asc, sql, count } from 'drizzle-orm'
+import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters } from './types'
 
@@ -85,20 +85,28 @@ export async function getOrders(filters: OrderFilters = {}) {
   const sortColumn = getSortColumn(filters.sort)
   const sortDir = filters.order === 'asc' ? asc(sortColumn) : desc(sortColumn)
 
-  // When filtering by claimType, join with claims table
+  // When filtering by claimType, find matching order IDs first
   let orderRows: (typeof orders.$inferSelect)[]
   if (filters.claimType) {
-    conditions.push(eq(claims.claimType, filters.claimType))
-    const whereWithClaim = conditions.length > 0 ? and(...conditions) : undefined
-    orderRows = await db
-      .selectDistinctOn([orders.id])
-      .from(orders)
-      .innerJoin(claims, eq(claims.orderId, orders.id))
-      .where(whereWithClaim)
-      .orderBy(sortDir)
-      .limit(pageSize)
-      .offset(offset)
-      .then((rows) => rows.map((r) => r.orders))
+    const claimOrderIds = await db
+      .select({ orderId: claims.orderId })
+      .from(claims)
+      .where(eq(claims.claimType, filters.claimType))
+    const ids = claimOrderIds.map((r) => r.orderId)
+    if (ids.length === 0) {
+      orderRows = []
+    } else {
+      const claimWhere = conditions.length > 0
+        ? and(...conditions, inArray(orders.id, ids))
+        : inArray(orders.id, ids)
+      orderRows = await db
+        .select()
+        .from(orders)
+        .where(claimWhere)
+        .orderBy(sortDir)
+        .limit(pageSize)
+        .offset(offset)
+    }
   } else {
     orderRows = await db
       .select()
@@ -180,17 +188,26 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   })
 
-  // Get total count (with claim join if filtering)
+  // Get total count
   let countResult: { value: number } | undefined
   if (filters.claimType) {
-    const countConditions = buildOrderWhereClause(filters)
-    countConditions.push(eq(claims.claimType, filters.claimType))
-    const countWhere = countConditions.length > 0 ? and(...countConditions) : undefined
-    ;[countResult] = await db
-      .select({ value: count(orders.id) })
-      .from(orders)
-      .innerJoin(claims, eq(claims.orderId, orders.id))
-      .where(countWhere)
+    const claimOrderIds = await db
+      .select({ orderId: claims.orderId })
+      .from(claims)
+      .where(eq(claims.claimType, filters.claimType))
+    const ids = claimOrderIds.map((r) => r.orderId)
+    if (ids.length === 0) {
+      countResult = { value: 0 }
+    } else {
+      const countConditions = buildOrderWhereClause(filters)
+      const countWhere = countConditions.length > 0
+        ? and(...countConditions, inArray(orders.id, ids))
+        : inArray(orders.id, ids)
+      ;[countResult] = await db
+        .select({ value: count(orders.id) })
+        .from(orders)
+        .where(countWhere)
+    }
   } else {
     ;[countResult] = await db
       .select({ value: count() })

@@ -1,6 +1,6 @@
 import { Queue } from 'bullmq'
 import { eq } from 'drizzle-orm'
-import { connection } from './connection'
+import { getConnection } from './connection'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
@@ -15,26 +15,34 @@ export interface OrderCollectionJobData {
   jobType?: string
 }
 
-/** Queue for scheduled order collection from marketplace APIs */
-export const orderCollectionQueue = new Queue<OrderCollectionJobData>(
-  'order-collection',
-  { connection }
-)
+// ─── Lazy Queue instances (created on first use so env vars are ready) ───
+
+let _orderQueue: Queue<OrderCollectionJobData> | null = null
+let _invoiceQueue: Queue<InvoiceUploadJobData> | null = null
+
+export function getOrderCollectionQueue(): Queue<OrderCollectionJobData> {
+  if (!_orderQueue) {
+    _orderQueue = new Queue('order-collection', { connection: getConnection() })
+  }
+  return _orderQueue
+}
+
+function getInvoiceUploadQueue(): Queue<InvoiceUploadJobData> {
+  if (!_invoiceQueue) {
+    _invoiceQueue = new Queue('invoice-upload', { connection: getConnection() })
+  }
+  return _invoiceQueue
+}
 
 /**
  * Schedule repeating order collection for a single marketplace connection.
- *
- * Uses `jobId: collect-${connectionId}` to prevent duplicate scheduling
- * (BullMQ deduplicates repeatable jobs by jobId).
- *
- * Polling interval: every 5 minutes (per D-01).
  */
 export async function scheduleOrderCollection(
   marketplaceId: string,
   connectionId: string,
   userId: string
 ): Promise<void> {
-  await orderCollectionQueue.add(
+  await getOrderCollectionQueue().add(
     `collect-${marketplaceId}`,
     { marketplaceId, connectionId, userId },
     {
@@ -76,7 +84,7 @@ export async function scheduleAllCollections(): Promise<void> {
 export async function queueManualCollection(
   data: OrderCollectionJobData & { jobLogId: string }
 ): Promise<string> {
-  const job = await orderCollectionQueue.add(
+  const job = await getOrderCollectionQueue().add(
     `manual-${data.marketplaceId}-${Date.now()}`,
     { ...data, jobType: 'manual-order-collection' },
     {
@@ -89,24 +97,13 @@ export async function queueManualCollection(
 
 // ─── Invoice Upload Queue ────────────────────────────────────────
 
-/** Queue for invoice upload jobs to marketplace APIs */
-export const invoiceUploadQueue = new Queue<InvoiceUploadJobData>(
-  'invoice-upload',
-  { connection },
-)
-
 /**
  * Add a single invoice upload job to the queue.
- *
- * Job options:
- * - attempts: 3 (per D-02 retry policy)
- * - backoff: exponential starting at 5s
- * - removeOnComplete/Fail: keep last N for debugging
  */
 export async function queueInvoiceUploadJob(
   data: InvoiceUploadJobData,
 ): Promise<void> {
-  await invoiceUploadQueue.add(
+  await getInvoiceUploadQueue().add(
     `upload-${data.shipmentId}`,
     data,
     {
@@ -122,12 +119,13 @@ export async function queueInvoiceUploadJob(
  * Remove the repeating schedule for a disconnected marketplace.
  */
 export async function removeSchedule(connectionId: string): Promise<void> {
-  const repeatableJobs = await orderCollectionQueue.getRepeatableJobs()
+  const queue = getOrderCollectionQueue()
+  const repeatableJobs = await queue.getRepeatableJobs()
   const job = repeatableJobs.find(
     (j) => j.id === `collect-${connectionId}`
   )
   if (job) {
-    await orderCollectionQueue.removeRepeatableByKey(job.key)
+    await queue.removeRepeatableByKey(job.key)
     console.log(`[Queue] Removed schedule for connection ${connectionId}`)
   }
 }

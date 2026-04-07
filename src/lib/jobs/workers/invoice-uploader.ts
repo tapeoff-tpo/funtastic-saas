@@ -12,7 +12,7 @@
 
 import { Worker } from 'bullmq'
 import type { Job } from 'bullmq'
-import { connection } from '../connection'
+import { getConnection } from '../connection'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { updateShipmentStatus } from '@/lib/shipping/queries'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
@@ -72,7 +72,7 @@ export function createInvoiceUploadWorker() {
     'invoice-upload',
     processInvoiceUpload,
     {
-      connection,
+      connection: getConnection(),
       concurrency: 1,
       limiter: {
         max: 2,

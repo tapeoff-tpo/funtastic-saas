@@ -13,7 +13,7 @@
 
 import '@/lib/marketplace/adapters/configs'
 import { Worker } from 'bullmq'
-import { connection } from '@/lib/jobs/connection'
+import { getConnection } from '@/lib/jobs/connection'
 import { scheduleAllCollections } from '@/lib/jobs/queues'
 import { processOrderCollection } from '@/lib/jobs/workers/order-collector'
 import { createInvoiceUploadWorker } from '@/lib/jobs/workers/invoice-uploader'
@@ -21,12 +21,14 @@ import { createInvoiceUploadWorker } from '@/lib/jobs/workers/invoice-uploader'
 async function main() {
   console.log('[Worker] Starting BullMQ worker process')
 
+  const conn = getConnection()
+
   // Order collection worker (concurrency 2: two marketplaces in parallel)
   const orderWorker = new Worker(
     'order-collection',
     processOrderCollection,
     {
-      connection,
+      connection: conn,
       concurrency: 2,
     }
   )

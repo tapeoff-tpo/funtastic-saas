@@ -4,30 +4,38 @@ import IORedis from 'ioredis'
  * Shared Redis connection for BullMQ queues and workers.
  *
  * BullMQ requires `maxRetriesPerRequest: null` to work correctly.
- * The connection is reused across all queues in the same process.
+ * Uses lazy initialization so env vars are available at connection time.
+ *
+ * IMPORTANT: Always use getConnection() — never import at module top-level.
  */
 
-const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
+let _connection: IORedis | null = null
 
-export const connection = new IORedis(REDIS_URL, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-})
+function getUrl() {
+  return process.env.REDIS_URL || 'redis://localhost:6379'
+}
 
-connection.on('error', (err: Error) => {
-  console.error(
-    `[Redis] Connection error: ${err.message}. ` +
-      `Ensure Redis is running at ${REDIS_URL} (docker compose up -d)`
-  )
-})
-
-connection.on('connect', () => {
-  console.log(`[Redis] Connected to ${REDIS_URL}`)
-})
+export function getConnection(): IORedis {
+  if (!_connection) {
+    const url = getUrl()
+    console.log(`[Redis] Connecting to ${url.replace(/\/\/.*@/, '//***@')}`)
+    _connection = new IORedis(url, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    })
+    _connection.on('error', (err: Error) => {
+      console.error(`[Redis] Connection error: ${err.message}`)
+    })
+    _connection.on('connect', () => {
+      console.log(`[Redis] Connected successfully`)
+    })
+  }
+  return _connection
+}
 
 /** Factory function for testing — returns a fresh connection */
 export function getRedisConnection(url?: string): IORedis {
-  return new IORedis(url || REDIS_URL, {
+  return new IORedis(url || getUrl(), {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   })

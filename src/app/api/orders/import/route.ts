@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { parseOrderExcel, importOrders } from '@/lib/orders/excel-import'
+import { parseOrderExcel } from '@/lib/orders/excel-import'
+import { db } from '@/lib/db'
+import { orders, orderItems } from '@/lib/db/schema'
+import { eq, and } from 'drizzle-orm'
 
 /**
  * POST /api/orders/import
  *
  * Upload an Excel file to import orders.
- * FormData: file (xlsx), marketplaceId (string)
+ * FormData: file (.xlsx), marketplaceId (string)
+ *
+ * Groups rows by orderNumber (same order, multiple items).
+ * Skips duplicate orders (same marketplaceId + marketplaceOrderId).
  */
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -28,15 +34,11 @@ export async function POST(request: NextRequest) {
   }
 
   if (!marketplaceId) {
-    return NextResponse.json({ error: '마켓플레이스를 선택해주세요' }, { status: 400 })
+    return NextResponse.json({ error: '마켓플레이스를 입력해주세요' }, { status: 400 })
   }
 
-  // Validate file type
-  const validTypes = [
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'application/vnd.ms-excel',
-  ]
-  if (!validTypes.includes(file.type) && !file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+  // Validate file extension
+  if (!file.name.endsWith('.xlsx')) {
     return NextResponse.json({ error: 'Excel 파일(.xlsx)만 업로드할 수 있습니다' }, { status: 400 })
   }
 
@@ -49,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     if (parseResult.rows.length === 0 && parseResult.errors.length > 0) {
       return NextResponse.json({
-        imported: 0,
+        inserted: 0,
         skipped: 0,
         errors: parseResult.errors,
       })
@@ -57,29 +59,113 @@ export async function POST(request: NextRequest) {
 
     if (parseResult.rows.length === 0) {
       return NextResponse.json({
-        imported: 0,
+        inserted: 0,
         skipped: 0,
-        errors: [{ row: 0, errors: ['데이터가 없습니다'] }],
+        errors: [{ row: 0, message: '데이터가 없습니다' }],
       })
     }
 
-    // Import into DB
-    const result = await importOrders(
-      parseResult.rows,
-      marketplaceId,
-      user.id,
-    )
+    // Group rows by orderNumber (same order may have multiple items)
+    const orderMap = new Map<string, typeof parseResult.rows>()
+    for (const row of parseResult.rows) {
+      const existing = orderMap.get(row.orderNumber) || []
+      existing.push(row)
+      orderMap.set(row.orderNumber, existing)
+    }
+
+    let inserted = 0
+    let skipped = 0
+    const importErrors: Array<{ row: number; message: string }> = []
+
+    // Use transaction for the entire batch
+    await db.transaction(async (tx) => {
+      for (const [orderNumber, items] of orderMap) {
+        const first = items[0]
+
+        // Check if order already exists
+        const existing = await tx
+          .select({ id: orders.id })
+          .from(orders)
+          .where(
+            and(
+              eq(orders.marketplaceId, marketplaceId),
+              eq(orders.marketplaceOrderId, orderNumber),
+            ),
+          )
+          .limit(1)
+
+        if (existing.length > 0) {
+          skipped++
+          continue
+        }
+
+        // Parse ordered date
+        let orderedAt: Date
+        try {
+          orderedAt = new Date(first.orderedAt)
+          if (isNaN(orderedAt.getTime())) orderedAt = new Date()
+        } catch {
+          orderedAt = new Date()
+        }
+
+        // Sum totalAmount for all items in this order
+        const totalAmount = items.reduce((sum, item) => sum + item.totalAmount, 0)
+
+        try {
+          // Insert order
+          const [newOrder] = await tx
+            .insert(orders)
+            .values({
+              userId: user.id,
+              connectionId: null,
+              marketplaceId,
+              marketplaceOrderId: orderNumber,
+              status: 'confirmed',
+              buyerName: first.buyerName,
+              recipientName: first.recipientName,
+              recipientPhone: first.recipientPhone ?? null,
+              shippingAddress: {
+                zipCode: first.zipCode ?? '',
+                address1: first.recipientAddress,
+              },
+              orderedAt,
+              totalAmount: String(totalAmount),
+              rawData: null,
+            })
+            .returning({ id: orders.id })
+
+          // Insert order items
+          await tx.insert(orderItems).values(
+            items.map((item) => ({
+              orderId: newOrder.id,
+              productName: item.productName,
+              optionText: item.optionText ?? null,
+              quantity: item.quantity,
+              unitPrice: String(item.totalAmount / item.quantity),
+              sku: item.sku ?? null,
+            })),
+          )
+
+          inserted++
+        } catch (error) {
+          importErrors.push({
+            row: 0,
+            message: `주문 ${orderNumber}: ${error instanceof Error ? error.message : '저장 실패'}`,
+          })
+        }
+      }
+    })
 
     return NextResponse.json({
-      imported: result.imported,
-      skipped: result.skipped,
-      errors: [...parseResult.errors, ...result.errors],
+      inserted,
+      skipped,
+      errors: [...parseResult.errors, ...importErrors],
     })
   } catch (error) {
     console.error('[OrderImport] Error:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '파일 처리 중 오류가 발생했습니다' },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }

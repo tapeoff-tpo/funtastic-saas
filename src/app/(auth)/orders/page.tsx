@@ -76,9 +76,17 @@ export default async function OrdersPage({
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold">주문 관리</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          전체 {total.toLocaleString('ko-KR')}건의 주문
-        </p>
+        <div className="flex items-center gap-4">
+          <p className="mt-1 text-sm text-muted-foreground">
+            전체 {total.toLocaleString('ko-KR')}건의 주문
+          </p>
+          <a
+            href="/orders/import"
+            className="text-sm text-blue-600 hover:underline"
+          >
+            엑셀 업로드
+          </a>
+        </div>
       </div>
 
       {/* Claims filter tabs */}

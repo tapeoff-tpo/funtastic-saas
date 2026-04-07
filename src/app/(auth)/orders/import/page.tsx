@@ -3,15 +3,10 @@
 import { useState, useCallback } from 'react'
 import Link from 'next/link'
 
-interface ImportError {
-  row: number
-  errors: string[]
-}
-
 interface ImportResult {
-  imported: number
+  inserted: number
   skipped: number
-  errors: ImportError[]
+  errors: Array<{ row: number; message: string }>
 }
 
 export default function OrderImportPage() {
@@ -55,18 +50,18 @@ export default function OrderImportPage() {
 
       if (!res.ok) {
         setResult({
-          imported: 0,
+          inserted: 0,
           skipped: 0,
-          errors: [{ row: 0, errors: [data.error || '업로드 실패'] }],
+          errors: [{ row: 0, message: data.error || '업로드 실패' }],
         })
       } else {
         setResult(data)
       }
     } catch {
       setResult({
-        imported: 0,
+        inserted: 0,
         skipped: 0,
-        errors: [{ row: 0, errors: ['네트워크 오류'] }],
+        errors: [{ row: 0, message: '네트워크 오류' }],
       })
     } finally {
       setUploading(false)
@@ -77,8 +72,8 @@ export default function OrderImportPage() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">주문 엑셀 업로드</h1>
-          <p className="mt-1 text-muted-foreground">
+          <h1 className="text-2xl font-bold">엑셀 주문 업로드</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             엑셀 파일로 주문을 일괄 등록합니다.
           </p>
         </div>
@@ -86,7 +81,7 @@ export default function OrderImportPage() {
           href="/orders"
           className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted"
         >
-          주문관리로 돌아가기
+          주문 목록으로
         </Link>
       </div>
 
@@ -110,7 +105,7 @@ export default function OrderImportPage() {
           </div>
         </div>
 
-        {/* Marketplace selection */}
+        {/* Marketplace input */}
         <div>
           <label className="mb-1.5 block text-sm font-medium">
             마켓플레이스 <span className="text-red-500">*</span>
@@ -119,12 +114,9 @@ export default function OrderImportPage() {
             type="text"
             value={marketplaceId}
             onChange={(e) => setMarketplaceId(e.target.value)}
-            placeholder="예: 도매꾹, 오너클랜, 기타"
+            placeholder="예: 자사몰, 오프라인, 도매꾹"
             className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
           />
-          <p className="mt-1 text-xs text-muted-foreground">
-            주문이 들어온 마켓/채널명을 입력하세요.
-          </p>
         </div>
 
         {/* File drop zone */}
@@ -168,7 +160,7 @@ export default function OrderImportPage() {
                 파일 선택
                 <input
                   type="file"
-                  accept=".xlsx,.xls"
+                  accept=".xlsx"
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0]
@@ -201,37 +193,37 @@ export default function OrderImportPage() {
           <div className="rounded-lg border p-4">
             <h3 className="text-sm font-semibold">업로드 결과</h3>
             <div className="mt-3 space-y-2">
-              {result.imported > 0 && (
+              {result.inserted > 0 && (
                 <p className="text-sm text-emerald-600">
-                  ✅ {result.imported}건 등록 완료
+                  {result.inserted}건 등록
                 </p>
               )}
               {result.skipped > 0 && (
                 <p className="text-sm text-muted-foreground">
-                  ⏭ {result.skipped}건 스킵 (중복)
+                  {result.skipped}건 중복 스킵
                 </p>
               )}
               {result.errors.length > 0 && (
                 <div>
                   <p className="text-sm font-medium text-red-600">
-                    ❌ {result.errors.length}건 오류
+                    {result.errors.length}건 오류
                   </p>
                   <ul className="mt-1 max-h-40 space-y-1 overflow-y-auto text-xs text-red-500">
                     {result.errors.map((e, i) => (
                       <li key={i}>
                         {e.row > 0 ? `행 ${e.row}: ` : ''}
-                        {e.errors.join(', ')}
+                        {e.message}
                       </li>
                     ))}
                   </ul>
                 </div>
               )}
-              {result.imported > 0 && result.errors.length === 0 && (
+              {result.inserted > 0 && result.errors.length === 0 && (
                 <Link
                   href="/orders"
                   className="mt-2 inline-block text-sm text-primary hover:underline"
                 >
-                  주문관리에서 확인하기 →
+                  주문관리에서 확인하기
                 </Link>
               )}
             </div>

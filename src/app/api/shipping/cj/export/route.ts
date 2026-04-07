@@ -9,17 +9,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { orders, orderItems } from '@/lib/db/schema'
+import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export'
 import { loadMappingLookup, applyMappings } from '@/lib/products/apply-mappings'
-
-// 발송자 정보 — 나중에 settings 테이블로 이동
-const SENDER = {
-  name: '판타스틱',
-  phone: '02-0000-0000',
-  address: '서울시',
-}
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -31,6 +24,12 @@ export async function GET(req: NextRequest) {
   if (orderIds.length === 0) {
     return NextResponse.json({ error: 'orderIds 필수' }, { status: 400 })
   }
+
+  const [senderSettings] = await db
+    .select()
+    .from(companySettings)
+    .where(eq(companySettings.userId, user.id))
+    .limit(1)
 
   const [orderRows, itemRows] = await Promise.all([
     db.select().from(orders).where(
@@ -64,9 +63,9 @@ export async function GET(req: NextRequest) {
       optionText: firstItem?.optionText ?? undefined,
       quantity: items.reduce((s, i) => s + i.quantity, 0),
       marketplaceItemId: firstItem?.marketplaceItemId ?? undefined,
-      senderName: SENDER.name,
-      senderPhone: SENDER.phone,
-      senderAddress: SENDER.address,
+      senderName: senderSettings?.companyName ?? '',
+      senderPhone: senderSettings?.phone ?? '',
+      senderAddress: senderSettings?.address ?? '',
       originalProductName: items[0]?.productName,
     }
   })

@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { marketplaceConnections } from '@/lib/db/schema'
+import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
-import { collectOrdersForConnection } from '@/lib/jobs/workers/order-collector'
-
-export const maxDuration = 60
+import { queueManualCollection } from '@/lib/jobs/queues'
 
 /**
  * POST /api/orders/collect
  *
  * Manually trigger order collection for selected marketplaces.
- * Works without BullMQ/Redis — calls marketplace APIs directly.
+ * Creates job_logs entries (status: 'queued') and adds jobs to the BullMQ queue.
+ * The actual marketplace API calls happen on the worker process (which has a whitelisted IP).
  *
  * Body: { marketplaceIds: string[] }
+ * Response: { jobLogIds: string[] }
  */
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -58,37 +58,31 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Collect orders sequentially (respect rate limits)
-  const results: Array<{
-    marketplaceId: string
-    success: boolean
-    ordersCollected?: number
-    claimsCollected?: number
-    error?: string
-  }> = []
+  // Create job_logs entries (status: queued) and add BullMQ jobs
+  const jobLogIds: string[] = []
 
   for (const conn of connections) {
-    try {
-      const result = await collectOrdersForConnection({
+    // 1. Pre-create job_log with 'queued' status
+    const [logRow] = await db
+      .insert(jobLogs)
+      .values({
+        jobType: 'manual-order-collection',
         marketplaceId: conn.marketplaceId,
         connectionId: conn.id,
-        userId: user.id,
-        jobType: 'manual-order-collection',
+        status: 'queued',
       })
-      results.push({
-        marketplaceId: conn.marketplaceId,
-        success: true,
-        ordersCollected: result.ordersCollected,
-        claimsCollected: result.claimsCollected,
-      })
-    } catch (error) {
-      results.push({
-        marketplaceId: conn.marketplaceId,
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      })
-    }
+      .returning({ id: jobLogs.id })
+
+    // 2. Add job to BullMQ queue (worker will pick it up)
+    await queueManualCollection({
+      marketplaceId: conn.marketplaceId,
+      connectionId: conn.id,
+      userId: user.id,
+      jobLogId: logRow.id,
+    })
+
+    jobLogIds.push(logRow.id)
   }
 
-  return NextResponse.json({ results })
+  return NextResponse.json({ jobLogIds })
 }

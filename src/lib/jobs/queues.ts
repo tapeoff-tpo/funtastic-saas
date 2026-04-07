@@ -10,6 +10,9 @@ export interface OrderCollectionJobData {
   marketplaceId: string
   connectionId: string
   userId: string
+  /** Pre-created job_logs row ID (for manual collection via API route) */
+  jobLogId?: string
+  jobType?: string
 }
 
 /** Queue for scheduled order collection from marketplace APIs */
@@ -64,6 +67,24 @@ export async function scheduleAllCollections(): Promise<void> {
   console.log(
     `[Queue] Scheduled order collection for ${activeConnections.length} active connections`
   )
+}
+
+/**
+ * Add a one-off manual order collection job to the queue.
+ * Called from the API route — the actual collection runs on the worker process.
+ */
+export async function queueManualCollection(
+  data: OrderCollectionJobData & { jobLogId: string }
+): Promise<string> {
+  const job = await orderCollectionQueue.add(
+    `manual-${data.marketplaceId}-${Date.now()}`,
+    { ...data, jobType: 'manual-order-collection' },
+    {
+      removeOnComplete: { count: 100 },
+      removeOnFail: { count: 50 },
+    }
+  )
+  return job.id ?? data.jobLogId
 }
 
 // ─── Invoice Upload Queue ────────────────────────────────────────

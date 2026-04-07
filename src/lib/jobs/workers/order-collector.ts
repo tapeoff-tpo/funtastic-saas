@@ -56,20 +56,31 @@ export async function collectOrdersForConnection(params: {
   connectionId: string
   userId: string
   jobType?: string
+  /** Pre-created job_logs row ID (from API route). If provided, updates it instead of creating new. */
+  jobLogId?: string
 }): Promise<{ ordersCollected: number; claimsCollected: number }> {
-  const { marketplaceId, connectionId, userId, jobType = 'order-collection' } = params
+  const { marketplaceId, connectionId, userId, jobType = 'order-collection', jobLogId } = params
 
-  // 1. Create job log entry
-  const [jobLog] = await db
-    .insert(jobLogs)
-    .values({
-      jobType,
-      marketplaceId,
-      connectionId,
-      status: 'running',
-      startedAt: new Date(),
-    })
-    .returning({ id: jobLogs.id })
+  // 1. Create or reuse job log entry
+  let logId: string
+  if (jobLogId) {
+    // Update existing pre-created row to 'running'
+    await db
+      .insert(jobLogs)
+      .values({ id: jobLogId, jobType, marketplaceId, connectionId, status: 'running', startedAt: new Date() })
+      .onConflictDoUpdate({
+        target: [jobLogs.id],
+        set: { status: 'running', startedAt: new Date() },
+      })
+    logId = jobLogId
+  } else {
+    const [row] = await db
+      .insert(jobLogs)
+      .values({ jobType, marketplaceId, connectionId, status: 'running', startedAt: new Date() })
+      .returning({ id: jobLogs.id })
+    logId = row.id
+  }
+  const jobLog = { id: logId }
 
   let ordersCollected = 0
   let claimsCollected = 0
@@ -201,7 +212,11 @@ export async function collectOrdersForConnection(params: {
 export async function processOrderCollection(
   job: Job<OrderCollectionJobData>
 ): Promise<{ ordersCollected: number; claimsCollected: number }> {
-  return collectOrdersForConnection(job.data)
+  return collectOrdersForConnection({
+    ...job.data,
+    jobLogId: job.data.jobLogId,
+    jobType: job.data.jobType,
+  })
 }
 
 /**

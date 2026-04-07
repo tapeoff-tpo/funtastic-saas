@@ -13,7 +13,9 @@ export interface JobLogResult {
 interface UseCollectPollReturn {
   collecting: boolean
   logs: JobLogResult[] | null
+  jobLogIds: string[]
   startCollect: (marketplaceIds: string[]) => Promise<void>
+  cancelCollect: () => Promise<void>
   clearResults: () => void
 }
 
@@ -21,10 +23,12 @@ const POLL_INTERVAL = 1500
 
 /**
  * Hook: POST /api/orders/collect → poll /api/orders/collect/status until all done.
+ * Supports cancellation of pending jobs.
  */
 export function useCollectPoll(): UseCollectPollReturn {
   const [collecting, setCollecting] = useState(false)
   const [logs, setLogs] = useState<JobLogResult[] | null>(null)
+  const [jobLogIds, setJobLogIds] = useState<string[]>([])
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -36,12 +40,13 @@ export function useCollectPoll(): UseCollectPollReturn {
 
   const clearResults = useCallback(() => {
     setLogs(null)
+    setJobLogIds([])
     stopPolling()
   }, [stopPolling])
 
   const pollStatus = useCallback(
-    (jobLogIds: string[]) => {
-      const idsParam = jobLogIds.join(',')
+    (ids: string[]) => {
+      const idsParam = ids.join(',')
 
       const poll = async () => {
         try {
@@ -69,6 +74,7 @@ export function useCollectPoll(): UseCollectPollReturn {
     async (marketplaceIds: string[]) => {
       setCollecting(true)
       setLogs(null)
+      setJobLogIds([])
       stopPolling()
 
       try {
@@ -95,7 +101,7 @@ export function useCollectPoll(): UseCollectPollReturn {
           return
         }
 
-        // Start polling for results
+        setJobLogIds(data.jobLogIds)
         pollStatus(data.jobLogIds)
       } catch {
         setLogs([
@@ -115,5 +121,36 @@ export function useCollectPoll(): UseCollectPollReturn {
     [pollStatus, stopPolling]
   )
 
-  return { collecting, logs, startCollect, clearResults }
+  const cancelCollect = useCallback(async () => {
+    if (jobLogIds.length === 0) return
+
+    stopPolling()
+
+    try {
+      await fetch('/api/orders/collect/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobLogIds }),
+      })
+    } catch {
+      // ignore cancel errors
+    }
+
+    // Final poll to get updated statuses
+    try {
+      const res = await fetch(
+        `/api/orders/collect/status?ids=${jobLogIds.join(',')}`
+      )
+      if (res.ok) {
+        const data = await res.json()
+        setLogs(data.logs)
+      }
+    } catch {
+      // ignore
+    }
+
+    setCollecting(false)
+  }, [jobLogIds, stopPolling])
+
+  return { collecting, logs, jobLogIds, startCollect, cancelCollect, clearResults }
 }

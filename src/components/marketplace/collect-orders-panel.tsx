@@ -13,7 +13,7 @@ interface CollectOrdersPanelProps {
 }
 
 export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
-  const { collecting, logs, startCollect, clearResults } = useCollectPoll()
+  const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
 
   const connectedMarkets = connections.filter((c) => c.status !== 'disconnected')
 
@@ -24,7 +24,6 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
 
   if (connectedMarkets.length === 0) return null
 
-  // Build display name map
   const nameMap = Object.fromEntries(
     connections.map((c) => [c.marketplaceId, c.displayName])
   )
@@ -35,7 +34,7 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
   }))
 
   const allDone = enrichedLogs && enrichedLogs.every(
-    (l) => l.status === 'completed' || l.status === 'failed'
+    (l) => l.status === 'completed' || l.status === 'failed' || l.status === 'cancelled'
   )
   const showModal = enrichedLogs && enrichedLogs.length > 0
 
@@ -43,6 +42,7 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
   const totalClaims = enrichedLogs?.reduce((sum, r) => sum + (r.claimsCollected ?? 0), 0) ?? 0
   const successCount = enrichedLogs?.filter((r) => r.status === 'completed').length ?? 0
   const failCount = enrichedLogs?.filter((r) => r.status === 'failed').length ?? 0
+  const cancelledCount = enrichedLogs?.filter((r) => r.status === 'cancelled').length ?? 0
 
   return (
     <>
@@ -61,7 +61,6 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
         )}
       </button>
 
-      {/* Results modal — shows while polling and stays until user closes */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-md rounded-xl border bg-background shadow-2xl">
@@ -70,18 +69,28 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
               <h2 className="text-base font-semibold">
                 {allDone ? '전체 수집 결과' : '수집 진행 중...'}
               </h2>
-              {allDone && (
-                <button
-                  onClick={clearResults}
-                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  aria-label="닫기"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 6 6 18" />
-                    <path d="m6 6 12 12" />
-                  </svg>
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {!allDone && (
+                  <button
+                    onClick={cancelCollect}
+                    className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
+                  >
+                    중지
+                  </button>
+                )}
+                {allDone && (
+                  <button
+                    onClick={clearResults}
+                    className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                    aria-label="닫기"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18" />
+                      <path d="m6 6 12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Per-marketplace results */}
@@ -106,7 +115,12 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
                     )}
                     {failCount > 0 && (
                       <span className={successCount > 0 ? 'ml-2' : ''}>
-                        {failCount}개 마켓 실패
+                        {failCount}개 실패
+                      </span>
+                    )}
+                    {cancelledCount > 0 && (
+                      <span className={successCount > 0 || failCount > 0 ? 'ml-2' : ''}>
+                        {cancelledCount}개 취소
                       </span>
                     )}
                   </p>
@@ -129,13 +143,15 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
 function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
   const isCompleted = log.status === 'completed'
   const isFailed = log.status === 'failed'
-  const isPending = !isCompleted && !isFailed
+  const isCancelled = log.status === 'cancelled'
+  const isPending = !isCompleted && !isFailed && !isCancelled
 
   return (
     <div className="flex items-start gap-3 py-3">
       <span className="mt-0.5 text-base">
         {isCompleted && '✅'}
         {isFailed && '❌'}
+        {isCancelled && '⏹'}
         {isPending && (
           <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
         )}
@@ -154,6 +170,9 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
           <p className="break-words text-sm text-red-500">
             {log.errorMessage ?? '알 수 없는 오류'}
           </p>
+        )}
+        {isCancelled && (
+          <p className="text-sm text-muted-foreground">취소됨</p>
         )}
         {isPending && (
           <p className="text-sm text-muted-foreground">대기 중...</p>

@@ -1,8 +1,8 @@
 import { Queue } from 'bullmq'
-import { eq } from 'drizzle-orm'
+import { eq, inArray } from 'drizzle-orm'
 import { getConnection } from './connection'
 import { db } from '@/lib/db'
-import { marketplaceConnections } from '@/lib/db/schema'
+import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
 
 /** Job data shape for order collection jobs */
@@ -93,6 +93,47 @@ export async function queueManualCollection(
     }
   )
   return job.id ?? data.jobLogId
+}
+
+/**
+ * Cancel manual collection jobs that are still waiting in the queue.
+ * Already-running jobs cannot be cancelled (they will complete normally).
+ */
+export async function cancelManualJobs(jobLogIds: string[]): Promise<{
+  cancelled: string[]
+  alreadyRunning: string[]
+}> {
+  const queue = getOrderCollectionQueue()
+  const cancelled: string[] = []
+  const alreadyRunning: string[] = []
+
+  // Get waiting jobs and match by jobLogId in data
+  const waitingJobs = await queue.getJobs(['waiting', 'delayed'])
+
+  for (const job of waitingJobs) {
+    if (job.data.jobLogId && jobLogIds.includes(job.data.jobLogId)) {
+      await job.remove()
+      cancelled.push(job.data.jobLogId)
+    }
+  }
+
+  // Check which requested IDs were not in waiting (already running or done)
+  const cancelledSet = new Set(cancelled)
+  for (const id of jobLogIds) {
+    if (!cancelledSet.has(id)) {
+      alreadyRunning.push(id)
+    }
+  }
+
+  // Update job_logs for cancelled jobs
+  if (cancelled.length > 0) {
+    await db
+      .update(jobLogs)
+      .set({ status: 'cancelled', completedAt: new Date() })
+      .where(inArray(jobLogs.id, cancelled))
+  }
+
+  return { cancelled, alreadyRunning }
 }
 
 // ─── Invoice Upload Queue ────────────────────────────────────────

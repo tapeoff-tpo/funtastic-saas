@@ -44,9 +44,9 @@ export async function GET(request: NextRequest) {
     .from(jobLogs)
     .where(inArray(jobLogs.id, ids))
 
-  // Check if all jobs are done (completed or failed)
+  // Check if all jobs are done (completed, failed, or cancelled)
   const allDone = logs.length > 0 && logs.every(
-    (l) => l.status === 'completed' || l.status === 'failed'
+    (l) => l.status === 'completed' || l.status === 'failed' || l.status === 'cancelled'
   )
 
   return NextResponse.json({ logs, allDone })

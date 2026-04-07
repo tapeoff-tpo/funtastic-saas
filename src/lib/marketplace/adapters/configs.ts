@@ -37,6 +37,9 @@ function createStubAdapter(config: MarketplaceAdapter['config']): MarketplaceAda
     async uploadInvoice(_orderId: string, _invoice: InvoiceData) {
       return notImplemented('uploadInvoice') as never
     },
+    async confirmOrder(_marketplaceOrderId: string) {
+      return { success: false, error: `${config.id}: 발주확인 미구현` }
+    },
     async getProducts(): Promise<NormalizedProduct[]> {
       return notImplemented('getProducts') as never
     },
@@ -75,6 +78,9 @@ const coupangAdapter: MarketplaceAdapter = {
   ) {
     return notImplemented('uploadInvoice') as never
   },
+  async confirmOrder(_marketplaceOrderId: string) {
+    return { success: false, error: '발주확인 미구현' }
+  },
   async getProducts(): Promise<NormalizedProduct[]> {
     return notImplemented('getProducts') as never
   },
@@ -111,6 +117,9 @@ const naverAdapter: MarketplaceAdapter = {
     _invoice: InvoiceData
   ) {
     return notImplemented('uploadInvoice') as never
+  },
+  async confirmOrder(_marketplaceOrderId: string) {
+    return { success: false, error: '발주확인 미구현' }
   },
   async getProducts(): Promise<NormalizedProduct[]> {
     return notImplemented('getProducts') as never
@@ -149,6 +158,9 @@ const elevenstAdapter: MarketplaceAdapter = {
   ) {
     return notImplemented('uploadInvoice') as never
   },
+  async confirmOrder(_marketplaceOrderId: string) {
+    return { success: false, error: '발주확인 미구현' }
+  },
   async getProducts(): Promise<NormalizedProduct[]> {
     return notImplemented('getProducts') as never
   },
@@ -185,6 +197,9 @@ const gmarketAdapter: MarketplaceAdapter = {
     _invoice: InvoiceData
   ) {
     return notImplemented('uploadInvoice') as never
+  },
+  async confirmOrder(_marketplaceOrderId: string) {
+    return { success: false, error: '발주확인 미구현' }
   },
   async getProducts(): Promise<NormalizedProduct[]> {
     return notImplemented('getProducts') as never
@@ -223,6 +238,9 @@ const auctionAdapter: MarketplaceAdapter = {
   ) {
     return notImplemented('uploadInvoice') as never
   },
+  async confirmOrder(_marketplaceOrderId: string) {
+    return { success: false, error: '발주확인 미구현' }
+  },
   async getProducts(): Promise<NormalizedProduct[]> {
     return notImplemented('getProducts') as never
   },
@@ -259,6 +277,9 @@ const ohouseAdapter: MarketplaceAdapter = {
     _invoice: InvoiceData
   ) {
     return notImplemented('uploadInvoice') as never
+  },
+  async confirmOrder(_marketplaceOrderId: string) {
+    return { success: false, error: '발주확인 미구현' }
   },
   async getProducts(): Promise<NormalizedProduct[]> {
     return notImplemented('getProducts') as never

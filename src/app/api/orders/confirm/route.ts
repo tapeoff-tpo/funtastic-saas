@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
       }
 
       try {
-        if ('confirmOrder' in adapter) {
+        if (typeof (adapter as { confirmOrder?: unknown }).confirmOrder === 'function') {
           const result = await adapter.confirmOrder(
             order.marketplaceOrderId,
             (order.rawData ?? undefined) as Record<string, unknown> | undefined

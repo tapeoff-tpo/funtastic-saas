@@ -59,6 +59,12 @@ export class TossShoppingAdapter implements MarketplaceAdapter {
     throw new MarketplaceApiError('toss-shopping', 501, 'Toss Shopping (토스쇼핑) uploadInvoice not yet implemented')
   }
 
+  async confirmOrder(
+    _marketplaceOrderId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '발주확인 미구현' }
+  }
+
   async getProducts(): Promise<NormalizedProduct[]> {
     // TODO: Implement when API access is available
     throw new MarketplaceApiError('toss-shopping', 501, 'Toss Shopping (토스쇼핑) getProducts not yet implemented')

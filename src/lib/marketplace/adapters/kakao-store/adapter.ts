@@ -129,6 +129,12 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
     }
   }
 
+  async confirmOrder(
+    _marketplaceOrderId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '발주확인 미구현' }
+  }
+
   async getProducts(): Promise<NormalizedProduct[]> {
     try {
       const response = await this.client.get('products', {

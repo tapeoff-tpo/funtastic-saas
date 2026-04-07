@@ -453,6 +453,34 @@ export const categoryMappings = pgTable(
   ],
 )
 
+// ─── Product Name Mappings (Phase 5+) ──────────────────────────
+// Maps marketplace product names to internal display names for shipping labels.
+// marketplace_name is the exact text from orderItems.productName.
+// display_name is what gets printed on shipping labels / 송장.
+
+export const productNameMappings = pgTable(
+  'product_name_mappings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceName: text('marketplace_name').notNull(),
+    displayName: text('display_name').notNull(),
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    variantId: uuid('variant_id').references(() => productVariants.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('product_name_mappings_unique').on(
+      table.userId,
+      table.marketplaceId,
+      table.marketplaceName,
+    ),
+    index('product_name_mappings_user').on(table.userId),
+  ],
+)
+
 // ─── Job Logs ───────────────────────────────────────────────────
 
 export const jobLogs = pgTable('job_logs', {

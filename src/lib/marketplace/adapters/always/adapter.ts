@@ -59,6 +59,12 @@ export class AlwaysAdapter implements MarketplaceAdapter {
     throw new MarketplaceApiError('always', 501, 'Always (올웨이즈) uploadInvoice not yet implemented')
   }
 
+  async confirmOrder(
+    _marketplaceOrderId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '발주확인 미구현' }
+  }
+
   async getProducts(): Promise<NormalizedProduct[]> {
     // TODO: Implement when API access is available
     throw new MarketplaceApiError('always', 501, 'Always (올웨이즈) getProducts not yet implemented')

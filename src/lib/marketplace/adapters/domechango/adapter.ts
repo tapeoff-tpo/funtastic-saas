@@ -59,6 +59,12 @@ export class DomechangoAdapter implements MarketplaceAdapter {
     throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 uploadInvoice pending API integration')
   }
 
+  async confirmOrder(
+    _marketplaceOrderId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '발주확인 미구현' }
+  }
+
   async getProducts(): Promise<NormalizedProduct[]> {
     // TODO: Implement when API access is available
     throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 getProducts pending API integration')

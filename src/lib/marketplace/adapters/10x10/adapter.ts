@@ -59,6 +59,12 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) uploadInvoice not yet implemented')
   }
 
+  async confirmOrder(
+    _marketplaceOrderId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '발주확인 미구현' }
+  }
+
   async getProducts(): Promise<NormalizedProduct[]> {
     // TODO: Implement when API access is available
     throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) getProducts not yet implemented')

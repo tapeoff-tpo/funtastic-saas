@@ -59,6 +59,12 @@ export class DomesinAdapter implements MarketplaceAdapter {
     throw new MarketplaceApiError('domesin', 501, 'Not yet implemented - 도매의신 uploadInvoice pending API integration')
   }
 
+  async confirmOrder(
+    _marketplaceOrderId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '발주확인 미구현' }
+  }
+
   async getProducts(): Promise<NormalizedProduct[]> {
     // TODO: Implement when API access is available
     throw new MarketplaceApiError('domesin', 501, 'Not yet implemented - 도매의신 getProducts pending API integration')

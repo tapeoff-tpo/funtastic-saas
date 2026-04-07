@@ -29,7 +29,7 @@ import type {
 export function createAdapter(
   marketplaceId: string,
   credentials: Record<string, string>
-): Pick<MarketplaceAdapter, 'config' | 'getOrders' | 'getClaimsOrders'> {
+): Pick<MarketplaceAdapter, 'config' | 'getOrders' | 'getClaimsOrders' | 'confirmOrder' | 'uploadInvoice'> {
   switch (marketplaceId) {
     case 'coupang':
       return new CoupangAdapter({

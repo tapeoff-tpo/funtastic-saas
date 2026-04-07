@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, orderItems, shipments } from '@/lib/db/schema'
 import { eq, inArray } from 'drizzle-orm'
@@ -13,8 +14,12 @@ import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
+import { loadMappingLookup, applyMappings } from '@/lib/products/apply-mappings'
 
 export async function GET(request: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+
   const searchParams = request.nextUrl.searchParams
   const orderIdsParam = searchParams.get('orderIds')
   const type = searchParams.get('type') ?? 'carrier'
@@ -38,26 +43,29 @@ export async function GET(request: NextRequest) {
 
   try {
     // Fetch orders with items and shipment data
-    const orderRows = await db
-      .select()
-      .from(orders)
-      .where(inArray(orders.id, orderIds))
+    const [orderRows, itemRows, shipmentRows] = await Promise.all([
+      db.select().from(orders).where(inArray(orders.id, orderIds)),
+      db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
+      db.select().from(shipments).where(inArray(shipments.orderId, orderIds)),
+    ])
 
-    const itemRows = await db
-      .select()
-      .from(orderItems)
-      .where(inArray(orderItems.orderId, orderIds))
-
-    const shipmentRows = await db
-      .select()
-      .from(shipments)
-      .where(inArray(shipments.orderId, orderIds))
+    // Load product name mappings for this user (empty map if unauthenticated)
+    const mappingLookup = user
+      ? await loadMappingLookup(user.id)
+      : new Map<string, string>()
 
     // Build flat order records for export
     const exportData: Record<string, unknown>[] = orderRows.map((order) => {
       const items = itemRows.filter((item) => item.orderId === order.id)
       const shipment = shipmentRows.find((s) => s.orderId === order.id)
-      const firstItem = items[0]
+
+      // Apply product name mappings — swaps marketplace names with internal names
+      const mappedItems = applyMappings(
+        items.map((i) => ({ ...i, marketplaceId: order.marketplaceId })),
+        mappingLookup,
+        order.marketplaceId,
+      )
+      const firstItem = mappedItems[0]
 
       return {
         orderId: order.id,
@@ -100,9 +108,8 @@ export async function GET(request: NextRequest) {
       if (templateId) {
         template = await getCarrierTemplateById(templateId)
       } else {
-        // Use first default template
-        // TODO: Get userId from auth session
-        const templates = await getCarrierTemplates('placeholder-user-id')
+        // Use first default template for this user
+        const templates = user ? await getCarrierTemplates(user.id) : []
         template = templates[0] ?? null
       }
 

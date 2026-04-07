@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { createClient } from '@/lib/supabase/server'
 import {
   updateOrderStatus,
   holdOrder,
@@ -76,9 +77,10 @@ export async function uploadInvoiceAction(
   trackingNumber: string,
   carrierId: string,
 ): Promise<{ success: boolean; error?: string }> {
-  // TODO: Get userId from auth session in production
-  const userId = 'placeholder-user-id'
-  const result = await queueInvoiceUpload(orderId, trackingNumber, carrierId, userId)
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Unauthorized' }
+  const result = await queueInvoiceUpload(orderId, trackingNumber, carrierId, user.id)
   revalidatePath('/orders')
   return result
 }
@@ -89,9 +91,10 @@ export async function uploadInvoiceAction(
 export async function bulkUploadInvoiceAction(
   orders: Array<{ orderId: string; trackingNumber: string; carrierId: string }>,
 ): Promise<{ queued: number; errors: Array<{ orderId: string; error: string }> }> {
-  // TODO: Get userId from auth session in production
-  const userId = 'placeholder-user-id'
-  const result = await bulkQueueInvoiceUpload(orders, userId)
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { queued: 0, errors: [] }
+  const result = await bulkQueueInvoiceUpload(orders, user.id)
   revalidatePath('/orders')
   return result
 }

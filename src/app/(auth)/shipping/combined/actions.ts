@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
@@ -12,8 +13,10 @@ import { createShipmentGroup } from '@/lib/shipping/combined-queries'
  * Creates shipment groups for orders that can be merged.
  */
 export async function detectCombinedShippingAction(): Promise<{ created: number }> {
-  // TODO: Get userId from auth session
-  const userId = 'placeholder-user-id'
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { created: 0 }
+  const userId = user.id
 
   // Fetch orders eligible for combined shipping (new/confirmed/preparing)
   const orderRows = await db

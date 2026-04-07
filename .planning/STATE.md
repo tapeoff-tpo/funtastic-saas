@@ -124,6 +124,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260407-o42 | fix upload API types, add scan page upload button, create settings company page | 2026-04-07 | 6759906 | [260407-o42-fix-upload-api-types-add-scan-page-uploa](.planning/quick/260407-o42-fix-upload-api-types-add-scan-page-uploa/) |
+| 260407-ohi | 엑셀 주문 업로드: 파싱 모듈 + 업로드 API + 업로드 페이지 + 양식 다운로드 | 2026-04-07 | 9a63c12 | [260407-ohi-excel-order-import](.planning/quick/260407-ohi-excel-order-import/) |
 
 ## Session Continuity
 

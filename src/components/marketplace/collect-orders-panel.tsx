@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { toast } from 'sonner'
+import { useState } from 'react'
 
 interface Connection {
   marketplaceId: string
@@ -9,169 +8,215 @@ interface Connection {
   status: string
 }
 
+interface CollectResult {
+  marketplaceId: string
+  displayName: string
+  success: boolean
+  ordersCollected?: number
+  claimsCollected?: number
+  error?: string
+}
+
 interface CollectOrdersPanelProps {
   connections: Connection[]
 }
 
 export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [collecting, setCollecting] = useState(false)
-  const panelRef = useRef<HTMLDivElement>(null)
-
-  // Close on click outside
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isOpen])
+  const [results, setResults] = useState<CollectResult[] | null>(null)
 
   const connectedMarkets = connections.filter((c) => c.status !== 'disconnected')
 
-  const toggleSelect = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const toggleAll = () => {
-    if (selected.size === connectedMarkets.length) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(connectedMarkets.map((c) => c.marketplaceId)))
-    }
-  }
-
-  const handleCollect = async () => {
-    if (selected.size === 0) {
-      toast.error('수집할 마켓플레이스를 선택하세요')
-      return
-    }
+  const handleCollectAll = async () => {
+    if (connectedMarkets.length === 0) return
     setCollecting(true)
+
+    const nameMap = Object.fromEntries(
+      connections.map((c) => [c.marketplaceId, c.displayName])
+    )
+
     try {
       const res = await fetch('/api/orders/collect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ marketplaceIds: [...selected] }),
+        body: JSON.stringify({
+          marketplaceIds: connectedMarkets.map((c) => c.marketplaceId),
+        }),
       })
       const data = await res.json()
 
       if (!res.ok) {
-        toast.error(data.error || '주문 수집에 실패했습니다')
+        setResults([
+          {
+            marketplaceId: '__error__',
+            displayName: '오류',
+            success: false,
+            error: data.error || '주문 수집에 실패했습니다',
+          },
+        ])
         return
       }
 
-      const successes = data.results.filter(
-        (r: { success: boolean }) => r.success
-      )
-      const failures = data.results.filter(
-        (r: { success: boolean }) => !r.success
-      )
-      const totalOrders = successes.reduce(
-        (sum: number, r: { ordersCollected?: number }) =>
-          sum + (r.ordersCollected ?? 0),
-        0
-      )
+      const enriched: CollectResult[] = (
+        data.results as Array<{
+          marketplaceId: string
+          success: boolean
+          ordersCollected?: number
+          claimsCollected?: number
+          error?: string
+        }>
+      ).map((r) => ({
+        ...r,
+        displayName: nameMap[r.marketplaceId] ?? r.marketplaceId,
+      }))
 
-      if (failures.length === 0) {
-        toast.success(`주문 수집 완료: 총 ${totalOrders}건 수집`)
-      } else if (successes.length > 0) {
-        toast.warning(
-          `${successes.length}개 성공 (${totalOrders}건), ${failures.length}개 실패`
-        )
-      } else {
-        const failureMessages = failures
-          .map((f: { marketplaceId: string; error?: string }) =>
-            f.error ? `${f.marketplaceId}: ${f.error}` : f.marketplaceId
-          )
-          .join('\n')
-        toast.error(`주문 수집 실패\n${failureMessages}`)
-      }
+      setResults(enriched)
     } catch {
-      toast.error('주문 수집 중 오류가 발생했습니다')
+      setResults([
+        {
+          marketplaceId: '__error__',
+          displayName: '오류',
+          success: false,
+          error: '주문 수집 중 오류가 발생했습니다',
+        },
+      ])
     } finally {
       setCollecting(false)
-      setIsOpen(false)
     }
   }
 
   if (connectedMarkets.length === 0) return null
 
+  const totalOrders =
+    results?.reduce((sum, r) => sum + (r.ordersCollected ?? 0), 0) ?? 0
+  const totalClaims =
+    results?.reduce((sum, r) => sum + (r.claimsCollected ?? 0), 0) ?? 0
+  const successCount = results?.filter((r) => r.success).length ?? 0
+  const failCount = results?.filter((r) => !r.success).length ?? 0
+
   return (
-    <div className="relative" ref={panelRef}>
+    <>
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80"
+        onClick={handleCollectAll}
+        disabled={collecting}
+        className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-70"
       >
-        주문 수집
+        {collecting ? (
+          <span className="flex items-center gap-2">
+            <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+            수집 중...
+          </span>
+        ) : (
+          `전체 수집 (${connectedMarkets.length}개)`
+        )}
       </button>
 
-      {isOpen && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border bg-background p-4 shadow-lg">
-          <p className="mb-3 text-sm font-medium">수집할 마켓플레이스 선택</p>
-
-          {/* Select All */}
-          <label className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 hover:bg-muted">
-            <input
-              type="checkbox"
-              checked={selected.size === connectedMarkets.length}
-              onChange={toggleAll}
-              className="h-4 w-4 rounded border-gray-300"
-            />
-            <span className="text-sm font-medium">전체선택</span>
-          </label>
-
-          <div className="my-2 border-t" />
-
-          {/* Individual marketplaces */}
-          {connections.map((conn) => {
-            const isDisconnected = conn.status === 'disconnected'
-            return (
-              <label
-                key={conn.marketplaceId}
-                className={`flex items-center gap-2 rounded px-2 py-1.5 ${
-                  isDisconnected
-                    ? 'cursor-not-allowed opacity-40'
-                    : 'cursor-pointer hover:bg-muted'
-                }`}
+      {/* Results modal */}
+      {results && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-xl border bg-background shadow-2xl">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <h2 className="text-base font-semibold">전체 수집 결과</h2>
+              <button
+                onClick={() => setResults(null)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="닫기"
               >
-                <input
-                  type="checkbox"
-                  checked={selected.has(conn.marketplaceId)}
-                  onChange={() => toggleSelect(conn.marketplaceId)}
-                  disabled={isDisconnected}
-                  className="h-4 w-4 rounded border-gray-300"
-                />
-                <span className="text-sm">{conn.displayName}</span>
-                {isDisconnected && (
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    미연결
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Per-marketplace results */}
+            <div className="divide-y px-5">
+              {results.map((r, i) => (
+                <div key={i} className="flex items-start gap-3 py-3">
+                  <span className="mt-0.5 text-base">
+                    {r.success ? '✅' : '❌'}
                   </span>
-                )}
-              </label>
-            )
-          })}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{r.displayName}</p>
+                    {r.success ? (
+                      <p className="text-sm text-muted-foreground">
+                        신규주문{' '}
+                        <span className="font-medium text-foreground">
+                          {r.ordersCollected ?? 0}건
+                        </span>
+                        {(r.claimsCollected ?? 0) > 0 && (
+                          <>
+                            {', '}클레임{' '}
+                            <span className="font-medium text-foreground">
+                              {r.claimsCollected}건
+                            </span>
+                          </>
+                        )}{' '}
+                        수집
+                      </p>
+                    ) : (
+                      <p className="break-words text-sm text-red-500">
+                        {r.error ?? '알 수 없는 오류'}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
 
-          <div className="my-2 border-t" />
-
-          <button
-            onClick={handleCollect}
-            disabled={selected.size === 0 || collecting}
-            className="w-full rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {collecting ? '수집 중...' : `수집 시작 (${selected.size}개)`}
-          </button>
+            {/* Summary footer */}
+            <div className="border-t bg-muted/30 px-5 py-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {successCount > 0 && (
+                    <span>
+                      총{' '}
+                      <span className="font-semibold text-foreground">
+                        {totalOrders}건
+                      </span>{' '}
+                      수집
+                      {totalClaims > 0 && (
+                        <>
+                          {' '}(클레임{' '}
+                          <span className="font-semibold text-foreground">
+                            {totalClaims}건
+                          </span>
+                          )
+                        </>
+                      )}
+                    </span>
+                  )}
+                  {failCount > 0 && (
+                    <span className={successCount > 0 ? 'ml-2' : ''}>
+                      {failCount}개 마켓 실패
+                    </span>
+                  )}
+                  {successCount === 0 && failCount === 0 && (
+                    <span>수집된 항목 없음</span>
+                  )}
+                </p>
+                <button
+                  onClick={() => setResults(null)}
+                  className="rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/80"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   )
 }

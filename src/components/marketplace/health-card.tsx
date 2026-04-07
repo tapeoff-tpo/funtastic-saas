@@ -1,5 +1,6 @@
 import type { ConnectionStatus } from '@/lib/marketplace/types'
 import { StatusBadge } from './status-badge'
+import { CollectButton } from './collect-button'
 import {
   Card,
   CardContent,
@@ -36,12 +37,15 @@ function isExpiringSoon(expiresAt: Date): boolean {
 }
 
 export function HealthCard({
+  marketplaceId,
   displayName,
   status,
   lastCheckedAt,
   lastErrorMessage,
   expiresAt,
 }: HealthCardProps) {
+  const isDisconnected = status === 'disconnected'
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -67,6 +71,12 @@ export function HealthCard({
             </p>
           )}
         </div>
+
+        <CollectButton
+          marketplaceId={marketplaceId}
+          displayName={displayName}
+          disabled={isDisconnected}
+        />
       </CardContent>
     </Card>
   )

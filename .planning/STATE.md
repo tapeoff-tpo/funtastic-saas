@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: Completed 07-05-PLAN.md
 last_updated: "2026-04-03T08:53:18.571Z"
-last_activity: 2026-04-03
+last_activity: 2026-04-07
 progress:
   total_phases: 7
   completed_phases: 7
@@ -118,6 +118,12 @@ None yet.
 - [Research]: Supabase Vault + Drizzle ORM compatibility needs proof-of-concept before credential storage schema is finalized (Phase 1)
 - [Research]: Naver Commerce API version transition -- check deprecation notices before building Naver adapter
 - [Research]: BullMQ deployment model (Vercel + Railway/Upstash vs VPS) decision needed before Phase 1 ends
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260407-o42 | fix upload API types, add scan page upload button, create settings company page | 2026-04-07 | 6759906 | [260407-o42-fix-upload-api-types-add-scan-page-uploa](.planning/quick/260407-o42-fix-upload-api-types-add-scan-page-uploa/) |
 
 ## Session Continuity
 

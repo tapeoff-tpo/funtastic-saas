@@ -17,21 +17,28 @@ import { CARRIERS } from '@/lib/shipping/carrier-codes'
 import type { CarrierTemplateColumn } from '@/lib/shipping/types'
 import type { Metadata } from 'next'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { TemplateClient } from './client'
+import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
   title: '택배사 양식 관리',
 }
 
 export default async function TemplatesPage() {
-  // TODO: Get userId from auth session
-  const userId = 'placeholder-user-id'
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
 
+  const userId = user.id
   const templates = await getCarrierTemplates(userId)
 
   async function handleSeedDefaults() {
     'use server'
-    await seedDefaultTemplates('placeholder-user-id')
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+    await seedDefaultTemplates(user.id)
     revalidatePath('/shipping/templates')
   }
 
@@ -46,6 +53,9 @@ export default async function TemplatesPage() {
 
   async function handleCreate(formData: FormData) {
     'use server'
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
     const carrierId = formData.get('carrierId') as string
     const name = formData.get('name') as string
     const columnsJson = formData.get('columns') as string
@@ -54,7 +64,7 @@ export default async function TemplatesPage() {
 
     const columns = JSON.parse(columnsJson) as CarrierTemplateColumn[]
     await createCarrierTemplate({
-      userId: 'placeholder-user-id',
+      userId: user.id,
       carrierId,
       name,
       columns,

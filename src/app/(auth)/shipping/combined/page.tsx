@@ -9,6 +9,8 @@ import { getShipmentGroups, confirmShipmentGroup, rejectShipmentGroup } from '@/
 import type { ShipmentGroupWithCount } from '@/lib/shipping/combined-queries'
 import type { Metadata } from 'next'
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import { CombinedShippingClient } from './client'
 
 export const metadata: Metadata = {
@@ -47,10 +49,16 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export default async function CombinedShippingPage() {
-  // TODO: Get userId from auth session
-  const userId = 'placeholder-user-id'
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  const groups = await getShipmentGroups(userId)
+  if (!user) {
+    redirect('/login')
+  }
+
+  const groups = await getShipmentGroups(user.id)
 
   return (
     <div className="space-y-6">

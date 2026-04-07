@@ -86,7 +86,6 @@ export const orders = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     userId: uuid('user_id').notNull(),
     connectionId: uuid('connection_id')
-      .notNull()
       .references(() => marketplaceConnections.id),
     marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
     marketplaceOrderId: varchar('marketplace_order_id', { length: 200 }).notNull(),

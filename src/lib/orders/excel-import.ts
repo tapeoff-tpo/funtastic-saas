@@ -1,127 +1,114 @@
 /**
- * Excel bulk import for orders.
- *
- * Parses uploaded Excel files into order data, validates rows,
- * and inserts/updates orders via UPSERT on (marketplaceId, marketplaceOrderId).
+ * Excel order import: parse uploaded Excel files into typed order rows.
  *
  * Server-side only. Uses ExcelJS for parsing and Zod for validation.
+ * Header auto-detection maps Korean column names to field keys.
  */
 
 import ExcelJS from 'exceljs'
 import { z } from 'zod'
-import { db } from '@/lib/db'
-import { orders, orderItems } from '@/lib/db/schema'
-import { eq, and } from 'drizzle-orm'
 
-/** Column headers expected in the import Excel file (Korean) */
-const COLUMN_HEADERS = {
-  orderNumber: '주문번호',
-  buyerName: '주문자명',
-  recipientName: '수령자명',
-  recipientPhone: '수령자전화',
-  zipCode: '우편번호',
-  address1: '주소',
-  address2: '상세주소',
-  orderedAt: '주문일시',
-  productName: '상품명',
-  optionText: '옵션',
-  quantity: '수량',
-  unitPrice: '단가',
-  totalAmount: '총금액',
-  sku: 'SKU',
-} as const
+/** Map of Korean header names to internal field keys */
+const HEADER_MAP: Record<string, string> = {
+  '주문번호': 'orderNumber',
+  '주문자명': 'buyerName',
+  '수령자명': 'recipientName',
+  '수령자주소': 'recipientAddress',
+  '수령자전화': 'recipientPhone',
+  '우편번호': 'zipCode',
+  '주문일시': 'orderedAt',
+  '상품명': 'productName',
+  '옵션': 'optionText',
+  '수량': 'quantity',
+  '금액(원)': 'totalAmount',
+  'SKU': 'sku',
+}
 
-/** Zod schema for a single row */
-const rowSchema = z.object({
-  orderNumber: z.string().min(1, '주문번호 필수'),
-  buyerName: z.string().min(1, '주문자명 필수'),
-  recipientName: z.string().min(1, '수령자명 필수'),
+const REQUIRED_HEADERS = ['주문번호', '주문자명', '수령자명', '수령자주소', '주문일시', '상품명', '수량', '금액(원)']
+
+/** Zod schema for each row */
+const orderRowSchema = z.object({
+  orderNumber: z.string().min(1, '주문번호가 비어있습니다'),
+  buyerName: z.string().min(1, '주문자명이 비어있습니다'),
+  recipientName: z.string().min(1, '수령자명이 비어있습니다'),
+  recipientAddress: z.string().min(1, '수령자주소가 비어있습니다'),
+  orderedAt: z.string().min(1, '주문일시가 비어있습니다'),
+  productName: z.string().min(1, '상품명이 비어있습니다'),
+  quantity: z.number().int().positive('수량은 1 이상이어야 합니다'),
+  totalAmount: z.number().nonnegative('금액은 0 이상이어야 합니다'),
   recipientPhone: z.string().optional(),
   zipCode: z.string().optional(),
-  address1: z.string().optional(),
-  address2: z.string().optional(),
-  orderedAt: z.string().min(1, '주문일시 필수'),
-  productName: z.string().min(1, '상품명 필수'),
   optionText: z.string().optional(),
-  quantity: z.number().min(1, '수량은 1 이상'),
-  unitPrice: z.number().min(0, '단가는 0 이상'),
-  totalAmount: z.number().optional(),
   sku: z.string().optional(),
 })
 
 export interface ParsedOrderRow {
-  row: number
   orderNumber: string
   buyerName: string
   recipientName: string
-  recipientPhone?: string
-  zipCode?: string
-  address1?: string
-  address2?: string
+  recipientAddress: string
   orderedAt: string
   productName: string
-  optionText?: string
   quantity: number
-  unitPrice: number
-  totalAmount?: number
+  totalAmount: number
+  recipientPhone?: string
+  zipCode?: string
+  optionText?: string
   sku?: string
 }
 
-export interface ValidationError {
+export interface ParseError {
   row: number
-  errors: string[]
+  message: string
 }
 
 export interface ParseResult {
   rows: ParsedOrderRow[]
-  errors: ValidationError[]
-}
-
-export interface ImportResult {
-  imported: number
-  skipped: number
-  errors: ValidationError[]
+  errors: ParseError[]
 }
 
 /**
- * Parse an Excel buffer into order rows.
- * Detects columns by header name (1st row).
+ * Parse an uploaded Excel buffer for order data.
+ *
+ * Reads the first worksheet, detects column indices from header row (row 1),
+ * then validates each data row using Zod.
  */
-export async function parseOrderExcel(buffer: Buffer | ArrayBuffer | Uint8Array): Promise<ParseResult> {
+export async function parseOrderExcel(
+  buffer: Buffer | ArrayBuffer | Uint8Array,
+): Promise<ParseResult> {
   const workbook = new ExcelJS.Workbook()
+  // ExcelJS types don't account for Node.js 24+ Buffer changes
   await workbook.xlsx.load(buffer as ExcelJS.Buffer)
 
   const worksheet = workbook.worksheets[0]
   if (!worksheet) {
-    return { rows: [], errors: [{ row: 0, errors: ['시트를 찾을 수 없습니다'] }] }
+    return { rows: [], errors: [{ row: 0, message: '시트를 찾을 수 없습니다' }] }
   }
 
-  // Detect column indices from header row
+  // Build column index map from header row
   const headerRow = worksheet.getRow(1)
   const colMap: Record<string, number> = {}
 
   headerRow.eachCell((cell, colNumber) => {
     const value = String(cell.value ?? '').trim()
-    for (const [key, header] of Object.entries(COLUMN_HEADERS)) {
-      if (value === header || value.includes(header)) {
-        colMap[key] = colNumber
+    for (const [korean, fieldKey] of Object.entries(HEADER_MAP)) {
+      if (value === korean || value.includes(korean)) {
+        colMap[fieldKey] = colNumber
       }
     }
   })
 
-  // Check required columns
-  const required = ['orderNumber', 'buyerName', 'recipientName', 'orderedAt', 'productName', 'quantity', 'unitPrice']
-  const missing = required.filter((k) => !colMap[k])
-  if (missing.length > 0) {
-    const missingHeaders = missing.map((k) => COLUMN_HEADERS[k as keyof typeof COLUMN_HEADERS])
+  // Verify required headers are present
+  const missingHeaders = REQUIRED_HEADERS.filter((h) => !colMap[HEADER_MAP[h]])
+  if (missingHeaders.length > 0) {
     return {
       rows: [],
-      errors: [{ row: 1, errors: [`필수 컬럼 누락: ${missingHeaders.join(', ')}`] }],
+      errors: [{ row: 1, message: `필수 컬럼 누락: ${missingHeaders.join(', ')}` }],
     }
   }
 
   const rows: ParsedOrderRow[] = []
-  const errors: ValidationError[] = []
+  const errors: ParseError[] = []
 
   const getCellString = (row: ExcelJS.Row, key: string): string => {
     if (!colMap[key]) return ''
@@ -146,132 +133,30 @@ export async function parseOrderExcel(buffer: Buffer | ArrayBuffer | Uint8Array)
       orderNumber: getCellString(row, 'orderNumber'),
       buyerName: getCellString(row, 'buyerName'),
       recipientName: getCellString(row, 'recipientName'),
+      recipientAddress: getCellString(row, 'recipientAddress'),
       recipientPhone: getCellString(row, 'recipientPhone') || undefined,
       zipCode: getCellString(row, 'zipCode') || undefined,
-      address1: getCellString(row, 'address1') || undefined,
-      address2: getCellString(row, 'address2') || undefined,
       orderedAt: getCellString(row, 'orderedAt'),
       productName: getCellString(row, 'productName'),
       optionText: getCellString(row, 'optionText') || undefined,
       quantity: getCellNumber(row, 'quantity') || 1,
-      unitPrice: getCellNumber(row, 'unitPrice'),
-      totalAmount: getCellNumber(row, 'totalAmount') || undefined,
+      totalAmount: getCellNumber(row, 'totalAmount'),
       sku: getCellString(row, 'sku') || undefined,
     }
 
     // Skip completely empty rows
     if (!raw.orderNumber && !raw.buyerName && !raw.productName) return
 
-    const result = rowSchema.safeParse(raw)
+    const result = orderRowSchema.safeParse(raw)
     if (!result.success) {
       errors.push({
         row: rowNumber,
-        errors: result.error.issues.map((i) => i.message),
+        message: result.error.issues.map((i) => i.message).join(', '),
       })
     } else {
-      rows.push({ row: rowNumber, ...result.data })
+      rows.push(result.data)
     }
   })
 
   return { rows, errors }
-}
-
-/**
- * Import parsed order rows into the database.
- * Groups rows by orderNumber (multiple items per order).
- * UPSERT on (marketplaceId, marketplaceOrderId).
- */
-export async function importOrders(
-  parsedRows: ParsedOrderRow[],
-  marketplaceId: string,
-  userId: string,
-  connectionId?: string,
-): Promise<ImportResult> {
-  // Group rows by orderNumber (same order may have multiple items)
-  const orderMap = new Map<string, ParsedOrderRow[]>()
-  for (const row of parsedRows) {
-    const existing = orderMap.get(row.orderNumber) || []
-    existing.push(row)
-    orderMap.set(row.orderNumber, existing)
-  }
-
-  let imported = 0
-  let skipped = 0
-  const errors: ValidationError[] = []
-
-  for (const [orderNumber, items] of orderMap) {
-    const first = items[0]
-    const totalAmount = first.totalAmount ??
-      items.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0)
-
-    try {
-      // Parse ordered date
-      let orderedAt: Date
-      try {
-        orderedAt = new Date(first.orderedAt)
-        if (isNaN(orderedAt.getTime())) throw new Error('Invalid date')
-      } catch {
-        orderedAt = new Date()
-      }
-
-      // UPSERT order
-      const [upsertedOrder] = await db
-        .insert(orders)
-        .values({
-          userId,
-          connectionId: connectionId ?? null,
-          marketplaceId,
-          marketplaceOrderId: orderNumber,
-          status: 'new',
-          buyerName: first.buyerName,
-          recipientName: first.recipientName,
-          recipientPhone: first.recipientPhone,
-          shippingAddress: first.address1
-            ? { zipCode: first.zipCode, address1: first.address1, address2: first.address2 }
-            : undefined,
-          orderedAt,
-          totalAmount: String(totalAmount),
-          collectedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [orders.marketplaceId, orders.marketplaceOrderId],
-          set: {
-            buyerName: first.buyerName,
-            recipientName: first.recipientName,
-            recipientPhone: first.recipientPhone,
-            shippingAddress: first.address1
-              ? { zipCode: first.zipCode, address1: first.address1, address2: first.address2 }
-              : undefined,
-            totalAmount: String(totalAmount),
-            updatedAt: new Date(),
-          },
-        })
-        .returning({ id: orders.id })
-
-      // Delete existing items and re-insert
-      await db.delete(orderItems).where(eq(orderItems.orderId, upsertedOrder.id))
-      if (items.length > 0) {
-        await db.insert(orderItems).values(
-          items.map((item) => ({
-            orderId: upsertedOrder.id,
-            marketplaceItemId: item.sku || `${orderNumber}-${item.productName}`,
-            productName: item.productName,
-            optionText: item.optionText,
-            quantity: item.quantity,
-            unitPrice: String(item.unitPrice),
-            sku: item.sku,
-          }))
-        )
-      }
-
-      imported++
-    } catch (error) {
-      errors.push({
-        row: first.row,
-        errors: [error instanceof Error ? error.message : `주문 ${orderNumber} 저장 실패`],
-      })
-    }
-  }
-
-  return { imported, skipped, errors }
 }

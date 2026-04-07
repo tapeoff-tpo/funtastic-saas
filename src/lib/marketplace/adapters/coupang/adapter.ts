@@ -123,7 +123,8 @@ export class CoupangAdapter implements MarketplaceAdapter {
       const dd = String(kst.getUTCDate()).padStart(2, '0')
       return `${yyyy}-${MM}-${dd}`
     }
-    const qs = `createdAtFrom=${fmt(since)}&createdAtTo=${fmt(now)}&status=RECEIPT&maxPerPage=50`
+    // Valid return statuses: RU(접수), CC(수거완료), PR(환불처리중), UC(철회)
+    const qs = `createdAtFrom=${fmt(since)}&createdAtTo=${fmt(now)}&status=RU&maxPerPage=50`
     const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/returnRequests?${qs}`
 
     try {
@@ -382,30 +383,38 @@ export class CoupangAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrder(sheet: CoupangOrderSheet): NormalizedOrder {
+    // v5 API returns orderItems array inside each shipment box
+    const items = (sheet.orderItems || []).map((item) => ({
+      marketplaceItemId: String(item.vendorItemId),
+      productName: item.vendorItemName || item.sellerProductName,
+      optionText: item.sellerProductItemName || undefined,
+      quantity: item.shippingCount || 1,
+      unitPrice: item.orderPrice?.units ?? 0,
+      sku: item.externalVendorSkuCode || undefined,
+    }))
+
+    const totalAmount = items.reduce(
+      (sum, item) => sum + item.unitPrice * item.quantity,
+      0
+    )
+
     return {
       marketplaceOrderId: String(sheet.orderId),
       marketplaceId: 'coupang',
       marketplaceStatus: sheet.status,
       status: mapCoupangStatus(sheet.status),
       buyerName: sheet.orderer.name,
-      buyerPhone: undefined,
+      buyerPhone: sheet.orderer.safeNumber || undefined,
       recipientName: sheet.receiver.name,
-      recipientPhone: sheet.receiver.phone,
+      recipientPhone: sheet.receiver.safeNumber || sheet.receiver.receiverNumber || undefined,
       shippingAddress: {
-        zipCode: sheet.receiver.postCode || sheet.receiver.zipCode,
+        zipCode: sheet.receiver.postCode,
         address1: sheet.receiver.addr1,
         address2: sheet.receiver.addr2 || undefined,
       },
-      items: [
-        {
-          marketplaceItemId: String(sheet.vendorItemId),
-          productName: sheet.vendorItemName,
-          quantity: sheet.shippingCount,
-          unitPrice: sheet.orderPrice,
-        },
-      ],
+      items,
       orderedAt: new Date(sheet.paidAt),
-      totalAmount: sheet.paymentPrice,
+      totalAmount,
       rawData: sheet as unknown as Record<string, unknown>,
     }
   }

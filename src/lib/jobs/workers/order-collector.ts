@@ -115,8 +115,11 @@ export async function collectOrdersForConnection(params: {
     // 3. Create adapter with credentials
     const adapter = createAdapter(marketplaceId, credentials)
 
-    // 4. Fetch orders (15-minute overlap window for safety)
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    // 4. Fetch orders — manual: 1 day, scheduled: 7 days
+    const lookbackMs = jobType === 'manual-order-collection'
+      ? 1 * 24 * 60 * 60 * 1000   // 수동: 1일
+      : 7 * 24 * 60 * 60 * 1000   // 스케줄: 7일 (놓친 주문 보완)
+    const since = new Date(Date.now() - lookbackMs)
     const normalizedOrders = await adapter.getOrders(since)
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)
@@ -244,7 +247,7 @@ async function upsertOrder(
       recipientPhone: order.recipientPhone,
       shippingAddress: order.shippingAddress,
       orderedAt: order.orderedAt,
-      totalAmount: String(order.totalAmount),
+      totalAmount: String(order.totalAmount ?? 0),
       rawData: order.rawData,
       collectedAt: new Date(),
     })

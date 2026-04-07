@@ -1,25 +1,42 @@
-/**
- * Layout wrapper for shipping sub-pages.
- * Provides breadcrumb navigation back to orders.
- */
+'use client'
 
-export default function ShippingLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+
+const tabs = [
+  { href: '/shipping/invoice',  label: '운송장 관리' },
+  { href: '/shipping/scan',     label: '🔍 스캔 출고' },
+  { href: '/shipping/combined', label: '합포장 관리' },
+  { href: '/shipping/print',    label: '송장 출력' },
+  { href: '/shipping/templates', label: '템플릿' },
+]
+
+export default function ShippingLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
+
   return (
-    <div className="space-y-6">
-      {/* Breadcrumb */}
-      <nav className="flex items-center gap-2 text-sm text-muted-foreground">
-        <a href="/orders" className="hover:text-foreground hover:underline">
-          주문 관리
-        </a>
-        <span>/</span>
-        <span className="text-foreground">배송 관리</span>
-      </nav>
-
-      {children}
+    <div>
+      <div className="border-b">
+        <nav className="-mb-px flex gap-1 px-1">
+          {tabs.map((tab) => {
+            const isActive = pathname.startsWith(tab.href)
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={`whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'border-black text-black'
+                    : 'border-transparent text-muted-foreground hover:border-gray-300 hover:text-foreground'
+                }`}
+              >
+                {tab.label}
+              </Link>
+            )
+          })}
+        </nav>
+      </div>
+      <div className="pt-6">{children}</div>
     </div>
   )
 }

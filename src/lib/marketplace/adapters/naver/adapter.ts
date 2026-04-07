@@ -441,7 +441,7 @@ export class NaverAdapter implements MarketplaceAdapter {
         zipCode: addr.zipCode ?? '',
         address1: addr.baseAddress ?? '',
         address2: addr.detailedAddress || undefined,
-      } : undefined,
+      } : { zipCode: '', address1: '' },
       items: [
         {
           marketplaceItemId: productOrder.productOrderId,

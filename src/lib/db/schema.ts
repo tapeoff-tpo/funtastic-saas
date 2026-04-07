@@ -481,6 +481,25 @@ export const productNameMappings = pgTable(
   ],
 )
 
+// ─── Company Settings ────────────────────────────────────────────
+
+export const companySettings = pgTable(
+  'company_settings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    companyName: varchar('company_name', { length: 200 }).notNull().default(''),
+    phone: varchar('phone', { length: 50 }).notNull().default(''),
+    address: text('address').notNull().default(''),
+    zipCode: varchar('zip_code', { length: 10 }).notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('company_settings_user_id').on(table.userId),
+  ],
+)
+
 // ─── Job Logs ───────────────────────────────────────────────────
 
 export const jobLogs = pgTable('job_logs', {

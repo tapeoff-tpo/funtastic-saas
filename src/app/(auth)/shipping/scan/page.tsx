@@ -45,6 +45,8 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false)
   const [todayCount, setTodayCount] = useState(0)
   const [history, setHistory] = useState<{ trackingNumber: string; status: ScanStatus; recipientName?: string }[]>([])
+  const [uploading, setUploading] = useState(false)
+  const [uploadResult, setUploadResult] = useState<{ uploaded: number; failed: number; total: number } | null>(null)
 
   // Always keep input focused
   const refocus = useCallback(() => {
@@ -54,6 +56,34 @@ export default function ScanPage() {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  const handleUpload = useCallback(async () => {
+    if (uploading) return
+    setUploading(true)
+    setUploadResult(null)
+    try {
+      const res = await fetch('/api/shipping/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      const data = await res.json()
+      const result = { uploaded: data.uploaded ?? 0, failed: data.failed ?? 0, total: data.total ?? 0 }
+      setUploadResult(result)
+      if (result.uploaded > 0 || result.failed > 0) {
+        speak(`${result.uploaded}건 전송 완료. ${result.failed > 0 ? `${result.failed}건 실패.` : ''}`)
+      } else {
+        speak('전송할 건이 없습니다')
+      }
+      // Auto-dismiss after 10 seconds
+      setTimeout(() => setUploadResult(null), 10000)
+    } catch {
+      speak('전송 중 오류가 발생했습니다')
+      setUploadResult(null)
+    } finally {
+      setUploading(false)
+      refocus()
+    }
+  }, [uploading, refocus])
 
   const handleScan = useCallback(async (trackingNumber: string) => {
     if (!trackingNumber.trim() || loading) return
@@ -105,9 +135,25 @@ export default function ScanPage() {
       {/* Header */}
       <div className="flex items-center justify-between px-8 pt-6">
         <h1 className="text-2xl font-bold text-white">포장검수 SCAN</h1>
-        <div className="text-right">
-          <div className="text-sm text-white/60">오늘 처리</div>
-          <div className="text-4xl font-bold tabular-nums text-white">{todayCount}<span className="ml-1 text-lg font-normal">건</span></div>
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col items-end gap-1">
+            <button
+              onClick={handleUpload}
+              disabled={uploading || loading}
+              className="rounded-lg bg-white/20 px-4 py-2 text-sm font-medium text-white hover:bg-white/30 disabled:opacity-50 transition-colors"
+            >
+              {uploading ? '전송 중...' : '오늘 출고분 전송'}
+            </button>
+            {uploadResult && (
+              <div className={`text-xs font-medium ${uploadResult.failed > 0 ? 'text-amber-300' : 'text-green-300'}`}>
+                {uploadResult.uploaded}건 전송 / {uploadResult.failed}건 실패
+              </div>
+            )}
+          </div>
+          <div className="text-right">
+            <div className="text-sm text-white/60">오늘 처리</div>
+            <div className="text-4xl font-bold tabular-nums text-white">{todayCount}<span className="ml-1 text-lg font-normal">건</span></div>
+          </div>
         </div>
       </div>
 

@@ -148,6 +148,42 @@ export class CoupangAdapter implements MarketplaceAdapter {
     }
   }
 
+  async confirmOrder(
+    marketplaceOrderId: string,
+    rawData?: Record<string, unknown>
+  ): Promise<{ success: boolean; error?: string }> {
+    // Coupang requires shipmentBoxId for order confirmation
+    const shipmentBoxId = rawData?.shipmentBoxId as number | undefined
+    if (!shipmentBoxId) {
+      return { success: false, error: 'shipmentBoxId가 없습니다 (rawData 확인 필요)' }
+    }
+
+    const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets/acknowledgement`
+
+    try {
+      const response = await this.client.put(path, {
+        json: {
+          vendorId: this.vendorId,
+          shipmentBoxIds: [shipmentBoxId],
+        },
+      }).json<{ code: number | string; message: string; data: unknown }>()
+
+      const codeStr = String(response.code)
+      if (codeStr === '200' || codeStr === 'SUCCESS' || codeStr === 'OK') {
+        return { success: true }
+      }
+
+      return { success: false, error: response.message || `발주확인 실패: ${codeStr}` }
+    } catch (error) {
+      if (error instanceof Error && 'response' in error) {
+        const res = (error as unknown as { response: Response }).response
+        const body = await res.text().catch(() => '')
+        return { success: false, error: `${res.status}: ${body}` }
+      }
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  }
+
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/orders/invoices`
 

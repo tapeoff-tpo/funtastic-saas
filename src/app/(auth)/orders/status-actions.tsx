@@ -79,6 +79,7 @@ interface BulkActionBarProps {
  */
 export function BulkActionBar({ selectedIds, onClear }: BulkActionBarProps) {
   const [isPending, startTransition] = useTransition()
+  const [confirming, setConfirming] = useState(false)
   const [showStatusMenu, setShowStatusMenu] = useState(false)
 
   if (selectedIds.length === 0) return null
@@ -101,15 +102,64 @@ export function BulkActionBar({ selectedIds, onClear }: BulkActionBarProps) {
     })
   }
 
+  const handleConfirmOrders = async () => {
+    setConfirming(true)
+    try {
+      const res = await fetch('/api/orders/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderIds: selectedIds }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        toast.error(data.error || '발주확인 실패')
+        return
+      }
+
+      if (data.failCount === 0) {
+        toast.success(`${data.successCount}건 발주확인 완료`)
+      } else if (data.successCount > 0) {
+        toast.warning(`${data.successCount}건 성공, ${data.failCount}건 실패`)
+        // Show failed order details
+        const failures = data.results.filter((r: { success: boolean }) => !r.success)
+        for (const f of failures.slice(0, 3)) {
+          toast.error(`${f.marketplaceOrderId}: ${f.error}`)
+        }
+      } else {
+        toast.error('발주확인 실패')
+        const failures = data.results.filter((r: { success: boolean }) => !r.success)
+        for (const f of failures.slice(0, 3)) {
+          toast.error(`${f.marketplaceOrderId}: ${f.error}`)
+        }
+      }
+      onClear()
+    } catch {
+      toast.error('네트워크 오류')
+    } finally {
+      setConfirming(false)
+    }
+  }
+
   return (
     <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-white px-4 py-3 shadow-xl">
       <span className="text-sm font-medium">{selectedIds.length}개 주문 선택됨</span>
+
+      {/* 발주확인 button */}
+      <button
+        type="button"
+        onClick={handleConfirmOrders}
+        disabled={confirming || isPending}
+        className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
+      >
+        {confirming ? '확인 중...' : '발주확인'}
+      </button>
 
       <div className="relative">
         <button
           type="button"
           onClick={() => setShowStatusMenu((v) => !v)}
-          disabled={isPending}
+          disabled={isPending || confirming}
           className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {isPending ? '처리중...' : '일괄 상태 변경'}

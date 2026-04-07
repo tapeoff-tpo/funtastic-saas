@@ -152,6 +152,12 @@ export interface MarketplaceAdapter {
   ): Promise<{ success: boolean; error?: string }>
   getProducts(): Promise<NormalizedProduct[]>
 
+  // Order confirmation (발주확인)
+  confirmOrder(
+    marketplaceOrderId: string,
+    rawData?: Record<string, unknown>
+  ): Promise<{ success: boolean; error?: string }>
+
   // Phase 5: Product registration and sync
   registerProduct(
     product: NormalizedProduct

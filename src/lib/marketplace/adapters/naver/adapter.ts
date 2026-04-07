@@ -114,19 +114,34 @@ export class NaverAdapter implements MarketplaceAdapter {
     }
   }
 
+  async confirmOrder(
+    marketplaceOrderId: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await this.naverClient.client.post(
+        'external/v1/pay-order/seller/product-orders/place-order',
+        { json: { productOrderIds: [marketplaceOrderId] } },
+      ).json<{
+        data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
+      }>()
+
+      if (response.data.failProductOrderIds?.includes(marketplaceOrderId)) {
+        return { success: false, error: `발주확인 실패: ${marketplaceOrderId}` }
+      }
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  }
+
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     try {
-      // Step 1: Place-order confirmation if required
+      // Step 1: Place-order confirmation if not already confirmed
       if (invoice.requiresConfirmation) {
-        const confirmResponse = await this.naverClient.client.post(
-          'external/v1/pay-order/seller/product-orders/place-order',
-          { json: { productOrderIds: [orderId] } },
-        ).json<{
-          data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
-        }>()
-
-        if (confirmResponse.data.failProductOrderIds?.includes(orderId)) {
-          return { success: false, error: `Place-order confirmation failed for ${orderId}` }
+        const confirmResult = await this.confirmOrder(orderId)
+        if (!confirmResult.success) {
+          return confirmResult
         }
       }
 

@@ -36,6 +36,10 @@ export async function getInventoryList(
     )
   }
 
+  if (filters.warehouseZone) {
+    conditions.push(eq(inventory.warehouseZone, filters.warehouseZone))
+  }
+
   const whereClause = and(...conditions)
 
   // Determine sort column
@@ -43,6 +47,8 @@ export async function getInventoryList(
     switch (filters.sort) {
       case 'sku': return inventory.sku
       case 'productName': return inventory.productName
+      case 'warehouseZone': return inventory.warehouseZone
+      case 'sectorCode': return inventory.sectorCode
       case 'totalStock': return inventory.totalStock
       case 'reservedStock': return inventory.reservedStock
       case 'availableStock': return inventory.availableStock

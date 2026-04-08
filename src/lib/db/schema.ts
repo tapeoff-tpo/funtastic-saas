@@ -294,6 +294,8 @@ export const inventory = pgTable(
     userId: uuid('user_id').notNull(),
     sku: varchar('sku', { length: 100 }).notNull(),
     productName: text('product_name').notNull(),
+    warehouseZone: varchar('warehouse_zone', { length: 100 }),
+    sectorCode: varchar('sector_code', { length: 100 }),
     totalStock: integer('total_stock').notNull().default(0),
     reservedStock: integer('reserved_stock').notNull().default(0),
     availableStock: integer('available_stock').notNull().default(0),

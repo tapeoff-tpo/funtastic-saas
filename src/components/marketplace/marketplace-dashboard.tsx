@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import Link from 'next/link'
+import { useState, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { useCollectPoll, type JobLogResult } from '@/lib/hooks/use-collect-poll'
 import { StatusBadge } from './status-badge'
 import {
@@ -209,24 +209,12 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
                   )}
                 </div>
 
-                {/* Excel upload link — stops click propagation */}
+                {/* Excel upload — inline, stops click propagation */}
                 <div onClick={(e) => e.stopPropagation()} className="mt-3">
-                  <Link
-                    href={`/orders/import?marketplace=${encodeURIComponent(conn.displayName)}`}
-                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                      isDisconnected
-                        ? 'cursor-not-allowed border-gray-200 text-gray-400'
-                        : 'hover:bg-muted'
-                    }`}
-                    onClick={isDisconnected ? (e) => e.preventDefault() : undefined}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="17 8 12 3 7 8"/>
-                      <line x1="12" x2="12" y1="3" y2="15"/>
-                    </svg>
-                    엑셀 업로드
-                  </Link>
+                  <ExcelUploadButton
+                    displayName={conn.displayName}
+                    disabled={isDisconnected}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -303,6 +291,87 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function ExcelUploadButton({ displayName, disabled }: { displayName: string; disabled: boolean }) {
+  const router = useRouter()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [result, setResult] = useState<{ inserted: number; skipped: number } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleFile = async (file: File) => {
+    setUploading(true)
+    setResult(null)
+    setError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('marketplaceId', displayName)
+
+      const res = await fetch('/api/orders/import', { method: 'POST', body: formData })
+      const data = await res.json()
+
+      if (!res.ok) {
+        setError(data.error || '업로드 실패')
+      } else {
+        setResult({ inserted: data.inserted, skipped: data.skipped })
+        if (data.inserted > 0) {
+          setTimeout(() => router.push('/orders?status=new'), 1500)
+        }
+        setTimeout(() => setResult(null), 5000)
+      }
+    } catch {
+      setError('네트워크 오류')
+    } finally {
+      setUploading(false)
+      if (inputRef.current) inputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) handleFile(f)
+        }}
+      />
+      <button
+        onClick={() => inputRef.current?.click()}
+        disabled={disabled || uploading}
+        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+          disabled
+            ? 'cursor-not-allowed border-gray-200 text-gray-400'
+            : uploading
+              ? 'border-gray-200 text-gray-400'
+              : 'hover:bg-muted'
+        }`}
+      >
+        {uploading ? (
+          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+        ) : (
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" x2="12" y1="3" y2="15"/>
+          </svg>
+        )}
+        {uploading ? '업로드 중...' : '엑셀 업로드'}
+      </button>
+      {result && (
+        <p className="text-xs text-emerald-600">
+          {result.inserted}건 등록{result.skipped > 0 ? ` (${result.skipped}건 중복 스킵)` : ''} → 신규주문으로 이동 중
+        </p>
+      )}
+      {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
   )
 }

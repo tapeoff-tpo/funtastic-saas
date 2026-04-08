@@ -6,9 +6,83 @@
  */
 
 import { db } from '@/lib/db'
-import { shipments, shipmentItems, orders } from '@/lib/db/schema'
-import { eq, and, inArray, sql, desc, lt } from 'drizzle-orm'
+import { shipments, shipmentItems, orders, orderItems } from '@/lib/db/schema'
+import { eq, and, inArray, sql, desc, lt, isNull, isNotNull } from 'drizzle-orm'
 import type { InvoiceUploadStatus, ShipmentRecord } from './types'
+
+// ─── Held Shipments ──────────────────────────────────────────────
+
+export interface HeldShipmentRow {
+  // Order fields
+  orderId: string
+  marketplaceOrderId: string
+  marketplaceId: string
+  buyerName: string
+  recipientName: string
+  status: string
+  isHeld: boolean
+  holdReason: string | null
+  // Shipment fields
+  shipmentId: string
+  trackingNumber: string
+  carrierId: string
+  carrierName: string
+  uploadStatus: string
+  shipmentCreatedAt: Date
+  // First item (representative)
+  productName: string | null
+  quantity: number | null
+}
+
+/**
+ * Get orders that have a tracking number but have not been shipped yet (shippedAt IS NULL).
+ * These are "held" in limbo — tracking was assigned but the parcel hasn't left.
+ * Returns up to 200 rows, ordered by shipment creation date descending.
+ */
+export async function getHeldShipments(userId: string): Promise<HeldShipmentRow[]> {
+  const rows = await db
+    .select({
+      orderId: orders.id,
+      marketplaceOrderId: orders.marketplaceOrderId,
+      marketplaceId: orders.marketplaceId,
+      buyerName: orders.buyerName,
+      recipientName: orders.recipientName,
+      status: orders.status,
+      isHeld: orders.isHeld,
+      holdReason: orders.holdReason,
+      shipmentId: shipments.id,
+      trackingNumber: shipments.trackingNumber,
+      carrierId: shipments.carrierId,
+      carrierName: shipments.carrierName,
+      uploadStatus: shipments.uploadStatus,
+      shipmentCreatedAt: shipments.createdAt,
+      productName: orderItems.productName,
+      quantity: orderItems.quantity,
+    })
+    .from(shipments)
+    .innerJoin(orders, eq(orders.id, shipments.orderId))
+    .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
+    .where(
+      and(
+        eq(shipments.userId, userId),
+        isNull(shipments.shippedAt),
+        isNotNull(shipments.trackingNumber),
+      ),
+    )
+    .orderBy(desc(shipments.createdAt))
+    .limit(200)
+
+  // Deduplicate: keep one row per shipment (leftJoin with orderItems produces multiple rows)
+  const seen = new Set<string>()
+  const deduped: HeldShipmentRow[] = []
+  for (const row of rows) {
+    if (!seen.has(row.shipmentId)) {
+      seen.add(row.shipmentId)
+      deduped.push(row as HeldShipmentRow)
+    }
+  }
+  return deduped
+}
 
 /**
  * Create a new shipment record.

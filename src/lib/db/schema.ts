@@ -468,6 +468,7 @@ export const productNameMappings = pgTable(
     marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
     marketplaceName: text('marketplace_name').notNull(),
     displayName: text('display_name').notNull(),
+    pickingLocation: varchar('picking_location', { length: 100 }),
     productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
     variantId: uuid('variant_id').references(() => productVariants.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

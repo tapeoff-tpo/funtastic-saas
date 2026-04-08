@@ -67,6 +67,7 @@ export async function GET(req: NextRequest) {
       senderPhone: senderSettings?.phone ?? '',
       senderAddress: senderSettings?.address ?? '',
       originalProductName: items[0]?.productName,
+      pickingLocation: firstItem?.pickingLocation ?? undefined,
     }
   })
 

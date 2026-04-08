@@ -14,7 +14,7 @@ import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
-import { loadMappingLookup, applyMappings } from '@/lib/products/apply-mappings'
+import { loadMappingLookup, applyMappings, type MappingEntry } from '@/lib/products/apply-mappings'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
     // Load product name mappings for this user (empty map if unauthenticated)
     const mappingLookup = user
       ? await loadMappingLookup(user.id)
-      : new Map<string, string>()
+      : new Map<string, MappingEntry>()
 
     // Build flat order records for export
     const exportData: Record<string, unknown>[] = orderRows.map((order) => {

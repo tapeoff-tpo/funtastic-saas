@@ -20,48 +20,58 @@ export interface OrderItemLike {
   [key: string]: unknown
 }
 
+export interface MappingEntry {
+  displayName: string
+  pickingLocation: string | null
+}
+
 /**
  * Load all mappings for a user and return a lookup Map.
  * Key: `${marketplaceId}::${marketplaceName}`
- * Value: displayName
+ * Value: { displayName, pickingLocation }
  */
 export async function loadMappingLookup(
   userId: string,
-): Promise<Map<string, string>> {
+): Promise<Map<string, MappingEntry>> {
   const rows = await db
     .select({
       marketplaceId: productNameMappings.marketplaceId,
       marketplaceName: productNameMappings.marketplaceName,
       displayName: productNameMappings.displayName,
+      pickingLocation: productNameMappings.pickingLocation,
     })
     .from(productNameMappings)
     .where(eq(productNameMappings.userId, userId))
 
-  const map = new Map<string, string>()
+  const map = new Map<string, MappingEntry>()
   for (const row of rows) {
-    map.set(`${row.marketplaceId}::${row.marketplaceName}`, row.displayName)
+    map.set(`${row.marketplaceId}::${row.marketplaceName}`, {
+      displayName: row.displayName,
+      pickingLocation: row.pickingLocation,
+    })
   }
   return map
 }
 
 /**
  * Apply mappings in-place: replace productName with displayName where a
- * mapping exists for (marketplaceId, productName).
+ * mapping exists for (marketplaceId, productName). Also spreads pickingLocation
+ * onto the returned item.
  *
- * Returns a new array with the productName fields updated.
- * Items without a mapping keep their original productName.
+ * Returns a new array with the productName and pickingLocation fields updated.
+ * Items without a mapping keep their original productName and have no pickingLocation.
  */
 export function applyMappings<T extends OrderItemLike>(
   items: T[],
-  lookup: Map<string, string>,
+  lookup: Map<string, MappingEntry>,
   marketplaceId?: string,
-): T[] {
+): (T & { pickingLocation?: string | null })[] {
   return items.map((item) => {
     const mid = item.marketplaceId ?? marketplaceId ?? ''
     const key = `${mid}::${item.productName}`
-    const displayName = lookup.get(key)
-    if (!displayName) return item
-    return { ...item, productName: displayName }
+    const entry = lookup.get(key)
+    if (!entry) return item
+    return { ...item, productName: entry.displayName, pickingLocation: entry.pickingLocation }
   })
 }
 
@@ -72,7 +82,7 @@ export async function applyProductNameMappings<T extends OrderItemLike>(
   userId: string,
   items: T[],
   marketplaceId?: string,
-): Promise<T[]> {
+): Promise<(T & { pickingLocation?: string | null })[]> {
   const lookup = await loadMappingLookup(userId)
   return applyMappings(items, lookup, marketplaceId)
 }

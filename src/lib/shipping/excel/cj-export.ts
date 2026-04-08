@@ -22,6 +22,7 @@ export interface CjOrderRow {
   senderPhone: string
   senderAddress: string
   originalProductName?: string  // 수집상품명 (마켓 원본)
+  pickingLocation?: string      // 피킹위치 (e.g. '1창고 A-01-03')
 }
 
 const HEADERS = [
@@ -102,7 +103,7 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
       row.originalProductName ?? row.productName,
       row.optionText ?? '',
       productAndOption,
-      '',
+      row.pickingLocation ?? '',
       '',
     ])
   }

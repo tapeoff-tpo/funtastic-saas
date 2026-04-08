@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
   ShoppingCart,
+  AlertTriangle,
   Truck,
   Package,
   Warehouse,
@@ -17,6 +18,7 @@ import { createClient } from '@/lib/supabase/client'
 const navItems = [
   { href: '/dashboard', label: '대시보드', icon: LayoutDashboard },
   { href: '/orders', label: '주문관리', icon: ShoppingCart },
+  { href: '/orders/claims', label: '클레임', icon: AlertTriangle },
   { href: '/shipping', label: '배송관리', icon: Truck },
   { href: '/products', label: '상품관리', icon: Package },
   { href: '/inventory', label: '재고관리', icon: Warehouse },

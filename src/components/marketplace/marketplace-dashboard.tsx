@@ -299,6 +299,7 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
   const [result, setResult] = useState<{ inserted: number; skipped: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -332,6 +333,16 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
     }
   }
 
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setDragOver(false)
+    if (disabled || uploading) return
+    const file = e.dataTransfer.files[0]
+    if (file?.name.endsWith('.xlsx')) handleFile(file)
+    else setError('.xlsx 파일만 가능합니다')
+  }
+
   return (
     <div className="space-y-1">
       <input
@@ -344,15 +355,19 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
           if (f) handleFile(f)
         }}
       />
-      <button
-        onClick={() => inputRef.current?.click()}
-        disabled={disabled || uploading}
-        className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+      <div
+        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!disabled && !uploading) setDragOver(true) }}
+        onDragLeave={(e) => { e.stopPropagation(); setDragOver(false) }}
+        onDrop={handleDrop}
+        onClick={() => !disabled && !uploading && inputRef.current?.click()}
+        className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
           disabled
             ? 'cursor-not-allowed border-gray-200 text-gray-400'
-            : uploading
-              ? 'border-gray-200 text-gray-400'
-              : 'hover:bg-muted'
+            : dragOver
+              ? 'border-primary bg-primary/5 text-primary'
+              : uploading
+                ? 'border-gray-200 text-gray-400'
+                : 'hover:bg-muted'
         }`}
       >
         {uploading ? (
@@ -364,8 +379,8 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
             <line x1="12" x2="12" y1="3" y2="15"/>
           </svg>
         )}
-        {uploading ? '업로드 중...' : '엑셀 업로드'}
-      </button>
+        {uploading ? '업로드 중...' : dragOver ? '여기에 놓기' : '엑셀 업로드'}
+      </div>
       {result && (
         <p className="text-xs text-emerald-600">
           {result.inserted}건 등록{result.skipped > 0 ? ` (${result.skipped}건 중복 스킵)` : ''} → 신규주문으로 이동 중

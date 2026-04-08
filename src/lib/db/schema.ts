@@ -43,6 +43,7 @@ export const marketplaceConnections = pgTable('marketplace_connections', {
   lastErrorMessage: text('last_error_message'),
   expiresAt: timestamp('expires_at', { withTimezone: true }),
   metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+  isManual: boolean('is_manual').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })
     .defaultNow()
     .notNull(),

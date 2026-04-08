@@ -47,7 +47,13 @@ export async function setStockAction(
     return { success: false, error: '수량은 0 이상이어야 합니다.' }
   }
 
-  const result = await setStock(user.id, sku.trim(), productName.trim(), totalStock)
+  const warehouseZone = (formData.get('warehouseZone') as string | null)?.trim() || undefined
+  const sectorCode = (formData.get('sectorCode') as string | null)?.trim() || undefined
+
+  const result = await setStock(user.id, sku.trim(), productName.trim(), totalStock, {
+    warehouseZone,
+    sectorCode,
+  })
   revalidatePath('/inventory')
   return result
 }

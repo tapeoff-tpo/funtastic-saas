@@ -19,6 +19,8 @@ export interface InventoryRecord {
   userId: string
   sku: string
   productName: string
+  warehouseZone: string | null
+  sectorCode: string | null
   totalStock: number
   reservedStock: number
   availableStock: number
@@ -45,6 +47,7 @@ export interface InventoryFilters {
   search?: string
   sort?: string
   order?: 'asc' | 'desc'
+  warehouseZone?: string
 }
 
 /** Korean labels for adjustment reasons */

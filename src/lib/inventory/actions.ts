@@ -95,6 +95,7 @@ export async function setStock(
   sku: string,
   productName: string,
   totalStock: number,
+  opts?: { warehouseZone?: string; sectorCode?: string },
 ): Promise<ActionResult> {
   return db.transaction(async (tx) => {
     // Try to find existing record with lock
@@ -115,6 +116,8 @@ export async function setStock(
           productName,
           totalStock,
           availableStock: newAvailable,
+          ...(opts?.warehouseZone !== undefined && { warehouseZone: opts.warehouseZone || null }),
+          ...(opts?.sectorCode !== undefined && { sectorCode: opts.sectorCode || null }),
           updatedAt: new Date(),
         })
         .where(eq(inventory.id, existing.id))
@@ -137,6 +140,8 @@ export async function setStock(
           userId,
           sku,
           productName,
+          warehouseZone: opts?.warehouseZone || null,
+          sectorCode: opts?.sectorCode || null,
           totalStock,
           reservedStock: 0,
           availableStock: totalStock,

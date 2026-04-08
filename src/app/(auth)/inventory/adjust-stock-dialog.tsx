@@ -38,6 +38,8 @@ export function AdjustStockDialog({
   const [sku, setSku] = useState(initialSku ?? '')
   const [productName, setProductName] = useState(initialProductName ?? '')
   const [totalStock, setTotalStock] = useState('')
+  const [warehouseZone, setWarehouseZone] = useState('')
+  const [sectorCode, setSectorCode] = useState('')
 
   // Adjust mode fields
   const [delta, setDelta] = useState('')
@@ -51,6 +53,8 @@ export function AdjustStockDialog({
       formData.set('sku', sku)
       formData.set('productName', productName)
       formData.set('totalStock', totalStock)
+      if (warehouseZone.trim()) formData.set('warehouseZone', warehouseZone.trim())
+      if (sectorCode.trim()) formData.set('sectorCode', sectorCode.trim())
 
       startTransition(async () => {
         const result = await setStockAction(formData)
@@ -135,6 +139,32 @@ export function AdjustStockDialog({
                   onChange={(e) => setTotalStock(e.target.value)}
                   placeholder="초기 재고 수량"
                   min={0}
+                  className="rounded-md border px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="set-warehouse" className="text-xs font-medium text-muted-foreground">
+                  창고
+                </label>
+                <input
+                  id="set-warehouse"
+                  type="text"
+                  value={warehouseZone}
+                  onChange={(e) => setWarehouseZone(e.target.value)}
+                  placeholder="예: 1창고, 쿠팡전용창고"
+                  className="rounded-md border px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label htmlFor="set-sector" className="text-xs font-medium text-muted-foreground">
+                  피킹위치
+                </label>
+                <input
+                  id="set-sector"
+                  type="text"
+                  value={sectorCode}
+                  onChange={(e) => setSectorCode(e.target.value)}
+                  placeholder="예: A-01-03"
                   className="rounded-md border px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                 />
               </div>

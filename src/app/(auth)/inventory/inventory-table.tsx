@@ -11,11 +11,14 @@ import {
 import { useQueryState, useQueryStates, parseAsInteger, parseAsString } from 'nuqs'
 import { AdjustStockDialog } from './adjust-stock-dialog'
 import { HistoryDialog } from './history-dialog'
+import { ExcelUploadDialog } from './excel-upload-dialog'
 
 export interface InventoryRow {
   id: string
   sku: string
   productName: string
+  warehouseZone: string | null
+  sectorCode: string | null
   totalStock: number
   reservedStock: number
   availableStock: number
@@ -27,6 +30,7 @@ interface InventoryTableProps {
   total: number
   page: number
   pageSize: number
+  warehouseZones: string[]
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
@@ -43,7 +47,7 @@ function StockCell({ value }: { value: number }) {
   return <span className={color}>{value.toLocaleString('ko-KR')}</span>
 }
 
-export function InventoryTable({ data, total, page, pageSize }: InventoryTableProps) {
+export function InventoryTable({ data, total, page, pageSize, warehouseZones }: InventoryTableProps) {
   const [adjustDialog, setAdjustDialog] = useState<{
     open: boolean
     mode: 'set' | 'adjust'
@@ -58,6 +62,8 @@ export function InventoryTable({ data, total, page, pageSize }: InventoryTablePr
     sku: string
   }>({ open: false, inventoryId: '', sku: '' })
 
+  const [excelDialogOpen, setExcelDialogOpen] = useState(false)
+
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
   const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50))
   const [filters, setFilters] = useQueryStates({
@@ -65,6 +71,7 @@ export function InventoryTable({ data, total, page, pageSize }: InventoryTablePr
     sort: parseAsString,
     order: parseAsString,
     page: parseAsInteger.withDefault(1),
+    warehouseZone: parseAsString,
   })
 
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -117,6 +124,25 @@ export function InventoryTable({ data, total, page, pageSize }: InventoryTablePr
           상품명{getSortIndicator('productName')}
         </button>
       ),
+    }),
+    columnHelper.accessor('warehouseZone', {
+      header: () => (
+        <button type="button" onClick={() => handleSort('warehouseZone')} className="hover:text-foreground">
+          창고{getSortIndicator('warehouseZone')}
+        </button>
+      ),
+      cell: (info) => info.getValue() ?? '-',
+    }),
+    columnHelper.accessor('sectorCode', {
+      header: () => (
+        <button type="button" onClick={() => handleSort('sectorCode')} className="hover:text-foreground">
+          피킹위치{getSortIndicator('sectorCode')}
+        </button>
+      ),
+      cell: (info) => {
+        const val = info.getValue()
+        return val ? <span className="font-mono text-xs">{val}</span> : '-'
+      },
     }),
     columnHelper.accessor('totalStock', {
       header: () => (
@@ -211,9 +237,9 @@ export function InventoryTable({ data, total, page, pageSize }: InventoryTablePr
 
   return (
     <div className="space-y-4">
-      {/* Toolbar: search + add stock button */}
+      {/* Toolbar: search + filter + buttons */}
       <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
           <input
             type="text"
             placeholder="SKU 또는 상품명 검색"
@@ -221,14 +247,40 @@ export function InventoryTable({ data, total, page, pageSize }: InventoryTablePr
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-[260px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
           />
+          <select
+            value={filters.warehouseZone ?? ''}
+            onChange={(e) => {
+              void setFilters({
+                warehouseZone: e.target.value || null,
+                page: 1,
+              })
+            }}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            <option value="">전체 창고</option>
+            {warehouseZones.map((zone) => (
+              <option key={zone} value={zone}>
+                {zone}
+              </option>
+            ))}
+          </select>
         </div>
-        <button
-          type="button"
-          onClick={() => setAdjustDialog({ open: true, mode: 'set' })}
-          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-        >
-          재고 등록
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setExcelDialogOpen(true)}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            엑셀 업로드
+          </button>
+          <button
+            type="button"
+            onClick={() => setAdjustDialog({ open: true, mode: 'set' })}
+            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            재고 등록
+          </button>
+        </div>
       </div>
 
       {/* Table */}
@@ -343,6 +395,10 @@ export function InventoryTable({ data, total, page, pageSize }: InventoryTablePr
           sku={historyDialog.sku}
           onClose={() => setHistoryDialog({ open: false, inventoryId: '', sku: '' })}
         />
+      )}
+
+      {excelDialogOpen && (
+        <ExcelUploadDialog onClose={() => setExcelDialogOpen(false)} />
       )}
     </div>
   )

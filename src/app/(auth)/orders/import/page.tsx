@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
@@ -10,7 +10,7 @@ interface ImportResult {
   errors: Array<{ row: number; message: string }>
 }
 
-export default function OrderImportPage() {
+function OrderImportForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [file, setFile] = useState<File | null>(null)
@@ -243,5 +243,13 @@ export default function OrderImportPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function OrderImportPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-center text-muted-foreground">로딩 중...</div>}>
+      <OrderImportForm />
+    </Suspense>
   )
 }

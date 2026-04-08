@@ -77,6 +77,12 @@ export default async function ProductsPage({
         </div>
         <div className="flex items-center gap-2">
           <a
+            href="/products/import/marketplace"
+            className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+          >
+            마켓플레이스 가져오기
+          </a>
+          <a
             href="/products/import"
             className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
           >

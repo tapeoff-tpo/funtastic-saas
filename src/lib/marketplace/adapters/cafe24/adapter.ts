@@ -32,7 +32,7 @@ const CAFE24_CONFIG: MarketplaceConfig = {
   name: 'Cafe24',
   authType: 'oauth2',
   rateLimitPerSecond: 40,
-  requiredCredentials: ['client_id', 'client_secret', 'mall_id'],
+  requiredCredentials: ['client_id', 'client_secret', 'mall_id', 'access_token'],
 }
 
 /** Format a Date as ISO date string (yyyy-MM-dd) for Cafe24 API */

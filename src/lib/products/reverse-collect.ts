@@ -20,6 +20,7 @@ import { readCredential } from '@/lib/supabase/admin'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
+import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
 import { setStock } from '@/lib/inventory/actions'
 import type { MarketplaceAdapter, NormalizedProduct } from '@/lib/marketplace/types'
 
@@ -60,6 +61,11 @@ async function createAdapterWithCredentials(
         client_id: credentials.client_id ?? '',
         client_secret: credentials.client_secret ?? '',
       })
+    case 'cafe24':
+      return new Cafe24Adapter({
+        access_token: credentials.access_token ?? '',
+        mall_id: credentials.mall_id ?? '',
+      })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}`)
   }
@@ -75,6 +81,7 @@ function skuPrefix(marketplaceId: string): string {
     elevenst: '11S',
     gmarket: 'GMK',
     auction: 'AUC',
+    cafe24: 'C24',
   }
   return prefixes[marketplaceId] ?? marketplaceId.toUpperCase().slice(0, 3)
 }

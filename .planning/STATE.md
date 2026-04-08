@@ -130,6 +130,7 @@ None yet.
 | 260407-o42 | fix upload API types, add scan page upload button, create settings company page | 2026-04-07 | 6759906 | [260407-o42-fix-upload-api-types-add-scan-page-uploa](.planning/quick/260407-o42-fix-upload-api-types-add-scan-page-uploa/) |
 | 260407-ohi | 엑셀 주문 업로드: 파싱 모듈 + 업로드 API + 업로드 페이지 + 양식 다운로드 | 2026-04-07 | 9a63c12 | [260407-ohi-excel-order-import](.planning/quick/260407-ohi-excel-order-import/) |
 | 260408-nb1 | 수동 쇼핑몰 채널 추가 (is_manual flag, 모달, 대시보드 카드 렌더링) | 2026-04-08 | 3694484 | [260408-nb1-ismanual](.planning/quick/260408-nb1-ismanual/) |
+| 260409-0jm | Cafe24 상품 역수집 — reverse-collect에 Cafe24 지원 추가, 상품 페이지에 마켓플레이스 가져오기 UI | 2026-04-09 | f0fed98 | [260409-0jm-cafe24-reverse-collect-cafe24-ui](.planning/quick/260409-0jm-cafe24-reverse-collect-cafe24-ui/) |
 
 ## Session Continuity
 

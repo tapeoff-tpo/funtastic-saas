@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 1: Foundation & Marketplace Infrastructure** - Auth, credential management, adapter architecture, and marketplace health monitoring
 - [ ] **Phase 2: Order Collection & Dashboard** - Collect orders from Coupang/Naver into a unified dashboard with full order lifecycle management
 - [ ] **Phase 3: Shipping & Invoice Processing** - Invoice upload, combined shipping, Excel export -- the 사방넷 switching trigger
-- [ ] **Phase 4: Inventory Management** - Central stock tracking with automatic deduction/restoration on order events
+- [ ] **Phase 4: Inventory Management** - Central stock tracking with picking locations, Excel bulk upload, and automatic deduction/restoration on order events
 - [ ] **Phase 5: Product Management & Data** - Product listing across marketplaces with category mapping and bulk operations
 - [x] **Phase 6: Marketplace Expansion** - Add 11번가, 지마켓/옥션, 오늘의집 adapters to complete top-5 coverage (completed 2026-04-03)
 - [x] **Phase 7: 추가 마켓플레이스 연동** - Add 18 additional marketplace adapters (Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매꾹, 온채널, 오너클랜 등)
@@ -77,18 +77,21 @@ Plans:
 **UI hint**: yes
 
 ### Phase 4: Inventory Management
-**Goal**: Central inventory is tracked per product with automatic stock adjustments on order and return events, preventing overselling
+**Goal**: Central inventory is tracked per product with picking location (warehouseZone/sectorCode), Excel bulk upload for incoming stock, and automatic stock adjustments on order and return events
 **Depends on**: Phase 2
 **Requirements**: INV-01, INV-02, INV-03, INV-04
 **Success Criteria** (what must be TRUE):
-  1. Admin can view and set inventory quantities for each product in a central inventory view
+  1. Admin can view and set inventory quantities for each product in a central inventory view with picking location (창고/피킹위치)
   2. When an order ships, inventory is automatically decremented (atomically, no race conditions)
   3. When an order is cancelled or returned, inventory is automatically restored
   4. Admin can manually adjust stock with a recorded reason (incoming stock, defective, physical count, etc.)
-**Plans:** 2 plans
+  5. Admin can bulk-register inventory via Excel upload with picking location data
+  6. Admin can filter inventory by warehouse zone (창고별 필터)
+**Plans:** 3 plans
 Plans:
-- [x] 04-01-PLAN.md — Inventory schema, types, queries, stock adjustment actions, order status hooks (INV-01, INV-02, INV-03, INV-04)
-- [x] 04-02-PLAN.md — Inventory management UI: data table, stock set/adjust dialogs, audit history viewer (INV-01, INV-04)
+- [ ] 04-01-PLAN.md — Picking location schema (warehouseZone, sectorCode) + migration SQL (INV-01)
+- [ ] 04-02-PLAN.md — Inventory CRUD with picking location + Excel bulk upload API (INV-01, INV-04)
+- [ ] 04-03-PLAN.md — Inventory UI: picking location columns, warehouse filter, Excel upload dialog (INV-01, INV-04)
 **UI hint**: yes
 
 ### Phase 5: Product Management & Data
@@ -173,7 +176,7 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 1. Foundation & Marketplace Infrastructure | 3/3 | Complete | - |
 | 2. Order Collection & Dashboard | 5/5 | Complete | - |
 | 3. Shipping & Invoice Processing | 1/5 | Executing | - |
-| 4. Inventory Management | 0/2 | Not started | - |
+| 4. Inventory Management | 0/3 | Replanned | - |
 | 5. Product Management & Data | 0/5 | Not started | - |
 | 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |
 | 7. 추가 마켓플레이스 연동 | 5/5 | Complete   | 2026-04-03 |

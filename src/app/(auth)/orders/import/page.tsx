@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
 interface ImportResult {
@@ -10,11 +11,18 @@ interface ImportResult {
 }
 
 export default function OrderImportPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const [file, setFile] = useState<File | null>(null)
-  const [marketplaceId, setMarketplaceId] = useState('')
+  const [marketplaceId, setMarketplaceId] = useState(() => searchParams.get('marketplace') ?? '')
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<ImportResult | null>(null)
   const [dragOver, setDragOver] = useState(false)
+
+  useEffect(() => {
+    const mp = searchParams.get('marketplace')
+    if (mp) setMarketplaceId(mp)
+  }, [searchParams])
 
   const handleFile = useCallback((selectedFile: File) => {
     setFile(selectedFile)
@@ -56,6 +64,10 @@ export default function OrderImportPage() {
         })
       } else {
         setResult(data)
+        if (data.inserted > 0) {
+          // 업로드 성공 시 1초 후 신규주문 페이지로 이동
+          setTimeout(() => router.push('/orders?status=new'), 1000)
+        }
       }
     } catch {
       setResult({

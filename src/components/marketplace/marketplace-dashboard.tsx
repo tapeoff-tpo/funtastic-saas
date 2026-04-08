@@ -1,9 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useCollectPoll, type JobLogResult } from '@/lib/hooks/use-collect-poll'
 import { StatusBadge } from './status-badge'
-import { CollectButton } from './collect-button'
 import {
   Card,
   CardContent,
@@ -209,13 +209,24 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
                   )}
                 </div>
 
-                {/* Individual collect button — stops click propagation */}
-                <div onClick={(e) => e.stopPropagation()}>
-                  <CollectButton
-                    marketplaceId={conn.marketplaceId}
-                    displayName={conn.displayName}
-                    disabled={isDisconnected}
-                  />
+                {/* Excel upload link — stops click propagation */}
+                <div onClick={(e) => e.stopPropagation()} className="mt-3">
+                  <Link
+                    href={`/orders/import?marketplace=${encodeURIComponent(conn.displayName)}`}
+                    className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                      isDisconnected
+                        ? 'cursor-not-allowed border-gray-200 text-gray-400'
+                        : 'hover:bg-muted'
+                    }`}
+                    onClick={isDisconnected ? (e) => e.preventDefault() : undefined}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" x2="12" y1="3" y2="15"/>
+                    </svg>
+                    엑셀 업로드
+                  </Link>
                 </div>
               </CardContent>
             </Card>

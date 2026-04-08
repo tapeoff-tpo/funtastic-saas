@@ -67,7 +67,7 @@ Plans:
   3. Admin can see auto-detected combined shipping suggestions and merge/split orders for shipping
   4. Admin can export orders to carrier-specific Excel formats with customizable column templates
   5. Admin can print shipping labels in batch
-**Plans:** 5 plans
+**Plans:** 6/8 plans executed
 Plans:
 - [x] 03-01-PLAN.md — Shipping types, carrier codes, Drizzle schema extensions, base queries (SHIP-01, SHIP-04, SHIP-06)
 - [x] 03-02-PLAN.md — Coupang/Naver uploadInvoice() implementation, BullMQ invoice worker, server actions (SHIP-01)
@@ -175,7 +175,7 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 |-------|----------------|--------|-----------|
 | 1. Foundation & Marketplace Infrastructure | 3/3 | Complete | - |
 | 2. Order Collection & Dashboard | 5/5 | Complete | - |
-| 3. Shipping & Invoice Processing | 1/5 | Executing | - |
+| 3. Shipping & Invoice Processing | 6/8 | In Progress|  |
 | 4. Inventory Management | 0/3 | Replanned | - |
 | 5. Product Management & Data | 0/5 | Not started | - |
 | 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |

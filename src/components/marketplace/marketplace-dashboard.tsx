@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useCollectPoll, type JobLogResult } from '@/lib/hooks/use-collect-poll'
 import { StatusBadge } from './status-badge'
@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
+import { addManualChannel } from '@/app/(auth)/dashboard/actions'
 
 interface Connection {
   marketplaceId: string
@@ -19,6 +20,7 @@ interface Connection {
   lastCheckedAt: Date | null
   lastErrorMessage: string | null
   expiresAt: Date | null
+  isManual: boolean
 }
 
 interface MarketplaceDashboardProps {
@@ -45,9 +47,10 @@ function isExpiringSoon(expiresAt: Date): boolean {
 
 export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [showAddModal, setShowAddModal] = useState(false)
   const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
 
-  const connectedMarkets = connections.filter((c) => c.status !== 'disconnected')
+  const connectedMarkets = connections.filter((c) => c.status !== 'disconnected' && !c.isManual)
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -145,6 +148,12 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
             )}
           </button>
         )}
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted"
+        >
+          + 수동 쇼핑몰 추가
+        </button>
         </div>
       </div>
 
@@ -153,24 +162,27 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
         {connections.map((conn) => {
           const isDisconnected = conn.status === 'disconnected'
           const isSelected = selected.has(conn.marketplaceId)
+          const isManual = conn.isManual
 
           return (
             <Card
               key={conn.marketplaceId}
-              className={`cursor-pointer transition-all ${
-                isSelected
-                  ? 'ring-2 ring-primary ring-offset-2'
-                  : isDisconnected
-                    ? 'opacity-60'
-                    : 'hover:shadow-md'
+              className={`transition-all ${
+                isManual
+                  ? 'border-blue-200'
+                  : isSelected
+                    ? 'cursor-pointer ring-2 ring-primary ring-offset-2'
+                    : isDisconnected
+                      ? 'cursor-pointer opacity-60'
+                      : 'cursor-pointer hover:shadow-md'
               }`}
               onClick={() => {
-                if (!isDisconnected) toggleSelect(conn.marketplaceId)
+                if (!isDisconnected && !isManual) toggleSelect(conn.marketplaceId)
               }}
             >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <div className="flex items-center gap-2">
-                  {!isDisconnected && (
+                  {!isDisconnected && !isManual && (
                     <div
                       className={`flex h-5 w-5 items-center justify-center rounded border ${
                         isSelected
@@ -187,29 +199,44 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
                   )}
                   <CardTitle className="text-sm font-medium">{conn.displayName}</CardTitle>
                 </div>
-                <StatusBadge status={conn.status as ConnectionStatus} />
+                <div className="flex items-center gap-1.5">
+                  {isManual && (
+                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                      수동
+                    </span>
+                  )}
+                  <StatusBadge status={conn.status as ConnectionStatus} />
+                </div>
               </CardHeader>
               <CardContent>
-                <div className="space-y-1 text-sm text-muted-foreground">
-                  <p>
-                    마지막 확인:{' '}
-                    {conn.lastCheckedAt ? formatRelativeTime(conn.lastCheckedAt) : '확인 안됨'}
-                  </p>
-                  {conn.status === 'error' && conn.lastErrorMessage && (
-                    <p className="text-red-600">
-                      {conn.lastErrorMessage.length > 100
-                        ? `${conn.lastErrorMessage.slice(0, 100)}...`
-                        : conn.lastErrorMessage}
+                {!isManual && (
+                  <div className="space-y-1 text-sm text-muted-foreground">
+                    <p>
+                      마지막 확인:{' '}
+                      {conn.lastCheckedAt ? formatRelativeTime(conn.lastCheckedAt) : '확인 안됨'}
                     </p>
-                  )}
-                  {conn.expiresAt && isExpiringSoon(conn.expiresAt) && (
-                    <p className="text-amber-600">
-                      인증 만료 예정: {conn.expiresAt.toLocaleDateString('ko-KR')}
-                    </p>
-                  )}
-                </div>
+                    {conn.status === 'error' && conn.lastErrorMessage && (
+                      <p className="text-red-600">
+                        {conn.lastErrorMessage.length > 100
+                          ? `${conn.lastErrorMessage.slice(0, 100)}...`
+                          : conn.lastErrorMessage}
+                      </p>
+                    )}
+                    {conn.expiresAt && isExpiringSoon(conn.expiresAt) && (
+                      <p className="text-amber-600">
+                        인증 만료 예정: {conn.expiresAt.toLocaleDateString('ko-KR')}
+                      </p>
+                    )}
+                  </div>
+                )}
 
-                {/* Excel upload — inline, stops click propagation */}
+                {isManual && (
+                  <p className="text-sm text-muted-foreground">
+                    엑셀 업로드로 주문을 관리합니다.
+                  </p>
+                )}
+
+                {/* Excel upload -- inline, stops click propagation */}
                 <div onClick={(e) => e.stopPropagation()} className="mt-3">
                   <ExcelUploadButton
                     displayName={conn.displayName}
@@ -221,6 +248,11 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
           )
         })}
       </div>
+
+      {/* Add manual channel modal */}
+      {showAddModal && (
+        <AddManualChannelModal onClose={() => setShowAddModal(false)} />
+      )}
 
       {/* Results modal */}
       {showModal && (
@@ -291,6 +323,82 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function AddManualChannelModal({ onClose }: { onClose: () => void }) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setError(null)
+    const formData = new FormData(e.currentTarget)
+
+    startTransition(async () => {
+      const result = await addManualChannel(formData)
+      if (result.error) {
+        setError(result.error)
+      } else {
+        router.refresh()
+        onClose()
+      }
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="w-full max-w-sm rounded-xl border bg-background shadow-2xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <h2 className="text-base font-semibold">수동 쇼핑몰 추가</h2>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="닫기"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-5">
+          <label htmlFor="displayName" className="block text-sm font-medium">
+            쇼핑몰 이름
+          </label>
+          <input
+            id="displayName"
+            name="displayName"
+            type="text"
+            required
+            maxLength={100}
+            placeholder="예: 자사몰, 네이버 수동, 오프라인"
+            className="mt-1.5 w-full rounded-lg border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+            autoFocus
+          />
+          {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted"
+            >
+              취소
+            </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80 disabled:opacity-70"
+            >
+              {isPending ? '추가 중...' : '추가'}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   )
 }

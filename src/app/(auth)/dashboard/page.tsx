@@ -48,6 +48,7 @@ export default async function DashboardPage() {
         lastCheckedAt: c.lastCheckedAt,
         lastErrorMessage: c.lastErrorMessage,
         expiresAt: c.expiresAt,
+        isManual: c.isManual,
       }))}
     />
   )

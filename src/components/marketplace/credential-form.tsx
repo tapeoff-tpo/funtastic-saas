@@ -32,6 +32,8 @@ const credentialLabels: Record<string, string> = {
   client_id: '클라이언트 ID',
   client_secret: '클라이언트 시크릿',
   api_key: 'API 키',
+  mall_id: '몰 ID (예: mymall)',
+  access_token: '액세스 토큰',
 }
 
 export function CredentialForm({ marketplaces }: CredentialFormProps) {

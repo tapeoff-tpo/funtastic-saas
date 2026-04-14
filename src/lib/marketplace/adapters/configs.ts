@@ -299,7 +299,7 @@ const cafe24Adapter = createStubAdapter({
   name: 'Cafe24',
   authType: 'oauth2',
   rateLimitPerSecond: 40,
-  requiredCredentials: ['client_id', 'client_secret', 'mall_id'],
+  requiredCredentials: ['client_id', 'client_secret', 'mall_id', 'access_token'],
 })
 
 const cjonestyleAdapter = createStubAdapter({

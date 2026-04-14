@@ -19,6 +19,7 @@ export function createCafe24Client(accessToken: string, mallId: string) {
         (request: Request) => {
           request.headers.set('Authorization', `Bearer ${accessToken}`)
           request.headers.set('Content-Type', 'application/json')
+          request.headers.set('Accept', 'application/json')
         },
       ],
     },

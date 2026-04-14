@@ -54,7 +54,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      await this.client.get('admin/store.json').json()
+      await this.client.get('admin/store').json()
       return { success: true }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -70,7 +70,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
     try {
-      const response = await this.client.get('admin/orders.json', {
+      const response = await this.client.get('admin/orders', {
         searchParams: {
           shop_no: 1,
           start_date: formatDate(since),
@@ -100,9 +100,9 @@ export class Cafe24Adapter implements MarketplaceAdapter {
     try {
       // Cafe24 has separate endpoints for each claim type
       const [cancellations, returns, exchanges] = await Promise.all([
-        this.client.get('admin/cancellation.json', { searchParams: params }).json<Cafe24ClaimResponse>(),
-        this.client.get('admin/return.json', { searchParams: params }).json<Cafe24ClaimResponse>(),
-        this.client.get('admin/exchange.json', { searchParams: params }).json<Cafe24ClaimResponse>(),
+        this.client.get('admin/cancellation', { searchParams: params }).json<Cafe24ClaimResponse>(),
+        this.client.get('admin/return', { searchParams: params }).json<Cafe24ClaimResponse>(),
+        this.client.get('admin/exchange', { searchParams: params }).json<Cafe24ClaimResponse>(),
       ])
 
       for (const claim of cancellations.cancellations ?? []) {
@@ -152,7 +152,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
 
   async getProducts(): Promise<NormalizedProduct[]> {
     try {
-      const response = await this.client.get('admin/products.json', {
+      const response = await this.client.get('admin/products', {
         searchParams: { shop_no: 1, limit: 100 },
       }).json<Cafe24ProductResponse>()
 
@@ -168,7 +168,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
 
   async registerProduct(product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
     try {
-      const response = await this.client.post('admin/products.json', {
+      const response = await this.client.post('admin/products', {
         json: {
           product: {
             product_name: product.name,

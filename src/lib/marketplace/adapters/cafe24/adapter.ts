@@ -72,6 +72,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
     try {
       const response = await this.client.get('admin/orders.json', {
         searchParams: {
+          shop_no: 1,
           start_date: formatDate(since),
           end_date: formatDate(new Date()),
           limit: 100,
@@ -152,7 +153,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
   async getProducts(): Promise<NormalizedProduct[]> {
     try {
       const response = await this.client.get('admin/products.json', {
-        searchParams: { limit: 100 },
+        searchParams: { shop_no: 1, limit: 100 },
       }).json<Cafe24ProductResponse>()
 
       return (response.products ?? []).map((product) => this.normalizeProduct(product))

@@ -57,7 +57,7 @@ export interface Cafe24ClaimResponse {
 export interface Cafe24Product {
   product_no: string
   product_name: string
-  selling_price: number
+  selling_price: string | number | null
   product_code: string
   detail_image: string
   display: string

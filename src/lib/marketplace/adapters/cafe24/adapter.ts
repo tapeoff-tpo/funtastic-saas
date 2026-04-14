@@ -245,7 +245,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
       productId: product.product_no,
       marketplaceId: 'cafe24',
       name: product.product_name,
-      price: product.selling_price,
+      price: product.selling_price != null ? Number(product.selling_price) : 0,
       sku: product.product_code,
       images: product.detail_image
         ? [{ url: product.detail_image, sortOrder: 0 }]

@@ -25,8 +25,8 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
-  const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
-  const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50))
+  const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1).withOptions({ shallow: false }))
+  const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50).withOptions({ shallow: false }))
 
   const pageCount = Math.ceil(total / pageSize)
 

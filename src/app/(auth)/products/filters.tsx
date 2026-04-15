@@ -26,7 +26,7 @@ export function ProductFilters() {
     skuExclude: parseAsBoolean,
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(50),
-  })
+  }, { shallow: false })
 
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {

@@ -11,8 +11,9 @@
  */
 
 import { db } from '@/lib/db'
-import { products, productVariants } from '@/lib/db/schema'
+import { products, productVariants, productChangeLogs } from '@/lib/db/schema'
 import { eq, and, notInArray } from 'drizzle-orm'
+import { logProductChanges } from './change-log'
 import { setStock } from '@/lib/inventory/actions'
 import type { ProductFormData } from './types'
 
@@ -86,15 +87,30 @@ export async function updateProduct(
 ): Promise<ActionResult<void>> {
   try {
     await db.transaction(async (tx) => {
-      // Verify ownership
+      // Verify ownership and fetch current values for change logging
       const [existing] = await tx
-        .select({ id: products.id })
+        .select()
         .from(products)
         .where(and(eq(products.id, productId), eq(products.userId, userId)))
         .limit(1)
 
       if (!existing) {
         throw new Error('Product not found or access denied')
+      }
+
+      // Detect field changes for audit log
+      const fieldsToTrack = [
+        { field: 'name', old: existing.name, new: formData.name },
+        { field: 'internal_sku', old: existing.internalSku, new: formData.internalSku },
+        { field: 'base_price', old: existing.basePrice, new: String(formData.basePrice) },
+        { field: 'cost_price', old: existing.costPrice, new: formData.costPrice != null ? String(formData.costPrice) : null },
+        { field: 'category_id', old: existing.categoryId, new: formData.categoryId ?? null },
+      ]
+      const changes = fieldsToTrack
+        .filter((f) => f.old !== f.new)
+        .map((f) => ({ productId, userId, fieldName: f.field, oldValue: f.old ?? null, newValue: f.new ?? null }))
+      if (changes.length > 0) {
+        await tx.insert(productChangeLogs).values(changes)
       }
 
       // Update product fields

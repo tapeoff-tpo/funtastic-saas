@@ -11,7 +11,7 @@ import {
   productVariants,
   productMarketplaceLinks,
 } from '@/lib/db/schema'
-import { eq, and, or, ilike, desc, asc, count, ne, sql, notLike, like } from 'drizzle-orm'
+import { eq, and, or, ilike, desc, asc, count, ne, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { ProductFilters, ProductListItem, ProductDetail } from './types'
 
@@ -55,16 +55,6 @@ export async function getProducts(
       )!,
     )
   }
-
-  if (filters.skuPrefix) {
-    const pattern = `${filters.skuPrefix}%`
-    conditions.push(
-      filters.skuExclude
-        ? notLike(products.internalSku, pattern)
-        : like(products.internalSku, pattern),
-    )
-  }
-
   const whereClause = and(...conditions)
 
   const sortColumn = (() => {
@@ -72,6 +62,7 @@ export async function getProducts(
       case 'name': return products.name
       case 'internalSku': return products.internalSku
       case 'basePrice': return products.basePrice
+      case 'costPrice': return products.costPrice
       case 'status': return products.status
       case 'updatedAt': return products.updatedAt
       default: return products.createdAt

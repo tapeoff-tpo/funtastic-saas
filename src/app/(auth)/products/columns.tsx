@@ -77,6 +77,7 @@ export const columns: ColumnDef<ProductRow>[] = [
   {
     accessorKey: 'categoryId',
     header: '카테고리',
+    enableSorting: false,
     cell: ({ row }) => {
       const cat = row.getValue('categoryId') as string | null
       return cat ? (
@@ -118,6 +119,7 @@ export const columns: ColumnDef<ProductRow>[] = [
   {
     accessorKey: 'variantCount',
     header: '옵션수',
+    enableSorting: false,
     cell: ({ row }) => {
       const count = row.getValue('variantCount') as number
       return <span className="text-sm">{count}</span>

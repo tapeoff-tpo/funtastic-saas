@@ -372,6 +372,27 @@ export const products = pgTable(
   ],
 )
 
+export const productChangeLogs = pgTable(
+  'product_change_logs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => products.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+    fieldName: varchar('field_name', { length: 100 }).notNull(),
+    oldValue: text('old_value'),
+    newValue: text('new_value'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('product_change_logs_product_id').on(table.productId),
+    index('product_change_logs_created_at').on(table.createdAt),
+  ],
+)
+
 export const productVariants = pgTable(
   'product_variants',
   {

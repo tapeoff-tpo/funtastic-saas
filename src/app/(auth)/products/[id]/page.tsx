@@ -17,6 +17,15 @@ const SYNC_STATUS_LABELS: Record<string, string> = {
   error: '오류',
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  name: '상품명',
+  internal_sku: '상품코드',
+  base_price: '판매가',
+  cost_price: '원가',
+  description: '설명',
+  category_id: '카테고리',
+}
+
 export default function EditProductPage() {
   const router = useRouter()
   const params = useParams()
@@ -36,6 +45,9 @@ export default function EditProductPage() {
   const [costPrice, setCostPrice] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [variants, setVariants] = useState<VariantFormData[]>([])
+  const [changeLogs, setChangeLogs] = useState<Array<{
+    id: string; fieldName: string; oldValue: string | null; newValue: string | null; createdAt: Date | string
+  }>>([])
 
   // Load product data
   useEffect(() => {
@@ -68,6 +80,10 @@ export default function EditProductPage() {
         })),
       )
       setLoading(false)
+
+      const { getProductChangeLogsAction } = await import('@/lib/products/ui-actions')
+      const logs = await getProductChangeLogsAction(productId)
+      if (!cancelled) setChangeLogs(logs)
     }
     void load()
     return () => { cancelled = true }
@@ -412,6 +428,41 @@ export default function EditProductPage() {
             </div>
           </div>
         )}
+
+        {/* Change log */}
+        <div className="space-y-4 rounded-md border p-4">
+          <h2 className="font-semibold">변경이력</h2>
+          {changeLogs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">변경 이력이 없습니다.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="px-2 py-1.5">날짜</th>
+                    <th className="px-2 py-1.5">항목</th>
+                    <th className="px-2 py-1.5">이전값</th>
+                    <th className="px-2 py-1.5">변경값</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {changeLogs.map((log) => (
+                    <tr key={log.id} className="border-b">
+                      <td className="px-2 py-1.5 whitespace-nowrap text-muted-foreground">
+                        {new Date(log.createdAt).toLocaleString('ko-KR')}
+                      </td>
+                      <td className="px-2 py-1.5">
+                        {FIELD_LABELS[log.fieldName] ?? log.fieldName}
+                      </td>
+                      <td className="px-2 py-1.5">{log.oldValue ?? '-'}</td>
+                      <td className="px-2 py-1.5 font-medium">{log.newValue ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {/* Actions */}
         <div className="flex justify-end gap-2">

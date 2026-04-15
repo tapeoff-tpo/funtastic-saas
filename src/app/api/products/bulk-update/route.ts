@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { products, productVariants } from '@/lib/db/schema'
 import { inArray, sql } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
+import { logProductChanges } from '@/lib/products/change-log'
 
 /**
  * POST /api/products/bulk-update
@@ -144,7 +145,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 4. Bulk update — single UPDATE FROM VALUES per chunk (≤500 rows = ≤1000 params)
+  // 4. Fetch existing cost prices for change logging
+  const existingPrices = new Map<string, string | null>()
+  if (toUpdate.length > 0) {
+    for (const chunk of chunkArray(toUpdate.map((r) => r.id), 500)) {
+      const existing = await db
+        .select({ id: products.id, costPrice: products.costPrice })
+        .from(products)
+        .where(inArray(products.id, chunk))
+      for (const row of existing) existingPrices.set(row.id, row.costPrice)
+    }
+  }
+
+  // 5. Bulk update — single UPDATE FROM VALUES per chunk (≤500 rows = ≤1000 params)
   let updated = 0
   for (const chunk of chunkArray(toUpdate, 500)) {
     await db.execute(sql`
@@ -171,6 +184,18 @@ export async function POST(req: NextRequest) {
       .onConflictDoNothing()
     inserted += chunk.length
   }
+
+  // 7. Log cost price changes
+  const changeEntries = toUpdate
+    .filter((r) => existingPrices.get(r.id) !== r.costPrice)
+    .map((r) => ({
+      productId: r.id,
+      userId: user.id,
+      fieldName: 'cost_price',
+      oldValue: existingPrices.get(r.id) ?? null,
+      newValue: r.costPrice,
+    }))
+  await logProductChanges(changeEntries)
 
   return NextResponse.json({
     total: rows.length,

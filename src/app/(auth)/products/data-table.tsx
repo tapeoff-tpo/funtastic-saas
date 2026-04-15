@@ -7,8 +7,9 @@ import {
   flexRender,
   type VisibilityState,
   type RowSelectionState,
+  type SortingState,
 } from '@tanstack/react-table'
-import { useQueryState, parseAsInteger } from 'nuqs'
+import { useQueryState, parseAsInteger, parseAsString } from 'nuqs'
 import { columns, type ProductRow } from './columns'
 import { ProductActions } from './product-actions'
 
@@ -27,8 +28,12 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1).withOptions({ shallow: false }))
   const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50).withOptions({ shallow: false }))
+  const [sort, setSort] = useQueryState('sort', parseAsString.withOptions({ shallow: false }))
+  const [order, setOrder] = useQueryState('order', parseAsString.withOptions({ shallow: false }))
 
   const pageCount = Math.ceil(total / pageSize)
+
+  const sorting: SortingState = sort ? [{ id: sort, desc: order === 'desc' }] : []
 
   const table = useReactTable({
     data,
@@ -42,15 +47,25 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
       columnVisibility,
       rowSelection,
       pagination: { pageIndex: page - 1, pageSize },
+      sorting,
     },
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    onSortingChange: (updater) => {
+      const next = typeof updater === 'function' ? updater(sorting) : updater
+      if (next.length > 0) {
+        void setSort(next[0].id)
+        void setOrder(next[0].desc ? 'desc' : 'asc')
+      } else {
+        void setSort(null)
+        void setOrder(null)
+      }
+    },
     enableRowSelection: true,
   })
 
   return (
     <div className="space-y-4">
-      {/* Action column injected via table meta */}
       <ProductActions table={table} />
 
       {/* Table */}
@@ -62,12 +77,26 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2.5 text-left font-medium text-muted-foreground"
+                    className={`px-3 py-2.5 text-left font-medium text-muted-foreground ${
+                      header.column.getCanSort() ? 'cursor-pointer select-none hover:text-foreground' : ''
+                    }`}
                     style={{ width: header.getSize() }}
+                    onClick={header.column.getToggleSortingHandler()}
                   >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
+                    {header.isPlaceholder ? null : (
+                      <div className="flex items-center gap-1">
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                        {header.column.getCanSort() && (
+                          <span className="text-xs opacity-60">
+                            {header.column.getIsSorted() === 'asc'
+                              ? '\u25B2'
+                              : header.column.getIsSorted() === 'desc'
+                                ? '\u25BC'
+                                : '\u21C5'}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </th>
                 ))}
                 <th className="px-3 py-2.5 text-left font-medium text-muted-foreground w-[120px]">
@@ -179,7 +208,6 @@ function DeleteButton({ productId }: { productId: string }) {
       return
     }
 
-    // Reload page to refresh data
     window.location.reload()
   }
 

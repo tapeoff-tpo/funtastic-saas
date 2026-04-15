@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useRef, useTransition } from 'react'
-import { useQueryStates, parseAsString, parseAsInteger, parseAsBoolean } from 'nuqs'
+import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { PRODUCT_STATUS_LABELS, type ProductStatus } from '@/lib/products/types'
 
 const STATUS_OPTIONS: { value: '' | ProductStatus; label: string }[] = [
@@ -22,8 +22,6 @@ export function ProductFilters() {
     status: parseAsString,
     category: parseAsString,
     search: parseAsString,
-    skuPrefix: parseAsString,
-    skuExclude: parseAsBoolean,
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(50),
   }, { shallow: false })
@@ -47,36 +45,21 @@ export function ProductFilters() {
     [updateFilter],
   )
 
-  const handlePrefixChange = useCallback(
-    (value: string) => {
-      if (searchTimeout.current) clearTimeout(searchTimeout.current)
-      searchTimeout.current = setTimeout(() => {
-        updateFilter({
-          skuPrefix: value || null,
-          skuExclude: value ? (filters.skuExclude ?? false) : null,
-        })
-      }, 500)
-    },
-    [updateFilter, filters.skuExclude],
-  )
-
   const handleReset = useCallback(() => {
     void setFilters({
       status: null,
       category: null,
       search: null,
-      skuPrefix: null,
-      skuExclude: null,
       page: 1,
       pageSize: filters.pageSize,
     })
   }, [setFilters, filters.pageSize])
 
-  const hasFilters = filters.status || filters.search || filters.skuPrefix
+  const hasFilters = filters.status || filters.search
 
   return (
     <div className="space-y-3">
-      {/* Row 1: Search bar */}
+      {/* Search bar */}
       <div className="relative">
         <svg
           className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
@@ -98,9 +81,8 @@ export function ProductFilters() {
         />
       </div>
 
-      {/* Row 2: Filter chips */}
+      {/* Filter chips */}
       <div className="flex flex-wrap items-center gap-2">
-        {/* Status */}
         <select
           id="filter-status"
           value={filters.status ?? ''}
@@ -114,30 +96,6 @@ export function ProductFilters() {
           ))}
         </select>
 
-        {/* SKU prefix */}
-        <div className="flex items-center overflow-hidden rounded-lg border bg-white shadow-sm">
-          <select
-            value={filters.skuExclude ? 'exclude' : 'include'}
-            onChange={(e) =>
-              updateFilter({
-                skuExclude: e.target.value === 'exclude' ? true : null,
-              })
-            }
-            className="border-r bg-transparent px-2 py-1.5 text-sm"
-          >
-            <option value="include">코드 포함</option>
-            <option value="exclude">코드 제외</option>
-          </select>
-          <input
-            type="text"
-            placeholder="접두사 (예: 11)"
-            defaultValue={filters.skuPrefix ?? ''}
-            onChange={(e) => handlePrefixChange(e.target.value)}
-            className="w-[120px] bg-transparent px-2 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none"
-          />
-        </div>
-
-        {/* Reset */}
         {hasFilters && (
           <button
             type="button"

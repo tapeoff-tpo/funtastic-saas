@@ -80,6 +80,15 @@ export async function deleteProductAction(
 }
 
 /**
+ * Get change logs for a product.
+ */
+export async function getProductChangeLogsAction(productId: string) {
+  await requireUser()
+  const { getProductChangeLogs } = await import('./change-log')
+  return getProductChangeLogs(productId)
+}
+
+/**
  * Bulk soft-delete products by ID list.
  */
 export async function bulkDeleteProductsAction(

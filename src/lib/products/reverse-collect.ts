@@ -170,7 +170,8 @@ async function importSingleProduct(
     throw new Error('SKIP_DUPLICATE')
   }
 
-  const internalSku = `${prefix}-${mp.productId}`
+  // Use marketplace's own product_code if available, otherwise fall back to generated SKU
+  const internalSku = mp.sku && mp.sku.trim() ? mp.sku.trim() : `${prefix}-${mp.productId}`
 
   // Run product + variants + link creation in a transaction
   const { productId, variantSkus } = await db.transaction(async (tx) => {

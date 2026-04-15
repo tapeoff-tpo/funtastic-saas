@@ -18,6 +18,7 @@ import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createCafe24Client } from './client'
 import { mapCafe24Status, mapCafe24ClaimStatus, mapCafe24ClaimType } from './status-map'
 import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
+import pLimit from 'p-limit'
 import type {
   Cafe24Order,
   Cafe24OrderResponse,
@@ -25,6 +26,8 @@ import type {
   Cafe24ClaimResponse,
   Cafe24Product,
   Cafe24ProductResponse,
+  Cafe24Variant,
+  Cafe24VariantsResponse,
 } from './types'
 
 const CAFE24_CONFIG: MarketplaceConfig = {
@@ -151,25 +154,43 @@ export class Cafe24Adapter implements MarketplaceAdapter {
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    const allProducts: NormalizedProduct[] = []
-    const limit = 100
+    const rawProducts: Cafe24Product[] = []
+    const pageLimit = 100
     let offset = 0
 
     try {
+      // 1. Fetch all products (paginated)
       while (true) {
         const response = await this.client.get('admin/products', {
-          searchParams: { shop_no: 1, limit, offset },
+          searchParams: { shop_no: 1, limit: pageLimit, offset },
         }).json<Cafe24ProductResponse>()
 
         const page = response.products ?? []
-        allProducts.push(...page.map((p) => this.normalizeProduct(p)))
+        rawProducts.push(...page)
 
-        // Cafe24 returns fewer items than limit when we've reached the end
-        if (page.length < limit) break
-        offset += limit
+        if (page.length < pageLimit) break
+        offset += pageLimit
       }
 
-      return allProducts
+      // 2. Fetch variants for each product with concurrency limit (5 at a time)
+      const limiter = pLimit(5)
+      const productsWithVariants = await Promise.all(
+        rawProducts.map((product) =>
+          limiter(async () => {
+            try {
+              const res = await this.client.get(`admin/products/${product.product_no}/variants`, {
+                searchParams: { shop_no: 1 },
+              }).json<Cafe24VariantsResponse>()
+              return this.normalizeProduct(product, res.variants ?? [])
+            } catch {
+              // If variant fetch fails, return product without variants
+              return this.normalizeProduct(product, [])
+            }
+          })
+        )
+      )
+
+      return productsWithVariants
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
@@ -260,7 +281,14 @@ export class Cafe24Adapter implements MarketplaceAdapter {
     }
   }
 
-  private normalizeProduct(product: Cafe24Product): NormalizedProduct {
+  private normalizeProduct(product: Cafe24Product, variants: Cafe24Variant[] = []): NormalizedProduct {
+    const normalizedVariants = variants.map((v) => ({
+      sku: v.variant_code,
+      price: v.price != null ? Number(v.price) : undefined,
+      optionText: v.options.map((o) => `${o.name}: ${o.value}`).join(' / '),
+      stock: v.stock_quantity ?? undefined,
+    }))
+
     return {
       productId: product.product_no,
       marketplaceId: 'cafe24',
@@ -271,6 +299,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
         ? [{ url: product.detail_image, sortOrder: 0 }]
         : [],
       status: product.display,
+      variants: normalizedVariants.length > 0 ? normalizedVariants : undefined,
     }
   }
 }

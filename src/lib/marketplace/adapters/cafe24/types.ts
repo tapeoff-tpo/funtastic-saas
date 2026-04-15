@@ -67,3 +67,16 @@ export interface Cafe24Product {
 export interface Cafe24ProductResponse {
   products: Cafe24Product[]
 }
+
+/** A single variant (옵션) from Cafe24 variants API */
+export interface Cafe24Variant {
+  variant_code: string
+  options: Array<{ name: string; value: string }>
+  price: string | number | null
+  stock_quantity: number | null
+}
+
+/** Wrapper for Cafe24 variants response */
+export interface Cafe24VariantsResponse {
+  variants: Cafe24Variant[]
+}

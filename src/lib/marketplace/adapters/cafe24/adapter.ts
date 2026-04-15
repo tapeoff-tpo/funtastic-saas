@@ -162,7 +162,12 @@ export class Cafe24Adapter implements MarketplaceAdapter {
       // 1. Fetch all products (paginated)
       while (true) {
         const response = await this.client.get('admin/products', {
-          searchParams: { shop_no: 1, limit: pageLimit, offset },
+          searchParams: {
+            shop_no: 1,
+            limit: pageLimit,
+            offset,
+            fields: 'product_no,product_name,selling_price,product_code,custom_product_code,detail_image,display',
+          },
         }).json<Cafe24ProductResponse>()
 
         const page = response.products ?? []
@@ -179,7 +184,10 @@ export class Cafe24Adapter implements MarketplaceAdapter {
           limiter(async () => {
             try {
               const res = await this.client.get(`admin/products/${product.product_no}/variants`, {
-                searchParams: { shop_no: 1 },
+                searchParams: {
+                  shop_no: 1,
+                  fields: 'variant_code,custom_variant_code,options,price,stock_quantity',
+                },
               }).json<Cafe24VariantsResponse>()
               return this.normalizeProduct(product, res.variants ?? [])
             } catch {

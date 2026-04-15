@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { products, productVariants } from '@/lib/db/schema'
-import { eq, inArray, sql } from 'drizzle-orm'
+import { inArray, sql } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
 
 /**
@@ -25,7 +25,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Parse Excel
-  const buffer = Buffer.from(await file.arrayBuffer()) as Buffer
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const buffer = Buffer.from(await file.arrayBuffer()) as any
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
   const sheet = workbook.worksheets[0]
@@ -112,7 +113,14 @@ export async function POST(req: NextRequest) {
 
   // 3. Separate rows into updates vs inserts
   const toUpdate: Array<{ id: string; costPrice: string }> = []
-  const toInsert: Array<{ userId: string; internalSku: string; name: string; basePrice: string; costPrice: string | null; status: 'active' }> = []
+  const toInsert: Array<{
+    userId: string
+    internalSku: string
+    name: string
+    basePrice: string
+    costPrice: string | null
+    status: 'active'
+  }> = []
   let skipped = 0
 
   for (const row of rows) {
@@ -136,39 +144,32 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 4. Batch update — transaction with Promise.all for parallelism
+  // 4. Bulk update — single UPDATE FROM VALUES per chunk (≤500 rows = ≤1000 params)
   let updated = 0
-  if (toUpdate.length > 0) {
-    await db.transaction(async (tx) => {
-      // Run up to 20 updates concurrently inside the transaction
-      const CONCURRENCY = 20
-      for (let i = 0; i < toUpdate.length; i += CONCURRENCY) {
-        const batch = toUpdate.slice(i, i + CONCURRENCY)
-        await Promise.all(
-          batch.map((row) =>
-            tx
-              .update(products)
-              .set({ costPrice: row.costPrice, updatedAt: new Date() })
-              .where(eq(products.id, row.id))
-          )
-        )
-      }
-      updated = toUpdate.length
-    })
+  for (const chunk of chunkArray(toUpdate, 500)) {
+    await db.execute(sql`
+      UPDATE products p
+      SET cost_price = v.cost_price,
+          updated_at = now()
+      FROM (
+        VALUES ${sql.join(
+          chunk.map((r) => sql`(${r.id}::uuid, ${r.costPrice}::numeric)`),
+          sql`, `
+        )}
+      ) AS v(id, cost_price)
+      WHERE p.id = v.id
+    `)
+    updated += chunk.length
   }
 
-  // 5. Batch insert — single INSERT ... VALUES (...)
+  // 5. Bulk insert — single INSERT ... VALUES per chunk
   let inserted = 0
-  if (toInsert.length > 0) {
-    // Chunk inserts at 500 rows to stay within Postgres limits
-    for (const chunk of chunkArray(toInsert, 500)) {
-      const result = await db
-        .insert(products)
-        .values(chunk)
-        .onConflictDoNothing()
-      // onConflictDoNothing returns undefined for rowCount in Drizzle; count manually
-      inserted += chunk.length
-    }
+  for (const chunk of chunkArray(toInsert, 500)) {
+    await db
+      .insert(products)
+      .values(chunk)
+      .onConflictDoNothing()
+    inserted += chunk.length
   }
 
   return NextResponse.json({

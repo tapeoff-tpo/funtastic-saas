@@ -5,8 +5,8 @@ import { useRef, useState } from 'react'
 interface UpdateResult {
   total: number
   updated: number
+  inserted: number
   skipped: number
-  noCost: number
   message: string
 }
 
@@ -98,15 +98,15 @@ export function CostUpdateClient() {
             </div>
             <div className="rounded-md border bg-white p-3 text-center">
               <p className="text-xl font-bold text-green-600">{result.updated}</p>
-              <p className="text-xs text-muted-foreground">업데이트</p>
+              <p className="text-xs text-muted-foreground">원가 업데이트</p>
             </div>
             <div className="rounded-md border bg-white p-3 text-center">
-              <p className="text-xl font-bold text-yellow-600">{result.skipped}</p>
-              <p className="text-xs text-muted-foreground">미매칭</p>
+              <p className="text-xl font-bold text-blue-600">{result.inserted}</p>
+              <p className="text-xs text-muted-foreground">신규 추가</p>
             </div>
             <div className="rounded-md border bg-white p-3 text-center">
-              <p className="text-xl font-bold text-gray-400">{result.noCost}</p>
-              <p className="text-xs text-muted-foreground">원가없음</p>
+              <p className="text-xl font-bold text-gray-400">{result.skipped}</p>
+              <p className="text-xs text-muted-foreground">스킵</p>
             </div>
           </div>
         </div>

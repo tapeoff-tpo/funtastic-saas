@@ -7,8 +7,9 @@ import ExcelJS from 'exceljs'
 
 /**
  * POST /api/products/bulk-update
- * Excel 파일을 업로드하면 품목코드로 매칭하여 원가(KRW)를 일괄 업데이트한다.
- * Excel 컬럼: 품목코드, works 신규 원가, works 기존 원가
+ * ESA009M 양식 Excel 업로드 → 품목코드로 매칭
+ * - 기존 상품: 원가(KRW) 업데이트
+ * - 신규 상품: 상품 추가 (품목명 + 원가)
  */
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -27,25 +28,23 @@ export async function POST(req: NextRequest) {
   const buffer = Buffer.from(await file.arrayBuffer())
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
-
   const sheet = workbook.worksheets[0]
 
-  // Find header row (row with 품목코드)
+  // Find header row (row containing 품목코드)
   let headerRow = 0
   let colMap: Record<string, number> = {}
+
   sheet.eachRow((row, rowNum) => {
     if (headerRow) return
     row.eachCell((cell, colNum) => {
-      const val = String(cell.value ?? '').trim()
-      if (val === '품목코드') {
+      if (String(cell.value ?? '').trim() === '품목코드') {
         headerRow = rowNum
         colMap['품목코드'] = colNum
       }
     })
     if (headerRow) {
       row.eachCell((cell, colNum) => {
-        const val = String(cell.value ?? '').trim()
-        colMap[val] = colNum
+        colMap[String(cell.value ?? '').trim()] = colNum
       })
     }
   })
@@ -54,74 +53,98 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '품목코드 헤더를 찾을 수 없습니다.' }, { status: 400 })
   }
 
-  // Read rows
-  type Row = { sku: string; costPrice: string | null }
-  const rows: Row[] = []
+  // Read all rows
+  type ExcelRow = { sku: string; name: string; costPrice: string | null }
+  const rows: ExcelRow[] = []
 
   sheet.eachRow((row, rowNum) => {
     if (rowNum <= headerRow) return
     const sku = String(row.getCell(colMap['품목코드'])?.value ?? '').trim()
     if (!sku) return
 
-    // works 신규 원가 우선, 없으면 works 기존 원가
+    const name = String(row.getCell(colMap['품목명'])?.value ?? '').trim()
+
     const newCost = row.getCell(colMap['works 신규 원가'])?.value
     const oldCost = row.getCell(colMap['works 기존 원가'])?.value
     const cost = newCost ?? oldCost
-    const costPrice = cost != null && String(cost).trim() !== '' ? String(cost) : null
+    const costPrice = cost != null && String(cost).trim() !== '' && String(cost).trim() !== 'x'
+      ? String(cost)
+      : null
 
-    rows.push({ sku, costPrice })
+    rows.push({ sku, name, costPrice })
   })
 
-  const skus = rows.map((r) => r.sku).filter(Boolean)
-  if (skus.length === 0) {
+  if (rows.length === 0) {
     return NextResponse.json({ error: '데이터가 없습니다.' }, { status: 400 })
   }
 
-  // 1. Match by products.internal_sku
-  const matchedProducts = await db
+  const skus = rows.map((r) => r.sku)
+
+  // 1. Find existing products by internal_sku
+  const existingProducts = await db
     .select({ id: products.id, internalSku: products.internalSku })
     .from(products)
     .where(inArray(products.internalSku, skus))
 
-  const productSkuMap = new Map(matchedProducts.map((p) => [p.internalSku, p.id]))
+  const productSkuMap = new Map(existingProducts.map((p) => [p.internalSku, p.id]))
 
-  // 2. Match by product_variants.sku (for unmatched SKUs)
+  // 2. Find existing products via product_variants.sku
   const unmatchedSkus = skus.filter((s) => !productSkuMap.has(s))
-  let variantSkuMap = new Map<string, string>() // sku → productId
-
   if (unmatchedSkus.length > 0) {
     const matchedVariants = await db
       .select({ productId: productVariants.productId, sku: productVariants.sku })
       .from(productVariants)
       .where(inArray(productVariants.sku, unmatchedSkus))
 
-    variantSkuMap = new Map(matchedVariants.map((v) => [v.sku, v.productId]))
+    for (const v of matchedVariants) {
+      productSkuMap.set(v.sku, v.productId)
+    }
   }
 
-  // 3. Update cost_price
+  // 3. Process each row
   let updated = 0
+  let inserted = 0
   let skipped = 0
-  let noCost = 0
 
   for (const row of rows) {
-    if (!row.costPrice) { noCost++; continue }
+    const productId = productSkuMap.get(row.sku)
 
-    const productId = productSkuMap.get(row.sku) ?? variantSkuMap.get(row.sku)
-    if (!productId) { skipped++; continue }
+    if (productId) {
+      // Existing product — update cost_price if we have one
+      if (row.costPrice) {
+        await db
+          .update(products)
+          .set({ costPrice: row.costPrice, updatedAt: new Date() })
+          .where(eq(products.id, productId))
+        updated++
+      } else {
+        skipped++
+      }
+    } else {
+      // New product — insert
+      if (!row.name) { skipped++; continue }
 
-    await db
-      .update(products)
-      .set({ costPrice: row.costPrice, updatedAt: new Date() })
-      .where(eq(products.id, productId))
-
-    updated++
+      try {
+        await db.insert(products).values({
+          userId: user.id,
+          internalSku: row.sku,
+          name: row.name,
+          basePrice: '0',
+          costPrice: row.costPrice ?? null,
+          status: 'active',
+        })
+        inserted++
+      } catch {
+        skipped++
+      }
+    }
   }
 
   return NextResponse.json({
     total: rows.length,
     updated,
+    inserted,
     skipped,
-    noCost,
-    message: `${updated}개 상품 원가 업데이트 완료`,
+    message: `업데이트 ${updated}개, 신규 추가 ${inserted}개 완료`,
   })
 }

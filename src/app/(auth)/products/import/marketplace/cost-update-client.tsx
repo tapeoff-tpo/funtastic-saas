@@ -40,14 +40,16 @@ export function CostUpdateClient() {
         method: 'POST',
         body: formData,
       })
-      const data = await res.json()
+      const text = await res.text()
+      let data: Record<string, unknown> = {}
+      try { data = JSON.parse(text) } catch { /* not json */ }
       if (!res.ok) {
-        setError(data.error ?? '업데이트 실패')
+        setError(`[${res.status}] ${(data.error as string) ?? text.slice(0, 200)}`)
       } else {
-        setResult(data)
+        setResult(data as unknown as UpdateResult)
       }
-    } catch {
-      setError('요청 실패')
+    } catch (e) {
+      setError(`요청 실패: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setLoading(false)
     }

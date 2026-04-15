@@ -91,10 +91,9 @@ export async function GET(req: NextRequest) {
     return html(`<h2 style="color:red">Vault 저장 실패</h2><p>${err instanceof Error ? err.message : '알 수 없는 오류'}</p>`)
   }
 
-  // Success — redirect to settings page
-  return NextResponse.redirect(
-    new URL('/settings/marketplaces?cafe24=token_updated', req.url),
-  )
+  // Success — redirect to settings page (use APP_URL to avoid localhost redirect on Railway)
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://funtastic-saas-production.up.railway.app'
+  return NextResponse.redirect(`${appUrl}/settings/marketplaces?cafe24=token_updated`)
 }
 
 function html(body: string) {

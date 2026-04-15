@@ -8,6 +8,9 @@
  */
 
 import { createClient } from '@/lib/supabase/server'
+import { db } from '@/lib/db'
+import { products } from '@/lib/db/schema'
+import { and, eq, inArray, like, notLike } from 'drizzle-orm'
 import { getProducts, getProductById } from './queries'
 import { createProduct, updateProduct, deleteProduct } from './actions'
 import { syncProductToMarketplace, syncProductToAllMarketplaces } from './sync'
@@ -74,6 +77,51 @@ export async function deleteProductAction(
 ): Promise<ActionResult<void>> {
   const userId = await requireUser()
   return deleteProduct(userId, productId)
+}
+
+/**
+ * Bulk soft-delete products by ID list.
+ */
+export async function bulkDeleteProductsAction(
+  productIds: string[],
+): Promise<ActionResult<{ deleted: number }>> {
+  const userId = await requireUser()
+  if (productIds.length === 0) return { success: true, data: { deleted: 0 } }
+
+  const updated = await db
+    .update(products)
+    .set({ status: 'deleted', updatedAt: new Date() })
+    .where(and(eq(products.userId, userId), inArray(products.id, productIds)))
+    .returning({ id: products.id })
+
+  return { success: true, data: { deleted: updated.length } }
+}
+
+/**
+ * Bulk soft-delete all products matching a skuPrefix filter.
+ * '!11' = 11로 시작 안함, '11' = 11로 시작
+ */
+export async function bulkDeleteBySkuPrefixAction(
+  skuPrefix: string,
+): Promise<ActionResult<{ deleted: number }>> {
+  const userId = await requireUser()
+
+  const skuCondition =
+    skuPrefix === '!11'
+      ? notLike(products.internalSku, '11%')
+      : skuPrefix === '11'
+        ? like(products.internalSku, '11%')
+        : null
+
+  if (!skuCondition) return { success: false, error: '유효하지 않은 필터입니다.' }
+
+  const updated = await db
+    .update(products)
+    .set({ status: 'deleted', updatedAt: new Date() })
+    .where(and(eq(products.userId, userId), skuCondition))
+    .returning({ id: products.id })
+
+  return { success: true, data: { deleted: updated.length } }
 }
 
 /**

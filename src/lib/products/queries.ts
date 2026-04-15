@@ -11,7 +11,7 @@ import {
   productVariants,
   productMarketplaceLinks,
 } from '@/lib/db/schema'
-import { eq, and, or, ilike, desc, asc, count, ne, sql } from 'drizzle-orm'
+import { eq, and, or, ilike, desc, asc, count, ne, sql, notLike, like } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { ProductFilters, ProductListItem, ProductDetail } from './types'
 
@@ -54,6 +54,12 @@ export async function getProducts(
         ilike(products.internalSku, searchPattern),
       )!,
     )
+  }
+
+  if (filters.skuPrefix === '!11') {
+    conditions.push(notLike(products.internalSku, '11%'))
+  } else if (filters.skuPrefix === '11') {
+    conditions.push(like(products.internalSku, '11%'))
   }
 
   const whereClause = and(...conditions)

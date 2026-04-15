@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useQueryState, parseAsString } from 'nuqs'
 import type { Table } from '@tanstack/react-table'
 import type { ProductRow } from './columns'
 
@@ -9,14 +10,50 @@ interface ProductActionsProps {
 }
 
 /**
- * Toolbar actions for the product list: reverse collection dialog.
+ * Toolbar actions for the product list: bulk delete + reverse collection.
  */
-export function ProductActions({ table: _table }: ProductActionsProps) {
+export function ProductActions({ table }: ProductActionsProps) {
   const [showReverseDialog, setShowReverseDialog] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [result, setResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null)
   const [connectionId, setConnectionId] = useState('')
   const [marketplaceId, setMarketplaceId] = useState('coupang')
+  const [skuPrefix] = useQueryState('skuPrefix', parseAsString)
+
+  const selectedIds = table
+    .getSelectedRowModel()
+    .rows.map((r) => r.original.id)
+
+  const handleBulkDelete = () => {
+    if (selectedIds.length === 0) return
+    if (!confirm(`선택한 ${selectedIds.length}개 상품을 삭제하시겠습니까?`)) return
+    startTransition(async () => {
+      const { bulkDeleteProductsAction } = await import('@/lib/products/ui-actions')
+      const res = await bulkDeleteProductsAction(selectedIds)
+      if (res.success) {
+        alert(`${res.data.deleted}개 삭제 완료`)
+        window.location.reload()
+      } else {
+        alert(`삭제 실패: ${res.error}`)
+      }
+    })
+  }
+
+  const handleDeleteByFilter = () => {
+    if (!skuPrefix) return
+    const label = skuPrefix === '!11' ? '11로 시작하지 않는 전체' : '11로 시작하는 전체'
+    if (!confirm(`필터 조건(${label}) 상품을 모두 삭제하시겠습니까?\n이 작업은 현재 페이지뿐 아니라 전체 해당 상품에 적용됩니다.`)) return
+    startTransition(async () => {
+      const { bulkDeleteBySkuPrefixAction } = await import('@/lib/products/ui-actions')
+      const res = await bulkDeleteBySkuPrefixAction(skuPrefix)
+      if (res.success) {
+        alert(`${res.data.deleted}개 삭제 완료`)
+        window.location.reload()
+      } else {
+        alert(`삭제 실패: ${res.error}`)
+      }
+    })
+  }
 
   const MARKETPLACE_OPTIONS = [
     { value: 'coupang', label: '쿠팡' },
@@ -119,13 +156,35 @@ export function ProductActions({ table: _table }: ProductActionsProps) {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setShowReverseDialog(true)}
-        className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-      >
-        역수집
-      </button>
+      <div className="flex items-center gap-2">
+        {selectedIds.length > 0 && (
+          <button
+            type="button"
+            onClick={handleBulkDelete}
+            disabled={isPending}
+            className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+          >
+            {isPending ? '삭제 중...' : `선택 삭제 (${selectedIds.length}개)`}
+          </button>
+        )}
+        {skuPrefix && (
+          <button
+            type="button"
+            onClick={handleDeleteByFilter}
+            disabled={isPending}
+            className="rounded-md border border-red-500 bg-red-50 px-3 py-1.5 text-sm text-red-700 hover:bg-red-100 disabled:opacity-50"
+          >
+            {isPending ? '삭제 중...' : '필터 전체 삭제'}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => setShowReverseDialog(true)}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          역수집
+        </button>
+      </div>
     </>
   )
 }

@@ -22,6 +22,7 @@ export function ProductFilters() {
     status: parseAsString,
     category: parseAsString,
     search: parseAsString,
+    skuPrefix: parseAsString,
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(50),
   })
@@ -50,6 +51,7 @@ export function ProductFilters() {
       status: null,
       category: null,
       search: null,
+      skuPrefix: null,
       page: 1,
       pageSize: filters.pageSize,
     })
@@ -73,6 +75,23 @@ export function ProductFilters() {
               {opt.label}
             </option>
           ))}
+        </select>
+      </div>
+
+      {/* SKU prefix filter */}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-sku-prefix" className="text-xs font-medium text-muted-foreground">
+          상품코드
+        </label>
+        <select
+          id="filter-sku-prefix"
+          value={filters.skuPrefix ?? ''}
+          onChange={(e) => updateFilter({ skuPrefix: e.target.value || null })}
+          className="rounded-md border px-3 py-1.5 text-sm"
+        >
+          <option value="">전체</option>
+          <option value="11">11로 시작</option>
+          <option value="!11">11로 시작 안함</option>
         </select>
       </div>
 

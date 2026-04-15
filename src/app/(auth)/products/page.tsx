@@ -22,6 +22,7 @@ const searchParamsCache = createSearchParamsCache({
   status: parseAsString,
   category: parseAsString,
   search: parseAsString,
+  skuPrefix: parseAsString,
   sort: parseAsString,
   order: parseAsString,
 })
@@ -48,6 +49,7 @@ export default async function ProductsPage({
     status: (params.status ?? undefined) as ProductFiltersParams['status'],
     categoryId: params.category ?? undefined,
     search: params.search ?? undefined,
+    skuPrefix: params.skuPrefix ?? undefined,
     sort: params.sort ?? undefined,
     order: (params.order as 'asc' | 'desc') ?? undefined,
   }

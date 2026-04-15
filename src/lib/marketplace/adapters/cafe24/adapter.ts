@@ -129,7 +129,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
     try {
       const carrierCode = mapCarrierCode('cafe24', invoice.carrierId)
 
-      await this.client.put(`admin/orders/${orderId}/shipments.json`, {
+      await this.client.put(`admin/orders/${orderId}/shipments`, {
         json: {
           shipment: {
             tracking_no: invoice.trackingNumber,
@@ -151,12 +151,25 @@ export class Cafe24Adapter implements MarketplaceAdapter {
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    try {
-      const response = await this.client.get('admin/products', {
-        searchParams: { shop_no: 1, limit: 100 },
-      }).json<Cafe24ProductResponse>()
+    const allProducts: NormalizedProduct[] = []
+    const limit = 100
+    let offset = 0
 
-      return (response.products ?? []).map((product) => this.normalizeProduct(product))
+    try {
+      while (true) {
+        const response = await this.client.get('admin/products', {
+          searchParams: { shop_no: 1, limit, offset },
+        }).json<Cafe24ProductResponse>()
+
+        const page = response.products ?? []
+        allProducts.push(...page.map((p) => this.normalizeProduct(p)))
+
+        // Cafe24 returns fewer items than limit when we've reached the end
+        if (page.length < limit) break
+        offset += limit
+      }
+
+      return allProducts
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
@@ -193,7 +206,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
       if (product.name) body.product_name = product.name
       if (product.price != null) body.selling_price = product.price
 
-      await this.client.put(`admin/products/${marketplaceProductId}.json`, {
+      await this.client.put(`admin/products/${marketplaceProductId}`, {
         json: { product: body },
       }).json()
 
@@ -252,7 +265,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
       productId: product.product_no,
       marketplaceId: 'cafe24',
       name: product.product_name,
-      price: product.selling_price,
+      price: product.selling_price != null ? Number(product.selling_price) : 0,
       sku: product.product_code,
       images: product.detail_image
         ? [{ url: product.detail_image, sortOrder: 0 }]

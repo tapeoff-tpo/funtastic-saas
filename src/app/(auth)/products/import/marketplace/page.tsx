@@ -3,6 +3,7 @@ import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { MarketplaceImportClient } from './import-client'
+import { CostUpdateClient } from './cost-update-client'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = { title: '마켓플레이스 가져오기' }
@@ -47,6 +48,9 @@ export default async function MarketplaceImportPage() {
       ) : (
         <MarketplaceImportClient connections={connected} />
       )}
+
+      <hr />
+      <CostUpdateClient />
     </div>
   )
 }

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { products, productVariants } from '@/lib/db/schema'
-import { eq, inArray } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
 
 /**
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Parse Excel
-  const buffer = Buffer.from(await file.arrayBuffer())
+  const buffer = Buffer.from(await file.arrayBuffer()) as Buffer
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(buffer)
   const sheet = workbook.worksheets[0]
@@ -80,63 +80,94 @@ export async function POST(req: NextRequest) {
 
   const skus = rows.map((r) => r.sku)
 
-  // 1. Find existing products by internal_sku
-  const existingProducts = await db
-    .select({ id: products.id, internalSku: products.internalSku })
-    .from(products)
-    .where(inArray(products.internalSku, skus))
+  // Helper: chunk array to avoid Postgres parameter limit
+  const chunkArray = <T>(arr: T[], size: number): T[][] => {
+    const result: T[][] = []
+    for (let i = 0; i < arr.length; i += size) result.push(arr.slice(i, i + size))
+    return result
+  }
 
-  const productSkuMap = new Map(existingProducts.map((p) => [p.internalSku, p.id]))
+  // 1. Find existing products by internal_sku (chunked)
+  const productSkuMap = new Map<string, string>() // sku → product id
 
-  // 2. Find existing products via product_variants.sku
+  for (const chunk of chunkArray(skus, 500)) {
+    const found = await db
+      .select({ id: products.id, internalSku: products.internalSku })
+      .from(products)
+      .where(inArray(products.internalSku, chunk))
+    for (const p of found) productSkuMap.set(p.internalSku, p.id)
+  }
+
+  // 2. Find via product_variants.sku for unmatched (chunked)
   const unmatchedSkus = skus.filter((s) => !productSkuMap.has(s))
   if (unmatchedSkus.length > 0) {
-    const matchedVariants = await db
-      .select({ productId: productVariants.productId, sku: productVariants.sku })
-      .from(productVariants)
-      .where(inArray(productVariants.sku, unmatchedSkus))
-
-    for (const v of matchedVariants) {
-      productSkuMap.set(v.sku, v.productId)
+    for (const chunk of chunkArray(unmatchedSkus, 500)) {
+      const matchedVariants = await db
+        .select({ productId: productVariants.productId, sku: productVariants.sku })
+        .from(productVariants)
+        .where(inArray(productVariants.sku, chunk))
+      for (const v of matchedVariants) productSkuMap.set(v.sku, v.productId)
     }
   }
 
-  // 3. Process each row
-  let updated = 0
-  let inserted = 0
+  // 3. Separate rows into updates vs inserts
+  const toUpdate: Array<{ id: string; costPrice: string }> = []
+  const toInsert: Array<{ userId: string; internalSku: string; name: string; basePrice: string; costPrice: string | null; status: 'active' }> = []
   let skipped = 0
 
   for (const row of rows) {
     const productId = productSkuMap.get(row.sku)
-
     if (productId) {
-      // Existing product — update cost_price if we have one
       if (row.costPrice) {
-        await db
-          .update(products)
-          .set({ costPrice: row.costPrice, updatedAt: new Date() })
-          .where(eq(products.id, productId))
-        updated++
+        toUpdate.push({ id: productId, costPrice: row.costPrice })
       } else {
         skipped++
       }
     } else {
-      // New product — insert
       if (!row.name) { skipped++; continue }
+      toInsert.push({
+        userId: user.id,
+        internalSku: row.sku,
+        name: row.name,
+        basePrice: '0',
+        costPrice: row.costPrice ?? null,
+        status: 'active',
+      })
+    }
+  }
 
-      try {
-        await db.insert(products).values({
-          userId: user.id,
-          internalSku: row.sku,
-          name: row.name,
-          basePrice: '0',
-          costPrice: row.costPrice ?? null,
-          status: 'active',
-        })
-        inserted++
-      } catch {
-        skipped++
+  // 4. Batch update — transaction with Promise.all for parallelism
+  let updated = 0
+  if (toUpdate.length > 0) {
+    await db.transaction(async (tx) => {
+      // Run up to 20 updates concurrently inside the transaction
+      const CONCURRENCY = 20
+      for (let i = 0; i < toUpdate.length; i += CONCURRENCY) {
+        const batch = toUpdate.slice(i, i + CONCURRENCY)
+        await Promise.all(
+          batch.map((row) =>
+            tx
+              .update(products)
+              .set({ costPrice: row.costPrice, updatedAt: new Date() })
+              .where(eq(products.id, row.id))
+          )
+        )
       }
+      updated = toUpdate.length
+    })
+  }
+
+  // 5. Batch insert — single INSERT ... VALUES (...)
+  let inserted = 0
+  if (toInsert.length > 0) {
+    // Chunk inserts at 500 rows to stay within Postgres limits
+    for (const chunk of chunkArray(toInsert, 500)) {
+      const result = await db
+        .insert(products)
+        .values(chunk)
+        .onConflictDoNothing()
+      // onConflictDoNothing returns undefined for rowCount in Drizzle; count manually
+      inserted += chunk.length
     }
   }
 

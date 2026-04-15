@@ -99,21 +99,18 @@ export async function bulkDeleteProductsAction(
 
 /**
  * Bulk soft-delete all products matching a skuPrefix filter.
- * '!11' = 11로 시작 안함, '11' = 11로 시작
  */
 export async function bulkDeleteBySkuPrefixAction(
-  skuPrefix: string,
+  prefix: string,
+  exclude: boolean,
 ): Promise<ActionResult<{ deleted: number }>> {
   const userId = await requireUser()
+  if (!prefix) return { success: false, error: '접두사를 입력해주세요.' }
 
-  const skuCondition =
-    skuPrefix === '!11'
-      ? notLike(products.internalSku, '11%')
-      : skuPrefix === '11'
-        ? like(products.internalSku, '11%')
-        : null
-
-  if (!skuCondition) return { success: false, error: '유효하지 않은 필터입니다.' }
+  const pattern = `${prefix}%`
+  const skuCondition = exclude
+    ? notLike(products.internalSku, pattern)
+    : like(products.internalSku, pattern)
 
   const updated = await db
     .update(products)

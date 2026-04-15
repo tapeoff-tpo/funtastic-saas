@@ -56,10 +56,13 @@ export async function getProducts(
     )
   }
 
-  if (filters.skuPrefix === '!11') {
-    conditions.push(notLike(products.internalSku, '11%'))
-  } else if (filters.skuPrefix === '11') {
-    conditions.push(like(products.internalSku, '11%'))
+  if (filters.skuPrefix) {
+    const pattern = `${filters.skuPrefix}%`
+    conditions.push(
+      filters.skuExclude
+        ? notLike(products.internalSku, pattern)
+        : like(products.internalSku, pattern),
+    )
   }
 
   const whereClause = and(...conditions)

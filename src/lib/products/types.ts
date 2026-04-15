@@ -99,8 +99,10 @@ export interface ProductFilters {
   categoryId?: string
   sort?: string
   order?: 'asc' | 'desc'
-  /** '11' = 11로 시작, '!11' = 11로 시작 안함 */
+  /** SKU 접두사 필터 텍스트 */
   skuPrefix?: string
+  /** true = 해당 접두사 제외, false = 해당 접두사 포함 */
+  skuExclude?: boolean
 }
 
 /** Product with variant count for list views */

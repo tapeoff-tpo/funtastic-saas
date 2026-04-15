@@ -19,6 +19,7 @@ export function ProductActions({ table }: ProductActionsProps) {
   const [connectionId, setConnectionId] = useState('')
   const [marketplaceId, setMarketplaceId] = useState('coupang')
   const [skuPrefix] = useQueryState('skuPrefix', parseAsString)
+  const [skuExclude] = useQueryState('skuExclude', parseAsString)
 
   const selectedIds = table
     .getSelectedRowModel()
@@ -41,11 +42,14 @@ export function ProductActions({ table }: ProductActionsProps) {
 
   const handleDeleteByFilter = () => {
     if (!skuPrefix) return
-    const label = skuPrefix === '!11' ? '11로 시작하지 않는 전체' : '11로 시작하는 전체'
+    const isExclude = skuExclude === 'true'
+    const label = isExclude
+      ? `"${skuPrefix}"로 시작하지 않는 전체`
+      : `"${skuPrefix}"로 시작하는 전체`
     if (!confirm(`필터 조건(${label}) 상품을 모두 삭제하시겠습니까?\n이 작업은 현재 페이지뿐 아니라 전체 해당 상품에 적용됩니다.`)) return
     startTransition(async () => {
       const { bulkDeleteBySkuPrefixAction } = await import('@/lib/products/ui-actions')
-      const res = await bulkDeleteBySkuPrefixAction(skuPrefix)
+      const res = await bulkDeleteBySkuPrefixAction(skuPrefix, isExclude)
       if (res.success) {
         alert(`${res.data.deleted}개 삭제 완료`)
         window.location.reload()

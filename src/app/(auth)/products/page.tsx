@@ -65,6 +65,7 @@ export default async function ProductsPage({
     name: item.name,
     categoryId: item.categoryId,
     basePrice: item.basePrice,
+    costPrice: item.costPrice ?? null,
     status: item.status,
     variantCount: item.variantCount,
     updatedAt: item.updatedAt,

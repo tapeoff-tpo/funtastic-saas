@@ -11,6 +11,7 @@ export interface ProductRow {
   name: string
   categoryId: string | null
   basePrice: string
+  costPrice: string | null
   status: ProductStatus
   variantCount: number
   updatedAt: Date | string
@@ -86,14 +87,16 @@ export const columns: ColumnDef<ProductRow>[] = [
     },
     size: 140,
   },
-  // 판매가
+  // 원가
   {
-    accessorKey: 'basePrice',
-    header: '판매가',
+    accessorKey: 'costPrice',
+    header: '원가',
     cell: ({ row }) => {
-      const price = Number(row.getValue('basePrice'))
-      if (Number.isNaN(price)) return '-'
-      return `${price.toLocaleString('ko-KR')}원`
+      const price = row.getValue('costPrice') as string | null
+      if (!price) return <span className="text-muted-foreground">-</span>
+      const num = Number(price)
+      if (Number.isNaN(num)) return '-'
+      return `${num.toLocaleString('ko-KR')}원`
     },
     size: 110,
   },

@@ -283,7 +283,8 @@ export class Cafe24Adapter implements MarketplaceAdapter {
 
   private normalizeProduct(product: Cafe24Product, variants: Cafe24Variant[] = []): NormalizedProduct {
     const normalizedVariants = variants.map((v) => ({
-      sku: v.variant_code,
+      // 자체상품코드 우선, 없으면 Cafe24 variant_code
+      sku: v.custom_variant_code?.trim() || v.variant_code,
       price: v.price != null ? Number(v.price) : undefined,
       optionText: v.options.map((o) => `${o.name}: ${o.value}`).join(' / '),
       stock: v.stock_quantity ?? undefined,
@@ -294,7 +295,8 @@ export class Cafe24Adapter implements MarketplaceAdapter {
       marketplaceId: 'cafe24',
       name: product.product_name,
       price: product.selling_price != null ? Number(product.selling_price) : 0,
-      sku: product.product_code,
+      // 자체상품코드 우선, 없으면 Cafe24 product_code
+      sku: product.custom_product_code?.trim() || product.product_code,
       images: product.detail_image
         ? [{ url: product.detail_image, sortOrder: 0 }]
         : [],

@@ -59,6 +59,7 @@ export interface Cafe24Product {
   product_name: string
   selling_price: string | number | null
   product_code: string
+  custom_product_code: string | null
   detail_image: string
   display: string
 }
@@ -71,6 +72,7 @@ export interface Cafe24ProductResponse {
 /** A single variant (옵션) from Cafe24 variants API */
 export interface Cafe24Variant {
   variant_code: string
+  custom_variant_code: string | null
   options: Array<{ name: string; value: string }>
   price: string | number | null
   stock_quantity: number | null

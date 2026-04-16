@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Read all rows
-  type ExcelRow = { sku: string; name: string; costPrice: string | null }
+  type ExcelRow = { sku: string; name: string; costPrice: string | null; warehouseLocation: string | null }
   const rows: ExcelRow[] = []
 
   sheet.eachRow((row, rowNum) => {
@@ -73,7 +73,14 @@ export async function POST(req: NextRequest) {
       ? String(cost)
       : null
 
-    rows.push({ sku, name, costPrice })
+    const locationRaw = colMap['한국창고기준 위치']
+      ? row.getCell(colMap['한국창고기준 위치'])?.value
+      : null
+    const warehouseLocation = locationRaw != null && String(locationRaw).trim() !== ''
+      ? String(locationRaw).trim()
+      : null
+
+    rows.push({ sku, name, costPrice, warehouseLocation })
   })
 
   if (rows.length === 0) {
@@ -113,13 +120,14 @@ export async function POST(req: NextRequest) {
   }
 
   // 3. Separate rows into updates vs inserts
-  const toUpdate: Array<{ id: string; costPrice: string }> = []
+  const toUpdate: Array<{ id: string; costPrice: string | null; warehouseLocation: string | null }> = []
   const toInsert: Array<{
     userId: string
     internalSku: string
     name: string
     basePrice: string
     costPrice: string | null
+    warehouseLocation: string | null
     status: 'active'
   }> = []
   let skipped = 0
@@ -127,8 +135,8 @@ export async function POST(req: NextRequest) {
   for (const row of rows) {
     const productId = productSkuMap.get(row.sku)
     if (productId) {
-      if (row.costPrice) {
-        toUpdate.push({ id: productId, costPrice: row.costPrice })
+      if (row.costPrice || row.warehouseLocation) {
+        toUpdate.push({ id: productId, costPrice: row.costPrice, warehouseLocation: row.warehouseLocation })
       } else {
         skipped++
       }
@@ -140,6 +148,7 @@ export async function POST(req: NextRequest) {
         name: row.name,
         basePrice: '0',
         costPrice: row.costPrice ?? null,
+        warehouseLocation: row.warehouseLocation ?? null,
         status: 'active',
       })
     }
@@ -157,19 +166,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 5. Bulk update — single UPDATE FROM VALUES per chunk (≤500 rows = ≤1000 params)
+  // 5. Bulk update — single UPDATE FROM VALUES per chunk
   let updated = 0
   for (const chunk of chunkArray(toUpdate, 500)) {
     await db.execute(sql`
       UPDATE products p
-      SET cost_price = v.cost_price,
+      SET cost_price = COALESCE(v.cost_price, p.cost_price),
+          warehouse_location = COALESCE(v.warehouse_location, p.warehouse_location),
           updated_at = now()
       FROM (
         VALUES ${sql.join(
-          chunk.map((r) => sql`(${r.id}::uuid, ${r.costPrice}::numeric)`),
+          chunk.map((r) => sql`(${r.id}::uuid, ${r.costPrice}::numeric, ${r.warehouseLocation}::varchar)`),
           sql`, `
         )}
-      ) AS v(id, cost_price)
+      ) AS v(id, cost_price, warehouse_location)
       WHERE p.id = v.id
     `)
     updated += chunk.length

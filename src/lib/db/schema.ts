@@ -356,6 +356,7 @@ export const products = pgTable(
     basePrice: numeric('base_price', { precision: 12, scale: 2 }).notNull(),
     costPrice: numeric('cost_price', { precision: 12, scale: 2 }),
     categoryId: varchar('category_id', { length: 100 }),
+    warehouseLocation: varchar('warehouse_location', { length: 200 }),
     status: productStatusEnum('status').notNull().default('draft'),
     images: jsonb('images').$type<Array<{ url: string; sortOrder: number }>>(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),

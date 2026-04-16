@@ -12,6 +12,7 @@ export interface ProductRow {
   categoryId: string | null
   basePrice: string
   costPrice: string | null
+  warehouseLocation: string | null
   status: ProductStatus
   variantCount: number
   updatedAt: Date | string
@@ -100,6 +101,21 @@ export const columns: ColumnDef<ProductRow>[] = [
       return `${num.toLocaleString('ko-KR')}원`
     },
     size: 110,
+  },
+  // 위치
+  {
+    accessorKey: 'warehouseLocation',
+    header: '위치',
+    enableSorting: false,
+    cell: ({ row }) => {
+      const loc = row.getValue('warehouseLocation') as string | null
+      return loc ? (
+        <span className="text-sm">{loc}</span>
+      ) : (
+        <span className="text-muted-foreground">-</span>
+      )
+    },
+    size: 100,
   },
   // 상태
   {

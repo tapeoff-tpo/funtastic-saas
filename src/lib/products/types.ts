@@ -22,6 +22,7 @@ export interface Product {
   description: string | null
   basePrice: string // numeric comes as string from Drizzle
   costPrice: string | null
+  warehouseLocation: string | null
   categoryId: string | null
   status: ProductStatus
   images: ProductImage[] | null

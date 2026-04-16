@@ -81,6 +81,7 @@ export async function getProducts(
         description: products.description,
         basePrice: products.basePrice,
         costPrice: products.costPrice,
+        warehouseLocation: products.warehouseLocation,
         categoryId: products.categoryId,
         status: products.status,
         images: products.images,

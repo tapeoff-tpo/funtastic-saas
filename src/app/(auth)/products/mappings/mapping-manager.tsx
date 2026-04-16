@@ -305,6 +305,10 @@ export function MappingManager() {
   const [mappingSearch, setMappingSearch] = useState('')
   const [selectedMarket, setSelectedMarket] = useState<string>('all')
   const [autoMapping, setAutoMapping] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [importMarket, setImportMarket] = useState('naver')
+  const [importFile, setImportFile] = useState<File | null>(null)
+  const [importing, setImporting] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -354,6 +358,33 @@ export function MappingManager() {
     }
   }
 
+  const handleExcelImport = async () => {
+    if (!importFile) return
+    setImporting(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', importFile)
+      formData.append('marketplaceId', importMarket)
+      const res = await fetch('/api/products/mappings/import', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast.error(data.error || '업로드 실패')
+      } else {
+        toast.success(data.message)
+        setShowImport(false)
+        setImportFile(null)
+        void load()
+      }
+    } catch {
+      toast.error('업로드 실패')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const allMarkets = Array.from(
     new Set([
       ...unmapped.map((u) => u.marketplaceId),
@@ -393,6 +424,65 @@ export function MappingManager() {
           onClose={() => setDialog(null)}
           onSaved={load}
         />
+      )}
+
+      {/* Excel import modal */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-md rounded-lg border bg-white p-6 shadow-xl">
+            <h2 className="mb-4 text-lg font-semibold">엑셀로 매핑</h2>
+            <p className="mb-4 text-sm text-muted-foreground">
+              마켓에서 다운받은 엑셀을 올리면 상품코드로 자동 매핑합니다.
+              엑셀에 &quot;상품코드&quot;와 &quot;상품명&quot; 컬럼이 있어야 합니다.
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium">마켓플레이스</label>
+                <select
+                  value={importMarket}
+                  onChange={(e) => setImportMarket(e.target.value)}
+                  className="w-full rounded-md border px-3 py-1.5 text-sm"
+                >
+                  {Object.entries(MARKETPLACE_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium">엑셀 파일</label>
+                <label className="block cursor-pointer rounded-md border px-4 py-2 text-sm hover:bg-gray-50">
+                  {importFile?.name ?? '파일 선택'}
+                  <input
+                    type="file"
+                    accept=".xlsx,.xls"
+                    className="hidden"
+                    onChange={(e) => setImportFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowImport(false); setImportFile(null) }}
+                className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleExcelImport()}
+                disabled={importing || !importFile}
+                className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+              >
+                {importing ? '매핑 중...' : '매핑 시작'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Market filter */}
@@ -444,6 +534,13 @@ export function MappingManager() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowImport(true)}
+              className="rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-700"
+            >
+              엑셀로 매핑
+            </button>
             {unmapped.length > 0 && (
               <button
                 type="button"

@@ -1,22 +1,21 @@
 /**
  * Apply product name mappings to order items.
  *
- * When exporting shipping labels / 송장, we replace each order item's
- * marketplace productName with the user's internal displayName.
+ * Two-tier matching:
+ * 1. SKU 자동 매핑: orderItem.sku → products.internalSku / productVariants.sku
+ * 2. 수동 매핑: (marketplaceId, productName) → productNameMappings.displayName
  *
- * Usage (server-side, inside an export route or action):
- *
- *   const items = await applyProductNameMappings(userId, orderItems)
- *   // items[n].productName is now the internal display name if mapped
+ * 수동 매핑이 있으면 우선 적용, 없으면 SKU 매칭 시도.
  */
 
 import { db } from '@/lib/db'
-import { productNameMappings } from '@/lib/db/schema'
+import { productNameMappings, products, productVariants } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
 export interface OrderItemLike {
   productName: string
   marketplaceId?: string
+  sku?: string | null
   [key: string]: unknown
 }
 
@@ -26,9 +25,8 @@ export interface MappingEntry {
 }
 
 /**
- * Load all mappings for a user and return a lookup Map.
+ * Load manual name mappings for a user.
  * Key: `${marketplaceId}::${marketplaceName}`
- * Value: { displayName, pickingLocation }
  */
 export async function loadMappingLookup(
   userId: string,
@@ -54,35 +52,98 @@ export async function loadMappingLookup(
 }
 
 /**
- * Apply mappings in-place: replace productName with displayName where a
- * mapping exists for (marketplaceId, productName). Also spreads pickingLocation
- * onto the returned item.
- *
- * Returns a new array with the productName and pickingLocation fields updated.
- * Items without a mapping keep their original productName and have no pickingLocation.
+ * Load SKU-based product lookup for a user.
+ * Key: sku (internalSku or variant sku)
+ * Value: { displayName (product name), pickingLocation (warehouseLocation) }
+ */
+export async function loadSkuLookup(
+  userId: string,
+): Promise<Map<string, MappingEntry>> {
+  const map = new Map<string, MappingEntry>()
+
+  // 1. products.internalSku → product name + warehouseLocation
+  const productRows = await db
+    .select({
+      internalSku: products.internalSku,
+      name: products.name,
+      warehouseLocation: products.warehouseLocation,
+    })
+    .from(products)
+    .where(eq(products.userId, userId))
+
+  for (const row of productRows) {
+    map.set(row.internalSku, {
+      displayName: row.name,
+      pickingLocation: row.warehouseLocation,
+    })
+  }
+
+  // 2. productVariants.sku → parent product name + warehouseLocation
+  const variantRows = await db
+    .select({
+      sku: productVariants.sku,
+      productName: products.name,
+      warehouseLocation: products.warehouseLocation,
+    })
+    .from(productVariants)
+    .innerJoin(products, eq(productVariants.productId, products.id))
+    .where(eq(products.userId, userId))
+
+  for (const row of variantRows) {
+    if (!map.has(row.sku)) {
+      map.set(row.sku, {
+        displayName: row.productName,
+        pickingLocation: row.warehouseLocation,
+      })
+    }
+  }
+
+  return map
+}
+
+/**
+ * Apply mappings: 수동 매핑 우선, 없으면 SKU 자동 매핑.
  */
 export function applyMappings<T extends OrderItemLike>(
   items: T[],
-  lookup: Map<string, MappingEntry>,
+  nameLookup: Map<string, MappingEntry>,
+  skuLookup: Map<string, MappingEntry>,
   marketplaceId?: string,
 ): (T & { pickingLocation?: string | null })[] {
   return items.map((item) => {
+    // 1. 수동 매핑 (marketplaceId + productName)
     const mid = item.marketplaceId ?? marketplaceId ?? ''
-    const key = `${mid}::${item.productName}`
-    const entry = lookup.get(key)
-    if (!entry) return item
-    return { ...item, productName: entry.displayName, pickingLocation: entry.pickingLocation }
+    const nameKey = `${mid}::${item.productName}`
+    const nameEntry = nameLookup.get(nameKey)
+    if (nameEntry) {
+      return { ...item, productName: nameEntry.displayName, pickingLocation: nameEntry.pickingLocation }
+    }
+
+    // 2. SKU 자동 매핑
+    const sku = typeof item.sku === 'string' ? item.sku.trim() : null
+    if (sku) {
+      const skuEntry = skuLookup.get(sku)
+      if (skuEntry) {
+        return { ...item, productName: skuEntry.displayName, pickingLocation: skuEntry.pickingLocation }
+      }
+    }
+
+    // 매칭 없음 — 원본 유지
+    return item
   })
 }
 
 /**
- * Convenience: load mappings and apply them in one call.
+ * Convenience: load all lookups and apply in one call.
  */
 export async function applyProductNameMappings<T extends OrderItemLike>(
   userId: string,
   items: T[],
   marketplaceId?: string,
 ): Promise<(T & { pickingLocation?: string | null })[]> {
-  const lookup = await loadMappingLookup(userId)
-  return applyMappings(items, lookup, marketplaceId)
+  const [nameLookup, skuLookup] = await Promise.all([
+    loadMappingLookup(userId),
+    loadSkuLookup(userId),
+  ])
+  return applyMappings(items, nameLookup, skuLookup, marketplaceId)
 }

@@ -14,7 +14,7 @@ import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
-import { loadMappingLookup, applyMappings, type MappingEntry } from '@/lib/products/apply-mappings'
+import { loadMappingLookup, loadSkuLookup, applyMappings, type MappingEntry } from '@/lib/products/apply-mappings'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -49,10 +49,10 @@ export async function GET(request: NextRequest) {
       db.select().from(shipments).where(inArray(shipments.orderId, orderIds)),
     ])
 
-    // Load product name mappings for this user (empty map if unauthenticated)
-    const mappingLookup = user
-      ? await loadMappingLookup(user.id)
-      : new Map<string, MappingEntry>()
+    // Load product name mappings + SKU lookup for this user
+    const [mappingLookup, skuLookup] = user
+      ? await Promise.all([loadMappingLookup(user.id), loadSkuLookup(user.id)])
+      : [new Map<string, MappingEntry>(), new Map<string, MappingEntry>()]
 
     // Build flat order records for export
     const exportData: Record<string, unknown>[] = orderRows.map((order) => {
@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
       const mappedItems = applyMappings(
         items.map((i) => ({ ...i, marketplaceId: order.marketplaceId })),
         mappingLookup,
+        skuLookup,
         order.marketplaceId,
       )
       const firstItem = mappedItems[0]

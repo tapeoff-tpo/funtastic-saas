@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition } from 'react'
+import { useEffect, useState, useTransition, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 
 const MARKETPLACE_LABELS: Record<string, string> = {
@@ -42,6 +42,103 @@ interface MappingItem {
   updatedAt: string
 }
 
+interface ProductSearchResult {
+  id: string
+  internalSku: string
+  name: string
+  warehouseLocation: string | null
+}
+
+// ── Product Search Component ──
+function ProductSearch({
+  onSelect,
+}: {
+  onSelect: (product: ProductSearchResult) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<ProductSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+  const [showDropdown, setShowDropdown] = useState(false)
+  const timeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+
+  const search = useCallback(async (q: string) => {
+    if (q.length < 1) { setResults([]); return }
+    setSearching(true)
+    try {
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`)
+      const data = await res.json()
+      setResults(data.results ?? [])
+      setShowDropdown(true)
+    } catch { /* ignore */ }
+    setSearching(false)
+  }, [])
+
+  const handleChange = (value: string) => {
+    setQuery(value)
+    if (timeout.current) clearTimeout(timeout.current)
+    timeout.current = setTimeout(() => search(value), 300)
+  }
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <label className="mb-1 block text-sm font-medium">
+        상품 검색 (상품코드 또는 상품명)
+      </label>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => results.length > 0 && setShowDropdown(true)}
+        placeholder="예: 111975-0001 또는 컬린디"
+        className="w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
+      />
+      {searching && (
+        <p className="mt-1 text-xs text-muted-foreground">검색 중...</p>
+      )}
+      {showDropdown && results.length > 0 && (
+        <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-white shadow-lg">
+          {results.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+              onClick={() => {
+                onSelect(p)
+                setQuery(`${p.internalSku} - ${p.name}`)
+                setShowDropdown(false)
+              }}
+            >
+              <span className="font-mono text-xs text-muted-foreground">{p.internalSku}</span>
+              <span className="flex-1 truncate">{p.name}</span>
+              {p.warehouseLocation && (
+                <span className="text-xs text-muted-foreground">{p.warehouseLocation}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+      {showDropdown && results.length === 0 && query.length >= 1 && !searching && (
+        <div className="absolute z-10 mt-1 w-full rounded-md border bg-white p-3 text-center text-sm text-muted-foreground shadow-lg">
+          검색 결과 없음
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Mapping Dialog ──
 interface MappingDialogProps {
   item: UnmappedItem | MappingItem | null
   mode: 'create' | 'edit'
@@ -53,9 +150,12 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
   const [displayName, setDisplayName] = useState(
     mode === 'edit' ? (item as MappingItem).displayName : '',
   )
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(
+    mode === 'edit' ? (item as MappingItem).productId : null,
+  )
+  const [pickingLocation, setPickingLocation] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
-  // Pre-fill with marketplace name as default when creating
   useEffect(() => {
     if (mode === 'create' && item && !displayName) {
       setDisplayName((item as UnmappedItem).productName)
@@ -74,6 +174,12 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
       ? (item as UnmappedItem).productName
       : (item as MappingItem).marketplaceName
 
+  const handleProductSelect = (product: ProductSearchResult) => {
+    setDisplayName(product.name)
+    setSelectedProductId(product.id)
+    setPickingLocation(product.warehouseLocation)
+  }
+
   const handleSave = () => {
     if (!displayName.trim()) return
     startTransition(async () => {
@@ -83,13 +189,19 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
           res = await fetch(`/api/products/mappings/${(item as MappingItem).id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ displayName }),
+            body: JSON.stringify({ displayName, productId: selectedProductId }),
           })
         } else {
           res = await fetch('/api/products/mappings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ marketplaceId, marketplaceName, displayName }),
+            body: JSON.stringify({
+              marketplaceId,
+              marketplaceName,
+              displayName,
+              productId: selectedProductId,
+              pickingLocation,
+            }),
           })
         }
         if (!res.ok) {
@@ -126,6 +238,9 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
             </div>
           </div>
 
+          {/* Product search */}
+          <ProductSearch onSelect={handleProductSelect} />
+
           <div>
             <label
               htmlFor="display-name"
@@ -141,12 +256,17 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
               onKeyDown={(e) => e.key === 'Enter' && handleSave()}
               placeholder="예: 닭가슴살 300g x5"
               className="w-full rounded-md border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-              autoFocus
             />
             <p className="mt-1 text-xs text-muted-foreground">
-              이 이름이 송장/출고 서류에 사용됩니다
+              상품을 검색하면 자동으로 채워집니다. 직접 입력도 가능합니다.
             </p>
           </div>
+
+          {selectedProductId && (
+            <p className="text-xs text-green-600">
+              상품 연결됨 (ID: {selectedProductId.slice(0, 8)}...)
+            </p>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
@@ -171,6 +291,7 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
   )
 }
 
+// ── Main Manager ──
 export function MappingManager() {
   const [mappings, setMappings] = useState<MappingItem[]>([])
   const [unmapped, setUnmapped] = useState<UnmappedItem[]>([])
@@ -183,6 +304,7 @@ export function MappingManager() {
   const [unmappedSearch, setUnmappedSearch] = useState('')
   const [mappingSearch, setMappingSearch] = useState('')
   const [selectedMarket, setSelectedMarket] = useState<string>('all')
+  const [autoMapping, setAutoMapping] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -198,7 +320,7 @@ export function MappingManager() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { void load() }, [])
 
   const handleDelete = async (id: string) => {
     if (!confirm('이 매핑을 삭제하시겠습니까?')) return
@@ -206,7 +328,7 @@ export function MappingManager() {
     try {
       await fetch(`/api/products/mappings/${id}`, { method: 'DELETE' })
       toast.success('삭제되었습니다')
-      load()
+      void load()
     } catch {
       toast.error('삭제 실패')
     } finally {
@@ -214,7 +336,24 @@ export function MappingManager() {
     }
   }
 
-  // Collect unique marketplaceIds for filter
+  const handleAutoMapping = async () => {
+    setAutoMapping(true)
+    try {
+      const res = await fetch('/api/products/mappings/auto', { method: 'POST' })
+      const data = await res.json()
+      if (data.matched > 0) {
+        toast.success(data.message)
+        void load()
+      } else {
+        toast.info(data.message)
+      }
+    } catch {
+      toast.error('자동 매핑 실패')
+    } finally {
+      setAutoMapping(false)
+    }
+  }
+
   const allMarkets = Array.from(
     new Set([
       ...unmapped.map((u) => u.marketplaceId),
@@ -288,7 +427,7 @@ export function MappingManager() {
         </div>
       )}
 
-      {/* ── Section 1: Unmapped product names ── */}
+      {/* ── Section 1: Unmapped ── */}
       <section>
         <div className="mb-3 flex items-center justify-between">
           <div>
@@ -301,16 +440,28 @@ export function MappingManager() {
               )}
             </h2>
             <p className="text-xs text-muted-foreground">
-              최근 90일 주문에서 매핑이 없는 상품명 — 내부 상품명을 지정해 주세요
+              최근 90일 주문에서 매핑이 없는 상품명
             </p>
           </div>
-          <input
-            type="text"
-            value={unmappedSearch}
-            onChange={(e) => setUnmappedSearch(e.target.value)}
-            placeholder="상품명 검색"
-            className="rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-black"
-          />
+          <div className="flex items-center gap-2">
+            {unmapped.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleAutoMapping()}
+                disabled={autoMapping}
+                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {autoMapping ? '매칭 중...' : '자동 매핑 (SKU)'}
+              </button>
+            )}
+            <input
+              type="text"
+              value={unmappedSearch}
+              onChange={(e) => setUnmappedSearch(e.target.value)}
+              placeholder="상품명 검색"
+              className="rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-black"
+            />
+          </div>
         </div>
 
         {filteredUnmapped.length === 0 ? (
@@ -439,7 +590,7 @@ export function MappingManager() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleDelete(m.id)}
+                          onClick={() => void handleDelete(m.id)}
                           disabled={deletingId === m.id}
                           className="rounded border border-red-200 px-2.5 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
                         >

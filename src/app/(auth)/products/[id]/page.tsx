@@ -44,6 +44,7 @@ export default function EditProductPage() {
   const [basePrice, setBasePrice] = useState('')
   const [costPrice, setCostPrice] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [defaultCarrierId, setDefaultCarrierId] = useState('')
   const [variants, setVariants] = useState<VariantFormData[]>([])
   const [changeLogs, setChangeLogs] = useState<Array<{
     id: string; fieldName: string; oldValue: string | null; newValue: string | null; createdAt: Date | string
@@ -70,6 +71,7 @@ export default function EditProductPage() {
       setBasePrice(data.basePrice)
       setCostPrice(data.costPrice ?? '')
       setCategoryId(data.categoryId ?? '')
+      setDefaultCarrierId(data.defaultCarrierId ?? '')
       setVariants(
         data.variants.map((v) => ({
           id: v.id,
@@ -136,6 +138,7 @@ export default function EditProductPage() {
         basePrice: Number(basePrice),
         costPrice: costPrice ? Number(costPrice) : undefined,
         categoryId: categoryId || undefined,
+        defaultCarrierId: defaultCarrierId || undefined,
         variants: variants.map((v) => ({
           ...v,
           sku: v.sku.trim(),
@@ -256,7 +259,7 @@ export default function EditProductPage() {
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
             <div className="flex flex-col gap-1">
               <label htmlFor="basePrice" className="text-sm font-medium">판매가 *</label>
               <input
@@ -290,6 +293,20 @@ export default function EditProductPage() {
                 placeholder="카테고리 ID"
                 className="rounded-md border px-3 py-1.5 text-sm"
               />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="defaultCarrierId" className="text-sm font-medium">택배사</label>
+              <select
+                id="defaultCarrierId"
+                value={defaultCarrierId}
+                onChange={(e) => setDefaultCarrierId(e.target.value)}
+                className="rounded-md border px-3 py-1.5 text-sm"
+              >
+                <option value="">선택 안함</option>
+                <option value="cj">CJ대한통운</option>
+                <option value="kyungdong">경동택배</option>
+                <option value="daesin">대신택배</option>
+              </select>
             </div>
           </div>
         </div>

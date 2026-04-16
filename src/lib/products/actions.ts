@@ -40,6 +40,7 @@ export async function createProduct(
           basePrice: String(formData.basePrice),
           costPrice: formData.costPrice != null ? String(formData.costPrice) : null,
           categoryId: formData.categoryId ?? null,
+          defaultCarrierId: formData.defaultCarrierId ?? null,
           images: formData.images ?? null,
           metadata: formData.metadata ?? null,
         })
@@ -123,6 +124,7 @@ export async function updateProduct(
           basePrice: String(formData.basePrice),
           costPrice: formData.costPrice != null ? String(formData.costPrice) : null,
           categoryId: formData.categoryId ?? null,
+          defaultCarrierId: formData.defaultCarrierId ?? null,
           images: formData.images ?? null,
           metadata: formData.metadata ?? null,
           updatedAt: new Date(),

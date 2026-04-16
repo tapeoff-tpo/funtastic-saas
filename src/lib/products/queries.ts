@@ -83,6 +83,7 @@ export async function getProducts(
         basePrice: products.basePrice,
         costPrice: products.costPrice,
         warehouseLocation: products.warehouseLocation,
+        defaultCarrierId: products.defaultCarrierId,
         categoryId: products.categoryId,
         status: products.status,
         images: products.images,

@@ -13,6 +13,7 @@ export interface ProductRow {
   basePrice: string
   costPrice: string | null
   warehouseLocation: string | null
+  defaultCarrierId: string | null
   status: ProductStatus
   variantCount: number
   updatedAt: Date | string
@@ -115,6 +116,22 @@ export const columns: ColumnDef<ProductRow>[] = [
       )
     },
     size: 100,
+  },
+  // 택배사
+  {
+    accessorKey: 'defaultCarrierId',
+    header: '택배사',
+    enableSorting: false,
+    cell: ({ row }) => {
+      const carrier = row.getValue('defaultCarrierId') as string | null
+      const labels: Record<string, string> = { cj: 'CJ', kyungdong: '경동', daesin: '대신' }
+      return carrier ? (
+        <span className="text-sm">{labels[carrier] ?? carrier}</span>
+      ) : (
+        <span className="text-muted-foreground">-</span>
+      )
+    },
+    size: 80,
   },
   // 상태
   {

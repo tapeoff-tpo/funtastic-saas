@@ -9,6 +9,7 @@ const PRODUCT_FIELDS = [
   { value: 'cost_price', label: '원가' },
   { value: 'base_price', label: '판매가' },
   { value: 'warehouse_location', label: '창고위치' },
+  { value: 'default_carrier_id', label: '택배사' },
   { value: 'category_id', label: '카테고리' },
   { value: 'description', label: '설명' },
 ]

@@ -102,6 +102,7 @@ export async function POST(req: NextRequest) {
   type ExcelRow = {
     sku: string; name: string; costPrice: string | null; warehouseLocation: string | null
     basePrice: string | null; categoryId: string | null; description: string | null
+    defaultCarrierId: string | null
   }
   const rows: ExcelRow[] = []
 
@@ -122,8 +123,9 @@ export async function POST(req: NextRequest) {
     const basePrice = readCell(row, fieldColumnMap['base_price'] ?? '')
     const categoryId = readCell(row, fieldColumnMap['category_id'] ?? '')
     const description = readCell(row, fieldColumnMap['description'] ?? '')
+    const defaultCarrierId = readCell(row, fieldColumnMap['default_carrier_id'] ?? '')
 
-    rows.push({ sku, name, costPrice, warehouseLocation, basePrice, categoryId, description })
+    rows.push({ sku, name, costPrice, warehouseLocation, basePrice, categoryId, description, defaultCarrierId })
   })
 
   if (rows.length === 0) {
@@ -171,6 +173,7 @@ export async function POST(req: NextRequest) {
     basePrice: string
     costPrice: string | null
     warehouseLocation: string | null
+    defaultCarrierId: string | null
     categoryId: string | null
     description: string | null
     status: 'active'
@@ -194,6 +197,7 @@ export async function POST(req: NextRequest) {
         basePrice: row.basePrice ?? '0',
         costPrice: row.costPrice ?? null,
         warehouseLocation: row.warehouseLocation ?? null,
+        defaultCarrierId: row.defaultCarrierId ?? null,
         categoryId: row.categoryId ?? null,
         description: row.description ?? null,
         status: 'active',

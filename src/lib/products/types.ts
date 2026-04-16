@@ -23,6 +23,7 @@ export interface Product {
   basePrice: string // numeric comes as string from Drizzle
   costPrice: string | null
   warehouseLocation: string | null
+  defaultCarrierId: string | null
   categoryId: string | null
   status: ProductStatus
   images: ProductImage[] | null
@@ -78,6 +79,7 @@ export interface ProductFormData {
   basePrice: number
   costPrice?: number
   categoryId?: string
+  defaultCarrierId?: string
   images?: ProductImage[]
   metadata?: Record<string, unknown>
   variants: VariantFormData[]

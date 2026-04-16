@@ -255,6 +255,23 @@ export const shipmentGroupOrders = pgTable('shipment_group_orders', {
   uniqueIndex('shipment_group_orders_pk').on(table.shipmentGroupId, table.orderId),
 ])
 
+export const excelImportTemplates = pgTable('excel_import_templates', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  name: varchar('name', { length: 200 }).notNull(),
+  mappings: jsonb('mappings').$type<Array<{
+    field: string
+    excelColumn: string
+  }>>().notNull(),
+  isDefault: boolean('is_default').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+})
+
 export const carrierTemplates = pgTable('carrier_templates', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull(),

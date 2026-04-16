@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products, productVariants } from '@/lib/db/schema'
-import { inArray, sql } from 'drizzle-orm'
+import { products, productVariants, excelImportTemplates } from '@/lib/db/schema'
+import { inArray, sql, eq, and } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
 import { logProductChanges } from '@/lib/products/change-log'
 
@@ -25,6 +25,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'file 필드가 없습니다.' }, { status: 400 })
   }
 
+  // Load template mapping if provided
+  const templateId = formData.get('templateId') as string | null
+  type FieldMapping = { field: string; excelColumn: string }
+  let templateMappings: FieldMapping[] | null = null
+
+  if (templateId) {
+    const [template] = await db
+      .select()
+      .from(excelImportTemplates)
+      .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, user.id)))
+      .limit(1)
+    if (template) {
+      templateMappings = template.mappings as FieldMapping[]
+    }
+  }
+
   // Parse Excel
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const buffer = Buffer.from(await file.arrayBuffer()) as any
@@ -32,16 +48,20 @@ export async function POST(req: NextRequest) {
   await workbook.xlsx.load(buffer)
   const sheet = workbook.worksheets[0]
 
-  // Find header row (row containing 품목코드)
+  // Find header row — search for the SKU column name
+  const skuColumnName = templateMappings
+    ? templateMappings.find((m) => m.field === 'internal_sku')?.excelColumn ?? '품목코드'
+    : '품목코드'
+
   let headerRow = 0
   let colMap: Record<string, number> = {}
 
   sheet.eachRow((row, rowNum) => {
     if (headerRow) return
     row.eachCell((cell, colNum) => {
-      if (String(cell.value ?? '').trim() === '품목코드') {
+      if (String(cell.value ?? '').trim() === skuColumnName) {
         headerRow = rowNum
-        colMap['품목코드'] = colNum
+        colMap[skuColumnName] = colNum
       }
     })
     if (headerRow) {
@@ -52,35 +72,58 @@ export async function POST(req: NextRequest) {
   })
 
   if (!headerRow) {
-    return NextResponse.json({ error: '품목코드 헤더를 찾을 수 없습니다.' }, { status: 400 })
+    return NextResponse.json({ error: `"${skuColumnName}" 헤더를 찾을 수 없습니다.` }, { status: 400 })
+  }
+
+  // Helper: read cell value as trimmed string or null
+  const readCell = (row: ExcelJS.Row, columnName: string): string | null => {
+    const colIdx = colMap[columnName]
+    if (!colIdx) return null
+    const val = row.getCell(colIdx)?.value
+    if (val == null) return null
+    const str = String(val).trim()
+    return str !== '' && str !== 'x' ? str : null
+  }
+
+  // Build field→excelColumn lookup from template or use hardcoded defaults
+  const fieldColumnMap: Record<string, string> = {}
+  if (templateMappings) {
+    for (const m of templateMappings) fieldColumnMap[m.field] = m.excelColumn
+  } else {
+    // Legacy hardcoded ESA009M mapping
+    fieldColumnMap['internal_sku'] = '품목코드'
+    fieldColumnMap['name'] = '품목명'
+    fieldColumnMap['cost_price'] = 'works 신규 원가'
+    fieldColumnMap['cost_price_fallback'] = 'works 기존 원가'
+    fieldColumnMap['warehouse_location'] = '한국창고기준 위치'
   }
 
   // Read all rows
-  type ExcelRow = { sku: string; name: string; costPrice: string | null; warehouseLocation: string | null }
+  type ExcelRow = {
+    sku: string; name: string; costPrice: string | null; warehouseLocation: string | null
+    basePrice: string | null; categoryId: string | null; description: string | null
+  }
   const rows: ExcelRow[] = []
 
   sheet.eachRow((row, rowNum) => {
     if (rowNum <= headerRow) return
-    const sku = String(row.getCell(colMap['품목코드'])?.value ?? '').trim()
+    const sku = readCell(row, fieldColumnMap['internal_sku'] ?? '품목코드')
     if (!sku) return
 
-    const name = String(row.getCell(colMap['품목명'])?.value ?? '').trim()
+    const name = readCell(row, fieldColumnMap['name'] ?? '품목명') ?? ''
 
-    const newCost = row.getCell(colMap['works 신규 원가'])?.value
-    const oldCost = row.getCell(colMap['works 기존 원가'])?.value
-    const cost = newCost ?? oldCost
-    const costPrice = cost != null && String(cost).trim() !== '' && String(cost).trim() !== 'x'
-      ? String(cost)
-      : null
+    // Cost price: template column or legacy fallback
+    let costPrice = readCell(row, fieldColumnMap['cost_price'] ?? '')
+    if (!costPrice && fieldColumnMap['cost_price_fallback']) {
+      costPrice = readCell(row, fieldColumnMap['cost_price_fallback'])
+    }
 
-    const locationRaw = colMap['한국창고기준 위치']
-      ? row.getCell(colMap['한국창고기준 위치'])?.value
-      : null
-    const warehouseLocation = locationRaw != null && String(locationRaw).trim() !== ''
-      ? String(locationRaw).trim()
-      : null
+    const warehouseLocation = readCell(row, fieldColumnMap['warehouse_location'] ?? '')
+    const basePrice = readCell(row, fieldColumnMap['base_price'] ?? '')
+    const categoryId = readCell(row, fieldColumnMap['category_id'] ?? '')
+    const description = readCell(row, fieldColumnMap['description'] ?? '')
 
-    rows.push({ sku, name, costPrice, warehouseLocation })
+    rows.push({ sku, name, costPrice, warehouseLocation, basePrice, categoryId, description })
   })
 
   if (rows.length === 0) {
@@ -128,6 +171,8 @@ export async function POST(req: NextRequest) {
     basePrice: string
     costPrice: string | null
     warehouseLocation: string | null
+    categoryId: string | null
+    description: string | null
     status: 'active'
   }> = []
   let skipped = 0
@@ -146,9 +191,11 @@ export async function POST(req: NextRequest) {
         userId: user.id,
         internalSku: row.sku,
         name: row.name,
-        basePrice: '0',
+        basePrice: row.basePrice ?? '0',
         costPrice: row.costPrice ?? null,
         warehouseLocation: row.warehouseLocation ?? null,
+        categoryId: row.categoryId ?? null,
+        description: row.description ?? null,
         status: 'active',
       })
     }

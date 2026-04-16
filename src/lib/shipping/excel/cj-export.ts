@@ -69,27 +69,50 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
   headerRow.alignment = { horizontal: 'center' }
 
   // Set column widths
-  ws.columns = HEADERS.map((h, i) => ({
+  ws.columns = HEADERS.map((_, i) => ({
     key: String(i + 1),
     width: [15, 15, 15, 40, 30, 8, 8, 8, 20, 36, 8, 30, 10, 15, 40, 15, 20, 20, 20, 8, 30, 20, 35, 10, 15][i] ?? 15,
   }))
+
+  // Detect 합배송: group by (recipientName + recipientAddress)
+  const recipientKey = (r: CjOrderRow) =>
+    `${r.recipientName.trim()}||${r.recipientAddress.trim()}`
+  const recipientCount = new Map<string, number>()
+  for (const row of rows) {
+    const key = recipientKey(row)
+    recipientCount.set(key, (recipientCount.get(key) ?? 0) + 1)
+  }
+  const combinedRecipients = new Set(
+    [...recipientCount.entries()].filter(([, c]) => c > 1).map(([k]) => k),
+  )
+
+  const COMBINED_FILL: ExcelJS.FillPattern = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FF66CCFF' }, // 파란 음영 (합배송)
+  }
 
   for (const row of rows) {
     const productAndOption = row.optionText
       ? `${row.productName} / ${row.optionText}`
       : row.productName
 
-    ws.addRow([
+    // 상품명에 위치 접두사 추가
+    const displayName = row.pickingLocation
+      ? `(${row.pickingLocation}) ${row.productName}`
+      : row.productName
+
+    const dataRow = ws.addRow([
       row.recipientName,
       row.recipientPhone,
       '',
       row.recipientAddress,
-      row.productName,
+      displayName,
       1,
       '착불',
       0,
       row.deliveryMessage ?? '',
-      row.orderId,           // 고객주문번호 = 우리 order ID (매칭 키)
+      row.orderId,
       row.quantity,
       row.productName,
       row.senderName,
@@ -106,6 +129,13 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
       row.pickingLocation ?? '',
       '',
     ])
+
+    // 합배송 행에 파란 음영 적용
+    if (combinedRecipients.has(recipientKey(row))) {
+      dataRow.eachCell((cell) => {
+        cell.fill = COMBINED_FILL
+      })
+    }
   }
 
   const buf = await wb.xlsx.writeBuffer()

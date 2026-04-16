@@ -449,6 +449,9 @@ export class NaverAdapter implements MarketplaceAdapter {
           optionText: productOrder.productOption || undefined,
           quantity: productOrder.quantity,
           unitPrice: productOrder.unitPrice,
+          sku: (productOrder as Record<string, unknown>).optionManageCode
+            ? String((productOrder as Record<string, unknown>).optionManageCode)
+            : undefined,
         },
       ],
       orderedAt: order.paymentDate ? new Date(order.paymentDate) : new Date(order.orderDate),

@@ -106,7 +106,6 @@ export const columns: ColumnDef<ProductRow>[] = [
   {
     accessorKey: 'warehouseLocation',
     header: '위치',
-    enableSorting: false,
     cell: ({ row }) => {
       const loc = row.getValue('warehouseLocation') as string | null
       return loc ? (

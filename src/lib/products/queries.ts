@@ -63,6 +63,7 @@ export async function getProducts(
       case 'internalSku': return products.internalSku
       case 'basePrice': return products.basePrice
       case 'costPrice': return products.costPrice
+      case 'warehouseLocation': return products.warehouseLocation
       case 'status': return products.status
       case 'updatedAt': return products.updatedAt
       default: return products.createdAt

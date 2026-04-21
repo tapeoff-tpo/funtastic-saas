@@ -12,6 +12,7 @@ import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
 import { BulkActionBar } from './status-actions'
 import { ShippingActions } from './shipping-actions'
+import { Pagination } from '@/components/ui/pagination'
 
 interface DataTableProps {
   data: OrderRow[]
@@ -20,7 +21,6 @@ interface DataTableProps {
   page: number
 }
 
-const PAGE_SIZE_OPTIONS = [20, 50, 100]
 
 export function DataTable({ data, total, pageSize, page }: DataTableProps) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
@@ -167,51 +167,13 @@ export function DataTable({ data, total, pageSize, page }: DataTableProps) {
         </table>
       </div>
 
-      {/* Pagination controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>페이지당</span>
-          <select
-            value={pageSize}
-            onChange={(e) => {
-              void setPageSize(Number(e.target.value))
-              void setPage(1)
-            }}
-            className="rounded border px-2 py-1 text-sm"
-          >
-            {PAGE_SIZE_OPTIONS.map((size) => (
-              <option key={size} value={size}>
-                {size}
-              </option>
-            ))}
-          </select>
-          <span>건</span>
-          <span className="ml-2">
-            총 {total.toLocaleString('ko-KR')}건
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void setPage(Math.max(1, page - 1))}
-            disabled={page <= 1}
-            className="rounded border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-muted"
-          >
-            이전
-          </button>
-          <span className="text-sm text-muted-foreground">
-            {page} / {pageCount || 1}
-          </span>
-          <button
-            type="button"
-            onClick={() => void setPage(Math.min(pageCount, page + 1))}
-            disabled={page >= pageCount}
-            className="rounded border px-3 py-1.5 text-sm disabled:opacity-50 hover:bg-muted"
-          >
-            다음
-          </button>
-        </div>
-      </div>
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        onPageChange={(p) => void setPage(p)}
+        onPageSizeChange={(s) => void setPageSize(s)}
+      />
     </div>
   )
 }

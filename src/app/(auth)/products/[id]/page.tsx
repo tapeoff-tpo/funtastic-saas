@@ -407,41 +407,58 @@ export default function EditProductPage() {
             </div>
 
             <div className="space-y-2">
-              {product.marketplaceLinks.map((link) => (
-                <div
-                  key={link.id}
-                  className="flex items-center justify-between rounded border p-3"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{link.marketplaceId}</span>
-                      <Badge variant={SYNC_STATUS_VARIANT[link.syncStatus] ?? 'outline'}>
-                        {SYNC_STATUS_LABELS[link.syncStatus] ?? link.syncStatus}
-                      </Badge>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {link.lastSyncedAt && (
-                        <span>
-                          마지막 동기화: {new Date(link.lastSyncedAt).toLocaleString('ko-KR')}
-                        </span>
-                      )}
-                      {link.lastSyncError && (
-                        <span className="ml-2 text-red-500">
-                          오류: {link.lastSyncError}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void handleSyncOne(link)}
-                    disabled={isSyncing}
-                    className="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+              {product.marketplaceLinks.map((link) => {
+                const categoryName = (link.rawData as { categoryName?: string } | null)?.categoryName
+                return (
+                  <div
+                    key={link.id}
+                    className="flex items-start justify-between rounded border p-3"
                   >
-                    동기화
-                  </button>
-                </div>
-              ))}
+                    <div className="flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{link.marketplaceId}</span>
+                        <Badge variant={SYNC_STATUS_VARIANT[link.syncStatus] ?? 'outline'}>
+                          {SYNC_STATUS_LABELS[link.syncStatus] ?? link.syncStatus}
+                        </Badge>
+                      </div>
+                      {link.marketplaceProductId && (
+                        <div className="text-xs text-muted-foreground">
+                          마켓 상품 ID: <span className="font-mono">{link.marketplaceProductId}</span>
+                        </div>
+                      )}
+                      {(link.marketplaceCategoryId || categoryName) && (
+                        <div className="text-xs text-muted-foreground">
+                          카테고리:{' '}
+                          {link.marketplaceCategoryId && (
+                            <span className="font-mono">[{link.marketplaceCategoryId}]</span>
+                          )}
+                          {categoryName && <span className="ml-1">{categoryName}</span>}
+                        </div>
+                      )}
+                      <div className="text-xs text-muted-foreground">
+                        {link.lastSyncedAt && (
+                          <span>
+                            마지막 동기화: {new Date(link.lastSyncedAt).toLocaleString('ko-KR')}
+                          </span>
+                        )}
+                        {link.lastSyncError && (
+                          <span className="ml-2 text-red-500">
+                            오류: {link.lastSyncError}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleSyncOne(link)}
+                      disabled={isSyncing}
+                      className="rounded-md border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                    >
+                      동기화
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

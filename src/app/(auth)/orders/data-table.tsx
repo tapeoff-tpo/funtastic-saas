@@ -13,16 +13,18 @@ import { columns, type OrderRow } from './columns'
 import { BulkActionBar } from './status-actions'
 import { ShippingActions } from './shipping-actions'
 import { Pagination } from '@/components/ui/pagination'
+import type { OrderStage } from '@/lib/orders/types'
 
 interface DataTableProps {
   data: OrderRow[]
   total: number
   pageSize: number
   page: number
+  stage?: OrderStage
 }
 
 
-export function DataTable({ data, total, pageSize, page }: DataTableProps) {
+export function DataTable({ data, total, pageSize, page, stage }: DataTableProps) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [showColumnToggle, setShowColumnToggle] = useState(false)
@@ -74,7 +76,7 @@ export function DataTable({ data, total, pageSize, page }: DataTableProps) {
   return (
     <div className="space-y-4">
       {/* Shipping action buttons */}
-      <ShippingActions selectedOrderIds={selectedIds} selectedOrders={selectedOrders} />
+      <ShippingActions selectedOrderIds={selectedIds} selectedOrders={selectedOrders} stage={stage} />
 
       {/* Bulk action bar (floating, shown when rows selected) */}
       <BulkActionBar

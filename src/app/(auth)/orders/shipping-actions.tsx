@@ -6,6 +6,7 @@ import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
 import { BulkMappingDialog } from './bulk-mapping-dialog'
 import type { OrderRow } from './columns'
+import type { OrderStage } from '@/lib/orders/types'
 
 const CARRIER_LABELS: Record<string, string> = {
   cj: 'CJ',
@@ -16,6 +17,7 @@ const CARRIER_LABELS: Record<string, string> = {
 interface ShippingActionsProps {
   selectedOrderIds: string[]
   selectedOrders?: OrderRow[]
+  stage?: OrderStage
 }
 
 /** Download a file by fetching — allows catching errors from the server */
@@ -48,7 +50,7 @@ async function downloadExcel(url: string, filename: string): Promise<{ success: 
   }
 }
 
-export function ShippingActions({ selectedOrderIds, selectedOrders = [] }: ShippingActionsProps) {
+export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }: ShippingActionsProps) {
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [bulkMappingOpen, setBulkMappingOpen] = useState(false)
@@ -119,11 +121,17 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [] }: Shipp
     window.open(`/shipping/print?${params.toString()}`, '_blank')
   }
 
+  // Determine which action groups to show based on stage
+  const showMapping = !stage || stage === 'mapping' || unmappedOrderCount > 0
+  const showInvoice = !stage || stage === 'invoice' || stage === 'confirm'
+  const showShipping = !stage || stage === 'shipping' || stage === 'invoice'
+  const showPrint = !stage || stage === 'shipping' || stage === 'done'
+  const showCombined = !stage || stage === 'mapping' || stage === 'confirm'
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
-        {/* Group 1: 매핑 준비 */}
-        {unmappedOrderCount > 0 && (
+        {showMapping && unmappedOrderCount > 0 && (
           <button
             type="button"
             onClick={() => setBulkMappingOpen(true)}
@@ -133,53 +141,63 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [] }: Shipp
           </button>
         )}
 
-        <a
-          href="/shipping/combined"
-          className="inline-flex items-center rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
-        >
-          합포장
-        </a>
+        {showCombined && (
+          <a
+            href="/shipping/combined"
+            className="inline-flex items-center rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
+          >
+            합포장
+          </a>
+        )}
 
-        <span className="mx-1 h-5 w-px bg-border" />
+        {showInvoice && (
+          <>
+            <button
+              type="button"
+              onClick={() => void handleCarrierAutoExport()}
+              disabled={!hasSelection || classifying}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {classifying ? '분류 중...' : '택배사별 엑셀 다운로드'}
+            </button>
 
-        {/* Group 2: 송장 처리 */}
-        <button
-          type="button"
-          onClick={() => void handleCarrierAutoExport()}
-          disabled={!hasSelection || classifying}
-          className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {classifying ? '분류 중...' : '택배사별 엑셀 다운로드'}
-        </button>
+            <button
+              type="button"
+              onClick={() => setExcelImportOpen(true)}
+              className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
+            >
+              송장번호 업로드
+            </button>
+          </>
+        )}
 
-        <button
-          type="button"
-          onClick={() => setExcelImportOpen(true)}
-          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
-        >
-          송장번호 업로드
-        </button>
+        {showShipping && (
+          <button
+            type="button"
+            onClick={() => setInvoiceDialogOpen(true)}
+            disabled={!hasSelection}
+            className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            몰에 송장 전송
+          </button>
+        )}
 
-        <button
-          type="button"
-          onClick={() => setInvoiceDialogOpen(true)}
-          disabled={!hasSelection}
-          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          몰에 송장 전송
-        </button>
+        {showPrint && (
+          <button
+            type="button"
+            onClick={handlePrintLabels}
+            disabled={!hasSelection}
+            className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            라벨인쇄
+          </button>
+        )}
 
-        <span className="mx-1 h-5 w-px bg-border" />
-
-        {/* Group 3: 출력 */}
-        <button
-          type="button"
-          onClick={handlePrintLabels}
-          disabled={!hasSelection}
-          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          라벨인쇄
-        </button>
+        {stage && (
+          <span className="ml-auto text-xs text-muted-foreground">
+            💡 현재 단계: <strong>{stage === 'mapping' ? '매핑 필요' : stage === 'confirm' ? '확정 대기' : stage === 'invoice' ? '송장 발급' : stage === 'shipping' ? '출고 대기' : '완료'}</strong>
+          </span>
+        )}
       </div>
 
       <InvoiceUploadDialog

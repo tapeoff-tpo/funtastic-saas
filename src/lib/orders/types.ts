@@ -50,6 +50,14 @@ export function isValidTransition(from: OrderStatus, to: OrderStatus): boolean {
 
 export type MappingStatus = 'mapped' | 'partial' | 'unmapped'
 
+/** 주문 처리 단계 (워크플로우) */
+export type OrderStage =
+  | 'mapping'     // 매핑 필요
+  | 'confirm'     // 확정 대기 (신규 + 매핑완료)
+  | 'invoice'     // 송장 발급 (주문확인, 송장 없음)
+  | 'shipping'    // 출고 대기 (출고대기/준비중, 송장 있음)
+  | 'done'        // 완료 (출고/배송중/배송완료)
+
 /** Filter interface for order listing queries */
 export interface OrderFilters {
   page?: number
@@ -62,5 +70,6 @@ export interface OrderFilters {
   sort?: string
   order?: 'asc' | 'desc'
   claimType?: ClaimType
-  mapping?: 'mapped' | 'unmapped' // 'mapped' = fully mapped, 'unmapped' = partial or none
+  mapping?: 'mapped' | 'unmapped'
+  stage?: OrderStage
 }

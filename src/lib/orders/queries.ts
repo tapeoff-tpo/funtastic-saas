@@ -9,7 +9,34 @@ import { db } from '@/lib/db'
 import { orders, orderItems, claims, shipments, productNameMappings, products, productVariants } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
-import type { OrderFilters, MappingStatus } from './types'
+import type { OrderFilters, MappingStatus, OrderStage } from './types'
+
+/** 주문이 특정 단계에 속하는지 판정 */
+export function matchStage(
+  order: {
+    status: string
+    mappingStatus: MappingStatus
+    trackingNumber: string | null
+  },
+  stage: OrderStage,
+): boolean {
+  const s = order.status
+  const isActive = s !== 'cancelled' && s !== 'delivered'
+  switch (stage) {
+    case 'mapping':
+      return isActive && order.mappingStatus !== 'mapped'
+    case 'confirm':
+      return s === 'new' && order.mappingStatus === 'mapped'
+    case 'invoice':
+      return s === 'confirmed' && !order.trackingNumber
+    case 'shipping':
+      return (s === 'preparing' || s === 'confirmed') && !!order.trackingNumber
+    case 'done':
+      return s === 'shipped' || s === 'delivering' || s === 'delivered'
+    default:
+      return true
+  }
+}
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -235,6 +262,11 @@ export async function getOrders(filters: OrderFilters = {}) {
     ordersWithItems = ordersWithItems.filter((o) => o.mappingStatus === 'mapped')
   } else if (filters.mapping === 'unmapped') {
     ordersWithItems = ordersWithItems.filter((o) => o.mappingStatus !== 'mapped')
+  }
+
+  // Apply workflow stage filter (post-fetch, computed)
+  if (filters.stage) {
+    ordersWithItems = ordersWithItems.filter((o) => matchStage(o, filters.stage!))
   }
 
   // Get total count

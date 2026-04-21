@@ -1,20 +1,21 @@
 /**
- * Inventory queries with server-side filtering and pagination.
+ * Inventory queries — driven by products table as source of truth.
  *
- * Used by the inventory management UI to list, search, and view
- * inventory records and their audit history.
+ * Inventory records are joined to products by sku ↔ internalSku.
+ * Orphan inventory records (no matching product) are excluded.
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory } from '@/lib/db/schema'
-import { eq, and, or, ilike, desc, asc, count } from 'drizzle-orm'
+import { inventory, inventoryHistory, products } from '@/lib/db/schema'
+import { eq, and, or, ilike, desc, asc, count, ne, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
 
 const DEFAULT_PAGE_SIZE = 50
 
 /**
- * Get paginated inventory list with search and sorting.
+ * Get paginated inventory list joined with products.
+ * Products table is the source of truth for 상품코드/상품명/창고위치.
  */
 export async function getInventoryList(
   userId: string,
@@ -24,14 +25,17 @@ export async function getInventoryList(
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
   const offset = (page - 1) * pageSize
 
-  const conditions: SQL[] = [eq(inventory.userId, userId)]
+  const conditions: SQL[] = [
+    eq(products.userId, userId),
+    ne(products.status, 'deleted'),
+  ]
 
   if (filters.search) {
     const searchPattern = `%${filters.search}%`
     conditions.push(
       or(
-        ilike(inventory.sku, searchPattern),
-        ilike(inventory.productName, searchPattern),
+        ilike(products.internalSku, searchPattern),
+        ilike(products.name, searchPattern),
       )!,
     )
   }
@@ -42,38 +46,59 @@ export async function getInventoryList(
 
   const whereClause = and(...conditions)
 
-  // Determine sort column
+  // Sort column — from products or inventory
   const sortColumn = (() => {
     switch (filters.sort) {
-      case 'sku': return inventory.sku
-      case 'productName': return inventory.productName
-      case 'warehouseZone': return inventory.warehouseZone
-      case 'sectorCode': return inventory.sectorCode
-      case 'totalStock': return inventory.totalStock
-      case 'reservedStock': return inventory.reservedStock
-      case 'availableStock': return inventory.availableStock
-      case 'updatedAt': return inventory.updatedAt
-      default: return inventory.createdAt
+      case 'sku': return products.internalSku
+      case 'productName': return products.name
+      case 'warehouseZone': return sql`COALESCE(${inventory.warehouseZone}, '')`
+      case 'sectorCode': return sql`COALESCE(${products.warehouseLocation}, ${inventory.sectorCode}, '')`
+      case 'totalStock': return sql`COALESCE(${inventory.totalStock}, 0)`
+      case 'reservedStock': return sql`COALESCE(${inventory.reservedStock}, 0)`
+      case 'availableStock': return sql`COALESCE(${inventory.availableStock}, 0)`
+      case 'updatedAt': return products.updatedAt
+      default: return products.createdAt
     }
   })()
 
   const sortDirection = filters.order === 'asc' ? asc : desc
 
-  const [items, [{ total }]] = await Promise.all([
+  const [rows, [{ total }]] = await Promise.all([
     db
-      .select()
-      .from(inventory)
+      .select({
+        // Use products as source of truth
+        id: sql<string>`COALESCE(${inventory.id}, ${products.id})`,
+        sku: products.internalSku,
+        productName: products.name,
+        warehouseZone: inventory.warehouseZone,
+        sectorCode: sql<string | null>`COALESCE(${products.warehouseLocation}, ${inventory.sectorCode})`,
+        totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
+        reservedStock: sql<number>`COALESCE(${inventory.reservedStock}, 0)::int`,
+        availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,
+        createdAt: products.createdAt,
+        updatedAt: sql<Date>`COALESCE(${inventory.updatedAt}, ${products.updatedAt})`,
+        userId: products.userId,
+      })
+      .from(products)
+      .leftJoin(
+        inventory,
+        and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
+      )
       .where(whereClause)
       .orderBy(sortDirection(sortColumn))
       .limit(pageSize)
       .offset(offset),
     db
       .select({ total: count() })
-      .from(inventory)
+      .from(products)
+      .leftJoin(
+        inventory,
+        and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
+      )
       .where(whereClause),
   ])
 
-  return { items, total }
+  return { items: rows, total }
 }
 
 /**

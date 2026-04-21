@@ -5,7 +5,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
   ShoppingCart,
-  AlertTriangle,
   ArrowRightLeft,
   Truck,
   Upload,
@@ -35,7 +34,6 @@ const navSections: NavSection[] = [
     title: '주문 처리',
     items: [
       { href: '/orders', label: '주문수집/관리', icon: ShoppingCart },
-      { href: '/orders/claims', label: '클레임', icon: AlertTriangle },
       { href: '/products', label: '상품매핑/관리', icon: ArrowRightLeft },
     ],
   },

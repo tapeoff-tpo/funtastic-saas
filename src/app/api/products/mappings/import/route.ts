@@ -105,14 +105,31 @@ export async function POST(req: NextRequest) {
     .from(products)
     .where(and(eq(products.userId, user.id), ne(products.status, 'deleted')))
 
-  const skuToProduct = new Map<string, { id: string; name: string; location: string | null }>()
+  // Exact SKU lookup
+  const skuToProduct = new Map<string, { id: string; name: string; location: string | null; sku: string }>()
   for (const p of productRows) {
-    skuToProduct.set(p.internalSku, { id: p.id, name: p.name, location: p.warehouseLocation })
+    skuToProduct.set(p.internalSku, { id: p.id, name: p.name, location: p.warehouseLocation, sku: p.internalSku })
+  }
+
+  // Prefix lookup: "110xxxxx" → [products starting with "110xxxxx-"]
+  // Builds a map from each possible prefix (split on "-") to the list of matching products
+  const prefixToProducts = new Map<string, Array<{ id: string; name: string; location: string | null; sku: string }>>()
+  for (const p of productRows) {
+    // Extract prefix before first "-"
+    const dashIdx = p.internalSku.indexOf('-')
+    if (dashIdx > 0) {
+      const prefix = p.internalSku.slice(0, dashIdx)
+      const arr = prefixToProducts.get(prefix) ?? []
+      arr.push({ id: p.id, name: p.name, location: p.warehouseLocation, sku: p.internalSku })
+      prefixToProducts.set(prefix, arr)
+    }
   }
 
   // Match and create mappings
   let matched = 0
+  let prefixMatched = 0
   let skipped = 0
+  const unmatchedSamples: Array<{ code: string; name: string }> = []
   const toInsert: Array<{
     userId: string
     marketplaceId: string
@@ -122,15 +139,33 @@ export async function POST(req: NextRequest) {
     pickingLocation: string | null
   }> = []
 
-  const seen = new Set<string>() // deduplicate
+  const seen = new Set<string>()
   for (const row of rows) {
-    // Try exact match first, then prefix match (e.g. "111974-0001" in "111974-0001-A")
-    let product = skuToProduct.get(row.code)
+    const code = row.code.trim()
+
+    // 1. Exact match (marketplace code = our internal SKU exactly, e.g. "110xxxxx-0001")
+    let product = skuToProduct.get(code)
+
+    // 2. Prefix match (marketplace code is shorter like "110xxxxx", our SKUs are "110xxxxx-0001, -0002"...)
+    //    Link to first variant — actual option mapping happens at order time
     if (!product) {
-      // Try matching by prefix (상품코드가 옵션코드를 포함할 수 있음)
-      const codeBase = row.code.split('-').slice(0, 2).join('-')
-      if (codeBase !== row.code) {
-        product = skuToProduct.get(codeBase)
+      const prefixMatches = prefixToProducts.get(code)
+      if (prefixMatches && prefixMatches.length > 0) {
+        product = prefixMatches[0]
+        prefixMatched++
+      }
+    }
+
+    // 3. Prefix-of-code match (marketplace code contains option suffix, we match by prefix)
+    if (!product) {
+      const dashIdx = code.indexOf('-')
+      if (dashIdx > 0) {
+        const codePrefix = code.slice(0, dashIdx)
+        const prefixMatches = prefixToProducts.get(codePrefix)
+        if (prefixMatches && prefixMatches.length > 0) {
+          product = prefixMatches[0]
+          prefixMatched++
+        }
       }
     }
 
@@ -150,6 +185,9 @@ export async function POST(req: NextRequest) {
       }
     } else {
       skipped++
+      if (unmatchedSamples.length < 5) {
+        unmatchedSamples.push({ code, name: row.marketplaceName })
+      }
     }
   }
 
@@ -161,10 +199,14 @@ export async function POST(req: NextRequest) {
       .onConflictDoNothing()
   }
 
+  const prefixNote = prefixMatched > 0 ? ` — ${prefixMatched}개는 상품 prefix 매칭 (옵션은 주문 시 매핑)` : ''
+
   return NextResponse.json({
     total: rows.length,
     matched,
+    prefixMatched,
     skipped,
-    message: `${matched}개 매핑 생성 (${rows.length}행 중 ${skipped}개 미매칭)`,
+    unmatchedSamples,
+    message: `${matched}개 매핑 생성 (${rows.length}행 중 ${skipped}개 미매칭)${prefixNote}`,
   })
 }

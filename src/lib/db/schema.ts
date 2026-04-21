@@ -524,6 +524,37 @@ export const productNameMappings = pgTable(
   ],
 )
 
+// Product option mappings — links (marketplace, productName, optionText) → variantSku
+// Used when an order arrives with a specific option like "색상: 빨강"
+// to identify which internal variant to pick.
+export const productOptionMappings = pgTable(
+  'product_option_mappings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceName: text('marketplace_name').notNull(),
+    optionText: text('option_text').notNull(),
+    variantSku: varchar('variant_sku', { length: 100 }).notNull(),
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('product_option_mappings_unique').on(
+      table.userId,
+      table.marketplaceId,
+      table.marketplaceName,
+      table.optionText,
+    ),
+    index('product_option_mappings_lookup').on(
+      table.userId,
+      table.marketplaceId,
+      table.marketplaceName,
+    ),
+  ],
+)
+
 // ─── Company Settings ────────────────────────────────────────────
 
 export const companySettings = pgTable(

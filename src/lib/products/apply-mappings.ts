@@ -9,13 +9,14 @@
  */
 
 import { db } from '@/lib/db'
-import { productNameMappings, products, productVariants } from '@/lib/db/schema'
+import { productNameMappings, productOptionMappings, products, productVariants } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 
 export interface OrderItemLike {
   productName: string
   marketplaceId?: string
   sku?: string | null
+  optionText?: string | null
   [key: string]: unknown
 }
 
@@ -102,21 +103,58 @@ export async function loadSkuLookup(
 }
 
 /**
+ * Load option-text mappings. Key: `${marketplaceId}::${marketplaceName}::${optionText}`
+ * Value: { variantSku (used as matchedSku), plus displayName carried from product name if available }
+ */
+export async function loadOptionLookup(userId: string): Promise<Map<string, string>> {
+  const rows = await db
+    .select({
+      marketplaceId: productOptionMappings.marketplaceId,
+      marketplaceName: productOptionMappings.marketplaceName,
+      optionText: productOptionMappings.optionText,
+      variantSku: productOptionMappings.variantSku,
+    })
+    .from(productOptionMappings)
+    .where(eq(productOptionMappings.userId, userId))
+
+  const map = new Map<string, string>()
+  for (const row of rows) {
+    map.set(`${row.marketplaceId}::${row.marketplaceName}::${row.optionText}`, row.variantSku)
+  }
+  return map
+}
+
+/**
  * Apply mappings: 수동 매핑 우선, 없으면 SKU 자동 매핑.
+ * Option lookup (optional): resolves specific variant SKU from option text.
  */
 export function applyMappings<T extends OrderItemLike>(
   items: T[],
   nameLookup: Map<string, MappingEntry>,
   skuLookup: Map<string, MappingEntry>,
   marketplaceId?: string,
-): (T & { pickingLocation?: string | null })[] {
+  optionLookup?: Map<string, string>,
+): (T & { pickingLocation?: string | null; resolvedVariantSku?: string })[] {
   return items.map((item) => {
-    // 1. 수동 매핑 (marketplaceId + productName)
     const mid = item.marketplaceId ?? marketplaceId ?? ''
+
+    // Check option-level mapping first (most specific)
+    let resolvedVariantSku: string | undefined
+    if (optionLookup && item.optionText) {
+      const optKey = `${mid}::${item.productName}::${item.optionText}`
+      resolvedVariantSku = optionLookup.get(optKey)
+    }
+
+    // 1. 수동 상품 매핑 (marketplaceId + productName)
     const nameKey = `${mid}::${item.productName}`
     const nameEntry = nameLookup.get(nameKey)
     if (nameEntry) {
-      return { ...item, productName: nameEntry.displayName, pickingLocation: nameEntry.pickingLocation }
+      return {
+        ...item,
+        productName: nameEntry.displayName,
+        pickingLocation: nameEntry.pickingLocation,
+        resolvedVariantSku,
+      }
     }
 
     // 2. SKU 자동 매핑
@@ -124,12 +162,17 @@ export function applyMappings<T extends OrderItemLike>(
     if (sku) {
       const skuEntry = skuLookup.get(sku)
       if (skuEntry) {
-        return { ...item, productName: skuEntry.displayName, pickingLocation: skuEntry.pickingLocation }
+        return {
+          ...item,
+          productName: skuEntry.displayName,
+          pickingLocation: skuEntry.pickingLocation,
+          resolvedVariantSku,
+        }
       }
     }
 
     // 매칭 없음 — 원본 유지
-    return item
+    return { ...item, resolvedVariantSku }
   })
 }
 

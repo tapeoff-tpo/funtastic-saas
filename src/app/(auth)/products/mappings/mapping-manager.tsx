@@ -373,7 +373,13 @@ export function MappingManager() {
       if (!res.ok) {
         toast.error(data.error || '업로드 실패')
       } else {
-        toast.success(data.message)
+        toast.success(data.message, { duration: 5000 })
+        if (data.unmatchedSamples?.length > 0) {
+          const samples = data.unmatchedSamples
+            .map((s: { code: string; name: string }) => `• ${s.code} (${s.name})`)
+            .join('\n')
+          toast.info(`미매칭 샘플:\n${samples}`, { duration: 10000 })
+        }
         setShowImport(false)
         setImportFile(null)
         void load()

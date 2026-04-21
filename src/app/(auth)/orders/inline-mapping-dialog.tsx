@@ -83,7 +83,7 @@ export function InlineMappingDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
       <div className="w-full max-w-2xl rounded-lg border bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
         <h2 className="mb-2 text-lg font-semibold">주문 상품 매핑</h2>
         <p className="mb-4 text-sm text-muted-foreground">

@@ -9,7 +9,6 @@ import {
   Truck,
   Upload,
   PackageX,
-  Package,
   Warehouse,
   BarChart3,
   Store,
@@ -49,7 +48,6 @@ const navSections: NavSection[] = [
     title: '관리',
     items: [
       { href: '/inventory', label: '재고관리', icon: Warehouse },
-      { href: '/products/import/marketplace', label: '상품 가져오기', icon: Package },
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
     ],
   },

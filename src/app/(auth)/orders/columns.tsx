@@ -1,11 +1,50 @@
 'use client'
 
+import { useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType } from '@/lib/orders/types'
 import { StatusDropdown } from './status-actions'
 import { HoldDialog } from './hold-dialog'
+import { InlineMappingDialog } from './inline-mapping-dialog'
+
+/** Mapping status cell — clickable badge that opens inline mapping dialog */
+function MappingCell({ order }: { order: OrderRow }) {
+  const [open, setOpen] = useState(false)
+  const status = order.mappingStatus
+
+  const handleClick = () => {
+    if (status !== 'mapped') setOpen(true)
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleClick}
+        className={status !== 'mapped' ? 'cursor-pointer' : 'cursor-default'}
+        disabled={status === 'mapped'}
+      >
+        {status === 'mapped' ? (
+          <Badge variant="secondary">매핑됨</Badge>
+        ) : status === 'partial' ? (
+          <Badge variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50">일부 매핑</Badge>
+        ) : (
+          <Badge variant="destructive" className="hover:opacity-80">미매핑</Badge>
+        )}
+      </button>
+
+      <InlineMappingDialog
+        open={open}
+        marketplaceId={order.marketplaceId}
+        items={order.items}
+        onClose={() => setOpen(false)}
+        onSaved={() => { window.location.reload() }}
+      />
+    </>
+  )
+}
 
 /** Claim type Korean labels */
 const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
@@ -218,20 +257,11 @@ export const columns: ColumnDef<OrderRow>[] = [
     },
     size: 110,
   },
-  // 매핑 상태
+  // 매핑 상태 (클릭하면 인라인 매핑 모달)
   {
     id: 'mappingStatus',
     header: '매핑',
-    cell: ({ row }) => {
-      const status = row.original.mappingStatus
-      if (status === 'mapped') {
-        return <Badge variant="secondary">매핑됨</Badge>
-      }
-      if (status === 'partial') {
-        return <Badge variant="outline" className="border-orange-300 text-orange-700">일부 매핑</Badge>
-      }
-      return <Badge variant="destructive">미매핑</Badge>
-    },
+    cell: ({ row }) => <MappingCell order={row.original} />,
     size: 90,
   },
   // 송장상태

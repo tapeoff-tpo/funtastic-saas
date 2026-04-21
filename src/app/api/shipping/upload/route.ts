@@ -39,11 +39,14 @@ export async function POST(req: NextRequest) {
       uploadAttempts: shipments.uploadAttempts,
     })
     .from(shipments)
+    .innerJoin(orders, eq(shipments.orderId, orders.id))
     .where(
       and(
         eq(shipments.userId, user.id),
         isNotNull(shipments.shippedAt),
         gte(shipments.shippedAt, todayStart),
+        // 미발송(isHeld) 주문은 송장 업로드 제외
+        eq(orders.isHeld, false),
         ...(body.shipmentIds?.length
           ? [inArray(shipments.id, body.shipmentIds)]
           : [eq(shipments.uploadStatus, 'pending')]),

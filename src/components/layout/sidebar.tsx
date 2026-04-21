@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -16,6 +16,10 @@ import {
   Store,
   Settings,
   LogOut,
+  ClipboardCheck,
+  FileText,
+  PackageCheck,
+  CircleAlert,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -33,7 +37,16 @@ const navSections: NavSection[] = [
   {
     title: '주문 처리',
     items: [
-      { href: '/orders', label: '주문수집/관리', icon: ShoppingCart },
+      { href: '/orders', label: '전체 주문', icon: ShoppingCart },
+      { href: '/orders?stage=mapping', label: '매핑 필요', icon: CircleAlert },
+      { href: '/orders?stage=confirm', label: '확정 대기', icon: ClipboardCheck },
+      { href: '/orders?stage=invoice', label: '송장 발급', icon: FileText },
+      { href: '/orders?stage=shipping', label: '출고 대기', icon: PackageCheck },
+    ],
+  },
+  {
+    title: '상품',
+    items: [
       { href: '/products', label: '상품 관리', icon: Package },
       { href: '/products/mappings', label: '상품명 매핑', icon: ArrowRightLeft },
       { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
@@ -65,7 +78,10 @@ const navSections: NavSection[] = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const router = useRouter()
+
+  const currentStage = searchParams.get('stage')
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -92,11 +108,27 @@ export function Sidebar() {
             )}
             <div className="space-y-0.5">
               {section.items.map((item) => {
-                // 상품 관리(/products)는 /products/mappings, /products/categories와 겹치지 않도록 정확 매칭
-                const exactMatch = item.href === '/settings' || item.href === '/products'
-                const isActive = exactMatch
-                  ? pathname === item.href
-                  : pathname.startsWith(item.href)
+                // Parse item.href to separate path and stage query
+                const [itemPath, itemQuery] = item.href.split('?')
+                const itemStage = itemQuery?.match(/stage=([^&]+)/)?.[1]
+
+                let isActive: boolean
+                if (itemPath === '/orders') {
+                  // Orders items: match path AND stage
+                  if (pathname !== '/orders') {
+                    isActive = false
+                  } else if (itemStage) {
+                    isActive = currentStage === itemStage
+                  } else {
+                    // "전체 주문" = /orders without stage
+                    isActive = !currentStage
+                  }
+                } else if (itemPath === '/settings' || itemPath === '/products') {
+                  isActive = pathname === itemPath
+                } else {
+                  isActive = pathname.startsWith(itemPath)
+                }
+
                 const Icon = item.icon
 
                 return (

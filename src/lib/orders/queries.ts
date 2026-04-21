@@ -144,39 +144,15 @@ export async function getOrders(filters: OrderFilters = {}) {
       .offset(offset)
   }
 
-  // Fetch items for these orders
+  // Fetch items/claims/shipments in parallel
   const orderIds = orderRows.map((o) => o.id)
-  let items: (typeof orderItems.$inferSelect)[] = []
-  if (orderIds.length > 0) {
-    items = await db
-      .select()
-      .from(orderItems)
-      .where(
-        sql`${orderItems.orderId} IN ${orderIds}`,
-      )
-  }
-
-  // Fetch claims for these orders to get claimType
-  let claimRows: (typeof claims.$inferSelect)[] = []
-  if (orderIds.length > 0) {
-    claimRows = await db
-      .select()
-      .from(claims)
-      .where(
-        sql`${claims.orderId} IN ${orderIds}`,
-      )
-  }
-
-  // Fetch shipments for these orders to get invoice status
-  let shipmentRows: (typeof shipments.$inferSelect)[] = []
-  if (orderIds.length > 0) {
-    shipmentRows = await db
-      .select()
-      .from(shipments)
-      .where(
-        sql`${shipments.orderId} IN ${orderIds}`,
-      )
-  }
+  const [items, claimRows, shipmentRows] = orderIds.length > 0
+    ? await Promise.all([
+        db.select().from(orderItems).where(sql`${orderItems.orderId} IN ${orderIds}`),
+        db.select().from(claims).where(sql`${claims.orderId} IN ${orderIds}`),
+        db.select().from(shipments).where(sql`${shipments.orderId} IN ${orderIds}`),
+      ])
+    : [[] as (typeof orderItems.$inferSelect)[], [] as (typeof claims.$inferSelect)[], [] as (typeof shipments.$inferSelect)[]]
 
   // Map latest shipment per order
   const shipmentByOrderId = new Map<string, typeof shipments.$inferSelect>()
@@ -203,27 +179,22 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  // Load mapping lookups for mapping status determination
+  // Load mapping lookups for mapping status determination (parallel)
   const userId = orderRows[0]?.userId
-  const nameMappings = userId
-    ? await db
-        .select({ marketplaceId: productNameMappings.marketplaceId, marketplaceName: productNameMappings.marketplaceName })
-        .from(productNameMappings)
-        .where(eq(productNameMappings.userId, userId))
-    : []
-  const productSkus = userId
-    ? await db
-        .select({ sku: products.internalSku })
-        .from(products)
-        .where(eq(products.userId, userId))
-    : []
-  const variantSkus = userId
-    ? await db
-        .select({ sku: productVariants.sku })
-        .from(productVariants)
-        .innerJoin(products, eq(productVariants.productId, products.id))
-        .where(eq(products.userId, userId))
-    : []
+  const [nameMappings, productSkus, variantSkus] = userId
+    ? await Promise.all([
+        db.select({ marketplaceId: productNameMappings.marketplaceId, marketplaceName: productNameMappings.marketplaceName })
+          .from(productNameMappings)
+          .where(eq(productNameMappings.userId, userId)),
+        db.select({ sku: products.internalSku })
+          .from(products)
+          .where(eq(products.userId, userId)),
+        db.select({ sku: productVariants.sku })
+          .from(productVariants)
+          .innerJoin(products, eq(productVariants.productId, products.id))
+          .where(eq(products.userId, userId)),
+      ])
+    : [[], [], []]
 
   const nameKeys = new Set(nameMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}`))
   const skuSet = new Set<string>()

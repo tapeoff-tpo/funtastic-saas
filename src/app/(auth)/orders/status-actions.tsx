@@ -110,32 +110,42 @@ export function BulkActionBar({ selectedIds, onClear }: BulkActionBarProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderIds: selectedIds }),
       })
-      const data = await res.json()
+      const text = await res.text()
+      let data: Record<string, unknown> = {}
+      try { data = JSON.parse(text) } catch { /* non-json response */ }
 
       if (!res.ok) {
-        toast.error(data.error || '발주확인 실패')
+        const errMsg = (data.error as string) || text.slice(0, 200) || `HTTP ${res.status}`
+        toast.error(`발주확인 실패 [${res.status}]: ${errMsg}`, { duration: 8000 })
         return
       }
 
-      if (data.failCount === 0) {
-        toast.success(`${data.successCount}건 발주확인 완료`)
-      } else if (data.successCount > 0) {
-        toast.warning(`${data.successCount}건 성공, ${data.failCount}건 실패`)
-        // Show failed order details
-        const failures = data.results.filter((r: { success: boolean }) => !r.success)
-        for (const f of failures.slice(0, 3)) {
-          toast.error(`${f.marketplaceOrderId}: ${f.error}`)
+      const successCount = (data.successCount as number) ?? 0
+      const failCount = (data.failCount as number) ?? 0
+      const results = (data.results as Array<{ success: boolean; marketplaceOrderId: string; error?: string }>) ?? []
+
+      if (failCount === 0) {
+        toast.success(`${successCount}건 발주확인 완료`)
+      } else if (successCount > 0) {
+        toast.warning(`${successCount}건 성공, ${failCount}건 실패`)
+        const failures = results.filter((r) => !r.success)
+        for (const f of failures.slice(0, 5)) {
+          toast.error(`${f.marketplaceOrderId}: ${f.error ?? '알 수 없는 오류'}`, { duration: 8000 })
         }
       } else {
-        toast.error('발주확인 실패')
-        const failures = data.results.filter((r: { success: boolean }) => !r.success)
-        for (const f of failures.slice(0, 3)) {
-          toast.error(`${f.marketplaceOrderId}: ${f.error}`)
+        const failures = results.filter((r) => !r.success)
+        if (failures.length === 0) {
+          toast.error('발주확인 실패 (상세 정보 없음)', { duration: 8000 })
+        } else {
+          toast.error(`${failCount}건 모두 실패`)
+          for (const f of failures.slice(0, 5)) {
+            toast.error(`${f.marketplaceOrderId}: ${f.error ?? '알 수 없는 오류'}`, { duration: 8000 })
+          }
         }
       }
       onClear()
-    } catch {
-      toast.error('네트워크 오류')
+    } catch (err) {
+      toast.error(`네트워크 오류: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setConfirming(false)
     }

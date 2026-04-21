@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   ShoppingCart,
   ArrowRightLeft,
+  Package,
   Truck,
   Upload,
   PackageX,
@@ -32,7 +33,8 @@ const navSections: NavSection[] = [
     title: '주문 처리',
     items: [
       { href: '/orders', label: '주문수집/관리', icon: ShoppingCart },
-      { href: '/products', label: '상품매핑/관리', icon: ArrowRightLeft },
+      { href: '/products', label: '상품 관리', icon: Package },
+      { href: '/products/mappings', label: '상품명 매핑', icon: ArrowRightLeft },
     ],
   },
   {
@@ -88,10 +90,11 @@ export function Sidebar() {
             )}
             <div className="space-y-0.5">
               {section.items.map((item) => {
-                const isActive =
-                  item.href === '/settings'
-                    ? pathname === '/settings'
-                    : pathname.startsWith(item.href)
+                // 상품 관리(/products)는 /products/mappings, /products/categories와 겹치지 않도록 정확 매칭
+                const exactMatch = item.href === '/settings' || item.href === '/products'
+                const isActive = exactMatch
+                  ? pathname === item.href
+                  : pathname.startsWith(item.href)
                 const Icon = item.icon
 
                 return (

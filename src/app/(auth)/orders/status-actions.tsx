@@ -155,14 +155,6 @@ export function BulkActionBar({ selectedIds, onClear }: BulkActionBarProps) {
         {confirming ? '확인 중...' : '발주확인'}
       </button>
 
-      {/* CJ 발주서 내보내기 */}
-      <a
-        href={`/api/shipping/cj/export?orderIds=${selectedIds.join(',')}`}
-        className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-      >
-        CJ 발주서
-      </a>
-
       <div className="relative">
         <button
           type="button"

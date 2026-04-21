@@ -40,11 +40,11 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: '배송',
+    title: '물류',
     items: [
-      { href: '/shipping', label: '송장 생성/출력', icon: Truck },
-      { href: '/shipping/invoice', label: '송장 업로드', icon: Upload },
+      { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
+      { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
     ],
   },
   {

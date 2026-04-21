@@ -3,6 +3,80 @@
 import { useEffect, useState, useTransition, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 
+// Pagination — shows up to 10 page numbers with prev/next arrows
+function Pagination({
+  page, pageSize, total, onPageChange, onPageSizeChange,
+}: {
+  page: number
+  pageSize: number
+  total: number
+  onPageChange: (p: number) => void
+  onPageSizeChange: (s: number) => void
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const windowSize = 10
+  const currentWindow = Math.floor((page - 1) / windowSize)
+  const windowStart = currentWindow * windowSize + 1
+  const windowEnd = Math.min(windowStart + windowSize - 1, totalPages)
+  const hasPrev = windowStart > 1
+  const hasNext = windowEnd < totalPages
+
+  const pages: number[] = []
+  for (let i = windowStart; i <= windowEnd; i++) pages.push(i)
+
+  return (
+    <div className="flex items-center justify-between gap-4 py-2 text-sm">
+      <div className="flex items-center gap-2 text-muted-foreground">
+        <span>페이지당</span>
+        <select
+          value={pageSize}
+          onChange={(e) => { onPageSizeChange(Number(e.target.value)); onPageChange(1) }}
+          className="rounded border px-2 py-1"
+        >
+          <option value={10}>10</option>
+          <option value={20}>20</option>
+          <option value={50}>50</option>
+        </select>
+        <span>건</span>
+        <span className="ml-2">총 {total.toLocaleString('ko-KR')}건</span>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(1, windowStart - 1))}
+          disabled={!hasPrev}
+          className="rounded border px-2 py-1 hover:bg-muted disabled:opacity-30"
+          aria-label="이전 10페이지"
+        >
+          ‹
+        </button>
+        {pages.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onPageChange(p)}
+            className={`min-w-[32px] rounded border px-2 py-1 ${
+              p === page ? 'bg-black text-white border-black' : 'hover:bg-muted'
+            }`}
+          >
+            {p}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages, windowEnd + 1))}
+          disabled={!hasNext}
+          className="rounded border px-2 py-1 hover:bg-muted disabled:opacity-30"
+          aria-label="다음 10페이지"
+        >
+          ›
+        </button>
+      </div>
+    </div>
+  )
+}
+
 const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡',
   naver: '네이버',
@@ -310,6 +384,12 @@ export function MappingManager() {
   const [importFile, setImportFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
 
+  // Pagination state for each section
+  const [unmappedPage, setUnmappedPage] = useState(1)
+  const [unmappedPageSize, setUnmappedPageSize] = useState(20)
+  const [mappingPage, setMappingPage] = useState(1)
+  const [mappingPageSize, setMappingPageSize] = useState(20)
+
   const load = async () => {
     setLoading(true)
     try {
@@ -412,6 +492,23 @@ export function MappingManager() {
     }
     return true
   })
+
+  // Pagination calculations
+  const unmappedTotal = filteredUnmapped.length
+  const unmappedTotalPages = Math.max(1, Math.ceil(unmappedTotal / unmappedPageSize))
+  const currentUnmappedPage = Math.min(unmappedPage, unmappedTotalPages)
+  const pagedUnmapped = filteredUnmapped.slice(
+    (currentUnmappedPage - 1) * unmappedPageSize,
+    currentUnmappedPage * unmappedPageSize,
+  )
+
+  const mappingTotal = filteredMappings.length
+  const mappingTotalPages = Math.max(1, Math.ceil(mappingTotal / mappingPageSize))
+  const currentMappingPage = Math.min(mappingPage, mappingTotalPages)
+  const pagedMappings = filteredMappings.slice(
+    (currentMappingPage - 1) * mappingPageSize,
+    currentMappingPage * mappingPageSize,
+  )
 
   if (loading) {
     return (
@@ -602,7 +699,7 @@ export function MappingManager() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredUnmapped.map((item) => (
+                {pagedUnmapped.map((item) => (
                   <tr key={`${item.marketplaceId}:${item.productName}`} className="hover:bg-muted/30">
                     <td className="px-4 py-2.5">
                       <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium">
@@ -631,6 +728,13 @@ export function MappingManager() {
                 ))}
               </tbody>
             </table>
+            <Pagination
+              page={currentUnmappedPage}
+              pageSize={unmappedPageSize}
+              total={unmappedTotal}
+              onPageChange={setUnmappedPage}
+              onPageSizeChange={setUnmappedPageSize}
+            />
           </div>
         )}
       </section>
@@ -677,7 +781,7 @@ export function MappingManager() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filteredMappings.map((m) => (
+                {pagedMappings.map((m) => (
                   <tr key={m.id} className="hover:bg-muted/30">
                     <td className="px-4 py-2.5">
                       <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium">
@@ -721,6 +825,13 @@ export function MappingManager() {
                 ))}
               </tbody>
             </table>
+            <Pagination
+              page={currentMappingPage}
+              pageSize={mappingPageSize}
+              total={mappingTotal}
+              onPageChange={setMappingPage}
+              onPageSizeChange={setMappingPageSize}
+            />
           </div>
         )}
       </section>

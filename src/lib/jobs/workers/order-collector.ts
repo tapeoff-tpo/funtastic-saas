@@ -123,6 +123,9 @@ export async function collectOrdersForConnection(params: {
     const normalizedOrders = await adapter.getOrders(since)
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)
+    // Track newly inserted 'new' status orders for auto-confirm
+    const newOrderIds: Array<{ id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }> = []
+
     for (const order of normalizedOrders) {
       const [upsertedOrder] = await upsertOrder(order, connectionId, userId)
       // Re-insert order items (delete existing first to handle updates)
@@ -141,6 +144,35 @@ export async function collectOrdersForConnection(params: {
         )
       }
       ordersCollected++
+
+      // Collect newly-new orders for auto-confirm
+      if (upsertedOrder.status === 'new') {
+        newOrderIds.push({
+          id: upsertedOrder.id,
+          marketplaceOrderId: order.marketplaceOrderId,
+          rawData: (order.rawData ?? null) as Record<string, unknown> | null,
+        })
+      }
+    }
+
+    // 4.5 Auto-confirm: 신규 주문을 즉시 주문확인(몰 통보)으로 전환
+    // 이유: 수집 후 처리 시간 동안 구매자 취소 가능성을 줄이기 위함
+    // confirmOrder 실패한 주문은 'new' 상태 유지 → 확정 대기 탭에서 수동 재시도
+    if (newOrderIds.length > 0 && typeof adapter.confirmOrder === 'function') {
+      for (const o of newOrderIds) {
+        try {
+          const result = await adapter.confirmOrder(o.marketplaceOrderId, o.rawData ?? undefined)
+          if (result.success) {
+            await db
+              .update(orders)
+              .set({ status: 'confirmed', marketplaceStatus: 'CONFIRMED', updatedAt: new Date() })
+              .where(eq(orders.id, o.id))
+          }
+        } catch (err) {
+          console.warn(`[OrderCollector] Auto-confirm failed for ${marketplaceId} order ${o.marketplaceOrderId}:`, err instanceof Error ? err.message : err)
+          // 실패 시 status는 'new' 유지 — 사용자가 확정 대기 탭에서 수동으로 재시도
+        }
+      }
     }
 
     // 5. Fetch claims (per D-09: collected alongside orders)
@@ -260,7 +292,7 @@ async function upsertOrder(
         updatedAt: new Date(),
       },
     })
-    .returning({ id: orders.id })
+    .returning({ id: orders.id, status: orders.status })
 }
 
 /**

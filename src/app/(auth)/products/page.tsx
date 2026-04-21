@@ -80,16 +80,10 @@ export default async function ProductsPage({
         </div>
         <div className="flex items-center gap-2">
           <a
-            href="/products/import/marketplace"
-            className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+            href="/inventory"
+            className="rounded-md border bg-green-50 border-green-300 px-3 py-1.5 text-sm text-green-700 hover:bg-green-100"
           >
-            마켓플레이스 가져오기
-          </a>
-          <a
-            href="/products/import"
-            className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-          >
-            엑셀 가져오기
+            재고관리에서 일괄 등록
           </a>
           <a
             href="/api/products/export"

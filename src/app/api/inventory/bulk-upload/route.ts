@@ -13,13 +13,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
 import { setStock } from '@/lib/inventory/actions'
+import { db } from '@/lib/db'
+import { products } from '@/lib/db/schema'
+import { and, eq, inArray } from 'drizzle-orm'
 
 /** Korean header → internal key */
 const HEADER_MAP: Record<string, string> = {
   'SKU': 'sku',
   '품번': 'sku',
+  '품목코드': 'sku',
+  '상품코드': 'sku',
   'SKU(품번)': 'sku',
   '상품명': 'productName',
+  '품목명': 'productName',
   '수량': 'totalStock',
   '재고': 'totalStock',
   '재고수량': 'totalStock',
@@ -28,7 +34,12 @@ const HEADER_MAP: Record<string, string> = {
   '창고구분': 'warehouseZone',
   '위치': 'sectorCode',
   '피킹위치': 'sectorCode',
+  '창고위치': 'sectorCode',
+  '한국창고기준 위치': 'sectorCode',
   '섹터': 'sectorCode',
+  '원가': 'costPrice',
+  '판매가': 'basePrice',
+  '택배사': 'carrierId',
 }
 
 interface ParsedRow {
@@ -37,6 +48,9 @@ interface ParsedRow {
   totalStock: number
   warehouseZone?: string
   sectorCode?: string
+  costPrice?: string
+  basePrice?: string
+  carrierId?: string
 }
 
 interface UploadResult {
@@ -161,10 +175,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       totalStock: Math.round(totalStock),
       warehouseZone: raw.warehouseZone?.trim() || undefined,
       sectorCode: raw.sectorCode?.trim() || undefined,
+      costPrice: raw.costPrice?.trim() || undefined,
+      basePrice: raw.basePrice?.trim() || undefined,
+      carrierId: raw.carrierId?.trim() || undefined,
     })
   })
 
-  // Upsert each row
+  // Upsert each row (inventory)
   let successCount = 0
   const dbErrors: Array<{ sku: string; error: string }> = []
 
@@ -178,6 +195,55 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     } else {
       dbErrors.push({ sku: row.sku, error: result.error ?? '저장 중 오류가 발생했습니다.' })
     }
+  }
+
+  // Sync products table — create or update products for each row
+  try {
+    const skus = rows.map((r) => r.sku)
+    if (skus.length > 0) {
+      const existingProducts = await db
+        .select({ id: products.id, internalSku: products.internalSku })
+        .from(products)
+        .where(and(eq(products.userId, user.id), inArray(products.internalSku, skus)))
+      const existingSet = new Set(existingProducts.map((p) => p.internalSku))
+
+      const toInsert: Array<typeof products.$inferInsert> = []
+      for (const row of rows) {
+        const location = [row.warehouseZone, row.sectorCode].filter(Boolean).join(' ').trim() || null
+        if (existingSet.has(row.sku)) {
+          // Update existing product with info from Excel
+          await db
+            .update(products)
+            .set({
+              name: row.productName,
+              ...(location ? { warehouseLocation: location } : {}),
+              ...(row.costPrice ? { costPrice: row.costPrice } : {}),
+              ...(row.basePrice ? { basePrice: row.basePrice } : {}),
+              ...(row.carrierId ? { defaultCarrierId: row.carrierId } : {}),
+              updatedAt: new Date(),
+            })
+            .where(and(eq(products.userId, user.id), eq(products.internalSku, row.sku)))
+        } else {
+          // Insert new product
+          toInsert.push({
+            userId: user.id,
+            internalSku: row.sku,
+            name: row.productName,
+            basePrice: row.basePrice ?? '0',
+            costPrice: row.costPrice ?? null,
+            warehouseLocation: location,
+            defaultCarrierId: row.carrierId ?? null,
+            status: 'active',
+          })
+        }
+      }
+
+      if (toInsert.length > 0) {
+        await db.insert(products).values(toInsert).onConflictDoNothing()
+      }
+    }
+  } catch (err) {
+    console.error('Product sync failed:', err)
   }
 
   const allErrors = [...parseErrors, ...dbErrors]

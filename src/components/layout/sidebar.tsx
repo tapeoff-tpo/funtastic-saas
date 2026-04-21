@@ -14,7 +14,6 @@ import {
   Store,
   Settings,
   LogOut,
-  FileSpreadsheet,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -55,7 +54,6 @@ const navSections: NavSection[] = [
     title: '설정',
     items: [
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
-      { href: '/settings/excel-templates', label: '엑셀 양식', icon: FileSpreadsheet },
       { href: '/settings', label: '설정', icon: Settings },
     ],
   },

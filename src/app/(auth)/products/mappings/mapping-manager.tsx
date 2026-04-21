@@ -446,14 +446,30 @@ export function MappingManager() {
               <div>
                 <label className="mb-1 block text-sm font-medium">마켓플레이스</label>
                 <select
-                  value={importMarket}
-                  onChange={(e) => setImportMarket(e.target.value)}
+                  value={importMarket === '__custom__' || Object.keys(MARKETPLACE_LABELS).includes(importMarket) ? (Object.keys(MARKETPLACE_LABELS).includes(importMarket) ? importMarket : '__custom__') : '__custom__'}
+                  onChange={(e) => {
+                    if (e.target.value === '__custom__') {
+                      setImportMarket('')
+                    } else {
+                      setImportMarket(e.target.value)
+                    }
+                  }}
                   className="w-full rounded-md border px-3 py-1.5 text-sm"
                 >
                   {Object.entries(MARKETPLACE_LABELS).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
+                  <option value="__custom__">기타 (직접 입력)</option>
                 </select>
+                {!Object.keys(MARKETPLACE_LABELS).includes(importMarket) && (
+                  <input
+                    type="text"
+                    value={importMarket}
+                    onChange={(e) => setImportMarket(e.target.value)}
+                    placeholder="마켓 이름 직접 입력 (예: 현대홈쇼핑, 홈앤쇼핑)"
+                    className="mt-2 w-full rounded-md border px-3 py-1.5 text-sm"
+                  />
+                )}
               </div>
 
               <div>
@@ -481,7 +497,7 @@ export function MappingManager() {
               <button
                 type="button"
                 onClick={() => void handleExcelImport()}
-                disabled={importing || !importFile}
+                disabled={importing || !importFile || !importMarket.trim()}
                 className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
               >
                 {importing ? '매핑 중...' : '매핑 시작'}

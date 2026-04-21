@@ -9,8 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products, productNameMappings } from '@/lib/db/schema'
-import { eq, and, ne } from 'drizzle-orm'
+import { products, productNameMappings, productMarketplaceLinks } from '@/lib/db/schema'
+import { eq, and, ne, sql } from 'drizzle-orm'
 import ExcelJS from 'exceljs'
 
 // 상품코드로 인식할 수 있는 헤더명들 (자체코드 우선, 없으면 플랫폼 ID 사용)
@@ -26,6 +26,16 @@ const CODE_HEADERS = [
 const NAME_HEADERS = [
   '상품명', '품목명', '등록상품명', '노출상품명', '판매상품명',
   '상품이름', '제품명', '품명', '쿠팡 노출상품명',
+]
+
+// 카테고리로 인식할 수 있는 헤더명들
+const CATEGORY_HEADERS = [
+  '카테고리', '카테고리명', '분류', '대분류', '중분류', '소분류',
+]
+
+// 마켓 플랫폼 상품ID 헤더
+const MARKETPLACE_PRODUCT_ID_HEADERS = [
+  '등록상품ID', '노출상품ID', '마켓상품ID', '판매자상품ID',
 ]
 
 /** Extract display text from ExcelJS cell value (handles rich text, formulas, etc.) */
@@ -68,6 +78,8 @@ export async function POST(req: NextRequest) {
   let headerRow = 0
   let codeCol = 0
   let nameCol = 0
+  let categoryCol = 0
+  let marketProductIdCol = 0
 
   for (const ws of workbook.worksheets) {
     if (!ws || ws.rowCount < 2) continue
@@ -79,7 +91,6 @@ export async function POST(req: NextRequest) {
         const val = cellText(cell.value)
         if (val) rowHeaders[val] = colNum
       })
-      // Check if both a code-header and name-header exist in this row
       const foundCode = Object.keys(rowHeaders).find((v) => CODE_HEADERS.includes(v))
       const foundName = Object.keys(rowHeaders).find((v) => NAME_HEADERS.includes(v))
       if (foundCode && foundName) {
@@ -87,6 +98,11 @@ export async function POST(req: NextRequest) {
         headerRow = r
         codeCol = rowHeaders[foundCode]
         nameCol = rowHeaders[foundName]
+        // Optional columns
+        const foundCategory = Object.keys(rowHeaders).find((v) => CATEGORY_HEADERS.includes(v))
+        const foundMarketId = Object.keys(rowHeaders).find((v) => MARKETPLACE_PRODUCT_ID_HEADERS.includes(v))
+        if (foundCategory) categoryCol = rowHeaders[foundCategory]
+        if (foundMarketId) marketProductIdCol = rowHeaders[foundMarketId]
         break
       }
     }
@@ -110,8 +126,23 @@ export async function POST(req: NextRequest) {
     }, { status: 400 })
   }
 
+  /** Parse Coupang-style category: "[80783] 주방용품>주방잡화" → { id: "80783", name: "주방용품>주방잡화" } */
+  function parseCategory(raw: string): { id: string; name: string } | null {
+    if (!raw) return null
+    const match = raw.match(/^\[(\d+)\]\s*(.+)$/)
+    if (match) return { id: match[1], name: match[2].trim() }
+    // No bracket prefix — treat whole string as name, no ID
+    return { id: '', name: raw.trim() }
+  }
+
   // Read rows (dedupe by marketplaceName to avoid processing option rows as separate products)
-  type ExcelRow = { code: string; marketplaceName: string }
+  type ExcelRow = {
+    code: string
+    marketplaceName: string
+    categoryId: string
+    categoryName: string
+    marketProductId: string
+  }
   const rows: ExcelRow[] = []
   const seenNames = new Set<string>()
 
@@ -119,10 +150,20 @@ export async function POST(req: NextRequest) {
     if (rowNum <= headerRow) return
     const code = cellText(row.getCell(codeCol)?.value)
     const name = cellText(row.getCell(nameCol)?.value)
-    if (code && name && !seenNames.has(name)) {
-      seenNames.add(name)
-      rows.push({ code, marketplaceName: name })
-    }
+    if (!code || !name || seenNames.has(name)) return
+    seenNames.add(name)
+
+    const categoryRaw = categoryCol ? cellText(row.getCell(categoryCol)?.value) : ''
+    const cat = parseCategory(categoryRaw)
+    const marketProductId = marketProductIdCol ? cellText(row.getCell(marketProductIdCol)?.value) : ''
+
+    rows.push({
+      code,
+      marketplaceName: name,
+      categoryId: cat?.id ?? '',
+      categoryName: cat?.name ?? '',
+      marketProductId,
+    })
   })
 
   if (rows.length === 0) {
@@ -185,6 +226,14 @@ export async function POST(req: NextRequest) {
     pickingLocation: string | null
   }> = []
 
+  const linksToUpsert: Array<{
+    productId: string
+    marketplaceId: string
+    marketplaceProductId: string
+    marketplaceCategoryId: string | null
+    rawData: Record<string, unknown> | null
+  }> = []
+
   const seen = new Set<string>()
   for (const row of rows) {
     const code = row.code.trim()
@@ -239,6 +288,17 @@ export async function POST(req: NextRequest) {
           pickingLocation: product.location,
         })
         matched++
+
+        // Collect marketplace link info (productId → marketplace info)
+        if (row.marketProductId) {
+          linksToUpsert.push({
+            productId: product.id,
+            marketplaceId,
+            marketplaceProductId: row.marketProductId,
+            marketplaceCategoryId: row.categoryId || null,
+            rawData: row.categoryName ? { categoryName: row.categoryName } : null,
+          })
+        }
       }
     } else {
       skipped++
@@ -256,9 +316,31 @@ export async function POST(req: NextRequest) {
       .onConflictDoNothing()
   }
 
+  // Upsert productMarketplaceLinks with category info
+  let categoriesLinked = 0
+  if (linksToUpsert.length > 0) {
+    try {
+      await db
+        .insert(productMarketplaceLinks)
+        .values(linksToUpsert)
+        .onConflictDoUpdate({
+          target: [productMarketplaceLinks.marketplaceId, productMarketplaceLinks.marketplaceProductId],
+          set: {
+            marketplaceCategoryId: sql`EXCLUDED.marketplace_category_id`,
+            rawData: sql`EXCLUDED.raw_data`,
+            updatedAt: new Date(),
+          },
+        })
+      categoriesLinked = linksToUpsert.filter((l) => l.marketplaceCategoryId).length
+    } catch (err) {
+      console.error('productMarketplaceLinks upsert failed:', err)
+    }
+  }
+
   const notes: string[] = []
   if (prefixMatched > 0) notes.push(`${prefixMatched}개 prefix 매칭`)
   if (nameMatched > 0) notes.push(`${nameMatched}개 상품명 매칭`)
+  if (categoriesLinked > 0) notes.push(`${categoriesLinked}개 카테고리 연결`)
   const noteStr = notes.length > 0 ? ` (${notes.join(', ')})` : ''
 
   return NextResponse.json({
@@ -266,6 +348,7 @@ export async function POST(req: NextRequest) {
     matched,
     prefixMatched,
     nameMatched,
+    categoriesLinked,
     skipped,
     unmatchedSamples,
     message: `${matched}개 매핑 생성${noteStr} — ${rows.length}행 중 ${skipped}개 미매칭`,

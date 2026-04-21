@@ -48,6 +48,7 @@ interface ProductSearchResult {
   internalSku: string
   name: string
   warehouseLocation: string | null
+  optionHint?: string | null
 }
 
 // ── Product Search Component ──
@@ -123,6 +124,11 @@ function ProductSearch({
             >
               <span className="font-mono text-xs text-muted-foreground">{p.internalSku}</span>
               <span className="flex-1 truncate">{p.name}</span>
+              {p.optionHint && (
+                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700">
+                  {p.optionHint}
+                </span>
+              )}
               {p.warehouseLocation && (
                 <span className="text-xs text-muted-foreground">{p.warehouseLocation}</span>
               )}

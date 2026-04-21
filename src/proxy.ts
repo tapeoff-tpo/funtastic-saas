@@ -35,6 +35,11 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
+  // Allow health check (Railway healthcheck)
+  if (pathname === '/api/health') {
+    return supabaseResponse
+  }
+
   // Redirect unauthenticated users to login (except /login and /auth/callback)
   if (!user && pathname !== '/login' && !pathname.startsWith('/auth/callback')) {
     const url = request.nextUrl.clone()

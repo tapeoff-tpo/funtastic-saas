@@ -113,7 +113,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
     columnHelper.accessor('sku', {
       header: () => (
         <button type="button" onClick={() => handleSort('sku')} className="hover:text-foreground">
-          SKU{getSortIndicator('sku')}
+          상품코드{getSortIndicator('sku')}
         </button>
       ),
       cell: (info) => <span className="font-mono text-xs">{info.getValue()}</span>,
@@ -242,7 +242,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
         <div className="flex items-center gap-2">
           <input
             type="text"
-            placeholder="SKU 또는 상품명 검색"
+            placeholder="상품코드 또는 상품명 검색"
             defaultValue={filters.search ?? ''}
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-[260px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"

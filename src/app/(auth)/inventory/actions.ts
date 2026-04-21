@@ -33,7 +33,7 @@ export async function setStockAction(
   const totalStockStr = formData.get('totalStock') as string | null
 
   if (!sku?.trim()) {
-    return { success: false, error: 'SKU를 입력해주세요.' }
+    return { success: false, error: '상품코드를 입력해주세요.' }
   }
   if (!productName?.trim()) {
     return { success: false, error: '상품명을 입력해주세요.' }
@@ -81,7 +81,7 @@ export async function adjustStockAction(
   const note = (formData.get('note') as string | null)?.trim() || undefined
 
   if (!sku?.trim()) {
-    return { success: false, error: 'SKU를 입력해주세요.' }
+    return { success: false, error: '상품코드를 입력해주세요.' }
   }
   if (!deltaStr || isNaN(Number(deltaStr)) || Number(deltaStr) === 0) {
     return { success: false, error: '변동 수량을 올바르게 입력해주세요.' }

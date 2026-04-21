@@ -103,14 +103,14 @@ export function AdjustStockDialog({
             <>
               <div className="flex flex-col gap-1">
                 <label htmlFor="set-sku" className="text-xs font-medium text-muted-foreground">
-                  SKU
+                  상품코드
                 </label>
                 <input
                   id="set-sku"
                   type="text"
                   value={sku}
                   onChange={(e) => setSku(e.target.value)}
-                  placeholder="SKU 코드 입력"
+                  placeholder="상품코드 입력"
                   className="rounded-md border px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                   autoFocus
                 />

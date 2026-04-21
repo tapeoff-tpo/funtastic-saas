@@ -47,9 +47,12 @@ export function ExcelUploadDialog({ onClose }: ExcelUploadDialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-        <h3 className="text-lg font-semibold">엑셀 재고 업로드</h3>
+        <h3 className="text-lg font-semibold">엑셀 재고/상품 업로드</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          필수 컬럼: SKU(품번), 상품명, 수량(재고). 선택 컬럼: 창고, 위치(피킹위치)
+          필수 컬럼: 상품코드, 상품명, 수량(재고). 선택 컬럼: 창고위치, 원가, 판매가, 택배사
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          상품코드 기준으로 상품 테이블도 자동 동기화됩니다.
         </p>
 
         <div className="mt-4 space-y-4">
@@ -91,7 +94,7 @@ export function ExcelUploadDialog({ onClose }: ExcelUploadDialogProps) {
                   <div className="mt-3 max-h-40 space-y-1 overflow-y-auto">
                     {result.errors.map((err, i) => (
                       <p key={i} className="text-sm text-red-600">
-                        SKU: {err.sku} - {err.error}
+                        상품코드: {err.sku} - {err.error}
                       </p>
                     ))}
                   </div>

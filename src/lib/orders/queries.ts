@@ -6,10 +6,10 @@
  */
 
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, productNameMappings, products, productVariants } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
-import type { OrderFilters } from './types'
+import type { OrderFilters, MappingStatus } from './types'
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -176,17 +176,66 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  // Combine orders with items, claim type, and shipment info
-  const ordersWithItems = orderRows.map((order) => {
+  // Load mapping lookups for mapping status determination
+  const userId = orderRows[0]?.userId
+  const nameMappings = userId
+    ? await db
+        .select({ marketplaceId: productNameMappings.marketplaceId, marketplaceName: productNameMappings.marketplaceName })
+        .from(productNameMappings)
+        .where(eq(productNameMappings.userId, userId))
+    : []
+  const productSkus = userId
+    ? await db
+        .select({ sku: products.internalSku })
+        .from(products)
+        .where(eq(products.userId, userId))
+    : []
+  const variantSkus = userId
+    ? await db
+        .select({ sku: productVariants.sku })
+        .from(productVariants)
+        .innerJoin(products, eq(productVariants.productId, products.id))
+        .where(eq(products.userId, userId))
+    : []
+
+  const nameKeys = new Set(nameMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}`))
+  const skuSet = new Set<string>()
+  for (const p of productSkus) skuSet.add(p.sku)
+  for (const v of variantSkus) skuSet.add(v.sku)
+
+  const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
+    if (orderItems.length === 0) return 'unmapped'
+    let mappedCount = 0
+    for (const item of orderItems) {
+      const hasNameMapping = nameKeys.has(`${orderMarketplaceId}::${item.productName}`)
+      const hasSkuMatch = item.sku ? skuSet.has(item.sku.trim()) : false
+      if (hasNameMapping || hasSkuMatch) mappedCount++
+    }
+    if (mappedCount === orderItems.length) return 'mapped'
+    if (mappedCount === 0) return 'unmapped'
+    return 'partial'
+  }
+
+  // Combine orders with items, claim type, shipment info, and mapping status
+  let ordersWithItems = orderRows.map((order) => {
     const shipment = shipmentByOrderId.get(order.id)
+    const orderItemsData = itemsByOrderId.get(order.id) ?? []
     return {
       ...order,
       claimType: claimTypeByOrderId.get(order.id) ?? null,
       invoiceStatus: shipment?.uploadStatus ?? null,
       trackingNumber: shipment?.trackingNumber ?? null,
-      items: itemsByOrderId.get(order.id) ?? [],
+      items: orderItemsData,
+      mappingStatus: getMappingStatus(order.marketplaceId, orderItemsData),
     }
   })
+
+  // Apply mapping filter (post-fetch since it requires computed status)
+  if (filters.mapping === 'mapped') {
+    ordersWithItems = ordersWithItems.filter((o) => o.mappingStatus === 'mapped')
+  } else if (filters.mapping === 'unmapped') {
+    ordersWithItems = ordersWithItems.filter((o) => o.mappingStatus !== 'mapped')
+  }
 
   // Get total count
   let countResult: { value: number } | undefined

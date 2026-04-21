@@ -49,6 +49,7 @@ export interface OrderRow {
   claimType?: ClaimType | null
   invoiceStatus?: InvoiceUploadStatus | null
   trackingNumber?: string | null
+  mappingStatus?: 'mapped' | 'partial' | 'unmapped'
   items: {
     productName: string
     optionText: string | null
@@ -216,6 +217,22 @@ export const columns: ColumnDef<OrderRow>[] = [
       return `${num.toLocaleString('ko-KR')}원`
     },
     size: 110,
+  },
+  // 매핑 상태
+  {
+    id: 'mappingStatus',
+    header: '매핑',
+    cell: ({ row }) => {
+      const status = row.original.mappingStatus
+      if (status === 'mapped') {
+        return <Badge variant="secondary">매핑됨</Badge>
+      }
+      if (status === 'partial') {
+        return <Badge variant="outline" className="border-orange-300 text-orange-700">일부 매핑</Badge>
+      }
+      return <Badge variant="destructive">미매핑</Badge>
+    },
+    size: 90,
   },
   // 송장상태
   {

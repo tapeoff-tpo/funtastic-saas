@@ -28,6 +28,7 @@ const searchParamsCache = createSearchParamsCache({
   sort: parseAsString,
   order: parseAsString,
   claimType: parseAsString,
+  mapping: parseAsString,
 })
 
 export default async function OrdersPage({
@@ -48,6 +49,7 @@ export default async function OrdersPage({
     sort: params.sort ?? undefined,
     order: (params.order as 'asc' | 'desc') ?? undefined,
     claimType: (params.claimType ?? undefined) as ClaimType | undefined,
+    mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
   })
 
   // Map DB rows to OrderRow shape
@@ -64,6 +66,7 @@ export default async function OrdersPage({
     claimType: o.claimType as OrderRow['claimType'],
     invoiceStatus: o.invoiceStatus as OrderRow['invoiceStatus'],
     trackingNumber: o.trackingNumber,
+    mappingStatus: o.mappingStatus,
     items: o.items.map((item) => ({
       productName: item.productName,
       optionText: item.optionText,

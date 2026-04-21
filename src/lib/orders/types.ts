@@ -48,6 +48,8 @@ export function isValidTransition(from: OrderStatus, to: OrderStatus): boolean {
   return VALID_TRANSITIONS[from]?.includes(to) ?? false
 }
 
+export type MappingStatus = 'mapped' | 'partial' | 'unmapped'
+
 /** Filter interface for order listing queries */
 export interface OrderFilters {
   page?: number
@@ -60,4 +62,5 @@ export interface OrderFilters {
   sort?: string
   order?: 'asc' | 'desc'
   claimType?: ClaimType
+  mapping?: 'mapped' | 'unmapped' // 'mapped' = fully mapped, 'unmapped' = partial or none
 }

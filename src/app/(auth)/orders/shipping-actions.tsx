@@ -1,9 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { toast } from 'sonner'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
+import { BulkMappingDialog } from './bulk-mapping-dialog'
+import type { OrderRow } from './columns'
 
 const CARRIER_LABELS: Record<string, string> = {
   cj: 'CJ',
@@ -13,18 +15,25 @@ const CARRIER_LABELS: Record<string, string> = {
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]
+  selectedOrders?: OrderRow[]
 }
 
 /**
  * Shipping action toolbar buttons for the order dashboard.
  * Renders below the table filters, providing shipping workflow actions.
  */
-export function ShippingActions({ selectedOrderIds }: ShippingActionsProps) {
+export function ShippingActions({ selectedOrderIds, selectedOrders = [] }: ShippingActionsProps) {
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
+  const [bulkMappingOpen, setBulkMappingOpen] = useState(false)
   const [classifying, setClassifying] = useState(false)
 
   const hasSelection = selectedOrderIds.length > 0
+
+  // Count orders that need mapping
+  const unmappedOrderCount = useMemo(() => {
+    return selectedOrders.filter((o) => o.mappingStatus !== 'mapped').length
+  }, [selectedOrders])
 
   const handleCarrierAutoExport = async () => {
     setClassifying(true)
@@ -108,6 +117,16 @@ export function ShippingActions({ selectedOrderIds }: ShippingActionsProps) {
           엑셀 송장등록
         </button>
 
+        {unmappedOrderCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setBulkMappingOpen(true)}
+            className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
+          >
+            일괄 매핑 ({unmappedOrderCount}건 미매핑)
+          </button>
+        )}
+
         <button
           type="button"
           onClick={() => void handleCarrierAutoExport()}
@@ -161,6 +180,13 @@ export function ShippingActions({ selectedOrderIds }: ShippingActionsProps) {
       <ExcelImportDialog
         open={excelImportOpen}
         onOpenChange={setExcelImportOpen}
+      />
+
+      <BulkMappingDialog
+        open={bulkMappingOpen}
+        orders={selectedOrders}
+        onClose={() => setBulkMappingOpen(false)}
+        onSaved={() => { window.location.reload() }}
       />
     </>
   )

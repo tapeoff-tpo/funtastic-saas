@@ -63,10 +63,18 @@ export function DataTable({ data, total, pageSize, page }: DataTableProps) {
       .filter(Boolean) as string[]
   }, [rowSelection, table])
 
+  // Extract selected orders (full data including items) for bulk mapping
+  const selectedOrders = useMemo(() => {
+    return Object.keys(rowSelection)
+      .filter((key) => rowSelection[key])
+      .map((key) => table.getRow(key)?.original)
+      .filter(Boolean) as OrderRow[]
+  }, [rowSelection, table])
+
   return (
     <div className="space-y-4">
       {/* Shipping action buttons */}
-      <ShippingActions selectedOrderIds={selectedIds} />
+      <ShippingActions selectedOrderIds={selectedIds} selectedOrders={selectedOrders} />
 
       {/* Bulk action bar (floating, shown when rows selected) */}
       <BulkActionBar

@@ -85,7 +85,8 @@ export function BulkActionBar({ selectedIds, onClear }: BulkActionBarProps) {
   if (selectedIds.length === 0) return null
 
   // Common statuses available for bulk change
-  const bulkStatuses: OrderStatus[] = ['confirmed', 'preparing', 'shipped', 'cancelled']
+  // "confirmed" is handled by 발주확인 button (includes marketplace API call)
+  const bulkStatuses: OrderStatus[] = ['preparing', 'shipped', 'cancelled']
 
   const handleBulkStatus = (newStatus: OrderStatus) => {
     setShowStatusMenu(false)
@@ -155,14 +156,15 @@ export function BulkActionBar({ selectedIds, onClear }: BulkActionBarProps) {
     <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-white px-4 py-3 shadow-xl">
       <span className="text-sm font-medium">{selectedIds.length}개 주문 선택됨</span>
 
-      {/* 발주확인 button */}
+      {/* 발주확인 (신규 → 주문확인 + 몰 API 호출) */}
       <button
         type="button"
         onClick={handleConfirmOrders}
         disabled={confirming || isPending}
+        title="신규 상태 주문을 주문확인으로 변경 + 몰에 자동 통보"
         className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
       >
-        {confirming ? '확인 중...' : '발주확인'}
+        {confirming ? '처리 중...' : '발주확인 (몰 통보)'}
       </button>
 
       <div className="relative">
@@ -170,9 +172,10 @@ export function BulkActionBar({ selectedIds, onClear }: BulkActionBarProps) {
           type="button"
           onClick={() => setShowStatusMenu((v) => !v)}
           disabled={isPending || confirming}
+          title="상태만 수동 변경 (몰 통보 없음)"
           className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          {isPending ? '처리중...' : '일괄 상태 변경'}
+          {isPending ? '처리중...' : '상태 수동 변경'}
         </button>
         {showStatusMenu && (
           <div className="absolute bottom-full left-0 mb-1 min-w-[140px] rounded-md border bg-white py-1 shadow-lg">

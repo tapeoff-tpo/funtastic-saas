@@ -72,8 +72,9 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-64 flex-col bg-gray-900 text-white">
       {/* Logo */}
-      <div className="flex h-16 items-center px-6">
+      <div className="flex h-16 items-center justify-between px-6">
         <span className="text-xl font-bold">Funtastic</span>
+        <span className="text-[10px] text-gray-500">v2.1</span>
       </div>
 
       {/* Navigation */}

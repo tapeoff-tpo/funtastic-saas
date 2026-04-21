@@ -7,6 +7,7 @@ import {
   ShoppingCart,
   ArrowRightLeft,
   Package,
+  FolderTree,
   Truck,
   Upload,
   PackageX,
@@ -35,6 +36,7 @@ const navSections: NavSection[] = [
       { href: '/orders', label: '주문수집/관리', icon: ShoppingCart },
       { href: '/products', label: '상품 관리', icon: Package },
       { href: '/products/mappings', label: '상품명 매핑', icon: ArrowRightLeft },
+      { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
     ],
   },
   {

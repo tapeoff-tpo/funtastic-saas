@@ -52,6 +52,7 @@ export interface ProductMarketplaceLink {
   marketplaceId: string
   marketplaceProductId: string
   marketplaceCategoryId: string | null
+  marketplaceCategoryName: string | null
   syncStatus: string
   lastSyncedAt: Date | null
   lastSyncError: string | null

@@ -450,6 +450,7 @@ export const productMarketplaceLinks = pgTable(
     marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
     marketplaceProductId: varchar('marketplace_product_id', { length: 200 }).notNull(),
     marketplaceCategoryId: varchar('marketplace_category_id', { length: 200 }),
+    marketplaceCategoryName: text('marketplace_category_name'),
     syncStatus: varchar('sync_status', { length: 50 }).notNull().default('synced'),
     lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
     lastSyncError: text('last_sync_error'),

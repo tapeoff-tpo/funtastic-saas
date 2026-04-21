@@ -231,6 +231,7 @@ export async function POST(req: NextRequest) {
     marketplaceId: string
     marketplaceProductId: string
     marketplaceCategoryId: string | null
+    marketplaceCategoryName: string | null
     rawData: Record<string, unknown> | null
   }> = []
 
@@ -296,6 +297,7 @@ export async function POST(req: NextRequest) {
             marketplaceId,
             marketplaceProductId: row.marketProductId,
             marketplaceCategoryId: row.categoryId || null,
+            marketplaceCategoryName: row.categoryName || null,
             rawData: row.categoryName ? { categoryName: row.categoryName } : null,
           })
         }
@@ -327,6 +329,7 @@ export async function POST(req: NextRequest) {
           target: [productMarketplaceLinks.marketplaceId, productMarketplaceLinks.marketplaceProductId],
           set: {
             marketplaceCategoryId: sql`EXCLUDED.marketplace_category_id`,
+            marketplaceCategoryName: sql`EXCLUDED.marketplace_category_name`,
             rawData: sql`EXCLUDED.raw_data`,
             updatedAt: new Date(),
           },

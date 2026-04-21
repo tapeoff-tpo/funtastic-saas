@@ -4,6 +4,7 @@ import { useState, useEffect, useTransition } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import type { ProductDetail, VariantFormData, ProductMarketplaceLink } from '@/lib/products/types'
+import { CategoryEditor } from './category-editor'
 
 const SYNC_STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   synced: 'default',
@@ -392,10 +393,10 @@ export default function EditProductPage() {
         </div>
 
         {/* Marketplace sync status */}
-        {product.marketplaceLinks.length > 0 && (
-          <div className="space-y-4 rounded-md border p-4">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold">마켓플레이스 연동 현황</h2>
+        <div className="space-y-4 rounded-md border p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold">마켓플레이스 연동 / 카테고리</h2>
+            {product.marketplaceLinks.length > 0 && (
               <button
                 type="button"
                 onClick={() => void handleSyncAll()}
@@ -404,11 +405,34 @@ export default function EditProductPage() {
               >
                 {isSyncing ? '동기화 중...' : '전체 동기화'}
               </button>
-            </div>
+            )}
+          </div>
+
+          <CategoryEditor
+            productId={productId}
+            existingLinks={product.marketplaceLinks.map((l) => ({
+              marketplaceId: l.marketplaceId,
+              marketplaceCategoryId: l.marketplaceCategoryId,
+              marketplaceCategoryName: l.marketplaceCategoryName,
+            }))}
+            onSaved={() => { window.location.reload() }}
+          />
+
+          {product.marketplaceLinks.length === 0 && (
+            <p className="py-4 text-center text-sm text-muted-foreground">
+              연동된 마켓이 없습니다. 위에서 카테고리를 추가하거나 매핑 엑셀을 업로드하세요.
+            </p>
+          )}
+        </div>
+
+        {product.marketplaceLinks.length > 0 && (
+          <div className="space-y-4 rounded-md border p-4">
+            <h2 className="font-semibold">마켓별 상세</h2>
 
             <div className="space-y-2">
               {product.marketplaceLinks.map((link) => {
-                const categoryName = (link.rawData as { categoryName?: string } | null)?.categoryName
+                const categoryName = link.marketplaceCategoryName
+                  ?? (link.rawData as { categoryName?: string } | null)?.categoryName
                 return (
                   <div
                     key={link.id}

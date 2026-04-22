@@ -140,6 +140,25 @@ export const orderItems = pgTable('order_items', {
   fulfillmentCode: varchar('fulfillment_code', { length: 50 }).default('normal'),
 })
 
+export const orderMemos = pgTable(
+  'order_memos',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+    content: text('content').notNull(),
+    memoType: varchar('memo_type', { length: 50 }).notNull().default('general'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('order_memos_order_id_created').on(table.orderId, table.createdAt),
+  ],
+)
+
 export const claims = pgTable(
   'claims',
   {

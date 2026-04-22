@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, productNameMappings, products, productVariants } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, products, productVariants } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage } from './types'
@@ -276,28 +276,39 @@ export async function getOrders(filters: OrderFilters = {}) {
 /**
  * Get single order by ID with items and claims.
  */
-export async function getOrderById(id: string) {
-  const [order] = await db
-    .select()
-    .from(orders)
-    .where(eq(orders.id, id))
+export async function getOrderById(id: string, userId?: string) {
+  const whereClause = userId
+    ? and(eq(orders.id, id), eq(orders.userId, userId))
+    : eq(orders.id, id)
+
+  const [order] = await db.select().from(orders).where(whereClause)
 
   if (!order) return null
 
-  const orderItemRows = await db
-    .select()
-    .from(orderItems)
-    .where(eq(orderItems.orderId, id))
+  const [orderItemRows, claimRows, memoRows, shipmentRows] = await Promise.all([
+    db.select().from(orderItems).where(eq(orderItems.orderId, id)),
+    db.select().from(claims).where(eq(claims.orderId, id)),
+    db
+      .select()
+      .from(orderMemos)
+      .where(eq(orderMemos.orderId, id))
+      .orderBy(desc(orderMemos.createdAt)),
+    db.select().from(shipments).where(eq(shipments.orderId, id)),
+  ])
 
-  const claimRows = await db
-    .select()
-    .from(claims)
-    .where(eq(claims.orderId, id))
+  const latestShipment =
+    shipmentRows.length > 0
+      ? shipmentRows.reduce((prev, cur) =>
+          cur.createdAt > prev.createdAt ? cur : prev,
+        )
+      : null
 
   return {
     ...order,
     items: orderItemRows,
     claims: claimRows,
+    memos: memoRows,
+    shipment: latestShipment,
   }
 }
 

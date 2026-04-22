@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
+import Link from 'next/link'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType } from '@/lib/orders/types'
@@ -152,9 +153,12 @@ export const columns: ColumnDef<OrderRow>[] = [
     accessorKey: 'marketplaceOrderId',
     header: '주문번호',
     cell: ({ row }) => (
-      <span className="font-mono text-sm">
-        {row.getValue('marketplaceOrderId')}
-      </span>
+      <Link
+        href={`/orders/${row.original.id}`}
+        className="font-mono text-sm text-primary hover:underline"
+      >
+        {row.getValue('marketplaceOrderId') as string}
+      </Link>
     ),
     size: 180,
   },

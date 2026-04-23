@@ -17,8 +17,9 @@ import type { ClaimType } from '@/lib/orders/types'
 import type { Metadata } from 'next'
 
 const STAGE_LABELS: Record<OrderStage, { title: string; desc: string }> = {
-  mapping: { title: '매핑 필요', desc: '상품매핑이 완료되지 않은 주문입니다. 매핑 후 송장 발급으로 이동합니다.' },
-  confirm: { title: '확정 대기 (자동 확인 실패)', desc: '주문수집 시 자동으로 몰 통보가 진행되지만, 실패한 주문이 여기 남습니다. "발주확인 (몰 통보)"로 수동 재시도하세요.' },
+  prep: { title: '출고 준비', desc: '매핑이 필요하거나 몰 통보가 안된 주문입니다. 처리되면 송장 발급으로 이동합니다.' },
+  mapping: { title: '매핑 필요', desc: '상품매핑이 완료되지 않은 주문입니다.' },
+  confirm: { title: '확정 대기', desc: '자동 몰 통보 실패. 수동 재시도 필요.' },
   invoice: { title: '송장 발급', desc: '주문확인 완료. 택배사별 엑셀을 다운받아 송장번호를 등록하세요.' },
   shipping: { title: '출고 대기', desc: '송장번호가 등록됨. 출고 후 몰에 송장번호를 전송하세요.' },
   done: { title: '완료', desc: '출고/배송 완료된 주문입니다.' },
@@ -135,6 +136,29 @@ export default async function OrdersPage({
         <Suspense>
           <ClaimsFilter counts={stats} />
         </Suspense>
+      )}
+
+      {/* prep 하위 탭 — 전체 / 매핑 필요 / 확정 대기 */}
+      {(stage === 'prep' || stage === 'mapping' || stage === 'confirm') && (
+        <div className="flex gap-1 border-b text-sm">
+          {[
+            { s: 'prep' as OrderStage, label: '전체' },
+            { s: 'mapping' as OrderStage, label: '매핑 필요' },
+            { s: 'confirm' as OrderStage, label: '확정 대기' },
+          ].map((tab) => (
+            <a
+              key={tab.s}
+              href={`/orders?stage=${tab.s}`}
+              className={`border-b-2 px-4 py-2 font-medium transition-colors ${
+                stage === tab.s
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {tab.label}
+            </a>
+          ))}
+        </div>
       )}
 
       {/* Filters */}

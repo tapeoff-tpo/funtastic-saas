@@ -23,6 +23,12 @@ export function matchStage(
   const s = order.status
   const isActive = s !== 'cancelled' && s !== 'delivered'
   switch (stage) {
+    case 'prep':
+      // 출고 준비 = 매핑 필요 ∪ 확정 대기
+      return (
+        (isActive && order.mappingStatus !== 'mapped') ||
+        (s === 'new' && order.mappingStatus === 'mapped')
+      )
     case 'mapping':
       return isActive && order.mappingStatus !== 'mapped'
     case 'confirm':

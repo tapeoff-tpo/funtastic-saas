@@ -16,7 +16,6 @@ import {
   Store,
   Settings,
   LogOut,
-  ClipboardCheck,
   FileText,
   PackageCheck,
   CircleAlert,
@@ -38,8 +37,7 @@ const navSections: NavSection[] = [
     title: '주문 처리',
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
-      { href: '/orders?stage=mapping', label: '매핑 필요', icon: CircleAlert },
-      { href: '/orders?stage=confirm', label: '확정 대기', icon: ClipboardCheck },
+      { href: '/orders?stage=prep', label: '출고 준비', icon: CircleAlert },
       { href: '/orders?stage=invoice', label: '송장 발급', icon: FileText },
       { href: '/orders?stage=shipping', label: '출고 대기', icon: PackageCheck },
     ],

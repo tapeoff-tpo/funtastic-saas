@@ -52,8 +52,9 @@ export type MappingStatus = 'mapped' | 'partial' | 'unmapped'
 
 /** 주문 처리 단계 (워크플로우) */
 export type OrderStage =
-  | 'mapping'     // 매핑 필요
-  | 'confirm'     // 확정 대기 (신규 + 매핑완료)
+  | 'prep'        // 출고 준비 (매핑 필요 ∪ 확정 대기) — 매핑 먼저, 그 다음 몰 통보
+  | 'mapping'     // 매핑 필요 (prep의 하위)
+  | 'confirm'     // 확정 대기 (prep의 하위, 신규 + 매핑완료)
   | 'invoice'     // 송장 발급 (주문확인, 송장 없음)
   | 'shipping'    // 출고 대기 (출고대기/준비중, 송장 있음)
   | 'done'        // 완료 (출고/배송중/배송완료)

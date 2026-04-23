@@ -11,6 +11,7 @@ import { getOrders, getOrderStats } from '@/lib/orders/queries'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { ClaimsFilter } from './claims-filter'
+import { WorkflowDiagram } from './workflow-diagram'
 import type { OrderRow } from './columns'
 import type { OrderFilters as OrderFiltersParams, OrderStage } from '@/lib/orders/types'
 import type { ClaimType } from '@/lib/orders/types'
@@ -80,8 +81,12 @@ export default async function OrdersPage({
     marketplaceId: o.marketplaceId,
     marketplaceOrderId: o.marketplaceOrderId,
     buyerName: o.buyerName,
+    buyerPhone: o.buyerPhone,
+    recipientName: o.recipientName,
+    recipientPhone: o.recipientPhone,
     status: o.status as OrderRow['status'],
     orderedAt: o.orderedAt,
+    collectedAt: o.collectedAt,
     totalAmount: o.totalAmount,
     isHeld: o.isHeld,
     holdReason: o.holdReason,
@@ -91,11 +96,13 @@ export default async function OrdersPage({
     claimReason: o.claimReason ?? null,
     invoiceStatus: o.invoiceStatus as OrderRow['invoiceStatus'],
     trackingNumber: o.trackingNumber,
+    carrierName: (o as { carrierName?: string | null }).carrierName ?? null,
     mappingStatus: o.mappingStatus,
     items: o.items.map((item) => ({
       productName: item.productName,
       optionText: item.optionText,
       quantity: item.quantity,
+      sku: item.sku ?? null,
     })),
   }))
 
@@ -125,6 +132,22 @@ export default async function OrdersPage({
           </p>
         )}
       </div>
+
+      {/* Workflow diagram — 사방넷 style visual flow (only on 전체 view) */}
+      {!stage && (
+        <WorkflowDiagram
+          counts={{
+            new: stats.newCount,
+            confirmed: stats.confirmed,
+            preparing: stats.preparing,
+            shipped: stats.shipped,
+            cancelled: stats.cancel,
+            returned: stats.return,
+            exchanged: stats.exchange,
+            held: stats.held,
+          }}
+        />
+      )}
 
       {/* CS-focused tab bar (only on 전체 view) */}
       {!stage && (

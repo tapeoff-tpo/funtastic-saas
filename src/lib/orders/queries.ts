@@ -238,6 +238,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       claimReason: claim?.reason ?? null,
       invoiceStatus: shipment?.uploadStatus ?? null,
       trackingNumber: shipment?.trackingNumber ?? null,
+      carrierName: shipment?.carrierName ?? null,
       items: orderItemsData,
       mappingStatus: getMappingStatus(order.marketplaceId, orderItemsData),
     }
@@ -333,14 +334,19 @@ export interface OrderStats {
   return: number
   exchange: number
   held: number
+  // Workflow flow counts (by orders.status)
+  newCount: number
+  confirmed: number
+  preparing: number
+  shipped: number
 }
 
 /**
  * Dashboard-style summary counts for a user's orders.
- * All scoped by userId. Runs 3 queries in parallel (total, claim grouped, held).
+ * All scoped by userId. Parallelized COUNT queries for tabs + workflow diagram.
  */
 export async function getOrderStats(userId: string): Promise<OrderStats> {
-  const [totalRow, claimRows, heldRow] = await Promise.all([
+  const [totalRow, claimRows, heldRow, statusRows] = await Promise.all([
     db.select({ value: count() }).from(orders).where(eq(orders.userId, userId)),
     db
       .select({ claimType: claims.claimType, value: count() })
@@ -352,17 +358,29 @@ export async function getOrderStats(userId: string): Promise<OrderStats> {
       .select({ value: count() })
       .from(orders)
       .where(and(eq(orders.userId, userId), eq(orders.isHeld, true))),
+    db
+      .select({ status: orders.status, value: count() })
+      .from(orders)
+      .where(eq(orders.userId, userId))
+      .groupBy(orders.status),
   ])
 
-  const byType: Record<string, number> = {}
-  for (const row of claimRows) byType[row.claimType] = row.value
+  const byClaimType: Record<string, number> = {}
+  for (const row of claimRows) byClaimType[row.claimType] = row.value
+
+  const byStatus: Record<string, number> = {}
+  for (const row of statusRows) byStatus[row.status] = row.value
 
   return {
     total: totalRow[0]?.value ?? 0,
-    cancel: byType.cancel ?? 0,
-    return: byType.return ?? 0,
-    exchange: byType.exchange ?? 0,
+    cancel: byClaimType.cancel ?? 0,
+    return: byClaimType.return ?? 0,
+    exchange: byClaimType.exchange ?? 0,
     held: heldRow[0]?.value ?? 0,
+    newCount: byStatus.new ?? 0,
+    confirmed: byStatus.confirmed ?? 0,
+    preparing: byStatus.preparing ?? 0,
+    shipped: (byStatus.shipped ?? 0) + (byStatus.delivering ?? 0) + (byStatus.delivered ?? 0),
   }
 }
 

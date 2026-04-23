@@ -18,7 +18,6 @@ const INVOICE_STATUS_LABELS: Record<InvoiceUploadStatus, string> = {
   confirmed: '확인됨',
 }
 
-/** Invoice status badge variant */
 const INVOICE_STATUS_VARIANT: Record<InvoiceUploadStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   pending: 'outline',
   uploading: 'default',
@@ -27,7 +26,6 @@ const INVOICE_STATUS_VARIANT: Record<InvoiceUploadStatus, 'default' | 'secondary
   confirmed: 'secondary',
 }
 
-/** Invoice upload status type */
 type InvoiceUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed' | 'confirmed'
 
 /** Row shape for the order table (matches getOrders return) */
@@ -36,8 +34,12 @@ export interface OrderRow {
   marketplaceId: string
   marketplaceOrderId: string
   buyerName: string
+  buyerPhone?: string | null
+  recipientName?: string | null
+  recipientPhone?: string | null
   status: OrderStatus
   orderedAt: Date | string
+  collectedAt?: Date | string | null
   totalAmount: string
   isHeld: boolean
   holdReason?: string | null
@@ -47,15 +49,16 @@ export interface OrderRow {
   claimReason?: string | null
   invoiceStatus?: InvoiceUploadStatus | null
   trackingNumber?: string | null
+  carrierName?: string | null
   mappingStatus?: 'mapped' | 'partial' | 'unmapped'
   items: {
     productName: string
     optionText: string | null
     quantity: number
+    sku?: string | null
   }[]
 }
 
-/** Status badge color mapping */
 const STATUS_VARIANT: Record<OrderStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   new: 'default',
   confirmed: 'secondary',
@@ -66,7 +69,6 @@ const STATUS_VARIANT: Record<OrderStatus, 'default' | 'secondary' | 'destructive
   cancelled: 'destructive',
 }
 
-/** Marketplace display names */
 const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡',
   naver: '네이버',
@@ -80,8 +82,17 @@ function getMarketplaceLabel(id: string): string {
   return MARKETPLACE_LABELS[id] ?? id
 }
 
+function formatPhone(phone: string | null | undefined): string {
+  if (!phone) return ''
+  // Normalize: 010-1234-5678 format
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`
+  return phone
+}
+
 export const columns: ColumnDef<OrderRow>[] = [
-  // Checkbox column for row selection (D-05)
+  // Checkbox
   {
     id: 'select',
     header: ({ table }) => (
@@ -104,107 +115,184 @@ export const columns: ColumnDef<OrderRow>[] = [
     ),
     enableSorting: false,
     enableHiding: false,
-    size: 40,
+    size: 32,
   },
-  // 주문번호
+
+  // 주문상태 | 주문 액션 — 상태 뱃지 + 상태 변경/보류 컨트롤
   {
-    accessorKey: 'marketplaceOrderId',
-    header: '주문번호',
-    cell: ({ row }) => (
-      <Link
-        href={`/orders/${row.original.id}`}
-        className="font-mono text-sm text-primary hover:underline"
-      >
-        {row.getValue('marketplaceOrderId') as string}
-      </Link>
-    ),
-    size: 180,
-  },
-  // 마켓
-  {
-    accessorKey: 'marketplaceId',
-    header: '마켓',
+    id: 'statusActions',
+    header: '주문상태',
     cell: ({ row }) => {
-      const id = row.getValue('marketplaceId') as string
+      const order = row.original
       return (
-        <Badge variant="outline">
-          {getMarketplaceLabel(id)}
-        </Badge>
+        <div className="flex flex-col gap-1">
+          <Badge variant={STATUS_VARIANT[order.status]} className="w-fit">
+            {ORDER_STATUS_LABELS[order.status]}
+          </Badge>
+          <div className="flex items-center gap-0.5">
+            <StatusDropdown
+              orderId={order.id}
+              currentStatus={order.status}
+              isHeld={order.isHeld}
+            />
+            <HoldDialog
+              orderId={order.id}
+              isHeld={order.isHeld}
+              holdReason={order.holdReason}
+            />
+          </div>
+        </div>
       )
     },
-    size: 120,
+    enableSorting: false,
+    size: 140,
   },
-  // 상품명
+
+  // 쇼핑몰
   {
-    id: 'productName',
-    header: '상품명',
+    accessorKey: 'marketplaceId',
+    header: '쇼핑몰',
+    cell: ({ row }) => (
+      <Badge variant="outline">
+        {getMarketplaceLabel(row.getValue('marketplaceId') as string)}
+      </Badge>
+    ),
+    size: 90,
+  },
+
+  // 수집/주문일시
+  {
+    id: 'orderedAt',
+    header: '주문일시',
     cell: ({ row }) => {
-      const items = row.original.items
-      if (!items || items.length === 0) return <span className="text-muted-foreground">-</span>
-      const first = items[0]
-      const extra = items.length - 1
+      const ordered = row.original.orderedAt
+      const collected = row.original.collectedAt
       return (
-        <div className="max-w-[250px] truncate" title={first.productName}>
-          {first.productName}
-          {first.optionText && (
-            <span className="ml-1 text-muted-foreground text-xs">
-              ({first.optionText})
-            </span>
-          )}
-          {extra > 0 && (
-            <span className="ml-1 text-muted-foreground text-xs">
-              +{extra}건
+        <div className="flex flex-col gap-0 text-xs leading-tight">
+          <span>{format(new Date(ordered), 'yyyy-MM-dd HH:mm')}</span>
+          {collected && (
+            <span className="text-muted-foreground">
+              수집 {format(new Date(collected), 'MM-dd HH:mm')}
             </span>
           )}
         </div>
       )
     },
-    size: 280,
+    size: 140,
   },
-  // 구매자
+
+  // 주문번호 (마켓 + 내부)
   {
-    accessorKey: 'buyerName',
-    header: '구매자',
-    size: 100,
-  },
-  // 상태 — 주문 상태만 (CS 상태는 별도 컬럼)
-  {
-    accessorKey: 'status',
-    header: '상태',
+    id: 'orderNumber',
+    header: '주문번호',
     cell: ({ row }) => {
-      const status = row.getValue('status') as OrderStatus
+      const order = row.original
       return (
-        <Badge variant={STATUS_VARIANT[status]}>
-          {ORDER_STATUS_LABELS[status]}
-        </Badge>
+        <div className="flex flex-col gap-0 text-xs leading-tight">
+          <Link
+            href={`/orders/${order.id}`}
+            className="font-mono font-medium text-primary hover:underline"
+          >
+            {order.marketplaceOrderId}
+          </Link>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            #{order.id.slice(0, 8)}
+          </span>
+        </div>
       )
     },
-    size: 100,
+    size: 180,
   },
-  // 주문일
+
+  // 상품 (SKU + 이름 + 옵션 + 수량)
   {
-    accessorKey: 'orderedAt',
-    header: '주문일',
+    id: 'productInfo',
+    header: '상품',
     cell: ({ row }) => {
-      const date = row.getValue('orderedAt')
-      if (!date) return '-'
-      return format(new Date(date as string | Date), 'yyyy-MM-dd HH:mm')
+      const items = row.original.items
+      if (!items || items.length === 0)
+        return <span className="text-muted-foreground">-</span>
+      const first = items[0]
+      const extra = items.length - 1
+      return (
+        <div className="flex flex-col gap-0 text-xs leading-tight">
+          {first.sku && (
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {first.sku}
+            </span>
+          )}
+          <span className="max-w-[280px] truncate font-medium" title={first.productName}>
+            {first.productName}
+          </span>
+          {first.optionText && (
+            <span className="max-w-[280px] truncate text-[11px] text-muted-foreground" title={first.optionText}>
+              {first.optionText}
+            </span>
+          )}
+          <span className="text-[11px]">
+            <span className="text-muted-foreground">수량</span>{' '}
+            <span className="font-medium">{first.quantity}</span>
+            {extra > 0 && (
+              <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                +{extra}건
+              </span>
+            )}
+          </span>
+        </div>
+      )
+    },
+    size: 300,
+  },
+
+  // 구매자/수취인/연락처
+  {
+    id: 'contact',
+    header: '구매자 · 수취인',
+    cell: ({ row }) => {
+      const order = row.original
+      const sameName =
+        order.recipientName && order.recipientName === order.buyerName
+      return (
+        <div className="flex flex-col gap-0 text-xs leading-tight">
+          <span>
+            <span className="text-muted-foreground">구매</span>{' '}
+            <span className="font-medium">{order.buyerName}</span>
+          </span>
+          {order.recipientName && !sameName && (
+            <span>
+              <span className="text-muted-foreground">수취</span>{' '}
+              <span className="font-medium">{order.recipientName}</span>
+            </span>
+          )}
+          {(order.recipientPhone || order.buyerPhone) && (
+            <span className="font-mono text-[10px] text-muted-foreground">
+              {formatPhone(order.recipientPhone ?? order.buyerPhone)}
+            </span>
+          )}
+        </div>
+      )
     },
     size: 140,
   },
+
   // 금액
   {
     accessorKey: 'totalAmount',
     header: '금액',
     cell: ({ row }) => {
-      const amount = row.getValue('totalAmount') as string
-      const num = Number(amount)
+      const num = Number(row.getValue('totalAmount') as string)
       if (Number.isNaN(num)) return '-'
-      return `${num.toLocaleString('ko-KR')}원`
+      return (
+        <span className="font-medium tabular-nums">
+          {num.toLocaleString('ko-KR')}
+          <span className="ml-0.5 text-[10px] text-muted-foreground">원</span>
+        </span>
+      )
     },
-    size: 110,
+    size: 100,
   },
-  // CS — 클레임 상태 전환 + 보류 사유
+
+  // CS — 클레임/미발송
   {
     id: 'cs',
     header: 'CS',
@@ -236,54 +324,38 @@ export const columns: ColumnDef<OrderRow>[] = [
       }
       return <span className="text-xs text-muted-foreground">-</span>
     },
-    size: 240,
+    size: 200,
   },
-  // 송장상태
+
+  // 택배사 · 송장
   {
-    id: 'invoiceStatus',
-    header: '송장상태',
+    id: 'shipping',
+    header: '택배 · 송장',
     cell: ({ row }) => {
-      const invoiceStatus = row.original.invoiceStatus
-      const trackingNumber = row.original.trackingNumber
-      if (!invoiceStatus) return <span className="text-muted-foreground">-</span>
+      const order = row.original
+      const invoiceStatus = order.invoiceStatus
+      const trackingNumber = order.trackingNumber
+      if (!invoiceStatus && !trackingNumber) {
+        return <span className="text-xs text-muted-foreground">미등록</span>
+      }
       return (
-        <div className="flex flex-col gap-0.5">
-          <Badge variant={INVOICE_STATUS_VARIANT[invoiceStatus]}>
-            {INVOICE_STATUS_LABELS[invoiceStatus]}
-          </Badge>
+        <div className="flex flex-col gap-0.5 text-xs leading-tight">
+          {order.carrierName && (
+            <span className="text-[11px] font-medium">{order.carrierName}</span>
+          )}
           {trackingNumber && (
-            <span className="font-mono text-xs text-muted-foreground">
+            <span className="font-mono text-[11px] text-muted-foreground">
               {trackingNumber}
             </span>
+          )}
+          {invoiceStatus && (
+            <Badge variant={INVOICE_STATUS_VARIANT[invoiceStatus]} className="w-fit text-[10px]">
+              {INVOICE_STATUS_LABELS[invoiceStatus]}
+            </Badge>
           )}
         </div>
       )
     },
-    size: 120,
-  },
-  // 액션
-  {
-    id: 'actions',
-    header: '',
-    cell: ({ row }) => {
-      const order = row.original
-      return (
-        <div className="flex items-center gap-1">
-          <StatusDropdown
-            orderId={order.id}
-            currentStatus={order.status}
-            isHeld={order.isHeld}
-          />
-          <HoldDialog
-            orderId={order.id}
-            isHeld={order.isHeld}
-            holdReason={order.holdReason}
-          />
-        </div>
-      )
-    },
-    enableSorting: false,
-    enableHiding: false,
-    size: 180,
+    size: 140,
   },
 ]

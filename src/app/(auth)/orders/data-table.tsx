@@ -10,7 +10,6 @@ import {
 } from '@tanstack/react-table'
 import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
-import { BulkActionBar } from './status-actions'
 import { ShippingActions } from './shipping-actions'
 import { OrderDetailDialog } from './order-detail-dialog'
 import { Pagination } from '@/components/ui/pagination'
@@ -82,12 +81,6 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
     <div className="space-y-4">
       {/* Shipping action buttons */}
       <ShippingActions selectedOrderIds={selectedIds} selectedOrders={selectedOrders} stage={stage} />
-
-      {/* Bulk action bar (floating, shown when rows selected) */}
-      <BulkActionBar
-        selectedIds={selectedIds}
-        onClear={() => setRowSelection({})}
-      />
 
       {/* Toolbar: column toggle + selected count */}
       <div className="flex items-center justify-between">

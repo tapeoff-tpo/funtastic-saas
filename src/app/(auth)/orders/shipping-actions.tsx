@@ -133,16 +133,6 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
-        {showMapping && unmappedOrderCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setBulkMappingOpen(true)}
-            className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
-          >
-            일괄 매핑 ({unmappedOrderCount}건 미매핑)
-          </button>
-        )}
-
         {showCombined && (
           <a
             href="/shipping/combined"

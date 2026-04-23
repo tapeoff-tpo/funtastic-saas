@@ -89,6 +89,7 @@ export default async function OrdersPage({
     totalAmount: o.totalAmount,
     isHeld: o.isHeld,
     holdReason: o.holdReason,
+    logisticsMessage: (o as { logisticsMessage?: string | null }).logisticsMessage ?? null,
     claimType: o.claimType as OrderRow['claimType'],
     claimId: o.claimId ?? null,
     claimStatus: o.claimStatus as OrderRow['claimStatus'],

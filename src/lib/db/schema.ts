@@ -106,6 +106,8 @@ export const orders = pgTable(
     isHeld: boolean('is_held').notNull().default(false),
     holdReason: text('hold_reason'),
     heldAt: timestamp('held_at', { withTimezone: true }),
+    /** 물류메세지 — 출고 담당자 참고용 (예: "경동택배 미발건", "출고 전 취소요청") */
+    logisticsMessage: varchar('logistics_message', { length: 200 }),
     rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
     marketplaceStatus: varchar('marketplace_status', { length: 100 }),
     collectedAt: timestamp('collected_at', { withTimezone: true }),

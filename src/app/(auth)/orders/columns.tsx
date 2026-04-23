@@ -1,13 +1,18 @@
 'use client'
 
-import type { ColumnDef } from '@tanstack/react-table'
-import Link from 'next/link'
+import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { StatusDropdown } from './status-actions'
 import { HoldDialog } from './hold-dialog'
 import { ClaimStatusActions } from './claim-status-actions'
+
+/** Helper to get openDetail from table.options.meta safely */
+function getOpenDetail(table: Table<OrderRow>): ((id: string) => void) | undefined {
+  const meta = table.options.meta as { openDetail?: (id: string) => void } | undefined
+  return meta?.openDetail
+}
 
 /** Invoice upload status labels */
 const INVOICE_STATUS_LABELS: Record<InvoiceUploadStatus, string> = {
@@ -43,6 +48,7 @@ export interface OrderRow {
   totalAmount: string
   isHeld: boolean
   holdReason?: string | null
+  logisticsMessage?: string | null
   claimType?: ClaimType | null
   claimId?: string | null
   claimStatus?: ClaimStatus | null
@@ -118,23 +124,33 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 32,
   },
 
-  // 주문상태 | 주문 액션 — 상태 뱃지 + 상태 변경/보류 컨트롤
+  // 주문상태 | 주문 액션 — 상태 뱃지 + Claim/C/S 버튼 + 보류
   {
     id: 'statusActions',
     header: '주문상태',
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const order = row.original
+      const openDetail = getOpenDetail(table)
       return (
         <div className="flex flex-col gap-1">
           <Badge variant={STATUS_VARIANT[order.status]} className="w-fit">
             {ORDER_STATUS_LABELS[order.status]}
           </Badge>
-          <div className="flex items-center gap-0.5">
-            <StatusDropdown
-              orderId={order.id}
-              currentStatus={order.status}
-              isHeld={order.isHeld}
-            />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => openDetail?.(order.id)}
+              className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100"
+            >
+              Claim
+            </button>
+            <button
+              type="button"
+              onClick={() => openDetail?.(order.id)}
+              className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-700 hover:bg-gray-50"
+            >
+              C/S
+            </button>
             <HoldDialog
               orderId={order.id}
               isHeld={order.isHeld}
@@ -145,7 +161,7 @@ export const columns: ColumnDef<OrderRow>[] = [
       )
     },
     enableSorting: false,
-    size: 140,
+    size: 160,
   },
 
   // 쇼핑몰
@@ -185,16 +201,18 @@ export const columns: ColumnDef<OrderRow>[] = [
   {
     id: 'orderNumber',
     header: '주문번호',
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const order = row.original
+      const openDetail = getOpenDetail(table)
       return (
         <div className="flex flex-col gap-0 text-xs leading-tight">
-          <Link
-            href={`/orders/${order.id}`}
-            className="font-mono font-medium text-primary hover:underline"
+          <button
+            type="button"
+            onClick={() => openDetail?.(order.id)}
+            className="text-left font-mono font-medium text-primary hover:underline"
           >
             {order.marketplaceOrderId}
-          </Link>
+          </button>
           <span className="font-mono text-[10px] text-muted-foreground">
             #{order.id.slice(0, 8)}
           </span>
@@ -204,12 +222,13 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 180,
   },
 
-  // 상품 (SKU + 이름 + 옵션 + 수량)
+  // 상품 (SKU + 이름 + 옵션 + 수량 + 물류메세지)
   {
     id: 'productInfo',
     header: '상품',
     cell: ({ row }) => {
-      const items = row.original.items
+      const order = row.original
+      const items = order.items
       if (!items || items.length === 0)
         return <span className="text-muted-foreground">-</span>
       const first = items[0]
@@ -238,6 +257,14 @@ export const columns: ColumnDef<OrderRow>[] = [
               </span>
             )}
           </span>
+          {order.logisticsMessage && (
+            <span
+              className="mt-1 inline-flex w-fit items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+              title={order.logisticsMessage}
+            >
+              📦 {order.logisticsMessage}
+            </span>
+          )}
         </div>
       )
     },

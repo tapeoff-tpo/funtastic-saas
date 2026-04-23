@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
 import { BulkMappingDialog } from './bulk-mapping-dialog'
+import { LogisticsMessageDialog } from './logistics-message-dialog'
 import type { OrderRow } from './columns'
 import type { OrderStage } from '@/lib/orders/types'
 
@@ -54,6 +55,7 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [bulkMappingOpen, setBulkMappingOpen] = useState(false)
+  const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
   const [classifying, setClassifying] = useState(false)
 
   const hasSelection = selectedOrderIds.length > 0
@@ -193,6 +195,15 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
           </button>
         )}
 
+        <button
+          type="button"
+          onClick={() => setLogisticsMsgOpen(true)}
+          disabled={!hasSelection}
+          className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          물류메세지 등록
+        </button>
+
         {stage && (
           <span className="ml-auto text-xs text-muted-foreground">
             💡 현재 단계: <strong>{stage === 'mapping' ? '매핑 필요' : stage === 'confirm' ? '확정 대기' : stage === 'invoice' ? '송장 발급' : stage === 'shipping' ? '출고 대기' : '완료'}</strong>
@@ -216,6 +227,12 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
         orders={selectedOrders}
         onClose={() => setBulkMappingOpen(false)}
         onSaved={() => { window.location.reload() }}
+      />
+
+      <LogisticsMessageDialog
+        open={logisticsMsgOpen}
+        onOpenChange={setLogisticsMsgOpen}
+        selectedOrderIds={selectedOrderIds}
       />
     </>
   )

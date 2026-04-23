@@ -12,6 +12,7 @@ import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
 import { BulkActionBar } from './status-actions'
 import { ShippingActions } from './shipping-actions'
+import { OrderDetailDialog } from './order-detail-dialog'
 import { Pagination } from '@/components/ui/pagination'
 import type { OrderStage } from '@/lib/orders/types'
 
@@ -28,6 +29,7 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [showColumnToggle, setShowColumnToggle] = useState(false)
+  const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
   const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50))
@@ -50,6 +52,9 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
     enableRowSelection: true,
+    meta: {
+      openDetail: (id: string) => setDetailOrderId(id),
+    },
   })
 
   const selectedCount = Object.keys(rowSelection).length
@@ -175,6 +180,13 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
         total={total}
         onPageChange={(p) => void setPage(p)}
         onPageSizeChange={(s) => void setPageSize(s)}
+      />
+
+      {/* Detail modal (opened via Claim button or 주문번호 click) */}
+      <OrderDetailDialog
+        orderId={detailOrderId}
+        open={detailOrderId !== null}
+        onOpenChange={(open) => { if (!open) setDetailOrderId(null) }}
       />
     </div>
   )

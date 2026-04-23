@@ -5,11 +5,49 @@ import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
+import { InlineMappingDialog } from './inline-mapping-dialog'
+import { useState } from 'react'
 
 /** Helper to get openDetail from table.options.meta safely */
 function getOpenDetail(table: Table<OrderRow>): ((id: string) => void) | undefined {
   const meta = table.options.meta as { openDetail?: (id: string) => void } | undefined
   return meta?.openDetail
+}
+
+/** Mapping status cell — clickable badge that opens inline mapping dialog */
+function MappingCell({ order }: { order: OrderRow }) {
+  const [open, setOpen] = useState(false)
+  const status = order.mappingStatus ?? 'unmapped'
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => status !== 'mapped' && setOpen(true)}
+        disabled={status === 'mapped'}
+        className={status !== 'mapped' ? 'cursor-pointer' : 'cursor-default'}
+      >
+        {status === 'mapped' ? (
+          <Badge variant="secondary">매핑됨</Badge>
+        ) : status === 'partial' ? (
+          <Badge variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50">일부 매핑</Badge>
+        ) : (
+          <Badge variant="destructive" className="hover:opacity-80">미매핑</Badge>
+        )}
+      </button>
+      <InlineMappingDialog
+        open={open}
+        marketplaceId={order.marketplaceId}
+        items={order.items.map((i) => ({
+          productName: i.productName,
+          optionText: i.optionText,
+          quantity: i.quantity,
+        }))}
+        onClose={() => setOpen(false)}
+        onSaved={() => { window.location.reload() }}
+      />
+    </>
+  )
 }
 
 /** Invoice upload status labels */
@@ -304,6 +342,13 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 100,
   },
 
+  // 매핑 — 매핑 필요 스테이지에서만 노출 (data-table이 columnVisibility로 제어)
+  {
+    id: 'mappingStatus',
+    header: '매핑',
+    cell: ({ row }) => <MappingCell order={row.original} />,
+    size: 90,
+  },
   // CS — 클레임/미발송
   {
     id: 'cs',

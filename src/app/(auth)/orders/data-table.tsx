@@ -25,7 +25,10 @@ interface DataTableProps {
 
 
 export function DataTable({ data, total, pageSize, page, stage }: DataTableProps) {
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
+    // 매핑 컬럼은 매핑 필요 스테이지에서만 노출
+    { mappingStatus: stage === 'mapping' },
+  )
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [showColumnToggle, setShowColumnToggle] = useState(false)
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)

@@ -71,6 +71,7 @@ export async function getInventoryList(
         sku: products.internalSku,
         productName: products.name,
         optionName: inventory.optionName,
+        packagingUnit: inventory.packagingUnit,
         warehouseZone: inventory.warehouseZone,
         sectorCode: inventory.sectorCode,
         totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,

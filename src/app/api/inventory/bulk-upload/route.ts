@@ -38,16 +38,18 @@ const HEADER_MAP: Record<string, string> = {
   '창고위치': 'sectorCode',
   '한국창고기준 위치': 'sectorCode',
   '섹터': 'sectorCode',
+  'Location': 'sectorCode',        // 사방넷 재고코드관리 col 20
+  'Location Location': 'sectorCode',
   '원가': 'costPrice',
   '판매가': 'basePrice',
   '택배사': 'carrierId',
   '단품명': 'optionName',
   '옵션명': 'optionName',
   '옵션': 'optionName',
-  '단품': 'optionName',        // 사방넷 재고코드관리 col 8
-  '단품 단품': 'optionName',   // 사방넷: row2+row3 둘 다 "단품"
-  '옵션별칭': 'optionName',    // 사방넷 col 26
-  '옵션별칭 옵션별칭': 'optionName',
+  '단품': 'optionName',            // 사방넷 재고코드관리 col 8
+  '단품 단품': 'optionName',       // 사방넷: row2+row3 둘 다 "단품"
+  '옵션별칭': 'packagingUnit',     // 사방넷 col 26 — 박스 포장 단위
+  '옵션별칭 옵션별칭': 'packagingUnit',
 }
 
 /** Build a column map for a single header row */
@@ -102,6 +104,7 @@ interface ParsedRow {
   warehouseZone?: string
   sectorCode?: string
   optionName?: string
+  packagingUnit?: string
   costPrice?: string
   basePrice?: string
   carrierId?: string
@@ -243,6 +246,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
       warehouseZone: raw.warehouseZone?.trim() || undefined,
       sectorCode: raw.sectorCode?.trim() || undefined,
       optionName: raw.optionName?.trim() || undefined,
+      packagingUnit: raw.packagingUnit?.trim() || undefined,
       costPrice: raw.costPrice?.trim() || undefined,
       basePrice: raw.basePrice?.trim() || undefined,
       carrierId: raw.carrierId?.trim() || undefined,
@@ -269,6 +273,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
             warehouseZone: r.warehouseZone ?? null,
             sectorCode: r.sectorCode ?? null,
             optionName: r.optionName ?? null,
+            packagingUnit: r.packagingUnit ?? null,
           })),
         )
         .onConflictDoUpdate({
@@ -281,6 +286,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
             warehouseZone: sql`excluded.warehouse_zone`,
             sectorCode: sql`excluded.sector_code`,
             optionName: sql`excluded.option_name`,
+            packagingUnit: sql`excluded.packaging_unit`,
             updatedAt: new Date(),
           },
         })

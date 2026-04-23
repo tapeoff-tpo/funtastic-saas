@@ -79,6 +79,7 @@ export default async function InventoryPage({
           sku: item.sku,
           productName: item.productName,
           optionName: item.optionName ?? null,
+          packagingUnit: item.packagingUnit ?? null,
           warehouseZone: item.warehouseZone,
           sectorCode: item.sectorCode,
           totalStock: item.totalStock,

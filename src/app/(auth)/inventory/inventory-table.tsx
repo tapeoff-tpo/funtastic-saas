@@ -20,6 +20,7 @@ export interface InventoryRow {
   sku: string
   productName: string
   optionName: string | null
+  packagingUnit: string | null
   warehouseZone: string | null
   sectorCode: string | null
   totalStock: number
@@ -186,6 +187,13 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
     }),
     columnHelper.accessor('optionName', {
       header: '옵션명',
+      cell: (info) => {
+        const val = info.getValue()
+        return val ? <span className="text-xs text-muted-foreground">{val}</span> : '-'
+      },
+    }),
+    columnHelper.accessor('packagingUnit', {
+      header: '박스단위',
       cell: (info) => {
         const val = info.getValue()
         return val ? <span className="text-xs text-muted-foreground">{val}</span> : '-'

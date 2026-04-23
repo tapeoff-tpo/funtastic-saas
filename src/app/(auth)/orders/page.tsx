@@ -111,7 +111,7 @@ export default async function OrdersPage({
   const pageTitle = stageInfo?.title ?? '주문 관리'
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {/* Compact header — inline title + count + action */}
       <div className="flex flex-wrap items-baseline gap-3">
         <h1 className="text-xl font-bold">{pageTitle}</h1>

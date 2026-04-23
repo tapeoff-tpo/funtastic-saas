@@ -41,6 +41,9 @@ const HEADER_MAP: Record<string, string> = {
   '원가': 'costPrice',
   '판매가': 'basePrice',
   '택배사': 'carrierId',
+  '단품명': 'optionName',
+  '옵션명': 'optionName',
+  '옵션': 'optionName',
 }
 
 /** Build a column map for a single header row */
@@ -94,6 +97,7 @@ interface ParsedRow {
   totalStock: number
   warehouseZone?: string
   sectorCode?: string
+  optionName?: string
   costPrice?: string
   basePrice?: string
   carrierId?: string
@@ -234,6 +238,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
       totalStock: Math.round(totalStock),
       warehouseZone: raw.warehouseZone?.trim() || undefined,
       sectorCode: raw.sectorCode?.trim() || undefined,
+      optionName: raw.optionName?.trim() || undefined,
       costPrice: raw.costPrice?.trim() || undefined,
       basePrice: raw.basePrice?.trim() || undefined,
       carrierId: raw.carrierId?.trim() || undefined,
@@ -259,6 +264,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
             availableStock: r.totalStock,
             warehouseZone: r.warehouseZone ?? null,
             sectorCode: r.sectorCode ?? null,
+            optionName: r.optionName ?? null,
           })),
         )
         .onConflictDoUpdate({
@@ -270,6 +276,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
             availableStock: sql`excluded.total_stock - ${inventory.reservedStock}`,
             warehouseZone: sql`excluded.warehouse_zone`,
             sectorCode: sql`excluded.sector_code`,
+            optionName: sql`excluded.option_name`,
             updatedAt: new Date(),
           },
         })

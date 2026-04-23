@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, products, productVariants } from '@/lib/db/schema'
+import { inventory, inventoryHistory, products } from '@/lib/db/schema'
 import { eq, and, ne, sql, inArray } from 'drizzle-orm'
 
 export async function GET(req: NextRequest) {
@@ -40,7 +40,7 @@ export async function GET(req: NextRequest) {
     .select({
       sku: products.internalSku,
       productName: products.name,
-      optionName: productVariants.optionName,
+      optionName: inventory.optionName,
       warehouseZone: inventory.warehouseZone,
       sectorCode: sql<string | null>`COALESCE(${products.warehouseLocation}, ${inventory.sectorCode})`,
       totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
@@ -54,9 +54,8 @@ export async function GET(req: NextRequest) {
     .from(products)
     .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
     .leftJoin(inventoryHistory, eq(inventoryHistory.inventoryId, inventory.id))
-    .leftJoin(productVariants, and(eq(productVariants.productId, products.id), eq(productVariants.sku, products.internalSku)))
     .where(and(...conditions))
-    .groupBy(products.id, inventory.id, productVariants.id)
+    .groupBy(products.id, inventory.id)
     .orderBy(products.internalSku)
 
   const monthLabel = `${year}년 ${month}월`

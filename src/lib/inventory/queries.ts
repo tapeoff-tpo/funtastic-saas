@@ -10,7 +10,7 @@
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, products, productVariants } from '@/lib/db/schema'
+import { inventory, inventoryHistory, products } from '@/lib/db/schema'
 import { eq, and, or, ilike, desc, asc, count, ne, sql, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
@@ -70,7 +70,7 @@ export async function getInventoryList(
         inventoryId: inventory.id,
         sku: products.internalSku,
         productName: products.name,
-        optionName: productVariants.optionName,
+        optionName: inventory.optionName,
         warehouseZone: inventory.warehouseZone,
         sectorCode: sql<string | null>`COALESCE(${products.warehouseLocation}, ${inventory.sectorCode})`,
         totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
@@ -82,7 +82,6 @@ export async function getInventoryList(
       })
       .from(products)
       .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
-      .leftJoin(productVariants, and(eq(productVariants.productId, products.id), eq(productVariants.sku, products.internalSku)))
       .where(whereClause)
       .orderBy(sortDirection(sortColumn))
       .limit(pageSize)

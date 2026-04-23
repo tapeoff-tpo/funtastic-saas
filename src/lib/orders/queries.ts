@@ -74,6 +74,10 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     )
   }
 
+  if (filters.isHeld) {
+    conditions.push(eq(orders.isHeld, true))
+  }
+
   return conditions
 }
 
@@ -171,11 +175,18 @@ export async function getOrders(filters: OrderFilters = {}) {
     itemsByOrderId.set(item.orderId, existing)
   }
 
-  // Map first claim type per order
-  const claimTypeByOrderId = new Map<string, string>()
+  // Map first claim (most recent by requestedAt) per order — need id/status for inline CS actions
+  type ClaimSummary = { id: string; claimType: string; claimStatus: string; reason: string | null }
+  const claimByOrderId = new Map<string, ClaimSummary>()
   for (const claim of claimRows) {
-    if (!claimTypeByOrderId.has(claim.orderId)) {
-      claimTypeByOrderId.set(claim.orderId, claim.claimType)
+    const existing = claimByOrderId.get(claim.orderId)
+    if (!existing || claim.requestedAt > (claimRows.find((c) => c.id === existing.id)?.requestedAt ?? new Date(0))) {
+      claimByOrderId.set(claim.orderId, {
+        id: claim.id,
+        claimType: claim.claimType,
+        claimStatus: claim.claimStatus,
+        reason: claim.reason,
+      })
     }
   }
 
@@ -214,13 +225,17 @@ export async function getOrders(filters: OrderFilters = {}) {
     return 'partial'
   }
 
-  // Combine orders with items, claim type, shipment info, and mapping status
+  // Combine orders with items, claim, shipment info, and mapping status
   let ordersWithItems = orderRows.map((order) => {
     const shipment = shipmentByOrderId.get(order.id)
     const orderItemsData = itemsByOrderId.get(order.id) ?? []
+    const claim = claimByOrderId.get(order.id) ?? null
     return {
       ...order,
-      claimType: claimTypeByOrderId.get(order.id) ?? null,
+      claimType: claim?.claimType ?? null,
+      claimId: claim?.id ?? null,
+      claimStatus: claim?.claimStatus ?? null,
+      claimReason: claim?.reason ?? null,
       invoiceStatus: shipment?.uploadStatus ?? null,
       trackingNumber: shipment?.trackingNumber ?? null,
       items: orderItemsData,
@@ -309,6 +324,45 @@ export async function getOrderById(id: string, userId?: string) {
     claims: claimRows,
     memos: memoRows,
     shipment: latestShipment,
+  }
+}
+
+export interface OrderStats {
+  total: number
+  cancel: number
+  return: number
+  exchange: number
+  held: number
+}
+
+/**
+ * Dashboard-style summary counts for a user's orders.
+ * All scoped by userId. Runs 3 queries in parallel (total, claim grouped, held).
+ */
+export async function getOrderStats(userId: string): Promise<OrderStats> {
+  const [totalRow, claimRows, heldRow] = await Promise.all([
+    db.select({ value: count() }).from(orders).where(eq(orders.userId, userId)),
+    db
+      .select({ claimType: claims.claimType, value: count() })
+      .from(claims)
+      .innerJoin(orders, eq(orders.id, claims.orderId))
+      .where(eq(orders.userId, userId))
+      .groupBy(claims.claimType),
+    db
+      .select({ value: count() })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), eq(orders.isHeld, true))),
+  ])
+
+  const byType: Record<string, number> = {}
+  for (const row of claimRows) byType[row.claimType] = row.value
+
+  return {
+    total: totalRow[0]?.value ?? 0,
+    cancel: byType.cancel ?? 0,
+    return: byType.return ?? 0,
+    exchange: byType.exchange ?? 0,
+    held: heldRow[0]?.value ?? 0,
   }
 }
 

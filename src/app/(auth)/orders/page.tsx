@@ -1,10 +1,13 @@
 import { Suspense } from 'react'
+import { redirect } from 'next/navigation'
 import {
   createSearchParamsCache,
   parseAsString,
   parseAsInteger,
+  parseAsBoolean,
 } from 'nuqs/server'
-import { getOrders } from '@/lib/orders/queries'
+import { createClient } from '@/lib/supabase/server'
+import { getOrders, getOrderStats } from '@/lib/orders/queries'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { ClaimsFilter } from './claims-filter'
@@ -38,6 +41,7 @@ const searchParamsCache = createSearchParamsCache({
   claimType: parseAsString,
   mapping: parseAsString,
   stage: parseAsString,
+  held: parseAsBoolean,
 })
 
 export default async function OrdersPage({
@@ -45,23 +49,31 @@ export default async function OrdersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
   const params = await searchParamsCache.parse(searchParams)
   const stage = (params.stage ?? undefined) as OrderStage | undefined
 
-  const { orders: orderList, total } = await getOrders({
-    page: params.page,
-    pageSize: params.pageSize,
-    status: (params.status ?? undefined) as OrderFiltersParams['status'],
-    marketplace: params.marketplace ?? undefined,
-    search: params.search ?? undefined,
-    dateFrom: params.dateFrom ?? undefined,
-    dateTo: params.dateTo ?? undefined,
-    sort: params.sort ?? undefined,
-    order: (params.order as 'asc' | 'desc') ?? undefined,
-    claimType: (params.claimType ?? undefined) as ClaimType | undefined,
-    mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
-    stage,
-  })
+  const [{ orders: orderList, total }, stats] = await Promise.all([
+    getOrders({
+      page: params.page,
+      pageSize: params.pageSize,
+      status: (params.status ?? undefined) as OrderFiltersParams['status'],
+      marketplace: params.marketplace ?? undefined,
+      search: params.search ?? undefined,
+      dateFrom: params.dateFrom ?? undefined,
+      dateTo: params.dateTo ?? undefined,
+      sort: params.sort ?? undefined,
+      order: (params.order as 'asc' | 'desc') ?? undefined,
+      claimType: (params.claimType ?? undefined) as ClaimType | undefined,
+      mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
+      stage,
+      isHeld: params.held ?? undefined,
+    }),
+    getOrderStats(user.id),
+  ])
 
   const data: OrderRow[] = orderList.map((o) => ({
     id: o.id,
@@ -74,6 +86,9 @@ export default async function OrdersPage({
     isHeld: o.isHeld,
     holdReason: o.holdReason,
     claimType: o.claimType as OrderRow['claimType'],
+    claimId: o.claimId ?? null,
+    claimStatus: o.claimStatus as OrderRow['claimStatus'],
+    claimReason: o.claimReason ?? null,
     invoiceStatus: o.invoiceStatus as OrderRow['invoiceStatus'],
     trackingNumber: o.trackingNumber,
     mappingStatus: o.mappingStatus,
@@ -111,10 +126,10 @@ export default async function OrdersPage({
         )}
       </div>
 
-      {/* Claims filter (only show on 전체) */}
+      {/* CS-focused tab bar (only on 전체 view) */}
       {!stage && (
         <Suspense>
-          <ClaimsFilter />
+          <ClaimsFilter counts={stats} />
         </Suspense>
       )}
 

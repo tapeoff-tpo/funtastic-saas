@@ -1,58 +1,13 @@
 'use client'
 
-import { useState } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import Link from 'next/link'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
-import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType } from '@/lib/orders/types'
+import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { StatusDropdown } from './status-actions'
 import { HoldDialog } from './hold-dialog'
-import { InlineMappingDialog } from './inline-mapping-dialog'
-
-/** Mapping status cell — clickable badge that opens inline mapping dialog */
-function MappingCell({ order }: { order: OrderRow }) {
-  const [open, setOpen] = useState(false)
-  const status = order.mappingStatus
-
-  const handleClick = () => {
-    if (status !== 'mapped') setOpen(true)
-  }
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={handleClick}
-        className={status !== 'mapped' ? 'cursor-pointer' : 'cursor-default'}
-        disabled={status === 'mapped'}
-      >
-        {status === 'mapped' ? (
-          <Badge variant="secondary">매핑됨</Badge>
-        ) : status === 'partial' ? (
-          <Badge variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50">일부 매핑</Badge>
-        ) : (
-          <Badge variant="destructive" className="hover:opacity-80">미매핑</Badge>
-        )}
-      </button>
-
-      <InlineMappingDialog
-        open={open}
-        marketplaceId={order.marketplaceId}
-        items={order.items}
-        onClose={() => setOpen(false)}
-        onSaved={() => { window.location.reload() }}
-      />
-    </>
-  )
-}
-
-/** Claim type Korean labels */
-const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
-  cancel: '취소',
-  return: '반품',
-  exchange: '교환',
-}
+import { ClaimStatusActions } from './claim-status-actions'
 
 /** Invoice upload status labels */
 const INVOICE_STATUS_LABELS: Record<InvoiceUploadStatus, string> = {
@@ -87,6 +42,9 @@ export interface OrderRow {
   isHeld: boolean
   holdReason?: string | null
   claimType?: ClaimType | null
+  claimId?: string | null
+  claimStatus?: ClaimStatus | null
+  claimReason?: string | null
   invoiceStatus?: InvoiceUploadStatus | null
   trackingNumber?: string | null
   mappingStatus?: 'mapped' | 'partial' | 'unmapped'
@@ -209,34 +167,19 @@ export const columns: ColumnDef<OrderRow>[] = [
     header: '구매자',
     size: 100,
   },
-  // 상태
+  // 상태 — 주문 상태만 (CS 상태는 별도 컬럼)
   {
     accessorKey: 'status',
     header: '상태',
     cell: ({ row }) => {
       const status = row.getValue('status') as OrderStatus
-      const isHeld = row.original.isHeld
-      const holdReason = row.original.holdReason
-      const claimType = row.original.claimType
       return (
-        <div className="flex flex-wrap items-center gap-1">
-          <Badge variant={STATUS_VARIANT[status]}>
-            {ORDER_STATUS_LABELS[status]}
-          </Badge>
-          {isHeld && (
-            <Badge variant="destructive" title={holdReason ?? undefined}>
-              보류
-            </Badge>
-          )}
-          {claimType && (
-            <Badge variant="outline" className="border-orange-300 text-orange-700">
-              {CLAIM_TYPE_LABELS[claimType]}
-            </Badge>
-          )}
-        </div>
+        <Badge variant={STATUS_VARIANT[status]}>
+          {ORDER_STATUS_LABELS[status]}
+        </Badge>
       )
     },
-    size: 160,
+    size: 100,
   },
   // 주문일
   {
@@ -261,12 +204,39 @@ export const columns: ColumnDef<OrderRow>[] = [
     },
     size: 110,
   },
-  // 매핑 상태 (클릭하면 인라인 매핑 모달)
+  // CS — 클레임 상태 전환 + 보류 사유
   {
-    id: 'mappingStatus',
-    header: '매핑',
-    cell: ({ row }) => <MappingCell order={row.original} />,
-    size: 90,
+    id: 'cs',
+    header: 'CS',
+    cell: ({ row }) => {
+      const order = row.original
+      if (order.claimId && order.claimType && order.claimStatus) {
+        return (
+          <ClaimStatusActions
+            claimId={order.claimId}
+            claimType={order.claimType}
+            claimStatus={order.claimStatus}
+            reason={order.claimReason ?? null}
+          />
+        )
+      }
+      if (order.isHeld) {
+        return (
+          <div className="flex flex-col gap-0.5">
+            <Badge variant="outline" className="border-purple-300 bg-purple-50 text-purple-700">
+              미발송
+            </Badge>
+            {order.holdReason && (
+              <span className="max-w-[180px] truncate text-xs text-muted-foreground" title={order.holdReason}>
+                {order.holdReason}
+              </span>
+            )}
+          </div>
+        )
+      }
+      return <span className="text-xs text-muted-foreground">-</span>
+    },
+    size: 240,
   },
   // 송장상태
   {

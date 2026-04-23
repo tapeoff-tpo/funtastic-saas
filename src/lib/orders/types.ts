@@ -72,4 +72,6 @@ export interface OrderFilters {
   claimType?: ClaimType
   mapping?: 'mapped' | 'unmapped'
   stage?: OrderStage
+  /** Filter to only held (미발송) orders */
+  isHeld?: boolean
 }

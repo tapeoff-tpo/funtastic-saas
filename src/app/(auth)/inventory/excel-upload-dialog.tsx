@@ -30,10 +30,32 @@ export function ExcelUploadDialog({ onClose }: ExcelUploadDialogProps) {
         method: 'POST',
         body: formData,
       })
-      const data = (await res.json()) as UploadResult
+      const text = await res.text()
+      let data: UploadResult
+      try {
+        data = JSON.parse(text) as UploadResult
+      } catch {
+        setResult({
+          total: 0,
+          success: 0,
+          failed: 1,
+          errors: [{ sku: '-', error: `[HTTP ${res.status}] ${text.slice(0, 300) || '서버 응답 파싱 실패'}` }],
+        })
+        return
+      }
+      if (!res.ok) {
+        const errMsg = (data as unknown as { error?: string }).error ?? `HTTP ${res.status}`
+        setResult({ total: 0, success: 0, failed: 1, errors: [{ sku: '-', error: errMsg }] })
+        return
+      }
       setResult(data)
-    } catch {
-      setResult({ total: 0, success: 0, failed: 1, errors: [{ sku: '-', error: '업로드 중 오류가 발생했습니다.' }] })
+    } catch (err) {
+      setResult({
+        total: 0,
+        success: 0,
+        failed: 1,
+        errors: [{ sku: '-', error: err instanceof Error ? err.message : '업로드 중 오류가 발생했습니다.' }],
+      })
     } finally {
       setUploading(false)
     }

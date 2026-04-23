@@ -12,10 +12,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
-import { setStock } from '@/lib/inventory/actions'
 import { db } from '@/lib/db'
-import { products } from '@/lib/db/schema'
-import { and, eq, inArray } from 'drizzle-orm'
+import { products, inventory } from '@/lib/db/schema'
+import { sql } from 'drizzle-orm'
 
 /** Korean header → internal key (also supports 사방넷 multi-row headers like "현재고 가용") */
 const HEADER_MAP: Record<string, string> = {
@@ -110,19 +109,37 @@ interface UploadResult {
 function cellText(cell: ExcelJS.Cell): string {
   const v = cell.value
   if (v === null || v === undefined) return ''
-  if (typeof v === 'object' && 'result' in v) return String((v as ExcelJS.CellFormulaValue).result ?? '')
-  if (typeof v === 'object' && 'text' in v) return String((v as ExcelJS.CellRichTextValue).text ?? '')
+  if (typeof v === 'object') {
+    const obj = v as unknown as Record<string, unknown>
+    if ('result' in obj) return String(obj.result ?? '')
+    if ('richText' in obj) {
+      const parts = obj.richText as Array<{ text?: string }> | undefined
+      return parts?.map((p) => p.text ?? '').join('') ?? ''
+    }
+    if ('text' in obj) return String(obj.text ?? '')
+  }
   return String(v).trim()
 }
 
-function cellNumber(cell: ExcelJS.Cell): number | null {
-  const v = cell.value
-  if (v === null || v === undefined) return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    return await handleUpload(req)
+  } catch (err) {
+    console.error('[bulk-upload] unhandled error:', err)
+    return NextResponse.json(
+      {
+        error: err instanceof Error ? `${err.name}: ${err.message}` : '알 수 없는 오류',
+        total: 0,
+        success: 0,
+        failed: 1,
+        errors: [{ sku: '-', error: err instanceof Error ? err.message : String(err) }],
+      },
+      { status: 500 },
+    )
+  }
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+async function handleUpload(req: NextRequest): Promise<NextResponse> {
   // Auth check
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -143,13 +160,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'file 필드가 없습니다.' }, { status: 400 })
   }
 
-  // Read file buffer
-  const buffer = Buffer.from(await file.arrayBuffer())
+  // Read file into ArrayBuffer (ExcelJS types accept ArrayBuffer here)
+  const arrayBuffer = await file.arrayBuffer()
 
   // Parse Excel
   const workbook = new ExcelJS.Workbook()
   try {
-    await workbook.xlsx.load(buffer)
+    await workbook.xlsx.load(arrayBuffer)
   } catch {
     return NextResponse.json({ error: 'Excel 파일을 읽을 수 없습니다. xlsx 형식인지 확인해주세요.' }, { status: 400 })
   }
@@ -223,69 +240,84 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     })
   })
 
-  // Upsert each row (inventory)
+  // Bulk UPSERT — single INSERT...ON CONFLICT DO UPDATE for all rows at once.
+  // Drops the per-row transaction + history-log overhead (was 2900+ round trips).
   let successCount = 0
   const dbErrors: Array<{ sku: string; error: string }> = []
 
-  for (const row of rows) {
-    const result = await setStock(user.id, row.sku, row.productName, row.totalStock, {
-      warehouseZone: row.warehouseZone,
-      sectorCode: row.sectorCode,
-    })
-    if (result.success) {
-      successCount++
-    } else {
-      dbErrors.push({ sku: row.sku, error: result.error ?? '저장 중 오류가 발생했습니다.' })
+  if (rows.length > 0) {
+    try {
+      await db
+        .insert(inventory)
+        .values(
+          rows.map((r) => ({
+            userId: user.id,
+            sku: r.sku,
+            productName: r.productName,
+            totalStock: r.totalStock,
+            reservedStock: 0,
+            availableStock: r.totalStock,
+            warehouseZone: r.warehouseZone ?? null,
+            sectorCode: r.sectorCode ?? null,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [inventory.userId, inventory.sku],
+          set: {
+            productName: sql`excluded.product_name`,
+            totalStock: sql`excluded.total_stock`,
+            // available = new total − existing reserved
+            availableStock: sql`excluded.total_stock - ${inventory.reservedStock}`,
+            warehouseZone: sql`excluded.warehouse_zone`,
+            sectorCode: sql`excluded.sector_code`,
+            updatedAt: new Date(),
+          },
+        })
+      successCount = rows.length
+    } catch (err) {
+      console.error('[bulk-upload] inventory upsert failed:', err)
+      dbErrors.push({
+        sku: '-',
+        error: `재고 업서트 실패: ${err instanceof Error ? err.message : String(err)}`,
+      })
     }
   }
 
-  // Sync products table — create or update products for each row
-  try {
-    const skus = rows.map((r) => r.sku)
-    if (skus.length > 0) {
-      const existingProducts = await db
-        .select({ id: products.id, internalSku: products.internalSku })
-        .from(products)
-        .where(and(eq(products.userId, user.id), inArray(products.internalSku, skus)))
-      const existingSet = new Set(existingProducts.map((p) => p.internalSku))
-
-      const toInsert: Array<typeof products.$inferInsert> = []
-      for (const row of rows) {
-        const location = [row.warehouseZone, row.sectorCode].filter(Boolean).join(' ').trim() || null
-        if (existingSet.has(row.sku)) {
-          // Update existing product with info from Excel
-          await db
-            .update(products)
-            .set({
-              name: row.productName,
-              ...(location ? { warehouseLocation: location } : {}),
-              ...(row.costPrice ? { costPrice: row.costPrice } : {}),
-              ...(row.basePrice ? { basePrice: row.basePrice } : {}),
-              ...(row.carrierId ? { defaultCarrierId: row.carrierId } : {}),
-              updatedAt: new Date(),
-            })
-            .where(and(eq(products.userId, user.id), eq(products.internalSku, row.sku)))
-        } else {
-          // Insert new product
-          toInsert.push({
-            userId: user.id,
-            internalSku: row.sku,
-            name: row.productName,
-            basePrice: row.basePrice ?? '0',
-            costPrice: row.costPrice ?? null,
-            warehouseLocation: location,
-            defaultCarrierId: row.carrierId ?? null,
-            status: 'active',
-          })
-        }
-      }
-
-      if (toInsert.length > 0) {
-        await db.insert(products).values(toInsert).onConflictDoNothing()
-      }
+  // Sync products table — one bulk upsert too
+  if (rows.length > 0) {
+    try {
+      await db
+        .insert(products)
+        .values(
+          rows.map((r) => {
+            const location = [r.warehouseZone, r.sectorCode].filter(Boolean).join(' ').trim() || null
+            return {
+              userId: user.id,
+              internalSku: r.sku,
+              name: r.productName,
+              basePrice: r.basePrice ?? '0',
+              costPrice: r.costPrice ?? null,
+              warehouseLocation: location,
+              defaultCarrierId: r.carrierId ?? null,
+              status: 'active' as const,
+            }
+          }),
+        )
+        .onConflictDoUpdate({
+          target: [products.userId, products.internalSku],
+          set: {
+            name: sql`excluded.name`,
+            warehouseLocation: sql`excluded.warehouse_location`,
+            costPrice: sql`excluded.cost_price`,
+            basePrice: sql`excluded.base_price`,
+            defaultCarrierId: sql`excluded.default_carrier_id`,
+            updatedAt: new Date(),
+          },
+        })
+    } catch (err) {
+      console.error('[bulk-upload] products upsert failed:', err)
+      // Non-fatal — inventory already updated
     }
-  } catch (err) {
-    console.error('Product sync failed:', err)
   }
 
   const allErrors = [...parseErrors, ...dbErrors]

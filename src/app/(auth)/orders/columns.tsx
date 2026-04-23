@@ -4,8 +4,6 @@ import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
-import { StatusDropdown } from './status-actions'
-import { HoldDialog } from './hold-dialog'
 import { ClaimStatusActions } from './claim-status-actions'
 
 /** Helper to get openDetail from table.options.meta safely */
@@ -124,7 +122,7 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 32,
   },
 
-  // 주문상태 | 주문 액션 — 상태 뱃지 + Claim/C/S 버튼 + 보류
+  // 주문상태 | Claim 버튼 (팝업으로 전체 주문정보 + CS 메모)
   {
     id: 'statusActions',
     header: '주문상태',
@@ -136,32 +134,18 @@ export const columns: ColumnDef<OrderRow>[] = [
           <Badge variant={STATUS_VARIANT[order.status]} className="w-fit">
             {ORDER_STATUS_LABELS[order.status]}
           </Badge>
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => openDetail?.(order.id)}
-              className="rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100"
-            >
-              Claim
-            </button>
-            <button
-              type="button"
-              onClick={() => openDetail?.(order.id)}
-              className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] font-medium text-gray-700 hover:bg-gray-50"
-            >
-              C/S
-            </button>
-            <HoldDialog
-              orderId={order.id}
-              isHeld={order.isHeld}
-              holdReason={order.holdReason}
-            />
-          </div>
+          <button
+            type="button"
+            onClick={() => openDetail?.(order.id)}
+            className="w-fit rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100"
+          >
+            Claim
+          </button>
         </div>
       )
     },
     enableSorting: false,
-    size: 160,
+    size: 110,
   },
 
   // 쇼핑몰

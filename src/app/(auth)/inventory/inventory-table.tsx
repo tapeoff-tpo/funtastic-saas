@@ -6,6 +6,7 @@ import {
   getCoreRowModel,
   flexRender,
   createColumnHelper,
+  type RowSelectionState,
   type SortingState,
 } from '@tanstack/react-table'
 import { useQueryState, useQueryStates, parseAsInteger, parseAsString } from 'nuqs'
@@ -68,6 +69,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   }>({ open: false, inventoryId: '', sku: '' })
 
   const [excelDialogOpen, setExcelDialogOpen] = useState(false)
+  const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
   const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50))
@@ -113,7 +115,51 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
     return filters.order === 'asc' ? ' \u2191' : ' \u2193'
   }
 
+  const now = new Date()
+  const [dlYear, setDlYear] = useState(now.getFullYear())
+  const [dlMonth, setDlMonth] = useState(now.getMonth() + 1)
+
+  const downloadExcel = useCallback((selectedOnly: boolean) => {
+    const params = new URLSearchParams({ year: String(dlYear), month: String(dlMonth) })
+    if (selectedOnly) {
+      const skus = Object.keys(rowSelection)
+        .filter((k) => rowSelection[k])
+        .map((k) => data[Number(k)]?.sku)
+        .filter(Boolean)
+      if (skus.length === 0) return
+      params.set('skus', skus.join(','))
+    }
+    const a = document.createElement('a')
+    a.href = `/api/inventory/export?${params}`
+    a.click()
+  }, [rowSelection, data, dlYear, dlMonth])
+
+  const selectedCount = Object.values(rowSelection).filter(Boolean).length
+
+  // Year options: current year and 2 years back
+  const yearOptions = [now.getFullYear() - 2, now.getFullYear() - 1, now.getFullYear()]
+
   const columns = [
+    columnHelper.display({
+      id: 'select',
+      header: ({ table }) => (
+        <input
+          type="checkbox"
+          className="h-3 w-3"
+          checked={table.getIsAllPageRowsSelected()}
+          ref={(el) => { if (el) el.indeterminate = table.getIsSomePageRowsSelected() }}
+          onChange={table.getToggleAllPageRowsSelectedHandler()}
+        />
+      ),
+      cell: ({ row }) => (
+        <input
+          type="checkbox"
+          className="h-3 w-3"
+          checked={row.getIsSelected()}
+          onChange={row.getToggleSelectedHandler()}
+        />
+      ),
+    }),
     columnHelper.display({
       id: 'rowNum',
       header: 'No.',
@@ -277,10 +323,13 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
     manualPagination: true,
     manualSorting: true,
     manualFiltering: true,
+    enableRowSelection: true,
     pageCount,
     state: {
       pagination: { pageIndex: page - 1, pageSize },
+      rowSelection,
     },
+    onRowSelectionChange: setRowSelection,
   })
 
   return (
@@ -326,6 +375,39 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
           </select>
         </div>
         <div className="flex items-center gap-2">
+          <select
+            value={dlYear}
+            onChange={(e) => setDlYear(Number(e.target.value))}
+            className="rounded border px-1.5 py-1 text-xs"
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>{y}년</option>
+            ))}
+          </select>
+          <select
+            value={dlMonth}
+            onChange={(e) => setDlMonth(Number(e.target.value))}
+            className="rounded border px-1.5 py-1 text-xs"
+          >
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              <option key={m} value={m}>{m}월</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => downloadExcel(true)}
+            disabled={selectedCount === 0}
+            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            선택 다운({selectedCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => downloadExcel(false)}
+            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
+          >
+            일괄 다운
+          </button>
           <button
             type="button"
             onClick={() => setExcelDialogOpen(true)}

@@ -133,13 +133,15 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
-        {stage === 'mapping' && unmappedOrderCount > 0 && (
+        {stage === 'mapping' && (
           <button
             type="button"
             onClick={() => setBulkMappingOpen(true)}
-            className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
+            disabled={unmappedOrderCount === 0}
+            title={unmappedOrderCount === 0 ? '매핑할 주문을 선택하세요' : undefined}
+            className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            일괄 매핑 ({unmappedOrderCount}건 미매핑)
+            일괄 매핑 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건)` : ''}
           </button>
         )}
 

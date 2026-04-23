@@ -44,6 +44,10 @@ const HEADER_MAP: Record<string, string> = {
   '단품명': 'optionName',
   '옵션명': 'optionName',
   '옵션': 'optionName',
+  '단품': 'optionName',        // 사방넷 재고코드관리 col 8
+  '단품 단품': 'optionName',   // 사방넷: row2+row3 둘 다 "단품"
+  '옵션별칭': 'optionName',    // 사방넷 col 26
+  '옵션별칭 옵션별칭': 'optionName',
 }
 
 /** Build a column map for a single header row */
@@ -190,15 +194,6 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
       dataStartRow = 4
     }
   }
-
-  // Debug: log raw header cells so we can see exact column names
-  const rawRow2: string[] = []
-  const rawRow3: string[] = []
-  sheet.getRow(2).eachCell((cell, col) => { rawRow2[col] = cellText(cell).replace(/\n/g, '\\n').trim() })
-  sheet.getRow(3).eachCell((cell, col) => { rawRow3[col] = cellText(cell).replace(/\n/g, '\\n').trim() })
-  console.log('[bulk-upload] row2 headers:', rawRow2)
-  console.log('[bulk-upload] row3 headers:', rawRow3)
-  console.log('[bulk-upload] detected colMap:', colMap)
 
   if (!hasRequired(colMap)) {
     const missing: string[] = []

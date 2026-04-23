@@ -18,11 +18,16 @@ export interface InventoryRow {
   id: string
   sku: string
   productName: string
+  optionName: string | null
   warehouseZone: string | null
   sectorCode: string | null
   totalStock: number
   reservedStock: number
   availableStock: number
+  monthlyIncoming: number
+  monthlyOutgoing: number
+  lastIncomingAt: Date | null
+  lastOutgoingAt: Date | null
   updatedAt: Date
 }
 
@@ -109,6 +114,15 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   }
 
   const columns = [
+    columnHelper.display({
+      id: 'rowNum',
+      header: 'No.',
+      cell: (info) => (
+        <span className="text-muted-foreground text-xs">
+          {(page - 1) * pageSize + info.row.index + 1}
+        </span>
+      ),
+    }),
     columnHelper.accessor('sku', {
       header: () => (
         <button type="button" onClick={() => handleSort('sku')} className="hover:text-foreground">
@@ -123,6 +137,13 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
           상품명{getSortIndicator('productName')}
         </button>
       ),
+    }),
+    columnHelper.accessor('optionName', {
+      header: '옵션명',
+      cell: (info) => {
+        const val = info.getValue()
+        return val ? <span className="text-xs text-muted-foreground">{val}</span> : '-'
+      },
     }),
     columnHelper.accessor('warehouseZone', {
       header: () => (
@@ -166,6 +187,34 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
         </button>
       ),
       cell: (info) => <StockCell value={info.getValue()} />,
+    }),
+    columnHelper.accessor('monthlyIncoming', {
+      header: '당월입고',
+      cell: (info) => {
+        const v = info.getValue()
+        return v > 0 ? <span className="text-blue-600">{v.toLocaleString('ko-KR')}</span> : '-'
+      },
+    }),
+    columnHelper.accessor('monthlyOutgoing', {
+      header: '당월출고',
+      cell: (info) => {
+        const v = info.getValue()
+        return v > 0 ? <span className="text-orange-600">{v.toLocaleString('ko-KR')}</span> : '-'
+      },
+    }),
+    columnHelper.accessor('lastIncomingAt', {
+      header: '최종입고일',
+      cell: (info) => {
+        const d = info.getValue()
+        return d ? new Date(d).toLocaleDateString('ko-KR') : '-'
+      },
+    }),
+    columnHelper.accessor('lastOutgoingAt', {
+      header: '최종출고일',
+      cell: (info) => {
+        const d = info.getValue()
+        return d ? new Date(d).toLocaleDateString('ko-KR') : '-'
+      },
     }),
     columnHelper.accessor('updatedAt', {
       header: () => (

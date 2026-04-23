@@ -80,11 +80,16 @@ export default async function InventoryPage({
           id: item.id,
           sku: item.sku,
           productName: item.productName,
+          optionName: item.optionName ?? null,
           warehouseZone: item.warehouseZone,
           sectorCode: item.sectorCode,
           totalStock: item.totalStock,
           reservedStock: item.reservedStock,
           availableStock: item.availableStock,
+          monthlyIncoming: item.monthlyIncoming,
+          monthlyOutgoing: item.monthlyOutgoing,
+          lastIncomingAt: item.lastIncomingAt ?? null,
+          lastOutgoingAt: item.lastOutgoingAt ?? null,
           updatedAt: item.updatedAt,
         }))}
         total={total}

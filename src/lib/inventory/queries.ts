@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, products } from '@/lib/db/schema'
+import { inventory, inventoryHistory, products, productVariants } from '@/lib/db/schema'
 import { eq, and, or, ilike, desc, asc, count, ne, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
@@ -67,9 +67,10 @@ export async function getInventoryList(
     db
       .select({
         // Use products as source of truth
-        id: sql<string>`COALESCE(${inventory.id}, ${products.id})`,
+        id: sql<string>`COALESCE(${inventory.id}::text, ${products.id}::text)`,
         sku: products.internalSku,
         productName: products.name,
+        optionName: productVariants.optionName,
         warehouseZone: inventory.warehouseZone,
         sectorCode: sql<string | null>`COALESCE(${products.warehouseLocation}, ${inventory.sectorCode})`,
         totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
@@ -78,13 +79,24 @@ export async function getInventoryList(
         createdAt: products.createdAt,
         updatedAt: sql<Date>`COALESCE(${inventory.updatedAt}, ${products.updatedAt})`,
         userId: products.userId,
+        // Monthly stats from inventory history
+        monthlyIncoming: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND date_trunc('month', ${inventoryHistory.createdAt}) = date_trunc('month', NOW()) THEN ${inventoryHistory.delta} ELSE 0 END), 0)::int`,
+        monthlyOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND date_trunc('month', ${inventoryHistory.createdAt}) = date_trunc('month', NOW()) THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
+        lastIncomingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' THEN ${inventoryHistory.createdAt} END)`,
+        lastOutgoingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' THEN ${inventoryHistory.createdAt} END)`,
       })
       .from(products)
       .leftJoin(
         inventory,
         and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
       )
+      .leftJoin(inventoryHistory, eq(inventoryHistory.inventoryId, inventory.id))
+      .leftJoin(
+        productVariants,
+        and(eq(productVariants.productId, products.id), eq(productVariants.sku, products.internalSku)),
+      )
       .where(whereClause)
+      .groupBy(products.id, inventory.id, productVariants.id)
       .orderBy(sortDirection(sortColumn))
       .limit(pageSize)
       .offset(offset),

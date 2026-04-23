@@ -13,6 +13,7 @@ import { useQueryState, useQueryStates, parseAsInteger, parseAsString } from 'nu
 import { AdjustStockDialog } from './adjust-stock-dialog'
 import { HistoryDialog } from './history-dialog'
 import { ExcelUploadDialog } from './excel-upload-dialog'
+import { IncomingDialog } from './incoming-dialog'
 import { Pagination } from '@/components/ui/pagination'
 
 export interface InventoryRow {
@@ -70,6 +71,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   }>({ open: false, inventoryId: '', sku: '' })
 
   const [excelDialogOpen, setExcelDialogOpen] = useState(false)
+  const [incomingDialogOpen, setIncomingDialogOpen] = useState(false)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
@@ -425,6 +427,13 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
           </button>
           <button
             type="button"
+            onClick={() => setIncomingDialogOpen(true)}
+            className="rounded-md border border-green-600 px-3 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
+          >
+            입고 처리
+          </button>
+          <button
+            type="button"
             onClick={() => setAdjustDialog({ open: true, mode: 'set' })}
             className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
           >
@@ -511,6 +520,10 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
 
       {excelDialogOpen && (
         <ExcelUploadDialog onClose={() => setExcelDialogOpen(false)} />
+      )}
+
+      {incomingDialogOpen && (
+        <IncomingDialog onClose={() => setIncomingDialogOpen(false)} />
       )}
     </div>
   )

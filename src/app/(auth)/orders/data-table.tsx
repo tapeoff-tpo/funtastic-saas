@@ -83,7 +83,12 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
   return (
     <div className="space-y-4">
       {/* Shipping action buttons */}
-      <ShippingActions selectedOrderIds={selectedIds} selectedOrders={selectedOrders} stage={stage} />
+      <ShippingActions
+        selectedOrderIds={selectedIds}
+        selectedOrders={selectedOrders}
+        allOrders={data}
+        stage={stage}
+      />
 
       {/* Toolbar: column toggle + selected count */}
       <div className="flex items-center justify-between">

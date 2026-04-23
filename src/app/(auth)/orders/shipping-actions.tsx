@@ -18,6 +18,8 @@ const CARRIER_LABELS: Record<string, string> = {
 interface ShippingActionsProps {
   selectedOrderIds: string[]
   selectedOrders?: OrderRow[]
+  /** All orders on the current page — used as fallback when nothing is selected (e.g. 일괄 매핑) */
+  allOrders?: OrderRow[]
   stage?: OrderStage
 }
 
@@ -51,7 +53,7 @@ async function downloadExcel(url: string, filename: string): Promise<{ success: 
   }
 }
 
-export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }: ShippingActionsProps) {
+export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrders = [], stage }: ShippingActionsProps) {
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [bulkMappingOpen, setBulkMappingOpen] = useState(false)
@@ -60,9 +62,11 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
 
   const hasSelection = selectedOrderIds.length > 0
 
+  // For 일괄 매핑: 선택된 주문이 있으면 그 중 미매핑만, 없으면 전체 미매핑 카운트
+  const ordersForMapping = selectedOrders.length > 0 ? selectedOrders : allOrders
   const unmappedOrderCount = useMemo(() => {
-    return selectedOrders.filter((o) => o.mappingStatus !== 'mapped').length
-  }, [selectedOrders])
+    return ordersForMapping.filter((o) => o.mappingStatus !== 'mapped').length
+  }, [ordersForMapping])
 
   const handleCarrierAutoExport = async () => {
     setClassifying(true)
@@ -137,11 +141,9 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
           <button
             type="button"
             onClick={() => setBulkMappingOpen(true)}
-            disabled={unmappedOrderCount === 0}
-            title={unmappedOrderCount === 0 ? '매핑할 주문을 선택하세요' : undefined}
-            className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
           >
-            일괄 매핑 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건)` : ''}
+            일괄 매핑 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
           </button>
         )}
 
@@ -226,7 +228,7 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], stage }
 
       <BulkMappingDialog
         open={bulkMappingOpen}
-        orders={selectedOrders}
+        orders={ordersForMapping}
         onClose={() => setBulkMappingOpen(false)}
         onSaved={() => { window.location.reload() }}
       />

@@ -1,22 +1,22 @@
 /**
  * Inventory queries — driven by products table as source of truth.
  *
- * Inventory records are joined to products by sku ↔ internalSku.
- * Orphan inventory records (no matching product) are excluded.
+ * Performance strategy: paginate first, enrich after.
+ * 1. Get 50 product rows (fast — no history join)
+ * 2. Aggregate inventoryHistory only for those 50 rows
+ * 3. Merge results in JS
+ *
+ * This avoids GROUP BY + inventoryHistory scan on all 3000+ rows.
  */
 
 import { db } from '@/lib/db'
 import { inventory, inventoryHistory, products, productVariants } from '@/lib/db/schema'
-import { eq, and, or, ilike, desc, asc, count, ne, sql } from 'drizzle-orm'
+import { eq, and, or, ilike, desc, asc, count, ne, sql, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
 
 const DEFAULT_PAGE_SIZE = 50
 
-/**
- * Get paginated inventory list joined with products.
- * Products table is the source of truth for 상품코드/상품명/창고위치.
- */
 export async function getInventoryList(
   userId: string,
   filters: InventoryFilters = {},
@@ -46,7 +46,6 @@ export async function getInventoryList(
 
   const whereClause = and(...conditions)
 
-  // Sort column — from products or inventory
   const sortColumn = (() => {
     switch (filters.sort) {
       case 'sku': return products.internalSku
@@ -63,11 +62,12 @@ export async function getInventoryList(
 
   const sortDirection = filters.order === 'asc' ? asc : desc
 
-  const [rows, [{ total }]] = await Promise.all([
+  // ── Step 1: paginate products (no history join — fast) ──────────────────
+  const [pageRows, [{ total }]] = await Promise.all([
     db
       .select({
-        // Use products as source of truth
         id: sql<string>`COALESCE(${inventory.id}::text, ${products.id}::text)`,
+        inventoryId: inventory.id,
         sku: products.internalSku,
         productName: products.name,
         optionName: productVariants.optionName,
@@ -79,38 +79,71 @@ export async function getInventoryList(
         createdAt: products.createdAt,
         updatedAt: sql<Date>`COALESCE(${inventory.updatedAt}, ${products.updatedAt})`,
         userId: products.userId,
-        // Monthly stats from inventory history
-        monthlyIncoming: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND date_trunc('month', ${inventoryHistory.createdAt}) = date_trunc('month', NOW()) THEN ${inventoryHistory.delta} ELSE 0 END), 0)::int`,
-        monthlyOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND date_trunc('month', ${inventoryHistory.createdAt}) = date_trunc('month', NOW()) THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
-        lastIncomingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' THEN ${inventoryHistory.createdAt} END)`,
-        lastOutgoingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' THEN ${inventoryHistory.createdAt} END)`,
       })
       .from(products)
-      .leftJoin(
-        inventory,
-        and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
-      )
-      .leftJoin(inventoryHistory, eq(inventoryHistory.inventoryId, inventory.id))
-      .leftJoin(
-        productVariants,
-        and(eq(productVariants.productId, products.id), eq(productVariants.sku, products.internalSku)),
-      )
+      .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
+      .leftJoin(productVariants, and(eq(productVariants.productId, products.id), eq(productVariants.sku, products.internalSku)))
       .where(whereClause)
-      .groupBy(products.id, inventory.id, productVariants.id)
       .orderBy(sortDirection(sortColumn))
       .limit(pageSize)
       .offset(offset),
     db
       .select({ total: count() })
       .from(products)
-      .leftJoin(
-        inventory,
-        and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
-      )
+      .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
       .where(whereClause),
   ])
 
-  return { items: rows, total }
+  // ── Step 2: aggregate history only for this page's inventory IDs ────────
+  const inventoryIds = pageRows.map((r) => r.inventoryId).filter((id): id is string => id !== null)
+
+  const historyMap = new Map<string, {
+    monthlyIncoming: number
+    monthlyOutgoing: number
+    lastIncomingAt: Date | null
+    lastOutgoingAt: Date | null
+  }>()
+
+  if (inventoryIds.length > 0) {
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
+
+    const stats = await db
+      .select({
+        inventoryId: inventoryHistory.inventoryId,
+        monthlyIncoming: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ${inventoryHistory.delta} ELSE 0 END), 0)::int`,
+        monthlyOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
+        lastIncomingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' THEN ${inventoryHistory.createdAt} END)`,
+        lastOutgoingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' THEN ${inventoryHistory.createdAt} END)`,
+      })
+      .from(inventoryHistory)
+      .where(inArray(inventoryHistory.inventoryId, inventoryIds))
+      .groupBy(inventoryHistory.inventoryId)
+
+    for (const s of stats) {
+      historyMap.set(s.inventoryId, {
+        monthlyIncoming: s.monthlyIncoming,
+        monthlyOutgoing: s.monthlyOutgoing,
+        lastIncomingAt: s.lastIncomingAt,
+        lastOutgoingAt: s.lastOutgoingAt,
+      })
+    }
+  }
+
+  // ── Step 3: merge ───────────────────────────────────────────────────────
+  const items = pageRows.map((row) => {
+    const hist = row.inventoryId ? historyMap.get(row.inventoryId) : undefined
+    return {
+      ...row,
+      monthlyIncoming: hist?.monthlyIncoming ?? 0,
+      monthlyOutgoing: hist?.monthlyOutgoing ?? 0,
+      lastIncomingAt: hist?.lastIncomingAt ?? null,
+      lastOutgoingAt: hist?.lastOutgoingAt ?? null,
+    }
+  })
+
+  return { items, total }
 }
 
 /**

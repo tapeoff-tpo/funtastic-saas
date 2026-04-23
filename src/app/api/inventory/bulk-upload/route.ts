@@ -191,6 +191,15 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // Debug: log raw header cells so we can see exact column names
+  const rawRow2: string[] = []
+  const rawRow3: string[] = []
+  sheet.getRow(2).eachCell((cell, col) => { rawRow2[col] = cellText(cell).replace(/\n/g, '\\n').trim() })
+  sheet.getRow(3).eachCell((cell, col) => { rawRow3[col] = cellText(cell).replace(/\n/g, '\\n').trim() })
+  console.log('[bulk-upload] row2 headers:', rawRow2)
+  console.log('[bulk-upload] row3 headers:', rawRow3)
+  console.log('[bulk-upload] detected colMap:', colMap)
+
   if (!hasRequired(colMap)) {
     const missing: string[] = []
     const vals = Object.values(colMap)

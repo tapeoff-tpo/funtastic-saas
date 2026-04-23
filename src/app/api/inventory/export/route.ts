@@ -1,8 +1,9 @@
 /**
- * GET /api/inventory/export?skus=sku1,sku2,...
+ * GET /api/inventory/export?skus=...&year=2026&month=4
  *
  * 재고현황 엑셀 다운로드.
- * skus 파라미터 없으면 전체 다운로드, 있으면 선택 다운로드.
+ * - skus: 쉼표구분 SKU (없으면 전체)
+ * - year/month: 조회 월 (없으면 당월)
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -20,6 +21,16 @@ export async function GET(req: NextRequest) {
   const skusParam = req.nextUrl.searchParams.get('skus')
   const skus = skusParam ? skusParam.split(',').filter(Boolean) : null
 
+  const now = new Date()
+  const year = parseInt(req.nextUrl.searchParams.get('year') ?? String(now.getFullYear()), 10)
+  const month = parseInt(req.nextUrl.searchParams.get('month') ?? String(now.getMonth() + 1), 10)
+
+  // Build month range in KST (UTC+9)
+  const monthStart = `${year}-${String(month).padStart(2, '0')}-01 00:00:00+09`
+  const nextMonth = month === 12 ? 1 : month + 1
+  const nextYear = month === 12 ? year + 1 : year
+  const monthEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01 00:00:00+09`
+
   const conditions = [eq(products.userId, user.id), ne(products.status, 'deleted')]
   if (skus && skus.length > 0) {
     conditions.push(inArray(products.internalSku, skus))
@@ -35,10 +46,10 @@ export async function GET(req: NextRequest) {
       totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
       reservedStock: sql<number>`COALESCE(${inventory.reservedStock}, 0)::int`,
       availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,
-      monthlyIncoming: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND date_trunc('month', ${inventoryHistory.createdAt}) = date_trunc('month', NOW()) THEN ${inventoryHistory.delta} ELSE 0 END), 0)::int`,
-      monthlyOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND date_trunc('month', ${inventoryHistory.createdAt}) = date_trunc('month', NOW()) THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
-      lastIncomingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' THEN ${inventoryHistory.createdAt} END)`,
-      lastOutgoingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' THEN ${inventoryHistory.createdAt} END)`,
+      monthlyIncoming: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ${inventoryHistory.delta} ELSE 0 END), 0)::int`,
+      monthlyOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
+      lastIncomingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ${inventoryHistory.createdAt} END)`,
+      lastOutgoingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ${inventoryHistory.createdAt} END)`,
     })
     .from(products)
     .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
@@ -48,9 +59,11 @@ export async function GET(req: NextRequest) {
     .groupBy(products.id, inventory.id, productVariants.id)
     .orderBy(products.internalSku)
 
+  const monthLabel = `${year}년 ${month}월`
+
   // Build Excel
   const workbook = new ExcelJS.Workbook()
-  const sheet = workbook.addWorksheet('재고현황')
+  const sheet = workbook.addWorksheet(`재고현황_${year}${String(month).padStart(2, '0')}`)
 
   sheet.columns = [
     { header: 'No.', key: 'no', width: 6 },
@@ -59,11 +72,11 @@ export async function GET(req: NextRequest) {
     { header: '옵션명', key: 'optionName', width: 20 },
     { header: '창고', key: 'warehouseZone', width: 10 },
     { header: '피킹위치', key: 'sectorCode', width: 14 },
-    { header: '총재고', key: 'totalStock', width: 8 },
+    { header: '현재고(총)', key: 'totalStock', width: 10 },
     { header: '예약', key: 'reservedStock', width: 8 },
     { header: '가용', key: 'availableStock', width: 8 },
-    { header: '당월입고', key: 'monthlyIncoming', width: 10 },
-    { header: '당월출고', key: 'monthlyOutgoing', width: 10 },
+    { header: `${monthLabel} 입고`, key: 'monthlyIncoming', width: 14 },
+    { header: `${monthLabel} 출고`, key: 'monthlyOutgoing', width: 14 },
     { header: '최종입고일', key: 'lastIncomingAt', width: 14 },
     { header: '최종출고일', key: 'lastOutgoingAt', width: 14 },
   ]
@@ -74,9 +87,7 @@ export async function GET(req: NextRequest) {
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE9EDF2' } }
     cell.font = { bold: true, size: 10 }
     cell.alignment = { horizontal: 'center', vertical: 'middle' }
-    cell.border = {
-      bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } },
-    }
+    cell.border = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } }
   })
   headerRow.height = 18
 
@@ -94,8 +105,8 @@ export async function GET(req: NextRequest) {
       totalStock: row.totalStock,
       reservedStock: row.reservedStock,
       availableStock: row.availableStock,
-      monthlyIncoming: row.monthlyIncoming,
-      monthlyOutgoing: row.monthlyOutgoing,
+      monthlyIncoming: row.monthlyIncoming || '',
+      monthlyOutgoing: row.monthlyOutgoing || '',
       lastIncomingAt: fmt(row.lastIncomingAt),
       lastOutgoingAt: fmt(row.lastOutgoingAt),
     })
@@ -104,7 +115,6 @@ export async function GET(req: NextRequest) {
       cell.font = { size: 10 }
       cell.alignment = { vertical: 'middle' }
     })
-    // Alternating row color
     if (i % 2 === 1) {
       r.eachCell((cell) => {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8F9FA' } }
@@ -112,12 +122,11 @@ export async function GET(req: NextRequest) {
     }
   })
 
-  // Freeze top row
   sheet.views = [{ state: 'frozen', ySplit: 1 }]
 
   const buffer = await workbook.xlsx.writeBuffer()
-  const dateStr = new Date().toISOString().slice(0, 10)
-  const filename = skus ? `inventory_selected_${dateStr}.xlsx` : `inventory_${dateStr}.xlsx`
+  const suffix = skus ? '_선택' : '_전체'
+  const filename = `재고현황_${year}${String(month).padStart(2, '0')}${suffix}.xlsx`
 
   return new NextResponse(buffer as ArrayBuffer, {
     headers: {

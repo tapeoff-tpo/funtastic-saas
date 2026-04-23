@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useTransition } from 'react'
+import { useCallback, useEffect, useState, useTransition } from 'react'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
 
@@ -23,8 +23,7 @@ const STATUS_OPTIONS: { value: '' | OrderStatus; label: string }[] = [
 ]
 
 export function OrderFilters() {
-  const [, startTransition] = useTransition()
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isPending, startTransition] = useTransition()
 
   const [filters, setFilters] = useQueryStates({
     status: parseAsString,
@@ -36,7 +35,14 @@ export function OrderFilters() {
     pageSize: parseAsInteger.withDefault(50),
   }, { shallow: false })
 
-  /** Update a filter and reset page to 1 */
+  // Local state for search input — only pushed to URL on explicit submit
+  const [searchInput, setSearchInput] = useState(filters.search ?? '')
+
+  // Keep local input in sync if URL changes externally (e.g. 초기화)
+  useEffect(() => {
+    setSearchInput(filters.search ?? '')
+  }, [filters.search])
+
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
       startTransition(() => {
@@ -46,19 +52,13 @@ export function OrderFilters() {
     [setFilters],
   )
 
-  /** Debounced search input (300ms) */
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      if (searchTimeout.current) clearTimeout(searchTimeout.current)
-      searchTimeout.current = setTimeout(() => {
-        updateFilter({ search: value || null })
-      }, 300)
-    },
-    [updateFilter],
-  )
+  const submitSearch = useCallback(() => {
+    const trimmed = searchInput.trim()
+    updateFilter({ search: trimmed || null })
+  }, [searchInput, updateFilter])
 
-  /** Reset all filters */
   const handleReset = useCallback(() => {
+    setSearchInput('')
     void setFilters({
       status: null,
       marketplace: null,
@@ -72,7 +72,7 @@ export function OrderFilters() {
 
   return (
     <div className="flex flex-wrap items-end gap-3">
-      {/* Marketplace filter */}
+      {/* Marketplace */}
       <div className="flex flex-col gap-1">
         <label htmlFor="filter-marketplace" className="text-xs font-medium text-muted-foreground">
           마켓플레이스
@@ -91,7 +91,7 @@ export function OrderFilters() {
         </select>
       </div>
 
-      {/* Status filter */}
+      {/* Status */}
       <div className="flex flex-col gap-1">
         <label htmlFor="filter-status" className="text-xs font-medium text-muted-foreground">
           주문 상태
@@ -136,19 +136,34 @@ export function OrderFilters() {
         />
       </div>
 
-      {/* Search */}
+      {/* Search — manual submit via Enter or button */}
       <div className="flex flex-col gap-1">
         <label htmlFor="filter-search" className="text-xs font-medium text-muted-foreground">
           검색
         </label>
-        <input
-          id="filter-search"
-          type="text"
-          placeholder="주문번호, 상품명, 구매자명 검색"
-          defaultValue={filters.search ?? ''}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          className="w-[260px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
-        />
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            submitSearch()
+          }}
+          className="flex items-center gap-1"
+        >
+          <input
+            id="filter-search"
+            type="text"
+            placeholder="주문번호, 상품명, 구매자명"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="w-[220px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
+          />
+          <button
+            type="submit"
+            disabled={isPending}
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            {isPending ? '검색중...' : '검색'}
+          </button>
+        </form>
       </div>
 
       {/* Reset */}

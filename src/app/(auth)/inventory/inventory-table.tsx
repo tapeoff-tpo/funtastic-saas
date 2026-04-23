@@ -284,7 +284,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   })
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       {/* Toolbar: search + filter + buttons */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
@@ -297,12 +297,12 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
               placeholder="상품코드 또는 상품명"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              className="w-[220px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
+              className="w-[200px] rounded-md border px-2 py-1 text-xs placeholder:text-muted-foreground"
             />
             <button
               type="submit"
               disabled={isPending}
-              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {isPending ? '검색중...' : '검색'}
             </button>
@@ -315,7 +315,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
                 page: 1,
               })
             }}
-            className="rounded-md border px-3 py-1.5 text-sm"
+            className="rounded-md border px-2 py-1 text-xs"
           >
             <option value="">전체 창고</option>
             {warehouseZones.map((zone) => (
@@ -329,14 +329,14 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
           <button
             type="button"
             onClick={() => setExcelDialogOpen(true)}
-            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
           >
             엑셀 업로드
           </button>
           <button
             type="button"
             onClick={() => setAdjustDialog({ open: true, mode: 'set' })}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
           >
             재고 등록
           </button>
@@ -345,14 +345,14 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
 
       {/* Table */}
       <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
+        <table className="w-full text-xs">
           <thead className="sticky top-0 z-[1] bg-muted/50">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="border-b">
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2.5 text-left font-medium text-muted-foreground"
+                    className="whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
                   >
                     {header.isPlaceholder
                       ? null
@@ -381,7 +381,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
                   }`}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2">
+                    <td key={cell.id} className="whitespace-nowrap px-2 py-1">
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

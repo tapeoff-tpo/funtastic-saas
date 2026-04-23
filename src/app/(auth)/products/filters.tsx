@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useTransition } from 'react'
+import { useCallback, useEffect, useState, useTransition } from 'react'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { PRODUCT_STATUS_LABELS, type ProductStatus } from '@/lib/products/types'
 
@@ -15,8 +15,7 @@ const STATUS_OPTIONS: { value: '' | ProductStatus; label: string }[] = [
 ]
 
 export function ProductFilters() {
-  const [, startTransition] = useTransition()
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isPending, startTransition] = useTransition()
 
   const [filters, setFilters] = useQueryStates({
     status: parseAsString,
@@ -25,6 +24,9 @@ export function ProductFilters() {
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(50),
   }, { shallow: false })
+
+  const [searchInput, setSearchInput] = useState(filters.search ?? '')
+  useEffect(() => { setSearchInput(filters.search ?? '') }, [filters.search])
 
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
@@ -35,17 +37,13 @@ export function ProductFilters() {
     [setFilters],
   )
 
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      if (searchTimeout.current) clearTimeout(searchTimeout.current)
-      searchTimeout.current = setTimeout(() => {
-        updateFilter({ search: value || null })
-      }, 300)
-    },
-    [updateFilter],
-  )
+  const submitSearch = useCallback(() => {
+    const trimmed = searchInput.trim()
+    updateFilter({ search: trimmed || null })
+  }, [searchInput, updateFilter])
 
   const handleReset = useCallback(() => {
+    setSearchInput('')
     void setFilters({
       status: null,
       category: null,
@@ -59,27 +57,39 @@ export function ProductFilters() {
 
   return (
     <div className="space-y-3">
-      {/* Search bar */}
-      <div className="relative">
-        <svg
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          viewBox="0 0 24 24"
+      {/* Search bar — manual submit */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); submitSearch() }}
+        className="flex items-center gap-2"
+      >
+        <div className="relative flex-1">
+          <svg
+            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            viewBox="0 0 24 24"
+          >
+            <circle cx={11} cy={11} r={8} />
+            <path d="M21 21l-4.35-4.35" />
+          </svg>
+          <input
+            id="filter-search"
+            type="text"
+            placeholder="상품코드 또는 상품명으로 검색"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="w-full rounded-lg border bg-white py-2 pl-10 pr-4 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-black/10"
+          />
+        </div>
+        <button
+          type="submit"
+          disabled={isPending}
+          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
-          <circle cx={11} cy={11} r={8} />
-          <path d="M21 21l-4.35-4.35" />
-        </svg>
-        <input
-          id="filter-search"
-          type="text"
-          placeholder="상품코드 또는 상품명으로 검색..."
-          defaultValue={filters.search ?? ''}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          className="w-full rounded-lg border bg-white py-2 pl-10 pr-4 text-sm shadow-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-black/10"
-        />
-      </div>
+          {isPending ? '검색중...' : '검색'}
+        </button>
+      </form>
 
       {/* Filter chips */}
       <div className="flex flex-wrap items-center gap-2">

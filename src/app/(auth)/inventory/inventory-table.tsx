@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useTransition } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -74,17 +74,16 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
     warehouseZone: parseAsString,
   })
 
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const [searchInput, setSearchInput] = useState(filters.search ?? '')
+  useEffect(() => { setSearchInput(filters.search ?? '') }, [filters.search])
 
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      if (searchTimeout.current) clearTimeout(searchTimeout.current)
-      searchTimeout.current = setTimeout(() => {
-        void setFilters({ search: value || null, page: 1 })
-      }, 300)
-    },
-    [setFilters],
-  )
+  const submitSearch = useCallback(() => {
+    const trimmed = searchInput.trim()
+    startTransition(() => {
+      void setFilters({ search: trimmed || null, page: 1 })
+    })
+  }, [searchInput, setFilters])
 
   const handleSort = useCallback(
     (columnId: string) => {
@@ -240,13 +239,25 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
       {/* Toolbar: search + filter + buttons */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <input
-            type="text"
-            placeholder="상품코드 또는 상품명 검색"
-            defaultValue={filters.search ?? ''}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            className="w-[260px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
-          />
+          <form
+            onSubmit={(e) => { e.preventDefault(); submitSearch() }}
+            className="flex items-center gap-1"
+          >
+            <input
+              type="text"
+              placeholder="상품코드 또는 상품명"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              className="w-[220px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
+            />
+            <button
+              type="submit"
+              disabled={isPending}
+              className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isPending ? '검색중...' : '검색'}
+            </button>
+          </form>
           <select
             value={filters.warehouseZone ?? ''}
             onChange={(e) => {

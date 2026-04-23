@@ -90,37 +90,34 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex h-full w-64 flex-col bg-gray-900 text-white">
+    <aside className="flex h-full w-48 flex-col bg-gray-900 text-white">
       {/* Logo */}
-      <div className="flex h-16 items-center justify-between px-6">
-        <span className="text-xl font-bold">Funtastic</span>
-        <span className="text-[10px] text-gray-500">v2.1</span>
+      <div className="flex h-10 items-center justify-between border-b border-gray-800 px-3">
+        <span className="text-sm font-bold">Funtastic</span>
+        <span className="text-[9px] text-gray-500">v2.1</span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto px-3 py-2">
+      <nav className="flex-1 overflow-y-auto px-2 py-1.5">
         {navSections.map((section, sIdx) => (
-          <div key={sIdx} className={sIdx > 0 ? 'mt-4' : ''}>
+          <div key={sIdx} className={sIdx > 0 ? 'mt-2' : ''}>
             {section.title && (
-              <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              <p className="mb-0.5 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
                 {section.title}
               </p>
             )}
-            <div className="space-y-0.5">
+            <div className="space-y-px">
               {section.items.map((item) => {
-                // Parse item.href to separate path and stage query
                 const [itemPath, itemQuery] = item.href.split('?')
                 const itemStage = itemQuery?.match(/stage=([^&]+)/)?.[1]
 
                 let isActive: boolean
                 if (itemPath === '/orders') {
-                  // Orders items: match path AND stage
                   if (pathname !== '/orders') {
                     isActive = false
                   } else if (itemStage) {
                     isActive = currentStage === itemStage
                   } else {
-                    // "전체 주문" = /orders without stage
                     isActive = !currentStage
                   }
                 } else if (itemPath === '/settings' || itemPath === '/products') {
@@ -135,14 +132,14 @@ export function Sidebar() {
                   <Link
                     key={item.href}
                     href={item.href}
-                    className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                    className={`flex items-center gap-2 rounded px-2 py-1 text-xs font-medium transition-colors ${
                       isActive
                         ? 'bg-gray-800 text-white'
                         : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
-                    {item.label}
+                    <Icon className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{item.label}</span>
                   </Link>
                 )
               })}
@@ -152,13 +149,13 @@ export function Sidebar() {
       </nav>
 
       {/* Sign Out */}
-      <div className="border-t border-gray-800 px-3 py-3">
+      <div className="border-t border-gray-800 px-2 py-1.5">
         <button
           type="button"
           onClick={handleSignOut}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+          className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
         >
-          <LogOut className="h-4 w-4" />
+          <LogOut className="h-3.5 w-3.5" />
           로그아웃
         </button>
       </div>

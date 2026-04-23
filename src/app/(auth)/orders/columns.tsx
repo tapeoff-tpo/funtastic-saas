@@ -244,35 +244,36 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 300,
   },
 
-  // 구매자/수취인/연락처
+  // 구매자 / 수취인 — 둘 다 표시 (연락처는 tooltip)
   {
     id: 'contact',
     header: '구매자 · 수취인',
     cell: ({ row }) => {
       const order = row.original
-      const sameName =
-        order.recipientName && order.recipientName === order.buyerName
       return (
         <div className="flex flex-col gap-0 text-xs leading-tight">
-          <span>
-            <span className="text-muted-foreground">구매</span>{' '}
+          <div>
+            <span className="inline-block w-7 text-[10px] text-muted-foreground">구매</span>
             <span className="font-medium">{order.buyerName}</span>
-          </span>
-          {order.recipientName && !sameName && (
-            <span>
-              <span className="text-muted-foreground">수취</span>{' '}
-              <span className="font-medium">{order.recipientName}</span>
-            </span>
-          )}
-          {(order.recipientPhone || order.buyerPhone) && (
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {formatPhone(order.recipientPhone ?? order.buyerPhone)}
-            </span>
-          )}
+            {order.buyerPhone && (
+              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                {formatPhone(order.buyerPhone)}
+              </span>
+            )}
+          </div>
+          <div>
+            <span className="inline-block w-7 text-[10px] text-muted-foreground">수취</span>
+            <span className="font-medium">{order.recipientName ?? '-'}</span>
+            {order.recipientPhone && (
+              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                {formatPhone(order.recipientPhone)}
+              </span>
+            )}
+          </div>
         </div>
       )
     },
-    size: 140,
+    size: 200,
   },
 
   // 금액

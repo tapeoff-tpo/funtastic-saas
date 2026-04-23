@@ -11,7 +11,6 @@ import { getOrders, getOrderStats } from '@/lib/orders/queries'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { ClaimsFilter } from './claims-filter'
-import { WorkflowDiagram } from './workflow-diagram'
 import type { OrderRow } from './columns'
 import type { OrderFilters as OrderFiltersParams, OrderStage } from '@/lib/orders/types'
 import type { ClaimType } from '@/lib/orders/types'
@@ -110,44 +109,25 @@ export default async function OrdersPage({
   const pageTitle = stageInfo?.title ?? '주문 관리'
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">{pageTitle}</h1>
-        <div className="mt-1 flex items-center gap-4">
-          <p className="text-sm text-muted-foreground">
-            {stageInfo?.desc ?? `전체 ${total.toLocaleString('ko-KR')}건의 주문`}
-          </p>
-          {!stage && (
-            <a
-              href="/orders/import"
-              className="text-sm text-blue-600 hover:underline"
-            >
-              엑셀 업로드
-            </a>
-          )}
-        </div>
+    <div className="space-y-3">
+      {/* Compact header — inline title + count + action */}
+      <div className="flex flex-wrap items-baseline gap-3">
+        <h1 className="text-xl font-bold">{pageTitle}</h1>
+        <span className="text-sm text-muted-foreground">
+          {total.toLocaleString('ko-KR')}건
+        </span>
         {stageInfo && (
-          <p className="mt-1 text-sm text-muted-foreground">
-            {total.toLocaleString('ko-KR')}건
-          </p>
+          <span className="text-sm text-muted-foreground">· {stageInfo.desc}</span>
+        )}
+        {!stage && (
+          <a
+            href="/orders/import"
+            className="ml-auto text-sm text-blue-600 hover:underline"
+          >
+            엑셀 업로드
+          </a>
         )}
       </div>
-
-      {/* Workflow diagram — 사방넷 style visual flow (only on 전체 view) */}
-      {!stage && (
-        <WorkflowDiagram
-          counts={{
-            new: stats.newCount,
-            confirmed: stats.confirmed,
-            preparing: stats.preparing,
-            shipped: stats.shipped,
-            cancelled: stats.cancel,
-            returned: stats.return,
-            exchanged: stats.exchange,
-            held: stats.held,
-          }}
-        />
-      )}
 
       {/* CS-focused tab bar (only on 전체 view) */}
       {!stage && (

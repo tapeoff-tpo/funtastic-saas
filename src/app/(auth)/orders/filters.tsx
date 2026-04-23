@@ -32,7 +32,6 @@ export function OrderFilters() {
     search: parseAsString,
     dateFrom: parseAsString,
     dateTo: parseAsString,
-    mapping: parseAsString,
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(50),
   }, { shallow: false })
@@ -66,7 +65,6 @@ export function OrderFilters() {
       search: null,
       dateFrom: null,
       dateTo: null,
-      mapping: null,
       page: 1,
       pageSize: filters.pageSize,
     })
@@ -90,23 +88,6 @@ export function OrderFilters() {
               {opt.label}
             </option>
           ))}
-        </select>
-      </div>
-
-      {/* Mapping filter */}
-      <div className="flex flex-col gap-1">
-        <label htmlFor="filter-mapping" className="text-xs font-medium text-muted-foreground">
-          매핑
-        </label>
-        <select
-          id="filter-mapping"
-          value={filters.mapping ?? ''}
-          onChange={(e) => updateFilter({ mapping: e.target.value || null })}
-          className="rounded-md border px-3 py-1.5 text-sm"
-        >
-          <option value="">전체</option>
-          <option value="mapped">매핑됨</option>
-          <option value="unmapped">미매핑만</option>
         </select>
       </div>
 

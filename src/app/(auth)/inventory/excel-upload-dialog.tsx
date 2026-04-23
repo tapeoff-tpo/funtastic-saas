@@ -49,7 +49,11 @@ export function ExcelUploadDialog({ onClose }: ExcelUploadDialogProps) {
       <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
         <h3 className="text-lg font-semibold">엑셀 재고/상품 업로드</h3>
         <p className="mt-1 text-sm text-muted-foreground">
-          필수 컬럼: 상품코드, 상품명, 수량(재고). 선택 컬럼: 창고위치, 원가, 판매가, 택배사
+          필수: 상품코드 · 상품명 · 수량(재고). 선택: 창고 · 원가 · 판매가 · 택배사.
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          📄 사방넷 <strong>재고코드관리 &gt; 다운로드</strong> 파일 그대로 업로드 가능 — 헤더가
+          2·3행에 걸쳐있고 &apos;현재고 가용&apos;을 수량으로 읽음.
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
           상품코드 기준으로 상품 테이블도 자동 동기화됩니다.

@@ -17,7 +17,7 @@ import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 import { and, eq, inArray } from 'drizzle-orm'
 
-/** Korean header → internal key */
+/** Korean header → internal key (also supports 사방넷 multi-row headers like "현재고 가용") */
 const HEADER_MAP: Record<string, string> = {
   'SKU': 'sku',
   '품번': 'sku',
@@ -30,6 +30,8 @@ const HEADER_MAP: Record<string, string> = {
   '재고': 'totalStock',
   '재고수량': 'totalStock',
   '수량(재고)': 'totalStock',
+  '현재고 가용': 'totalStock', // 사방넷 재고코드관리 format
+  '현재고가용': 'totalStock',
   '창고': 'warehouseZone',
   '창고구분': 'warehouseZone',
   '위치': 'sectorCode',
@@ -40,6 +42,51 @@ const HEADER_MAP: Record<string, string> = {
   '원가': 'costPrice',
   '판매가': 'basePrice',
   '택배사': 'carrierId',
+}
+
+/** Build a column map for a single header row */
+function mapSingleRow(sheet: ExcelJS.Worksheet, rowNum: number): Record<number, string> {
+  const row = sheet.getRow(rowNum)
+  const map: Record<number, string> = {}
+  row.eachCell((cell, col) => {
+    const key = HEADER_MAP[cellText(cell).replace(/\n/g, '').trim()]
+    if (key) map[col] = key
+  })
+  return map
+}
+
+/** Build a column map for combined row N + row N+1 headers (merged parents + sub-headers) */
+function mapCombinedRows(sheet: ExcelJS.Worksheet, topRow: number, subRow: number): Record<number, string> {
+  const top = sheet.getRow(topRow)
+  const sub = sheet.getRow(subRow)
+  const map: Record<number, string> = {}
+  const maxCol = Math.max(top.cellCount, sub.cellCount, sheet.columnCount)
+
+  // Forward-fill the top row for merged cells — value carries across empty continuations
+  const topValues: string[] = []
+  let last = ''
+  for (let col = 1; col <= maxCol; col++) {
+    const v = cellText(top.getCell(col)).replace(/\n/g, '').trim()
+    if (v) last = v
+    topValues[col] = v || last
+  }
+
+  for (let col = 1; col <= maxCol; col++) {
+    const s = cellText(sub.getCell(col)).replace(/\n/g, '').trim()
+    const p = topValues[col]
+    // Try "parent sub" combined, then parent alone, then sub alone
+    const key =
+      (s && HEADER_MAP[`${p} ${s}`]) ??
+      HEADER_MAP[p] ??
+      (s && HEADER_MAP[s])
+    if (key) map[col] = key
+  }
+  return map
+}
+
+function hasRequired(map: Record<number, string>): boolean {
+  const vals = Object.values(map)
+  return vals.includes('sku') && vals.includes('productName') && vals.includes('totalStock')
 }
 
 interface ParsedRow {
@@ -112,30 +159,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Excel 시트가 비어있습니다.' }, { status: 400 })
   }
 
-  // Detect header row (row 1)
-  const headerRow = sheet.getRow(1)
-  const colMap: Record<number, string> = {}
-  headerRow.eachCell((cell, colNumber) => {
-    const header = cellText(cell)
-    const key = HEADER_MAP[header]
-    if (key) colMap[colNumber] = key
-  })
+  // Detect header layout — try row 1 (standard), then row 2+3 combined (사방넷 format)
+  let colMap = mapSingleRow(sheet, 1)
+  let dataStartRow = 2
+  if (!hasRequired(colMap)) {
+    const sabangnetMap = mapCombinedRows(sheet, 2, 3)
+    if (hasRequired(sabangnetMap)) {
+      colMap = sabangnetMap
+      dataStartRow = 4
+    }
+  }
 
-  if (!Object.values(colMap).includes('sku')) {
+  if (!hasRequired(colMap)) {
+    const missing: string[] = []
+    const vals = Object.values(colMap)
+    if (!vals.includes('sku')) missing.push('상품코드/SKU')
+    if (!vals.includes('productName')) missing.push('상품명')
+    if (!vals.includes('totalStock')) missing.push('수량/현재고')
     return NextResponse.json(
-      { error: 'SKU 또는 품번 컬럼을 찾을 수 없습니다.' },
-      { status: 400 },
-    )
-  }
-  if (!Object.values(colMap).includes('productName')) {
-    return NextResponse.json(
-      { error: '상품명 컬럼을 찾을 수 없습니다.' },
-      { status: 400 },
-    )
-  }
-  if (!Object.values(colMap).includes('totalStock')) {
-    return NextResponse.json(
-      { error: '수량 또는 재고 컬럼을 찾을 수 없습니다.' },
+      { error: `다음 컬럼을 찾을 수 없습니다: ${missing.join(', ')}` },
       { status: 400 },
     )
   }
@@ -145,7 +187,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const parseErrors: Array<{ sku: string; error: string }> = []
 
   sheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return // Skip header
+    if (rowNumber < dataStartRow) return // Skip header rows
 
     const raw: Record<string, string> = {}
     row.eachCell((cell, colNumber) => {

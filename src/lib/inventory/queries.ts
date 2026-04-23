@@ -51,7 +51,7 @@ export async function getInventoryList(
       case 'sku': return products.internalSku
       case 'productName': return products.name
       case 'warehouseZone': return sql`COALESCE(${inventory.warehouseZone}, '')`
-      case 'sectorCode': return sql`COALESCE(${products.warehouseLocation}, ${inventory.sectorCode}, '')`
+      case 'sectorCode': return sql`COALESCE(${inventory.sectorCode}, '')`
       case 'totalStock': return sql`COALESCE(${inventory.totalStock}, 0)`
       case 'reservedStock': return sql`COALESCE(${inventory.reservedStock}, 0)`
       case 'availableStock': return sql`COALESCE(${inventory.availableStock}, 0)`
@@ -72,7 +72,7 @@ export async function getInventoryList(
         productName: products.name,
         optionName: inventory.optionName,
         warehouseZone: inventory.warehouseZone,
-        sectorCode: sql<string | null>`COALESCE(${products.warehouseLocation}, ${inventory.sectorCode})`,
+        sectorCode: inventory.sectorCode,
         totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
         reservedStock: sql<number>`COALESCE(${inventory.reservedStock}, 0)::int`,
         availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,

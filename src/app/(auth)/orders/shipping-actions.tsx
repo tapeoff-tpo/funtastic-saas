@@ -6,6 +6,7 @@ import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
 import { BulkMappingDialog } from './bulk-mapping-dialog'
 import { LogisticsMessageDialog } from './logistics-message-dialog'
+import { bulkCombineByContactAction } from './combined-actions'
 import type { OrderRow } from './columns'
 import type { OrderStage } from '@/lib/orders/types'
 
@@ -59,6 +60,7 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
   const [bulkMappingOpen, setBulkMappingOpen] = useState(false)
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
   const [classifying, setClassifying] = useState(false)
+  const [combining, setCombining] = useState(false)
 
   const hasSelection = selectedOrderIds.length > 0
 
@@ -121,6 +123,33 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
     }
   }
 
+  const handleBulkCombineByContact = async () => {
+    if (combining) return
+    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
+    if (scope.length === 0) {
+      toast.error('대상 주문이 없습니다.')
+      return
+    }
+    const confirmMsg = selectedOrderIds.length > 0
+      ? `선택한 ${scope.length}건에서 이름+연락처 동일 주문을 합포장으로 묶습니다. 계속하시겠습니까?`
+      : `현재 페이지 ${scope.length}건에서 이름+연락처 동일 주문을 합포장으로 묶습니다. 계속하시겠습니까?`
+    if (!window.confirm(confirmMsg)) return
+
+    setCombining(true)
+    try {
+      const result = await bulkCombineByContactAction(scope)
+      if (result.created === 0) {
+        toast.info('합포장 대상이 없습니다 (이름+연락처 동일 주문이 2건 이상인 경우에만 묶입니다).')
+      } else {
+        toast.success(`${result.created}개 그룹 생성 (${result.totalOrders}건 포함). /shipping/combined 에서 확인하세요.`)
+      }
+    } catch (err) {
+      toast.error(`합포장 실패: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setCombining(false)
+    }
+  }
+
   const handlePrintLabels = () => {
     const params = new URLSearchParams()
     params.set('ids', selectedOrderIds.join(','))
@@ -154,6 +183,18 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
           >
             합포장
           </a>
+        )}
+
+        {stage === 'confirm' && (
+          <button
+            type="button"
+            onClick={() => void handleBulkCombineByContact()}
+            disabled={combining}
+            className="rounded-md bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
+            title="이름+연락처가 동일한 주문을 자동으로 합포장 그룹으로 묶습니다"
+          >
+            {combining ? '묶는 중...' : '일괄 합포장 (이름+연락처)'}
+          </button>
         )}
 
         {showInvoice && (

@@ -71,10 +71,15 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
   }, [ordersForMapping])
 
   const handleCarrierAutoExport = async () => {
+    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
+    if (scope.length === 0) {
+      toast.error('대상 주문이 없습니다.')
+      return
+    }
     setClassifying(true)
     try {
       const params = new URLSearchParams()
-      params.set('orderIds', selectedOrderIds.join(','))
+      params.set('orderIds', scope.join(','))
       const classifyRes = await fetch(`/api/shipping/classify?${params.toString()}`)
       if (!classifyRes.ok) {
         const text = await classifyRes.text()
@@ -183,7 +188,11 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
             className="rounded-md bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
             title="이름+연락처가 동일한 주문을 자동으로 합포장 그룹으로 묶습니다"
           >
-            {combining ? '묶는 중...' : '일괄 합포장 (이름+연락처)'}
+            {combining
+              ? '묶는 중...'
+              : hasSelection
+                ? `선택 합포장 (${selectedOrderIds.length}건, 이름+연락처)`
+                : '일괄 합포장 (이름+연락처)'}
           </button>
         )}
 
@@ -192,10 +201,15 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
             <button
               type="button"
               onClick={() => void handleCarrierAutoExport()}
-              disabled={!hasSelection || classifying}
+              disabled={classifying}
               className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              title={hasSelection ? '선택한 주문만' : '현재 페이지 전체'}
             >
-              {classifying ? '분류 중...' : '택배사별 엑셀 다운로드'}
+              {classifying
+                ? '분류 중...'
+                : hasSelection
+                  ? `선택 엑셀 다운로드 (${selectedOrderIds.length}건)`
+                  : '일괄 엑셀 다운로드'}
             </button>
 
             <button

@@ -52,27 +52,31 @@ export async function GET(req: NextRequest) {
       skuLookup,
       order.marketplaceId,
     )
-    const firstItem = mapped[0]
+    const firstItem: (typeof mapped)[number] | undefined = mapped.length > 0 ? mapped[0] : undefined
+    const firstOriginal: (typeof items)[number] | undefined = items.length > 0 ? items[0] : undefined
     const addr = order.shippingAddress
-    const fullAddress = addr
+    const fullAddress = addr && typeof addr === 'object'
       ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
       : ''
+
+    const marketplaceItemIdRaw = firstItem ? firstItem.marketplaceItemId : null
+    const marketplaceItemId = typeof marketplaceItemIdRaw === 'string' ? marketplaceItemIdRaw : undefined
 
     return {
       orderId: order.id,
       marketplaceOrderId: order.marketplaceOrderId,
-      recipientName: order.recipientName,
+      recipientName: order.recipientName ?? '',
       recipientPhone: order.recipientPhone ?? '',
       recipientAddress: fullAddress,
-      productName: firstItem?.productName ?? '',
-      optionText: firstItem?.optionText ?? undefined,
+      productName: firstItem ? firstItem.productName ?? '' : '',
+      optionText: firstItem ? firstItem.optionText ?? undefined : undefined,
       quantity: items.reduce((s, i) => s + i.quantity, 0),
-      marketplaceItemId: firstItem?.marketplaceItemId ?? undefined,
+      marketplaceItemId,
       senderName: senderSettings?.companyName ?? '',
       senderPhone: senderSettings?.phone ?? '',
       senderAddress: senderSettings?.address ?? '',
-      originalProductName: items[0]?.productName,
-      pickingLocation: firstItem?.pickingLocation ?? undefined,
+      originalProductName: firstOriginal ? firstOriginal.productName : undefined,
+      pickingLocation: firstItem ? firstItem.pickingLocation ?? undefined : undefined,
     }
   })
 

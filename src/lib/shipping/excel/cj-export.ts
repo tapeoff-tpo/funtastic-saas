@@ -76,7 +76,7 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
 
   // Detect 합배송: group by (recipientName + recipientAddress)
   const recipientKey = (r: CjOrderRow) =>
-    `${r.recipientName.trim()}||${r.recipientAddress.trim()}`
+    `${(r.recipientName ?? '').trim()}||${(r.recipientAddress ?? '').trim()}`
   const recipientCount = new Map<string, number>()
   for (const row of rows) {
     const key = recipientKey(row)

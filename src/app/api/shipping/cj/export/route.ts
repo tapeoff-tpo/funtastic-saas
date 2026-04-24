@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
   return new NextResponse(new Uint8Array(buffer), {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'Content-Disposition': `attachment; filename="CJ발주서_${date}.xlsx"`,
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`CJ발주서_${date}.xlsx`)}`,
     },
   })
   } catch (err) {

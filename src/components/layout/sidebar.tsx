@@ -17,7 +17,6 @@ import {
   Settings,
   LogOut,
   FileText,
-  PackageCheck,
   CircleAlert,
   ChevronsLeft,
 } from 'lucide-react'
@@ -35,12 +34,19 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    title: '주문 처리',
+    title: '주문',
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
       { href: '/orders?stage=prep', label: '출고 준비', icon: CircleAlert },
+      { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
+    ],
+  },
+  {
+    title: '출고/송장',
+    items: [
+      { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
       { href: '/orders?stage=invoice', label: '송장 발급', icon: FileText },
-      { href: '/orders?stage=shipping', label: '출고 대기', icon: PackageCheck },
+      { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
     ],
   },
   {
@@ -49,20 +55,12 @@ const navSections: NavSection[] = [
       { href: '/products', label: '상품 관리', icon: Package },
       { href: '/products/mappings', label: '상품명 매핑', icon: ArrowRightLeft },
       { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
-    ],
-  },
-  {
-    title: '물류',
-    items: [
-      { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
-      { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
-      { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
-    ],
-  },
-  {
-    title: '관리',
-    items: [
       { href: '/inventory', label: '재고관리', icon: Warehouse },
+    ],
+  },
+  {
+    title: '분석',
+    items: [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
     ],
   },

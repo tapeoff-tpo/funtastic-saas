@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'orderIds 필수' }, { status: 400 })
   }
 
+  try {
   const [senderSettings] = await db
     .select()
     .from(companySettings)
@@ -84,4 +85,9 @@ export async function GET(req: NextRequest) {
       'Content-Disposition': `attachment; filename="CJ발주서_${date}.xlsx"`,
     },
   })
+  } catch (err) {
+    console.error('[cj/export] failed:', err, { orderIds })
+    const msg = err instanceof Error ? `${err.message}\n${err.stack}` : String(err)
+    return NextResponse.json({ error: msg }, { status: 500 })
+  }
 }

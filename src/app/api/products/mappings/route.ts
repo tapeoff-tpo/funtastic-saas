@@ -36,6 +36,7 @@ export async function GET(_req: NextRequest) {
         productId: productNameMappings.productId,
         productName: products.name,
         variantId: productNameMappings.variantId,
+        quantity: productNameMappings.quantity,
         updatedAt: productNameMappings.updatedAt,
       })
       .from(productNameMappings)
@@ -98,6 +99,7 @@ export async function POST(req: NextRequest) {
     displayName: string
     productId?: string | null
     variantId?: string | null
+    quantity?: number
   }
   try {
     body = await req.json()
@@ -112,6 +114,8 @@ export async function POST(req: NextRequest) {
     )
   }
 
+  const qty = Math.max(1, Math.floor(body.quantity ?? 1))
+
   const [mapping] = await db
     .insert(productNameMappings)
     .values({
@@ -121,6 +125,7 @@ export async function POST(req: NextRequest) {
       displayName: body.displayName.trim(),
       productId: body.productId ?? null,
       variantId: body.variantId ?? null,
+      quantity: qty,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -133,6 +138,7 @@ export async function POST(req: NextRequest) {
         displayName: body.displayName.trim(),
         productId: body.productId ?? null,
         variantId: body.variantId ?? null,
+        quantity: qty,
         updatedAt: new Date(),
       },
     })

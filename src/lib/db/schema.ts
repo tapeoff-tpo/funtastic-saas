@@ -139,6 +139,8 @@ export const orderItems = pgTable('order_items', {
   quantity: integer('quantity').notNull().default(1),
   unitPrice: numeric('unit_price', { precision: 12, scale: 2 }).notNull(),
   sku: varchar('sku', { length: 100 }),
+  /** 매핑에서 가져온 멀티플라이어. 예: "A 2개입" 마켓 상품 매핑 시 2 */
+  skuMultiplier: integer('sku_multiplier').notNull().default(1),
   fulfillmentCode: varchar('fulfillment_code', { length: 50 }).default('normal'),
 })
 
@@ -535,6 +537,8 @@ export const productNameMappings = pgTable(
     pickingLocation: varchar('picking_location', { length: 100 }),
     productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
     variantId: uuid('variant_id').references(() => productVariants.id, { onDelete: 'set null' }),
+    /** 매핑 멀티플라이어. 마켓 상품 1개가 내부 SKU N개 분량일 때. 기본 1 */
+    quantity: integer('quantity').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -561,6 +565,8 @@ export const productOptionMappings = pgTable(
     optionText: text('option_text').notNull(),
     variantSku: varchar('variant_sku', { length: 100 }).notNull(),
     productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    /** 매핑 멀티플라이어. 마켓 상품 1개가 내부 SKU N개 분량일 때. 기본 1 */
+    quantity: integer('quantity').notNull().default(1),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

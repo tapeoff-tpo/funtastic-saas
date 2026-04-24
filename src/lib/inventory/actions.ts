@@ -224,10 +224,19 @@ export async function deductForOrder(
   userId: string,
   orderId: string,
 ): Promise<void> {
-  const rawItems = await tx
-    .select({ sku: orderItems.sku, quantity: orderItems.quantity })
+  const rawItemsRaw = await tx
+    .select({
+      sku: orderItems.sku,
+      quantity: orderItems.quantity,
+      skuMultiplier: orderItems.skuMultiplier,
+    })
     .from(orderItems)
     .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
+
+  const rawItems = rawItemsRaw.map((r) => ({
+    sku: r.sku,
+    quantity: r.quantity * (r.skuMultiplier ?? 1),
+  }))
 
   const items = await expandBundleItems(tx, userId, rawItems)
 
@@ -249,10 +258,19 @@ export async function restoreForOrder(
   userId: string,
   orderId: string,
 ): Promise<void> {
-  const rawItems = await tx
-    .select({ sku: orderItems.sku, quantity: orderItems.quantity })
+  const rawItemsRaw = await tx
+    .select({
+      sku: orderItems.sku,
+      quantity: orderItems.quantity,
+      skuMultiplier: orderItems.skuMultiplier,
+    })
     .from(orderItems)
     .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
+
+  const rawItems = rawItemsRaw.map((r) => ({
+    sku: r.sku,
+    quantity: r.quantity * (r.skuMultiplier ?? 1),
+  }))
 
   const items = await expandBundleItems(tx, userId, rawItems)
 

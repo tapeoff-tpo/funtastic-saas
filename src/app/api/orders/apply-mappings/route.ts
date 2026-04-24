@@ -57,49 +57,42 @@ export async function POST(req: NextRequest) {
       marketplaceName: productOptionMappings.marketplaceName,
       optionText: productOptionMappings.optionText,
       variantSku: productOptionMappings.variantSku,
+      quantity: productOptionMappings.quantity,
     })
     .from(productOptionMappings)
     .where(eq(productOptionMappings.userId, user.id))
 
-  // Build lookup: "marketplaceId::productName::optionText" → variantSku
-  const lookup = new Map<string, string>()
+  // Build lookup: "marketplaceId::productName::optionText" → { sku, qty }
+  const lookup = new Map<string, { sku: string; qty: number }>()
   for (const m of optionMaps) {
-    lookup.set(`${m.marketplaceId}::${m.marketplaceName}::${m.optionText}`, m.variantSku)
+    const val = { sku: m.variantSku, qty: m.quantity ?? 1 }
+    lookup.set(`${m.marketplaceId}::${m.marketplaceName}::${m.optionText}`, val)
     // Also try empty optionText as fallback (product-level option mapping)
     if (!lookup.has(`${m.marketplaceId}::${m.marketplaceName}::`)) {
-      lookup.set(`${m.marketplaceId}::${m.marketplaceName}::`, m.variantSku)
+      lookup.set(`${m.marketplaceId}::${m.marketplaceName}::`, val)
     }
   }
 
   // Resolve SKUs and update
   let updated = 0
-  const updates: Array<{ itemId: string; variantSku: string }> = []
+  const updates: Array<{ itemId: string; variantSku: string; multiplier: number }> = []
 
   for (const item of unmappedItems) {
     const optText = item.optionText?.trim() ?? ''
     const key = `${item.marketplaceId}::${item.productName}::${optText}`
-    const variantSku = lookup.get(key) ?? lookup.get(`${item.marketplaceId}::${item.productName}::`)
-    if (variantSku) {
-      updates.push({ itemId: item.itemId, variantSku })
+    const hit = lookup.get(key) ?? lookup.get(`${item.marketplaceId}::${item.productName}::`)
+    if (hit) {
+      updates.push({ itemId: item.itemId, variantSku: hit.sku, multiplier: hit.qty })
     }
   }
 
   if (updates.length > 0) {
-    // Batch update using CASE WHEN for efficiency
-    const ids = updates.map((u) => u.itemId)
-    const skuByItemId = new Map(updates.map((u) => [u.itemId, u.variantSku]))
-
-    // Update in batches of 100
-    for (let i = 0; i < ids.length; i += 100) {
-      const batch = ids.slice(i, i + 100)
-      for (const itemId of batch) {
-        const sku = skuByItemId.get(itemId)!
-        await db
-          .update(orderItems)
-          .set({ sku })
-          .where(eq(orderItems.id, itemId))
-      }
-      updated += batch.length
+    for (const u of updates) {
+      await db
+        .update(orderItems)
+        .set({ sku: u.variantSku, skuMultiplier: u.multiplier })
+        .where(eq(orderItems.id, u.itemId))
+      updated += 1
     }
   }
 

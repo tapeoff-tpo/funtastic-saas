@@ -39,12 +39,14 @@ export function InlineMappingDialog({
   onSaved,
 }: InlineMappingDialogProps) {
   const [mappings, setMappings] = useState<Record<string, ProductSearchResult | null>>({})
+  const [mappingQty, setMappingQty] = useState<Record<string, number>>({})
   const [bundleItems, setBundleItems] = useState<Record<string, BundleItem[]>>({})
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
       setMappings({})
+      setMappingQty({})
       setBundleItems({})
     }
   }, [open])
@@ -112,6 +114,7 @@ export function InlineMappingDialog({
       let success = 0
       let failed = 0
       for (const [marketplaceName, product] of entries) {
+        const qty = Math.max(1, mappingQty[marketplaceName] ?? 1)
         const res = await fetch('/api/products/mappings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -121,6 +124,7 @@ export function InlineMappingDialog({
             displayName: product.name,
             productId: product.id,
             pickingLocation: product.warehouseLocation,
+            quantity: qty,
           }),
         })
         if (res.ok) success++
@@ -178,9 +182,25 @@ export function InlineMappingDialog({
                 <ProductSearch onSelect={(p) => void handleSelectProduct(itemKey, p)} />
 
                 {selected && (
-                  <p className="text-xs text-green-600">
-                    ✓ {selected.internalSku} — {selected.name}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="flex-1 truncate text-xs text-green-600">
+                      ✓ {selected.internalSku} — {selected.name}
+                    </p>
+                    <span className="text-xs text-muted-foreground">× 수량</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={mappingQty[itemKey] ?? 1}
+                      onChange={(e) =>
+                        setMappingQty((prev) => ({
+                          ...prev,
+                          [itemKey]: Math.max(1, Number(e.target.value) || 1),
+                        }))
+                      }
+                      className="w-14 rounded border px-2 py-0.5 text-xs text-center"
+                      title="이 마켓 상품 1개당 내부 SKU N개 (예: A 2개입 벌크팩 → 2)"
+                    />
+                  </div>
                 )}
 
                 {/* Bundle section */}

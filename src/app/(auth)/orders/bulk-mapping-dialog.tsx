@@ -48,6 +48,8 @@ interface BulkMappingDialogProps {
 export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappingDialogProps) {
   // key: `${marketplaceId}::${productName}::${optionText}`
   const [mappings, setMappings] = useState<Record<string, ProductSearchResult | null>>({})
+  // mappingQty: key → multiplier (default 1)
+  const [mappingQty, setMappingQty] = useState<Record<string, number>>({})
   // bundleItems: key → component list
   const [bundleItems, setBundleItems] = useState<Record<string, BundleItem[]>>({})
   const [saving, setSaving] = useState(false)
@@ -96,6 +98,7 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
   useEffect(() => {
     if (open) {
       setMappings({})
+      setMappingQty({})
       setBundleItems({})
     }
   }, [open])
@@ -175,6 +178,7 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
         const nameKey = `${opt.marketplaceId}::${opt.productName}`
         if (savedNameKeys.has(nameKey)) continue
         savedNameKeys.add(nameKey)
+        const qty = Math.max(1, mappingQty[key] ?? 1)
         const res = await fetch('/api/products/mappings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -184,6 +188,7 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
             displayName: product.name,
             productId: product.id,
             pickingLocation: product.warehouseLocation,
+            quantity: qty,
           }),
         })
         if (!res.ok) nameFailed++
@@ -198,6 +203,7 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
           optionText: opt.optionText,
           variantSku: product.internalSku,
           productId: product.id,
+          quantity: Math.max(1, mappingQty[key] ?? 1),
         }
       })
       const optRes = await fetch('/api/products/option-mappings', {
@@ -291,9 +297,25 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
                         <ProductSearch onSelect={(p) => void handleSelect(key, p)} />
 
                         {selected && (
-                          <p className="text-xs text-green-600">
-                            ✓ {selected.internalSku} — {selected.name}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="flex-1 truncate text-xs text-green-600">
+                              ✓ {selected.internalSku} — {selected.name}
+                            </p>
+                            <span className="text-xs text-muted-foreground">× 수량</span>
+                            <input
+                              type="number"
+                              min={1}
+                              value={mappingQty[key] ?? 1}
+                              onChange={(e) =>
+                                setMappingQty((prev) => ({
+                                  ...prev,
+                                  [key]: Math.max(1, Number(e.target.value) || 1),
+                                }))
+                              }
+                              className="w-14 rounded border px-2 py-0.5 text-xs text-center"
+                              title="이 마켓 상품 1개당 내부 SKU N개 (예: A 2개입 벌크팩 → 2)"
+                            />
+                          </div>
                         )}
 
                         {/* Bundle section — shown after product selected */}
@@ -388,8 +410,14 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
   )
 }
 
-function ProductSearch({ onSelect }: { onSelect: (p: ProductSearchResult) => void }) {
-  const [query, setQuery] = useState('')
+function ProductSearch({
+  onSelect,
+  initialValue = '',
+}: {
+  onSelect: (p: ProductSearchResult) => void
+  initialValue?: string
+}) {
+  const [query, setQuery] = useState(initialValue)
   const [results, setResults] = useState<ProductSearchResult[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
   const timeout = useRef<ReturnType<typeof setTimeout> | null>(null)

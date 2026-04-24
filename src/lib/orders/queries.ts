@@ -368,6 +368,7 @@ export async function getStockDeductionPreview(
       productName: orderItems.productName,
       optionText: orderItems.optionText,
       quantity: orderItems.quantity,
+      skuMultiplier: orderItems.skuMultiplier,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
@@ -418,7 +419,7 @@ export async function getStockDeductionPreview(
 
   for (const row of rows) {
     const sku = row.sku!
-    const orderQty = row.quantity
+    const orderQty = row.quantity * (row.skuMultiplier ?? 1)
     const components = bundleMap.get(sku)
 
     if (components && components.length > 0) {

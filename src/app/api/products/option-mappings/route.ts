@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
     optionText: string
     variantSku: string
     productId?: string | null
+    quantity?: number
   }>
   try {
     body = await req.json()
@@ -43,6 +44,7 @@ export async function POST(req: NextRequest) {
         optionText: item.optionText,
         variantSku: item.variantSku,
         productId: item.productId ?? null,
+        quantity: Math.max(1, Math.floor(item.quantity ?? 1)),
         updatedAt: new Date(),
       })),
     )
@@ -56,6 +58,7 @@ export async function POST(req: NextRequest) {
       set: {
         variantSku: sql`excluded.variant_sku`,
         productId: sql`excluded.product_id`,
+        quantity: sql`excluded.quantity`,
         updatedAt: new Date(),
       },
     })

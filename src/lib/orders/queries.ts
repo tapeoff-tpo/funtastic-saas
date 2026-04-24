@@ -6,8 +6,8 @@
  */
 
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants } from '@/lib/db/schema'
-import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray } from 'drizzle-orm'
+import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory } from '@/lib/db/schema'
+import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray, isNotNull } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage } from './types'
 
@@ -338,6 +338,150 @@ export async function getOrderById(id: string, userId?: string) {
     memos: memoRows,
     shipment: latestShipment,
   }
+}
+
+/**
+ * 주문 출고 시 실제 차감될 재고 미리보기.
+ * - 각 order item의 sku를 bundle 정의로 확장 (구성품 × (componentQty × orderQty))
+ * - 단품 SKU는 그대로 (orderQty)
+ * - 현재 재고(totalStock/availableStock)와 상품명 포함
+ * - 같은 component SKU가 여러 줄에서 나오면 합산
+ */
+export interface StockDeductionPreviewRow {
+  sku: string
+  productName: string | null
+  requiredQty: number
+  totalStock: number | null
+  availableStock: number | null
+  sufficient: boolean
+  isBundleComponent: boolean
+  sourceItems: Array<{ productName: string; optionText: string | null; orderQty: number }>
+}
+
+export async function getStockDeductionPreview(
+  orderId: string,
+  userId: string,
+): Promise<StockDeductionPreviewRow[]> {
+  const rows = await db
+    .select({
+      sku: orderItems.sku,
+      productName: orderItems.productName,
+      optionText: orderItems.optionText,
+      quantity: orderItems.quantity,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .where(
+      and(
+        eq(orderItems.orderId, orderId),
+        eq(orders.userId, userId),
+        isNotNull(orderItems.sku),
+      ),
+    )
+
+  if (rows.length === 0) return []
+
+  const mappedSkus = Array.from(new Set(rows.map((r) => r.sku!).filter(Boolean)))
+
+  const bundleRows = mappedSkus.length
+    ? await db
+        .select({
+          bundleSku: productBundleItems.bundleSku,
+          componentSku: productBundleItems.componentSku,
+          quantity: productBundleItems.quantity,
+        })
+        .from(productBundleItems)
+        .where(
+          and(
+            eq(productBundleItems.userId, userId),
+            inArray(productBundleItems.bundleSku, mappedSkus),
+          ),
+        )
+    : []
+
+  const bundleMap = new Map<string, Array<{ componentSku: string; quantity: number }>>()
+  for (const b of bundleRows) {
+    const list = bundleMap.get(b.bundleSku) ?? []
+    list.push({ componentSku: b.componentSku, quantity: b.quantity })
+    bundleMap.set(b.bundleSku, list)
+  }
+
+  // Accumulator: sku → { requiredQty, isBundleComponent, sourceItems }
+  const acc = new Map<
+    string,
+    {
+      requiredQty: number
+      isBundleComponent: boolean
+      sourceItems: Array<{ productName: string; optionText: string | null; orderQty: number }>
+    }
+  >()
+
+  for (const row of rows) {
+    const sku = row.sku!
+    const orderQty = row.quantity
+    const components = bundleMap.get(sku)
+
+    if (components && components.length > 0) {
+      for (const c of components) {
+        const current = acc.get(c.componentSku) ?? {
+          requiredQty: 0,
+          isBundleComponent: true,
+          sourceItems: [],
+        }
+        current.requiredQty += c.quantity * orderQty
+        current.isBundleComponent = true
+        current.sourceItems.push({
+          productName: row.productName,
+          optionText: row.optionText,
+          orderQty,
+        })
+        acc.set(c.componentSku, current)
+      }
+    } else {
+      const current = acc.get(sku) ?? {
+        requiredQty: 0,
+        isBundleComponent: false,
+        sourceItems: [],
+      }
+      current.requiredQty += orderQty
+      current.sourceItems.push({
+        productName: row.productName,
+        optionText: row.optionText,
+        orderQty,
+      })
+      acc.set(sku, current)
+    }
+  }
+
+  const skus = Array.from(acc.keys())
+  const invRows = skus.length
+    ? await db
+        .select({
+          sku: inventory.sku,
+          productName: inventory.productName,
+          totalStock: inventory.totalStock,
+          availableStock: inventory.availableStock,
+        })
+        .from(inventory)
+        .where(and(eq(inventory.userId, userId), inArray(inventory.sku, skus)))
+    : []
+
+  const invMap = new Map(invRows.map((r) => [r.sku, r]))
+
+  return skus.map((sku) => {
+    const { requiredQty, isBundleComponent, sourceItems } = acc.get(sku)!
+    const inv = invMap.get(sku)
+    return {
+      sku,
+      productName: inv?.productName ?? null,
+      requiredQty,
+      totalStock: inv?.totalStock ?? null,
+      availableStock: inv?.availableStock ?? null,
+      sufficient: inv ? (inv.availableStock ?? 0) >= requiredQty : false,
+      isBundleComponent,
+      sourceItems,
+    }
+  })
 }
 
 export interface OrderStats {

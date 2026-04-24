@@ -3,9 +3,9 @@ import Link from 'next/link'
 import { format } from 'date-fns'
 import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
-import { getOrderById } from '@/lib/orders/queries'
+import { getOrderById, getStockDeductionPreview } from '@/lib/orders/queries'
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
-import { ClaimList, MemoPanel } from './client'
+import { ClaimList } from './client'
 
 export const metadata: Metadata = {
   title: '주문 상세',
@@ -36,6 +36,9 @@ export default async function OrderDetailPage({
 
   const order = await getOrderById(id, user.id)
   if (!order) notFound()
+
+  const stockPreview = await getStockDeductionPreview(id, user.id)
+  const alreadyShipped = order.status === 'shipped' || order.status === 'delivering' || order.status === 'delivered'
 
   const shippingAddr = order.shippingAddress as
     | { zipCode: string; address1: string; address2?: string }
@@ -178,19 +181,96 @@ export default async function OrderDetailPage({
           )}
         </div>
 
-        {/* Right column: memos */}
+        {/* Right column: stock deduction preview */}
         <div className="lg:col-span-1">
           <section className="rounded-lg border bg-white p-5">
-            <h2 className="mb-3 text-lg font-semibold">CS 메모</h2>
-            <MemoPanel
-              orderId={order.id}
-              initialMemos={order.memos.map((m) => ({
-                id: m.id,
-                content: m.content,
-                memoType: m.memoType,
-                createdAt: m.createdAt.toISOString(),
-              }))}
-            />
+            <div className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-lg font-semibold">
+                {alreadyShipped ? '차감된 재고' : '예상 차감 재고'}
+              </h2>
+              {!alreadyShipped && (
+                <span className="text-xs text-muted-foreground">
+                  출고완료 시점 차감 예상치
+                </span>
+              )}
+            </div>
+
+            {stockPreview.length === 0 ? (
+              <p className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+                매핑된 SKU가 없어 차감 내역을 계산할 수 없습니다.
+                <br />
+                먼저 주문 매핑을 완료하세요.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {stockPreview.map((row) => {
+                  const missing = row.totalStock === null
+                  const insufficient = !missing && !row.sufficient
+                  return (
+                    <li
+                      key={row.sku}
+                      className={`rounded-md border p-3 text-sm ${
+                        missing
+                          ? 'border-red-300 bg-red-50'
+                          : insufficient
+                            ? 'border-amber-300 bg-amber-50'
+                            : 'border-gray-200'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-mono text-xs text-muted-foreground">
+                            {row.sku}
+                          </p>
+                          <p className="truncate font-medium">
+                            {row.productName ?? '(재고 미등록)'}
+                          </p>
+                        </div>
+                        <span
+                          className={`shrink-0 rounded px-2 py-0.5 text-xs font-semibold ${
+                            missing || insufficient
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-green-100 text-green-700'
+                          }`}
+                        >
+                          -{row.requiredQty}
+                        </span>
+                      </div>
+
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        {row.isBundleComponent && (
+                          <span className="rounded bg-purple-100 px-1.5 py-0.5 text-purple-700">
+                            세트구성품
+                          </span>
+                        )}
+                        {missing ? (
+                          <span className="text-red-700">재고 레코드 없음</span>
+                        ) : (
+                          <span className={insufficient ? 'text-amber-700' : 'text-muted-foreground'}>
+                            가용 {row.availableStock ?? 0} / 총 {row.totalStock ?? 0}
+                            {insufficient && ' (부족!)'}
+                          </span>
+                        )}
+                      </div>
+
+                      {row.sourceItems.length > 0 && (
+                        <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
+                          <span className="text-[10px] uppercase tracking-wide">출처</span>
+                          <ul className="mt-1 space-y-0.5">
+                            {row.sourceItems.map((s, i) => (
+                              <li key={i} className="truncate">
+                                · {s.productName}
+                                {s.optionText && ` (${s.optionText})`} × {s.orderQty}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
           </section>
         </div>
       </div>

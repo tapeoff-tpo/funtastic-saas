@@ -5,8 +5,7 @@ import { marketplaceConnections } from '@/lib/db/schema'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import '@/lib/marketplace/adapters/configs'
 import { CredentialForm } from '@/components/marketplace/credential-form'
-import { StatusBadge } from '@/components/marketplace/status-badge'
-import { DeleteConnectionButton } from './delete-button'
+import { ConnectionRow } from './edit-button'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
 
 export default async function MarketplaceSettingsPage() {
@@ -50,16 +49,12 @@ export default async function MarketplaceSettingsPage() {
           <h2 className="text-lg font-semibold">연결된 마켓플레이스</h2>
           <div className="divide-y rounded-lg border">
             {connections.map((conn) => (
-              <div
+              <ConnectionRow
                 key={conn.id}
-                className="flex items-center justify-between px-4 py-3"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="font-medium">{conn.displayName}</span>
-                  <StatusBadge status={conn.status as ConnectionStatus} />
-                </div>
-                <DeleteConnectionButton connectionId={conn.id} />
-              </div>
+                connectionId={conn.id}
+                displayName={conn.displayName}
+                status={conn.status as ConnectionStatus}
+              />
             ))}
           </div>
         </div>

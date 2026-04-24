@@ -26,11 +26,19 @@ function marketplaceLabel(id: string) {
   return MARKETPLACE_LABELS[id] ?? id
 }
 
+interface Suggestion {
+  productId: string
+  name: string
+  sku: string
+  score: number
+}
+
 interface UnmappedItem {
   marketplaceId: string
   productName: string
   orderCount: number
   lastOrderedAt: string
+  suggestions?: Suggestion[]
 }
 
 interface MappingItem {
@@ -322,6 +330,89 @@ export function MappingManager() {
   const [unmappedPageSize, setUnmappedPageSize] = useState(20)
   const [mappingPage, setMappingPage] = useState(1)
   const [mappingPageSize, setMappingPageSize] = useState(20)
+
+  // Selection + bulk mapping
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
+  const [bulkTarget, setBulkTarget] = useState<ProductSearchResult | null>(null)
+  const [bulkApplying, setBulkApplying] = useState(false)
+  const [applyingKey, setApplyingKey] = useState<string | null>(null)
+
+  const keyOf = (u: UnmappedItem) => `${u.marketplaceId}::${u.productName}`
+
+  const toggleKey = (k: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  }
+
+  const applySuggestion = async (u: UnmappedItem, s: Suggestion) => {
+    const k = keyOf(u)
+    setApplyingKey(k)
+    try {
+      const res = await fetch('/api/products/mappings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          marketplaceId: u.marketplaceId,
+          marketplaceName: u.productName,
+          displayName: s.name,
+          productId: s.productId,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        toast.error(data.error || '매핑 실패')
+        return
+      }
+      toast.success(`${marketplaceLabel(u.marketplaceId)} → ${s.name}`)
+      setSelectedKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(k)
+        return next
+      })
+      void load()
+    } catch {
+      toast.error('네트워크 오류')
+    } finally {
+      setApplyingKey(null)
+    }
+  }
+
+  const applyBulk = async () => {
+    if (!bulkTarget || selectedKeys.size === 0) return
+    setBulkApplying(true)
+    try {
+      const targets = unmapped.filter((u) => selectedKeys.has(keyOf(u)))
+      const results = await Promise.all(
+        targets.map((u) =>
+          fetch('/api/products/mappings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              marketplaceId: u.marketplaceId,
+              marketplaceName: u.productName,
+              displayName: bulkTarget.name,
+              productId: bulkTarget.id,
+            }),
+          }).then((r) => r.ok),
+        ),
+      )
+      const ok = results.filter(Boolean).length
+      const fail = results.length - ok
+      if (fail === 0) toast.success(`${ok}건 매핑 완료 → ${bulkTarget.name}`)
+      else toast.warning(`${ok}건 성공 / ${fail}건 실패`)
+      setSelectedKeys(new Set())
+      setBulkTarget(null)
+      void load()
+    } catch {
+      toast.error('일괄 매핑 실패')
+    } finally {
+      setBulkApplying(false)
+    }
+  }
 
   const load = async () => {
     setLoading(true)
@@ -621,44 +712,164 @@ export function MappingManager() {
           </div>
         ) : (
           <div className="overflow-hidden rounded-lg border">
+            {/* Bulk action bar */}
+            {selectedKeys.size > 0 && (
+              <div className="sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b bg-blue-50 px-4 py-2.5">
+                <span className="text-sm font-medium text-blue-900">
+                  {selectedKeys.size}개 선택됨
+                </span>
+                <div className="min-w-[280px] flex-1">
+                  <ProductSearch onSelect={setBulkTarget} />
+                </div>
+                {bulkTarget && (
+                  <span className="text-xs text-blue-800">
+                    → <strong>{bulkTarget.internalSku}</strong> {bulkTarget.name}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void applyBulk()}
+                  disabled={!bulkTarget || bulkApplying}
+                  className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {bulkApplying ? '적용 중...' : `선택 ${selectedKeys.size}개 일괄 매핑`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSelectedKeys(new Set()); setBulkTarget(null) }}
+                  className="rounded-md border px-3 py-1.5 text-xs hover:bg-white"
+                >
+                  선택 해제
+                </button>
+              </div>
+            )}
+
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-xs">
                 <tr>
+                  <th className="w-10 px-3 py-2.5 text-center">
+                    <input
+                      type="checkbox"
+                      checked={pagedUnmapped.length > 0 && pagedUnmapped.every((u) => selectedKeys.has(keyOf(u)))}
+                      onChange={(e) => {
+                        setSelectedKeys((prev) => {
+                          const next = new Set(prev)
+                          if (e.target.checked) pagedUnmapped.forEach((u) => next.add(keyOf(u)))
+                          else pagedUnmapped.forEach((u) => next.delete(keyOf(u)))
+                          return next
+                        })
+                      }}
+                      title="현재 페이지 전체 선택"
+                    />
+                  </th>
                   <th className="px-4 py-2.5 text-left font-medium">마켓</th>
                   <th className="px-4 py-2.5 text-left font-medium">마켓 상품명</th>
                   <th className="px-4 py-2.5 text-center font-medium">주문수</th>
-                  <th className="px-4 py-2.5 text-center font-medium">최근 주문</th>
+                  <th className="px-4 py-2.5 text-left font-medium">자동 제안</th>
                   <th className="px-4 py-2.5 text-right font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {pagedUnmapped.map((item) => (
-                  <tr key={`${item.marketplaceId}:${item.productName}`} className="hover:bg-muted/30">
-                    <td className="px-4 py-2.5">
-                      <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium">
-                        {marketplaceLabel(item.marketplaceId)}
-                      </span>
-                    </td>
-                    <td className="max-w-xs px-4 py-2.5">
-                      <span className="line-clamp-2 text-sm">{item.productName}</span>
-                    </td>
-                    <td className="px-4 py-2.5 text-center tabular-nums">
-                      {item.orderCount.toLocaleString('ko-KR')}건
-                    </td>
-                    <td className="px-4 py-2.5 text-center text-xs text-muted-foreground">
-                      {new Date(item.lastOrderedAt).toLocaleDateString('ko-KR')}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => setDialog({ item, mode: 'create' })}
-                        className="rounded-md bg-black px-3 py-1 text-xs font-medium text-white hover:bg-gray-800"
-                      >
-                        매핑 추가
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {pagedUnmapped.map((item) => {
+                  const k = keyOf(item)
+                  const checked = selectedKeys.has(k)
+                  const topSuggestion = item.suggestions?.[0]
+                  return (
+                    <tr
+                      key={k}
+                      className={`hover:bg-muted/30 ${checked ? 'bg-blue-50/50' : ''}`}
+                    >
+                      <td className="w-10 px-3 py-2.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleKey(k)}
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium">
+                          {marketplaceLabel(item.marketplaceId)}
+                        </span>
+                      </td>
+                      <td className="max-w-xs px-4 py-2.5">
+                        <span className="line-clamp-2 text-sm">{item.productName}</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          최근: {new Date(item.lastOrderedAt).toLocaleDateString('ko-KR')}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center tabular-nums">
+                        {item.orderCount.toLocaleString('ko-KR')}건
+                      </td>
+                      <td className="max-w-[260px] px-4 py-2.5">
+                        {topSuggestion ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+                                  topSuggestion.score > 0.5
+                                    ? 'bg-green-100 text-green-800'
+                                    : topSuggestion.score > 0.3
+                                      ? 'bg-amber-100 text-amber-800'
+                                      : 'bg-gray-100 text-gray-700'
+                                }`}
+                                title={`유사도 ${(topSuggestion.score * 100).toFixed(0)}%`}
+                              >
+                                {(topSuggestion.score * 100).toFixed(0)}%
+                              </span>
+                              <span className="truncate text-xs">{topSuggestion.name}</span>
+                            </div>
+                            {(item.suggestions?.length ?? 0) > 1 && (
+                              <details className="text-xs text-muted-foreground">
+                                <summary className="cursor-pointer hover:text-foreground">
+                                  +{(item.suggestions?.length ?? 0) - 1}개 더
+                                </summary>
+                                <div className="mt-1 space-y-1 border-l-2 border-muted pl-2">
+                                  {item.suggestions!.slice(1).map((s) => (
+                                    <div key={s.productId} className="flex items-center justify-between gap-1.5">
+                                      <span className="truncate">{s.name}</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => void applySuggestion(item, s)}
+                                        disabled={applyingKey === k}
+                                        className="shrink-0 rounded border border-blue-200 px-1.5 py-0.5 text-xs text-blue-700 hover:bg-blue-50"
+                                      >
+                                        적용 {(s.score * 100).toFixed(0)}%
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              </details>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {topSuggestion && (
+                            <button
+                              type="button"
+                              onClick={() => void applySuggestion(item, topSuggestion)}
+                              disabled={applyingKey === k}
+                              className="rounded-md bg-blue-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                              title={`${topSuggestion.name} 로 매핑`}
+                            >
+                              {applyingKey === k ? '적용 중...' : '제안 적용'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setDialog({ item, mode: 'create' })}
+                            className="rounded-md border bg-white px-2.5 py-1 text-xs hover:bg-muted"
+                          >
+                            수동
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
             <Pagination

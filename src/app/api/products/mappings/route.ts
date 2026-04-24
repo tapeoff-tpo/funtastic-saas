@@ -10,6 +10,32 @@ import {
 import { eq, and, sql, desc, notExists, gte } from 'drizzle-orm'
 import { subDays } from 'date-fns'
 
+/** Split name into tokens (Korean-friendly). Filter tokens shorter than 2 chars. */
+function tokenize(s: string): Set<string> {
+  return new Set(
+    s
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((t) => t.length >= 2),
+  )
+}
+
+/** Jaccard similarity between two token sets. */
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0
+  let inter = 0
+  for (const t of a) if (b.has(t)) inter++
+  const union = a.size + b.size - inter
+  return union === 0 ? 0 : inter / union
+}
+
+interface Suggestion {
+  productId: string
+  name: string
+  sku: string
+  score: number
+}
+
 /**
  * GET /api/products/mappings
  *
@@ -25,7 +51,7 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  const [mappings, unmappedRaw] = await Promise.all([
+  const [mappings, unmappedRaw, allProducts] = await Promise.all([
     // All existing mappings, with optional product name
     db
       .select({
@@ -75,9 +101,41 @@ export async function GET(_req: NextRequest) {
       .groupBy(orders.marketplaceId, orderItems.productName)
       .orderBy(desc(sql`order_count`))
       .limit(200),
+
+    // All user's products — used to compute suggestions
+    db
+      .select({
+        id: products.id,
+        name: products.name,
+        internalSku: products.internalSku,
+      })
+      .from(products)
+      .where(eq(products.userId, user.id)),
   ])
 
-  return NextResponse.json({ mappings, unmapped: unmappedRaw })
+  // Pre-compute product token sets once
+  const productTokens = allProducts.map((p) => ({
+    productId: p.id,
+    name: p.name,
+    sku: p.internalSku,
+    tokens: tokenize(p.name),
+  }))
+
+  // For each unmapped name, compute top-3 suggestions
+  const unmapped = unmappedRaw.map((u) => {
+    const queryTokens = tokenize(u.productName)
+    const scored: Suggestion[] = []
+    for (const p of productTokens) {
+      const score = jaccard(queryTokens, p.tokens)
+      if (score > 0.1) {
+        scored.push({ productId: p.productId, name: p.name, sku: p.sku, score })
+      }
+    }
+    scored.sort((a, b) => b.score - a.score)
+    return { ...u, suggestions: scored.slice(0, 3) }
+  })
+
+  return NextResponse.json({ mappings, unmapped })
 }
 
 /**

@@ -21,9 +21,10 @@ interface ProductSearchResult {
   optionHint?: string | null
 }
 
-interface UnmappedItem {
+interface UnmappedOption {
   marketplaceId: string
   productName: string
+  optionText: string
   orderCount: number
 }
 
@@ -35,28 +36,58 @@ interface BulkMappingDialogProps {
 }
 
 /**
- * 선택한 주문들의 미매핑 상품들을 중복 제거 후 일괄 매핑.
+ * 선택한 주문들의 미매핑 상품 옵션들을 중복 제거 후 일괄 매핑.
+ * (marketplaceId, productName, optionText) 단위로 dedup → productOptionMappings 저장.
  */
 export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappingDialogProps) {
+  // key: `${marketplaceId}::${productName}::${optionText}`
   const [mappings, setMappings] = useState<Record<string, ProductSearchResult | null>>({})
   const [saving, setSaving] = useState(false)
 
-  // 미매핑 or 일부매핑 주문들에서 중복 제거하여 매핑 필요 목록 생성
-  const unmappedItems = useMemo<UnmappedItem[]>(() => {
-    const map = new Map<string, UnmappedItem>()
+  // Deduplicate by (marketplaceId, productName, optionText)
+  const unmappedOptions = useMemo<UnmappedOption[]>(() => {
+    const map = new Map<string, UnmappedOption>()
     for (const order of orders) {
       if (order.mappingStatus === 'mapped') continue
       for (const item of order.items) {
-        const key = `${order.marketplaceId}::${item.productName}`
+        const optionText = item.optionText?.trim() ?? ''
+        const key = `${order.marketplaceId}::${item.productName}::${optionText}`
         const existing = map.get(key)
         if (existing) existing.orderCount++
-        else map.set(key, { marketplaceId: order.marketplaceId, productName: item.productName, orderCount: 1 })
+        else
+          map.set(key, {
+            marketplaceId: order.marketplaceId,
+            productName: item.productName,
+            optionText,
+            orderCount: 1,
+          })
       }
     }
-    return Array.from(map.values()).sort((a, b) => b.orderCount - a.orderCount)
+    return Array.from(map.values()).sort((a, b) => {
+      const nameCompare = a.productName.localeCompare(b.productName)
+      if (nameCompare !== 0) return nameCompare
+      return a.optionText.localeCompare(b.optionText)
+    })
   }, [orders])
 
-  useEffect(() => { if (open) setMappings({}) }, [open])
+  // Group by (marketplaceId, productName)
+  const groupedProducts = useMemo(() => {
+    const groups = new Map<
+      string,
+      { marketplaceId: string; productName: string; options: UnmappedOption[] }
+    >()
+    for (const opt of unmappedOptions) {
+      const gKey = `${opt.marketplaceId}::${opt.productName}`
+      const group = groups.get(gKey)
+      if (group) group.options.push(opt)
+      else groups.set(gKey, { marketplaceId: opt.marketplaceId, productName: opt.productName, options: [opt] })
+    }
+    return Array.from(groups.values())
+  }, [unmappedOptions])
+
+  useEffect(() => {
+    if (open) setMappings({})
+  }, [open])
 
   if (!open) return null
 
@@ -65,82 +96,139 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
   }
 
   const handleSaveAll = async () => {
-    const entries = Object.entries(mappings).filter(([, p]) => p !== null)
+    const entries = Object.entries(mappings).filter(([, p]) => p !== null) as [
+      string,
+      ProductSearchResult,
+    ][]
     if (entries.length === 0) {
       toast.error('매핑할 상품을 하나 이상 선택하세요.')
       return
     }
     setSaving(true)
     try {
-      let success = 0
-      let failed = 0
+      // Build lookup: key → UnmappedOption (avoids re-parsing key strings)
+      const optionByKey = new Map(
+        unmappedOptions.map((opt) => [
+          `${opt.marketplaceId}::${opt.productName}::${opt.optionText}`,
+          opt,
+        ]),
+      )
+
+      // 1. Save productNameMappings — one per unique (marketplaceId, productName)
+      const savedNameKeys = new Set<string>()
+      let nameFailed = 0
       for (const [key, product] of entries) {
-        if (!product) continue
-        const [marketplaceId, marketplaceName] = key.split('::')
+        const opt = optionByKey.get(key)!
+        const nameKey = `${opt.marketplaceId}::${opt.productName}`
+        if (savedNameKeys.has(nameKey)) continue
+        savedNameKeys.add(nameKey)
         const res = await fetch('/api/products/mappings', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            marketplaceId,
-            marketplaceName,
+            marketplaceId: opt.marketplaceId,
+            marketplaceName: opt.productName,
             displayName: product.name,
             productId: product.id,
             pickingLocation: product.warehouseLocation,
           }),
         })
-        if (res.ok) success++
-        else failed++
+        if (!res.ok) nameFailed++
       }
-      if (success > 0) toast.success(`${success}건 매핑 완료`)
-      if (failed > 0) toast.error(`${failed}건 실패`)
+
+      // 2. Save productOptionMappings — one per (marketplaceId, productName, optionText)
+      const optionPayload = entries.map(([key, product]) => {
+        const opt = optionByKey.get(key)!
+        return {
+          marketplaceId: opt.marketplaceId,
+          marketplaceName: opt.productName,
+          optionText: opt.optionText,
+          variantSku: product.internalSku,
+          productId: product.id,
+        }
+      })
+      const optRes = await fetch('/api/products/option-mappings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(optionPayload),
+      })
+
+      // 3. Apply mappings immediately to existing orderItems
+      const orderIds = orders.map((o) => o.id)
+      await fetch('/api/orders/apply-mappings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderIds }),
+      })
+
+      if (optRes.ok) toast.success(`${entries.length}개 옵션 매핑 완료`)
+      if (nameFailed > 0) toast.error(`상품명 매핑 ${nameFailed}건 실패`)
+
       onSaved()
       onClose()
+    } catch {
+      toast.error('매핑 저장 중 오류가 발생했습니다.')
     } finally {
       setSaving(false)
     }
   }
+
+  const mappedCount = Object.values(mappings).filter(Boolean).length
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
       <div className="w-full max-w-3xl rounded-lg border bg-white p-6 shadow-xl max-h-[90vh] flex flex-col">
         <h2 className="mb-2 text-lg font-semibold">일괄 매핑</h2>
         <p className="mb-4 text-sm text-muted-foreground">
-          선택한 주문 {orders.length}건에서 매핑되지 않은 상품 {unmappedItems.length}개 (중복 제외).
+          선택한 주문 {orders.length}건 · 미매핑 옵션 {unmappedOptions.length}개 (중복 제외)
         </p>
 
-        {unmappedItems.length === 0 ? (
+        {unmappedOptions.length === 0 ? (
           <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
             매핑이 필요한 상품이 없습니다 — 모두 매핑 완료!
           </div>
         ) : (
-          <div className="flex-1 overflow-y-auto space-y-3">
-            {unmappedItems.map((item) => {
-              const key = `${item.marketplaceId}::${item.productName}`
-              const selected = mappings[key]
-              return (
-                <div key={key} className="rounded-md border p-3">
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium">
-                          {MARKETPLACE_LABELS[item.marketplaceId] ?? item.marketplaceId}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {item.orderCount}건
-                        </span>
-                      </div>
-                      <p className="text-sm line-clamp-2">{item.productName}</p>
-                    </div>
-                  </div>
-                  <ProductSearch onSelect={(p) => handleSelect(key, p)} />
-                  {selected && (
-                    <p className="mt-2 text-xs text-green-600">
-                      ✓ {selected.internalSku} - {selected.name}
-                    </p>
-                  )}
+          <div className="flex-1 overflow-y-auto space-y-4">
+            {groupedProducts.map(({ marketplaceId, productName, options }) => (
+              <div key={`${marketplaceId}::${productName}`} className="rounded-md border">
+                {/* Product group header */}
+                <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2">
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium">
+                    {MARKETPLACE_LABELS[marketplaceId] ?? marketplaceId}
+                  </span>
+                  <span className="text-sm font-medium line-clamp-1">{productName}</span>
                 </div>
-              )
-            })}
+                {/* Option sub-rows */}
+                <div className="divide-y">
+                  {options.map((opt) => {
+                    const key = `${opt.marketplaceId}::${opt.productName}::${opt.optionText}`
+                    const selected = mappings[key]
+                    return (
+                      <div key={key} className="px-3 py-2.5 space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+                            {opt.optionText ? (
+                              opt.optionText
+                            ) : (
+                              <span className="italic">(옵션 없음)</span>
+                            )}
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {opt.orderCount}건
+                          </span>
+                        </div>
+                        <ProductSearch onSelect={(p) => handleSelect(key, p)} />
+                        {selected && (
+                          <p className="text-xs text-green-600">
+                            ✓ {selected.internalSku} — {selected.name}
+                          </p>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -155,10 +243,10 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
           <button
             type="button"
             onClick={() => void handleSaveAll()}
-            disabled={saving || Object.keys(mappings).length === 0}
+            disabled={saving || mappedCount === 0}
             className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
           >
-            {saving ? '저장 중...' : `매핑 저장 (${Object.keys(mappings).length}개)`}
+            {saving ? '저장 중...' : `매핑 저장 (${mappedCount}개)`}
           </button>
         </div>
       </div>
@@ -174,13 +262,18 @@ function ProductSearch({ onSelect }: { onSelect: (p: ProductSearchResult) => voi
   const wrapperRef = useRef<HTMLDivElement>(null)
 
   const search = useCallback(async (q: string) => {
-    if (q.length < 1) { setResults([]); return }
+    if (q.length < 1) {
+      setResults([])
+      return
+    }
     try {
       const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`)
       const data = await res.json()
       setResults(data.results ?? [])
       setShowDropdown(true)
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }, [])
 
   const handleChange = (value: string) => {

@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, products, productVariants } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage } from './types'
@@ -198,11 +198,14 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   // Load mapping lookups for mapping status determination (parallel)
   const userId = orderRows[0]?.userId
-  const [nameMappings, productSkus, variantSkus] = userId
+  const [nameMappings, optionMappings, productSkus, variantSkus] = userId
     ? await Promise.all([
         db.select({ marketplaceId: productNameMappings.marketplaceId, marketplaceName: productNameMappings.marketplaceName })
           .from(productNameMappings)
           .where(eq(productNameMappings.userId, userId)),
+        db.select({ marketplaceId: productOptionMappings.marketplaceId, marketplaceName: productOptionMappings.marketplaceName, optionText: productOptionMappings.optionText })
+          .from(productOptionMappings)
+          .where(eq(productOptionMappings.userId, userId)),
         db.select({ sku: products.internalSku })
           .from(products)
           .where(eq(products.userId, userId)),
@@ -211,9 +214,10 @@ export async function getOrders(filters: OrderFilters = {}) {
           .innerJoin(products, eq(productVariants.productId, products.id))
           .where(eq(products.userId, userId)),
       ])
-    : [[], [], []]
+    : [[], [], [], []]
 
   const nameKeys = new Set(nameMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}`))
+  const optionKeys = new Set(optionMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}::${m.optionText}`))
   const skuSet = new Set<string>()
   for (const p of productSkus) skuSet.add(p.sku)
   for (const v of variantSkus) skuSet.add(v.sku)
@@ -224,7 +228,9 @@ export async function getOrders(filters: OrderFilters = {}) {
     for (const item of orderItems) {
       const hasNameMapping = nameKeys.has(`${orderMarketplaceId}::${item.productName}`)
       const hasSkuMatch = item.sku ? skuSet.has(item.sku.trim()) : false
-      if (hasNameMapping || hasSkuMatch) mappedCount++
+      const optText = item.optionText?.trim() ?? ''
+      const hasOptionMapping = optionKeys.has(`${orderMarketplaceId}::${item.productName}::${optText}`)
+      if (hasNameMapping || hasSkuMatch || hasOptionMapping) mappedCount++
     }
     if (mappedCount === orderItems.length) return 'mapped'
     if (mappedCount === 0) return 'unmapped'

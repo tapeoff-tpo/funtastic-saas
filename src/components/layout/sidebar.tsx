@@ -19,6 +19,7 @@ import {
   FileText,
   PackageCheck,
   CircleAlert,
+  ChevronsLeft,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -74,7 +75,11 @@ const navSections: NavSection[] = [
   },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  onCollapse?: () => void
+}
+
+export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -91,8 +96,20 @@ export function Sidebar() {
     <aside className="flex h-full w-48 flex-col bg-gray-900 text-white">
       {/* Logo */}
       <div className="flex h-10 items-center justify-between border-b border-gray-800 px-3">
-        <span className="text-sm font-bold">Funtastic</span>
-        <span className="text-[9px] text-gray-500">v2.1</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-bold">Funtastic</span>
+          <span className="text-[9px] text-gray-500">v2.1</span>
+        </div>
+        {onCollapse && (
+          <button
+            type="button"
+            onClick={onCollapse}
+            aria-label="사이드바 접기"
+            className="flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-white"
+          >
+            <ChevronsLeft className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
 
       {/* Navigation */}

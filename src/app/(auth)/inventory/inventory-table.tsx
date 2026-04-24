@@ -78,8 +78,14 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   })
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
-  const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
-  const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50))
+  const [, setPage] = useQueryState(
+    'page',
+    parseAsInteger.withDefault(1).withOptions({ shallow: false }),
+  )
+  const [, setPageSize] = useQueryState(
+    'pageSize',
+    parseAsInteger.withDefault(50).withOptions({ shallow: false }),
+  )
   const [filters, setFilters] = useQueryStates({
     search: parseAsString,
     sort: parseAsString,

@@ -28,23 +28,43 @@ export function formatCoupangDatetime(date: Date): string {
 /**
  * Generate the Coupang CEA authorization header value.
  *
- * Message format: datetime\nmethod\npath\nquery
+ * Message format: datetime + method + path + query   (no separators)
  * Header format: CEA algorithm=HmacSHA256, access-key={key}, signed-date={datetime}, signature={hex}
+ *
+ * NOTE: accessKey/secretKey are trimmed to remove any accidental whitespace
+ *       that could have been introduced when storing credentials (copy-paste newlines).
  */
 export function generateCoupangAuth(
   method: string,
   path: string,
   query: string,
   accessKey: string,
-  secretKey: string
+  secretKey: string,
 ): string {
+  const cleanAccessKey = accessKey.trim()
+  const cleanSecretKey = secretKey.trim()
+
   const datetime = formatCoupangDatetime(new Date())
   const message = `${datetime}${method}${path}${query}`
-  const signature = createHmac('sha256', secretKey)
+  const signature = createHmac('sha256', cleanSecretKey)
     .update(message)
     .digest('hex')
 
-  return `CEA algorithm=HmacSHA256, access-key=${accessKey}, signed-date=${datetime}, signature=${signature}`
+  if (process.env.COUPANG_DEBUG === '1') {
+    // secret은 절대 로그하지 않음. 길이와 prefix만.
+    console.log('[Coupang Sig]', {
+      datetime,
+      method,
+      path,
+      queryLen: query.length,
+      messagePreview: message.slice(0, 120) + (message.length > 120 ? '...' : ''),
+      accessKeyPrefix: cleanAccessKey.slice(0, 4),
+      accessKeyLen: cleanAccessKey.length,
+      secretKeyLen: cleanSecretKey.length,
+    })
+  }
+
+  return `CEA algorithm=HmacSHA256, access-key=${cleanAccessKey}, signed-date=${datetime}, signature=${signature}`
 }
 
 /**

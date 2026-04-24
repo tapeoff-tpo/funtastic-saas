@@ -161,7 +161,6 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
   const showInvoice = !stage || stage === 'invoice' || stage === 'confirm'
   const showShipping = !stage || stage === 'shipping' || stage === 'invoice'
   const showPrint = !stage || stage === 'shipping' || stage === 'done'
-  const showCombined = !stage || stage === 'mapping' || stage === 'confirm'
 
   return (
     <>
@@ -174,15 +173,6 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
           >
             일괄 매핑 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
           </button>
-        )}
-
-        {showCombined && (
-          <a
-            href="/shipping/combined"
-            className="inline-flex items-center rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
-          >
-            합포장
-          </a>
         )}
 
         {stage === 'confirm' && (

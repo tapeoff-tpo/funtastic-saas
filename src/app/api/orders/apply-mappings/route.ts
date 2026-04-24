@@ -17,6 +17,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orderItems, orders, productOptionMappings } from '@/lib/db/schema'
 import { eq, and, isNull, inArray, sql } from 'drizzle-orm'
+import { runAutoCombineByContact } from '@/lib/shipping/auto-combine'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -96,5 +97,30 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ updated, total: unmappedItems.length })
+  // 매핑 적용 직후 자동 합포장 (수령인 이름+주소+전화 동일 주문 2건 이상)
+  let autoCombined = { created: 0, totalOrders: 0 }
+  if (updated > 0) {
+    try {
+      // 방금 업데이트된 주문을 기준으로 자동 합포장
+      const touchedOrderIds = [...new Set(
+        unmappedItems
+          .filter((i) => updates.some((u) => u.itemId === i.itemId))
+          .map((i) => i.itemId),
+      )]
+      // itemId가 아닌 orderId가 필요 — 다시 조회
+      if (touchedOrderIds.length > 0) {
+        const orderIdRows = await db
+          .select({ orderId: orderItems.orderId })
+          .from(orderItems)
+          .where(inArray(orderItems.id, touchedOrderIds))
+        const orderIds = [...new Set(orderIdRows.map((r) => r.orderId))]
+        autoCombined = await runAutoCombineByContact(user.id, orderIds)
+      }
+    } catch (err) {
+      // 자동 합포장 실패해도 매핑 적용은 성공으로 처리
+      console.error('[apply-mappings] auto-combine failed:', err)
+    }
+  }
+
+  return NextResponse.json({ updated, total: unmappedItems.length, autoCombined })
 }

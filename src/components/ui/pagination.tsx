@@ -52,7 +52,7 @@ export function Pagination({
           type="button"
           onClick={() => onPageChange(Math.max(1, windowStart - 1))}
           disabled={!hasPrev}
-          className="rounded border px-2 py-1 hover:bg-muted disabled:opacity-30"
+          className="cursor-pointer rounded border px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
           aria-label="이전 10페이지"
         >
           ‹
@@ -62,7 +62,7 @@ export function Pagination({
             key={p}
             type="button"
             onClick={() => onPageChange(p)}
-            className={`min-w-[32px] rounded border px-2 py-1 ${
+            className={`min-w-[32px] cursor-pointer rounded border px-2 py-1 ${
               p === page ? 'bg-black text-white border-black' : 'hover:bg-muted'
             }`}
           >
@@ -73,7 +73,7 @@ export function Pagination({
           type="button"
           onClick={() => onPageChange(Math.min(totalPages, windowEnd + 1))}
           disabled={!hasNext}
-          className="rounded border px-2 py-1 hover:bg-muted disabled:opacity-30"
+          className="cursor-pointer rounded border px-2 py-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-30"
           aria-label="다음 10페이지"
         >
           ›

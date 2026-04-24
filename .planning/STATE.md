@@ -5,7 +5,7 @@ milestone_name: milestone
 status: executing
 stopped_at: Completed 03-07-PLAN.md
 last_updated: "2026-04-08T15:18:59.043Z"
-last_activity: 2026-04-03
+last_activity: 2026-04-24
 progress:
   total_phases: 8
   completed_phases: 7
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-03)
 Phase: 07
 Plan: Not started
 Status: executing
-Last activity: 2026-04-03
+Last activity: 2026-04-24 - Completed quick task 260424-oz0: 사이드바 접기/펼치기 기능 추가
 
 Progress: [##########] 100%
 
@@ -131,6 +131,7 @@ None yet.
 | 260407-ohi | 엑셀 주문 업로드: 파싱 모듈 + 업로드 API + 업로드 페이지 + 양식 다운로드 | 2026-04-07 | 9a63c12 | [260407-ohi-excel-order-import](.planning/quick/260407-ohi-excel-order-import/) |
 | 260408-nb1 | 수동 쇼핑몰 채널 추가 (is_manual flag, 모달, 대시보드 카드 렌더링) | 2026-04-08 | 3694484 | [260408-nb1-ismanual](.planning/quick/260408-nb1-ismanual/) |
 | 260409-0jm | Cafe24 상품 역수집 — reverse-collect에 Cafe24 지원 추가, 상품 페이지에 마켓플레이스 가져오기 UI | 2026-04-09 | f0fed98 | [260409-0jm-cafe24-reverse-collect-cafe24-ui](.planning/quick/260409-0jm-cafe24-reverse-collect-cafe24-ui/) |
+| 260424-oz0 | 사이드바 접기/펼치기 기능 추가 (<< 버튼 + localStorage 상태 저장) | 2026-04-24 | 5b59f1d | [260424-oz0-localstorage](.planning/quick/260424-oz0-localstorage/) |
 
 ## Session Continuity
 

@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products, productNameMappings } from '@/lib/db/schema'
+import { products, productNameMappings, inventory } from '@/lib/db/schema'
 import { eq, and, or, ilike, ne, inArray } from 'drizzle-orm'
 
 /** 마켓 상품명에서 옵션 힌트 추출: "상품명, 옵션A, 1개" → "옵션A" */
@@ -47,8 +47,13 @@ export async function GET(req: NextRequest) {
       internalSku: products.internalSku,
       name: products.name,
       warehouseLocation: products.warehouseLocation,
+      optionName: inventory.optionName,
     })
     .from(products)
+    .leftJoin(
+      inventory,
+      and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
+    )
     .where(
       and(
         eq(products.userId, user.id),
@@ -61,10 +66,12 @@ export async function GET(req: NextRequest) {
     )
     .limit(20)
 
-  // Enrich each product with option hint from existing mappings
-  let results = rows.map((r) => ({ ...r, optionHint: null as string | null }))
-  if (rows.length > 0) {
-    const productIds = rows.map((r) => r.id)
+  // optionName from inventory is the primary hint.
+  // Fallback: derive hint from existing productNameMappings.
+  let results = rows.map((r) => ({ ...r, optionHint: r.optionName ?? null }))
+
+  const unmatchedIds = rows.filter((r) => !r.optionName).map((r) => r.id)
+  if (unmatchedIds.length > 0) {
     const mappingRows = await db
       .select({
         productId: productNameMappings.productId,
@@ -74,23 +81,22 @@ export async function GET(req: NextRequest) {
       .where(
         and(
           eq(productNameMappings.userId, user.id),
-          inArray(productNameMappings.productId, productIds),
+          inArray(productNameMappings.productId, unmatchedIds),
         ),
       )
 
     const hintByProduct = new Map<string, string>()
     for (const m of mappingRows) {
-      if (!m.productId) continue
-      if (hintByProduct.has(m.productId)) continue
+      if (!m.productId || hintByProduct.has(m.productId)) continue
       const product = rows.find((r) => r.id === m.productId)
       if (!product) continue
       const hint = extractOptionHint(m.marketplaceName, product.name)
       if (hint) hintByProduct.set(m.productId, hint)
     }
 
-    results = rows.map((r) => ({
+    results = results.map((r) => ({
       ...r,
-      optionHint: hintByProduct.get(r.id) ?? null,
+      optionHint: r.optionHint ?? hintByProduct.get(r.id) ?? null,
     }))
   }
 

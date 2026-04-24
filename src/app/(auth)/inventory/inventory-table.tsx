@@ -14,6 +14,7 @@ import { AdjustStockDialog } from './adjust-stock-dialog'
 import { HistoryDialog } from './history-dialog'
 import { ExcelUploadDialog } from './excel-upload-dialog'
 import { IncomingDialog } from './incoming-dialog'
+import { BundleEditorDialog } from './bundle-editor-dialog'
 import { Pagination } from '@/components/ui/pagination'
 
 export interface InventoryRow {
@@ -72,6 +73,9 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
 
   const [excelDialogOpen, setExcelDialogOpen] = useState(false)
   const [incomingDialogOpen, setIncomingDialogOpen] = useState(false)
+  const [bundleDialog, setBundleDialog] = useState<{ open: boolean; sku: string; productName: string }>({
+    open: false, sku: '', productName: '',
+  })
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1))
@@ -318,6 +322,14 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
             >
               이력
             </button>
+            <button
+              type="button"
+              onClick={() => setBundleDialog({ open: true, sku: row.sku, productName: row.productName })}
+              className="rounded border px-2 py-1 text-xs hover:bg-muted"
+              title="세트 구성"
+            >
+              세트
+            </button>
           </div>
         )
       },
@@ -524,6 +536,14 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
 
       {incomingDialogOpen && (
         <IncomingDialog onClose={() => setIncomingDialogOpen(false)} />
+      )}
+
+      {bundleDialog.open && (
+        <BundleEditorDialog
+          sku={bundleDialog.sku}
+          productName={bundleDialog.productName}
+          onClose={() => setBundleDialog({ open: false, sku: '', productName: '' })}
+        />
       )}
     </div>
   )

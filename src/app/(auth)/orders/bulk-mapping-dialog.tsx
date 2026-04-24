@@ -21,6 +21,11 @@ interface ProductSearchResult {
   optionHint?: string | null
 }
 
+interface BundleItem {
+  componentSku: string
+  quantity: number
+}
+
 interface UnmappedOption {
   marketplaceId: string
   productName: string
@@ -37,11 +42,13 @@ interface BulkMappingDialogProps {
 
 /**
  * 선택한 주문들의 미매핑 상품 옵션들을 중복 제거 후 일괄 매핑.
- * (marketplaceId, productName, optionText) 단위로 dedup → productOptionMappings 저장.
+ * 세트상품이면 선택 즉시 구성품 편집 가능 → 저장 시 번들+매핑 동시 저장.
  */
 export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappingDialogProps) {
   // key: `${marketplaceId}::${productName}::${optionText}`
   const [mappings, setMappings] = useState<Record<string, ProductSearchResult | null>>({})
+  // bundleItems: key → component list
+  const [bundleItems, setBundleItems] = useState<Record<string, BundleItem[]>>({})
   const [saving, setSaving] = useState(false)
 
   // Deduplicate by (marketplaceId, productName, optionText)
@@ -86,13 +93,50 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
   }, [unmappedOptions])
 
   useEffect(() => {
-    if (open) setMappings({})
+    if (open) {
+      setMappings({})
+      setBundleItems({})
+    }
   }, [open])
 
   if (!open) return null
 
-  const handleSelect = (key: string, product: ProductSearchResult) => {
+  // When product selected: load existing bundle items for that SKU
+  const handleSelect = async (key: string, product: ProductSearchResult) => {
     setMappings((prev) => ({ ...prev, [key]: product }))
+    try {
+      const res = await fetch(`/api/products/bundles/${encodeURIComponent(product.internalSku)}`)
+      if (res.ok) {
+        const data = await res.json()
+        setBundleItems((prev) => ({ ...prev, [key]: data.items ?? [] }))
+      }
+    } catch { /* ignore */ }
+  }
+
+  const addBundleItem = (key: string) => {
+    setBundleItems((prev) => ({
+      ...prev,
+      [key]: [...(prev[key] ?? []), { componentSku: '', quantity: 1 }],
+    }))
+  }
+
+  const updateBundleItem = (
+    key: string,
+    idx: number,
+    field: keyof BundleItem,
+    value: string | number,
+  ) => {
+    setBundleItems((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).map((item, i) => (i === idx ? { ...item, [field]: value } : item)),
+    }))
+  }
+
+  const removeBundleItem = (key: string, idx: number) => {
+    setBundleItems((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).filter((_, i) => i !== idx),
+    }))
   }
 
   const handleSaveAll = async () => {
@@ -106,7 +150,6 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
     }
     setSaving(true)
     try {
-      // Build lookup: key → UnmappedOption (avoids re-parsing key strings)
       const optionByKey = new Map(
         unmappedOptions.map((opt) => [
           `${opt.marketplaceId}::${opt.productName}::${opt.optionText}`,
@@ -114,7 +157,7 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
         ]),
       )
 
-      // 1. Save productNameMappings — one per unique (marketplaceId, productName)
+      // 1. Save productNameMappings
       const savedNameKeys = new Set<string>()
       let nameFailed = 0
       for (const [key, product] of entries) {
@@ -136,7 +179,7 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
         if (!res.ok) nameFailed++
       }
 
-      // 2. Save productOptionMappings — one per (marketplaceId, productName, optionText)
+      // 2. Save productOptionMappings
       const optionPayload = entries.map(([key, product]) => {
         const opt = optionByKey.get(key)!
         return {
@@ -153,7 +196,25 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
         body: JSON.stringify(optionPayload),
       })
 
-      // 3. Apply mappings immediately to existing orderItems
+      // 3. Save bundle items for each mapped SKU that has components defined
+      const savedBundleSkus = new Set<string>()
+      for (const [key, product] of entries) {
+        if (savedBundleSkus.has(product.internalSku)) continue
+        const items = (bundleItems[key] ?? []).filter(
+          (i) => i.componentSku.trim() && i.quantity > 0,
+        )
+        // Save even if empty (clears previous bundle if user removed all components)
+        if (key in bundleItems) {
+          savedBundleSkus.add(product.internalSku)
+          await fetch(`/api/products/bundles/${encodeURIComponent(product.internalSku)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(items),
+          })
+        }
+      }
+
+      // 4. Apply mappings immediately to existing orderItems
       const orderIds = orders.map((o) => o.id)
       await fetch('/api/orders/apply-mappings', {
         method: 'POST',
@@ -198,30 +259,94 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
                   </span>
                   <span className="text-sm font-medium line-clamp-1">{productName}</span>
                 </div>
+
                 {/* Option sub-rows */}
                 <div className="divide-y">
                   {options.map((opt) => {
                     const key = `${opt.marketplaceId}::${opt.productName}::${opt.optionText}`
                     const selected = mappings[key]
+                    const items = bundleItems[key]
+                    const hasBundle = items !== undefined
+
                     return (
-                      <div key={key} className="px-3 py-2.5 space-y-1.5">
+                      <div key={key} className="px-3 py-2.5 space-y-2">
+                        {/* Option label + order count */}
                         <div className="flex items-center gap-2">
                           <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-                            {opt.optionText ? (
-                              opt.optionText
-                            ) : (
-                              <span className="italic">(옵션 없음)</span>
-                            )}
+                            {opt.optionText ? opt.optionText : <span className="italic">(옵션 없음)</span>}
                           </span>
-                          <span className="shrink-0 text-xs text-muted-foreground">
-                            {opt.orderCount}건
-                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">{opt.orderCount}건</span>
                         </div>
-                        <ProductSearch onSelect={(p) => handleSelect(key, p)} />
+
+                        {/* Product search */}
+                        <ProductSearch onSelect={(p) => void handleSelect(key, p)} />
+
                         {selected && (
                           <p className="text-xs text-green-600">
                             ✓ {selected.internalSku} — {selected.name}
                           </p>
+                        )}
+
+                        {/* Bundle section — shown after product selected */}
+                        {selected && (
+                          <div className="rounded-md border border-dashed px-3 py-2 space-y-2 bg-muted/20">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-medium text-muted-foreground">
+                                세트 구성
+                                {hasBundle && items.length > 0 && (
+                                  <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-blue-700">
+                                    {items.length}개 구성품
+                                  </span>
+                                )}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => addBundleItem(key)}
+                                className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+                              >
+                                + 구성품
+                              </button>
+                            </div>
+
+                            {!hasBundle || items.length === 0 ? (
+                              <p className="text-xs text-muted-foreground">
+                                단일 상품 — 세트이면 구성품을 추가하세요
+                              </p>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {items.map((item, idx) => (
+                                  <div key={idx} className="flex items-center gap-2">
+                                    <input
+                                      type="text"
+                                      value={item.componentSku}
+                                      onChange={(e) =>
+                                        updateBundleItem(key, idx, 'componentSku', e.target.value)
+                                      }
+                                      placeholder="구성품 SKU"
+                                      className="flex-1 rounded border px-2 py-1 text-xs font-mono"
+                                    />
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={item.quantity}
+                                      onChange={(e) =>
+                                        updateBundleItem(key, idx, 'quantity', Number(e.target.value))
+                                      }
+                                      className="w-14 rounded border px-2 py-1 text-xs text-center"
+                                    />
+                                    <span className="text-xs text-muted-foreground">개</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => removeBundleItem(key, idx)}
+                                      className="text-xs text-red-400 hover:text-red-600"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     )
@@ -271,9 +396,7 @@ function ProductSearch({ onSelect }: { onSelect: (p: ProductSearchResult) => voi
       const data = await res.json()
       setResults(data.results ?? [])
       setShowDropdown(true)
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, [])
 
   const handleChange = (value: string) => {

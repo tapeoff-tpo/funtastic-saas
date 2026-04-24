@@ -579,6 +579,25 @@ export const productOptionMappings = pgTable(
   ],
 )
 
+// ─── Phase 5: Bundle Products ────────────────────────────────────
+
+export const productBundleItems = pgTable(
+  'product_bundle_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    bundleSku: varchar('bundle_sku', { length: 100 }).notNull(),
+    componentSku: varchar('component_sku', { length: 100 }).notNull(),
+    quantity: integer('quantity').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('product_bundle_items_unique').on(table.userId, table.bundleSku, table.componentSku),
+    index('product_bundle_items_user_bundle').on(table.userId, table.bundleSku),
+  ],
+)
+
 // ─── Company Settings ────────────────────────────────────────────
 
 export const companySettings = pgTable(

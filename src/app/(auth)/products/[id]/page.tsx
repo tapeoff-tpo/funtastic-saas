@@ -47,6 +47,8 @@ export default function EditProductPage() {
   const [categoryId, setCategoryId] = useState('')
   const [defaultCarrierId, setDefaultCarrierId] = useState('')
   const [variants, setVariants] = useState<VariantFormData[]>([])
+  const [bundleItems, setBundleItems] = useState<Array<{ componentSku: string; quantity: number }>>([])
+  const [bundleSaving, setBundleSaving] = useState(false)
   const [changeLogs, setChangeLogs] = useState<Array<{
     id: string; fieldName: string; oldValue: string | null; newValue: string | null; createdAt: Date | string
   }>>([])
@@ -82,6 +84,13 @@ export default function EditProductPage() {
           priceAdjustment: Number(v.priceAdjustment),
         })),
       )
+      // Load bundle items for this product's SKU
+      const bundleRes = await fetch(`/api/products/bundles/${encodeURIComponent(data.internalSku)}`)
+      if (bundleRes.ok) {
+        const bundleData = await bundleRes.json()
+        if (!cancelled) setBundleItems(bundleData.items ?? [])
+      }
+
       setLoading(false)
 
       const { getProductChangeLogsAction } = await import('@/lib/products/ui-actions')
@@ -119,6 +128,33 @@ export default function EditProductPage() {
         return { ...v, [field]: value }
       }),
     )
+  }
+
+  const addBundleItem = () => {
+    setBundleItems((prev) => [...prev, { componentSku: '', quantity: 1 }])
+  }
+
+  const updateBundleItem = (idx: number, field: 'componentSku' | 'quantity', value: string | number) => {
+    setBundleItems((prev) => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
+  }
+
+  const removeBundleItem = (idx: number) => {
+    setBundleItems((prev) => prev.filter((_, i) => i !== idx))
+  }
+
+  const handleSaveBundle = async () => {
+    if (!product) return
+    setBundleSaving(true)
+    try {
+      const res = await fetch(`/api/products/bundles/${encodeURIComponent(product.internalSku)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bundleItems.filter((i) => i.componentSku.trim() && i.quantity > 0)),
+      })
+      if (!res.ok) alert('세트 구성 저장 실패')
+    } finally {
+      setBundleSaving(false)
+    }
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -388,6 +424,78 @@ export default function EditProductPage() {
                   </button>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        {/* Bundle composition */}
+        <div className="space-y-4 rounded-md border p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold">세트 구성</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                이 상품이 세트상품이면 구성품 SKU와 수량을 입력하세요. 주문 출고 시 구성품 재고가 자동 차감됩니다.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={addBundleItem}
+              className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+            >
+              구성품 추가
+            </button>
+          </div>
+
+          {bundleItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              구성품이 없습니다. 단일 상품으로 처리됩니다.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {bundleItems.map((item, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <div className="flex flex-col gap-0.5 flex-1">
+                    <label className="text-xs text-muted-foreground">구성품 SKU</label>
+                    <input
+                      type="text"
+                      value={item.componentSku}
+                      onChange={(e) => updateBundleItem(idx, 'componentSku', e.target.value)}
+                      placeholder="예: 102436-0001"
+                      className="rounded border px-2 py-1 text-sm font-mono"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-0.5 w-20">
+                    <label className="text-xs text-muted-foreground">수량</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={item.quantity}
+                      onChange={(e) => updateBundleItem(idx, 'quantity', Number(e.target.value))}
+                      className="rounded border px-2 py-1 text-sm text-center"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeBundleItem(idx)}
+                    className="mt-4 rounded px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                  >
+                    삭제
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {bundleItems.length > 0 && (
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleSaveBundle()}
+                disabled={bundleSaving}
+                className="rounded-md bg-black px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+              >
+                {bundleSaving ? '저장 중...' : '세트 구성 저장'}
+              </button>
             </div>
           )}
         </div>

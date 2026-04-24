@@ -10,8 +10,8 @@
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, orderItems } from '@/lib/db/schema'
-import { eq, and, isNotNull } from 'drizzle-orm'
+import { inventory, inventoryHistory, orderItems, productBundleItems } from '@/lib/db/schema'
+import { eq, and, isNotNull, inArray } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 
 type ActionResult = { success: boolean; error?: string; newTotal?: number }
@@ -165,9 +165,57 @@ export async function setStock(
 }
 
 /**
+ * Expand order items accounting for bundle SKUs.
+ * Returns flat list of {sku, quantity} to actually deduct/restore.
+ * Bundle SKU → each component SKU × (componentQty × orderQty).
+ * Non-bundle SKU → returned as-is.
+ */
+async function expandBundleItems(
+  tx: DrizzleTransaction,
+  userId: string,
+  items: Array<{ sku: string | null; quantity: number }>,
+): Promise<Array<{ sku: string; quantity: number }>> {
+  const skus = items.map((i) => i.sku).filter((s): s is string => !!s)
+  if (skus.length === 0) return []
+
+  const bundleRows = await tx
+    .select({
+      bundleSku: productBundleItems.bundleSku,
+      componentSku: productBundleItems.componentSku,
+      quantity: productBundleItems.quantity,
+    })
+    .from(productBundleItems)
+    .where(and(eq(productBundleItems.userId, userId), inArray(productBundleItems.bundleSku, skus)))
+
+  // Map: bundleSku → [{componentSku, quantity}]
+  const bundleMap = new Map<string, Array<{ componentSku: string; quantity: number }>>()
+  for (const row of bundleRows) {
+    const existing = bundleMap.get(row.bundleSku) ?? []
+    existing.push({ componentSku: row.componentSku, quantity: row.quantity })
+    bundleMap.set(row.bundleSku, existing)
+  }
+
+  const expanded: Array<{ sku: string; quantity: number }> = []
+  for (const item of items) {
+    if (!item.sku) continue
+    const components = bundleMap.get(item.sku)
+    if (components && components.length > 0) {
+      // Bundle: replace with component deductions
+      for (const comp of components) {
+        expanded.push({ sku: comp.componentSku, quantity: comp.quantity * item.quantity })
+      }
+    } else {
+      expanded.push({ sku: item.sku, quantity: item.quantity })
+    }
+  }
+  return expanded
+}
+
+/**
  * Deduct inventory for a shipped order.
  * Called INSIDE an existing transaction (receives tx parameter).
  * Queries order_items for SKU + quantity pairs and decrements stock.
+ * Bundle SKUs are expanded to their component SKUs before deduction.
  * Items without SKU are silently skipped.
  * Does NOT fail if inventory record doesn't exist for a SKU -- logs warning and continues.
  */
@@ -176,30 +224,17 @@ export async function deductForOrder(
   userId: string,
   orderId: string,
 ): Promise<void> {
-  const items = await tx
-    .select({
-      sku: orderItems.sku,
-      quantity: orderItems.quantity,
-    })
+  const rawItems = await tx
+    .select({ sku: orderItems.sku, quantity: orderItems.quantity })
     .from(orderItems)
     .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
 
+  const items = await expandBundleItems(tx, userId, rawItems)
+
   for (const item of items) {
-    if (!item.sku) continue
-
-    const result = await adjustStockInTx(
-      tx,
-      userId,
-      item.sku,
-      -item.quantity,
-      'order_ship',
-      { orderId },
-    )
-
+    const result = await adjustStockInTx(tx, userId, item.sku, -item.quantity, 'order_ship', { orderId })
     if (!result.success) {
-      console.warn(
-        `[inventory] deductForOrder: SKU '${item.sku}' not found in inventory for order ${orderId}, skipping`,
-      )
+      console.warn(`[inventory] deductForOrder: SKU '${item.sku}' not found for order ${orderId}, skipping`)
     }
   }
 }
@@ -207,37 +242,24 @@ export async function deductForOrder(
 /**
  * Restore inventory for a cancelled order.
  * Called INSIDE an existing transaction (receives tx parameter).
- * Increments stock for each order item with a SKU.
+ * Bundle SKUs are expanded to their component SKUs before restoration.
  */
 export async function restoreForOrder(
   tx: DrizzleTransaction,
   userId: string,
   orderId: string,
 ): Promise<void> {
-  const items = await tx
-    .select({
-      sku: orderItems.sku,
-      quantity: orderItems.quantity,
-    })
+  const rawItems = await tx
+    .select({ sku: orderItems.sku, quantity: orderItems.quantity })
     .from(orderItems)
     .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
 
+  const items = await expandBundleItems(tx, userId, rawItems)
+
   for (const item of items) {
-    if (!item.sku) continue
-
-    const result = await adjustStockInTx(
-      tx,
-      userId,
-      item.sku,
-      item.quantity,
-      'order_cancel',
-      { orderId },
-    )
-
+    const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'order_cancel', { orderId })
     if (!result.success) {
-      console.warn(
-        `[inventory] restoreForOrder: SKU '${item.sku}' not found in inventory for order ${orderId}, skipping`,
-      )
+      console.warn(`[inventory] restoreForOrder: SKU '${item.sku}' not found for order ${orderId}, skipping`)
     }
   }
 }
@@ -246,36 +268,27 @@ export async function restoreForOrder(
  * Restore inventory for a completed return claim.
  * Standalone function (not inside a tx) since claims processing
  * is separate from order status changes.
+ * Bundle SKUs are expanded to their component SKUs before restoration.
  */
 export async function restoreForClaim(
   userId: string,
   orderId: string,
 ): Promise<void> {
   return db.transaction(async (tx) => {
-    const items = await tx
-      .select({
-        sku: orderItems.sku,
-        quantity: orderItems.quantity,
-      })
+    const rawItems = await tx
+      .select({ sku: orderItems.sku, quantity: orderItems.quantity })
       .from(orderItems)
       .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
 
+    const items = await expandBundleItems(tx, userId, rawItems)
+
     for (const item of items) {
-      if (!item.sku) continue
-
-      const result = await adjustStockInTx(
-        tx,
-        userId,
-        item.sku,
-        item.quantity,
-        'return',
-        { orderId, note: 'Return claim completed' },
-      )
-
+      const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'return', {
+        orderId,
+        note: 'Return claim completed',
+      })
       if (!result.success) {
-        console.warn(
-          `[inventory] restoreForClaim: SKU '${item.sku}' not found in inventory for order ${orderId}, skipping`,
-        )
+        console.warn(`[inventory] restoreForClaim: SKU '${item.sku}' not found for order ${orderId}, skipping`)
       }
     }
   })

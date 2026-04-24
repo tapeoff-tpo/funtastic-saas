@@ -61,6 +61,7 @@ export default async function OrdersPage({
     getOrders({
       page: params.page,
       pageSize: params.pageSize,
+      userId: user.id,
       status: (params.status ?? undefined) as OrderFiltersParams['status'],
       marketplace: params.marketplace ?? undefined,
       search: params.search ?? undefined,

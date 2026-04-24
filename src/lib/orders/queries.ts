@@ -53,6 +53,10 @@ const DEFAULT_PAGE_SIZE = 50
 export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   const conditions: SQL[] = []
 
+  if (filters.userId) {
+    conditions.push(eq(orders.userId, filters.userId))
+  }
+
   if (filters.status) {
     conditions.push(eq(orders.status, filters.status))
   }
@@ -197,7 +201,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   }
 
   // Load mapping lookups for mapping status determination (parallel)
-  const userId = orderRows[0]?.userId
+  const userId = filters.userId ?? orderRows[0]?.userId
   const [nameMappings, optionMappings, productSkus, variantSkus] = userId
     ? await Promise.all([
         db.select({ marketplaceId: productNameMappings.marketplaceId, marketplaceName: productNameMappings.marketplaceName })

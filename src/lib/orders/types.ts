@@ -63,6 +63,8 @@ export type OrderStage =
 export interface OrderFilters {
   page?: number
   pageSize?: number
+  /** Scope to a specific user — REQUIRED for production queries (security + perf). */
+  userId?: string
   status?: OrderStatus
   marketplace?: string
   search?: string

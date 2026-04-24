@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getProducts } from '@/lib/products/queries'
 import { ProductDataTable } from './data-table'
 import { ProductFilters } from './filters'
+import { CarrierBulkActions } from './carrier-bulk-actions'
 import type { ProductRow } from './columns'
 import type { ProductFilters as ProductFiltersParams } from '@/lib/products/types'
 import type { Metadata } from 'next'
@@ -85,6 +86,7 @@ export default async function ProductsPage({
           >
             재고관리에서 일괄 등록
           </a>
+          <CarrierBulkActions />
           <a
             href="/api/products/export"
             className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"

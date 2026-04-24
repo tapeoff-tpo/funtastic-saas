@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory, shipmentGroups, shipmentGroupOrders } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray, isNotNull } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage } from './types'
@@ -158,15 +158,29 @@ export async function getOrders(filters: OrderFilters = {}) {
       .offset(offset)
   }
 
-  // Fetch items/claims/shipments in parallel
+  // Fetch items/claims/shipments/shipmentGroups in parallel
   const orderIds = orderRows.map((o) => o.id)
-  const [items, claimRows, shipmentRows] = orderIds.length > 0
+  const [items, claimRows, shipmentRows, groupRows] = orderIds.length > 0
     ? await Promise.all([
         db.select().from(orderItems).where(sql`${orderItems.orderId} IN ${orderIds}`),
         db.select().from(claims).where(sql`${claims.orderId} IN ${orderIds}`),
         db.select().from(shipments).where(sql`${shipments.orderId} IN ${orderIds}`),
+        db
+          .select({
+            orderId: shipmentGroupOrders.orderId,
+            groupId: shipmentGroups.id,
+            groupKey: shipmentGroups.groupKey,
+          })
+          .from(shipmentGroupOrders)
+          .innerJoin(shipmentGroups, eq(shipmentGroupOrders.shipmentGroupId, shipmentGroups.id))
+          .where(sql`${shipmentGroupOrders.orderId} IN ${orderIds}`),
       ])
-    : [[] as (typeof orderItems.$inferSelect)[], [] as (typeof claims.$inferSelect)[], [] as (typeof shipments.$inferSelect)[]]
+    : [[] as (typeof orderItems.$inferSelect)[], [] as (typeof claims.$inferSelect)[], [] as (typeof shipments.$inferSelect)[], [] as { orderId: string; groupId: string; groupKey: string }[]]
+
+  const groupByOrderId = new Map<string, { groupId: string; groupKey: string }>()
+  for (const g of groupRows) {
+    groupByOrderId.set(g.orderId, { groupId: g.groupId, groupKey: g.groupKey })
+  }
 
   // Map latest shipment per order
   const shipmentByOrderId = new Map<string, typeof shipments.$inferSelect>()
@@ -246,6 +260,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     const shipment = shipmentByOrderId.get(order.id)
     const orderItemsData = itemsByOrderId.get(order.id) ?? []
     const claim = claimByOrderId.get(order.id) ?? null
+    const group = groupByOrderId.get(order.id) ?? null
     return {
       ...order,
       claimType: claim?.claimType ?? null,
@@ -255,6 +270,8 @@ export async function getOrders(filters: OrderFilters = {}) {
       invoiceStatus: shipment?.uploadStatus ?? null,
       trackingNumber: shipment?.trackingNumber ?? null,
       carrierName: shipment?.carrierName ?? null,
+      shipmentGroupId: group?.groupId ?? null,
+      shipmentGroupKey: group?.groupKey ?? null,
       items: orderItemsData,
       mappingStatus: getMappingStatus(order.marketplaceId, orderItemsData),
     }
@@ -270,6 +287,18 @@ export async function getOrders(filters: OrderFilters = {}) {
   // Apply workflow stage filter (post-fetch, computed)
   if (filters.stage) {
     ordersWithItems = ordersWithItems.filter((o) => matchStage(o, filters.stage!))
+  }
+
+  // 확정대기 단계: 같은 합포장 그룹 주문이 인접하도록 정렬 (그룹 있는 것 먼저)
+  if (filters.stage === 'confirm') {
+    ordersWithItems.sort((a, b) => {
+      const aG = a.shipmentGroupId
+      const bG = b.shipmentGroupId
+      if (aG && !bG) return -1
+      if (!aG && bG) return 1
+      if (aG && bG && aG !== bG) return aG < bG ? -1 : 1
+      return 0
+    })
   }
 
   // Get total count

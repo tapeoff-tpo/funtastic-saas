@@ -100,6 +100,8 @@ export default async function OrdersPage({
     trackingNumber: o.trackingNumber,
     carrierName: (o as { carrierName?: string | null }).carrierName ?? null,
     mappingStatus: o.mappingStatus,
+    shipmentGroupId: (o as { shipmentGroupId?: string | null }).shipmentGroupId ?? null,
+    shipmentGroupKey: (o as { shipmentGroupKey?: string | null }).shipmentGroupKey ?? null,
     items: o.items.map((item) => ({
       productName: item.productName,
       optionText: item.optionText,

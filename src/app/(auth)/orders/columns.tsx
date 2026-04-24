@@ -93,6 +93,8 @@ export interface OrderRow {
   trackingNumber?: string | null
   carrierName?: string | null
   mappingStatus?: 'mapped' | 'partial' | 'unmapped'
+  shipmentGroupId?: string | null
+  shipmentGroupKey?: string | null
   items: {
     productName: string
     optionText: string | null
@@ -131,6 +133,27 @@ function formatPhone(phone: string | null | undefined): string {
   if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`
   if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`
   return phone
+}
+
+/** 합포장 그룹 ID → 배경/텍스트 색 조합 (해시 기반 결정적 매핑) */
+const GROUP_COLORS = [
+  'border-pink-400 bg-pink-50 text-pink-700',
+  'border-amber-400 bg-amber-50 text-amber-700',
+  'border-emerald-400 bg-emerald-50 text-emerald-700',
+  'border-sky-400 bg-sky-50 text-sky-700',
+  'border-violet-400 bg-violet-50 text-violet-700',
+  'border-rose-400 bg-rose-50 text-rose-700',
+  'border-cyan-400 bg-cyan-50 text-cyan-700',
+  'border-lime-400 bg-lime-50 text-lime-700',
+  'border-orange-400 bg-orange-50 text-orange-700',
+  'border-teal-400 bg-teal-50 text-teal-700',
+]
+function groupColor(groupId: string): string {
+  let hash = 0
+  for (let i = 0; i < groupId.length; i++) {
+    hash = (hash * 31 + groupId.charCodeAt(i)) | 0
+  }
+  return GROUP_COLORS[Math.abs(hash) % GROUP_COLORS.length]
 }
 
 export const columns: ColumnDef<OrderRow>[] = [
@@ -319,6 +342,18 @@ export const columns: ColumnDef<OrderRow>[] = [
               </span>
             )}
           </div>
+          {order.shipmentGroupId && (
+            <span
+              className={`mt-0.5 inline-flex w-fit items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${groupColor(order.shipmentGroupId)}`}
+              title={order.shipmentGroupKey ?? ''}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: 'currentColor' }}
+              />
+              합포장 · {order.shipmentGroupId.slice(0, 4).toUpperCase()}
+            </span>
+          )}
         </div>
       )
     },

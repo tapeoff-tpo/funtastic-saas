@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   useReactTable,
   getCoreRowModel,
@@ -95,6 +96,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   })
 
   const [isPending, startTransition] = useTransition()
+  const router = useRouter()
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
   useEffect(() => { setSearchInput(filters.search ?? '') }, [filters.search])
 
@@ -513,8 +515,12 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
         page={page}
         pageSize={pageSize}
         total={total}
-        onPageChange={(p) => void setPage(p)}
-        onPageSizeChange={(s) => void setPageSize(s)}
+        onPageChange={(p) => {
+          void setPage(p).then(() => router.refresh())
+        }}
+        onPageSizeChange={(s) => {
+          void setPageSize(s).then(() => router.refresh())
+        }}
       />
 
       {/* Dialogs */}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   useReactTable,
   getCoreRowModel,
@@ -32,6 +33,7 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [showColumnToggle, setShowColumnToggle] = useState(false)
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
+  const router = useRouter()
 
   const [, setPage] = useQueryState(
     'page',
@@ -187,8 +189,12 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
         page={page}
         pageSize={pageSize}
         total={total}
-        onPageChange={(p) => void setPage(p)}
-        onPageSizeChange={(s) => void setPageSize(s)}
+        onPageChange={(p) => {
+          void setPage(p).then(() => router.refresh())
+        }}
+        onPageSizeChange={(s) => {
+          void setPageSize(s).then(() => router.refresh())
+        }}
       />
 
       {/* Detail modal (opened via Claim button or 주문번호 click) */}

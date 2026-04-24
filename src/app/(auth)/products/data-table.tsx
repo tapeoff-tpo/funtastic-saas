@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   useReactTable,
   getCoreRowModel,
@@ -24,6 +25,7 @@ interface DataTableProps {
 export function ProductDataTable({ data, total, pageSize, page }: DataTableProps) {
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const router = useRouter()
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1).withOptions({ shallow: false }))
   const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50).withOptions({ shallow: false }))
@@ -149,8 +151,12 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
         page={page}
         pageSize={pageSize}
         total={total}
-        onPageChange={(p) => void setPage(p)}
-        onPageSizeChange={(s) => void setPageSize(s)}
+        onPageChange={(p) => {
+          void setPage(p).then(() => router.refresh())
+        }}
+        onPageSizeChange={(s) => {
+          void setPageSize(s).then(() => router.refresh())
+        }}
       />
     </div>
   )

@@ -32,8 +32,9 @@ export interface AutoCombineResult {
  * 자동 합포장 실행.
  *
  * @param userId - 대상 사용자
- * @param scopeOrderIds - 합포장 후보로 포함할 주문 ID (생략 시 사용자의 모든 미출고 주문)
- *                       단, 그룹 매칭은 항상 사용자의 전체 미출고 주문 범위에서 수행.
+ * @param scopeOrderIds - 합포장 후보로 포함할 주문 ID.
+ *                       **주어진 범위 안에서만** 그룹화를 수행 (전체 미출고 스캔 X).
+ *                       생략 시 사용자의 미출고 주문 전체를 스캔.
  */
 export async function runAutoCombineByContact(
   userId: string,
@@ -45,8 +46,11 @@ export async function runAutoCombineByContact(
     .from(shipmentGroupOrders)
   const groupedSet = new Set(alreadyGrouped.map((r) => r.orderId))
 
-  // 사용자의 미출고 주문 + 필요한 필드 조회
-  // 미출고 = status가 new/confirmed/preparing (shipped/delivering/delivered/cancelled 제외)
+  // 조회 범위: scope가 있으면 해당 주문만, 없으면 전체 미출고
+  const scopeCondition = scopeOrderIds && scopeOrderIds.length > 0
+    ? inArray(orders.id, scopeOrderIds)
+    : inArray(orders.status, ['new', 'confirmed', 'preparing'])
+
   const candidates = await db
     .select({
       id: orders.id,
@@ -56,12 +60,7 @@ export async function runAutoCombineByContact(
       shippingAddress: orders.shippingAddress,
     })
     .from(orders)
-    .where(
-      and(
-        eq(orders.userId, userId),
-        inArray(orders.status, ['new', 'confirmed', 'preparing']),
-      ),
-    )
+    .where(and(eq(orders.userId, userId), scopeCondition))
 
   // 그룹 매칭 대상 필터링
   const eligible = candidates.filter((o) => !groupedSet.has(o.id))
@@ -94,12 +93,7 @@ export async function runAutoCombineByContact(
   const mergeKeys = [...byKey.entries()].filter(([, list]) => list.length >= 2)
   if (mergeKeys.length === 0) return { created: 0, totalOrders: 0 }
 
-  // scopeOrderIds가 있으면 해당 주문이 포함된 그룹만 대상 (선택적 필터)
-  const scopedKeys = scopeOrderIds && scopeOrderIds.length > 0
-    ? mergeKeys.filter(([, list]) => list.some((o) => scopeOrderIds.includes(o.id)))
-    : mergeKeys
-
-  if (scopedKeys.length === 0) return { created: 0, totalOrders: 0 }
+  const scopedKeys = mergeKeys
 
   // fulfillmentCode 조회를 위해 관련 주문의 items 조회
   const relatedIds = scopedKeys.flatMap(([, list]) => list.map((o) => o.id))

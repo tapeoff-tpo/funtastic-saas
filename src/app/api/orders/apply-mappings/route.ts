@@ -28,9 +28,11 @@ export async function POST(req: NextRequest) {
   try { body = await req.json() } catch { /* optional body */ }
 
   // Find orderItems that still have no SKU, joined to their order's marketplaceId
+  // 미출고(보류) 주문은 매핑 대상에서 제외 — 어차피 배송 안 나가는 주문
   const conditions = [
     eq(orders.userId, user.id),
     isNull(orderItems.sku),
+    eq(orders.isHeld, false),
   ]
   if (body.orderIds && body.orderIds.length > 0) {
     conditions.push(inArray(orders.id, body.orderIds))

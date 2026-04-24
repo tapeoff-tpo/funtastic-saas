@@ -23,6 +23,7 @@ interface ProductSearchResult {
 
 interface BundleItem {
   componentSku: string
+  componentName: string
   quantity: number
 }
 
@@ -108,7 +109,12 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
       const res = await fetch(`/api/products/bundles/${encodeURIComponent(product.internalSku)}`)
       if (res.ok) {
         const data = await res.json()
-        setBundleItems((prev) => ({ ...prev, [key]: data.items ?? [] }))
+        const enriched: BundleItem[] = (data.items ?? []).map((i: { componentSku: string; quantity: number }) => ({
+          componentSku: i.componentSku,
+          componentName: i.componentSku,
+          quantity: i.quantity,
+        }))
+        setBundleItems((prev) => ({ ...prev, [key]: enriched }))
       }
     } catch { /* ignore */ }
   }
@@ -116,19 +122,23 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
   const addBundleItem = (key: string) => {
     setBundleItems((prev) => ({
       ...prev,
-      [key]: [...(prev[key] ?? []), { componentSku: '', quantity: 1 }],
+      [key]: [...(prev[key] ?? []), { componentSku: '', componentName: '', quantity: 1 }],
     }))
   }
 
-  const updateBundleItem = (
-    key: string,
-    idx: number,
-    field: keyof BundleItem,
-    value: string | number,
-  ) => {
+  const selectBundleComponent = (key: string, idx: number, product: ProductSearchResult) => {
     setBundleItems((prev) => ({
       ...prev,
-      [key]: (prev[key] ?? []).map((item, i) => (i === idx ? { ...item, [field]: value } : item)),
+      [key]: (prev[key] ?? []).map((item, i) =>
+        i === idx ? { ...item, componentSku: product.internalSku, componentName: product.name } : item,
+      ),
+    }))
+  }
+
+  const updateBundleQty = (key: string, idx: number, quantity: number) => {
+    setBundleItems((prev) => ({
+      ...prev,
+      [key]: (prev[key] ?? []).map((item, i) => (i === idx ? { ...item, quantity } : item)),
     }))
   }
 
@@ -200,12 +210,11 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
       const savedBundleSkus = new Set<string>()
       for (const [key, product] of entries) {
         if (savedBundleSkus.has(product.internalSku)) continue
-        const items = (bundleItems[key] ?? []).filter(
-          (i) => i.componentSku.trim() && i.quantity > 0,
-        )
-        // Save even if empty (clears previous bundle if user removed all components)
         if (key in bundleItems) {
           savedBundleSkus.add(product.internalSku)
+          const items = (bundleItems[key] ?? [])
+            .filter((i) => i.componentSku && i.quantity > 0)
+            .map((i) => ({ componentSku: i.componentSku, quantity: i.quantity }))
           await fetch(`/api/products/bundles/${encodeURIComponent(product.internalSku)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -313,35 +322,35 @@ export function BulkMappingDialog({ open, orders, onClose, onSaved }: BulkMappin
                                 단일 상품 — 세트이면 구성품을 추가하세요
                               </p>
                             ) : (
-                              <div className="space-y-1.5">
+                              <div className="space-y-2">
                                 {items.map((item, idx) => (
-                                  <div key={idx} className="flex items-center gap-2">
-                                    <input
-                                      type="text"
-                                      value={item.componentSku}
-                                      onChange={(e) =>
-                                        updateBundleItem(key, idx, 'componentSku', e.target.value)
-                                      }
-                                      placeholder="구성품 SKU"
-                                      className="flex-1 rounded border px-2 py-1 text-xs font-mono"
+                                  <div key={idx} className="space-y-1">
+                                    <ProductSearch
+                                      initialValue={item.componentSku ? `${item.componentSku} - ${item.componentName}` : ''}
+                                      onSelect={(p) => selectBundleComponent(key, idx, p)}
                                     />
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      value={item.quantity}
-                                      onChange={(e) =>
-                                        updateBundleItem(key, idx, 'quantity', Number(e.target.value))
-                                      }
-                                      className="w-14 rounded border px-2 py-1 text-xs text-center"
-                                    />
-                                    <span className="text-xs text-muted-foreground">개</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => removeBundleItem(key, idx)}
-                                      className="text-xs text-red-400 hover:text-red-600"
-                                    >
-                                      ✕
-                                    </button>
+                                    {item.componentSku && (
+                                      <div className="flex items-center gap-2 pl-1">
+                                        <p className="flex-1 text-xs text-green-600 truncate">
+                                          ✓ {item.componentSku} — {item.componentName}
+                                        </p>
+                                        <input
+                                          type="number"
+                                          min={1}
+                                          value={item.quantity}
+                                          onChange={(e) => updateBundleQty(key, idx, Number(e.target.value))}
+                                          className="w-14 rounded border px-2 py-0.5 text-xs text-center"
+                                        />
+                                        <span className="text-xs text-muted-foreground">개</span>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeBundleItem(key, idx)}
+                                          className="text-xs text-red-400 hover:text-red-600"
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
                                 ))}
                               </div>

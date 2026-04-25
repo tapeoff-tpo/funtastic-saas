@@ -76,6 +76,7 @@ export default async function InventoryPage({
       <InventoryTable
         data={items.map((item) => ({
           id: item.id,
+          productId: item.productId,
           sku: item.sku,
           productName: item.productName,
           optionName: item.optionName ?? null,
@@ -89,6 +90,7 @@ export default async function InventoryPage({
           monthlyOutgoing: item.monthlyOutgoing,
           lastIncomingAt: item.lastIncomingAt ?? null,
           lastOutgoingAt: item.lastOutgoingAt ?? null,
+          shippingCost: item.shippingCost,
           updatedAt: item.updatedAt,
         }))}
         total={total}

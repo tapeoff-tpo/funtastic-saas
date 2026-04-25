@@ -68,6 +68,7 @@ export async function getInventoryList(
       .select({
         id: sql<string>`COALESCE(${inventory.id}::text, ${products.id}::text)`,
         inventoryId: inventory.id,
+        productId: products.id,
         sku: products.internalSku,
         productName: products.name,
         optionName: inventory.optionName,
@@ -77,6 +78,7 @@ export async function getInventoryList(
         totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
         reservedStock: sql<number>`COALESCE(${inventory.reservedStock}, 0)::int`,
         availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,
+        shippingCost: products.shippingCost,
         createdAt: products.createdAt,
         updatedAt: sql<Date>`COALESCE(${inventory.updatedAt}, ${products.updatedAt})`,
         userId: products.userId,

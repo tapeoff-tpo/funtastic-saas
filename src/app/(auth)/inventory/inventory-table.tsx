@@ -11,15 +11,19 @@ import {
   type SortingState,
 } from '@tanstack/react-table'
 import { useQueryState, useQueryStates, parseAsInteger, parseAsString } from 'nuqs'
+import { toast } from 'sonner'
 import { AdjustStockDialog } from './adjust-stock-dialog'
 import { HistoryDialog } from './history-dialog'
 import { ExcelUploadDialog } from './excel-upload-dialog'
 import { IncomingDialog } from './incoming-dialog'
 import { BundleEditorDialog } from './bundle-editor-dialog'
 import { Pagination } from '@/components/ui/pagination'
+import { Input } from '@/components/ui/input'
+import { updateShippingCost } from './actions'
 
 export interface InventoryRow {
   id: string
+  productId: string
   sku: string
   productName: string
   optionName: string | null
@@ -33,6 +37,7 @@ export interface InventoryRow {
   monthlyOutgoing: number
   lastIncomingAt: Date | null
   lastOutgoingAt: Date | null
+  shippingCost: string | null
   updatedAt: Date
 }
 
@@ -55,6 +60,64 @@ function StockCell({ value }: { value: number }) {
         ? 'text-amber-600 font-medium'
         : ''
   return <span className={color}>{value.toLocaleString('ko-KR')}</span>
+}
+
+/**
+ * Inline-editable cell for products.shipping_cost (SaaS 배송비 원가).
+ * - draft state holds the current input string
+ * - onBlur: validate → call updateShippingCost server action via useTransition
+ * - On error: revert draft + toast.error
+ * - On success: toast.success
+ */
+function ShippingCostCell({
+  productId,
+  value,
+}: {
+  productId: string
+  value: string | number | null
+}) {
+  const initial = value == null ? '' : String(value)
+  const [draft, setDraft] = useState(initial)
+  const [pending, startTransition] = useTransition()
+
+  // Sync external value changes (e.g. after revalidatePath) into the draft
+  useEffect(() => {
+    setDraft(initial)
+  }, [initial])
+
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <Input
+        type="number"
+        min={0}
+        step="1"
+        inputMode="numeric"
+        value={draft}
+        disabled={pending}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          if (draft === initial) return
+          const num = draft === '' ? null : Number(draft)
+          if (num !== null && (Number.isNaN(num) || num < 0)) {
+            setDraft(initial)
+            toast.error('숫자만 입력 가능합니다')
+            return
+          }
+          startTransition(async () => {
+            const result = await updateShippingCost(productId, num)
+            if (result.ok) {
+              toast.success('배송비 저장됨')
+            } else {
+              setDraft(initial)
+              toast.error(result.error)
+            }
+          })
+        }}
+        className="h-7 w-24 text-right text-xs"
+      />
+      <span className="text-xs text-muted-foreground">원</span>
+    </div>
+  )
 }
 
 export function InventoryTable({ data, total, page, pageSize, warehouseZones }: InventoryTableProps) {
@@ -255,6 +318,15 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
         </button>
       ),
       cell: (info) => <StockCell value={info.getValue()} />,
+    }),
+    columnHelper.accessor('shippingCost', {
+      header: 'SaaS 배송비(원가)',
+      cell: (info) => (
+        <ShippingCostCell
+          productId={info.row.original.productId}
+          value={info.getValue()}
+        />
+      ),
     }),
     columnHelper.accessor('monthlyIncoming', {
       header: '당월입고',

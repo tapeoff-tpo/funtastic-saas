@@ -1,7 +1,10 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { eq, and } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
+import { db } from '@/lib/db'
+import { products } from '@/lib/db/schema'
 import { setStock, adjustStock } from '@/lib/inventory/actions'
 import { getInventoryHistory } from '@/lib/inventory/queries'
 import type { AdjustmentReason } from '@/lib/inventory/types'
@@ -94,6 +97,42 @@ export async function adjustStockAction(
   const result = await adjustStock(user.id, sku.trim(), delta, reason, { note })
   revalidatePath('/inventory')
   return result
+}
+
+/**
+ * Server action: update SaaS shipping cost (원가) for a product.
+ *
+ * Phase 8 / SC-07 — 재고관리 화면에서 상품별 배송비(원가) 인라인 편집.
+ * - userId scope (RLS) — 다른 사용자 product 수정 불가
+ * - value === null → 컬럼을 NULL로 클리어
+ * - value 검증: 숫자 + 음수 거부
+ */
+export async function updateShippingCost(
+  productId: string,
+  value: number | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: 'unauthorized' }
+
+  if (value !== null) {
+    if (typeof value !== 'number' || Number.isNaN(value) || value < 0) {
+      return { ok: false, error: 'invalid value' }
+    }
+  }
+
+  await db
+    .update(products)
+    .set({
+      shippingCost: value === null ? null : String(value),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(products.id, productId), eq(products.userId, user.id)))
+
+  revalidatePath('/inventory')
+  return { ok: true }
 }
 
 /**

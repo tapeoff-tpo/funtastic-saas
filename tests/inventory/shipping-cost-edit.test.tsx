@@ -2,10 +2,31 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 
 describe('inventory shipping_cost edit', () => {
-  it('updateShippingCost server action이 존재한다', () => {
-    const actions = readFileSync('src/app/(auth)/inventory/actions.ts', 'utf8')
-    expect(actions).toMatch(/updateShippingCost/)
+  it('updateShippingCost server action exists with userId scope', () => {
+    const src = readFileSync('src/app/(auth)/inventory/actions.ts', 'utf8')
+    expect(src).toMatch(/['"]use server['"]/)
+    expect(src).toMatch(/export\s+async\s+function\s+updateShippingCost/)
+    expect(src).toMatch(/eq\(products\.userId,\s*user\.id\)/)
+    expect(src).toMatch(/eq\(products\.id,\s*productId\)/)
   })
-  it.todo('재고 행에서 shipping_cost 입력 → onBlur로 server action 호출 → DB 반영')
-  it.todo('비숫자 입력은 거부 (NULL 또는 이전 값 유지)')
+  it('updateShippingCost validates input (rejects NaN / negative)', () => {
+    const src = readFileSync('src/app/(auth)/inventory/actions.ts', 'utf8')
+    expect(src).toMatch(/Number\.isNaN|isNaN/)
+    expect(src).toMatch(/value\s*>=\s*0|value\s*<\s*0/)
+  })
+  it('inventory-table renders ShippingCostCell for new column', () => {
+    const src = readFileSync('src/app/(auth)/inventory/inventory-table.tsx', 'utf8')
+    expect(src).toMatch(/ShippingCostCell/)
+    expect(src).toMatch(/SaaS 배송비\(원가\)|배송비/)
+  })
+  it('ShippingCostCell uses useTransition + onBlur + updateShippingCost', () => {
+    const src = readFileSync('src/app/(auth)/inventory/inventory-table.tsx', 'utf8')
+    expect(src).toMatch(/useTransition/)
+    expect(src).toMatch(/onBlur/)
+    expect(src).toMatch(/updateShippingCost/)
+  })
+  it('page.tsx 데이터 페치에 shippingCost 포함', () => {
+    const src = readFileSync('src/app/(auth)/inventory/page.tsx', 'utf8')
+    expect(src).toMatch(/shippingCost/)
+  })
 })

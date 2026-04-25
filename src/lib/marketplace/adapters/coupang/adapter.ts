@@ -35,6 +35,29 @@ const COUPANG_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['access_key', 'secret_key', 'vendor_id'],
 }
 
+/**
+ * Phase 8 — Normalize Coupang's free-form shipping label into a fixed enum.
+ *
+ * Coupang exposes 배송비 결제 구분 in several Korean fields
+ * (deliveryChargeTypeName, parcelPrintMessage, shipmentType). We map them to
+ * a 4-value enum used across the SaaS for the 배송구분 column.
+ *
+ *   '선불' / '선결제'    → 'prepaid'
+ *   '착불'              → 'cod'
+ *   '무료' / '무료배송'   → 'free'
+ *   anything else / null → 'unknown'
+ */
+export function normalizeCoupangShippingType(
+  raw: string | undefined | null,
+): 'prepaid' | 'cod' | 'free' | 'unknown' {
+  if (!raw) return 'unknown'
+  const s = String(raw)
+  if (s.includes('선불') || s.includes('선결제')) return 'prepaid'
+  if (s.includes('착불')) return 'cod'
+  if (s.includes('무료')) return 'free'
+  return 'unknown'
+}
+
 export class CoupangAdapter implements MarketplaceAdapter {
   readonly config = COUPANG_CONFIG
 
@@ -451,6 +474,12 @@ export class CoupangAdapter implements MarketplaceAdapter {
       items,
       orderedAt: new Date(sheet.paidAt),
       totalAmount,
+      // Phase 8: 마켓에서 수집된 배송비 (KRW)
+      shippingFee: typeof sheet.shippingPrice?.units === 'number' ? sheet.shippingPrice.units : null,
+      // Phase 8: 배송구분 enum (prepaid/cod/free/unknown) - per CONTEXT.md D-04
+      shippingType: normalizeCoupangShippingType(
+        sheet.deliveryChargeTypeName ?? sheet.parcelPrintMessage ?? sheet.shipmentType,
+      ),
       rawData: sheet as unknown as Record<string, unknown>,
     }
   }

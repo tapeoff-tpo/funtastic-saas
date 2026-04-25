@@ -1,10 +1,22 @@
 import { describe, it, expect } from 'vitest'
+import { normalizeCoupangShippingType } from '@/lib/marketplace/adapters/coupang/adapter'
 
-describe('Coupang normalizeOrder shipping fields', () => {
-  it.todo('sheet.shippingPrice.units → NormalizedOrder.shippingFee')
-  it.todo('sheet.shipmentType + deliveryChargeTypeName → shippingType (enum prepaid/cod/free/unknown)')
-  it('placeholder — 모듈이 export하는 정규화 결과에 shippingFee/Type 키가 있어야 함', () => {
-    // RED placeholder — Plan 02에서 normalize 확장 후 GREEN
-    expect(true).toBe(true)
+describe('normalizeCoupangShippingType', () => {
+  it.each([
+    ['선불', 'prepaid'],
+    ['선결제', 'prepaid'],
+    ['착불', 'cod'],
+    ['무료', 'free'],
+    ['무료배송', 'free'],
+    ['', 'unknown'],
+    [null, 'unknown'],
+    [undefined, 'unknown'],
+    ['알수없음', 'unknown'],
+  ])('%s → %s', (input, expected) => {
+    expect(normalizeCoupangShippingType(input as string | null | undefined)).toBe(expected)
   })
+})
+
+describe('Coupang normalizeOrder shippingFee/Type', () => {
+  it.todo('integration — 실제 normalizeOrder 호출 시 shippingPrice.units가 shippingFee에 매핑')
 })

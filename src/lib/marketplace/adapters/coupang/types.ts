@@ -69,6 +69,8 @@ export interface CoupangOrderSheet {
   deliveredDate: string | null
   refer: string
   shipmentType: string
+  /** Phase 8 — Coupang 배송비 결제 구분 라벨 (한글). 일부 응답에서만 제공 */
+  deliveryChargeTypeName?: string
   isCod: boolean
   overseaShippingInfoDto?: {
     personalCustomsClearanceCode: string

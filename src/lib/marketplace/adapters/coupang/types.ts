@@ -103,3 +103,27 @@ export interface CoupangReturnRequestsResponse {
   message: string
   data: CoupangReturnRequest[]
 }
+
+// ─── Phase 8: Online Inquiries ─────────────────────────────────────
+// GET /v2/providers/openapi/apis/api/v5/vendors/{vendorId}/onlineInquiries
+// Coupang exposes 3 inquiry kinds (product / callcenter / online).
+// Phase 8 implements `online` only — others can extend without breaking.
+
+export interface CoupangOnlineInquiry {
+  inquiryId: string | number
+  content?: string
+  title?: string
+  /** YYYY-MM-DDTHH:mm:ss (KST) */
+  inquiryRegisteredAt: string
+  answeredAt?: string | null
+  orderId?: string | number
+  // Allow raw fields beyond what we model — kept on rawData
+  [key: string]: unknown
+}
+
+/** Response from GET v5 onlineInquiries */
+export interface CoupangInquiriesResponse {
+  code: number | string
+  data?: CoupangOnlineInquiry[]
+  message?: string
+}

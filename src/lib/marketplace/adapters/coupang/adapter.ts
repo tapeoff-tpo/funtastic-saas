@@ -11,6 +11,7 @@ import type {
   MarketplaceCredentials,
   NormalizedOrder,
   NormalizedClaim,
+  NormalizedInquiry,
   NormalizedProduct,
   InvoiceData,
 } from '../../types'
@@ -19,6 +20,7 @@ import { createCoupangClient } from './client'
 import { mapCoupangStatus, mapCoupangClaimStatus } from './status-map'
 import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import type {
+  CoupangInquiriesResponse,
   CoupangOrderSheet,
   CoupangOrderSheetsResponse,
   CoupangReturnRequestsResponse,
@@ -166,6 +168,54 @@ export class CoupangAdapter implements MarketplaceAdapter {
         const body = await res.text().catch(() => '')
         console.error('[Coupang] getClaimsOrders error response:', res.status, body)
         throw new MarketplaceApiError('coupang', res.status, `${res.status}: ${body}`)
+      }
+      throw new MarketplaceApiError('coupang', 500, error instanceof Error ? error.message : 'Unknown error')
+    }
+  }
+
+  /**
+   * Phase 8 — Fetch online inquiries (온라인 문의) registered between `since`
+   * and now. Coupang uses KST datetimes formatted yyyy-MM-ddTHH:mm:ss for the
+   * onlineInquiries endpoint (no timezone suffix; documentation shows naive
+   * KST values). pageSize fixed at 50 — pagination beyond a single page is
+   * deferred (Phase 8 ends at "수집 가능" per plan).
+   */
+  async getInquiries(since: Date): Promise<NormalizedInquiry[]> {
+    const fmt = (d: Date) => {
+      const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+      const yyyy = kst.getUTCFullYear()
+      const MM = String(kst.getUTCMonth() + 1).padStart(2, '0')
+      const dd = String(kst.getUTCDate()).padStart(2, '0')
+      const HH = String(kst.getUTCHours()).padStart(2, '0')
+      const mm = String(kst.getUTCMinutes()).padStart(2, '0')
+      const ss = String(kst.getUTCSeconds()).padStart(2, '0')
+      return `${yyyy}-${MM}-${dd}T${HH}:${mm}:${ss}`
+    }
+
+    const qs = `inquiryStartAt=${encodeURIComponent(fmt(since))}&inquiryEndAt=${encodeURIComponent(fmt(new Date()))}&pageSize=50`
+    const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/onlineInquiries?${qs}`
+
+    try {
+      const res = await this.client.get(path).json<CoupangInquiriesResponse>()
+      return (res.data ?? []).map((raw) => ({
+        marketplaceInquiryId: String(raw.inquiryId),
+        marketplaceId: 'coupang' as const,
+        marketplaceOrderId: raw.orderId !== undefined && raw.orderId !== null
+          ? String(raw.orderId)
+          : undefined,
+        inquiryType: 'online' as const,
+        question: raw.content ?? raw.title ?? '',
+        answeredAt: raw.answeredAt ? new Date(raw.answeredAt) : undefined,
+        requestedAt: new Date(raw.inquiryRegisteredAt),
+        rawData: raw as unknown as Record<string, unknown>,
+      }))
+    } catch (error) {
+      if (error instanceof MarketplaceApiError) throw error
+      if (error instanceof Error && 'response' in error) {
+        const r = (error as unknown as { response: Response }).response
+        const body = await r.text().catch(() => '')
+        console.error('[Coupang] getInquiries error response:', r.status, body)
+        throw new MarketplaceApiError('coupang', r.status, `${r.status}: ${body}`)
       }
       throw new MarketplaceApiError('coupang', 500, error instanceof Error ? error.message : 'Unknown error')
     }

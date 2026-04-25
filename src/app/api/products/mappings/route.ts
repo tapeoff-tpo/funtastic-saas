@@ -6,8 +6,9 @@ import {
   orderItems,
   orders,
   products,
+  productVariants,
 } from '@/lib/db/schema'
-import { eq, and, sql, desc, notExists, gte } from 'drizzle-orm'
+import { eq, and, or, sql, desc, notExists, gte, isNull } from 'drizzle-orm'
 import { subDays } from 'date-fns'
 
 /** Split name into tokens (Korean-friendly). Filter tokens shorter than 2 chars. */
@@ -71,11 +72,13 @@ export async function GET(_req: NextRequest) {
       .orderBy(desc(productNameMappings.updatedAt)),
 
     // Distinct product names from recent orders without a mapping
+    // 주의: 같은 마켓상품명이 한 주문에 여러 번 노출될 수 있어
+    //       count(orderItems.id) 가 아닌 count(DISTINCT orders.id) 사용 — 실제 주문 건수 기준.
     db
       .select({
         marketplaceId: orders.marketplaceId,
         productName: orderItems.productName,
-        orderCount: sql<number>`cast(count(${orderItems.id}) as int)`.as('order_count'),
+        orderCount: sql<number>`cast(count(distinct ${orders.id}) as int)`.as('order_count'),
         lastOrderedAt: sql<string>`max(${orders.orderedAt})`.as('last_ordered_at'),
       })
       .from(orderItems)
@@ -95,6 +98,37 @@ export async function GET(_req: NextRequest) {
                   eq(productNameMappings.marketplaceName, orderItems.productName),
                 ),
               ),
+          ),
+          // SKU 자동 매칭되는 항목 제외 — 판매자상품코드(orderItems.sku)가
+          // 내부 products.internalSku 또는 productVariants.sku 와 일치하면 이미 매핑된 것으로 간주
+          or(
+            isNull(orderItems.sku),
+            sql`btrim(${orderItems.sku}) = ''`,
+            and(
+              notExists(
+                db
+                  .select({ one: sql`1` })
+                  .from(products)
+                  .where(
+                    and(
+                      eq(products.userId, user.id),
+                      eq(products.internalSku, sql`btrim(${orderItems.sku})`),
+                    ),
+                  ),
+              ),
+              notExists(
+                db
+                  .select({ one: sql`1` })
+                  .from(productVariants)
+                  .innerJoin(products, eq(productVariants.productId, products.id))
+                  .where(
+                    and(
+                      eq(products.userId, user.id),
+                      eq(productVariants.sku, sql`btrim(${orderItems.sku})`),
+                    ),
+                  ),
+              ),
+            ),
           ),
         ),
       )

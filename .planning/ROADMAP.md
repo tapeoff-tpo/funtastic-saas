@@ -162,7 +162,7 @@ Plans:
   7. 재고관리 화면에서 상품별 배송비(원가)를 입력/수정할 수 있다
 **Plans:** 4 plans
 Plans:
-- [ ] 08-01-PLAN.md — 데이터 모델 확장 (orders/products shipping fields, inquiries 테이블) + vitest setup + RED 테스트 stubs (SC-01,05,06,07)
+- [x] 08-01-PLAN.md — 데이터 모델 확장 (orders/products shipping fields, inquiries 테이블) + vitest setup + RED 테스트 stubs (SC-01,05,06,07)
 - [ ] 08-02-PLAN.md — Coupang adapter normalize 확장 (shippingFee/Type) + getInquiries + BullMQ inquiry-collection worker (SC-06, inquiry)
 - [ ] 08-03-PLAN.md — 주문관리 UI 리팩터: 9탭 OrderTabs, 엑셀 업로드 제거, stage-tabs 폐기, CS 컬럼 → 인디케이터 통합, displayName, 배송 3컬럼 (SC-01,02,03,04,05,06)
 - [ ] 08-04-PLAN.md — 재고관리 shipping_cost 인라인 편집 (SC-07)

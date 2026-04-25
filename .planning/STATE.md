@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-07-PLAN.md
-last_updated: "2026-04-08T15:18:59.043Z"
-last_activity: 2026-04-24
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-04-25T17:54:53.124Z"
+last_activity: 2026-04-25
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 7
-  total_plans: 32
-  completed_plans: 32
+  total_plans: 36
+  completed_plans: 33
   percent: 100
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-03)
 
 **Core value:** 마켓플레이스 주문을 수집하고 송장을 업로드하는 것이 막힘없이 동작 = 사방넷 끊기
-**Current focus:** Phase 07 — cafe24-cj-ns-b2b (COMPLETE)
+**Current focus:** Phase 08 — orders-ux-improvements
 
 ## Current Position
 
-Phase: 07
-Plan: Not started
-Status: executing
-Last activity: 2026-04-24 - Completed quick task 260424-oz0: 사이드바 접기/펼치기 기능 추가
+Phase: 08 (orders-ux-improvements) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-04-25
 
 Progress: [##########] 100%
 
@@ -68,6 +68,7 @@ Progress: [##########] 100%
 | Phase 07 P04 | 3min | 2 tasks | 16 files |
 | Phase 07 P05 | 2min | 1 tasks | 2 files |
 | Phase 03-shipping-invoice-processing P07 | 15 | 2 tasks | 5 files |
+| Phase 08 P01 | 4min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -108,10 +109,14 @@ Recent decisions affecting current work:
 - [Phase 04]: warehouseZone and sectorCode added as nullable varchar(100) to inventory schema
 - [Phase 03-shipping-invoice-processing]: Added getHeldShipments to existing queries.ts and held actions to existing actions.ts to keep module structure consistent
 - [Phase 03-shipping-invoice-processing]: HeldOrderActions renders as two td cells inside server-rendered tr for correct table structure
+- [Phase 08]: Phase 8 schema: orders.shipping_type/shipping_fee + products.shipping_cost + inquiries table — backfill deferred (NULL start)
+- [Phase 08]: MarketplaceAdapter.getInquiries declared as optional method — non-supporting adapters require zero changes
+- [Phase 08]: schema.test.ts uses typeof orders.shippingType (no `as any` cast) per W-2 — column removal triggers tsc failure before runtime
 
 ### Roadmap Evolution
 
 - Phase 7 added: 추가 마켓플레이스 연동 (도매꾹, 온채널, 오너클랜, Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매의신, 도매창고, 바나나B2B, 신세계몰, 에이블리, 올웨이즈, 카카오선물하기, 카카오톡스토어, 텐바이텐, 토스쇼핑, 투비즈온)
+- Phase 8 added: 주문관리 UX 개선 (취소 탭 활성화, 엑셀 업로드 진입점 정리, CS 컬럼을 클레임 인디케이터로 통합, 매핑된 상품명 표시)
 
 ### Pending Todos
 
@@ -135,6 +140,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-08T15:18:59.037Z
-Stopped at: Completed 03-07-PLAN.md
+Last session: 2026-04-25T17:54:53.122Z
+Stopped at: Completed 08-01-PLAN.md
 Resume file: None

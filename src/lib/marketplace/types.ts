@@ -80,6 +80,22 @@ export interface NormalizedOrder {
   items: NormalizedOrderItem[]
   orderedAt: Date
   totalAmount: number
+  /** 배송구분 — raw marketplace value or normalized enum (prepaid/cod/free/unknown). Phase 8. */
+  shippingType?: string | null
+  /** 마켓에서 수집된 배송비 (KRW). Phase 8. */
+  shippingFee?: number | null
+  rawData: Record<string, unknown>
+}
+
+/** Normalized marketplace inquiry (Phase 8 — Coupang 우선) */
+export interface NormalizedInquiry {
+  marketplaceInquiryId: string
+  marketplaceId: MarketplaceId
+  marketplaceOrderId?: string
+  inquiryType: 'product' | 'callcenter' | 'online'
+  question: string
+  answeredAt?: Date
+  requestedAt: Date
   rawData: Record<string, unknown>
 }
 
@@ -166,4 +182,7 @@ export interface MarketplaceAdapter {
     marketplaceProductId: string,
     product: Partial<NormalizedProduct>
   ): Promise<{ success: boolean; error?: string }>
+
+  // Phase 8: Marketplace inquiries (optional — only marketplaces that support it)
+  getInquiries?(since: Date): Promise<NormalizedInquiry[]>
 }

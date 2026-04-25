@@ -111,6 +111,10 @@ export const orders = pgTable(
     rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
     marketplaceStatus: varchar('marketplace_status', { length: 100 }),
     collectedAt: timestamp('collected_at', { withTimezone: true }),
+    /** 배송구분 (prepaid/cod/free/unknown) — 마켓에서 수집 (Phase 8 / migration 011) */
+    shippingType: varchar('shipping_type', { length: 50 }),
+    /** 마켓에서 수집된 배송비 (KRW). NULL = 미수집/미존재. (Phase 8 / migration 011) */
+    shippingFee: numeric('shipping_fee', { precision: 12, scale: 2 }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -400,6 +404,8 @@ export const products = pgTable(
     categoryId: varchar('category_id', { length: 100 }),
     warehouseLocation: varchar('warehouse_location', { length: 200 }),
     defaultCarrierId: varchar('default_carrier_id', { length: 50 }),
+    /** SaaS 등록 배송비(원가) — 재고관리에서 수동 입력. NULL 허용. (Phase 8 / migration 012) */
+    shippingCost: numeric('shipping_cost', { precision: 12, scale: 2 }),
     status: productStatusEnum('status').notNull().default('draft'),
     images: jsonb('images').$type<Array<{ url: string; sortOrder: number }>>(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
@@ -620,6 +626,37 @@ export const companySettings = pgTable(
   },
   (table) => [
     uniqueIndex('company_settings_user_id').on(table.userId),
+  ],
+)
+
+// ─── Phase 8: Marketplace Inquiries ────────────────────────────
+// 마켓플레이스 문의 수집 (migration 013).
+// Coupang 우선 — Naver는 별도 quick task로 분리.
+// inquiry_type: 'product' | 'callcenter' | 'online' (Coupang 3종)
+
+export const inquiries = pgTable(
+  'inquiries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceInquiryId: varchar('marketplace_inquiry_id', { length: 255 }).notNull(),
+    marketplaceOrderId: varchar('marketplace_order_id', { length: 255 }),
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    inquiryType: varchar('inquiry_type', { length: 50 }).notNull(),
+    question: text('question').notNull(),
+    answeredAt: timestamp('answered_at', { withTimezone: true }),
+    requestedAt: timestamp('requested_at', { withTimezone: true }).notNull(),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('inquiries_user_market_external_uniq').on(
+      table.userId, table.marketplaceId, table.marketplaceInquiryId,
+    ),
+    index('inquiries_order_id_idx').on(table.orderId),
+    index('inquiries_user_marketplace_idx').on(table.userId, table.marketplaceId),
   ],
 )
 

@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-01-PLAN.md
+stopped_at: Completed 08-02-PLAN.md
 last_updated: "2026-04-25T17:54:53.124Z"
 last_activity: 2026-04-25
 progress:
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-03)
 ## Current Position
 
 Phase: 08 (orders-ux-improvements) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
-Last activity: 2026-04-25
+Last activity: 2026-04-26
 
 Progress: [##########] 100%
 
@@ -69,6 +69,7 @@ Progress: [##########] 100%
 | Phase 07 P05 | 2min | 1 tasks | 2 files |
 | Phase 03-shipping-invoice-processing P07 | 15 | 2 tasks | 5 files |
 | Phase 08 P01 | 4min | 3 tasks | 14 files |
+| Phase 08 P02 | 5min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -112,6 +113,9 @@ Recent decisions affecting current work:
 - [Phase 08]: Phase 8 schema: orders.shipping_type/shipping_fee + products.shipping_cost + inquiries table — backfill deferred (NULL start)
 - [Phase 08]: MarketplaceAdapter.getInquiries declared as optional method — non-supporting adapters require zero changes
 - [Phase 08]: schema.test.ts uses typeof orders.shippingType (no `as any` cast) per W-2 — column removal triggers tsc failure before runtime
+- [Phase 08]: Coupang shipping_type normalized via substring match on Korean delivery charge name (선불/착불/무료) — robust to API label variations
+- [Phase 08]: inquiry-worker bypasses createAdapter factory (direct CoupangAdapter instantiation) since the factory's Pick<> type excludes getInquiries
+- [Phase 08]: upsertInquiries uses createdAt==updatedAt heuristic to count inserted vs updated rows (avoids extra SELECT)
 
 ### Roadmap Evolution
 
@@ -140,6 +144,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-25T17:54:53.122Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-04-26T00:00:00.000Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None

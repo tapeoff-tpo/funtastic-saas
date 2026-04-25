@@ -64,6 +64,12 @@
 - 스키마 확장: `products` 테이블에 `shipping_cost` (numeric, nullable) 추가 — 또는 inventory 측에 추가 (어느 쪽이 더 적절한지 research에서 판단)
 - 사용자 의견: "현재 재고관리부분에 그 부분도 없다보니 그것도 넣어서"
 
+### 추가 결정 (2026-04-26 user feedback)
+- **stage-tabs 완전 폐기**: 기존 stage-tabs (매핑/확정/송장/출고/완료) 컴포넌트 제거. 주문관리는 9탭(신규/확인/출고대기/출고완료/배송중/배송완료/취소/교환/반품)만 사용
+- **Naver inquiry는 별도**: Phase 8에서는 Coupang inquiry만 구현. Naver inquiry는 phase 종료 후 별도 quick task로 분리
+- **UI-SPEC skip**: 기존 UI 액세서리 수정이므로 별도 디자인 계약서 생성 안 함. shadcn/ui 패턴 그대로 준수
+- **배송구분(shipping_type) = 결제 방식**: 선결제/착불/무료 등 배송비 결제 구분. Coupang의 `shippingType` / `freeShippingType` 필드를 정규화해서 매핑. enum 권장: `prepaid` (선결제) / `cod` (착불) / `free` (무료) / `unknown`
+
 ### Claude's Discretion
 - 탭 UI 구체적 디자인 (색상, 위치, 아이콘 선택) — shadcn/ui 패턴 준수
 - 클레임/문의 인디케이터의 정확한 시각 표현 (이모지 vs 색칠 점 vs 아이콘 라이브러리)

@@ -17,6 +17,7 @@ import { getConnection } from '@/lib/jobs/connection'
 import { scheduleAllCollections } from '@/lib/jobs/queues'
 import { processOrderCollection } from '@/lib/jobs/workers/order-collector'
 import { createInvoiceUploadWorker } from '@/lib/jobs/workers/invoice-uploader'
+import { startInquiryWorker } from './workers/inquiry-worker'
 
 async function main() {
   console.log('[Worker] Starting BullMQ worker process')
@@ -35,6 +36,10 @@ async function main() {
 
   // Invoice upload worker (concurrency 1, rate limited)
   const invoiceWorker = createInvoiceUploadWorker()
+
+  // Phase 8: Inquiry collection worker (concurrency 2, no repeatable schedule
+  // — manual .add() only for now per Phase 8 scope)
+  const inquiryWorker = startInquiryWorker()
 
   orderWorker.on('completed', (job) => {
     const result = job.returnvalue as { ordersCollected: number; claimsCollected: number } | undefined
@@ -58,7 +63,11 @@ async function main() {
   // Graceful shutdown — Railway sends SIGTERM before stopping a container
   const shutdown = async (signal: string) => {
     console.log(`[Worker] ${signal} received, draining workers...`)
-    await Promise.all([orderWorker.close(), invoiceWorker.close()])
+    await Promise.all([
+      orderWorker.close(),
+      invoiceWorker.close(),
+      inquiryWorker.close(),
+    ])
     console.log('[Worker] Workers closed. Exiting.')
     process.exit(0)
   }

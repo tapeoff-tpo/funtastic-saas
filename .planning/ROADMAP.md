@@ -19,6 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 5: Product Management & Data** - Product listing across marketplaces with category mapping and bulk operations
 - [x] **Phase 6: Marketplace Expansion** - Add 11번가, 지마켓/옥션, 오늘의집 adapters to complete top-5 coverage (completed 2026-04-03)
 - [x] **Phase 7: 추가 마켓플레이스 연동** - Add 18 additional marketplace adapters (Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매꾹, 온채널, 오너클랜 등)
+- [ ] **Phase 8: 주문관리 UX 개선** - 취소 탭 활성화, 단계별 필터, 클레임 인디케이터 통합, 매핑 상품명 표시, 배송구분/SaaS 배송비 노출
 
 ## Phase Details
 
@@ -147,6 +148,24 @@ Plans:
 - [x] 07-04-PLAN.md — Tier 3b stubs: 올웨이즈, 텐바이텐, 토스쇼핑, 투비즈온 (MKT-V2)
 - [x] 07-05-PLAN.md — Register all 18 in configs.ts + update MarketplaceId type (MKT-V2)
 
+### Phase 8: 주문관리 UX 개선
+**Goal**: 주문관리 화면이 사방넷 대체에 충분히 직관적 — 클레임 상태가 한눈에 보이고, 매핑된 상품명이 표시되며, 단계별 필터가 명확히 동작하고, 배송구분/배송비가 명확히 보인다
+**Depends on**: Phase 3 (출고/송장), Phase 4 (재고/배송비), Phase 5 (상품 매핑)
+**Requirements**: post-launch UX feedback (취소 탭 활성화, 엑셀 업로드 제거 + 단계별 필터, CS 컬럼을 클레임 인디케이터로 통합, 매핑된 상품명 표시, 배송구분/SaaS 배송비 노출)
+**Success Criteria** (what must be TRUE):
+  1. 취소 탭에 정확한 카운트가 표시되고 클릭 시 취소 클레임 주문만 필터링된다
+  2. 주문관리 메인 헤더에서 "엑셀 업로드" 진입점이 제거되고, 단계별(출고대기/출고완료/교환 등) 탭/필터로 대체된다
+  3. 별도 CS 컬럼 없이 클레임/문의 유무가 좌측 첫 컬럼에 뱃지/아이콘으로 표시된다 (가능한 마켓에서 문의도 수집)
+  4. 매핑된 상품의 표시명이 마켓플레이스 원본명이 아닌 SaaS 등록 상품명(displayName)으로 노출된다
+  5. 단계별(출고대기/출고완료/교환 등) 필터가 빠짐없이 동작하고 카운트가 정확하다
+  6. 주문 행에 배송구분이 표시되고, "수집 배송비"와 "SaaS 배송비(원가)"가 별도 컬럼으로 노출된다 (재고/상품 등록 정보 기반)
+  7. 재고관리 화면에서 상품별 배송비(원가)를 입력/수정할 수 있다
+**Plans:** 0 plans
+Plans:
+- [ ] TBD (run /gsd:plan-phase 8 to break down)
+
+**Note:** 매출관리(원가/배송비/판매가/수령배송비 기반 수익 계산)는 별도 phase로 분리 예정 — Phase 8은 데이터 노출과 입력 UI까지만 담당.
+
 ## Backlog
 
 ### Phase 999.1: OAuth2 마켓플레이스 인앱 연동 (BACKLOG)
@@ -168,7 +187,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 8
 Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, Phase 5 depends on Phase 1).
 
 | Phase | Plans Complete | Status | Completed |
@@ -180,3 +199,4 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 5. Product Management & Data | 0/5 | Not started | - |
 | 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |
 | 7. 추가 마켓플레이스 연동 | 5/5 | Complete   | 2026-04-03 |
+| 8. 주문관리 UX 개선 | 0/0 | Not planned | - |

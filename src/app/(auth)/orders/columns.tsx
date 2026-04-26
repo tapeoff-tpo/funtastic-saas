@@ -485,43 +485,36 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 80,
   },
 
-  // Phase 8 — 수집 배송비 (마켓 원본)
+  // Phase 8 — 배송비 (수집 / 등록 통합)
+  //   상단: 수집 배송비 (마켓 원본)
+  //   하단: SaaS 등록 배송비(원가) — products.shipping_cost SUM
   {
-    id: 'shippingFee',
-    header: '수집 배송비',
+    id: 'shippingFees',
+    header: '배송비 (수집/등록)',
     cell: ({ row }) => {
-      const v = row.original.shippingFee
-      if (v == null || v === '') return <span className="text-xs text-muted-foreground">—</span>
-      const num = Number(v)
-      if (Number.isNaN(num)) return <span className="text-xs text-muted-foreground">—</span>
-      return (
-        <span className="text-xs tabular-nums">
-          {num.toLocaleString('ko-KR')}
-          <span className="ml-0.5 text-[10px] text-muted-foreground">원</span>
-        </span>
-      )
-    },
-    size: 100,
-  },
-
-  // Phase 8 — SaaS 배송비(원가) — products.shipping_cost SUM (items 다건 시 합산)
-  {
-    id: 'shippingCost',
-    header: 'SaaS 배송비(원가)',
-    cell: ({ row }) => {
+      const fee = row.original.shippingFee
       const items = row.original.items ?? []
-      const haveAny = items.some((i) => i.shippingCost != null && i.shippingCost !== '')
-      if (!haveAny) return <span className="text-xs text-muted-foreground">—</span>
-      const sum = items.reduce((acc, i) => acc + Number(i.shippingCost ?? 0), 0)
-      if (Number.isNaN(sum)) return <span className="text-xs text-muted-foreground">—</span>
+      const haveCost = items.some((i) => i.shippingCost != null && i.shippingCost !== '')
+      const costSum = haveCost
+        ? items.reduce((acc, i) => acc + Number(i.shippingCost ?? 0), 0)
+        : null
+
+      const feeNum = fee == null || fee === '' ? null : Number(fee)
+      const feeText =
+        feeNum != null && !Number.isNaN(feeNum) ? `${feeNum.toLocaleString('ko-KR')}원` : '—'
+      const costText =
+        costSum != null && !Number.isNaN(costSum)
+          ? `${costSum.toLocaleString('ko-KR')}원`
+          : '—'
+
       return (
-        <span className="text-xs tabular-nums">
-          {sum.toLocaleString('ko-KR')}
-          <span className="ml-0.5 text-[10px] text-muted-foreground">원</span>
-        </span>
+        <div className="flex flex-col gap-0.5 text-xs leading-tight tabular-nums">
+          <span>{feeText}</span>
+          <span className="text-[10px] text-muted-foreground">{costText}</span>
+        </div>
       )
     },
-    size: 120,
+    size: 110,
   },
 
   // 택배사 · 송장

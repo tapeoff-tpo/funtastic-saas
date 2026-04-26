@@ -92,14 +92,12 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
     <div className="space-y-2">
       {/* Action bar + toolbar merged — ShippingActions + 선택 카운트 + 열 표시 in one row */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex-1 min-w-0">
-          <ShippingActions
-            selectedOrderIds={selectedIds}
-            selectedOrders={selectedOrders}
-            allOrders={data}
-            stage={stage}
-          />
-        </div>
+        <ShippingActions
+          selectedOrderIds={selectedIds}
+          selectedOrders={selectedOrders}
+          allOrders={data}
+          stage={stage}
+        />
         {selectedCount > 0 && (
           <span className="text-sm text-muted-foreground">
             {selectedCount}건 선택됨

@@ -14,12 +14,11 @@ describe('columns.tsx — phase 8 file-content assertions', () => {
     expect(src).toMatch(/header:\s*['"`]배송구분['"`]/)
   })
 
-  it('수집 배송비 컬럼이 추가되었다', () => {
-    expect(src).toMatch(/header:\s*['"`]수집 배송비['"`]/)
-  })
-
-  it('SaaS 배송비(원가) 컬럼이 추가되었다', () => {
-    expect(src).toMatch(/header:\s*['"`]SaaS 배송비\(원가\)['"`]/)
+  it('배송비 (수집/등록) 통합 컬럼이 추가되었다', () => {
+    expect(src).toMatch(/header:\s*['"`]배송비 \(수집\/등록\)['"`]/)
+    // 셀 내부에 shippingFee + shippingCost 둘 다 참조
+    expect(src).toMatch(/shippingFee/)
+    expect(src).toMatch(/shippingCost/)
   })
 
   it('displayName fallback 패턴 사용 (displayName ?? productName)', () => {

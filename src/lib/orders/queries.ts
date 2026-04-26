@@ -7,9 +7,12 @@
 
 import { db } from '@/lib/db'
 import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory, shipmentGroups, shipmentGroupOrders } from '@/lib/db/schema'
-import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, inArray, isNotNull } from 'drizzle-orm'
+import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
-import type { OrderFilters, MappingStatus, OrderStage } from './types'
+import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
+// re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
+export type { OrderStats }
+import { listInquiriesByOrderIds } from './inquiry-queries'
 
 /** 주문이 특정 단계에 속하는지 판정 */
 export function matchStage(
@@ -88,6 +91,26 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(eq(orders.isHeld, true))
   }
 
+  // Phase 8 — 취소 탭 통합 필터: status='cancelled' OR claimType='cancel'
+  if (filters.cancelTab) {
+    conditions.push(
+      or(
+        eq(orders.status, 'cancelled'),
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(claims)
+            .where(
+              and(
+                eq(claims.orderId, orders.id),
+                eq(claims.claimType, 'cancel'),
+              ),
+            ),
+        ),
+      )!,
+    )
+  }
+
   return conditions
 }
 
@@ -159,12 +182,53 @@ export async function getOrders(filters: OrderFilters = {}) {
   }
 
   // Fetch items/claims/shipments/shipmentGroups in parallel
+  // Phase 8: items query is now a multi-join — orderItems LEFT JOIN productNameMappings
+  // (on user_id + marketplace_id + marketplace_name) for displayName, plus LEFT JOIN
+  // products (on internal_sku ↔ orderItems.sku) for shipping_cost.
+  // marketplaceId match prevents Pitfall 2 (쿠팡 row가 네이버 매핑을 잡지 않음).
   const orderIds = orderRows.map((o) => o.id)
-  const [items, claimRows, shipmentRows, groupRows] = orderIds.length > 0
+  const [itemRows, claimRows, shipmentRows, groupRows, inquiryRows] = orderIds.length > 0
     ? await Promise.all([
-        db.select().from(orderItems).where(sql`${orderItems.orderId} IN ${orderIds}`),
-        db.select().from(claims).where(sql`${claims.orderId} IN ${orderIds}`),
-        db.select().from(shipments).where(sql`${shipments.orderId} IN ${orderIds}`),
+        db
+          .select({
+            id: orderItems.id,
+            orderId: orderItems.orderId,
+            marketplaceItemId: orderItems.marketplaceItemId,
+            productName: orderItems.productName,
+            optionText: orderItems.optionText,
+            quantity: orderItems.quantity,
+            unitPrice: orderItems.unitPrice,
+            sku: orderItems.sku,
+            skuMultiplier: orderItems.skuMultiplier,
+            fulfillmentCode: orderItems.fulfillmentCode,
+            // Phase 8 — displayName from product_name_mappings (nullable on miss)
+            displayName: productNameMappings.displayName,
+            // Phase 8 — shipping_cost from products (nullable when SKU has no product master)
+            shippingCost: products.shippingCost,
+            // need order's marketplaceId for the displayName join condition
+            orderMarketplaceId: orders.marketplaceId,
+            orderUserId: orders.userId,
+          })
+          .from(orderItems)
+          .innerJoin(orders, eq(orders.id, orderItems.orderId))
+          .leftJoin(
+            productNameMappings,
+            and(
+              eq(productNameMappings.userId, orders.userId),
+              eq(productNameMappings.marketplaceId, orders.marketplaceId),
+              eq(productNameMappings.marketplaceName, orderItems.productName),
+            ),
+          )
+          .leftJoin(
+            products,
+            and(
+              eq(products.userId, orders.userId),
+              eq(products.internalSku, orderItems.sku),
+            ),
+          )
+          .where(inArray(orderItems.orderId, orderIds)),
+        db.select().from(claims).where(inArray(claims.orderId, orderIds)),
+        db.select().from(shipments).where(inArray(shipments.orderId, orderIds)),
         db
           .select({
             orderId: shipmentGroupOrders.orderId,
@@ -173,9 +237,55 @@ export async function getOrders(filters: OrderFilters = {}) {
           })
           .from(shipmentGroupOrders)
           .innerJoin(shipmentGroups, eq(shipmentGroupOrders.shipmentGroupId, shipmentGroups.id))
-          .where(sql`${shipmentGroupOrders.orderId} IN ${orderIds}`),
+          .where(inArray(shipmentGroupOrders.orderId, orderIds)),
+        // Phase 8 — inquiry indicator (hasInquiries) source
+        listInquiriesByOrderIds(orderIds),
       ])
-    : [[] as (typeof orderItems.$inferSelect)[], [] as (typeof claims.$inferSelect)[], [] as (typeof shipments.$inferSelect)[], [] as { orderId: string; groupId: string; groupKey: string }[]]
+    : [
+        [] as Array<{
+          id: string
+          orderId: string
+          marketplaceItemId: string | null
+          productName: string
+          optionText: string | null
+          quantity: number
+          unitPrice: string
+          sku: string | null
+          skuMultiplier: number
+          fulfillmentCode: string | null
+          displayName: string | null
+          shippingCost: string | null
+          orderMarketplaceId: string
+          orderUserId: string
+        }>,
+        [] as (typeof claims.$inferSelect)[],
+        [] as (typeof shipments.$inferSelect)[],
+        [] as { orderId: string; groupId: string; groupKey: string }[],
+        [] as Awaited<ReturnType<typeof listInquiriesByOrderIds>>,
+      ]
+
+  // Phase 8 — orderItems shape used downstream (mapping status / sortable item arrays)
+  // We keep an "items" alias matching the legacy shape to avoid touching mappingStatus logic.
+  const items = itemRows.map((r) => ({
+    id: r.id,
+    orderId: r.orderId,
+    marketplaceItemId: r.marketplaceItemId,
+    productName: r.productName,
+    optionText: r.optionText,
+    quantity: r.quantity,
+    unitPrice: r.unitPrice,
+    sku: r.sku,
+    skuMultiplier: r.skuMultiplier,
+    fulfillmentCode: r.fulfillmentCode,
+    displayName: r.displayName,
+    shippingCost: r.shippingCost,
+  }))
+
+  // Phase 8 — Set of orderIds with at least one inquiry
+  const inquirySet = new Set<string>()
+  for (const inq of inquiryRows) {
+    if (inq.orderId) inquirySet.add(inq.orderId)
+  }
 
   const groupByOrderId = new Map<string, { groupId: string; groupKey: string }>()
   for (const g of groupRows) {
@@ -191,8 +301,9 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  // Group items by orderId
-  const itemsByOrderId = new Map<string, (typeof orderItems.$inferSelect)[]>()
+  // Group items by orderId — Phase 8 shape (orderItems base + displayName + shippingCost)
+  type ItemRow = typeof items[number]
+  const itemsByOrderId = new Map<string, ItemRow[]>()
   for (const item of items) {
     const existing = itemsByOrderId.get(item.orderId) ?? []
     existing.push(item)
@@ -272,6 +383,8 @@ export async function getOrders(filters: OrderFilters = {}) {
       carrierName: shipment?.carrierName ?? null,
       shipmentGroupId: group?.groupId ?? null,
       shipmentGroupKey: group?.groupKey ?? null,
+      // Phase 8 — inquiry indicator source for orders UI (SC-03)
+      hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,
       mappingStatus: getMappingStatus(order.marketplaceId, orderItemsData),
     }
@@ -518,59 +631,77 @@ export async function getStockDeductionPreview(
   })
 }
 
-export interface OrderStats {
-  total: number
-  cancel: number
-  return: number
-  exchange: number
-  held: number
-  // Workflow flow counts (by orders.status)
-  newCount: number
-  confirmed: number
-  preparing: number
-  shipped: number
-}
-
 /**
- * Dashboard-style summary counts for a user's orders.
- * All scoped by userId. Parallelized COUNT queries for tabs + workflow diagram.
+ * Phase 8 — Dashboard 9탭 summary counts.
+ * Three focused queries (per-status group, per-claimType distinct group,
+ * cancelTab distinct OR) so each tab badge is exact at SQL level.
+ *
+ * - Status counts: `groupBy(orders.status)` (single GROUP BY scan)
+ * - Claim counts: `countDistinct(claims.orderId)` per claimType
+ * - cancelTabCount: `countDistinct(orders.id)` WHERE status='cancelled' OR has cancel claim
+ *
+ * All scoped by userId (RLS pattern + perf).
  */
 export async function getOrderStats(userId: string): Promise<OrderStats> {
-  const [totalRow, claimRows, heldRow, statusRows] = await Promise.all([
-    db.select({ value: count() }).from(orders).where(eq(orders.userId, userId)),
-    db
-      .select({ claimType: claims.claimType, value: count() })
-      .from(claims)
-      .innerJoin(orders, eq(orders.id, claims.orderId))
-      .where(eq(orders.userId, userId))
-      .groupBy(claims.claimType),
-    db
-      .select({ value: count() })
-      .from(orders)
-      .where(and(eq(orders.userId, userId), eq(orders.isHeld, true))),
+  const [statusRows, claimRows, cancelTabRows, totalRow, heldRow] = await Promise.all([
     db
       .select({ status: orders.status, value: count() })
       .from(orders)
       .where(eq(orders.userId, userId))
       .groupBy(orders.status),
+    db
+      .select({ claimType: claims.claimType, value: countDistinct(claims.orderId) })
+      .from(claims)
+      .innerJoin(orders, eq(orders.id, claims.orderId))
+      .where(eq(orders.userId, userId))
+      .groupBy(claims.claimType),
+    db
+      .select({ value: countDistinct(orders.id) })
+      .from(orders)
+      .leftJoin(
+        claims,
+        and(eq(claims.orderId, orders.id), eq(claims.claimType, 'cancel')),
+      )
+      .where(
+        and(
+          eq(orders.userId, userId),
+          or(eq(orders.status, 'cancelled'), isNotNull(claims.id)),
+        ),
+      ),
+    db.select({ value: count() }).from(orders).where(eq(orders.userId, userId)),
+    db
+      .select({ value: count() })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), eq(orders.isHeld, true))),
   ])
-
-  const byClaimType: Record<string, number> = {}
-  for (const row of claimRows) byClaimType[row.claimType] = row.value
 
   const byStatus: Record<string, number> = {}
   for (const row of statusRows) byStatus[row.status] = row.value
 
+  const byClaim: Record<string, number> = {}
+  for (const row of claimRows) byClaim[row.claimType] = row.value
+
+  const cancelTabCount = cancelTabRows[0]?.value ?? 0
+
   return {
-    total: totalRow[0]?.value ?? 0,
-    cancel: byClaimType.cancel ?? 0,
-    return: byClaimType.return ?? 0,
-    exchange: byClaimType.exchange ?? 0,
-    held: heldRow[0]?.value ?? 0,
-    newCount: byStatus.new ?? 0,
+    new: byStatus.new ?? 0,
     confirmed: byStatus.confirmed ?? 0,
     preparing: byStatus.preparing ?? 0,
-    shipped: (byStatus.shipped ?? 0) + (byStatus.delivering ?? 0) + (byStatus.delivered ?? 0),
+    shipped: byStatus.shipped ?? 0,
+    delivering: byStatus.delivering ?? 0,
+    delivered: byStatus.delivered ?? 0,
+    cancelled: byStatus.cancelled ?? 0,
+    claimCancel: byClaim.cancel ?? 0,
+    claimExchange: byClaim.exchange ?? 0,
+    claimReturn: byClaim.return ?? 0,
+    cancelTabCount,
+    // legacy/aux fields — kept for backward compatibility with older callers
+    total: totalRow[0]?.value ?? 0,
+    held: heldRow[0]?.value ?? 0,
+    cancel: byClaim.cancel ?? 0,
+    return: byClaim.return ?? 0,
+    exchange: byClaim.exchange ?? 0,
+    newCount: byStatus.new ?? 0,
   }
 }
 

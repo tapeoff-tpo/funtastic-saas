@@ -77,4 +77,94 @@ export interface OrderFilters {
   stage?: OrderStage
   /** Filter to only held (미발송) orders */
   isHeld?: boolean
+  /**
+   * Phase 8 — 취소 탭 통합 필터.
+   * true → orders.status='cancelled' OR claims.claimType='cancel' (distinct)
+   */
+  cancelTab?: boolean
+}
+
+/**
+ * Phase 8 — Dashboard 9탭 + claim 카운트 stats.
+ * status counts (7) + claim counts (3) + cancelTabCount (distinct OR).
+ */
+export interface OrderStats {
+  // status counts (orders.status)
+  new: number
+  confirmed: number
+  preparing: number
+  shipped: number
+  delivering: number
+  delivered: number
+  cancelled: number
+  // claim counts — DISTINCT order_id per claimType
+  claimCancel: number
+  claimExchange: number
+  claimReturn: number
+  /**
+   * 취소 탭 통합 카운트 — DISTINCT order_id WHERE
+   * orders.status='cancelled' OR claims.claimType='cancel'.
+   * 단일 SQL로 정확 계산. (B-3)
+   */
+  cancelTabCount: number
+  // legacy/aux fields (backward compat for older callers)
+  total?: number
+  /** legacy alias for claimCancel — kept for transitional callers; prefer claimCancel */
+  cancel?: number
+  /** legacy alias for claimReturn — kept for transitional callers */
+  return?: number
+  /** legacy alias for claimExchange — kept for transitional callers */
+  exchange?: number
+  /** count of orders.is_held=true */
+  held?: number
+  /** legacy alias for `new` (avoid TS reserved-word collision in older callers) */
+  newCount?: number
+}
+
+/**
+ * Phase 8 — Order list row returned by getOrders.
+ * Wraps the orders schema with computed fields (claim summary, shipment, mapping status,
+ * inquiry indicator) and a normalized items[] (with displayName + shippingCost).
+ */
+export interface OrderListItem {
+  id: string
+  marketplaceId: string
+  marketplaceOrderId: string
+  buyerName: string
+  buyerPhone?: string | null
+  recipientName?: string | null
+  recipientPhone?: string | null
+  status: OrderStatus
+  orderedAt: Date | string
+  collectedAt?: Date | string | null
+  totalAmount: string
+  isHeld: boolean
+  holdReason?: string | null
+  logisticsMessage?: string | null
+  /** Phase 8 — 마켓에서 수집된 배송구분 (prepaid|cod|free|unknown) */
+  shippingType: string | null
+  /** Phase 8 — 마켓에서 수집된 배송비 (KRW, numeric => string) */
+  shippingFee: string | null
+  claimType?: ClaimType | null
+  claimId?: string | null
+  claimStatus?: ClaimStatus | null
+  claimReason?: string | null
+  invoiceStatus?: string | null
+  trackingNumber?: string | null
+  carrierName?: string | null
+  mappingStatus?: MappingStatus
+  shipmentGroupId?: string | null
+  shipmentGroupKey?: string | null
+  /** Phase 8 — 이 주문에 마켓 문의가 1건 이상 존재하는가 */
+  hasInquiries: boolean
+  items: Array<{
+    productName: string
+    /** Phase 8 — product_name_mappings.display_name (매핑 없을 때 null → fallback to productName) */
+    displayName: string | null
+    optionText: string | null
+    quantity: number
+    sku: string | null
+    /** Phase 8 — products.shipping_cost (SaaS 등록 원가, NULL 가능) */
+    shippingCost: string | null
+  }>
 }

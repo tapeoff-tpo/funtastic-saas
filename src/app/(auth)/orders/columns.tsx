@@ -2,6 +2,7 @@
 
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
+import { MessageCircle, Lock } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
@@ -69,7 +70,7 @@ const INVOICE_STATUS_VARIANT: Record<InvoiceUploadStatus, 'default' | 'secondary
 
 type InvoiceUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed' | 'confirmed'
 
-/** Row shape for the order table (matches getOrders return) */
+/** Row shape for the order table (matches getOrders return — Phase 8) */
 export interface OrderRow {
   id: string
   marketplaceId: string
@@ -85,6 +86,12 @@ export interface OrderRow {
   isHeld: boolean
   holdReason?: string | null
   logisticsMessage?: string | null
+  /** Phase 8 — 마켓 수집 배송구분 (prepaid|cod|free|unknown|null) */
+  shippingType?: string | null
+  /** Phase 8 — 마켓 수집 배송비 (KRW numeric → string from postgres-js) */
+  shippingFee?: string | null
+  /** Phase 8 — 이 주문에 마켓 문의가 1건 이상 존재하는가 */
+  hasInquiries?: boolean
   claimType?: ClaimType | null
   claimId?: string | null
   claimStatus?: ClaimStatus | null
@@ -97,9 +104,13 @@ export interface OrderRow {
   shipmentGroupKey?: string | null
   items: {
     productName: string
+    /** Phase 8 — product_name_mappings.display_name (null → fallback to productName) */
+    displayName?: string | null
     optionText: string | null
     quantity: number
     sku?: string | null
+    /** Phase 8 — products.shipping_cost (SaaS 등록 원가) */
+    shippingCost?: string | null
   }[]
 }
 
@@ -128,7 +139,6 @@ function getMarketplaceLabel(id: string): string {
 
 function formatPhone(phone: string | null | undefined): string {
   if (!phone) return ''
-  // Normalize: 010-1234-5678 format
   const digits = phone.replace(/\D/g, '')
   if (digits.length === 11) return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`
   if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`
@@ -154,6 +164,29 @@ function groupColor(groupId: string): string {
     hash = (hash * 31 + groupId.charCodeAt(i)) | 0
   }
   return GROUP_COLORS[Math.abs(hash) % GROUP_COLORS.length]
+}
+
+/** Phase 8 — 배송구분 한글 라벨 */
+const SHIPPING_TYPE_LABELS: Record<string, string> = {
+  prepaid: '선결제',
+  cod: '착불',
+  free: '무료',
+}
+function shippingTypeLabel(t: string | null | undefined): string {
+  if (!t) return '—'
+  return SHIPPING_TYPE_LABELS[t] ?? t
+}
+
+/** Phase 8 — Claim type 한글 라벨 + 배지 색 */
+const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
+  cancel: '취소',
+  exchange: '교환',
+  return: '반품',
+}
+const CLAIM_TYPE_BADGE: Record<ClaimType, string> = {
+  cancel: 'border-red-300 bg-red-50 text-red-700',
+  exchange: 'border-blue-300 bg-blue-50 text-blue-700',
+  return: 'border-orange-300 bg-orange-50 text-orange-700',
 }
 
 export const columns: ColumnDef<OrderRow>[] = [
@@ -183,7 +216,7 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 32,
   },
 
-  // 주문상태 | Claim 버튼 (팝업으로 전체 주문정보 + CS 메모)
+  // 주문상태 + 인디케이터 통합 (claim 뱃지 / 문의 / 미발송 holdReason) — Phase 8 SC-03
   {
     id: 'statusActions',
     header: '주문상태',
@@ -192,21 +225,62 @@ export const columns: ColumnDef<OrderRow>[] = [
       const openDetail = getOpenDetail(table)
       return (
         <div className="flex flex-col gap-1">
-          <Badge variant={STATUS_VARIANT[order.status]} className="w-fit">
-            {ORDER_STATUS_LABELS[order.status]}
-          </Badge>
-          <button
-            type="button"
-            onClick={() => openDetail?.(order.id)}
-            className="w-fit rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100"
-          >
-            Claim
-          </button>
+          {/* 인디케이터 클러스터 — claim badge / 문의 / 미발송 */}
+          <div className="flex flex-wrap items-center gap-1">
+            <Badge variant={STATUS_VARIANT[order.status]} className="w-fit">
+              {ORDER_STATUS_LABELS[order.status]}
+            </Badge>
+            {order.claimType && (
+              <span
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${CLAIM_TYPE_BADGE[order.claimType]}`}
+                title={order.claimReason ?? CLAIM_TYPE_LABELS[order.claimType]}
+              >
+                {CLAIM_TYPE_LABELS[order.claimType]}
+              </span>
+            )}
+            {order.hasInquiries && (
+              <span title="문의 있음" className="inline-flex items-center text-blue-600">
+                <MessageCircle className="h-3.5 w-3.5" aria-label="문의" />
+              </span>
+            )}
+            {order.isHeld && (
+              <span
+                title={order.holdReason ?? '미발송'}
+                className="inline-flex items-center gap-0.5 rounded border border-purple-300 bg-purple-50 px-1 py-0.5 text-[10px] font-medium text-purple-700"
+              >
+                <Lock className="h-3 w-3" aria-label="미발송" />
+                미발송
+              </span>
+            )}
+          </div>
+          {/* hold reason 보조 텍스트 (Pitfall 3 — holdReason 정보 보존) */}
+          {order.isHeld && order.holdReason && (
+            <span className="max-w-[180px] truncate text-[10px] text-muted-foreground" title={order.holdReason}>
+              {order.holdReason}
+            </span>
+          )}
+          {/* Claim 액션 (기존 ClaimStatusActions) */}
+          {order.claimId && order.claimType && order.claimStatus ? (
+            <ClaimStatusActions
+              claimId={order.claimId}
+              claimType={order.claimType}
+              claimStatus={order.claimStatus}
+              reason={order.claimReason ?? null}
+            />
+          ) : (
+            <button
+              type="button"
+              onClick={() => openDetail?.(order.id)}
+              className="w-fit rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100"
+            >
+              Claim
+            </button>
+          )}
         </div>
       )
     },
     enableSorting: false,
-    size: 110,
+    size: 130,
   },
 
   // 쇼핑몰
@@ -267,7 +341,7 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 180,
   },
 
-  // 상품 (SKU + 이름 + 옵션 + 수량 + 물류메세지)
+  // 상품 (SKU + displayName 우선 + 원본명 보조 + 옵션 + 수량 + 물류메세지) — Phase 8 SC-04
   {
     id: 'productInfo',
     header: '상품',
@@ -278,6 +352,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         return <span className="text-muted-foreground">-</span>
       const first = items[0]
       const extra = items.length - 1
+      // displayName 우선, 매핑 없으면 productName
+      const primaryName = first.displayName ?? first.productName
+      const showOriginal = first.displayName != null && first.displayName !== first.productName
       return (
         <div className="flex flex-col gap-0 text-xs leading-tight">
           {first.sku && (
@@ -285,9 +362,17 @@ export const columns: ColumnDef<OrderRow>[] = [
               {first.sku}
             </span>
           )}
-          <span className="max-w-[280px] truncate font-medium" title={first.productName}>
-            {first.productName}
+          <span className="max-w-[280px] truncate font-medium" title={primaryName}>
+            {primaryName}
           </span>
+          {showOriginal && (
+            <span
+              className="max-w-[280px] truncate text-[10px] text-muted-foreground"
+              title={`원본명: ${first.productName}`}
+            >
+              ({first.productName})
+            </span>
+          )}
           {first.optionText && (
             <span className="max-w-[280px] truncate text-[11px] text-muted-foreground" title={first.optionText}>
               {first.optionText}
@@ -316,7 +401,7 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 300,
   },
 
-  // 구매자 / 수취인 — 둘 다 표시 (연락처는 tooltip)
+  // 구매자 / 수취인
   {
     id: 'contact',
     header: '구매자 · 수취인',
@@ -384,39 +469,59 @@ export const columns: ColumnDef<OrderRow>[] = [
     cell: ({ row }) => <MappingCell order={row.original} />,
     size: 90,
   },
-  // CS — 클레임/미발송
+
+  // Phase 8 — 배송구분
   {
-    id: 'cs',
-    header: 'CS',
+    id: 'shippingType',
+    header: '배송구분',
     cell: ({ row }) => {
-      const order = row.original
-      if (order.claimId && order.claimType && order.claimStatus) {
-        return (
-          <ClaimStatusActions
-            claimId={order.claimId}
-            claimType={order.claimType}
-            claimStatus={order.claimStatus}
-            reason={order.claimReason ?? null}
-          />
-        )
-      }
-      if (order.isHeld) {
-        return (
-          <div className="flex flex-col gap-0.5">
-            <Badge variant="outline" className="border-purple-300 bg-purple-50 text-purple-700">
-              미발송
-            </Badge>
-            {order.holdReason && (
-              <span className="max-w-[180px] truncate text-xs text-muted-foreground" title={order.holdReason}>
-                {order.holdReason}
-              </span>
-            )}
-          </div>
-        )
-      }
-      return <span className="text-xs text-muted-foreground">-</span>
+      const t = row.original.shippingType
+      return (
+        <Badge variant="outline" className="text-[11px]">
+          {shippingTypeLabel(t)}
+        </Badge>
+      )
     },
-    size: 200,
+    size: 80,
+  },
+
+  // Phase 8 — 수집 배송비 (마켓 원본)
+  {
+    id: 'shippingFee',
+    header: '수집 배송비',
+    cell: ({ row }) => {
+      const v = row.original.shippingFee
+      if (v == null || v === '') return <span className="text-xs text-muted-foreground">—</span>
+      const num = Number(v)
+      if (Number.isNaN(num)) return <span className="text-xs text-muted-foreground">—</span>
+      return (
+        <span className="text-xs tabular-nums">
+          {num.toLocaleString('ko-KR')}
+          <span className="ml-0.5 text-[10px] text-muted-foreground">원</span>
+        </span>
+      )
+    },
+    size: 100,
+  },
+
+  // Phase 8 — SaaS 배송비(원가) — products.shipping_cost SUM (items 다건 시 합산)
+  {
+    id: 'shippingCost',
+    header: 'SaaS 배송비(원가)',
+    cell: ({ row }) => {
+      const items = row.original.items ?? []
+      const haveAny = items.some((i) => i.shippingCost != null && i.shippingCost !== '')
+      if (!haveAny) return <span className="text-xs text-muted-foreground">—</span>
+      const sum = items.reduce((acc, i) => acc + Number(i.shippingCost ?? 0), 0)
+      if (Number.isNaN(sum)) return <span className="text-xs text-muted-foreground">—</span>
+      return (
+        <span className="text-xs tabular-nums">
+          {sum.toLocaleString('ko-KR')}
+          <span className="ml-0.5 text-[10px] text-muted-foreground">원</span>
+        </span>
+      )
+    },
+    size: 120,
   },
 
   // 택배사 · 송장

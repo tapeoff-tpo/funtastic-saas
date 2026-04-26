@@ -163,9 +163,9 @@ Plans:
 **Plans:** 4 plans
 Plans:
 - [x] 08-01-PLAN.md — 데이터 모델 확장 (orders/products shipping fields, inquiries 테이블) + vitest setup + RED 테스트 stubs (SC-01,05,06,07)
-- [ ] 08-02-PLAN.md — Coupang adapter normalize 확장 (shippingFee/Type) + getInquiries + BullMQ inquiry-collection worker (SC-06, inquiry)
-- [ ] 08-03-PLAN.md — 주문관리 UI 리팩터: 9탭 OrderTabs, 엑셀 업로드 제거, stage-tabs 폐기, CS 컬럼 → 인디케이터 통합, displayName, 배송 3컬럼 (SC-01,02,03,04,05,06)
-- [ ] 08-04-PLAN.md — 재고관리 shipping_cost 인라인 편집 (SC-07)
+- [x] 08-02-PLAN.md — Coupang adapter normalize 확장 (shippingFee/Type) + getInquiries + BullMQ inquiry-collection worker (SC-06, inquiry)
+- [x] 08-03-PLAN.md — 주문관리 UI 리팩터: 9탭 OrderTabs, 엑셀 업로드 제거, stage-tabs 폐기, CS 컬럼 → 인디케이터 통합, displayName, 배송 3컬럼 (SC-01,02,03,04,05,06)
+- [x] 08-04-PLAN.md — 재고관리 shipping_cost 인라인 편집 (SC-07)
 
 **Note:** 매출관리(원가/배송비/판매가/수령배송비 기반 수익 계산)는 별도 phase로 분리 예정 — Phase 8은 데이터 노출과 입력 UI까지만 담당.
 

@@ -2,7 +2,8 @@ import { eq, and, gte, lt, sql } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, products } from '@/lib/db/schema'
-import { ShoppingCart, Calendar, Package, Wallet, TrendingUp } from 'lucide-react'
+import { ShoppingCart, Calendar, Package, Wallet, TrendingUp, PackageX } from 'lucide-react'
+import Link from 'next/link'
 import {
   DailyOrdersChart,
   MonthlyOrdersChart,
@@ -45,6 +46,7 @@ export default async function DashboardPage() {
     newOrdersResult,
     monthOrdersResult,
     productCountResult,
+    heldOrdersResult,
     todaySalesResult,
     monthSalesResult,
     dailyRows,
@@ -62,6 +64,10 @@ export default async function DashboardPage() {
       .select({ count: sql<number>`count(*)::int` })
       .from(products)
       .where(eq(products.userId, user.id)),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(orders)
+      .where(and(eq(orders.userId, user.id), eq(orders.isHeld, true))),
     db
       .select({ sum: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text` })
       .from(orders)
@@ -99,6 +105,7 @@ export default async function DashboardPage() {
   const newOrderCount = newOrdersResult[0]?.count ?? 0
   const monthOrderCount = monthOrdersResult[0]?.count ?? 0
   const productCount = productCountResult[0]?.count ?? 0
+  const heldOrderCount = heldOrdersResult[0]?.count ?? 0
   const todaySales = Number(todaySalesResult[0]?.sum ?? 0)
   const monthSales = Number(monthSalesResult[0]?.sum ?? 0)
 
@@ -143,12 +150,20 @@ export default async function DashboardPage() {
       <h1 className="text-2xl font-bold">대시보드</h1>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard
           label="신규 주문"
           value={newOrderCount.toLocaleString('ko-KR')}
           hint="발주확인 대기"
           icon={<ShoppingCart className="h-5 w-5 text-blue-500" />}
+        />
+        <StatCard
+          label="미발송 출고"
+          value={heldOrderCount.toLocaleString('ko-KR')}
+          hint="송장 발급 후 미출고"
+          icon={<PackageX className="h-5 w-5 text-orange-500" />}
+          href="/shipping/held"
+          highlight={heldOrderCount > 0}
         />
         <StatCard
           label="당월 주문"
@@ -200,24 +215,40 @@ function StatCard({
   value,
   hint,
   icon,
+  href,
+  highlight,
 }: {
   label: string
   value: string
   hint: string
   icon: React.ReactNode
+  href?: string
+  highlight?: boolean
 }) {
-  return (
-    <div className="rounded-lg border bg-white p-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
-        </div>
-        {icon}
+  const baseClass = 'rounded-lg border bg-white p-4'
+  const interactiveClass = href ? ' transition-shadow hover:shadow-md' : ''
+  const highlightClass = highlight ? ' border-orange-300 bg-orange-50' : ''
+  const className = baseClass + interactiveClass + highlightClass
+
+  const inner = (
+    <div className="flex items-start justify-between">
+      <div>
+        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
       </div>
+      {icon}
     </div>
   )
+
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {inner}
+      </Link>
+    )
+  }
+  return <div className={className}>{inner}</div>
 }
 
 function ChartCard({

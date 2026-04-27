@@ -217,7 +217,7 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
               onClick={() => setExcelImportOpen(true)}
               className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
             >
-              송장번호 업로드
+              송장등록
             </button>
           </>
         )}

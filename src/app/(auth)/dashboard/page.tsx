@@ -1,11 +1,13 @@
-import { eq, and, gte, sql } from 'drizzle-orm'
+import { eq, and, gte, lt, sql } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, products } from '@/lib/db/schema'
-import { ShoppingCart, Calendar, Package } from 'lucide-react'
+import { ShoppingCart, Calendar, Package, Wallet, TrendingUp } from 'lucide-react'
 import {
   DailyOrdersChart,
   MonthlyOrdersChart,
+  DailySalesChart,
+  MonthlySalesChart,
   type DailyPoint,
   type MonthlyPoint,
 } from './charts'
@@ -26,11 +28,14 @@ export default async function DashboardPage() {
   }
 
   const now = new Date()
-  // 당월 시작 (KST). orderedAt 인덱스 활용을 위해 단순 비교.
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  // 7일 시작 (오늘 포함 7일)
+  // 당일 시작/종료 (서버 로컬 기준 — 가능하면 KST 환경)
   const dayStart = new Date(now)
   dayStart.setHours(0, 0, 0, 0)
+  const dayEnd = new Date(dayStart)
+  dayEnd.setDate(dayEnd.getDate() + 1)
+  // 당월 시작
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  // 7일 시작 (오늘 포함 7일)
   const sevenDaysAgo = new Date(dayStart)
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6)
   // 12개월 시작 (현재 월 포함 12개월)
@@ -40,6 +45,8 @@ export default async function DashboardPage() {
     newOrdersResult,
     monthOrdersResult,
     productCountResult,
+    todaySalesResult,
+    monthSalesResult,
     dailyRows,
     monthlyRows,
   ] = await Promise.all([
@@ -56,9 +63,24 @@ export default async function DashboardPage() {
       .from(products)
       .where(eq(products.userId, user.id)),
     db
+      .select({ sum: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text` })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, user.id),
+          gte(orders.orderedAt, dayStart),
+          lt(orders.orderedAt, dayEnd),
+        ),
+      ),
+    db
+      .select({ sum: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text` })
+      .from(orders)
+      .where(and(eq(orders.userId, user.id), gte(orders.orderedAt, monthStart))),
+    db
       .select({
         d: sql<string>`to_char(${orders.orderedAt} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`,
         count: sql<number>`count(*)::int`,
+        amount: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text`,
       })
       .from(orders)
       .where(and(eq(orders.userId, user.id), gte(orders.orderedAt, sevenDaysAgo)))
@@ -67,6 +89,7 @@ export default async function DashboardPage() {
       .select({
         m: sql<string>`to_char(${orders.orderedAt} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`,
         count: sql<number>`count(*)::int`,
+        amount: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text`,
       })
       .from(orders)
       .where(and(eq(orders.userId, user.id), gte(orders.orderedAt, twelveMonthsAgo)))
@@ -76,32 +99,42 @@ export default async function DashboardPage() {
   const newOrderCount = newOrdersResult[0]?.count ?? 0
   const monthOrderCount = monthOrdersResult[0]?.count ?? 0
   const productCount = productCountResult[0]?.count ?? 0
+  const todaySales = Number(todaySalesResult[0]?.sum ?? 0)
+  const monthSales = Number(monthSalesResult[0]?.sum ?? 0)
 
   // 일별: 최근 7일 모든 날짜를 0으로 채우고 SQL 결과 머지
-  const dailyMap = new Map(dailyRows.map((r) => [r.d, r.count]))
+  const dailyMap = new Map(
+    dailyRows.map((r) => [r.d, { count: r.count, amount: Number(r.amount) }]),
+  )
   const dailyData: DailyPoint[] = []
   for (let i = 0; i < 7; i++) {
     const d = new Date(sevenDaysAgo)
     d.setDate(sevenDaysAgo.getDate() + i)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const entry = dailyMap.get(key)
     dailyData.push({
       date: key,
       label: `${d.getMonth() + 1}/${d.getDate()}`,
-      count: dailyMap.get(key) ?? 0,
+      count: entry?.count ?? 0,
+      amount: entry?.amount ?? 0,
     })
   }
 
   // 월별: 최근 12개월 채움
-  const monthlyMap = new Map(monthlyRows.map((r) => [r.m, r.count]))
+  const monthlyMap = new Map(
+    monthlyRows.map((r) => [r.m, { count: r.count, amount: Number(r.amount) }]),
+  )
   const monthlyData: MonthlyPoint[] = []
   for (let i = 0; i < 12; i++) {
     const d = new Date(twelveMonthsAgo)
     d.setMonth(twelveMonthsAgo.getMonth() + i)
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const entry = monthlyMap.get(key)
     monthlyData.push({
       month: key,
       label: `${d.getMonth() + 1}월`,
-      count: monthlyMap.get(key) ?? 0,
+      count: entry?.count ?? 0,
+      amount: entry?.amount ?? 0,
     })
   }
 
@@ -110,22 +143,34 @@ export default async function DashboardPage() {
       <h1 className="text-2xl font-bold">대시보드</h1>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
         <StatCard
           label="신규 주문"
-          value={newOrderCount}
+          value={newOrderCount.toLocaleString('ko-KR')}
           hint="발주확인 대기"
           icon={<ShoppingCart className="h-5 w-5 text-blue-500" />}
         />
         <StatCard
           label="당월 주문"
-          value={monthOrderCount}
+          value={monthOrderCount.toLocaleString('ko-KR')}
           hint={`${now.getMonth() + 1}월 누적`}
           icon={<Calendar className="h-5 w-5 text-emerald-500" />}
         />
         <StatCard
+          label="당일 판매금액"
+          value={`₩${todaySales.toLocaleString('ko-KR')}`}
+          hint={`${now.getMonth() + 1}/${now.getDate()} 매출`}
+          icon={<Wallet className="h-5 w-5 text-amber-500" />}
+        />
+        <StatCard
+          label="당월 판매금액"
+          value={`₩${monthSales.toLocaleString('ko-KR')}`}
+          hint={`${now.getMonth() + 1}월 누적 매출`}
+          icon={<TrendingUp className="h-5 w-5 text-rose-500" />}
+        />
+        <StatCard
           label="전체 상품"
-          value={productCount}
+          value={productCount.toLocaleString('ko-KR')}
           hint="등록된 상품 수"
           icon={<Package className="h-5 w-5 text-gray-500" />}
         />
@@ -139,6 +184,12 @@ export default async function DashboardPage() {
         <ChartCard title="월별 주문 (최근 12개월)">
           <MonthlyOrdersChart data={monthlyData} />
         </ChartCard>
+        <ChartCard title="일별 매출 (최근 7일)">
+          <DailySalesChart data={dailyData} />
+        </ChartCard>
+        <ChartCard title="월별 매출 (최근 12개월)">
+          <MonthlySalesChart data={monthlyData} />
+        </ChartCard>
       </div>
     </div>
   )
@@ -151,7 +202,7 @@ function StatCard({
   icon,
 }: {
   label: string
-  value: number
+  value: string
   hint: string
   icon: React.ReactNode
 }) {
@@ -160,9 +211,7 @@ function StatCard({
       <div className="flex items-start justify-between">
         <div>
           <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-1 text-2xl font-bold tabular-nums">
-            {value.toLocaleString('ko-KR')}
-          </p>
+          <p className="mt-1 text-2xl font-bold tabular-nums">{value}</p>
           <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
         </div>
         {icon}

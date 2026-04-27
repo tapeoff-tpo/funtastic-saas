@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -16,8 +16,6 @@ import {
   Store,
   Settings,
   LogOut,
-  FileText,
-  CircleAlert,
   ChevronsLeft,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -37,15 +35,13 @@ const navSections: NavSection[] = [
     title: '주문',
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
-      { href: '/orders?stage=prep', label: '출고 준비', icon: CircleAlert },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
     ],
   },
   {
-    title: '출고/송장',
+    title: '출고 작업',
     items: [
       { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
-      { href: '/orders?stage=invoice', label: '송장 발급', icon: FileText },
       { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
     ],
   },
@@ -79,10 +75,7 @@ interface SidebarProps {
 
 export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const pathname = usePathname()
-  const searchParams = useSearchParams()
   const router = useRouter()
-
-  const currentStage = searchParams.get('stage')
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -121,23 +114,11 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
             )}
             <div className="space-y-px">
               {section.items.map((item) => {
-                const [itemPath, itemQuery] = item.href.split('?')
-                const itemStage = itemQuery?.match(/stage=([^&]+)/)?.[1]
-
-                let isActive: boolean
-                if (itemPath === '/orders') {
-                  if (pathname !== '/orders') {
-                    isActive = false
-                  } else if (itemStage) {
-                    isActive = currentStage === itemStage
-                  } else {
-                    isActive = !currentStage
-                  }
-                } else if (itemPath === '/settings' || itemPath === '/products') {
-                  isActive = pathname === itemPath
-                } else {
-                  isActive = pathname.startsWith(itemPath)
-                }
+                const itemPath = item.href.split('?')[0]
+                const isActive =
+                  itemPath === '/orders' || itemPath === '/settings' || itemPath === '/products'
+                    ? pathname === itemPath
+                    : pathname.startsWith(itemPath)
 
                 const Icon = item.icon
 

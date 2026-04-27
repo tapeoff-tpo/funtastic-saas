@@ -62,6 +62,7 @@ export const orderStatusEnum = pgEnum('order_status', [
   'new',
   'confirmed',
   'preparing',
+  'ready',
   'shipped',
   'delivering',
   'delivered',

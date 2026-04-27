@@ -9,6 +9,7 @@ export type OrderStatus =
   | 'new'
   | 'confirmed'
   | 'preparing'
+  | 'ready'
   | 'shipped'
   | 'delivering'
   | 'delivered'
@@ -23,6 +24,7 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   new: '신규',
   confirmed: '확인',
   preparing: '출고대기',
+  ready: '출고준비',
   shipped: '출고완료',
   delivering: '배송중',
   delivered: '배송완료',
@@ -36,7 +38,8 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
 export const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   new: ['confirmed', 'cancelled'],
   confirmed: ['preparing', 'cancelled'],
-  preparing: ['shipped', 'cancelled'],
+  preparing: ['ready', 'cancelled'],
+  ready: ['shipped', 'cancelled'],
   shipped: ['delivering'],
   delivering: ['delivered'],
   delivered: [],
@@ -93,6 +96,7 @@ export interface OrderStats {
   new: number
   confirmed: number
   preparing: number
+  ready: number
   shipped: number
   delivering: number
   delivered: number

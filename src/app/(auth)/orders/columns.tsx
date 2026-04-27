@@ -118,6 +118,7 @@ const STATUS_VARIANT: Record<OrderStatus, 'default' | 'secondary' | 'destructive
   new: 'default',
   confirmed: 'secondary',
   preparing: 'outline',
+  ready: 'default',
   shipped: 'secondary',
   delivering: 'default',
   delivered: 'secondary',

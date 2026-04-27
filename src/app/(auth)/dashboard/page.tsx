@@ -156,6 +156,7 @@ export default async function DashboardPage() {
           value={newOrderCount.toLocaleString('ko-KR')}
           hint="발주확인 대기"
           icon={<ShoppingCart className="h-5 w-5 text-blue-500" />}
+          href="/orders?status=new"
         />
         <StatCard
           label="미발송 출고"
@@ -170,24 +171,28 @@ export default async function DashboardPage() {
           value={monthOrderCount.toLocaleString('ko-KR')}
           hint={`${now.getMonth() + 1}월 누적`}
           icon={<Calendar className="h-5 w-5 text-emerald-500" />}
+          href="/analytics"
         />
         <StatCard
           label="당일 판매금액"
           value={`₩${todaySales.toLocaleString('ko-KR')}`}
           hint={`${now.getMonth() + 1}/${now.getDate()} 매출`}
           icon={<Wallet className="h-5 w-5 text-amber-500" />}
+          href="/analytics"
         />
         <StatCard
           label="당월 판매금액"
           value={`₩${monthSales.toLocaleString('ko-KR')}`}
           hint={`${now.getMonth() + 1}월 누적 매출`}
           icon={<TrendingUp className="h-5 w-5 text-rose-500" />}
+          href="/analytics/sales"
         />
         <StatCard
           label="전체 상품"
           value={productCount.toLocaleString('ko-KR')}
           hint="등록된 상품 수"
           icon={<Package className="h-5 w-5 text-gray-500" />}
+          href="/analytics/sales"
         />
       </div>
 

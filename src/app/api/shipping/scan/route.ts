@@ -72,7 +72,8 @@ export async function POST(req: NextRequest) {
     })
   }
 
-  // 정상: 출고 처리
+  // 정상: 출고 처리 + 주문 상태를 출고준비(ready)로 전환
+  // 출고대기(preparing) 상태일 때만 ready로 승격 (이미 ready 이상이면 변경 없음)
   await db
     .update(shipments)
     .set({
@@ -81,6 +82,11 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date(),
     })
     .where(eq(shipments.id, shipment.id))
+
+  await db
+    .update(orders)
+    .set({ status: 'ready', updatedAt: new Date() })
+    .where(and(eq(orders.id, shipment.orderId), eq(orders.status, 'preparing')))
 
   // Fetch order + item info for display
   const [order] = await db

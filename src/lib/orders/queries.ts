@@ -687,6 +687,7 @@ export async function getOrderStats(userId: string): Promise<OrderStats> {
     new: byStatus.new ?? 0,
     confirmed: byStatus.confirmed ?? 0,
     preparing: byStatus.preparing ?? 0,
+    ready: byStatus.ready ?? 0,
     shipped: byStatus.shipped ?? 0,
     delivering: byStatus.delivering ?? 0,
     delivered: byStatus.delivered ?? 0,

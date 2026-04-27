@@ -112,6 +112,7 @@ export default async function OrdersPage({
     new: stats.new,
     confirmed: stats.confirmed,
     preparing: stats.preparing,
+    ready: stats.ready,
     shipped: stats.shipped,
     delivering: stats.delivering,
     delivered: stats.delivered,

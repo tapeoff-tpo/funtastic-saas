@@ -26,6 +26,7 @@ interface TabDef {
     | 'new'
     | 'confirmed'
     | 'preparing'
+    | 'ready'
     | 'shipped'
     | 'delivering'
     | 'delivered'
@@ -40,6 +41,7 @@ const TABS: TabDef[] = [
   { id: 'new', label: '신규', kind: 'status', countKey: 'new' },
   { id: 'confirmed', label: '확인', kind: 'status', countKey: 'confirmed' },
   { id: 'preparing', label: '출고대기', kind: 'status', countKey: 'preparing' },
+  { id: 'ready', label: '출고준비', kind: 'status', countKey: 'ready' },
   { id: 'shipped', label: '출고완료', kind: 'status', countKey: 'shipped' },
   { id: 'delivering', label: '배송중', kind: 'status', countKey: 'delivering' },
   { id: 'delivered', label: '배송완료', kind: 'status', countKey: 'delivered' },
@@ -53,6 +55,7 @@ export interface OrderTabsCounts {
   new: number
   confirmed: number
   preparing: number
+  ready: number
   shipped: number
   delivering: number
   delivered: number

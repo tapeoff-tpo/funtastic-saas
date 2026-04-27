@@ -17,6 +17,7 @@ import {
   Settings,
   LogOut,
   ChevronsLeft,
+  Download,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
@@ -35,6 +36,7 @@ const navSections: NavSection[] = [
     title: '주문',
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
+      { href: '/orders/collect', label: '주문 수집', icon: Download },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
     ],
   },

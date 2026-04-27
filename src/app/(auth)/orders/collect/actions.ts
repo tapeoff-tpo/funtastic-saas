@@ -53,6 +53,6 @@ export async function addManualChannel(
     }
   }
 
-  revalidatePath('/dashboard')
+  revalidatePath('/orders/collect')
   return { success: true }
 }

@@ -11,7 +11,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
-import { addManualChannel } from '@/app/(auth)/dashboard/actions'
+import { addManualChannel } from '@/app/(auth)/orders/collect/actions'
 
 interface Connection {
   marketplaceId: string

@@ -51,6 +51,8 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
   const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
 
   const connectedMarkets = connections.filter((c) => c.status !== 'disconnected' && !c.isManual)
+  const autoConnections = connections.filter((c) => !c.isManual)
+  const manualConnections = connections.filter((c) => c.isManual)
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -157,97 +159,63 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
         </div>
       </div>
 
-      {/* Cards grid */}
-      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {connections.map((conn) => {
-          const isDisconnected = conn.status === 'disconnected'
-          const isSelected = selected.has(conn.marketplaceId)
-          const isManual = conn.isManual
+      {/* 자동수집몰 */}
+      <section className="mt-6">
+        <div className="mb-3 flex items-baseline gap-2">
+          <h2 className="text-base font-semibold">자동수집몰</h2>
+          <span className="text-xs text-muted-foreground">
+            API 연동 — 클릭하여 선택 후 수집
+          </span>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {autoConnections.length}개
+          </span>
+        </div>
+        {autoConnections.length === 0 ? (
+          <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
+            연동된 자동수집몰이 없습니다.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {autoConnections.map((conn) => (
+              <MarketCard
+                key={conn.marketplaceId}
+                conn={conn}
+                isSelected={selected.has(conn.marketplaceId)}
+                onToggle={toggleSelect}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
-          return (
-            <Card
-              key={conn.marketplaceId}
-              className={`transition-all ${
-                isManual
-                  ? 'border-blue-200'
-                  : isSelected
-                    ? 'cursor-pointer ring-2 ring-primary ring-offset-2'
-                    : isDisconnected
-                      ? 'cursor-pointer opacity-60'
-                      : 'cursor-pointer hover:shadow-md'
-              }`}
-              onClick={() => {
-                if (!isDisconnected && !isManual) toggleSelect(conn.marketplaceId)
-              }}
-            >
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <div className="flex items-center gap-2">
-                  {!isDisconnected && !isManual && (
-                    <div
-                      className={`flex h-5 w-5 items-center justify-center rounded border ${
-                        isSelected
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-gray-300'
-                      }`}
-                    >
-                      {isSelected && (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </div>
-                  )}
-                  <CardTitle className="text-sm font-medium">{conn.displayName}</CardTitle>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {isManual && (
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-                      수동
-                    </span>
-                  )}
-                  <StatusBadge status={conn.status as ConnectionStatus} />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {!isManual && (
-                  <div className="space-y-1 text-sm text-muted-foreground">
-                    <p>
-                      마지막 확인:{' '}
-                      {conn.lastCheckedAt ? formatRelativeTime(conn.lastCheckedAt) : '확인 안됨'}
-                    </p>
-                    {conn.status === 'error' && conn.lastErrorMessage && (
-                      <p className="text-red-600">
-                        {conn.lastErrorMessage.length > 100
-                          ? `${conn.lastErrorMessage.slice(0, 100)}...`
-                          : conn.lastErrorMessage}
-                      </p>
-                    )}
-                    {conn.expiresAt && isExpiringSoon(conn.expiresAt) && (
-                      <p className="text-amber-600">
-                        인증 만료 예정: {conn.expiresAt.toLocaleDateString('ko-KR')}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {isManual && (
-                  <p className="text-sm text-muted-foreground">
-                    엑셀 업로드로 주문을 관리합니다.
-                  </p>
-                )}
-
-                {/* Excel upload -- inline, stops click propagation */}
-                <div onClick={(e) => e.stopPropagation()} className="mt-3">
-                  <ExcelUploadButton
-                    displayName={conn.displayName}
-                    disabled={isDisconnected}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          )
-        })}
-      </div>
+      {/* 수동수집몰 */}
+      <section className="mt-8">
+        <div className="mb-3 flex items-baseline gap-2">
+          <h2 className="text-base font-semibold">수동수집몰</h2>
+          <span className="text-xs text-muted-foreground">
+            엑셀 업로드 전용
+          </span>
+          <span className="ml-auto text-xs text-muted-foreground">
+            {manualConnections.length}개
+          </span>
+        </div>
+        {manualConnections.length === 0 ? (
+          <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
+            등록된 수동수집몰이 없습니다. 우측 상단 "+ 수동 쇼핑몰 추가" 버튼으로 추가하세요.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {manualConnections.map((conn) => (
+              <MarketCard
+                key={conn.marketplaceId}
+                conn={conn}
+                isSelected={false}
+                onToggle={toggleSelect}
+              />
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* Add manual channel modal */}
       {showAddModal && (
@@ -324,6 +292,101 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
         </div>
       )}
     </div>
+  )
+}
+
+function MarketCard({
+  conn,
+  isSelected,
+  onToggle,
+}: {
+  conn: Connection
+  isSelected: boolean
+  onToggle: (id: string) => void
+}) {
+  const isDisconnected = conn.status === 'disconnected'
+  const isManual = conn.isManual
+
+  return (
+    <Card
+      className={`transition-all ${
+        isManual
+          ? 'border-blue-200'
+          : isSelected
+            ? 'cursor-pointer ring-2 ring-primary ring-offset-2'
+            : isDisconnected
+              ? 'cursor-pointer opacity-60'
+              : 'cursor-pointer hover:shadow-md'
+      }`}
+      onClick={() => {
+        if (!isDisconnected && !isManual) onToggle(conn.marketplaceId)
+      }}
+    >
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <div className="flex items-center gap-2">
+          {!isDisconnected && !isManual && (
+            <div
+              className={`flex h-5 w-5 items-center justify-center rounded border ${
+                isSelected
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-gray-300'
+              }`}
+            >
+              {isSelected && (
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              )}
+            </div>
+          )}
+          <CardTitle className="text-sm font-medium">{conn.displayName}</CardTitle>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {isManual && (
+            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+              수동
+            </span>
+          )}
+          <StatusBadge status={conn.status as ConnectionStatus} />
+        </div>
+      </CardHeader>
+      <CardContent>
+        {!isManual && (
+          <div className="space-y-1 text-sm text-muted-foreground">
+            <p>
+              마지막 확인:{' '}
+              {conn.lastCheckedAt ? formatRelativeTime(conn.lastCheckedAt) : '확인 안됨'}
+            </p>
+            {conn.status === 'error' && conn.lastErrorMessage && (
+              <p className="text-red-600">
+                {conn.lastErrorMessage.length > 100
+                  ? `${conn.lastErrorMessage.slice(0, 100)}...`
+                  : conn.lastErrorMessage}
+              </p>
+            )}
+            {conn.expiresAt && isExpiringSoon(conn.expiresAt) && (
+              <p className="text-amber-600">
+                인증 만료 예정: {conn.expiresAt.toLocaleDateString('ko-KR')}
+              </p>
+            )}
+          </div>
+        )}
+
+        {isManual && (
+          <p className="text-sm text-muted-foreground">
+            엑셀 업로드로 주문을 관리합니다.
+          </p>
+        )}
+
+        {/* Excel upload -- inline, stops click propagation */}
+        <div onClick={(e) => e.stopPropagation()} className="mt-3">
+          <ExcelUploadButton
+            displayName={conn.displayName}
+            disabled={isDisconnected}
+          />
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 

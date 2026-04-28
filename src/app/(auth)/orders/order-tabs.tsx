@@ -8,14 +8,13 @@
  *  → 취소: ?cancel=1 (cancelTab — status='cancelled' OR claimType='cancel' distinct)
  *  → 교환/반품: ?claimType=exchange|return
  *
- * URL 상태는 nuqs 기반. status / claimType / cancel 은 상호 배타적으로 set한다.
- * 3개 키를 useQueryStates로 묶어 한 번의 batch update로 처리해야 RSC가
- * 한 번만 refetch되고 race condition이 없다. (개별 useQueryState + Promise.all
- * 패턴은 마지막 setter만 살아남아 데이터가 비어 보이는 버그 발생)
+ * URL 상태는 직접 router.push 로 갈아끼운다. nuqs 의 shallow:false 만으로는
+ * Next.js 16 환경에서 RSC refetch 가 누락되는 케이스가 있어서, useTransition
+ * + router.push 조합으로 명확하게 navigation 을 트리거한다.
  */
 
-import { useRouter } from 'next/navigation'
-import { useQueryStates, parseAsString, parseAsBoolean, parseAsInteger } from 'nuqs'
+import { useTransition } from 'react'
+import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 
 type TabKind = 'all' | 'status' | 'cancel' | 'claim'
 
@@ -74,47 +73,43 @@ interface OrderTabsProps {
 
 export function OrderTabs({ counts }: OrderTabsProps) {
   const router = useRouter()
-  const [tabState, setTabState] = useQueryStates(
-    {
-      status: parseAsString,
-      claimType: parseAsString,
-      cancel: parseAsBoolean,
-      page: parseAsInteger.withDefault(1),
-    },
-    { shallow: false },
-  )
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const [isPending, startTransition] = useTransition()
 
-  // Determine active tab from URL state
+  // Determine active tab from URL
+  const status = searchParams.get('status')
+  const claimType = searchParams.get('claimType')
+  const cancel = searchParams.get('cancel')
   const currentTab: string = (() => {
-    if (tabState.cancel) return 'cancel'
-    if (tabState.claimType === 'exchange') return 'exchange'
-    if (tabState.claimType === 'return') return 'return'
-    if (tabState.status) return tabState.status
+    if (cancel === 'true' || cancel === '1') return 'cancel'
+    if (claimType === 'exchange') return 'exchange'
+    if (claimType === 'return') return 'return'
+    if (status) return status
     return 'all'
   })()
 
-  function applyTabState(next: { status: string | null; claimType: string | null; cancel: boolean | null }) {
-    // page=1 로 초기화 (다른 탭으로 갈 때 이전 페이지 번호가 따라가면 빈 결과)
-    void setTabState({ ...next, page: 1 }).then(() => router.refresh())
-  }
-
   function selectTab(tab: TabDef) {
-    if (tab.id === 'all') {
-      applyTabState({ status: null, claimType: null, cancel: null })
-      return
-    }
+    const params = new URLSearchParams(searchParams.toString())
+    // 탭 전환 시 이전 탭 키 + 페이지 번호 초기화
+    params.delete('status')
+    params.delete('claimType')
+    params.delete('cancel')
+    params.delete('page')
+
     if (tab.kind === 'status') {
-      applyTabState({ status: tab.id, claimType: null, cancel: null })
-      return
+      params.set('status', tab.id)
+    } else if (tab.kind === 'cancel') {
+      params.set('cancel', 'true')
+    } else if (tab.kind === 'claim') {
+      params.set('claimType', tab.id)
     }
-    if (tab.kind === 'cancel') {
-      applyTabState({ status: null, claimType: null, cancel: true })
-      return
-    }
-    if (tab.kind === 'claim') {
-      applyTabState({ status: null, claimType: tab.id, cancel: null })
-      return
-    }
+    // tab.id === 'all' → 아무 키도 set 안 함
+
+    const qs = params.toString()
+    startTransition(() => {
+      router.push(qs ? `${pathname}?${qs}` : pathname)
+    })
   }
 
   return (
@@ -128,7 +123,8 @@ export function OrderTabs({ counts }: OrderTabsProps) {
             key={tab.id}
             type="button"
             onClick={() => selectTab(tab)}
-            className={`inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            disabled={isPending}
+            className={`inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
               isActive
                 ? 'border-primary text-primary'
                 : 'border-transparent text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground'

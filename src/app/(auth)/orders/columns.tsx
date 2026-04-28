@@ -112,6 +112,8 @@ export interface OrderRow {
     sku?: string | null
     /** Phase 8 — products.shipping_cost (SaaS 등록 원가) */
     shippingCost?: string | null
+    /** 잔여 재고 — inventory.available_stock (SKU 매칭 안되면 null) */
+    availableStock?: number | null
   }[]
 }
 
@@ -158,15 +160,11 @@ function ProductInfoCell({ order }: { order: OrderRow }) {
           {first.optionText}
         </span>
       )}
-      <span className="text-[11px]">
-        <span className="text-muted-foreground">수량</span>{' '}
-        <span className="font-medium">{first.quantity}</span>
-        {extra > 0 && (
-          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px]">
-            +{extra}건
-          </span>
-        )}
-      </span>
+      {extra > 0 && (
+        <span className="w-fit rounded bg-muted px-1.5 py-0.5 text-[10px]">
+          +{extra}건
+        </span>
+      )}
       {order.logisticsMessage && (
         <span
           className="mt-1 inline-flex w-fit items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
@@ -414,6 +412,34 @@ export const columns: ColumnDef<OrderRow>[] = [
     header: '상품',
     cell: ({ row }) => <ProductInfoCell order={row.original} />,
     size: 300,
+  },
+
+  // 수량 — 메인: 주문 수량, 보조(괄호): 잔여 재고 (SKU 매칭 안되면 - 표시)
+  {
+    id: 'quantity',
+    header: '수량',
+    cell: ({ row }) => {
+      const items = row.original.items
+      if (!items || items.length === 0)
+        return <span className="text-muted-foreground">-</span>
+      const first = items[0]
+      const stock = first.availableStock
+      const lowStock = stock != null && stock < first.quantity
+      return (
+        <div className="flex flex-col items-end gap-0 leading-tight tabular-nums">
+          <span className="text-sm font-semibold">{first.quantity}</span>
+          <span
+            className={`text-[10px] ${
+              lowStock ? 'font-medium text-red-600' : 'text-muted-foreground'
+            }`}
+            title={stock == null ? 'SKU 매핑 없음' : '잔여 재고'}
+          >
+            ({stock ?? '-'})
+          </span>
+        </div>
+      )
+    },
+    size: 60,
   },
 
   // 구매자 / 수취인

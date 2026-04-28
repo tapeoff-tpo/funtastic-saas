@@ -289,6 +289,8 @@ export async function getOrders(filters: OrderFilters = {}) {
             productInternalName: products.name,
             // Phase 8 — shipping_cost from products (nullable when SKU has no product master)
             shippingCost: products.shippingCost,
+            // 잔여 재고 — orderItems.sku ↔ inventory.sku (user 스코프)
+            availableStock: inventory.availableStock,
             // need order's marketplaceId for the displayName join condition
             orderMarketplaceId: orders.marketplaceId,
             orderUserId: orders.userId,
@@ -308,6 +310,13 @@ export async function getOrders(filters: OrderFilters = {}) {
             and(
               eq(products.userId, orders.userId),
               eq(products.internalSku, orderItems.sku),
+            ),
+          )
+          .leftJoin(
+            inventory,
+            and(
+              eq(inventory.userId, orders.userId),
+              eq(inventory.sku, orderItems.sku),
             ),
           )
           .where(inArray(orderItems.orderId, orderIds)),
@@ -340,6 +349,7 @@ export async function getOrders(filters: OrderFilters = {}) {
           nameMappingDisplayName: string | null
           productInternalName: string | null
           shippingCost: string | null
+          availableStock: number | null
           orderMarketplaceId: string
           orderUserId: string
         }>,
@@ -365,6 +375,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     // 확정상품명: name_mapping → SKU→products.name → null
     displayName: r.nameMappingDisplayName ?? r.productInternalName ?? null,
     shippingCost: r.shippingCost,
+    availableStock: r.availableStock,
   }))
 
   // Phase 8 — Set of orderIds with at least one inquiry

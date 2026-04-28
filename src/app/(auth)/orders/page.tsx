@@ -103,6 +103,7 @@ export default async function OrdersPage({
       quantity: item.quantity,
       sku: item.sku ?? null,
       shippingCost: (item as { shippingCost?: string | null }).shippingCost ?? null,
+      availableStock: (item as { availableStock?: number | null }).availableStock ?? null,
     })),
   }))
 

@@ -89,7 +89,7 @@ export function OrderTabs({ counts }: OrderTabsProps) {
     return 'all'
   })()
 
-  function selectTab(tab: TabDef) {
+  function buildTabUrl(tab: TabDef): string {
     const params = new URLSearchParams(searchParams.toString())
     // 탭 전환 시 이전 탭 키 + 페이지 번호 초기화
     params.delete('status')
@@ -107,9 +107,17 @@ export function OrderTabs({ counts }: OrderTabsProps) {
     // tab.id === 'all' → 아무 키도 set 안 함
 
     const qs = params.toString()
+    return qs ? `${pathname}?${qs}` : pathname
+  }
+
+  function selectTab(tab: TabDef) {
     startTransition(() => {
-      router.push(qs ? `${pathname}?${qs}` : pathname)
+      router.push(buildTabUrl(tab))
     })
+  }
+
+  function prefetchTab(tab: TabDef) {
+    router.prefetch(buildTabUrl(tab))
   }
 
   return (
@@ -123,12 +131,13 @@ export function OrderTabs({ counts }: OrderTabsProps) {
             key={tab.id}
             type="button"
             onClick={() => selectTab(tab)}
-            disabled={isPending}
-            className={`inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors disabled:opacity-60 ${
+            onMouseEnter={() => prefetchTab(tab)}
+            onFocus={() => prefetchTab(tab)}
+            className={`inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               isActive
                 ? 'border-primary text-primary'
                 : 'border-transparent text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground'
-            }`}
+            } ${isPending && isActive ? 'animate-pulse' : ''}`}
           >
             {tab.label}
             <span

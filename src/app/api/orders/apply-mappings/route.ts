@@ -27,11 +27,14 @@ export async function POST(req: NextRequest) {
   let body: { orderIds?: string[] } = {}
   try { body = await req.json() } catch { /* optional body */ }
 
-  // Find orderItems that still have no SKU, joined to their order's marketplaceId
+  // 매핑 적용 대상 orderItems 를 모은다.
+  // 옵션매핑은 사용자가 명시적으로 등록한 "공식 매핑"이므로,
+  // 어댑터가 이미 채워둔 벤더 SKU(예: 쿠팡 externalVendorSku)보다 우선한다.
+  // → isNull(sku) 필터 없이 전체를 모으고, lookup 미스 또는 동일 SKU 인 경우엔
+  //   update 자체를 건너뛰어 기존 SKU 를 보존한다 (아래 분기 참고).
   // 미출고(보류) 주문은 매핑 대상에서 제외 — 어차피 배송 안 나가는 주문
   const conditions = [
     eq(orders.userId, user.id),
-    isNull(orderItems.sku),
     eq(orders.isHeld, false),
   ]
   if (body.orderIds && body.orderIds.length > 0) {
@@ -43,6 +46,7 @@ export async function POST(req: NextRequest) {
       itemId: orderItems.id,
       productName: orderItems.productName,
       optionText: orderItems.optionText,
+      currentSku: orderItems.sku,
       marketplaceId: orders.marketplaceId,
     })
     .from(orderItems)
@@ -85,7 +89,9 @@ export async function POST(req: NextRequest) {
       const optText = item.optionText?.trim() ?? ''
       const key = `${item.marketplaceId}::${item.productName}::${optText}`
       const hit = lookup.get(key) ?? lookup.get(`${item.marketplaceId}::${item.productName}::`)
-      if (hit) {
+      if (hit && hit.sku !== item.currentSku) {
+        // 매핑이 있고, 현재 SKU 와 다른 경우에만 갱신.
+        // (어댑터가 채운 벤더 SKU 위로 옵션매핑 SKU 가 덮어쓰임)
         updates.push({ itemId: item.itemId, variantSku: hit.sku, multiplier: hit.qty })
       }
     }

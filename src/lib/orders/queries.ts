@@ -131,14 +131,15 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
 
   if (filters.search) {
     // 부분일치 검색 — 입력값이 양끝 공백이라도 trim 한 뒤 wrap.
-    // 대상: 주문번호 / 구매자명 / 수취인명 / 상품명(orderItems) / 송장번호(shipments).
-    // productName/trackingNumber 는 다른 테이블이라 EXISTS 서브쿼리로 매칭.
+    // 대상: 주문번호 / 구매자명 / 수취인명 / 상품명(orderItems.productName + 매핑된 displayName) / 송장번호(shipments).
+    // productName/trackingNumber/displayName 는 다른 테이블이라 EXISTS 서브쿼리로 매칭.
     const searchPattern = `%${filters.search.trim()}%`
     conditions.push(
       or(
         ilike(orders.marketplaceOrderId, searchPattern),
         ilike(orders.buyerName, searchPattern),
         ilike(orders.recipientName, searchPattern),
+        // 마켓상품명(원문) 매칭
         exists(
           db
             .select({ x: sql`1` })
@@ -150,6 +151,47 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
               ),
             ),
         ),
+        // 매핑된 송장용 상품명(displayName) 매칭 — UI 에서 보이는 이름으로 검색 가능하도록
+        // displayName 출처는 두 가지: (1) productNameMappings.displayName (name 매핑 경로),
+        // (2) products.name (SKU↔internalSku 조인, 옵션 매핑/직접 SKU 매칭 경로).
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(orderItems)
+            .innerJoin(
+              productNameMappings,
+              and(
+                eq(productNameMappings.userId, orders.userId),
+                eq(productNameMappings.marketplaceId, orders.marketplaceId),
+                eq(productNameMappings.marketplaceName, orderItems.productName),
+              ),
+            )
+            .where(
+              and(
+                eq(orderItems.orderId, orders.id),
+                ilike(productNameMappings.displayName, searchPattern),
+              ),
+            ),
+        ),
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(orderItems)
+            .innerJoin(
+              products,
+              and(
+                eq(products.userId, orders.userId),
+                eq(products.internalSku, orderItems.sku),
+              ),
+            )
+            .where(
+              and(
+                eq(orderItems.orderId, orders.id),
+                ilike(products.name, searchPattern),
+              ),
+            ),
+        ),
+        // 송장번호 매칭
         exists(
           db
             .select({ x: sql`1` })

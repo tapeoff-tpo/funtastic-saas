@@ -9,10 +9,12 @@
  *  → 교환/반품: ?claimType=exchange|return
  *
  * URL 상태는 nuqs 기반. status / claimType / cancel 은 상호 배타적으로 set한다.
- * (CONTEXT.md D-01 / RESEARCH § Code Example 1)
+ * 3개 키를 useQueryStates로 묶어 한 번의 batch update로 처리해야 RSC가
+ * 한 번만 refetch되고 race condition이 없다. (개별 useQueryState + Promise.all
+ * 패턴은 마지막 setter만 살아남아 데이터가 비어 보이는 버그 발생)
  */
 
-import { useQueryState, parseAsString, parseAsBoolean } from 'nuqs'
+import { useQueryStates, parseAsString, parseAsBoolean } from 'nuqs'
 
 type TabKind = 'all' | 'status' | 'cancel' | 'claim'
 
@@ -70,43 +72,39 @@ interface OrderTabsProps {
 }
 
 export function OrderTabs({ counts }: OrderTabsProps) {
-  const [status, setStatus] = useQueryState(
-    'status',
-    parseAsString.withOptions({ shallow: false }),
-  )
-  const [claimType, setClaimType] = useQueryState(
-    'claimType',
-    parseAsString.withOptions({ shallow: false }),
-  )
-  const [cancel, setCancel] = useQueryState(
-    'cancel',
-    parseAsBoolean.withOptions({ shallow: false }),
+  const [tabState, setTabState] = useQueryStates(
+    {
+      status: parseAsString,
+      claimType: parseAsString,
+      cancel: parseAsBoolean,
+    },
+    { shallow: false },
   )
 
   // Determine active tab from URL state
   const currentTab: string = (() => {
-    if (cancel) return 'cancel'
-    if (claimType === 'exchange') return 'exchange'
-    if (claimType === 'return') return 'return'
-    if (status) return status
+    if (tabState.cancel) return 'cancel'
+    if (tabState.claimType === 'exchange') return 'exchange'
+    if (tabState.claimType === 'return') return 'return'
+    if (tabState.status) return tabState.status
     return 'all'
   })()
 
-  async function selectTab(tab: TabDef) {
+  function selectTab(tab: TabDef) {
     if (tab.id === 'all') {
-      await Promise.all([setStatus(null), setClaimType(null), setCancel(null)])
+      void setTabState({ status: null, claimType: null, cancel: null })
       return
     }
     if (tab.kind === 'status') {
-      await Promise.all([setStatus(tab.id), setClaimType(null), setCancel(null)])
+      void setTabState({ status: tab.id, claimType: null, cancel: null })
       return
     }
     if (tab.kind === 'cancel') {
-      await Promise.all([setStatus(null), setClaimType(null), setCancel(true)])
+      void setTabState({ status: null, claimType: null, cancel: true })
       return
     }
     if (tab.kind === 'claim') {
-      await Promise.all([setStatus(null), setClaimType(tab.id), setCancel(null)])
+      void setTabState({ status: null, claimType: tab.id, cancel: null })
       return
     }
   }
@@ -121,7 +119,7 @@ export function OrderTabs({ counts }: OrderTabsProps) {
           <button
             key={tab.id}
             type="button"
-            onClick={() => void selectTab(tab)}
+            onClick={() => selectTab(tab)}
             className={`inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               isActive
                 ? 'border-primary text-primary'

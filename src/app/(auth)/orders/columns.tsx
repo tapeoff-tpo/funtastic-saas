@@ -3,6 +3,7 @@
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import { MessageCircle, Lock } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
@@ -112,6 +113,70 @@ export interface OrderRow {
     /** Phase 8 — products.shipping_cost (SaaS 등록 원가) */
     shippingCost?: string | null
   }[]
+}
+
+/**
+ * 상품 셀 — 신규 탭(status=new)에서만 수집상품명을 보조로 같이 표시.
+ * 그 외 탭은 확정상품명만 표시(매핑 없으면 fallback으로 productName 자체 노출).
+ */
+function ProductInfoCell({ order }: { order: OrderRow }) {
+  const searchParams = useSearchParams()
+  const isNewTab = searchParams.get('status') === 'new'
+
+  const items = order.items
+  if (!items || items.length === 0)
+    return <span className="text-muted-foreground">-</span>
+  const first = items[0]
+  const extra = items.length - 1
+  const primaryName = first.displayName ?? first.productName
+  const showOriginal =
+    isNewTab && first.displayName != null && first.displayName !== first.productName
+
+  return (
+    <div className="flex flex-col gap-0 text-xs leading-tight">
+      {first.sku && (
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {first.sku}
+        </span>
+      )}
+      <span className="max-w-[280px] truncate font-medium" title={primaryName}>
+        {primaryName}
+      </span>
+      {showOriginal && (
+        <span
+          className="max-w-[280px] truncate text-[10px] text-muted-foreground"
+          title={`수집상품명: ${first.productName}`}
+        >
+          ({first.productName})
+        </span>
+      )}
+      {first.optionText && (
+        <span
+          className="max-w-[280px] truncate text-[11px] text-muted-foreground"
+          title={first.optionText}
+        >
+          {first.optionText}
+        </span>
+      )}
+      <span className="text-[11px]">
+        <span className="text-muted-foreground">수량</span>{' '}
+        <span className="font-medium">{first.quantity}</span>
+        {extra > 0 && (
+          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px]">
+            +{extra}건
+          </span>
+        )}
+      </span>
+      {order.logisticsMessage && (
+        <span
+          className="mt-1 inline-flex w-fit items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+          title={order.logisticsMessage}
+        >
+          📦 {order.logisticsMessage}
+        </span>
+      )}
+    </div>
+  )
 }
 
 const STATUS_VARIANT: Record<OrderStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
@@ -342,63 +407,12 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 180,
   },
 
-  // 상품 (SKU + displayName 우선 + 원본명 보조 + 옵션 + 수량 + 물류메세지) — Phase 8 SC-04
+  // 상품 (SKU + 확정상품명 + 옵션 + 수량 + 물류메세지) — Phase 8 SC-04
+  // 신규 탭에서만 원본(수집상품명) 보조 표시, 그 외 탭은 확정상품명만 표시
   {
     id: 'productInfo',
     header: '상품',
-    cell: ({ row }) => {
-      const order = row.original
-      const items = order.items
-      if (!items || items.length === 0)
-        return <span className="text-muted-foreground">-</span>
-      const first = items[0]
-      const extra = items.length - 1
-      // displayName 우선, 매핑 없으면 productName
-      const primaryName = first.displayName ?? first.productName
-      const showOriginal = first.displayName != null && first.displayName !== first.productName
-      return (
-        <div className="flex flex-col gap-0 text-xs leading-tight">
-          {first.sku && (
-            <span className="font-mono text-[10px] text-muted-foreground">
-              {first.sku}
-            </span>
-          )}
-          <span className="max-w-[280px] truncate font-medium" title={primaryName}>
-            {primaryName}
-          </span>
-          {showOriginal && (
-            <span
-              className="max-w-[280px] truncate text-[10px] text-muted-foreground"
-              title={`원본명: ${first.productName}`}
-            >
-              ({first.productName})
-            </span>
-          )}
-          {first.optionText && (
-            <span className="max-w-[280px] truncate text-[11px] text-muted-foreground" title={first.optionText}>
-              {first.optionText}
-            </span>
-          )}
-          <span className="text-[11px]">
-            <span className="text-muted-foreground">수량</span>{' '}
-            <span className="font-medium">{first.quantity}</span>
-            {extra > 0 && (
-              <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-[10px]">
-                +{extra}건
-              </span>
-            )}
-          </span>
-          {order.logisticsMessage && (
-            <span
-              className="mt-1 inline-flex w-fit items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
-              title={order.logisticsMessage}
-            >
-              📦 {order.logisticsMessage}
-            </span>
-          )}
-        </div>
-      )
-    },
+    cell: ({ row }) => <ProductInfoCell order={row.original} />,
     size: 300,
   },
 

@@ -41,7 +41,10 @@ interface OrderDetail {
   logisticsMessage?: string | null
   items: Array<{
     id: string
+    /** 수집상품명 — 마켓에서 들어온 그대로 */
     productName: string
+    /** 확정상품명 — product_name_mappings.display_name (매핑 안 됐으면 null) */
+    displayName: string | null
     optionText: string | null
     quantity: number
     unitPrice: string
@@ -113,6 +116,9 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between border-b px-5 py-3">
           <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              주문상세정보
+            </p>
             <h2 className="text-lg font-bold">
               {order?.marketplaceOrderId ?? '로딩 중...'}
             </h2>
@@ -216,13 +222,32 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                   <ul className="divide-y text-sm">
                     {order.items.map((item) => (
                       <li key={item.id} className="flex justify-between gap-3 py-2">
-                        <div className="flex-1">
-                          {item.sku && (
-                            <span className="mr-2 font-mono text-[10px] text-muted-foreground">
-                              {item.sku}
+                        <div className="flex-1 space-y-1">
+                          {/* 수집상품명 — 마켓에서 받아온 원본 */}
+                          <div className="flex gap-2">
+                            <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              수집상품명
                             </span>
-                          )}
-                          <span className="font-medium">{item.productName}</span>
+                            <span className="text-sm">{item.productName}</span>
+                          </div>
+                          {/* 확정상품명 — 매핑된 내부 상품명 (없으면 미매핑 표시) */}
+                          <div className="flex gap-2">
+                            <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                              확정상품명
+                            </span>
+                            {item.displayName ? (
+                              <span className="text-sm font-medium">
+                                {item.sku && (
+                                  <span className="mr-2 font-mono text-[10px] text-muted-foreground">
+                                    {item.sku}
+                                  </span>
+                                )}
+                                {item.displayName}
+                              </span>
+                            ) : (
+                              <span className="text-sm italic text-muted-foreground">미매핑</span>
+                            )}
+                          </div>
                           {item.optionText && (
                             <p className="text-xs text-muted-foreground">
                               옵션: {item.optionText}

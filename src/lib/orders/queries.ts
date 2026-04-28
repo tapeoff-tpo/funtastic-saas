@@ -460,7 +460,32 @@ export async function getOrderById(id: string, userId?: string) {
   if (!order) return null
 
   const [orderItemRows, claimRows, memoRows, shipmentRows] = await Promise.all([
-    db.select().from(orderItems).where(eq(orderItems.orderId, id)),
+    // 수집상품명(productName) + 확정상품명(displayName from product_name_mappings) 동시 반환
+    db
+      .select({
+        id: orderItems.id,
+        orderId: orderItems.orderId,
+        marketplaceItemId: orderItems.marketplaceItemId,
+        productName: orderItems.productName,
+        optionText: orderItems.optionText,
+        quantity: orderItems.quantity,
+        unitPrice: orderItems.unitPrice,
+        sku: orderItems.sku,
+        skuMultiplier: orderItems.skuMultiplier,
+        fulfillmentCode: orderItems.fulfillmentCode,
+        displayName: productNameMappings.displayName,
+      })
+      .from(orderItems)
+      .innerJoin(orders, eq(orders.id, orderItems.orderId))
+      .leftJoin(
+        productNameMappings,
+        and(
+          eq(productNameMappings.userId, orders.userId),
+          eq(productNameMappings.marketplaceId, orders.marketplaceId),
+          eq(productNameMappings.marketplaceName, orderItems.productName),
+        ),
+      )
+      .where(eq(orderItems.orderId, id)),
     db.select().from(claims).where(eq(claims.orderId, id)),
     db
       .select()

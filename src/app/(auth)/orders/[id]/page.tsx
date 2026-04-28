@@ -55,6 +55,9 @@ export default async function OrderDetailPage({
           <span className="mx-2">/</span>
           <span>주문 상세</span>
         </nav>
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          주문상세정보
+        </p>
         <div className="flex items-baseline justify-between">
           <div>
             <h1 className="text-2xl font-bold">
@@ -139,8 +142,25 @@ export default async function OrderDetailPage({
             <ul className="divide-y">
               {order.items.map((item) => (
                 <li key={item.id} className="flex justify-between gap-4 py-3 text-sm">
-                  <div className="flex-1">
-                    <p className="font-medium">{item.productName}</p>
+                  <div className="flex-1 space-y-1">
+                    {/* 수집상품명 — 마켓에서 받아온 원본 */}
+                    <div className="flex gap-2">
+                      <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        수집상품명
+                      </span>
+                      <span>{item.productName}</span>
+                    </div>
+                    {/* 확정상품명 — product_name_mappings.display_name */}
+                    <div className="flex gap-2">
+                      <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                        확정상품명
+                      </span>
+                      {item.displayName ? (
+                        <span className="font-medium">{item.displayName}</span>
+                      ) : (
+                        <span className="italic text-muted-foreground">미매핑</span>
+                      )}
+                    </div>
                     {item.optionText && (
                       <p className="text-xs text-muted-foreground">
                         옵션: {item.optionText}

@@ -101,28 +101,45 @@ export async function POST(req: NextRequest) {
 
   // 매핑 적용 직후 자동 합포장 (수령인 이름+주소+전화 동일 주문 2건 이상)
   let autoCombined = { created: 0, totalOrders: 0 }
+  let confirmed = 0
   if (updated > 0) {
-    try {
-      // 방금 업데이트된 주문을 기준으로 자동 합포장
-      const touchedOrderIds = [...new Set(
-        unmappedItems
-          .filter((i) => updates.some((u) => u.itemId === i.itemId))
-          .map((i) => i.itemId),
-      )]
-      // itemId가 아닌 orderId가 필요 — 다시 조회
-      if (touchedOrderIds.length > 0) {
-        const orderIdRows = await db
-          .select({ orderId: orderItems.orderId })
-          .from(orderItems)
-          .where(inArray(orderItems.id, touchedOrderIds))
-        const orderIds = [...new Set(orderIdRows.map((r) => r.orderId))]
-        autoCombined = await runAutoCombineByContact(user.id, orderIds)
+    // 방금 업데이트된 itemId → orderId 조회
+    const touchedItemIds = updates.map((u) => u.itemId)
+    const orderIdRows = await db
+      .select({ orderId: orderItems.orderId })
+      .from(orderItems)
+      .where(inArray(orderItems.id, touchedItemIds))
+    const touchedOrderIds = [...new Set(orderIdRows.map((r) => r.orderId))]
+
+    if (touchedOrderIds.length > 0) {
+      // 매핑 완료된 신규 주문 → 확인(confirmed)으로 자동 전환
+      // 조건: status='new' AND sku IS NULL 인 itemorders 가 더 이상 없음
+      try {
+        const result = await db.execute(sql`
+          UPDATE orders
+          SET status = 'confirmed', updated_at = NOW()
+          WHERE user_id = ${user.id}
+            AND status = 'new'
+            AND id = ANY(${touchedOrderIds}::uuid[])
+            AND NOT EXISTS (
+              SELECT 1 FROM order_items
+              WHERE order_id = orders.id AND sku IS NULL
+            )
+        `)
+        confirmed = (result as unknown as { rowCount?: number }).rowCount ?? 0
+      } catch (err) {
+        console.error('[apply-mappings] auto-confirm failed:', err)
       }
-    } catch (err) {
-      // 자동 합포장 실패해도 매핑 적용은 성공으로 처리
-      console.error('[apply-mappings] auto-combine failed:', err)
+
+      // 자동 합포장
+      try {
+        autoCombined = await runAutoCombineByContact(user.id, touchedOrderIds)
+      } catch (err) {
+        // 자동 합포장 실패해도 매핑 적용은 성공으로 처리
+        console.error('[apply-mappings] auto-combine failed:', err)
+      }
     }
   }
 
-  return NextResponse.json({ updated, total: unmappedItems.length, autoCombined })
+  return NextResponse.json({ updated, total: unmappedItems.length, autoCombined, confirmed })
 }

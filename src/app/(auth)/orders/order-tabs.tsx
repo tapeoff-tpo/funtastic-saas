@@ -70,9 +70,18 @@ interface OrderTabsProps {
 }
 
 export function OrderTabs({ counts }: OrderTabsProps) {
-  const [status, setStatus] = useQueryState('status', parseAsString)
-  const [claimType, setClaimType] = useQueryState('claimType', parseAsString)
-  const [cancel, setCancel] = useQueryState('cancel', parseAsBoolean)
+  const [status, setStatus] = useQueryState(
+    'status',
+    parseAsString.withOptions({ shallow: false }),
+  )
+  const [claimType, setClaimType] = useQueryState(
+    'claimType',
+    parseAsString.withOptions({ shallow: false }),
+  )
+  const [cancel, setCancel] = useQueryState(
+    'cancel',
+    parseAsBoolean.withOptions({ shallow: false }),
+  )
 
   // Determine active tab from URL state
   const currentTab: string = (() => {

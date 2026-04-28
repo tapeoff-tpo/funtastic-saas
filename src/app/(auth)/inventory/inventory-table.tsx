@@ -156,7 +156,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
     order: parseAsString,
     page: parseAsInteger.withDefault(1),
     warehouseZone: parseAsString,
-  })
+  }, { shallow: false })
 
   const [isPending, startTransition] = useTransition()
   const router = useRouter()

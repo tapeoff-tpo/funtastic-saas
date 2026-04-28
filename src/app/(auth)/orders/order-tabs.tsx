@@ -116,10 +116,6 @@ export function OrderTabs({ counts }: OrderTabsProps) {
     })
   }
 
-  function prefetchTab(tab: TabDef) {
-    router.prefetch(buildTabUrl(tab))
-  }
-
   return (
     <div className="flex flex-wrap gap-1 border-b">
       {TABS.map((tab) => {
@@ -131,8 +127,6 @@ export function OrderTabs({ counts }: OrderTabsProps) {
             key={tab.id}
             type="button"
             onClick={() => selectTab(tab)}
-            onMouseEnter={() => prefetchTab(tab)}
-            onFocus={() => prefetchTab(tab)}
             className={`inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               isActive
                 ? 'border-primary text-primary'

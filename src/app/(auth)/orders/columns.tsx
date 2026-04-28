@@ -405,7 +405,7 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 180,
   },
 
-  // 상품 (SKU + 확정상품명 + 옵션 + 수량 + 물류메세지) — Phase 8 SC-04
+  // 상품 (SKU + 확정상품명 + 옵션 + 물류메세지) — Phase 8 SC-04
   // 신규 탭에서만 원본(수집상품명) 보조 표시, 그 외 탭은 확정상품명만 표시
   {
     id: 'productInfo',

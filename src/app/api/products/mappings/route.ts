@@ -10,6 +10,7 @@ import {
 } from '@/lib/db/schema'
 import { eq, and, or, sql, desc, notExists, gte, isNull } from 'drizzle-orm'
 import { subDays } from 'date-fns'
+import { applyMappingsForUser } from '@/lib/orders/apply-mappings'
 
 /** Split name into tokens (Korean-friendly). Filter tokens shorter than 2 chars. */
 function tokenize(s: string): Set<string> {
@@ -236,5 +237,14 @@ export async function POST(req: NextRequest) {
     })
     .returning()
 
-  return NextResponse.json({ mapping })
+  // 매핑 저장 직후 — 기존 주문에 대해 SKU 갈아끼우기 (벤더 SKU → 내부 재고코드)
+  // + 매핑 완료된 신규 주문 자동 확정. 실패해도 매핑 저장 자체는 성공으로 처리.
+  let applied: Awaited<ReturnType<typeof applyMappingsForUser>> | null = null
+  try {
+    applied = await applyMappingsForUser(user.id)
+  } catch (err) {
+    console.error('[products/mappings POST] applyMappingsForUser failed:', err)
+  }
+
+  return NextResponse.json({ mapping, applied })
 }

@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { productOptionMappings } from '@/lib/db/schema'
 import { sql } from 'drizzle-orm'
+import { applyMappingsForUser } from '@/lib/orders/apply-mappings'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -63,5 +64,14 @@ export async function POST(req: NextRequest) {
       },
     })
 
-  return NextResponse.json({ saved: body.length })
+  // 매핑 저장 직후 — 기존 주문에 대해 SKU 갈아끼우기 (벤더 SKU → 내부 재고코드).
+  // 실패해도 매핑 저장 자체는 성공으로 처리.
+  let applied: Awaited<ReturnType<typeof applyMappingsForUser>> | null = null
+  try {
+    applied = await applyMappingsForUser(user.id)
+  } catch (err) {
+    console.error('[products/option-mappings POST] applyMappingsForUser failed:', err)
+  }
+
+  return NextResponse.json({ saved: body.length, applied })
 }

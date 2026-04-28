@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { productNameMappings } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
+import { applyMappingsForUser } from '@/lib/orders/apply-mappings'
 
 /**
  * DELETE /api/products/mappings/[id]
@@ -77,5 +78,14 @@ export async function PUT(
     return NextResponse.json({ error: '매핑을 찾을 수 없습니다' }, { status: 404 })
   }
 
-  return NextResponse.json({ mapping: updated })
+  // 매핑 수정 직후 — 기존 주문에 대해 SKU 갈아끼우기 (벤더 SKU → 내부 재고코드).
+  // 실패해도 매핑 저장 자체는 성공으로 처리.
+  let applied: Awaited<ReturnType<typeof applyMappingsForUser>> | null = null
+  try {
+    applied = await applyMappingsForUser(user.id)
+  } catch (err) {
+    console.error('[products/mappings PUT] applyMappingsForUser failed:', err)
+  }
+
+  return NextResponse.json({ mapping: updated, applied })
 }

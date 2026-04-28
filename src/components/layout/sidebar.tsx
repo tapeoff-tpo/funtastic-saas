@@ -18,12 +18,20 @@ import {
   LogOut,
   ChevronsLeft,
   Download,
+  Star,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { useNavState } from './nav-state'
+
+interface NavItem {
+  href: string
+  label: string
+  icon: typeof LayoutDashboard
+}
 
 interface NavSection {
   title?: string
-  items: Array<{ href: string; label: string; icon: typeof LayoutDashboard }>
+  items: NavItem[]
 }
 
 const navSections: NavSection[] = [
@@ -71,6 +79,9 @@ const navSections: NavSection[] = [
   },
 ]
 
+// Flat lookup so favorites can resolve label/icon from href
+const allNavItems: NavItem[] = navSections.flatMap((s) => s.items)
+
 interface SidebarProps {
   onCollapse?: () => void
 }
@@ -78,11 +89,63 @@ interface SidebarProps {
 export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const pathname = usePathname()
   const router = useRouter()
+  const { favorites, toggleFavorite, isFavorite } = useNavState()
 
   async function handleSignOut() {
     const supabase = createClient()
     await supabase.auth.signOut()
     router.push('/login')
+  }
+
+  const favoriteItems = favorites
+    .map((href) => allNavItems.find((i) => i.href === href))
+    .filter((i): i is NavItem => Boolean(i))
+
+  function isItemActive(href: string) {
+    const itemPath = href.split('?')[0]
+    if (itemPath === '/orders' || itemPath === '/settings' || itemPath === '/products') {
+      return pathname === itemPath
+    }
+    return pathname.startsWith(itemPath)
+  }
+
+  function renderNavItem(item: NavItem, opts: { showStar: boolean }) {
+    const Icon = item.icon
+    const active = isItemActive(item.href)
+    const fav = isFavorite(item.href)
+
+    return (
+      <div
+        key={item.href}
+        className={`group flex items-center rounded transition-colors ${
+          active ? 'bg-gray-800 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+        }`}
+      >
+        <Link
+          href={item.href}
+          className="flex flex-1 items-center gap-2 px-2 py-1 text-xs font-medium"
+        >
+          <Icon className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{item.label}</span>
+        </Link>
+        {opts.showStar && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              toggleFavorite(item.href)
+            }}
+            aria-label={fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}
+            className={`mr-1 flex h-5 w-5 items-center justify-center rounded transition-opacity hover:bg-gray-700 ${
+              fav ? 'text-yellow-400 opacity-100' : 'text-gray-500 opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            <Star className={`h-3 w-3 ${fav ? 'fill-yellow-400' : ''}`} />
+          </button>
+        )}
+      </div>
+    )
   }
 
   return (
@@ -107,38 +170,34 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-1.5">
-        {navSections.map((section, sIdx) => (
-          <div key={sIdx} className={sIdx > 0 ? 'mt-2' : ''}>
+        {/* Dashboard */}
+        <div className="space-y-px">
+          {navSections[0].items.map((item) => renderNavItem(item, { showStar: false }))}
+        </div>
+
+        {/* Favorites — directly below Dashboard */}
+        {favoriteItems.length > 0 && (
+          <div className="mt-2">
+            <p className="mb-0.5 flex items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+              <Star className="h-2.5 w-2.5 fill-yellow-400 text-yellow-400" />
+              즐겨찾기
+            </p>
+            <div className="space-y-px">
+              {favoriteItems.map((item) => renderNavItem(item, { showStar: true }))}
+            </div>
+          </div>
+        )}
+
+        {/* Remaining sections */}
+        {navSections.slice(1).map((section, sIdx) => (
+          <div key={sIdx} className="mt-2">
             {section.title && (
               <p className="mb-0.5 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
                 {section.title}
               </p>
             )}
             <div className="space-y-px">
-              {section.items.map((item) => {
-                const itemPath = item.href.split('?')[0]
-                const isActive =
-                  itemPath === '/orders' || itemPath === '/settings' || itemPath === '/products'
-                    ? pathname === itemPath
-                    : pathname.startsWith(itemPath)
-
-                const Icon = item.icon
-
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={`flex items-center gap-2 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                      isActive
-                        ? 'bg-gray-800 text-white'
-                        : 'text-gray-400 hover:bg-gray-800 hover:text-white'
-                    }`}
-                  >
-                    <Icon className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{item.label}</span>
-                  </Link>
-                )
-              })}
+              {section.items.map((item) => renderNavItem(item, { showStar: true }))}
             </div>
           </div>
         ))}

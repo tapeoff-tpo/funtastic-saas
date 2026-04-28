@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react'
 import { ChevronsRight } from 'lucide-react'
 import { Sidebar } from './sidebar'
+import { TabBar } from './tab-bar'
+import { NavStateProvider } from './nav-state'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -37,20 +39,25 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   return (
-    <div className="flex h-screen">
-      {collapsed ? (
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          aria-label="사이드바 펼치기"
-          className="fixed left-2 top-2 z-50 flex h-7 w-7 items-center justify-center rounded bg-gray-900 text-white shadow hover:bg-gray-800"
-        >
-          <ChevronsRight className="h-4 w-4" />
-        </button>
-      ) : (
-        <Sidebar onCollapse={toggleCollapsed} />
-      )}
-      <main className="flex-1 overflow-auto bg-gray-50 p-6">{children}</main>
-    </div>
+    <NavStateProvider>
+      <div className="flex h-screen">
+        {collapsed ? (
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="사이드바 펼치기"
+            className="fixed left-2 top-2 z-50 flex h-7 w-7 items-center justify-center rounded bg-gray-900 text-white shadow hover:bg-gray-800"
+          >
+            <ChevronsRight className="h-4 w-4" />
+          </button>
+        ) : (
+          <Sidebar onCollapse={toggleCollapsed} />
+        )}
+        <div className="flex flex-1 flex-col overflow-hidden">
+          <TabBar />
+          <main className="flex-1 overflow-auto bg-gray-50 p-6">{children}</main>
+        </div>
+      </div>
+    </NavStateProvider>
   )
 }

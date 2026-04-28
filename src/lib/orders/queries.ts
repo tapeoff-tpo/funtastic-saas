@@ -460,7 +460,8 @@ export async function getOrderById(id: string, userId?: string) {
   if (!order) return null
 
   const [orderItemRows, claimRows, memoRows, shipmentRows] = await Promise.all([
-    // 수집상품명(productName) + 확정상품명(displayName from product_name_mappings) 동시 반환
+    // 수집상품명(productName) + 확정상품명 동시 반환
+    // 확정상품명 fallback: product_name_mappings.display_name → products.name (SKU 직접 매칭) → null
     db
       .select({
         id: orderItems.id,
@@ -473,7 +474,8 @@ export async function getOrderById(id: string, userId?: string) {
         sku: orderItems.sku,
         skuMultiplier: orderItems.skuMultiplier,
         fulfillmentCode: orderItems.fulfillmentCode,
-        displayName: productNameMappings.displayName,
+        nameMappingDisplayName: productNameMappings.displayName,
+        productInternalName: products.name,
       })
       .from(orderItems)
       .innerJoin(orders, eq(orders.id, orderItems.orderId))
@@ -483,6 +485,13 @@ export async function getOrderById(id: string, userId?: string) {
           eq(productNameMappings.userId, orders.userId),
           eq(productNameMappings.marketplaceId, orders.marketplaceId),
           eq(productNameMappings.marketplaceName, orderItems.productName),
+        ),
+      )
+      .leftJoin(
+        products,
+        and(
+          eq(products.userId, orders.userId),
+          eq(products.internalSku, orderItems.sku),
         ),
       )
       .where(eq(orderItems.orderId, id)),
@@ -502,9 +511,24 @@ export async function getOrderById(id: string, userId?: string) {
         )
       : null
 
+  // 확정상품명 fallback chain
+  const items = orderItemRows.map((r) => ({
+    id: r.id,
+    orderId: r.orderId,
+    marketplaceItemId: r.marketplaceItemId,
+    productName: r.productName,
+    optionText: r.optionText,
+    quantity: r.quantity,
+    unitPrice: r.unitPrice,
+    sku: r.sku,
+    skuMultiplier: r.skuMultiplier,
+    fulfillmentCode: r.fulfillmentCode,
+    displayName: r.nameMappingDisplayName ?? r.productInternalName ?? null,
+  }))
+
   return {
     ...order,
-    items: orderItemRows,
+    items,
     claims: claimRows,
     memos: memoRows,
     shipment: latestShipment,

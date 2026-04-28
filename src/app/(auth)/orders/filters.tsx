@@ -151,7 +151,7 @@ export function OrderFilters() {
           <input
             id="filter-search"
             type="text"
-            placeholder="주문번호, 상품명, 구매자명"
+            placeholder="주문번호 / 상품명 / 구매자 / 수취인 / 송장번호"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="w-[220px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"

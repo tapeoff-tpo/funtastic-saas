@@ -48,6 +48,8 @@ interface MappingItem {
   displayName: string
   productId: string | null
   productName: string | null
+  /** 매핑 시 order_items.sku 로 들어가는 실제 재고관리코드 */
+  productSku: string | null
   updatedAt: string
 }
 
@@ -168,6 +170,10 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(
     mode === 'edit' ? (item as MappingItem).productId : null,
   )
+  // 수정 모드일 땐 기존 매핑의 상품코드를 보여줌 — ProductSearch 로 새로 선택하면 갱신.
+  const [selectedProductSku, setSelectedProductSku] = useState<string | null>(
+    mode === 'edit' ? (item as MappingItem).productSku ?? null : null,
+  )
   const [pickingLocation, setPickingLocation] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -192,6 +198,7 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
   const handleProductSelect = (product: ProductSearchResult) => {
     setDisplayName(product.name)
     setSelectedProductId(product.id)
+    setSelectedProductSku(product.internalSku)
     setPickingLocation(product.warehouseLocation)
   }
 
@@ -279,7 +286,10 @@ function MappingDialog({ item, mode, onClose, onSaved }: MappingDialogProps) {
 
           {selectedProductId && (
             <p className="text-xs text-green-600">
-              상품 연결됨 (ID: {selectedProductId.slice(0, 8)}...)
+              상품 연결됨{' '}
+              {selectedProductSku && (
+                <span className="font-mono">— 상품코드 {selectedProductSku}</span>
+              )}
             </p>
           )}
         </div>
@@ -512,7 +522,13 @@ export function MappingManager() {
     if (selectedMarket !== 'all' && m.marketplaceId !== selectedMarket) return false
     if (mappingSearch) {
       const q = mappingSearch.toLowerCase()
-      if (!m.marketplaceName.toLowerCase().includes(q) && !m.displayName.toLowerCase().includes(q)) return false
+      const sku = m.productSku?.toLowerCase() ?? ''
+      if (
+        !m.marketplaceName.toLowerCase().includes(q) &&
+        !m.displayName.toLowerCase().includes(q) &&
+        !sku.includes(q)
+      )
+        return false
     }
     return true
   })
@@ -920,6 +936,7 @@ export function MappingManager() {
                   <th className="px-4 py-2.5 text-left font-medium">마켓</th>
                   <th className="px-4 py-2.5 text-left font-medium">마켓 상품명</th>
                   <th className="px-4 py-2.5 text-center font-medium">→</th>
+                  <th className="px-4 py-2.5 text-left font-medium">상품코드</th>
                   <th className="px-4 py-2.5 text-left font-medium">내부 상품명 (송장용)</th>
                   <th className="px-4 py-2.5 text-right font-medium"></th>
                 </tr>
@@ -938,6 +955,13 @@ export function MappingManager() {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-center text-muted-foreground">→</td>
+                    <td className="px-4 py-2.5">
+                      {m.productSku ? (
+                        <span className="font-mono text-xs">{m.productSku}</span>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5">
                       <span className="font-medium">{m.displayName}</span>
                       {m.productName && (

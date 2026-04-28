@@ -130,12 +130,37 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   }
 
   if (filters.search) {
-    const searchPattern = `%${filters.search}%`
+    // 부분일치 검색 — 입력값이 양끝 공백이라도 trim 한 뒤 wrap.
+    // 대상: 주문번호 / 구매자명 / 수취인명 / 상품명(orderItems) / 송장번호(shipments).
+    // productName/trackingNumber 는 다른 테이블이라 EXISTS 서브쿼리로 매칭.
+    const searchPattern = `%${filters.search.trim()}%`
     conditions.push(
       or(
-        ilike(orders.buyerName, searchPattern),
         ilike(orders.marketplaceOrderId, searchPattern),
+        ilike(orders.buyerName, searchPattern),
         ilike(orders.recipientName, searchPattern),
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(orderItems)
+            .where(
+              and(
+                eq(orderItems.orderId, orders.id),
+                ilike(orderItems.productName, searchPattern),
+              ),
+            ),
+        ),
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(shipments)
+            .where(
+              and(
+                eq(shipments.orderId, orders.id),
+                ilike(shipments.trackingNumber, searchPattern),
+              ),
+            ),
+        ),
       )!,
     )
   }

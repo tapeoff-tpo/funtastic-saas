@@ -63,12 +63,16 @@ export async function GET(_req: NextRequest) {
         displayName: productNameMappings.displayName,
         productId: productNameMappings.productId,
         productName: products.name,
+        // 매핑 적용 시 order_items.sku 로 들어가는 실제 재고관리코드 —
+        // variantId 가 있으면 productVariants.sku, 없으면 products.internalSku.
+        productSku: sql<string | null>`coalesce(${productVariants.sku}, ${products.internalSku})`,
         variantId: productNameMappings.variantId,
         quantity: productNameMappings.quantity,
         updatedAt: productNameMappings.updatedAt,
       })
       .from(productNameMappings)
       .leftJoin(products, eq(productNameMappings.productId, products.id))
+      .leftJoin(productVariants, eq(productNameMappings.variantId, productVariants.id))
       .where(eq(productNameMappings.userId, user.id))
       .orderBy(desc(productNameMappings.updatedAt)),
 

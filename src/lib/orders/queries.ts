@@ -149,37 +149,90 @@ export async function getOrders(filters: OrderFilters = {}) {
   const sortColumn = getSortColumn(filters.sort)
   const sortDir = filters.order === 'asc' ? asc(sortColumn) : desc(sortColumn)
 
-  // When filtering by claimType, find matching order IDs first
-  let orderRows: (typeof orders.$inferSelect)[]
-  if (filters.claimType) {
-    const claimOrderIds = await db
-      .select({ orderId: claims.orderId })
-      .from(claims)
-      .where(eq(claims.claimType, filters.claimType))
-    const ids = claimOrderIds.map((r) => r.orderId)
-    if (ids.length === 0) {
-      orderRows = []
-    } else {
+  // perf: orderRows / count / mapping-lookups 는 서로 의존성이 없으므로
+  // 한 wave 에서 병렬 실행한다 (이전엔 4 wave 직렬 → 2 wave 로 압축).
+  const userId = filters.userId
+
+  // userId-scoped mapping 인벤토리 (mappingStatus 계산용) — 페이지/검색과 무관하게 동일
+  const userScopedPromise: Promise<readonly [
+    Array<{ marketplaceId: string; marketplaceName: string }>,
+    Array<{ marketplaceId: string; marketplaceName: string; optionText: string | null }>,
+    Array<{ sku: string }>,
+    Array<{ sku: string }>,
+  ]> = userId
+    ? Promise.all([
+        db
+          .select({
+            marketplaceId: productNameMappings.marketplaceId,
+            marketplaceName: productNameMappings.marketplaceName,
+          })
+          .from(productNameMappings)
+          .where(eq(productNameMappings.userId, userId)),
+        db
+          .select({
+            marketplaceId: productOptionMappings.marketplaceId,
+            marketplaceName: productOptionMappings.marketplaceName,
+            optionText: productOptionMappings.optionText,
+          })
+          .from(productOptionMappings)
+          .where(eq(productOptionMappings.userId, userId)),
+        db
+          .select({ sku: products.internalSku })
+          .from(products)
+          .where(eq(products.userId, userId)),
+        db
+          .select({ sku: productVariants.sku })
+          .from(productVariants)
+          .innerJoin(products, eq(productVariants.productId, products.id))
+          .where(eq(products.userId, userId)),
+      ])
+    : Promise.resolve([[], [], [], []] as const)
+
+  // orderRows + total count — claimType 분기 안에서도 두 쿼리는 같은 IDs 를 공유하므로
+  // 같은 IIFE 안에서 처리하되, 외부에서는 userScopedPromise 와 병렬 실행한다.
+  const ordersAndCountPromise: Promise<{
+    orderRows: (typeof orders.$inferSelect)[]
+    total: number
+  }> = (async () => {
+    if (filters.claimType) {
+      const claimOrderIds = await db
+        .select({ orderId: claims.orderId })
+        .from(claims)
+        .where(eq(claims.claimType, filters.claimType))
+      const ids = claimOrderIds.map((r) => r.orderId)
+      if (ids.length === 0) return { orderRows: [], total: 0 }
       const claimWhere = conditions.length > 0
         ? and(...conditions, inArray(orders.id, ids))
         : inArray(orders.id, ids)
-      orderRows = await db
+      const [rows, countRows] = await Promise.all([
+        db
+          .select()
+          .from(orders)
+          .where(claimWhere)
+          .orderBy(sortDir)
+          .limit(pageSize)
+          .offset(offset),
+        db.select({ value: count(orders.id) }).from(orders).where(claimWhere),
+      ])
+      return { orderRows: rows, total: countRows[0]?.value ?? 0 }
+    }
+    const [rows, countRows] = await Promise.all([
+      db
         .select()
         .from(orders)
-        .where(claimWhere)
+        .where(whereClause)
         .orderBy(sortDir)
         .limit(pageSize)
-        .offset(offset)
-    }
-  } else {
-    orderRows = await db
-      .select()
-      .from(orders)
-      .where(whereClause)
-      .orderBy(sortDir)
-      .limit(pageSize)
-      .offset(offset)
-  }
+        .offset(offset),
+      db.select({ value: count() }).from(orders).where(whereClause),
+    ])
+    return { orderRows: rows, total: countRows[0]?.value ?? 0 }
+  })()
+
+  const [
+    { orderRows, total: orderTotal },
+    [nameMappings, optionMappings, productSkus, variantSkus],
+  ] = await Promise.all([ordersAndCountPromise, userScopedPromise])
 
   // Fetch items/claims/shipments/shipmentGroups in parallel
   // Phase 8: items query is now a multi-join — orderItems LEFT JOIN productNameMappings
@@ -329,26 +382,8 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  // Load mapping lookups for mapping status determination (parallel)
-  const userId = filters.userId ?? orderRows[0]?.userId
-  const [nameMappings, optionMappings, productSkus, variantSkus] = userId
-    ? await Promise.all([
-        db.select({ marketplaceId: productNameMappings.marketplaceId, marketplaceName: productNameMappings.marketplaceName })
-          .from(productNameMappings)
-          .where(eq(productNameMappings.userId, userId)),
-        db.select({ marketplaceId: productOptionMappings.marketplaceId, marketplaceName: productOptionMappings.marketplaceName, optionText: productOptionMappings.optionText })
-          .from(productOptionMappings)
-          .where(eq(productOptionMappings.userId, userId)),
-        db.select({ sku: products.internalSku })
-          .from(products)
-          .where(eq(products.userId, userId)),
-        db.select({ sku: productVariants.sku })
-          .from(productVariants)
-          .innerJoin(products, eq(productVariants.productId, products.id))
-          .where(eq(products.userId, userId)),
-      ])
-    : [[], [], [], []]
-
+  // perf: nameMappings / optionMappings / productSkus / variantSkus 은 위쪽
+  // userScopedPromise 에서 이미 받아왔다 (orderRows 와 병렬 실행).
   const nameKeys = new Set(nameMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}`))
   const optionKeys = new Set(optionMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}::${m.optionText}`))
   const skuSet = new Set<string>()
@@ -418,36 +453,10 @@ export async function getOrders(filters: OrderFilters = {}) {
     })
   }
 
-  // Get total count
-  let countResult: { value: number } | undefined
-  if (filters.claimType) {
-    const claimOrderIds = await db
-      .select({ orderId: claims.orderId })
-      .from(claims)
-      .where(eq(claims.claimType, filters.claimType))
-    const ids = claimOrderIds.map((r) => r.orderId)
-    if (ids.length === 0) {
-      countResult = { value: 0 }
-    } else {
-      const countConditions = buildOrderWhereClause(filters)
-      const countWhere = countConditions.length > 0
-        ? and(...countConditions, inArray(orders.id, ids))
-        : inArray(orders.id, ids)
-      ;[countResult] = await db
-        .select({ value: count(orders.id) })
-        .from(orders)
-        .where(countWhere)
-    }
-  } else {
-    ;[countResult] = await db
-      .select({ value: count() })
-      .from(orders)
-      .where(whereClause)
-  }
-
+  // perf: total count 는 ordersAndCountPromise 에서 같이 가져왔다.
   return {
     orders: ordersWithItems,
-    total: countResult?.value ?? 0,
+    total: orderTotal,
   }
 }
 

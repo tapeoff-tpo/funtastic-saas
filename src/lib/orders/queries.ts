@@ -202,7 +202,9 @@ export async function getOrders(filters: OrderFilters = {}) {
             skuMultiplier: orderItems.skuMultiplier,
             fulfillmentCode: orderItems.fulfillmentCode,
             // Phase 8 — displayName from product_name_mappings (nullable on miss)
-            displayName: productNameMappings.displayName,
+            nameMappingDisplayName: productNameMappings.displayName,
+            // 확정상품명 fallback — SKU가 products에 직접 매칭된 경우 (Excel SKU 매핑 등)
+            productInternalName: products.name,
             // Phase 8 — shipping_cost from products (nullable when SKU has no product master)
             shippingCost: products.shippingCost,
             // need order's marketplaceId for the displayName join condition
@@ -253,7 +255,8 @@ export async function getOrders(filters: OrderFilters = {}) {
           sku: string | null
           skuMultiplier: number
           fulfillmentCode: string | null
-          displayName: string | null
+          nameMappingDisplayName: string | null
+          productInternalName: string | null
           shippingCost: string | null
           orderMarketplaceId: string
           orderUserId: string
@@ -277,7 +280,8 @@ export async function getOrders(filters: OrderFilters = {}) {
     sku: r.sku,
     skuMultiplier: r.skuMultiplier,
     fulfillmentCode: r.fulfillmentCode,
-    displayName: r.displayName,
+    // 확정상품명: name_mapping → SKU→products.name → null
+    displayName: r.nameMappingDisplayName ?? r.productInternalName ?? null,
     shippingCost: r.shippingCost,
   }))
 

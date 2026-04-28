@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { nanoid } from 'nanoid'
 
 interface ActionResult {
@@ -54,5 +54,6 @@ export async function addManualChannel(
   }
 
   revalidatePath('/orders/collect')
+  revalidateTag('orders', 'max')
   return { success: true }
 }

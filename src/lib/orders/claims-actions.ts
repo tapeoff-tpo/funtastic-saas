@@ -7,7 +7,7 @@
  * All actions require authentication and verify claim ownership.
  */
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { claims } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
@@ -47,6 +47,7 @@ export async function updateClaimStatus(
   }
 
   revalidatePath('/orders/claims')
+  revalidateTag('orders', 'max')
   return { success: true }
 }
 
@@ -82,5 +83,6 @@ export async function updateClaimMemo(
   }
 
   revalidatePath('/orders/claims')
+  revalidateTag('orders', 'max')
   return { success: true }
 }

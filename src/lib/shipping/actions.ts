@@ -13,7 +13,7 @@
 import { db } from '@/lib/db'
 import { orders, shipments } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createShipment } from './queries'
 import { getCarrierName } from './carrier-codes'
@@ -145,6 +145,7 @@ export async function reprocessHeldOrder(
     })
 
     revalidatePath('/shipping/held')
+    revalidateTag('orders', 'max')
     return { success: true }
   } catch (error) {
     return {
@@ -180,6 +181,7 @@ export async function updateHeldMemo(
       .where(and(eq(orders.id, orderId), eq(orders.userId, user.id)))
 
     revalidatePath('/shipping/held')
+    revalidateTag('orders', 'max')
     return { success: true }
   } catch (error) {
     return {

@@ -5,6 +5,7 @@
  * All queries run server-side (offset/limit pagination acceptable for admin tool).
  */
 
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory, shipmentGroups, shipmentGroupOrders } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, exists } from 'drizzle-orm'
@@ -13,6 +14,58 @@ import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './type
 // re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
 export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
+
+/**
+ * perf: mapping lookups (products / product_name_mappings / product_option_mappings / variants)
+ * 는 탭 전환·페이지 이동 사이에 거의 안 변하므로 사용자별 60초 캐시.
+ * 매핑/상품이 바뀔 때 `revalidateTag('product-mappings')` 호출로 즉시 무효화.
+ *
+ * 진단 (2026-04-28): 사용자가 92건 주문에 대해 mappingStatus 계산하려고
+ * products 3386건 + name_mappings 922건 = 4300여 row 를 매번 fetch 하던 것이 핵심 병목.
+ */
+const getMappingLookupsCached = unstable_cache(
+  async (userId: string) => {
+    const [nameMappings, optionMappings, productSkus, variantSkus] = await Promise.all([
+      db
+        .select({
+          marketplaceId: productNameMappings.marketplaceId,
+          marketplaceName: productNameMappings.marketplaceName,
+        })
+        .from(productNameMappings)
+        .where(eq(productNameMappings.userId, userId)),
+      db
+        .select({
+          marketplaceId: productOptionMappings.marketplaceId,
+          marketplaceName: productOptionMappings.marketplaceName,
+          optionText: productOptionMappings.optionText,
+        })
+        .from(productOptionMappings)
+        .where(eq(productOptionMappings.userId, userId)),
+      db
+        .select({ sku: products.internalSku })
+        .from(products)
+        .where(eq(products.userId, userId)),
+      db
+        .select({ sku: productVariants.sku })
+        .from(productVariants)
+        .innerJoin(products, eq(productVariants.productId, products.id))
+        .where(eq(products.userId, userId)),
+    ])
+    return { nameMappings, optionMappings, productSkus, variantSkus }
+  },
+  ['order-mapping-lookups'],
+  { revalidate: 60, tags: ['product-mappings'] },
+)
+
+/**
+ * perf: getOrderStats 는 5개 병렬 COUNT 쿼리. 탭 전환 사이엔 값이 거의 안 변함.
+ * 30초 캐시 + 주문 변경 시 `revalidateTag('orders')` 로 무효화.
+ */
+const getOrderStatsCached = unstable_cache(
+  async (userId: string): Promise<OrderStats> => getOrderStatsImpl(userId),
+  ['order-stats'],
+  { revalidate: 30, tags: ['orders'] },
+)
 
 /** 주문이 특정 단계에 속하는지 판정 */
 export function matchStage(
@@ -153,40 +206,16 @@ export async function getOrders(filters: OrderFilters = {}) {
   // 한 wave 에서 병렬 실행한다 (이전엔 4 wave 직렬 → 2 wave 로 압축).
   const userId = filters.userId
 
-  // userId-scoped mapping 인벤토리 (mappingStatus 계산용) — 페이지/검색과 무관하게 동일
-  const userScopedPromise: Promise<readonly [
-    Array<{ marketplaceId: string; marketplaceName: string }>,
-    Array<{ marketplaceId: string; marketplaceName: string; optionText: string | null }>,
-    Array<{ sku: string }>,
-    Array<{ sku: string }>,
-  ]> = userId
-    ? Promise.all([
-        db
-          .select({
-            marketplaceId: productNameMappings.marketplaceId,
-            marketplaceName: productNameMappings.marketplaceName,
-          })
-          .from(productNameMappings)
-          .where(eq(productNameMappings.userId, userId)),
-        db
-          .select({
-            marketplaceId: productOptionMappings.marketplaceId,
-            marketplaceName: productOptionMappings.marketplaceName,
-            optionText: productOptionMappings.optionText,
-          })
-          .from(productOptionMappings)
-          .where(eq(productOptionMappings.userId, userId)),
-        db
-          .select({ sku: products.internalSku })
-          .from(products)
-          .where(eq(products.userId, userId)),
-        db
-          .select({ sku: productVariants.sku })
-          .from(productVariants)
-          .innerJoin(products, eq(productVariants.productId, products.id))
-          .where(eq(products.userId, userId)),
-      ])
-    : Promise.resolve([[], [], [], []] as const)
+  // userId-scoped mapping 인벤토리 (mappingStatus 계산용)
+  // unstable_cache 로 60초 캐시 → 탭/페이지 전환 시 DB 안 가고 메모리에서 즉시 응답
+  const userScopedPromise = userId
+    ? getMappingLookupsCached(userId)
+    : Promise.resolve({
+        nameMappings: [] as Array<{ marketplaceId: string; marketplaceName: string }>,
+        optionMappings: [] as Array<{ marketplaceId: string; marketplaceName: string; optionText: string | null }>,
+        productSkus: [] as Array<{ sku: string }>,
+        variantSkus: [] as Array<{ sku: string }>,
+      })
 
   // orderRows + total count — claimType 분기 안에서도 두 쿼리는 같은 IDs 를 공유하므로
   // 같은 IIFE 안에서 처리하되, 외부에서는 userScopedPromise 와 병렬 실행한다.
@@ -231,7 +260,7 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const [
     { orderRows, total: orderTotal },
-    [nameMappings, optionMappings, productSkus, variantSkus],
+    { nameMappings, optionMappings, productSkus, variantSkus },
   ] = await Promise.all([ordersAndCountPromise, userScopedPromise])
 
   // Fetch items/claims/shipments/shipmentGroups in parallel
@@ -704,7 +733,14 @@ export async function getStockDeductionPreview(
  *
  * All scoped by userId (RLS pattern + perf).
  */
-export async function getOrderStats(userId: string): Promise<OrderStats> {
+/**
+ * Cached entry-point. 호출자는 `getOrderStats(userId)` 그대로 쓰면 30초 캐시 히트.
+ */
+export function getOrderStats(userId: string): Promise<OrderStats> {
+  return getOrderStatsCached(userId)
+}
+
+async function getOrderStatsImpl(userId: string): Promise<OrderStats> {
   const [statusRows, claimRows, cancelTabRows, totalRow, heldRow] = await Promise.all([
     db
       .select({ status: orders.status, value: count() })

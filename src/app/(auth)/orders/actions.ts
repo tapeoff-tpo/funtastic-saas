@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import {
   updateOrderStatus,
@@ -24,6 +24,7 @@ export async function changeStatusAction(
 ): Promise<{ success: boolean; error?: string }> {
   const result = await updateOrderStatus(orderId, newStatus)
   revalidatePath('/orders')
+  revalidateTag('orders', 'max')
   return result
 }
 
@@ -41,6 +42,7 @@ export async function holdOrderAction(
   }
   const result = await holdOrder(orderId, trimmed)
   revalidatePath('/orders')
+  revalidateTag('orders', 'max')
   return result
 }
 
@@ -52,6 +54,7 @@ export async function releaseOrderAction(
 ): Promise<{ success: boolean; error?: string }> {
   const result = await releaseOrder(orderId)
   revalidatePath('/orders')
+  revalidateTag('orders', 'max')
   return result
 }
 
@@ -65,6 +68,7 @@ export async function bulkChangeStatusAction(
 ): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
   const result = await bulkUpdateStatus(orderIds, newStatus)
   revalidatePath('/orders')
+  revalidateTag('orders', 'max')
   return result
 }
 
@@ -82,6 +86,7 @@ export async function uploadInvoiceAction(
   if (!user) return { success: false, error: 'Unauthorized' }
   const result = await queueInvoiceUpload(orderId, trackingNumber, carrierId, user.id)
   revalidatePath('/orders')
+  revalidateTag('orders', 'max')
   return result
 }
 
@@ -96,5 +101,6 @@ export async function bulkUploadInvoiceAction(
   if (!user) return { queued: 0, errors: [] }
   const result = await bulkQueueInvoiceUpload(orders, user.id)
   revalidatePath('/orders')
+  revalidateTag('orders', 'max')
   return result
 }

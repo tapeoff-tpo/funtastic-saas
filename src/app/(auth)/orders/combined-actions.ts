@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, orderItems } from '@/lib/db/schema'
@@ -116,6 +116,7 @@ export async function bulkCombineByContactAction(
   }
 
   revalidatePath('/orders')
+  revalidateTag('orders', 'max')
   revalidatePath('/shipping/combined')
   return { created, totalOrders }
 }

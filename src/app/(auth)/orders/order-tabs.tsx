@@ -14,7 +14,8 @@
  * 패턴은 마지막 setter만 살아남아 데이터가 비어 보이는 버그 발생)
  */
 
-import { useQueryStates, parseAsString, parseAsBoolean } from 'nuqs'
+import { useRouter } from 'next/navigation'
+import { useQueryStates, parseAsString, parseAsBoolean, parseAsInteger } from 'nuqs'
 
 type TabKind = 'all' | 'status' | 'cancel' | 'claim'
 
@@ -72,11 +73,13 @@ interface OrderTabsProps {
 }
 
 export function OrderTabs({ counts }: OrderTabsProps) {
+  const router = useRouter()
   const [tabState, setTabState] = useQueryStates(
     {
       status: parseAsString,
       claimType: parseAsString,
       cancel: parseAsBoolean,
+      page: parseAsInteger.withDefault(1),
     },
     { shallow: false },
   )
@@ -90,21 +93,26 @@ export function OrderTabs({ counts }: OrderTabsProps) {
     return 'all'
   })()
 
+  function applyTabState(next: { status: string | null; claimType: string | null; cancel: boolean | null }) {
+    // page=1 로 초기화 (다른 탭으로 갈 때 이전 페이지 번호가 따라가면 빈 결과)
+    void setTabState({ ...next, page: 1 }).then(() => router.refresh())
+  }
+
   function selectTab(tab: TabDef) {
     if (tab.id === 'all') {
-      void setTabState({ status: null, claimType: null, cancel: null })
+      applyTabState({ status: null, claimType: null, cancel: null })
       return
     }
     if (tab.kind === 'status') {
-      void setTabState({ status: tab.id, claimType: null, cancel: null })
+      applyTabState({ status: tab.id, claimType: null, cancel: null })
       return
     }
     if (tab.kind === 'cancel') {
-      void setTabState({ status: null, claimType: null, cancel: true })
+      applyTabState({ status: null, claimType: null, cancel: true })
       return
     }
     if (tab.kind === 'claim') {
-      void setTabState({ status: null, claimType: tab.id, cancel: null })
+      applyTabState({ status: null, claimType: tab.id, cancel: null })
       return
     }
   }

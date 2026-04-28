@@ -7,10 +7,10 @@ import {
   parseAsBoolean,
 } from 'nuqs/server'
 import { createClient } from '@/lib/supabase/server'
-import { getOrders } from '@/lib/orders/queries'
+import { getOrders, getOrderStats } from '@/lib/orders/queries'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
-import { OrderTabsServer, OrderTabsSkeleton } from './order-tabs-server'
+import { OrderTabs } from './order-tabs'
 import type { OrderRow } from './columns'
 import type { OrderFilters as OrderFiltersParams } from '@/lib/orders/types'
 import type { ClaimType } from '@/lib/orders/types'
@@ -48,24 +48,25 @@ export default async function OrdersPage({
 
   const params = await searchParamsCache.parse(searchParams)
 
-  // Phase 8 perf — stats 는 Suspense 로 분리되어 OrderTabsServer 가 알아서 fetch.
-  // 메인 await 는 테이블 데이터만 기다린다 → 테이블 즉시 표시, 탭 카운트는 streaming.
-  const { orders: orderList, total } = await getOrders({
-    page: params.page,
-    pageSize: params.pageSize,
-    userId: user.id,
-    status: (params.status ?? undefined) as OrderFiltersParams['status'],
-    marketplace: params.marketplace ?? undefined,
-    search: params.search ?? undefined,
-    dateFrom: params.dateFrom ?? undefined,
-    dateTo: params.dateTo ?? undefined,
-    sort: params.sort ?? undefined,
-    order: (params.order as 'asc' | 'desc') ?? undefined,
-    claimType: (params.claimType ?? undefined) as ClaimType | undefined,
-    mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
-    isHeld: params.held ?? undefined,
-    cancelTab: params.cancel ?? undefined,
-  })
+  const [{ orders: orderList, total }, stats] = await Promise.all([
+    getOrders({
+      page: params.page,
+      pageSize: params.pageSize,
+      userId: user.id,
+      status: (params.status ?? undefined) as OrderFiltersParams['status'],
+      marketplace: params.marketplace ?? undefined,
+      search: params.search ?? undefined,
+      dateFrom: params.dateFrom ?? undefined,
+      dateTo: params.dateTo ?? undefined,
+      sort: params.sort ?? undefined,
+      order: (params.order as 'asc' | 'desc') ?? undefined,
+      claimType: (params.claimType ?? undefined) as ClaimType | undefined,
+      mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
+      isHeld: params.held ?? undefined,
+      cancelTab: params.cancel ?? undefined,
+    }),
+    getOrderStats(user.id),
+  ])
 
   const data: OrderRow[] = orderList.map((o) => ({
     id: o.id,
@@ -105,6 +106,22 @@ export default async function OrdersPage({
     })),
   }))
 
+  // OrderTabs counts — map OrderStats (server) → OrderTabsCounts (component)
+  const orderTabsCounts = {
+    all: stats.total ?? 0,
+    new: stats.new,
+    confirmed: stats.confirmed,
+    preparing: stats.preparing,
+    ready: stats.ready,
+    shipped: stats.shipped,
+    delivering: stats.delivering,
+    delivered: stats.delivered,
+    // 취소 탭 = status='cancelled' OR claimType='cancel' distinct (B-3)
+    cancelled: stats.cancelTabCount,
+    exchange: stats.claimExchange,
+    return: stats.claimReturn,
+  }
+
   return (
     <div className="space-y-2">
       {/* Compact header — title + count (Excel import entry-point removed in Phase 8) */}
@@ -115,9 +132,9 @@ export default async function OrdersPage({
         </span>
       </div>
 
-      {/* Phase 8 — 9탭 통합 컴포넌트. stats 는 streaming 으로 따로 도착. */}
-      <Suspense fallback={<OrderTabsSkeleton />}>
-        <OrderTabsServer userId={user.id} />
+      {/* Phase 8 — 9탭 통합 컴포넌트 (ClaimsFilter / stage-tabs 폐기) */}
+      <Suspense>
+        <OrderTabs counts={orderTabsCounts} />
       </Suspense>
 
       {/* Filters — marketplace / 날짜 / 검색 (W-3 유지) */}

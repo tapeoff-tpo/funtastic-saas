@@ -81,12 +81,14 @@ export function OrderTabs({ counts }: OrderTabsProps) {
   const status = searchParams.get('status')
   const claimType = searchParams.get('claimType')
   const cancel = searchParams.get('cancel')
-  const currentTab: string = (() => {
+  const tab = searchParams.get('tab')
+  const currentTab: string | null = (() => {
     if (cancel === 'true' || cancel === '1') return 'cancel'
     if (claimType === 'exchange') return 'exchange'
     if (claimType === 'return') return 'return'
     if (status) return status
-    return 'all'
+    if (tab === 'all') return 'all'
+    return null // 탭 미선택 (사이드바 진입 직후) — 어떤 탭도 highlight 안 됨
   })()
 
   function buildTabUrl(tab: TabDef): string {
@@ -95,6 +97,7 @@ export function OrderTabs({ counts }: OrderTabsProps) {
     params.delete('status')
     params.delete('claimType')
     params.delete('cancel')
+    params.delete('tab')
     params.delete('page')
 
     if (tab.kind === 'status') {
@@ -103,8 +106,10 @@ export function OrderTabs({ counts }: OrderTabsProps) {
       params.set('cancel', 'true')
     } else if (tab.kind === 'claim') {
       params.set('claimType', tab.id)
+    } else if (tab.kind === 'all') {
+      // 전체 탭도 명시적으로 ?tab=all 을 붙여서 fetch 트리거
+      params.set('tab', 'all')
     }
-    // tab.id === 'all' → 아무 키도 set 안 함
 
     const qs = params.toString()
     return qs ? `${pathname}?${qs}` : pathname

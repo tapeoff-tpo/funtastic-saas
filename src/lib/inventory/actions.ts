@@ -10,7 +10,7 @@
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, orderItems } from '@/lib/db/schema'
+import { inventory, inventoryHistory, orderItems, orders, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, and, isNotNull } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 
@@ -165,20 +165,89 @@ export async function setStock(
 }
 
 /**
- * Order items 의 sku/quantity 를 그대로 반환 (sku 없는 행 제외).
+ * orderItems → 차감 대상 SKU/수량 으로 전개.
  *
- * Phase A 매핑 시스템 재설계로 bundle 전개 로직은 제거됨. 신규 매핑코드 시스템
- * 도입 시 mapping_components 기반으로 다시 구현 예정 (Phase C).
+ * Phase C 매핑코드 시스템:
+ *   1) (marketplaceId, marketplaceItemId) 가 mapping_sources 에 있으면
+ *      mapping_components 의 SKU + 수량으로 전개 (단품=1행, 세트=N행).
+ *   2) 매칭 없으면 fallback: orderItems.sku 직접 사용 (구 데이터 호환).
+ *   3) sku 없고 매핑도 없으면 스킵 (차감 불가).
+ *
+ * 같은 SKU 가 여러 번 등장할 수 있으므로 합산해서 한 번에 차감.
  */
-function flattenOrderItems(
-  items: Array<{ sku: string | null; quantity: number }>,
-): Array<{ sku: string; quantity: number }> {
-  const result: Array<{ sku: string; quantity: number }> = []
-  for (const item of items) {
-    if (!item.sku) continue
-    result.push({ sku: item.sku, quantity: item.quantity })
+async function expandOrderItemsForDeduction(
+  tx: DrizzleTransaction,
+  userId: string,
+  orderId: string,
+): Promise<Array<{ sku: string; quantity: number }>> {
+  const rawItems = await tx
+    .select({
+      marketplaceItemId: orderItems.marketplaceItemId,
+      sku: orderItems.sku,
+      quantity: orderItems.quantity,
+      skuMultiplier: orderItems.skuMultiplier,
+      orderMarketplaceId: orders.marketplaceId,
+    })
+    .from(orderItems)
+    .innerJoin(orders, eq(orders.id, orderItems.orderId))
+    .where(eq(orderItems.orderId, orderId))
+
+  if (rawItems.length === 0) return []
+
+  // 매핑 lookup 을 위해 (marketplaceId, marketplaceItemId) 셋 수집
+  const sourceKeys = new Set<string>()
+  for (const r of rawItems) {
+    if (r.marketplaceItemId) {
+      sourceKeys.add(`${r.orderMarketplaceId}:${r.marketplaceItemId}`)
+    }
   }
-  return result
+
+  // mapping_sources + components 한 번에 join 으로 가져옴
+  const mappingRows = sourceKeys.size > 0
+    ? await tx
+        .select({
+          marketplaceId: mappingSources.marketplaceId,
+          marketplaceProductId: mappingSources.marketplaceProductId,
+          componentSku: mappingComponents.sku,
+          componentQuantity: mappingComponents.quantity,
+        })
+        .from(mappingSources)
+        .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
+        .where(eq(mappingSources.userId, userId))
+    : []
+
+  // (marketplaceId:marketplaceItemId) → [{sku, quantity}, ...]
+  const mappingByKey = new Map<string, Array<{ sku: string; quantity: number }>>()
+  for (const row of mappingRows) {
+    const key = `${row.marketplaceId}:${row.marketplaceProductId}`
+    if (!sourceKeys.has(key)) continue
+    const existing = mappingByKey.get(key) ?? []
+    existing.push({ sku: row.componentSku, quantity: row.componentQuantity })
+    mappingByKey.set(key, existing)
+  }
+
+  // 합산 (같은 SKU 여러 번 → 한 번에 차감)
+  const accumulated = new Map<string, number>()
+  const add = (sku: string, qty: number) => {
+    accumulated.set(sku, (accumulated.get(sku) ?? 0) + qty)
+  }
+
+  for (const r of rawItems) {
+    const orderQty = r.quantity * (r.skuMultiplier ?? 1)
+    const key = r.marketplaceItemId
+      ? `${r.orderMarketplaceId}:${r.marketplaceItemId}`
+      : null
+    const components = key ? mappingByKey.get(key) : null
+
+    if (components && components.length > 0) {
+      for (const c of components) add(c.sku, orderQty * c.quantity)
+    } else if (r.sku) {
+      add(r.sku, orderQty)
+    }
+    // else: 매핑도 없고 sku 도 없음 → 스킵
+  }
+
+  return Array.from(accumulated.entries()).map(([sku, quantity]) => ({ sku, quantity }))
 }
 
 /**
@@ -194,21 +263,7 @@ export async function deductForOrder(
   userId: string,
   orderId: string,
 ): Promise<void> {
-  const rawItemsRaw = await tx
-    .select({
-      sku: orderItems.sku,
-      quantity: orderItems.quantity,
-      skuMultiplier: orderItems.skuMultiplier,
-    })
-    .from(orderItems)
-    .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
-
-  const rawItems = rawItemsRaw.map((r) => ({
-    sku: r.sku,
-    quantity: r.quantity * (r.skuMultiplier ?? 1),
-  }))
-
-  const items = flattenOrderItems(rawItems)
+  const items = await expandOrderItemsForDeduction(tx, userId, orderId)
 
   for (const item of items) {
     const result = await adjustStockInTx(tx, userId, item.sku, -item.quantity, 'order_ship', { orderId })
@@ -228,21 +283,7 @@ export async function restoreForOrder(
   userId: string,
   orderId: string,
 ): Promise<void> {
-  const rawItemsRaw = await tx
-    .select({
-      sku: orderItems.sku,
-      quantity: orderItems.quantity,
-      skuMultiplier: orderItems.skuMultiplier,
-    })
-    .from(orderItems)
-    .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
-
-  const rawItems = rawItemsRaw.map((r) => ({
-    sku: r.sku,
-    quantity: r.quantity * (r.skuMultiplier ?? 1),
-  }))
-
-  const items = flattenOrderItems(rawItems)
+  const items = await expandOrderItemsForDeduction(tx, userId, orderId)
 
   for (const item of items) {
     const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'order_cancel', { orderId })
@@ -263,12 +304,7 @@ export async function restoreForClaim(
   orderId: string,
 ): Promise<void> {
   return db.transaction(async (tx) => {
-    const rawItems = await tx
-      .select({ sku: orderItems.sku, quantity: orderItems.quantity })
-      .from(orderItems)
-      .where(and(eq(orderItems.orderId, orderId), isNotNull(orderItems.sku)))
-
-    const items = flattenOrderItems(rawItems)
+    const items = await expandOrderItemsForDeduction(tx, userId, orderId)
 
     for (const item of items) {
       const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'return', {

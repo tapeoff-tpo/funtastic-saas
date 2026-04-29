@@ -10,6 +10,7 @@ import { db } from '@/lib/db'
 import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateDaesinExcel, type DaesinOrderRow } from '@/lib/shipping/excel/daesin-export'
+import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -35,19 +36,30 @@ export async function GET(req: NextRequest) {
     db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
   ])
 
-  // Phase A 매핑 재설계: name/sku 매핑 + bundle 펼침 제거.
-  // orderItems 원본 그대로 출력. (Phase C 신규 매핑코드 도입 시 재연결.)
+  // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
+  const expanded = await expandOrderItemsWithMapping(
+    user.id,
+    orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
+    itemRows,
+  )
+  const expandedByOrder = new Map<string, typeof expanded>()
+  for (const row of expanded) {
+    const list = expandedByOrder.get(row.orderId) ?? []
+    list.push(row)
+    expandedByOrder.set(row.orderId, list)
+  }
+
   const exportRows: DaesinOrderRow[] = []
   for (const order of orderRows) {
-    const items = itemRows.filter((i) => i.orderId === order.id)
+    const rows = expandedByOrder.get(order.id) ?? []
     const addr = order.shippingAddress
     const fullAddress = addr
       ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
       : ''
 
-    if (items.length === 0) continue
+    if (rows.length === 0) continue
 
-    for (const item of items) {
+    for (const row of rows) {
       exportRows.push({
         orderId: order.id,
         marketplaceOrderId: order.marketplaceOrderId,
@@ -58,13 +70,13 @@ export async function GET(req: NextRequest) {
         recipientAltPhone: order.recipientPhone2 ? (order.recipientPhone ?? '') : '',
         recipientAddress: fullAddress,
         recipientZipCode: addr?.zipCode ?? '',
-        productName: item.productName ?? '',
-        quantity: item.quantity,
+        productName: row.productName,
+        quantity: row.quantity,
         deliveryMessage: undefined,
         senderName: senderSettings?.companyName ?? '',
         senderPhone: senderSettings?.phone ?? '',
         pickingLocation: undefined,
-        internalSku: item.sku ?? undefined,
+        internalSku: row.sku || undefined,
       })
     }
   }

@@ -7,7 +7,7 @@
 
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
@@ -18,14 +18,13 @@ import { listInquiriesByOrderIds } from './inquiry-queries'
 /**
  * mappingStatus 계산용 SKU 인벤토리 캐시 (60초).
  *
- * Phase A — 매핑 시스템 재설계:
- * 기존엔 product_name_mappings / product_option_mappings 도 같이 조회했지만 두 테이블 모두 drop.
- * 현재는 SKU 직접 매칭(orderItems.sku ∈ products.internalSku ∪ productVariants.sku) 만으로 mappingStatus 판정.
- * 신규 매핑코드 시스템 도입 시 (Phase C) 이 lookup 도 재구성 예정.
+ * Phase C — 매핑코드 시스템:
+ * mappingStatus 는 mapping_sources(marketplaceId + marketplaceItemId) 매칭으로 판정.
+ * SKU 직접 매칭은 fallback 용도로 유지 (마켓상품ID가 없는 임포트 주문 등).
  */
 const getMappingLookupsCached = unstable_cache(
   async (userId: string) => {
-    const [productSkus, variantSkus] = await Promise.all([
+    const [productSkus, variantSkus, sources] = await Promise.all([
       db
         .select({ sku: products.internalSku })
         .from(products)
@@ -35,8 +34,15 @@ const getMappingLookupsCached = unstable_cache(
         .from(productVariants)
         .innerJoin(products, eq(productVariants.productId, products.id))
         .where(eq(products.userId, userId)),
+      db
+        .select({
+          marketplaceId: mappingSources.marketplaceId,
+          marketplaceProductId: mappingSources.marketplaceProductId,
+        })
+        .from(mappingSources)
+        .where(eq(mappingSources.userId, userId)),
     ])
-    return { productSkus, variantSkus }
+    return { productSkus, variantSkus, sources }
   },
   ['order-mapping-lookups'],
   { revalidate: 60, tags: ['product-mappings'] },
@@ -250,6 +256,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     : Promise.resolve({
         productSkus: [] as Array<{ sku: string }>,
         variantSkus: [] as Array<{ sku: string }>,
+        sources: [] as Array<{ marketplaceId: string; marketplaceProductId: string }>,
       })
 
   // orderRows + total count — claimType 분기 안에서도 두 쿼리는 같은 IDs 를 공유하므로
@@ -295,7 +302,7 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const [
     { orderRows, total: orderTotal },
-    { productSkus, variantSkus },
+    { productSkus, variantSkus, sources: mappingSourceRows },
   ] = await Promise.all([ordersAndCountPromise, userScopedPromise])
 
   // Fetch items/claims/shipments/shipmentGroups in parallel.
@@ -441,18 +448,29 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  // perf: productSkus / variantSkus 은 위쪽 userScopedPromise 에서 이미 받아왔다.
-  // Phase A 매핑 재설계: nameMappings / optionMappings 제거. SKU 매칭만으로 판정.
+  // perf: productSkus / variantSkus / mappingSources 는 위쪽 userScopedPromise 에서 이미 받아왔다.
+  // Phase C — mappingStatus 판정:
+  //   1) (marketplaceId, marketplaceItemId) ∈ mapping_sources → 매핑됨
+  //   2) fallback: orderItems.sku ∈ products.internalSku ∪ productVariants.sku
   const skuSet = new Set<string>()
   for (const p of productSkus) skuSet.add(p.sku)
   for (const v of variantSkus) skuSet.add(v.sku)
 
-  const getMappingStatus = (_orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
+  const sourceSet = new Set<string>()
+  for (const s of mappingSourceRows) {
+    sourceSet.add(`${s.marketplaceId}:${s.marketplaceProductId}`)
+  }
+
+  const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
     if (orderItems.length === 0) return 'unmapped'
     let mappedCount = 0
     for (const item of orderItems) {
+      const itemKey = item.marketplaceItemId
+        ? `${orderMarketplaceId}:${item.marketplaceItemId}`
+        : null
+      const hasSourceMatch = itemKey ? sourceSet.has(itemKey) : false
       const hasSkuMatch = item.sku ? skuSet.has(item.sku.trim()) : false
-      if (hasSkuMatch) mappedCount++
+      if (hasSourceMatch || hasSkuMatch) mappedCount++
     }
     if (mappedCount === orderItems.length) return 'mapped'
     if (mappedCount === 0) return 'unmapped'
@@ -605,10 +623,12 @@ export async function getOrderById(id: string, userId?: string) {
 
 /**
  * 주문 출고 시 실제 차감될 재고 미리보기.
- * - 각 order item.sku 가 그대로 차감 대상 (orderQty × skuMultiplier)
- * - 같은 SKU 가 여러 줄에서 나오면 합산
- * - Phase A 매핑 재설계: bundle 전개 로직 제거. 신규 매핑코드 시스템 도입 시 (Phase C)
- *   mapping_components 기반으로 다시 구현 예정.
+ *
+ * Phase C 매핑코드 시스템:
+ *   1) (marketplaceId, marketplaceItemId) 가 mapping_sources 에 있으면
+ *      mapping_components 의 SKU + 수량으로 전개 (단품=1, 세트=N).
+ *   2) 매칭 없으면 fallback: orderItems.sku 직접 사용.
+ *   3) 같은 SKU 가 여러 줄에서 나오면 합산.
  */
 export interface StockDeductionPreviewRow {
   sku: string
@@ -632,6 +652,8 @@ export async function getStockDeductionPreview(
       optionText: orderItems.optionText,
       quantity: orderItems.quantity,
       skuMultiplier: orderItems.skuMultiplier,
+      marketplaceItemId: orderItems.marketplaceItemId,
+      orderMarketplaceId: orders.marketplaceId,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
@@ -639,51 +661,103 @@ export async function getStockDeductionPreview(
       and(
         eq(orderItems.orderId, orderId),
         eq(orders.userId, userId),
-        isNotNull(orderItems.sku),
       ),
     )
 
   if (rows.length === 0) return []
 
-  // Accumulator: sku → { requiredQty, sourceItems }
+  // 매핑 lookup: (marketplaceId, marketplaceItemId) → components[]
+  const sourceKeys = new Set<string>()
+  for (const r of rows) {
+    if (r.marketplaceItemId) {
+      sourceKeys.add(`${r.orderMarketplaceId}:${r.marketplaceItemId}`)
+    }
+  }
+
+  const mappingRows = sourceKeys.size > 0
+    ? await db
+        .select({
+          marketplaceId: mappingSources.marketplaceId,
+          marketplaceProductId: mappingSources.marketplaceProductId,
+          componentSku: mappingComponents.sku,
+          componentQuantity: mappingComponents.quantity,
+        })
+        .from(mappingSources)
+        .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
+        .where(eq(mappingSources.userId, userId))
+    : []
+
+  const mappingByKey = new Map<string, Array<{ sku: string; quantity: number }>>()
+  for (const m of mappingRows) {
+    const key = `${m.marketplaceId}:${m.marketplaceProductId}`
+    if (!sourceKeys.has(key)) continue
+    const list = mappingByKey.get(key) ?? []
+    list.push({ sku: m.componentSku, quantity: m.componentQuantity })
+    mappingByKey.set(key, list)
+  }
+
+  // Accumulator: sku → { requiredQty, sourceItems, isBundleComponent }
   const acc = new Map<
     string,
     {
       requiredQty: number
       sourceItems: Array<{ productName: string; optionText: string | null; orderQty: number }>
+      isBundleComponent: boolean
     }
   >()
+  const addToAcc = (
+    sku: string,
+    qty: number,
+    src: { productName: string; optionText: string | null; orderQty: number },
+    isBundle: boolean,
+  ) => {
+    const cur = acc.get(sku) ?? { requiredQty: 0, sourceItems: [], isBundleComponent: false }
+    cur.requiredQty += qty
+    cur.sourceItems.push(src)
+    cur.isBundleComponent = cur.isBundleComponent || isBundle
+    acc.set(sku, cur)
+  }
 
   for (const row of rows) {
-    const sku = row.sku!
     const orderQty = row.quantity * (row.skuMultiplier ?? 1)
-    const current = acc.get(sku) ?? { requiredQty: 0, sourceItems: [] }
-    current.requiredQty += orderQty
-    current.sourceItems.push({
-      productName: row.productName,
+    const key = row.marketplaceItemId
+      ? `${row.orderMarketplaceId}:${row.marketplaceItemId}`
+      : null
+    const components = key ? mappingByKey.get(key) : null
+    const src = {
+      productName: row.productName ?? '',
       optionText: row.optionText,
       orderQty,
-    })
-    acc.set(sku, current)
+    }
+
+    if (components && components.length > 0) {
+      const isBundle = components.length > 1
+      for (const c of components) {
+        addToAcc(c.sku, orderQty * c.quantity, src, isBundle)
+      }
+    } else if (row.sku) {
+      addToAcc(row.sku, orderQty, src, false)
+    }
+    // else: 매핑도 없고 sku 도 없음 → preview 에서 제외
   }
 
   const skus = Array.from(acc.keys())
-  const invRows = skus.length
-    ? await db
-        .select({
-          sku: inventory.sku,
-          productName: inventory.productName,
-          totalStock: inventory.totalStock,
-          availableStock: inventory.availableStock,
-        })
-        .from(inventory)
-        .where(and(eq(inventory.userId, userId), inArray(inventory.sku, skus)))
-    : []
+  if (skus.length === 0) return []
+
+  const invRows = await db
+    .select({
+      sku: inventory.sku,
+      productName: inventory.productName,
+      totalStock: inventory.totalStock,
+      availableStock: inventory.availableStock,
+    })
+    .from(inventory)
+    .where(and(eq(inventory.userId, userId), inArray(inventory.sku, skus)))
 
   const invMap = new Map(invRows.map((r) => [r.sku, r]))
 
   return skus.map((sku) => {
-    const { requiredQty, sourceItems } = acc.get(sku)!
+    const { requiredQty, sourceItems, isBundleComponent } = acc.get(sku)!
     const inv = invMap.get(sku)
     return {
       sku,
@@ -692,7 +766,7 @@ export async function getStockDeductionPreview(
       totalStock: inv?.totalStock ?? null,
       availableStock: inv?.availableStock ?? null,
       sufficient: inv ? (inv.availableStock ?? 0) >= requiredQty : false,
-      isBundleComponent: false,
+      isBundleComponent,
       sourceItems,
     }
   })

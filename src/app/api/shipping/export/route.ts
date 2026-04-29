@@ -14,6 +14,7 @@ import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
+import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -58,16 +59,29 @@ export async function GET(request: NextRequest) {
       : []
     const connectionMap = new Map(connectionRows.map((c) => [c.id, c.displayName]))
 
-    // Phase A 매핑 재설계: option-level 매핑 제거. 확정 SKU 는 orderItems.sku 그대로 사용.
-    const confirmedSkuByItem = new Map<string, string>()
-    for (const item of itemRows) {
-      const sku = (item.sku ?? '').trim()
-      if (sku) confirmedSkuByItem.set(item.id, sku)
+    // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
+    // 매핑 없으면 orderItems.sku 를 그대로 사용 (fallback).
+    const expanded = user
+      ? await expandOrderItemsWithMapping(
+          user.id,
+          orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
+          itemRows,
+        )
+      : []
+    const expandedByOrder = new Map<string, typeof expanded>()
+    for (const row of expanded) {
+      const list = expandedByOrder.get(row.orderId) ?? []
+      list.push(row)
+      expandedByOrder.set(row.orderId, list)
     }
 
-    // SKU 기준 products(위치) + inventory(현재고/확정옵션명) lookup
+    // SKU 기준 products(위치) + inventory(현재고/확정옵션명) lookup —
+    // 매핑 확장 후 행들의 SKU 까지 모두 포함해야 함.
     const skuSet = [
-      ...new Set(itemRows.map((i) => i.sku).filter(Boolean) as string[]),
+      ...new Set([
+        ...itemRows.map((i) => i.sku).filter(Boolean) as string[],
+        ...expanded.map((r) => r.sku).filter(Boolean),
+      ]),
     ]
     const [productRows, inventoryRows] = user && skuSet.length > 0
       ? await Promise.all([
@@ -102,18 +116,18 @@ export async function GET(request: NextRequest) {
     const exportData: Record<string, unknown>[] = orderRows.map((order) => {
       const items = itemRows.filter((item) => item.orderId === order.id)
       const shipment = shipmentRows.find((s) => s.orderId === order.id)
+      const expandedRows = expandedByOrder.get(order.id) ?? []
 
       // 매핑 전 원본 (수집상품명/수집옵션명 용)
       const rawFirst = items[0]
 
-      // Phase A 매핑 재설계: name/option mapping 제거. 상품명은 marketplace 원본 사용.
-      // (신규 매핑코드 시스템 도입 시 Phase C 에서 다시 연결 예정.)
-      const firstItem = rawFirst
-      const productName = firstItem?.productName ?? ''
-      const sku: string = (rawFirst ? confirmedSkuByItem.get(rawFirst.id) : undefined) ?? rawFirst?.sku ?? ''
-      // 확정 옵션명 = inventory.optionName (재고관리에 등록된 옵션명)
-      // → 마켓 원본(optionText) 이 아니라 우리 내부에서 정리한 옵션명을 출력
-      const optionText = (sku ? inventoryMap.get(sku)?.optionName : '') ?? ''
+      // Phase C: 매핑 확장된 첫 행 기준으로 상품명/SKU/옵션 결정.
+      // 매핑된 행이면 component SKU + inventory.optionName + inventory.productName.
+      // 미매핑이면 expanded helper 가 원본을 fallback 으로 채워줌.
+      const primary = expandedRows[0]
+      const productName = primary?.productName ?? rawFirst?.productName ?? ''
+      const sku: string = primary?.sku ?? rawFirst?.sku ?? ''
+      const optionText = primary?.optionText ?? ''
 
       return {
         // 사용자 노출용 8자리 내부 주문번호
@@ -132,8 +146,10 @@ export async function GET(request: NextRequest) {
         shippingAddress: order.shippingAddress,
         productName,
         optionText,
-        quantity: items.reduce((sum, item) => sum + item.quantity, 0),
-        unitPrice: firstItem?.unitPrice ?? '0',
+        quantity: expandedRows.length > 0
+          ? expandedRows.reduce((sum, r) => sum + r.quantity, 0)
+          : items.reduce((sum, item) => sum + item.quantity, 0),
+        unitPrice: rawFirst?.unitPrice ?? '0',
         totalAmount: order.totalAmount,
         trackingNumber: shipment?.trackingNumber ?? '',
         carrierName: shipment?.carrierName ?? '',

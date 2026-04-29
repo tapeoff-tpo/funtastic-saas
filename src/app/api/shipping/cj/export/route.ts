@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export'
+import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -38,21 +39,33 @@ export async function GET(req: NextRequest) {
     db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
   ])
 
-  // Phase A 매핑 재설계: name/sku/option 매핑 + bundle 펼침 제거.
-  // orderItems 를 원본 그대로 출력. (Phase C 신규 매핑코드 시스템 도입 시 재연결.)
+  // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
+  // 매핑 없으면 원본 1 행 유지.
+  const expanded = await expandOrderItemsWithMapping(
+    user.id,
+    orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
+    itemRows,
+  )
+  const expandedByOrder = new Map<string, typeof expanded>()
+  for (const row of expanded) {
+    const list = expandedByOrder.get(row.orderId) ?? []
+    list.push(row)
+    expandedByOrder.set(row.orderId, list)
+  }
+
   const cjRows: CjOrderRow[] = []
   for (const order of orderRows) {
-    const items = itemRows.filter((i) => i.orderId === order.id)
+    const rows = expandedByOrder.get(order.id) ?? []
 
     const addr = order.shippingAddress
     const fullAddress = addr && typeof addr === 'object'
       ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
       : ''
 
-    if (items.length === 0) continue
+    if (rows.length === 0) continue
 
-    for (const item of items) {
-      const marketplaceItemId = item.marketplaceItemId ?? undefined
+    for (const row of rows) {
+      const marketplaceItemId = row.source.marketplaceItemId ?? undefined
 
       cjRows.push({
         orderId: order.id,
@@ -61,14 +74,14 @@ export async function GET(req: NextRequest) {
         // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
         recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
         recipientAddress: fullAddress,
-        productName: item.productName ?? '',
-        optionText: item.optionText ?? undefined,
-        quantity: item.quantity,
+        productName: row.productName,
+        optionText: row.optionText || undefined,
+        quantity: row.quantity,
         marketplaceItemId,
         senderName: senderSettings?.companyName ?? '',
         senderPhone: senderSettings?.phone ?? '',
         senderAddress: senderSettings?.address ?? '',
-        originalProductName: item.productName,
+        originalProductName: row.source.productName,
         pickingLocation: undefined,
       })
     }

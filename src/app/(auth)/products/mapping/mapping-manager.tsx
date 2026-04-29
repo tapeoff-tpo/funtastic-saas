@@ -1,9 +1,9 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2, X, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, X, RefreshCw, Search } from 'lucide-react'
 
 export const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡', naver: '네이버', gmarket: 'G마켓', auction: '옥션',
@@ -532,7 +532,233 @@ function ExistingCodePicker({
   )
 }
 
+interface ProductSearchResult {
+  id: string
+  internalSku: string
+  name: string
+  warehouseLocation: string | null
+  basePrice: string | null
+  costPrice: string | null
+  optionName: string | null
+  optionHint: string | null
+  availableStock: number | null
+}
+
+/**
+ * 사방넷 스타일 자체상품 검색 모달.
+ * - 검색어 입력 → /api/products/search
+ * - 결과 테이블에서 [선택] 클릭 시 onSelect 호출 + 닫힘
+ * - 매핑 EditDialog 의 SKU 구성품 입력에서 호출됨
+ */
+export function ProductSearchDialog({
+  open,
+  onClose,
+  onSelect,
+}: {
+  open: boolean
+  onClose: () => void
+  onSelect: (p: ProductSearchResult) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<ProductSearchResult[]>([])
+  const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setResults([])
+      setSearched(false)
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }, [open])
+
+  const search = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setResults([])
+      setSearched(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`)
+      if (!res.ok) {
+        setResults([])
+        return
+      }
+      const data = await res.json() as { results: ProductSearchResult[] }
+      setResults(data.results ?? [])
+      setSearched(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const handleQueryChange = (v: string) => {
+    setQuery(v)
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => void search(v), 300)
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (debounce.current) clearTimeout(debounce.current)
+    void search(query)
+  }
+
+  const fmtPrice = (v: string | null) =>
+    v == null ? '-' : Number(v).toLocaleString('ko-KR')
+
+  if (!open) return null
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-4xl flex-col rounded-lg bg-background shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b px-5 py-3">
+          <h2 className="text-base font-semibold">자체상품 검색</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="닫기"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        {/* 검색 폼 */}
+        <form onSubmit={handleSubmit} className="border-b bg-muted/30 px-5 py-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-muted-foreground">검색항목</label>
+            <select
+              disabled
+              className="rounded border bg-background px-2 py-1.5 text-xs text-muted-foreground"
+            >
+              <option>품번/상품명</option>
+            </select>
+            <input
+              ref={inputRef}
+              type="text"
+              value={query}
+              onChange={(e) => handleQueryChange(e.target.value)}
+              placeholder="품번코드 또는 상품명 검색"
+              className="flex-1 rounded border bg-background px-3 py-1.5 text-sm"
+            />
+            <Button type="submit" size="sm" disabled={loading}>
+              <Search className="size-3.5" />
+              {loading ? '검색 중...' : '검색'}
+            </Button>
+          </div>
+        </form>
+
+        {/* 결과 테이블 */}
+        <div className="flex-1 overflow-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 z-[1] bg-muted/60">
+              <tr className="border-b">
+                <th className="w-10 px-2 py-2 text-center font-medium">No</th>
+                <th className="px-2 py-2 text-left font-medium">품번코드(자체상품코드)</th>
+                <th className="px-2 py-2 text-left font-medium">상품명 / 옵션</th>
+                <th className="px-2 py-2 text-right font-medium">판매가</th>
+                <th className="px-2 py-2 text-right font-medium">원가 / 이익률</th>
+                <th className="px-2 py-2 text-right font-medium">재고</th>
+                <th className="w-16 px-2 py-2 text-center font-medium">선택</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-muted-foreground">
+                    불러오는 중...
+                  </td>
+                </tr>
+              ) : !searched ? (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-muted-foreground">
+                    품번코드 또는 상품명을 입력하고 검색하세요
+                  </td>
+                </tr>
+              ) : results.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-10 text-center text-muted-foreground">
+                    검색 결과가 없습니다
+                  </td>
+                </tr>
+              ) : (
+                results.map((p, idx) => {
+                  const base = p.basePrice ? Number(p.basePrice) : null
+                  const cost = p.costPrice ? Number(p.costPrice) : null
+                  const margin = base != null && cost != null && base > 0
+                    ? Math.round(((base - cost) / base) * 1000) / 10
+                    : null
+                  return (
+                    <tr key={p.id} className="hover:bg-muted/40">
+                      <td className="px-2 py-1.5 text-center text-muted-foreground tabular-nums">
+                        {idx + 1}
+                      </td>
+                      <td className="px-2 py-1.5 font-mono">{p.internalSku}</td>
+                      <td className="px-2 py-1.5">
+                        <div className="truncate">{p.name}</div>
+                        {p.optionHint && (
+                          <div className="truncate text-[10px] text-muted-foreground">
+                            {p.optionHint}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{fmtPrice(p.basePrice)}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        <div>{fmtPrice(p.costPrice)}</div>
+                        {margin != null && (
+                          <div className="text-[10px] text-muted-foreground">{margin}%</div>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">
+                        {p.availableStock ?? '-'}
+                      </td>
+                      <td className="px-2 py-1.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelect(p)
+                            onClose()
+                          }}
+                          className="rounded border bg-background px-2 py-0.5 text-[11px] hover:bg-blue-50 hover:border-blue-300"
+                        >
+                          선택
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex items-center justify-between border-t bg-muted/20 px-5 py-2.5 text-xs text-muted-foreground">
+          <span>
+            {searched && !loading ? `${results.length}건` : ''}
+          </span>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogProps) {
+  // 자체상품 검색 모달 — 어떤 components 행을 채울지 idx 로 추적 (-1 = 닫힘)
+  const [searchIdx, setSearchIdx] = useState<number>(-1)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
@@ -738,7 +964,7 @@ export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogP
             </div>
             <div className="space-y-1">
               {state.components.map((c, idx) => (
-                <div key={idx} className="grid grid-cols-[1fr_80px_24px] items-center gap-1.5 rounded-md border p-1.5">
+                <div key={idx} className="grid grid-cols-[1fr_28px_80px_24px] items-center gap-1.5 rounded-md border p-1.5">
                   <input
                     type="text"
                     value={c.sku}
@@ -750,6 +976,15 @@ export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogP
                     placeholder="SKU (내부 품목코드)"
                     className="rounded border px-1.5 py-1 font-mono text-xs"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setSearchIdx(idx)}
+                    aria-label="자체상품 검색"
+                    title="자체상품 검색"
+                    className="flex h-6 w-6 items-center justify-center rounded border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <Search className="size-3" />
+                  </button>
                   <input
                     type="number"
                     min={1}
@@ -783,6 +1018,17 @@ export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogP
           </div>
         </div>
       </div>
+
+      <ProductSearchDialog
+        open={searchIdx >= 0}
+        onClose={() => setSearchIdx(-1)}
+        onSelect={(p) => {
+          if (searchIdx < 0) return
+          const next = [...state.components]
+          next[searchIdx] = { ...next[searchIdx], sku: p.internalSku }
+          onChange({ ...state, components: next })
+        }}
+      />
     </div>
   )
 }

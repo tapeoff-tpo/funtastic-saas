@@ -28,7 +28,10 @@ export async function GET(req: NextRequest) {
       internalSku: products.internalSku,
       name: products.name,
       warehouseLocation: products.warehouseLocation,
+      basePrice: products.basePrice,
+      costPrice: products.costPrice,
       optionName: inventory.optionName,
+      availableStock: inventory.availableStock,
     })
     .from(products)
     .leftJoin(
@@ -45,7 +48,7 @@ export async function GET(req: NextRequest) {
         ),
       ),
     )
-    .limit(20)
+    .limit(50)
 
   // optionName from inventory is the primary hint.
   // Phase A 매핑 재설계: productNameMappings fallback 제거. inventory.optionName 만 사용.

@@ -104,3 +104,29 @@ export async function bulkUploadInvoiceAction(
   revalidateTag('orders', 'max')
   return result
 }
+
+/**
+ * Server action: 주문 복사.
+ * 원본 주문의 모든 정보(상품/수량/수취인/주문자/배송지/배송비 등)를 동일하게 복제하되,
+ * 내부 UUID 는 새로 발급되며 마켓플레이스 unique 제약(marketplaceId+marketplaceOrderId)
+ * 충돌을 피하기 위해 marketplaceOrderId 에 '-copy-XXXX' 접미를 붙인다.
+ *
+ * 복사본 초기 상태:
+ * - status: 'new' (재출고 워크플로우 시작점)
+ * - isHeld/holdReason/heldAt: 초기화
+ * - claims/shipments: 복제하지 않음 (출고/클레임은 새 주문에서 새로 발생)
+ * - 메모: 복제하지 않음
+ */
+export async function copyOrderAction(
+  orderId: string,
+): Promise<{ success: boolean; newOrderId?: string; error?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { success: false, error: 'Unauthorized' }
+
+  const { copyOrder } = await import('@/lib/orders/copy-order')
+  const result = await copyOrder(orderId, user.id)
+  revalidatePath('/orders')
+  revalidateTag('orders', 'max')
+  return result
+}

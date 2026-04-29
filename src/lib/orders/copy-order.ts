@@ -1,0 +1,77 @@
+/**
+ * 주문 복사 — 원본 주문 + orderItems 만 복제 (claims/shipments/memos 제외).
+ * marketplaceOrderId 에 -copy-XXXX 접미 붙여 unique 제약 충돌 회피.
+ */
+
+import { db } from '@/lib/db'
+import { orders, orderItems } from '@/lib/db/schema'
+import { eq, and } from 'drizzle-orm'
+import { nanoid } from 'nanoid'
+
+export interface CopyOrderResult {
+  success: boolean
+  newOrderId?: string
+  error?: string
+}
+
+export async function copyOrder(orderId: string, userId: string): Promise<CopyOrderResult> {
+  // 원본 주문 — userId 스코프로 권한 검증 겸용
+  const [src] = await db
+    .select()
+    .from(orders)
+    .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
+    .limit(1)
+  if (!src) return { success: false, error: '원본 주문을 찾을 수 없습니다.' }
+
+  const srcItems = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId))
+
+  const copySuffix = `-copy-${nanoid(6)}`
+
+  const [inserted] = await db
+    .insert(orders)
+    .values({
+      userId: src.userId,
+      connectionId: src.connectionId,
+      marketplaceId: src.marketplaceId,
+      marketplaceOrderId: `${src.marketplaceOrderId}${copySuffix}`,
+      status: 'new',
+      previousStatus: null,
+      buyerName: src.buyerName,
+      buyerPhone: src.buyerPhone,
+      recipientName: src.recipientName,
+      recipientPhone: src.recipientPhone,
+      shippingAddress: src.shippingAddress,
+      orderedAt: src.orderedAt,
+      totalAmount: src.totalAmount,
+      isHeld: false,
+      holdReason: null,
+      heldAt: null,
+      logisticsMessage: src.logisticsMessage,
+      rawData: src.rawData,
+      marketplaceStatus: src.marketplaceStatus,
+      collectedAt: src.collectedAt,
+      shippingType: src.shippingType,
+      shippingFee: src.shippingFee,
+    })
+    .returning({ id: orders.id })
+
+  if (!inserted) return { success: false, error: '복사 실패 (insert returned no row)' }
+
+  if (srcItems.length > 0) {
+    await db.insert(orderItems).values(
+      srcItems.map((it) => ({
+        orderId: inserted.id,
+        marketplaceItemId: it.marketplaceItemId,
+        productName: it.productName,
+        optionText: it.optionText,
+        quantity: it.quantity,
+        unitPrice: it.unitPrice,
+        sku: it.sku,
+        skuMultiplier: it.skuMultiplier,
+        fulfillmentCode: it.fulfillmentCode,
+      })),
+    )
+  }
+
+  return { success: true, newOrderId: inserted.id }
+}

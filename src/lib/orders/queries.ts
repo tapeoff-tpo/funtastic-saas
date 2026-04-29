@@ -131,14 +131,19 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
 
   if (filters.search) {
     // 부분일치 검색 — 입력값이 양끝 공백이라도 trim 한 뒤 wrap.
-    // 대상: 주문번호 / 구매자명 / 수취인명 / 상품명(orderItems.productName + 매핑된 displayName) / 송장번호(shipments).
+    // 대상: 주문번호(마켓+내부) / 구매자명 / 수취인명 / 상품명(orderItems.productName + 매핑된 displayName) / 송장번호(shipments).
     // productName/trackingNumber/displayName 는 다른 테이블이라 EXISTS 서브쿼리로 매칭.
-    const searchPattern = `%${filters.search.trim()}%`
+    // 내부주문번호: '#xxxxxxxx' 또는 'xxxxxxxx' 형식 (UUID 앞 8자리). orders.id::text prefix 매칭.
+    const trimmed = filters.search.trim()
+    const searchPattern = `%${trimmed}%`
+    const internalIdPattern = `${trimmed.replace(/^#/, '')}%`
     conditions.push(
       or(
         ilike(orders.marketplaceOrderId, searchPattern),
         ilike(orders.buyerName, searchPattern),
         ilike(orders.recipientName, searchPattern),
+        // 내부 주문번호(UUID 앞자리) 검색 — '#8520bd19' 또는 '8520bd19' 형태 모두 허용
+        ilike(sql`${orders.id}::text`, internalIdPattern),
         // 마켓상품명(원문) 매칭
         exists(
           db

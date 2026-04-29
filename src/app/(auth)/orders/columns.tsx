@@ -2,18 +2,44 @@
 
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
-import { MessageCircle, Lock } from 'lucide-react'
+import { MessageCircle, Lock, Copy } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
 import { InlineMappingDialog } from './inline-mapping-dialog'
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
+import { copyOrderAction } from './actions'
 
 /** Helper to get openDetail from table.options.meta safely */
 function getOpenDetail(table: Table<OrderRow>): ((id: string) => void) | undefined {
   const meta = table.options.meta as { openDetail?: (id: string) => void } | undefined
   return meta?.openDetail
+}
+
+/** Copy-order button (shown under internal order id) — duplicates order + items with new internal UUID */
+function CopyOrderButton({ orderId }: { orderId: string }) {
+  const [pending, startTransition] = useTransition()
+  return (
+    <button
+      type="button"
+      disabled={pending}
+      onClick={() => {
+        if (!confirm('이 주문을 복사하시겠습니까?\n(주문내용·수취인·주문자 동일, 내부 주문번호만 새로 발급)')) return
+        startTransition(async () => {
+          const result = await copyOrderAction(orderId)
+          if (!result.success) {
+            alert(`복사 실패: ${result.error ?? '알 수 없는 오류'}`)
+          }
+        })
+      }}
+      title="주문 복사"
+      aria-label="주문 복사"
+      className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+    >
+      <Copy className="h-2.5 w-2.5" />
+    </button>
+  )
 }
 
 /** Mapping status cell — clickable badge that opens inline mapping dialog */
@@ -396,9 +422,12 @@ export const columns: ColumnDef<OrderRow>[] = [
           >
             {order.marketplaceOrderId}
           </button>
-          <span className="font-mono text-[10px] text-muted-foreground">
-            #{order.id.slice(0, 8)}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-[10px] text-muted-foreground">
+              #{order.id.slice(0, 8)}
+            </span>
+            <CopyOrderButton orderId={order.id} />
+          </div>
         </div>
       )
     },

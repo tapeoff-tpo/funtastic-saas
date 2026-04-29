@@ -645,6 +645,86 @@ export const devLogEntries = pgTable(
   ],
 )
 
+// ─── Mapping Codes (사방넷 방식) ─────────────────────────────────
+// migration 022 — Phase B 매핑 시스템 재설계.
+//
+// mapping_codes      = 셀러가 정의하는 통합 식별자 (예: "MC-A001")
+// mapping_sources    = 마켓상품(±옵션) → 매핑코드 (1차/2차 매핑 통합)
+// mapping_components = 매핑코드 → 내부 SKU + 수량 (단품=1, 세트=N)
+//
+// option_id 는 NOT NULL DEFAULT '' — Postgres unique 가 NULL 동등 비교를
+// 하지 않아 중복 방지가 깨지는 이슈를 피하기 위함.
+
+export const mappingCodes = pgTable(
+  'mapping_codes',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    code: varchar('code', { length: 100 }).notNull(),
+    name: text('name').notNull(),
+    note: text('note'),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('mapping_codes_user_code_uniq').on(table.userId, table.code),
+    index('mapping_codes_user_active_idx').on(table.userId, table.isActive),
+  ],
+)
+
+export const mappingSources = pgTable(
+  'mapping_sources',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    mappingCodeId: uuid('mapping_code_id')
+      .notNull()
+      .references(() => mappingCodes.id, { onDelete: 'cascade' }),
+    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
+    marketplaceProductId: varchar('marketplace_product_id', { length: 100 }).notNull(),
+    marketplaceOptionId: varchar('marketplace_option_id', { length: 100 }).notNull().default(''),
+    productNameSnapshot: text('product_name_snapshot'),
+    optionNameSnapshot: text('option_name_snapshot'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('mapping_sources_user_market_product_option_uniq').on(
+      table.userId,
+      table.marketplaceId,
+      table.marketplaceProductId,
+      table.marketplaceOptionId,
+    ),
+    index('mapping_sources_code_id_idx').on(table.mappingCodeId),
+    index('mapping_sources_user_market_idx').on(table.userId, table.marketplaceId),
+  ],
+)
+
+export const mappingComponents = pgTable(
+  'mapping_components',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    mappingCodeId: uuid('mapping_code_id')
+      .notNull()
+      .references(() => mappingCodes.id, { onDelete: 'cascade' }),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    quantity: integer('quantity').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('mapping_components_user_code_sku_uniq').on(
+      table.userId,
+      table.mappingCodeId,
+      table.sku,
+    ),
+    index('mapping_components_code_id_idx').on(table.mappingCodeId),
+    index('mapping_components_user_sku_idx').on(table.userId, table.sku),
+  ],
+)
+
 // ─── Scan Logs ───────────────────────────────────────────────────
 // 바코드 스캔 이력 — 정상/중복/비정상 모두 기록 (migration 020).
 // 상세 페이지의 "바코드 스캔 여부" 섹션에서 이 테이블을 조회한다.

@@ -22,56 +22,24 @@ interface TabDef {
   id: string
   label: string
   kind: TabKind
-  /** Key into the OrderTabs counts prop */
-  countKey:
-    | 'all'
-    | 'new'
-    | 'confirmed'
-    | 'preparing'
-    | 'ready'
-    | 'shipped'
-    | 'delivering'
-    | 'delivered'
-    | 'cancelled'
-    | 'exchange'
-    | 'return'
   accent?: string
 }
 
 const TABS: TabDef[] = [
-  { id: 'all', label: '전체', kind: 'all', countKey: 'all' },
-  { id: 'new', label: '신규', kind: 'status', countKey: 'new' },
-  { id: 'confirmed', label: '확인', kind: 'status', countKey: 'confirmed' },
-  { id: 'preparing', label: '출고대기', kind: 'status', countKey: 'preparing' },
-  { id: 'ready', label: '출고준비', kind: 'status', countKey: 'ready' },
-  { id: 'shipped', label: '출고완료', kind: 'status', countKey: 'shipped' },
-  { id: 'delivering', label: '배송중', kind: 'status', countKey: 'delivering' },
-  { id: 'delivered', label: '배송완료', kind: 'status', countKey: 'delivered' },
-  { id: 'cancel', label: '취소', kind: 'cancel', countKey: 'cancelled', accent: 'text-red-600' },
-  { id: 'exchange', label: '교환', kind: 'claim', countKey: 'exchange', accent: 'text-blue-600' },
-  { id: 'return', label: '반품', kind: 'claim', countKey: 'return', accent: 'text-orange-600' },
+  { id: 'all', label: '전체', kind: 'all' },
+  { id: 'new', label: '신규', kind: 'status' },
+  { id: 'confirmed', label: '확인', kind: 'status' },
+  { id: 'preparing', label: '출고대기', kind: 'status' },
+  { id: 'ready', label: '출고준비', kind: 'status' },
+  { id: 'shipped', label: '출고완료', kind: 'status' },
+  { id: 'delivering', label: '배송중', kind: 'status' },
+  { id: 'delivered', label: '배송완료', kind: 'status' },
+  { id: 'cancel', label: '취소', kind: 'cancel', accent: 'text-red-600' },
+  { id: 'exchange', label: '교환', kind: 'claim', accent: 'text-blue-600' },
+  { id: 'return', label: '반품', kind: 'claim', accent: 'text-orange-600' },
 ]
 
-export interface OrderTabsCounts {
-  all: number
-  new: number
-  confirmed: number
-  preparing: number
-  ready: number
-  shipped: number
-  delivering: number
-  delivered: number
-  /** 취소 탭 — status='cancelled' OR claimType='cancel' (distinct order) */
-  cancelled: number
-  exchange: number
-  return: number
-}
-
-interface OrderTabsProps {
-  counts: OrderTabsCounts
-}
-
-export function OrderTabs({ counts }: OrderTabsProps) {
+export function OrderTabs() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -124,32 +92,19 @@ export function OrderTabs({ counts }: OrderTabsProps) {
   return (
     <div className="flex flex-wrap gap-1 border-b">
       {TABS.map((tab) => {
-        const count = counts[tab.countKey] ?? 0
         const isActive = currentTab === tab.id
-        const isEmpty = count === 0
         return (
           <button
             key={tab.id}
             type="button"
             onClick={() => selectTab(tab)}
-            className={`inline-flex items-center gap-1.5 border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+            className={`inline-flex items-center border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
               isActive
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:border-muted-foreground/30 hover:text-foreground'
+                ? `border-primary ${tab.accent ?? 'text-primary'}`
+                : `border-transparent ${tab.accent ?? 'text-muted-foreground'} hover:border-muted-foreground/30 hover:text-foreground`
             } ${isPending && isActive ? 'animate-pulse' : ''}`}
           >
             {tab.label}
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-xs font-semibold tabular-nums ${
-                isEmpty
-                  ? 'bg-muted text-muted-foreground/50'
-                  : isActive
-                    ? 'bg-primary/10 text-primary'
-                    : `bg-muted ${tab.accent ?? ''}`
-              }`}
-            >
-              {count.toLocaleString('ko-KR')}
-            </span>
           </button>
         )
       })}

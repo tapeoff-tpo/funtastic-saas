@@ -7,7 +7,7 @@ import {
   parseAsBoolean,
 } from 'nuqs/server'
 import { createClient } from '@/lib/supabase/server'
-import { getOrders, getOrderStats } from '@/lib/orders/queries'
+import { getOrders } from '@/lib/orders/queries'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { OrderTabs } from './order-tabs'
@@ -58,44 +58,26 @@ export default async function OrdersPage({
     !!params.cancel ||
     params.tab === 'all'
 
-  const [{ orders: orderList, total }, stats] = tabSelected
-    ? await Promise.all([
-        getOrders({
-          page: params.page,
-          pageSize: params.pageSize,
-          userId: user.id,
-          status: (params.status ?? undefined) as OrderFiltersParams['status'],
-          marketplace: params.marketplace ?? undefined,
-          search: params.search ?? undefined,
-          dateFrom: params.dateFrom ?? undefined,
-          dateTo: params.dateTo ?? undefined,
-          sort: params.sort ?? undefined,
-          order: (params.order as 'asc' | 'desc') ?? undefined,
-          claimType: (params.claimType ?? undefined) as ClaimType | undefined,
-          mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
-          isHeld: params.held ?? undefined,
-          cancelTab: params.cancel ?? undefined,
-        }),
-        getOrderStats(user.id),
-      ])
-    : [
-        { orders: [] as Awaited<ReturnType<typeof getOrders>>['orders'], total: 0 },
-        {
-          total: 0,
-          new: 0,
-          confirmed: 0,
-          preparing: 0,
-          ready: 0,
-          shipped: 0,
-          delivering: 0,
-          delivered: 0,
-          cancelled: 0,
-          cancelTabCount: 0,
-          claimCancel: 0,
-          claimExchange: 0,
-          claimReturn: 0,
-        } as Awaited<ReturnType<typeof getOrderStats>>,
-      ]
+  // 탭별 카운트(getOrderStats)는 매 조회마다 11개 status COUNT 쿼리를 추가로 실행해
+  // 응답을 느리게 한다. 현재 선택된 탭의 total 만 헤더에 노출하면 충분하므로 제거.
+  const { orders: orderList, total } = tabSelected
+    ? await getOrders({
+        page: params.page,
+        pageSize: params.pageSize,
+        userId: user.id,
+        status: (params.status ?? undefined) as OrderFiltersParams['status'],
+        marketplace: params.marketplace ?? undefined,
+        search: params.search ?? undefined,
+        dateFrom: params.dateFrom ?? undefined,
+        dateTo: params.dateTo ?? undefined,
+        sort: params.sort ?? undefined,
+        order: (params.order as 'asc' | 'desc') ?? undefined,
+        claimType: (params.claimType ?? undefined) as ClaimType | undefined,
+        mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
+        isHeld: params.held ?? undefined,
+        cancelTab: params.cancel ?? undefined,
+      })
+    : { orders: [] as Awaited<ReturnType<typeof getOrders>>['orders'], total: 0 }
 
   const data: OrderRow[] = orderList.map((o) => ({
     id: o.id,
@@ -140,22 +122,6 @@ export default async function OrdersPage({
     })),
   }))
 
-  // OrderTabs counts — map OrderStats (server) → OrderTabsCounts (component)
-  const orderTabsCounts = {
-    all: stats.total ?? 0,
-    new: stats.new,
-    confirmed: stats.confirmed,
-    preparing: stats.preparing,
-    ready: stats.ready,
-    shipped: stats.shipped,
-    delivering: stats.delivering,
-    delivered: stats.delivered,
-    // 취소 탭 = status='cancelled' OR claimType='cancel' distinct (B-3)
-    cancelled: stats.cancelTabCount,
-    exchange: stats.claimExchange,
-    return: stats.claimReturn,
-  }
-
   return (
     <div className="space-y-2">
       {/* Compact header — title + count (Excel import entry-point removed in Phase 8) */}
@@ -170,7 +136,7 @@ export default async function OrdersPage({
 
       {/* Phase 8 — 9탭 통합 컴포넌트 (ClaimsFilter / stage-tabs 폐기) */}
       <Suspense>
-        <OrderTabs counts={orderTabsCounts} />
+        <OrderTabs />
       </Suspense>
 
       {/* Filters — marketplace / 날짜 / 검색 (W-3 유지) */}

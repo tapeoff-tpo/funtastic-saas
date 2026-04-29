@@ -69,7 +69,7 @@ export async function GET(request: NextRequest) {
     const [productRows, inventoryRows] = user && skuSet.length > 0
       ? await Promise.all([
           db
-            .select({ sku: products.internalSku, location: products.warehouseLocation })
+            .select({ sku: products.internalSku, location: products.warehouseLocation, costPrice: products.costPrice })
             .from(products)
             .where(and(eq(products.userId, user.id), inArray(products.internalSku, skuSet))),
           db
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
             .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skuSet))),
         ])
       : [[], []]
-    const productMap = new Map(productRows.map((p) => [p.sku, p.location]))
+    const productMap = new Map(productRows.map((p) => [p.sku, { location: p.location, costPrice: p.costPrice }]))
     const inventoryMap = new Map(inventoryRows.map((i) => [i.sku, i.stock]))
 
     // 셀러 고정값은 이제 carrier_templates.columns[].fixedValue 로 관리
@@ -131,8 +131,27 @@ export async function GET(request: NextRequest) {
         collectedProductName: rawFirst?.productName ?? '',
         collectedOption: rawFirst?.optionText ?? '',
         stock: sku ? inventoryMap.get(sku) ?? '' : '',
-        location: sku ? productMap.get(sku) ?? '' : '',
+        location: sku ? productMap.get(sku)?.location ?? '' : '',
+        costPrice: sku ? productMap.get(sku)?.costPrice ?? '' : '',
         senderName: order.connectionId ? connectionMap.get(order.connectionId) ?? '' : '',
+        // ─ DB 컬럼 미존재 — 사용자가 fixedValue 로 채우거나 비워둠 ─
+        recipientPhone2: '',
+        buyerPhone2: '',
+        deliveryMessage: '',
+        supplyPrice: '',
+        // 수집일자 — yyyy-mm-dd 포맷
+        collectedAt: order.collectedAt ? new Date(order.collectedAt).toISOString().slice(0, 10) : '',
+        // 기타1~10 — fixedValue 로 채우는 용도
+        etc1: '',
+        etc2: '',
+        etc3: '',
+        etc4: '',
+        etc5: '',
+        etc6: '',
+        etc7: '',
+        etc8: '',
+        etc9: '',
+        etc10: '',
       }
     })
 

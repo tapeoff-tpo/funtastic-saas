@@ -5,26 +5,23 @@
  *   1) 상단 dense 필터 패널 (수집일자 + quick / 쇼핑몰 / 매핑선택 라디오 2그룹 / 검색)
  *   2) 툴바 (자료수 N건 + 일괄 품번/단품매핑 + 매핑해제 + 새로고침)
  *   3) 2그룹 헤더 dense 테이블 (좌: 쇼핑몰 수집 데이터 / 우: 매핑 적용 결과)
+ *   4) 하단 인라인 매핑 패널 (일괄/개별 매핑 버튼 클릭 시 등장 — 모달 X)
  *
- * 행 = order_items 1건. 미매핑 행은 [+ 품번매핑] / [+ 단품매핑] 버튼 클릭으로
- * EditDialog 가 prefill 상태로 열리고 저장 후 즉시 보드 재조회.
+ * 매핑 워크플로우 (사방넷 스타일):
+ *   - 행 선택 → [일괄 품번매핑] 또는 행의 [+ 품번]/[+ 단품] 클릭
+ *   - 페이지 하단에 인라인 검색 패널 등장 (모달 아님)
+ *   - 자체상품 검색 → [선택] → POST /api/products/mapping-codes 즉시 저장
+ *   - 저장 후 보드 자동 재조회 + 선택 해제 + 패널 닫힘
  */
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryStates, parseAsString, parseAsInteger, parseAsStringEnum } from 'nuqs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { PageSizeSelector } from '@/components/ui/pagination'
-import { RefreshCw, Plus, Search } from 'lucide-react'
-import {
-  EditDialog,
-  emptyForm,
-  MARKETPLACE_LABELS,
-  marketLabel,
-  type FormState,
-  type SourceMode,
-} from './mapping-manager'
+import { RefreshCw, Plus, Search, X } from 'lucide-react'
+import { MARKETPLACE_LABELS, marketLabel, type SourceMode } from './mapping-manager'
 
 interface OrderRowComponent {
   sku: string
@@ -56,6 +53,23 @@ interface OrderRowsResponse {
   total: number
   page: number
   pageSize: number
+}
+
+interface ProductSearchResult {
+  id: string
+  internalSku: string
+  name: string
+  warehouseLocation: string | null
+  basePrice: string | null
+  costPrice: string | null
+  optionName: string | null
+  optionHint: string | null
+  availableStock: number | null
+}
+
+interface BulkTarget {
+  rows: OrderRow[]
+  mode: SourceMode
 }
 
 const PRODUCT_MATCH_OPTIONS = [
@@ -118,8 +132,8 @@ export function OrderRowsBoard() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [editing, setEditing] = useState<FormState | null>(null)
-  const [saving, setSaving] = useState(false)
+  const [bulkTarget, setBulkTarget] = useState<BulkTarget | null>(null)
+  const bulkPanelRef = useRef<HTMLDivElement>(null)
 
   const pageSize = filters.pageSize
 
@@ -202,37 +216,22 @@ export function OrderRowsBoard() {
     setSelected(next)
   }
 
-  // ---------- 매핑 다이얼로그 prefill ----------
-  function buildPrefillForm(targets: OrderRow[], mode: SourceMode): FormState {
-    const form = emptyForm()
-    if (targets.length === 0) return form
-    const head = targets[0]
-    form.name = head.productName
-    form.sources = targets.map((r) => {
-      const split = splitProductOption(r.marketplaceItemId)
-      return {
-        mode,
-        marketplaceId: r.marketplaceId,
-        marketplaceProductId: split.product,
-        marketplaceOptionId: mode === 'option' ? split.option : '',
-        productNameSnapshot: r.productName,
-        optionNameSnapshot: r.optionText ?? '',
-      }
-    })
-    return form
-  }
-
-  function openMapping(row: OrderRow, mode: SourceMode) {
-    setEditing(buildPrefillForm([row], mode))
-  }
-
-  function openBulk(mode: SourceMode) {
-    const targets = rows.filter((r) => selected.has(r.orderItemId))
+  // ---------- 매핑 진입점 (인라인 패널 오픈) ----------
+  function openInlineMapping(targets: OrderRow[], mode: SourceMode) {
     if (targets.length === 0) {
       alert('선택된 행이 없습니다')
       return
     }
-    setEditing(buildPrefillForm(targets, mode))
+    setBulkTarget({ rows: targets, mode })
+  }
+
+  function openMapping(row: OrderRow, mode: SourceMode) {
+    openInlineMapping([row], mode)
+  }
+
+  function openBulk(mode: SourceMode) {
+    const targets = rows.filter((r) => selected.has(r.orderItemId))
+    openInlineMapping(targets, mode)
   }
 
   function openUnmap() {
@@ -242,62 +241,51 @@ export function OrderRowsBoard() {
       return
     }
     alert(
-      '일괄 매핑해제는 별도 API 가 없어 현재 다이얼로그 편집으로 대체합니다. ' +
+      '일괄 매핑해제는 별도 API 가 없어 현재 매핑코드 마스터에서 처리합니다. ' +
       '매핑코드 마스터(/products/mapping-codes) 에서 해당 매핑코드를 열고 마켓상품 행을 제거하세요.',
     )
   }
 
-  // ---------- 저장 ----------
-  async function handleSave() {
-    if (!editing) return
-    if (!editing.code.trim() || !editing.name.trim()) {
-      alert('매핑코드와 이름을 입력하세요')
-      return
+  // 패널이 열리면 화면에 보이도록 자동 스크롤
+  useEffect(() => {
+    if (bulkTarget && bulkPanelRef.current) {
+      bulkPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
     }
-    if (editing.components.length === 0 || editing.components.some((c) => !c.sku.trim())) {
-      alert('SKU 구성품을 1개 이상 입력하세요')
-      return
-    }
+  }, [bulkTarget])
 
-    setSaving(true)
-    try {
-      const url = editing.id
-        ? `/api/products/mapping-codes/${editing.id}`
-        : '/api/products/mapping-codes'
-      const method = editing.id ? 'PATCH' : 'POST'
-      const res = await fetch(url, {
-        method,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          code: editing.code.trim(),
-          name: editing.name.trim(),
-          note: editing.note.trim() || null,
-          isActive: editing.isActive,
-          sources: editing.sources
-            .filter((s) => s.marketplaceId && s.marketplaceProductId)
-            .map((s) => ({
-              marketplaceId: s.marketplaceId,
-              marketplaceProductId: s.marketplaceProductId.trim(),
-              marketplaceOptionId: s.mode === 'option' ? s.marketplaceOptionId.trim() : '',
-              productNameSnapshot: s.productNameSnapshot.trim() || null,
-              optionNameSnapshot: s.optionNameSnapshot.trim() || null,
-            })),
-          components: editing.components
-            .filter((c) => c.sku.trim())
-            .map((c) => ({ sku: c.sku.trim(), quantity: c.quantity })),
-        }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        alert(err.error ?? '저장 실패')
-        return
+  // ---------- 인라인 패널 → 자체상품 선택 시 즉시 매핑 저장 ----------
+  async function submitBulkMapping(product: ProductSearchResult): Promise<void> {
+    if (!bulkTarget) return
+    const sources = bulkTarget.rows.map((r) => {
+      const split = splitProductOption(r.marketplaceItemId)
+      return {
+        marketplaceId: r.marketplaceId,
+        marketplaceProductId: split.product,
+        marketplaceOptionId: bulkTarget.mode === 'option' ? split.option : '',
+        productNameSnapshot: r.productName || null,
+        optionNameSnapshot: r.optionText || null,
       }
-      setEditing(null)
-      setSelected(new Set())
-      await reload()
-    } finally {
-      setSaving(false)
+    })
+    const res = await fetch('/api/products/mapping-codes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        code: product.internalSku,
+        name: product.name,
+        note: null,
+        isActive: true,
+        sources,
+        components: [{ sku: product.internalSku, quantity: 1 }],
+      }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      alert(err.error ?? '매핑 저장 실패')
+      return
     }
+    setBulkTarget(null)
+    setSelected(new Set())
+    await reload()
   }
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -600,15 +588,265 @@ export function OrderRowsBoard() {
         </div>
       )}
 
-      {editing && (
-        <EditDialog
-          state={editing}
-          onChange={setEditing}
-          onClose={() => setEditing(null)}
-          onSave={handleSave}
-          saving={saving}
-        />
+      {/* ============ 인라인 매핑 패널 (모달 X — 페이지 하단에 등장) ============ */}
+      {bulkTarget && (
+        <div ref={bulkPanelRef}>
+          <BulkMappingPanel
+            target={bulkTarget}
+            onClose={() => setBulkTarget(null)}
+            onSelect={submitBulkMapping}
+          />
+        </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * 인라인 매핑 패널 — 일괄/개별 매핑 버튼 클릭 시 페이지 하단에 등장.
+ * - 좌: 선택된 행 요약 (쇼핑몰 / 상품명 / 옵션 / 수량)
+ * - 우: 자체상품 검색 폼 + 결과 테이블
+ * - 결과 [선택] 클릭 시 onSelect(product) → 즉시 POST /api/products/mapping-codes 저장
+ */
+function BulkMappingPanel({
+  target,
+  onClose,
+  onSelect,
+}: {
+  target: BulkTarget
+  onClose: () => void
+  onSelect: (p: ProductSearchResult) => Promise<void>
+}) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<ProductSearchResult[]>([])
+  const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  // 패널 열릴 때 검색 input 자동 포커스
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 100)
+  }, [])
+
+  const search = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setResults([])
+      setSearched(false)
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`)
+      if (!res.ok) {
+        setResults([])
+        return
+      }
+      const data = await res.json() as { results: ProductSearchResult[] }
+      setResults(data.results ?? [])
+      setSearched(true)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const handleQueryChange = (v: string) => {
+    setQuery(v)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => void search(v), 300)
+  }
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    void search(query)
+  }
+
+  const handlePick = async (p: ProductSearchResult) => {
+    setSubmitting(true)
+    try {
+      await onSelect(p)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const fmtPrice = (v: string | null) =>
+    v == null ? '-' : Number(v).toLocaleString('ko-KR')
+
+  const modeLabel = target.mode === 'product' ? '품번매핑' : '단품매핑'
+  const modeColor = target.mode === 'product'
+    ? 'bg-blue-100 text-blue-800 border-blue-200'
+    : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+
+  return (
+    <div className="rounded-md border-2 border-blue-300 bg-blue-50/30 shadow-sm">
+      {/* 헤더 — 모드 + 선택 건수 + 닫기 */}
+      <div className="flex items-center justify-between border-b border-blue-200 bg-blue-100/50 px-3 py-2">
+        <div className="flex items-center gap-2 text-sm">
+          <span className={`rounded border px-2 py-0.5 text-xs font-medium ${modeColor}`}>
+            {modeLabel}
+          </span>
+          <span className="font-medium">자체상품 검색하여 매핑 적용</span>
+          <span className="text-muted-foreground">
+            (선택된 마켓상품 <strong className="tabular-nums">{target.rows.length}</strong>건)
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="닫기"
+          disabled={submitting}
+          className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+        >
+          <X className="size-4" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-[300px_1fr]">
+        {/* 선택된 행 요약 */}
+        <div className="rounded border bg-background">
+          <div className="border-b bg-muted/40 px-2 py-1 text-[11px] font-medium text-muted-foreground">
+            선택된 마켓상품 ({target.rows.length}건)
+          </div>
+          <div className="max-h-64 overflow-auto divide-y text-xs">
+            {target.rows.map((r) => {
+              const split = splitProductOption(r.marketplaceItemId)
+              const showOption = target.mode === 'option' && split.option
+              return (
+                <div key={r.orderItemId} className="px-2 py-1.5">
+                  <div className="flex items-center gap-1">
+                    <span className="rounded bg-gray-100 px-1 py-0.5 text-[10px]">
+                      {marketLabel(r.marketplaceId)}
+                    </span>
+                    <span className="truncate font-mono text-[10px] text-muted-foreground">
+                      {showOption
+                        ? `${split.product}-${split.option}`
+                        : split.product}
+                    </span>
+                  </div>
+                  <div className="truncate">{r.productName}</div>
+                  {r.optionText && (
+                    <div className="truncate text-[10px] text-muted-foreground">
+                      {r.optionText}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* 검색 폼 + 결과 */}
+        <div className="rounded border bg-background">
+          <form onSubmit={handleSubmit} className="border-b bg-muted/30 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-muted-foreground">검색항목</label>
+              <select
+                disabled
+                className="rounded border bg-background px-2 py-1 text-xs text-muted-foreground"
+              >
+                <option>품번/상품명</option>
+              </select>
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => handleQueryChange(e.target.value)}
+                placeholder="품번코드 또는 상품명 검색"
+                disabled={submitting}
+                className="flex-1 rounded border bg-background px-2 py-1 text-sm"
+              />
+              <Button type="submit" size="sm" disabled={loading || submitting}>
+                <Search className="size-3.5" />
+                {loading ? '검색 중...' : '검색'}
+              </Button>
+            </div>
+          </form>
+
+          <div className="max-h-80 overflow-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 z-[1] bg-muted/60">
+                <tr className="border-b">
+                  <th className="w-10 px-2 py-1.5 text-center font-medium">No</th>
+                  <th className="px-2 py-1.5 text-left font-medium">품번코드</th>
+                  <th className="px-2 py-1.5 text-left font-medium">상품명 / 옵션</th>
+                  <th className="px-2 py-1.5 text-right font-medium">판매가</th>
+                  <th className="px-2 py-1.5 text-right font-medium">원가 / 이익률</th>
+                  <th className="px-2 py-1.5 text-right font-medium">재고</th>
+                  <th className="w-16 px-2 py-1.5 text-center font-medium">선택</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {loading ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                      불러오는 중...
+                    </td>
+                  </tr>
+                ) : !searched ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                      품번코드 또는 상품명을 입력하고 검색하세요
+                    </td>
+                  </tr>
+                ) : results.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                      검색 결과가 없습니다
+                    </td>
+                  </tr>
+                ) : (
+                  results.map((p, idx) => {
+                    const base = p.basePrice ? Number(p.basePrice) : null
+                    const cost = p.costPrice ? Number(p.costPrice) : null
+                    const margin = base != null && cost != null && base > 0
+                      ? Math.round(((base - cost) / base) * 1000) / 10
+                      : null
+                    return (
+                      <tr key={p.id} className="hover:bg-muted/40">
+                        <td className="px-2 py-1.5 text-center text-muted-foreground tabular-nums">
+                          {idx + 1}
+                        </td>
+                        <td className="px-2 py-1.5 font-mono">{p.internalSku}</td>
+                        <td className="px-2 py-1.5">
+                          <div className="truncate">{p.name}</div>
+                          {p.optionHint && (
+                            <div className="truncate text-[10px] text-muted-foreground">
+                              {p.optionHint}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">{fmtPrice(p.basePrice)}</td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          <div>{fmtPrice(p.costPrice)}</div>
+                          {margin != null && (
+                            <div className="text-[10px] text-muted-foreground">{margin}%</div>
+                          )}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums">
+                          {p.availableStock ?? '-'}
+                        </td>
+                        <td className="px-2 py-1.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => void handlePick(p)}
+                            disabled={submitting}
+                            className="rounded border bg-background px-2 py-0.5 text-[11px] hover:bg-blue-50 hover:border-blue-300 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            {submitting ? '저장 중...' : '선택'}
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

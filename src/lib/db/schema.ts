@@ -88,6 +88,8 @@ export const orders = pgTable(
   'orders',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    /** 사용자에게 보이는 8자리 내부 주문번호 — 화면/엑셀에 노출. UUID 와 별개. */
+    internalNo: varchar('internal_no', { length: 8 }).notNull(),
     userId: uuid('user_id').notNull(),
     connectionId: uuid('connection_id')
       .references(() => marketplaceConnections.id),
@@ -133,6 +135,7 @@ export const orders = pgTable(
       .where(sql`${table.isCopy} = false`),
     index('orders_user_status').on(table.userId, table.status),
     index('orders_ordered_at').on(table.orderedAt),
+    uniqueIndex('orders_user_internal_no_unique').on(table.userId, table.internalNo),
   ],
 )
 

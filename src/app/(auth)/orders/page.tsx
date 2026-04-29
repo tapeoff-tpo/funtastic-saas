@@ -99,6 +99,7 @@ export default async function OrdersPage({
 
   const data: OrderRow[] = orderList.map((o) => ({
     id: o.id,
+    internalNo: (o as { internalNo: string }).internalNo,
     marketplaceId: o.marketplaceId,
     marketplaceOrderId: o.marketplaceOrderId,
     buyerName: o.buyerName,

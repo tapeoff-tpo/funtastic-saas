@@ -105,8 +105,9 @@ export async function GET(request: NextRequest) {
       const sku = (firstItem?.sku ?? rawFirst?.sku ?? '') as string
 
       return {
-        // Excel 출력용 — UUID 첫 8자리만 (간략 표시)
-        orderId: order.id.slice(0, 8),
+        // 사용자 노출용 8자리 내부 주문번호
+        orderId: order.internalNo,
+        internalNo: order.internalNo,
         marketplaceOrderId: order.marketplaceOrderId,
         marketplaceId: order.marketplaceId,
         buyerName: order.buyerName,

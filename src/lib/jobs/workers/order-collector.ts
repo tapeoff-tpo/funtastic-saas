@@ -13,6 +13,7 @@ import { readCredential } from '@/lib/supabase/admin'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
+import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
 import type {
   MarketplaceAdapter,
@@ -267,6 +268,7 @@ async function upsertOrder(
   return db
     .insert(orders)
     .values({
+      internalNo: generateInternalNo(),
       userId,
       connectionId,
       marketplaceId: order.marketplaceId,

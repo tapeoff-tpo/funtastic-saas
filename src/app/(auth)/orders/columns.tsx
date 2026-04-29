@@ -100,6 +100,8 @@ type InvoiceUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed' | 'co
 /** Row shape for the order table (matches getOrders return — Phase 8) */
 export interface OrderRow {
   id: string
+  /** 사용자에게 보이는 8자리 내부 주문번호 (orders.internal_no) */
+  internalNo: string
   marketplaceId: string
   marketplaceOrderId: string
   buyerName: string
@@ -427,9 +429,9 @@ export const columns: ColumnDef<OrderRow>[] = [
           <div className="flex items-center gap-1.5">
             <span
               className="font-mono text-[10px] text-muted-foreground"
-              title={order.id}
+              title={`내부 PK: ${order.id}`}
             >
-              #{order.id.slice(0, 8)}
+              #{order.internalNo}
             </span>
             <CopyOrderButton orderId={order.id} />
             {order.isCopy && (

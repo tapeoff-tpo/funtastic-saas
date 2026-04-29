@@ -4,6 +4,7 @@ import { parseOrderExcel } from '@/lib/orders/excel-import'
 import { db } from '@/lib/db'
 import { orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
+import { generateInternalNo } from '@/lib/orders/internal-no'
 
 /**
  * POST /api/orders/import
@@ -116,6 +117,7 @@ export async function POST(request: NextRequest) {
           const [newOrder] = await tx
             .insert(orders)
             .values({
+              internalNo: generateInternalNo(),
               userId: user.id,
               connectionId: null,
               marketplaceId,

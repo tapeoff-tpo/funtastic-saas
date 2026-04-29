@@ -7,6 +7,7 @@
 import { db } from '@/lib/db'
 import { orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
+import { generateInternalNo } from './internal-no'
 
 export interface CopyOrderResult {
   success: boolean
@@ -28,6 +29,7 @@ export async function copyOrder(orderId: string, userId: string): Promise<CopyOr
   const [inserted] = await db
     .insert(orders)
     .values({
+      internalNo: generateInternalNo(),
       userId: src.userId,
       connectionId: src.connectionId,
       marketplaceId: src.marketplaceId,

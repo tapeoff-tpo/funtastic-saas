@@ -26,7 +26,8 @@ export interface CarrierTemplateDef {
  * Korean labels match the standard Korean e-commerce terminology.
  */
 export const AVAILABLE_ORDER_FIELDS: OrderFieldDef[] = [
-  { field: 'orderId', label: '주문번호' },
+  { field: 'orderId', label: '내부 주문번호' },
+  { field: 'internalNo', label: '내부 주문번호' },
   { field: 'marketplaceOrderId', label: '마켓주문번호' },
   { field: 'marketplaceId', label: '마켓플레이스' },
   { field: 'buyerName', label: '구매자' },

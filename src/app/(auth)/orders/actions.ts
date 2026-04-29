@@ -130,3 +130,24 @@ export async function copyOrderAction(
   revalidateTag('orders', 'max')
   return result
 }
+
+/**
+ * Server action: 선택한 주문 일괄 삭제.
+ * 관련 shipments/claims/shipmentGroupOrders 삭제, inventoryHistory 의 orderId 는 NULL.
+ */
+export async function bulkDeleteOrdersAction(
+  orderIds: string[],
+): Promise<{ deleted: number; errors: string[] }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { deleted: 0, errors: ['Unauthorized'] }
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    return { deleted: 0, errors: ['선택된 주문이 없습니다.'] }
+  }
+
+  const { deleteOrdersForUser } = await import('@/lib/orders/delete-orders')
+  const result = await deleteOrdersForUser(orderIds, user.id)
+  revalidatePath('/orders')
+  revalidateTag('orders', 'max')
+  return result
+}

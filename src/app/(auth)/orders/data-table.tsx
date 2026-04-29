@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { bulkDeleteOrdersAction } from './actions'
 import {
   useReactTable,
   getCoreRowModel,
@@ -33,6 +34,7 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [showColumnToggle, setShowColumnToggle] = useState(false)
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
+  const [deletePending, startDelete] = useTransition()
   const router = useRouter()
 
   const [, setPage] = useQueryState(
@@ -103,6 +105,40 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
             {selectedCount}건 선택됨
           </span>
         )}
+        <button
+          type="button"
+          disabled={selectedCount === 0 || deletePending}
+          onClick={() => {
+            if (selectedCount === 0) return
+            // 1차 확인 — 단순 confirm
+            if (
+              !confirm(
+                `선택한 ${selectedCount}건의 주문을 삭제하시겠습니까?\n\n` +
+                  `※ 관련 송장/클레임 정보도 함께 삭제됩니다.\n` +
+                  `※ 재고 변동 이력은 보존됩니다.`,
+              )
+            ) {
+              return
+            }
+            // 2차 확인 — 되돌릴 수 없음을 명시
+            if (!confirm(`정말 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) {
+              return
+            }
+            startDelete(async () => {
+              const result = await bulkDeleteOrdersAction(selectedIds)
+              if (result.errors.length > 0) {
+                alert(`삭제 실패: ${result.errors.join('\n')}`)
+                return
+              }
+              alert(`${result.deleted}건 삭제 완료`)
+              setRowSelection({})
+              router.refresh()
+            })
+          }}
+          className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {deletePending ? '삭제 중...' : `주문 삭제${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+        </button>
         <div className="relative">
           <button
             type="button"

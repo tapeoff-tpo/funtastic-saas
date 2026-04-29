@@ -159,7 +159,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                   <thead className="bg-muted/50">
                     <tr>
                       <th className="px-3 py-1.5 text-left font-medium">헤더</th>
-                      <th className="px-3 py-1.5 text-left font-medium">필드</th>
+                      <th className="px-3 py-1.5 text-left font-medium">출력 항목</th>
                       <th className="px-3 py-1.5 text-left font-medium">출력내용</th>
                     </tr>
                   </thead>

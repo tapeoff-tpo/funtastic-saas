@@ -164,17 +164,17 @@ export function TemplateClient({
           {/* Column list — header text & 출력내용(고정값) 인라인 편집 */}
           {columns.length > 0 && (
             <div className="overflow-hidden rounded-md border">
-              <div className="grid grid-cols-[2rem_1fr_14rem_1fr_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="grid grid-cols-[2rem_1fr_16rem_1fr_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <span>#</span>
-                <span>헤더 (Excel 표시 텍스트)</span>
-                <span>필드 <span className="normal-case text-[10px] text-muted-foreground/80">(+ 합치면 공백 join)</span></span>
+                <span>헤더 <span className="normal-case text-[10px] text-muted-foreground/80">(Excel 표시 텍스트)</span></span>
+                <span>출력 항목 <span className="normal-case text-[10px] text-muted-foreground/80">(실제 출력 데이터 + 합치기)</span></span>
                 <span>출력내용 <span className="normal-case text-[10px] text-muted-foreground/80">(비우면 자동, 입력 시 모든 행에 고정)</span></span>
                 <span className="text-right">동작</span>
               </div>
               {columns.map((col, idx) => (
                 <div
                   key={idx}
-                  className="grid grid-cols-[2rem_1fr_14rem_1fr_6rem] items-start gap-2 border-b px-3 py-1.5 last:border-b-0"
+                  className="grid grid-cols-[2rem_1fr_16rem_1fr_6rem] items-start gap-2 border-b px-3 py-1.5 last:border-b-0"
                 >
                   <span className="pt-1.5 text-center text-xs text-muted-foreground">{idx + 1}</span>
                   <input
@@ -184,12 +184,23 @@ export function TemplateClient({
                     className="rounded border px-2 py-1 text-sm"
                   />
                   <div className="flex flex-wrap items-center gap-1">
-                    <span
-                      className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground"
-                      title={col.field}
+                    <select
+                      value={col.field}
+                      onChange={(e) => updateColumn(idx, { field: e.target.value })}
+                      className="rounded border bg-white px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+                      aria-label="출력 항목 선택"
+                      title="이 컬럼에 들어갈 데이터 항목"
                     >
-                      {col.field}
-                    </span>
+                      {availableFields.map((f) => (
+                        <option key={f.field} value={f.field}>
+                          {f.label} ({f.field})
+                        </option>
+                      ))}
+                      {/* 현재 col.field 가 availableFields 에 없을 수 있으므로 fallback */}
+                      {!availableFields.some((f) => f.field === col.field) && (
+                        <option value={col.field}>{col.field}</option>
+                      )}
+                    </select>
                     {(col.extraFields ?? []).map((extra) => (
                       <span
                         key={extra}

@@ -125,6 +125,7 @@ export default async function OrdersPage({
     mappingStatus: o.mappingStatus,
     shipmentGroupId: (o as { shipmentGroupId?: string | null }).shipmentGroupId ?? null,
     shipmentGroupKey: (o as { shipmentGroupKey?: string | null }).shipmentGroupKey ?? null,
+    isCopy: (o as { isCopy?: boolean }).isCopy ?? false,
     items: o.items.map((item) => ({
       productName: item.productName,
       displayName: (item as { displayName?: string | null }).displayName ?? null,

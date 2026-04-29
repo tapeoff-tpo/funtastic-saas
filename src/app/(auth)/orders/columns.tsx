@@ -129,6 +129,8 @@ export interface OrderRow {
   mappingStatus?: 'mapped' | 'partial' | 'unmapped'
   shipmentGroupId?: string | null
   shipmentGroupKey?: string | null
+  /** 복사된 주문 여부 — true 이면 주문번호 아래 'copy' 배지 표시 */
+  isCopy?: boolean
   items: {
     productName: string
     /** Phase 8 — product_name_mappings.display_name (null → fallback to productName) */
@@ -427,6 +429,15 @@ export const columns: ColumnDef<OrderRow>[] = [
               #{order.id.slice(0, 8)}
             </span>
             <CopyOrderButton orderId={order.id} />
+            {order.isCopy && (
+              <span
+                title="복사된 주문"
+                className="inline-flex items-center gap-0.5 rounded bg-amber-50 px-1 py-px text-[9px] font-medium text-amber-700 ring-1 ring-amber-200"
+              >
+                <Copy className="h-2.5 w-2.5" />
+                copy
+              </span>
+            )}
           </div>
         </div>
       )

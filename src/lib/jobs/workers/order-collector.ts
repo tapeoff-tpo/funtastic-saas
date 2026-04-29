@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import type { OrderCollectionJobData } from '../queues'
 import { db } from '@/lib/db'
 import {
@@ -285,6 +285,8 @@ async function upsertOrder(
     })
     .onConflictDoUpdate({
       target: [orders.marketplaceId, orders.marketplaceOrderId],
+      // partial unique index — 복사본은 제외하고 원본끼리만 dedup
+      targetWhere: sql`is_copy = false`,
       set: {
         status: order.status,
         marketplaceStatus: order.marketplaceStatus,

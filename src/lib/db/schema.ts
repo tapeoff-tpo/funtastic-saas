@@ -13,6 +13,7 @@ import {
   index,
   date,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 
 // ─── Phase 1: Marketplace Connections ───────────────────────────
 
@@ -117,6 +118,8 @@ export const orders = pgTable(
     shippingType: varchar('shipping_type', { length: 50 }),
     /** 마켓에서 수집된 배송비 (KRW). NULL = 미수집/미존재. (Phase 8 / migration 011) */
     shippingFee: numeric('shipping_fee', { precision: 12, scale: 2 }),
+    /** 복사된 주문 표시 — true 이면 unique 제약에서 제외됨 (migration 016) */
+    isCopy: boolean('is_copy').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -125,10 +128,9 @@ export const orders = pgTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex('orders_marketplace_unique').on(
-      table.marketplaceId,
-      table.marketplaceOrderId,
-    ),
+    uniqueIndex('orders_marketplace_unique')
+      .on(table.marketplaceId, table.marketplaceOrderId)
+      .where(sql`${table.isCopy} = false`),
     index('orders_user_status').on(table.userId, table.status),
     index('orders_ordered_at').on(table.orderedAt),
   ],

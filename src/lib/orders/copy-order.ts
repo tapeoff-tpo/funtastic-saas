@@ -1,12 +1,12 @@
 /**
  * 주문 복사 — 원본 주문 + orderItems 만 복제 (claims/shipments/memos 제외).
- * marketplaceOrderId 에 -copy-XXXX 접미 붙여 unique 제약 충돌 회피.
+ * is_copy=true 로 마킹 → partial unique index 가 복사본을 제외하므로
+ * marketplaceOrderId 를 원본과 동일하게 유지 가능.
  */
 
 import { db } from '@/lib/db'
 import { orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
-import { nanoid } from 'nanoid'
 
 export interface CopyOrderResult {
   success: boolean
@@ -25,15 +25,13 @@ export async function copyOrder(orderId: string, userId: string): Promise<CopyOr
 
   const srcItems = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId))
 
-  const copySuffix = `-copy-${nanoid(6)}`
-
   const [inserted] = await db
     .insert(orders)
     .values({
       userId: src.userId,
       connectionId: src.connectionId,
       marketplaceId: src.marketplaceId,
-      marketplaceOrderId: `${src.marketplaceOrderId}${copySuffix}`,
+      marketplaceOrderId: src.marketplaceOrderId,
       status: 'new',
       previousStatus: null,
       buyerName: src.buyerName,
@@ -52,6 +50,7 @@ export async function copyOrder(orderId: string, userId: string): Promise<CopyOr
       collectedAt: src.collectedAt,
       shippingType: src.shippingType,
       shippingFee: src.shippingFee,
+      isCopy: true,
     })
     .returning({ id: orders.id })
 

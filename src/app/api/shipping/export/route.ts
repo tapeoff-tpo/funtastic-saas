@@ -148,6 +148,8 @@ export async function GET(request: NextRequest) {
         orderId: order.internalNo,
         internalNo: order.internalNo,
         marketplaceOrderId: order.marketplaceOrderId,
+        // 마켓 상품코드 — 쿠팡 vendorItemId / 네이버 productOrderId / Cafe24 item_no 등
+        marketplaceItemId: rawFirst?.marketplaceItemId ?? '',
         marketplaceId: order.marketplaceId,
         buyerName: order.buyerName,
         buyerPhone: order.buyerPhone,

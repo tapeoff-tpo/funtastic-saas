@@ -10,7 +10,7 @@
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, products } from '@/lib/db/schema'
+import { inventory, inventoryHistory, orders, products } from '@/lib/db/schema'
 import { eq, and, or, ilike, desc, asc, count, ne, sql, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
@@ -171,10 +171,24 @@ export async function getInventoryHistory(
 ) {
   const offset = (page - 1) * pageSize
 
-  const [items, [{ total }]] = await Promise.all([
+  const [rawItems, [{ total }]] = await Promise.all([
     db
-      .select()
+      .select({
+        id: inventoryHistory.id,
+        inventoryId: inventoryHistory.inventoryId,
+        userId: inventoryHistory.userId,
+        createdAt: inventoryHistory.createdAt,
+        adjustmentReason: inventoryHistory.adjustmentReason,
+        delta: inventoryHistory.delta,
+        previousTotal: inventoryHistory.previousTotal,
+        newTotal: inventoryHistory.newTotal,
+        note: inventoryHistory.note,
+        orderId: inventoryHistory.orderId,
+        // 사용자에게 보여줄 8자리 internal_no — UUID 대신 노출
+        orderInternalNo: orders.internalNo,
+      })
       .from(inventoryHistory)
+      .leftJoin(orders, eq(orders.id, inventoryHistory.orderId))
       .where(eq(inventoryHistory.inventoryId, inventoryId))
       .orderBy(desc(inventoryHistory.createdAt))
       .limit(pageSize)
@@ -185,5 +199,5 @@ export async function getInventoryHistory(
       .where(eq(inventoryHistory.inventoryId, inventoryId)),
   ])
 
-  return { items, total }
+  return { items: rawItems, total }
 }

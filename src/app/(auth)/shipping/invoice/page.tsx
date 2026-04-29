@@ -138,7 +138,7 @@ export default function InvoicePage() {
                   <div className="mt-2 space-y-1">
                     {importResult.unmatchedRows.slice(0, 10).map((r) => (
                       <div key={r.rowNum} className="text-xs text-muted-foreground">
-                        행 {r.rowNum}: {r.trackingNumber} (주문ID: {r.orderId.slice(0, 8)}...)
+                        행 {r.rowNum}: {r.trackingNumber} (마켓주문번호: <span className="font-mono">{r.orderId}</span>)
                       </div>
                     ))}
                   </div>

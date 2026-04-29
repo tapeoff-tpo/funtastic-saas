@@ -429,7 +429,7 @@ export const columns: ColumnDef<OrderRow>[] = [
           <div className="flex items-center gap-1.5">
             <span
               className="font-mono text-[10px] text-muted-foreground"
-              title={`내부 PK: ${order.id}`}
+              title="내부 주문번호"
             >
               #{order.internalNo}
             </span>

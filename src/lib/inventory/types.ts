@@ -38,6 +38,8 @@ export interface InventoryHistoryRecord {
   newTotal: number
   note: string | null
   orderId: string | null
+  /** 사용자에게 보여줄 8자리 internal_no — orders 와 LEFT JOIN 결과 */
+  orderInternalNo: string | null
   createdAt: Date
 }
 

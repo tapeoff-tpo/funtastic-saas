@@ -114,12 +114,12 @@ export function HistoryDialog({ inventoryId, sku, onClose }: HistoryDialogProps)
                       {item.note ?? '-'}
                     </td>
                     <td className="px-3 py-2 text-xs">
-                      {item.orderId ? (
+                      {item.orderInternalNo ? (
                         <a
-                          href={`/orders?search=${item.orderId}`}
-                          className="text-primary hover:underline"
+                          href={`/orders?search=${item.orderInternalNo}`}
+                          className="font-mono text-primary hover:underline"
                         >
-                          {item.orderId.slice(0, 8)}...
+                          #{item.orderInternalNo}
                         </a>
                       ) : (
                         '-'

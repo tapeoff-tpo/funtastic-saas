@@ -80,7 +80,11 @@ export async function GET(req: NextRequest) {
   if (from) whereParts.push(sql`o.ordered_at >= ${from}`)
   if (to) whereParts.push(sql`o.ordered_at < (${to}::date + INTERVAL '1 day')`)
   if (marketplaceIds.length > 0) {
-    whereParts.push(sql`o.marketplace_id = ANY(${marketplaceIds})`)
+    // drizzle 의 sql template 은 JS 배열을 Postgres array literal 로 직접 직렬화하지 않음.
+    // ANY(${arr}) 로 넘기면 "ssgmall" 같은 단일 문자열 그대로 전달돼 22P02 (malformed array literal) 발생.
+    // 각 원소를 개별 파라미터로 펼쳐 IN (...) 로 변환.
+    const ids = sql.join(marketplaceIds.map((id) => sql`${id}`), sql`, `)
+    whereParts.push(sql`o.marketplace_id IN (${ids})`)
   }
   if (q) {
     const like = `%${q}%`

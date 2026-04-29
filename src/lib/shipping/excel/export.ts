@@ -60,10 +60,12 @@ export async function exportToCarrierExcel(
   const workbook = new ExcelJS.Workbook()
   const worksheet = workbook.addWorksheet(template.name)
 
-  // Set columns from template
-  worksheet.columns = template.columns.map((col) => ({
+  // Set columns from template — index 기반 unique key.
+  // 같은 source field 를 두 컬럼이 쓰는 경우(예: 배송메세지 = internalNo+deliveryMessage,
+  // 고객주문번호 = internalNo) ExcelJS 가 key 로 dedupe 해서 한쪽이 빈칸으로 출력되는 버그가 있음.
+  worksheet.columns = template.columns.map((col, idx) => ({
     header: col.header,
-    key: col.field,
+    key: `c${idx}`,
     width: col.width,
   }))
 
@@ -80,19 +82,20 @@ export async function exportToCarrierExcel(
   // - extraFields 가 있으면 primary + extras 를 공백으로 합쳐서 출력
   for (const order of orders) {
     const rowData: Record<string, unknown> = {}
-    for (const col of template.columns) {
+    template.columns.forEach((col, idx) => {
+      const key = `c${idx}`
       if (col.fixedValue !== undefined && col.fixedValue !== '') {
-        rowData[col.field] = col.fixedValue
+        rowData[key] = col.fixedValue
       } else if (col.extraFields && col.extraFields.length > 0) {
         const parts = [col.field, ...col.extraFields]
           .map((f) => getNestedValue(order, f))
           .filter((v) => v !== undefined && v !== null && v !== '')
           .map((v) => String(v))
-        rowData[col.field] = parts.join(col.joinSeparator ?? ' ')
+        rowData[key] = parts.join(col.joinSeparator ?? ' ')
       } else {
-        rowData[col.field] = getNestedValue(order, col.field)
+        rowData[key] = getNestedValue(order, col.field)
       }
-    }
+    })
     worksheet.addRow(rowData)
   }
 

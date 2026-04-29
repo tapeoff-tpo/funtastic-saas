@@ -425,8 +425,11 @@ export const columns: ColumnDef<OrderRow>[] = [
             {order.marketplaceOrderId}
           </button>
           <div className="flex items-center gap-1.5">
-            <span className="font-mono text-[10px] text-muted-foreground">
-              #{order.id.slice(0, 8)}
+            <span
+              className="font-mono text-[10px] text-muted-foreground break-all"
+              title={order.id}
+            >
+              #{order.id}
             </span>
             <CopyOrderButton orderId={order.id} />
             {order.isCopy && (

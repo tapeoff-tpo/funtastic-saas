@@ -549,88 +549,11 @@ export const categoryMappings = pgTable(
   ],
 )
 
-// ─── Product Name Mappings (Phase 5+) ──────────────────────────
-// Maps marketplace product names to internal display names for shipping labels.
-// marketplace_name is the exact text from orderItems.productName.
-// display_name is what gets printed on shipping labels / 송장.
-
-export const productNameMappings = pgTable(
-  'product_name_mappings',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull(),
-    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
-    marketplaceName: text('marketplace_name').notNull(),
-    displayName: text('display_name').notNull(),
-    pickingLocation: varchar('picking_location', { length: 100 }),
-    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
-    variantId: uuid('variant_id').references(() => productVariants.id, { onDelete: 'set null' }),
-    /** 매핑 멀티플라이어. 마켓 상품 1개가 내부 SKU N개 분량일 때. 기본 1 */
-    quantity: integer('quantity').notNull().default(1),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    uniqueIndex('product_name_mappings_unique').on(
-      table.userId,
-      table.marketplaceId,
-      table.marketplaceName,
-    ),
-    index('product_name_mappings_user').on(table.userId),
-  ],
-)
-
-// Product option mappings — links (marketplace, productName, optionText) → variantSku
-// Used when an order arrives with a specific option like "색상: 빨강"
-// to identify which internal variant to pick.
-export const productOptionMappings = pgTable(
-  'product_option_mappings',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull(),
-    marketplaceId: varchar('marketplace_id', { length: 50 }).notNull(),
-    marketplaceName: text('marketplace_name').notNull(),
-    optionText: text('option_text').notNull(),
-    variantSku: varchar('variant_sku', { length: 100 }).notNull(),
-    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
-    /** 매핑 멀티플라이어. 마켓 상품 1개가 내부 SKU N개 분량일 때. 기본 1 */
-    quantity: integer('quantity').notNull().default(1),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    uniqueIndex('product_option_mappings_unique').on(
-      table.userId,
-      table.marketplaceId,
-      table.marketplaceName,
-      table.optionText,
-    ),
-    index('product_option_mappings_lookup').on(
-      table.userId,
-      table.marketplaceId,
-      table.marketplaceName,
-    ),
-  ],
-)
-
-// ─── Phase 5: Bundle Products ────────────────────────────────────
-
-export const productBundleItems = pgTable(
-  'product_bundle_items',
-  {
-    id: uuid('id').defaultRandom().primaryKey(),
-    userId: uuid('user_id').notNull(),
-    bundleSku: varchar('bundle_sku', { length: 100 }).notNull(),
-    componentSku: varchar('component_sku', { length: 100 }).notNull(),
-    quantity: integer('quantity').notNull().default(1),
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    uniqueIndex('product_bundle_items_unique').on(table.userId, table.bundleSku, table.componentSku),
-    index('product_bundle_items_user_bundle').on(table.userId, table.bundleSku),
-  ],
-)
+// ─── 매핑 시스템 ────────────────────────────────────────────────
+// 기존 product_name_mappings / product_option_mappings / product_bundle_items
+// 3개 테이블은 migration 021 에서 drop. 신규 mapping_codes 기반 시스템은
+// 다음 phase 에서 추가 (사방넷 매핑코드 방식 — 1차: 마켓수집 → 매핑코드,
+// 2차: 매핑코드 → 재고 SKU N개 + 각 수량).
 
 // ─── Company Settings ────────────────────────────────────────────
 

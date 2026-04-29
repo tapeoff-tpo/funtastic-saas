@@ -61,7 +61,7 @@ const navSections: NavSection[] = [
     title: '상품',
     items: [
       { href: '/products', label: '상품 관리', icon: Package },
-      { href: '/products/mappings', label: '상품명 매핑', icon: ArrowRightLeft },
+      { href: '/products/mapping', label: '매핑관리', icon: ArrowRightLeft },
       { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
       { href: '/inventory', label: '재고관리', icon: Warehouse },
     ],

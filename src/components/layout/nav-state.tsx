@@ -31,7 +31,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/shipping/print': '송장 출력',
   '/products': '상품 관리',
   '/products/new': '상품 등록',
-  '/products/mappings': '상품명 매핑',
+  '/products/mapping': '매핑관리',
   '/products/categories': '카테고리',
   '/products/marketplace-categories': '카테고리 매핑',
   '/inventory': '재고관리',

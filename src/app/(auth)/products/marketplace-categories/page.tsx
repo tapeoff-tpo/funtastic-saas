@@ -98,7 +98,7 @@ export default function MarketplaceCategoriesPage() {
         <div className="py-10 text-center text-sm text-muted-foreground">불러오는 중...</div>
       ) : filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">
-          수집된 카테고리가 없습니다. 상품명 매핑 페이지에서 마켓 엑셀을 업로드하세요.
+          수집된 카테고리가 없습니다. 매핑관리 페이지에서 마켓 엑셀을 업로드하세요.
         </div>
       ) : (
         <div className="space-y-3">

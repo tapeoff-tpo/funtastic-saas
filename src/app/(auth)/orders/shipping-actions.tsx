@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { ChevronDown } from 'lucide-react'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
-import { BulkMappingDialog } from './bulk-mapping-dialog'
 import { LogisticsMessageDialog } from './logistics-message-dialog'
 import { bulkCombineByContactAction } from './combined-actions'
 import type { OrderRow } from './columns'
@@ -60,7 +59,6 @@ async function downloadExcel(url: string, filename: string): Promise<{ success: 
 export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrders = [], stage }: ShippingActionsProps) {
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
-  const [bulkMappingOpen, setBulkMappingOpen] = useState(false)
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
@@ -186,13 +184,12 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
     <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
         {stage === 'mapping' && (
-          <button
-            type="button"
-            onClick={() => setBulkMappingOpen(true)}
+          <a
+            href="/products/mapping"
             className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
           >
-            일괄 매핑 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
-          </button>
+            매핑관리로 이동 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
+          </a>
         )}
 
         {stage === 'confirm' && (
@@ -343,13 +340,6 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
       <ExcelImportDialog
         open={excelImportOpen}
         onOpenChange={setExcelImportOpen}
-      />
-
-      <BulkMappingDialog
-        open={bulkMappingOpen}
-        orders={ordersForMapping}
-        onClose={() => setBulkMappingOpen(false)}
-        onSaved={() => { window.location.reload() }}
       />
 
       <LogisticsMessageDialog

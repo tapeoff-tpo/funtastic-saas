@@ -10,8 +10,6 @@ import { db } from '@/lib/db'
 import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateDaesinExcel, type DaesinOrderRow } from '@/lib/shipping/excel/daesin-export'
-import { loadMappingLookup, loadSkuLookup, applyMappings } from '@/lib/products/apply-mappings'
-import { expandBundlesForExport } from '@/lib/products/expand-bundles'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -37,30 +35,19 @@ export async function GET(req: NextRequest) {
     db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
   ])
 
-  const [mappingLookup, skuLookup] = await Promise.all([
-    loadMappingLookup(user.id),
-    loadSkuLookup(user.id),
-  ])
-
-  // 주문 → 매핑 → bundle 펼침. 송장 1행 = 박스 1개라 세트는 component 행으로 분리.
+  // Phase A 매핑 재설계: name/sku 매핑 + bundle 펼침 제거.
+  // orderItems 원본 그대로 출력. (Phase C 신규 매핑코드 도입 시 재연결.)
   const exportRows: DaesinOrderRow[] = []
   for (const order of orderRows) {
     const items = itemRows.filter((i) => i.orderId === order.id)
-    const mapped = applyMappings(
-      items.map((i) => ({ ...i, marketplaceId: order.marketplaceId })),
-      mappingLookup,
-      skuLookup,
-      order.marketplaceId,
-    )
-    const expanded = await expandBundlesForExport(user.id, mapped)
     const addr = order.shippingAddress
     const fullAddress = addr
       ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
       : ''
 
-    if (expanded.length === 0) continue
+    if (items.length === 0) continue
 
-    for (const item of expanded) {
+    for (const item of items) {
       exportRows.push({
         orderId: order.id,
         marketplaceOrderId: order.marketplaceOrderId,
@@ -76,7 +63,7 @@ export async function GET(req: NextRequest) {
         deliveryMessage: undefined,
         senderName: senderSettings?.companyName ?? '',
         senderPhone: senderSettings?.phone ?? '',
-        pickingLocation: item.pickingLocation ?? undefined,
+        pickingLocation: undefined,
         internalSku: item.sku ?? undefined,
       })
     }

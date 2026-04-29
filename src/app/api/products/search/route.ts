@@ -8,27 +8,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products, productNameMappings, inventory } from '@/lib/db/schema'
-import { eq, and, or, ilike, ne, inArray } from 'drizzle-orm'
-
-/** 마켓 상품명에서 옵션 힌트 추출: "상품명, 옵션A, 1개" → "옵션A" */
-function extractOptionHint(fullName: string, baseName: string): string | null {
-  const base = baseName.trim().toLowerCase()
-  const full = fullName.trim()
-  // 기본 상품명이 포함돼 있으면 뒤의 나머지를 옵션으로 추정
-  const idx = full.toLowerCase().indexOf(base)
-  if (idx === -1) {
-    // 마켓 이름이 완전히 다른 경우 — 그냥 짧게 줄여서 표시
-    return full.length > 30 ? full.slice(0, 28) + '...' : full
-  }
-  const rest = full.slice(idx + base.length).replace(/^[\s,·\-()[\]]+/, '').trim()
-  if (!rest) return null
-  // "블랙, 1개" 같은 문자열에서 앞쪽 토큰 하나 or 두개 추출
-  const firstComma = rest.indexOf(',')
-  const hint = firstComma > 0 ? rest.slice(0, firstComma) : rest
-  const trimmed = hint.trim()
-  return trimmed.length > 0 ? trimmed.slice(0, 30) : null
-}
+import { products, inventory } from '@/lib/db/schema'
+import { eq, and, or, ilike, ne } from 'drizzle-orm'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -67,38 +48,8 @@ export async function GET(req: NextRequest) {
     .limit(20)
 
   // optionName from inventory is the primary hint.
-  // Fallback: derive hint from existing productNameMappings.
-  let results = rows.map((r) => ({ ...r, optionHint: r.optionName ?? null }))
-
-  const unmatchedIds = rows.filter((r) => !r.optionName).map((r) => r.id)
-  if (unmatchedIds.length > 0) {
-    const mappingRows = await db
-      .select({
-        productId: productNameMappings.productId,
-        marketplaceName: productNameMappings.marketplaceName,
-      })
-      .from(productNameMappings)
-      .where(
-        and(
-          eq(productNameMappings.userId, user.id),
-          inArray(productNameMappings.productId, unmatchedIds),
-        ),
-      )
-
-    const hintByProduct = new Map<string, string>()
-    for (const m of mappingRows) {
-      if (!m.productId || hintByProduct.has(m.productId)) continue
-      const product = rows.find((r) => r.id === m.productId)
-      if (!product) continue
-      const hint = extractOptionHint(m.marketplaceName, product.name)
-      if (hint) hintByProduct.set(m.productId, hint)
-    }
-
-    results = results.map((r) => ({
-      ...r,
-      optionHint: r.optionHint ?? hintByProduct.get(r.id) ?? null,
-    }))
-  }
+  // Phase A 매핑 재설계: productNameMappings fallback 제거. inventory.optionName 만 사용.
+  const results = rows.map((r) => ({ ...r, optionHint: r.optionName ?? null }))
 
   return NextResponse.json({ results })
 }

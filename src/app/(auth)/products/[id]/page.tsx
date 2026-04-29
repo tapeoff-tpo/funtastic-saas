@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useTransition, useRef, useCallback } from 'react'
+import { useState, useEffect, useTransition } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import type { ProductDetail, VariantFormData, ProductMarketplaceLink } from '@/lib/products/types'
@@ -47,8 +47,6 @@ export default function EditProductPage() {
   const [categoryId, setCategoryId] = useState('')
   const [defaultCarrierId, setDefaultCarrierId] = useState('')
   const [variants, setVariants] = useState<VariantFormData[]>([])
-  const [bundleItems, setBundleItems] = useState<Array<{ componentSku: string; componentName: string; quantity: number }>>([])
-  const [bundleSaving, setBundleSaving] = useState(false)
   const [changeLogs, setChangeLogs] = useState<Array<{
     id: string; fieldName: string; oldValue: string | null; newValue: string | null; createdAt: Date | string
   }>>([])
@@ -84,21 +82,6 @@ export default function EditProductPage() {
           priceAdjustment: Number(v.priceAdjustment),
         })),
       )
-      // Load bundle items for this product's SKU
-      const bundleRes = await fetch(`/api/products/bundles/${encodeURIComponent(data.internalSku)}`)
-      if (bundleRes.ok) {
-        const bundleData = await bundleRes.json()
-        if (!cancelled) {
-          setBundleItems(
-            (bundleData.items ?? []).map((i: { componentSku: string; quantity: number }) => ({
-              componentSku: i.componentSku,
-              componentName: i.componentSku,
-              quantity: i.quantity,
-            })),
-          )
-        }
-      }
-
       setLoading(false)
 
       const { getProductChangeLogsAction } = await import('@/lib/products/ui-actions')
@@ -136,47 +119,6 @@ export default function EditProductPage() {
         return { ...v, [field]: value }
       }),
     )
-  }
-
-  const addBundleItem = () => {
-    setBundleItems((prev) => [...prev, { componentSku: '', componentName: '', quantity: 1 }])
-  }
-
-  const selectBundleComponent = (idx: number, product: ProductSearchResult) => {
-    setBundleItems((prev) =>
-      prev.map((item, i) =>
-        i === idx
-          ? { ...item, componentSku: product.internalSku, componentName: product.name }
-          : item,
-      ),
-    )
-  }
-
-  const updateBundleQty = (idx: number, quantity: number) => {
-    setBundleItems((prev) => prev.map((item, i) => (i === idx ? { ...item, quantity } : item)))
-  }
-
-  const removeBundleItem = (idx: number) => {
-    setBundleItems((prev) => prev.filter((_, i) => i !== idx))
-  }
-
-  const handleSaveBundle = async () => {
-    if (!product) return
-    setBundleSaving(true)
-    try {
-      const res = await fetch(`/api/products/bundles/${encodeURIComponent(product.internalSku)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          bundleItems
-            .filter((i) => i.componentSku.trim() && i.quantity > 0)
-            .map((i) => ({ componentSku: i.componentSku, quantity: i.quantity })),
-        ),
-      })
-      if (!res.ok) alert('세트 구성 저장 실패')
-    } finally {
-      setBundleSaving(false)
-    }
   }
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -450,77 +392,6 @@ export default function EditProductPage() {
           )}
         </div>
 
-        {/* Bundle composition */}
-        <div className="space-y-4 rounded-md border p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold">세트 구성</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                이 상품이 세트상품이면 구성품 SKU와 수량을 입력하세요. 주문 출고 시 구성품 재고가 자동 차감됩니다.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={addBundleItem}
-              className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-            >
-              구성품 추가
-            </button>
-          </div>
-
-          {bundleItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              구성품이 없습니다. 단일 상품으로 처리됩니다.
-            </p>
-          ) : (
-            <div className="space-y-3">
-              {bundleItems.map((item, idx) => (
-                <div key={idx} className="space-y-1.5">
-                  <ProductSearch
-                    initialValue={item.componentSku ? `${item.componentSku} - ${item.componentName}` : ''}
-                    onSelect={(p) => selectBundleComponent(idx, p)}
-                  />
-                  {item.componentSku && (
-                    <div className="flex items-center gap-2 pl-1">
-                      <p className="flex-1 text-xs text-green-600 truncate">
-                        ✓ {item.componentSku} — {item.componentName}
-                      </p>
-                      <input
-                        type="number"
-                        min={1}
-                        value={item.quantity}
-                        onChange={(e) => updateBundleQty(idx, Number(e.target.value))}
-                        className="w-16 rounded border px-2 py-1 text-sm text-center"
-                      />
-                      <span className="text-xs text-muted-foreground">개</span>
-                      <button
-                        type="button"
-                        onClick={() => removeBundleItem(idx)}
-                        className="text-red-400 hover:text-red-600 text-sm"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {bundleItems.length > 0 && (
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => void handleSaveBundle()}
-                disabled={bundleSaving}
-                className="rounded-md bg-black px-4 py-1.5 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
-              >
-                {bundleSaving ? '저장 중...' : '세트 구성 저장'}
-              </button>
-            </div>
-          )}
-        </div>
-
         {/* Marketplace sync status */}
         <div className="space-y-4 rounded-md border p-4">
           <div className="flex items-center justify-between">
@@ -672,90 +543,3 @@ export default function EditProductPage() {
   )
 }
 
-interface ProductSearchResult {
-  id: string
-  internalSku: string
-  name: string
-  warehouseLocation: string | null
-  optionHint?: string | null
-}
-
-function ProductSearch({
-  onSelect,
-  initialValue = '',
-}: {
-  onSelect: (p: ProductSearchResult) => void
-  initialValue?: string
-}) {
-  const [query, setQuery] = useState(initialValue)
-  const [results, setResults] = useState<ProductSearchResult[]>([])
-  const [showDropdown, setShowDropdown] = useState(false)
-  const timeout = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const wrapperRef = useRef<HTMLDivElement>(null)
-
-  const search = useCallback(async (q: string) => {
-    if (q.length < 1) { setResults([]); return }
-    try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`)
-      const data = await res.json()
-      setResults(data.results ?? [])
-      setShowDropdown(true)
-    } catch { /* ignore */ }
-  }, [])
-
-  const handleChange = (value: string) => {
-    setQuery(value)
-    if (timeout.current) clearTimeout(timeout.current)
-    timeout.current = setTimeout(() => search(value), 300)
-  }
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setShowDropdown(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
-
-  return (
-    <div ref={wrapperRef} className="relative">
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => handleChange(e.target.value)}
-        onFocus={() => results.length > 0 && setShowDropdown(true)}
-        placeholder="구성품 검색 (상품코드 또는 상품명)"
-        className="w-full rounded-md border px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-black"
-      />
-      {showDropdown && results.length > 0 && (
-        <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-md border bg-white shadow-lg">
-          {results.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
-              onClick={() => {
-                onSelect(p)
-                setQuery(`${p.internalSku} - ${p.name}`)
-                setShowDropdown(false)
-              }}
-            >
-              <span className="font-mono text-xs text-muted-foreground">{p.internalSku}</span>
-              <span className="flex-1 truncate">{p.name}</span>
-              {p.optionHint && (
-                <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700">
-                  {p.optionHint}
-                </span>
-              )}
-              {p.warehouseLocation && (
-                <span className="text-xs text-muted-foreground">{p.warehouseLocation}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}

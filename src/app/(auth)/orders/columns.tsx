@@ -7,8 +7,7 @@ import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
-import { InlineMappingDialog } from './inline-mapping-dialog'
-import { useState, useTransition } from 'react'
+import { useTransition } from 'react'
 import { copyOrderAction } from './actions'
 
 /** Helper to get openDetail from table.options.meta safely */
@@ -42,39 +41,20 @@ function CopyOrderButton({ orderId }: { orderId: string }) {
   )
 }
 
-/** Mapping status cell — clickable badge that opens inline mapping dialog */
+/** Mapping status cell — Phase A 매핑 시스템 재설계 중에는 비-클릭 표시만.
+ * 신규 매핑관리 페이지(/products/mapping) 도입 후 다시 inline 매핑 다이얼로그 연결 예정. */
 function MappingCell({ order }: { order: OrderRow }) {
-  const [open, setOpen] = useState(false)
   const status = order.mappingStatus ?? 'unmapped'
-
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => status !== 'mapped' && setOpen(true)}
-        disabled={status === 'mapped'}
-        className={status !== 'mapped' ? 'cursor-pointer' : 'cursor-default'}
-      >
-        {status === 'mapped' ? (
-          <Badge variant="secondary">매핑됨</Badge>
-        ) : status === 'partial' ? (
-          <Badge variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50">일부 매핑</Badge>
-        ) : (
-          <Badge variant="destructive" className="hover:opacity-80">미매핑</Badge>
-        )}
-      </button>
-      <InlineMappingDialog
-        open={open}
-        marketplaceId={order.marketplaceId}
-        items={order.items.map((i) => ({
-          productName: i.productName,
-          optionText: i.optionText,
-          quantity: i.quantity,
-        }))}
-        onClose={() => setOpen(false)}
-        onSaved={() => { window.location.reload() }}
-      />
-    </>
+    <span className="cursor-default">
+      {status === 'mapped' ? (
+        <Badge variant="secondary">매핑됨</Badge>
+      ) : status === 'partial' ? (
+        <Badge variant="outline" className="border-orange-300 text-orange-700">일부 매핑</Badge>
+      ) : (
+        <Badge variant="destructive">미매핑</Badge>
+      )}
+    </span>
   )
 }
 

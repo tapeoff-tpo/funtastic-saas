@@ -7,7 +7,7 @@
 
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory, shipmentGroups, shipmentGroupOrders, scanLogs } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
@@ -16,31 +16,16 @@ export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
 
 /**
- * perf: mapping lookups (products / product_name_mappings / product_option_mappings / variants)
- * 는 탭 전환·페이지 이동 사이에 거의 안 변하므로 사용자별 60초 캐시.
- * 매핑/상품이 바뀔 때 `revalidateTag('product-mappings')` 호출로 즉시 무효화.
+ * mappingStatus 계산용 SKU 인벤토리 캐시 (60초).
  *
- * 진단 (2026-04-28): 사용자가 92건 주문에 대해 mappingStatus 계산하려고
- * products 3386건 + name_mappings 922건 = 4300여 row 를 매번 fetch 하던 것이 핵심 병목.
+ * Phase A — 매핑 시스템 재설계:
+ * 기존엔 product_name_mappings / product_option_mappings 도 같이 조회했지만 두 테이블 모두 drop.
+ * 현재는 SKU 직접 매칭(orderItems.sku ∈ products.internalSku ∪ productVariants.sku) 만으로 mappingStatus 판정.
+ * 신규 매핑코드 시스템 도입 시 (Phase C) 이 lookup 도 재구성 예정.
  */
 const getMappingLookupsCached = unstable_cache(
   async (userId: string) => {
-    const [nameMappings, optionMappings, productSkus, variantSkus] = await Promise.all([
-      db
-        .select({
-          marketplaceId: productNameMappings.marketplaceId,
-          marketplaceName: productNameMappings.marketplaceName,
-        })
-        .from(productNameMappings)
-        .where(eq(productNameMappings.userId, userId)),
-      db
-        .select({
-          marketplaceId: productOptionMappings.marketplaceId,
-          marketplaceName: productOptionMappings.marketplaceName,
-          optionText: productOptionMappings.optionText,
-        })
-        .from(productOptionMappings)
-        .where(eq(productOptionMappings.userId, userId)),
+    const [productSkus, variantSkus] = await Promise.all([
       db
         .select({ sku: products.internalSku })
         .from(products)
@@ -51,7 +36,7 @@ const getMappingLookupsCached = unstable_cache(
         .innerJoin(products, eq(productVariants.productId, products.id))
         .where(eq(products.userId, userId)),
     ])
-    return { nameMappings, optionMappings, productSkus, variantSkus }
+    return { productSkus, variantSkus }
   },
   ['order-mapping-lookups'],
   { revalidate: 60, tags: ['product-mappings'] },
@@ -156,28 +141,8 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
               ),
             ),
         ),
-        // 매핑된 송장용 상품명(displayName) 매칭 — UI 에서 보이는 이름으로 검색 가능하도록
-        // displayName 출처는 두 가지: (1) productNameMappings.displayName (name 매핑 경로),
-        // (2) products.name (SKU↔internalSku 조인, 옵션 매핑/직접 SKU 매칭 경로).
-        exists(
-          db
-            .select({ x: sql`1` })
-            .from(orderItems)
-            .innerJoin(
-              productNameMappings,
-              and(
-                eq(productNameMappings.userId, orders.userId),
-                eq(productNameMappings.marketplaceId, orders.marketplaceId),
-                eq(productNameMappings.marketplaceName, orderItems.productName),
-              ),
-            )
-            .where(
-              and(
-                eq(orderItems.orderId, orders.id),
-                ilike(productNameMappings.displayName, searchPattern),
-              ),
-            ),
-        ),
+        // 매핑된 상품명(products.name) 매칭 — orderItems.sku ↔ products.internalSku 조인.
+        // 기존 productNameMappings.displayName 검색 경로는 매핑 시스템 재설계로 제거됨.
         exists(
           db
             .select({ x: sql`1` })
@@ -283,8 +248,6 @@ export async function getOrders(filters: OrderFilters = {}) {
   const userScopedPromise = userId
     ? getMappingLookupsCached(userId)
     : Promise.resolve({
-        nameMappings: [] as Array<{ marketplaceId: string; marketplaceName: string }>,
-        optionMappings: [] as Array<{ marketplaceId: string; marketplaceName: string; optionText: string | null }>,
         productSkus: [] as Array<{ sku: string }>,
         variantSkus: [] as Array<{ sku: string }>,
       })
@@ -332,14 +295,12 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const [
     { orderRows, total: orderTotal },
-    { nameMappings, optionMappings, productSkus, variantSkus },
+    { productSkus, variantSkus },
   ] = await Promise.all([ordersAndCountPromise, userScopedPromise])
 
-  // Fetch items/claims/shipments/shipmentGroups in parallel
-  // Phase 8: items query is now a multi-join — orderItems LEFT JOIN productNameMappings
-  // (on user_id + marketplace_id + marketplace_name) for displayName, plus LEFT JOIN
-  // products (on internal_sku ↔ orderItems.sku) for shipping_cost.
-  // marketplaceId match prevents Pitfall 2 (쿠팡 row가 네이버 매핑을 잡지 않음).
+  // Fetch items/claims/shipments/shipmentGroups in parallel.
+  // Phase A 매핑 재설계: productNameMappings LEFT JOIN 제거. 확정상품명은
+  // SKU ↔ products.internalSku 직접 매칭(products.name) 으로만 해석.
   const orderIds = orderRows.map((o) => o.id)
   const [itemRows, claimRows, shipmentRows, groupRows, inquiryRows] = orderIds.length > 0
     ? await Promise.all([
@@ -355,28 +316,16 @@ export async function getOrders(filters: OrderFilters = {}) {
             sku: orderItems.sku,
             skuMultiplier: orderItems.skuMultiplier,
             fulfillmentCode: orderItems.fulfillmentCode,
-            // Phase 8 — displayName from product_name_mappings (nullable on miss)
-            nameMappingDisplayName: productNameMappings.displayName,
-            // 확정상품명 fallback — SKU가 products에 직접 매칭된 경우 (Excel SKU 매핑 등)
+            // 확정상품명 — SKU가 products에 직접 매칭된 경우만 해석
             productInternalName: products.name,
-            // Phase 8 — shipping_cost from products (nullable when SKU has no product master)
             shippingCost: products.shippingCost,
             // 잔여 재고 — orderItems.sku ↔ inventory.sku (user 스코프)
             availableStock: inventory.availableStock,
-            // need order's marketplaceId for the displayName join condition
             orderMarketplaceId: orders.marketplaceId,
             orderUserId: orders.userId,
           })
           .from(orderItems)
           .innerJoin(orders, eq(orders.id, orderItems.orderId))
-          .leftJoin(
-            productNameMappings,
-            and(
-              eq(productNameMappings.userId, orders.userId),
-              eq(productNameMappings.marketplaceId, orders.marketplaceId),
-              eq(productNameMappings.marketplaceName, orderItems.productName),
-            ),
-          )
           .leftJoin(
             products,
             and(
@@ -403,7 +352,6 @@ export async function getOrders(filters: OrderFilters = {}) {
           .from(shipmentGroupOrders)
           .innerJoin(shipmentGroups, eq(shipmentGroupOrders.shipmentGroupId, shipmentGroups.id))
           .where(inArray(shipmentGroupOrders.orderId, orderIds)),
-        // Phase 8 — inquiry indicator (hasInquiries) source
         listInquiriesByOrderIds(orderIds),
       ])
     : [
@@ -418,7 +366,6 @@ export async function getOrders(filters: OrderFilters = {}) {
           sku: string | null
           skuMultiplier: number
           fulfillmentCode: string | null
-          nameMappingDisplayName: string | null
           productInternalName: string | null
           shippingCost: string | null
           availableStock: number | null
@@ -444,8 +391,8 @@ export async function getOrders(filters: OrderFilters = {}) {
     sku: r.sku,
     skuMultiplier: r.skuMultiplier,
     fulfillmentCode: r.fulfillmentCode,
-    // 확정상품명: name_mapping → SKU→products.name → null
-    displayName: r.nameMappingDisplayName ?? r.productInternalName ?? null,
+    // 확정상품명: SKU→products.name 직접 매칭만 사용 (Phase A 매핑 재설계)
+    displayName: r.productInternalName ?? null,
     shippingCost: r.shippingCost,
     availableStock: r.availableStock,
   }))
@@ -494,23 +441,18 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  // perf: nameMappings / optionMappings / productSkus / variantSkus 은 위쪽
-  // userScopedPromise 에서 이미 받아왔다 (orderRows 와 병렬 실행).
-  const nameKeys = new Set(nameMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}`))
-  const optionKeys = new Set(optionMappings.map((m) => `${m.marketplaceId}::${m.marketplaceName}::${m.optionText}`))
+  // perf: productSkus / variantSkus 은 위쪽 userScopedPromise 에서 이미 받아왔다.
+  // Phase A 매핑 재설계: nameMappings / optionMappings 제거. SKU 매칭만으로 판정.
   const skuSet = new Set<string>()
   for (const p of productSkus) skuSet.add(p.sku)
   for (const v of variantSkus) skuSet.add(v.sku)
 
-  const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
+  const getMappingStatus = (_orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
     if (orderItems.length === 0) return 'unmapped'
     let mappedCount = 0
     for (const item of orderItems) {
-      const hasNameMapping = nameKeys.has(`${orderMarketplaceId}::${item.productName}`)
       const hasSkuMatch = item.sku ? skuSet.has(item.sku.trim()) : false
-      const optText = item.optionText?.trim() ?? ''
-      const hasOptionMapping = optionKeys.has(`${orderMarketplaceId}::${item.productName}::${optText}`)
-      if (hasNameMapping || hasSkuMatch || hasOptionMapping) mappedCount++
+      if (hasSkuMatch) mappedCount++
     }
     if (mappedCount === orderItems.length) return 'mapped'
     if (mappedCount === 0) return 'unmapped'
@@ -586,7 +528,7 @@ export async function getOrderById(id: string, userId?: string) {
 
   const [orderItemRows, claimRows, memoRows, shipmentRows, scanLogRows] = await Promise.all([
     // 수집상품명(productName) + 확정상품명 동시 반환
-    // 확정상품명 fallback: product_name_mappings.display_name → products.name (SKU 직접 매칭) → null
+    // Phase A 매핑 재설계: 확정상품명은 SKU ↔ products.internalSku 직접 매칭(products.name) 만 사용.
     db
       .select({
         id: orderItems.id,
@@ -599,19 +541,10 @@ export async function getOrderById(id: string, userId?: string) {
         sku: orderItems.sku,
         skuMultiplier: orderItems.skuMultiplier,
         fulfillmentCode: orderItems.fulfillmentCode,
-        nameMappingDisplayName: productNameMappings.displayName,
         productInternalName: products.name,
       })
       .from(orderItems)
       .innerJoin(orders, eq(orders.id, orderItems.orderId))
-      .leftJoin(
-        productNameMappings,
-        and(
-          eq(productNameMappings.userId, orders.userId),
-          eq(productNameMappings.marketplaceId, orders.marketplaceId),
-          eq(productNameMappings.marketplaceName, orderItems.productName),
-        ),
-      )
       .leftJoin(
         products,
         and(
@@ -654,7 +587,7 @@ export async function getOrderById(id: string, userId?: string) {
     sku: r.sku,
     skuMultiplier: r.skuMultiplier,
     fulfillmentCode: r.fulfillmentCode,
-    displayName: r.nameMappingDisplayName ?? r.productInternalName ?? null,
+    displayName: r.productInternalName ?? null,
   }))
 
   return {
@@ -672,10 +605,10 @@ export async function getOrderById(id: string, userId?: string) {
 
 /**
  * 주문 출고 시 실제 차감될 재고 미리보기.
- * - 각 order item의 sku를 bundle 정의로 확장 (구성품 × (componentQty × orderQty))
- * - 단품 SKU는 그대로 (orderQty)
- * - 현재 재고(totalStock/availableStock)와 상품명 포함
- * - 같은 component SKU가 여러 줄에서 나오면 합산
+ * - 각 order item.sku 가 그대로 차감 대상 (orderQty × skuMultiplier)
+ * - 같은 SKU 가 여러 줄에서 나오면 합산
+ * - Phase A 매핑 재설계: bundle 전개 로직 제거. 신규 매핑코드 시스템 도입 시 (Phase C)
+ *   mapping_components 기반으로 다시 구현 예정.
  */
 export interface StockDeductionPreviewRow {
   sku: string
@@ -712,37 +645,11 @@ export async function getStockDeductionPreview(
 
   if (rows.length === 0) return []
 
-  const mappedSkus = Array.from(new Set(rows.map((r) => r.sku!).filter(Boolean)))
-
-  const bundleRows = mappedSkus.length
-    ? await db
-        .select({
-          bundleSku: productBundleItems.bundleSku,
-          componentSku: productBundleItems.componentSku,
-          quantity: productBundleItems.quantity,
-        })
-        .from(productBundleItems)
-        .where(
-          and(
-            eq(productBundleItems.userId, userId),
-            inArray(productBundleItems.bundleSku, mappedSkus),
-          ),
-        )
-    : []
-
-  const bundleMap = new Map<string, Array<{ componentSku: string; quantity: number }>>()
-  for (const b of bundleRows) {
-    const list = bundleMap.get(b.bundleSku) ?? []
-    list.push({ componentSku: b.componentSku, quantity: b.quantity })
-    bundleMap.set(b.bundleSku, list)
-  }
-
-  // Accumulator: sku → { requiredQty, isBundleComponent, sourceItems }
+  // Accumulator: sku → { requiredQty, sourceItems }
   const acc = new Map<
     string,
     {
       requiredQty: number
-      isBundleComponent: boolean
       sourceItems: Array<{ productName: string; optionText: string | null; orderQty: number }>
     }
   >()
@@ -750,38 +657,14 @@ export async function getStockDeductionPreview(
   for (const row of rows) {
     const sku = row.sku!
     const orderQty = row.quantity * (row.skuMultiplier ?? 1)
-    const components = bundleMap.get(sku)
-
-    if (components && components.length > 0) {
-      for (const c of components) {
-        const current = acc.get(c.componentSku) ?? {
-          requiredQty: 0,
-          isBundleComponent: true,
-          sourceItems: [],
-        }
-        current.requiredQty += c.quantity * orderQty
-        current.isBundleComponent = true
-        current.sourceItems.push({
-          productName: row.productName,
-          optionText: row.optionText,
-          orderQty,
-        })
-        acc.set(c.componentSku, current)
-      }
-    } else {
-      const current = acc.get(sku) ?? {
-        requiredQty: 0,
-        isBundleComponent: false,
-        sourceItems: [],
-      }
-      current.requiredQty += orderQty
-      current.sourceItems.push({
-        productName: row.productName,
-        optionText: row.optionText,
-        orderQty,
-      })
-      acc.set(sku, current)
-    }
+    const current = acc.get(sku) ?? { requiredQty: 0, sourceItems: [] }
+    current.requiredQty += orderQty
+    current.sourceItems.push({
+      productName: row.productName,
+      optionText: row.optionText,
+      orderQty,
+    })
+    acc.set(sku, current)
   }
 
   const skus = Array.from(acc.keys())
@@ -800,7 +683,7 @@ export async function getStockDeductionPreview(
   const invMap = new Map(invRows.map((r) => [r.sku, r]))
 
   return skus.map((sku) => {
-    const { requiredQty, isBundleComponent, sourceItems } = acc.get(sku)!
+    const { requiredQty, sourceItems } = acc.get(sku)!
     const inv = invMap.get(sku)
     return {
       sku,
@@ -809,7 +692,7 @@ export async function getStockDeductionPreview(
       totalStock: inv?.totalStock ?? null,
       availableStock: inv?.availableStock ?? null,
       sufficient: inv ? (inv.availableStock ?? 0) >= requiredQty : false,
-      isBundleComponent,
+      isBundleComponent: false,
       sourceItems,
     }
   })

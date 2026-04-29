@@ -12,8 +12,6 @@ import { db } from '@/lib/db'
 import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export'
-import { loadMappingLookup, loadSkuLookup, applyMappings } from '@/lib/products/apply-mappings'
-import { expandBundlesForExport } from '@/lib/products/expand-bundles'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -40,36 +38,21 @@ export async function GET(req: NextRequest) {
     db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
   ])
 
-  const [mappingLookup, skuLookup] = await Promise.all([
-    loadMappingLookup(user.id),
-    loadSkuLookup(user.id),
-  ])
-
-  // 주문 → 매핑 적용 → bundle 펼침 → 행 생성.
-  // 송장 1행 = 박스 1개 발송이라, 세트 SKU 는 component 행으로 펼쳐 출력한다.
+  // Phase A 매핑 재설계: name/sku/option 매핑 + bundle 펼침 제거.
+  // orderItems 를 원본 그대로 출력. (Phase C 신규 매핑코드 시스템 도입 시 재연결.)
   const cjRows: CjOrderRow[] = []
   for (const order of orderRows) {
     const items = itemRows.filter((i) => i.orderId === order.id)
-    const mapped = applyMappings(
-      items.map((i) => ({ ...i, marketplaceId: order.marketplaceId })),
-      mappingLookup,
-      skuLookup,
-      order.marketplaceId,
-    )
-    const expanded = await expandBundlesForExport(user.id, mapped)
 
     const addr = order.shippingAddress
     const fullAddress = addr && typeof addr === 'object'
       ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
       : ''
 
-    if (expanded.length === 0) continue
+    if (items.length === 0) continue
 
-    for (const item of expanded) {
-      const marketplaceItemIdRaw = item.marketplaceItemId
-      const marketplaceItemId = typeof marketplaceItemIdRaw === 'string' ? marketplaceItemIdRaw : undefined
-      // 펼친 행은 원본 수집상품명을 알 수 없으므로, 펼침 결과면 부모 sku 를 표기에 활용
-      const originalRow = items.find((i) => i.sku === item.parentSku) ?? items[0]
+    for (const item of items) {
+      const marketplaceItemId = item.marketplaceItemId ?? undefined
 
       cjRows.push({
         orderId: order.id,
@@ -85,8 +68,8 @@ export async function GET(req: NextRequest) {
         senderName: senderSettings?.companyName ?? '',
         senderPhone: senderSettings?.phone ?? '',
         senderAddress: senderSettings?.address ?? '',
-        originalProductName: originalRow?.productName,
-        pickingLocation: item.pickingLocation ?? undefined,
+        originalProductName: item.productName,
+        pickingLocation: undefined,
       })
     }
   }

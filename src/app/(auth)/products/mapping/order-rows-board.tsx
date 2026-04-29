@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQueryStates, parseAsString, parseAsInteger, parseAsStringEnum } from 'nuqs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { PageSizeSelector } from '@/components/ui/pagination'
 import { RefreshCw, Plus, Search } from 'lucide-react'
 import {
   EditDialog,
@@ -102,6 +103,7 @@ export function OrderRowsBoard() {
     optionMatch: parseAsStringEnum(['all', 'matched', 'unmatched', 'sku']).withDefault('all'),
     q: parseAsString,
     page: parseAsInteger.withDefault(1),
+    pageSize: parseAsInteger.withDefault(50),
   }, { shallow: false })
 
   const [searchInput, setSearchInput] = useState(filters.q ?? '')
@@ -119,7 +121,7 @@ export function OrderRowsBoard() {
   const [editing, setEditing] = useState<FormState | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const pageSize = 50
+  const pageSize = filters.pageSize
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -146,7 +148,7 @@ export function OrderRowsBoard() {
     } finally {
       setLoading(false)
     }
-  }, [filters.from, filters.to, filters.productMatch, filters.optionMatch, filters.q, filters.page, selectedMarkets])
+  }, [filters.from, filters.to, filters.productMatch, filters.optionMatch, filters.q, filters.page, filters.pageSize, selectedMarkets, pageSize])
 
   useEffect(() => { void reload() }, [reload])
 
@@ -412,7 +414,7 @@ export function OrderRowsBoard() {
       </div>
 
       {/* ============ 툴바 ============ */}
-      <div className="flex items-center justify-between text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         <div>
           자료수 <strong className="tabular-nums">{total.toLocaleString()}</strong>건
           {selected.size > 0 && (
@@ -421,7 +423,15 @@ export function OrderRowsBoard() {
             </span>
           )}
         </div>
-        <div className="flex gap-1.5">
+        <PageSizeSelector
+          pageSize={pageSize}
+          total={total}
+          pageSizeOptions={[25, 50, 100, 200, 500, 1000]}
+          onPageSizeChange={(s) => setFilters({ pageSize: s })}
+          onPageChange={(p) => setFilters({ page: p })}
+          className="text-xs [&>select]:py-0.5 [&>select]:text-xs"
+        />
+        <div className="ml-auto flex gap-1.5">
           <Button onClick={() => openBulk('product')} size="sm" variant="outline" className="h-7 px-2 text-xs">
             <Plus className="size-3" /> 일괄 품번매핑
           </Button>

@@ -14,7 +14,7 @@ import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
 import { ShippingActions } from './shipping-actions'
 import { OrderDetailDialog } from './order-detail-dialog'
-import { Pagination } from '@/components/ui/pagination'
+import { Pagination, PageSizeSelector } from '@/components/ui/pagination'
 import type { OrderStage } from '@/lib/orders/types'
 
 interface DataTableProps {
@@ -167,6 +167,18 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
             </div>
           )}
         </div>
+        <PageSizeSelector
+          pageSize={pageSize}
+          total={total}
+          pageSizeOptions={[25, 50, 100, 200, 500, 1000]}
+          onPageSizeChange={(s) => {
+            void setPageSize(s).then(() => router.refresh())
+          }}
+          onPageChange={(p) => {
+            void setPage(p).then(() => router.refresh())
+          }}
+          className="ml-auto"
+        />
       </div>
 
       {/* Table */}
@@ -223,6 +235,7 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
         page={page}
         pageSize={pageSize}
         total={total}
+        hidePageSize
         onPageChange={(p) => {
           void setPage(p).then(() => router.refresh())
         }}

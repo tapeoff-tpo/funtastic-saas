@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { toast } from 'sonner'
+import { ChevronDown } from 'lucide-react'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
 import { BulkMappingDialog } from './bulk-mapping-dialog'
@@ -9,6 +10,12 @@ import { LogisticsMessageDialog } from './logistics-message-dialog'
 import { bulkCombineByContactAction } from './combined-actions'
 import type { OrderRow } from './columns'
 import type { OrderStage } from '@/lib/orders/types'
+
+interface UserTemplate {
+  id: string
+  name: string
+  carrierId: string
+}
 
 const CARRIER_LABELS: Record<string, string> = {
   cj: 'CJ',
@@ -61,6 +68,30 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [userTemplates, setUserTemplates] = useState<UserTemplate[] | null>(null)
+  const exportMenuRef = useRef<HTMLDivElement>(null)
+
+  // 드롭다운 외부 클릭 시 닫기
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [exportMenuOpen])
+
+  // 메뉴 처음 열릴 때 사용자 템플릿 lazy fetch
+  useEffect(() => {
+    if (!exportMenuOpen || userTemplates !== null) return
+    fetch('/api/shipping/templates')
+      .then((r) => r.ok ? r.json() : { templates: [] })
+      .then((d: { templates: UserTemplate[] }) => setUserTemplates(d.templates ?? []))
+      .catch(() => setUserTemplates([]))
+  }, [exportMenuOpen, userTemplates])
 
   const hasSelection = selectedOrderIds.length > 0
 
@@ -123,6 +154,73 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
       }
     } catch (err) {
       toast.error(`내보내기 실패: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setClassifying(false)
+    }
+  }
+
+  // 단일 택배사 — classify 후 해당 택배사 IDs 만 다운로드
+  const handleSingleCarrierExport = async (carrier: 'cj' | 'kyungdong' | 'daesin') => {
+    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
+    if (scope.length === 0) {
+      toast.error('대상 주문이 없습니다.')
+      return
+    }
+    setClassifying(true)
+    try {
+      const params = new URLSearchParams()
+      params.set('orderIds', scope.join(','))
+      const classifyRes = await fetch(`/api/shipping/classify?${params.toString()}`)
+      if (!classifyRes.ok) {
+        toast.error(`분류 실패 [${classifyRes.status}]`)
+        return
+      }
+      const data = await classifyRes.json() as Record<string, string[]>
+      const ids = data[carrier] ?? []
+      if (ids.length === 0) {
+        toast.error(`${CARRIER_LABELS[carrier]}로 지정된 주문이 없습니다.`)
+        return
+      }
+      const p = new URLSearchParams()
+      p.set('orderIds', ids.join(','))
+      const date = new Date().toISOString().slice(0, 10)
+      const result = await downloadExcel(
+        `/api/shipping/${carrier}/export?${p.toString()}`,
+        `${CARRIER_LABELS[carrier]}_${date}.xlsx`,
+      )
+      if (result.success) {
+        toast.success(`${CARRIER_LABELS[carrier]} ${ids.length}건 다운로드`)
+      } else {
+        toast.error(`다운로드 실패: ${result.error}`)
+      }
+    } finally {
+      setClassifying(false)
+    }
+  }
+
+  // 사용자 등록 양식 — 선택 주문 전체를 해당 양식으로 다운로드
+  const handleUserTemplateExport = async (template: UserTemplate) => {
+    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
+    if (scope.length === 0) {
+      toast.error('대상 주문이 없습니다.')
+      return
+    }
+    setClassifying(true)
+    try {
+      const p = new URLSearchParams()
+      p.set('orderIds', scope.join(','))
+      p.set('type', 'carrier')
+      p.set('templateId', template.id)
+      const date = new Date().toISOString().slice(0, 10)
+      const result = await downloadExcel(
+        `/api/shipping/export?${p.toString()}`,
+        `${template.name}_${date}.xlsx`,
+      )
+      if (result.success) {
+        toast.success(`${template.name} ${scope.length}건 다운로드`)
+      } else {
+        toast.error(`다운로드 실패: ${result.error}`)
+      }
     } finally {
       setClassifying(false)
     }
@@ -198,19 +296,101 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
 
         {showInvoice && (
           <>
-            <button
-              type="button"
-              onClick={() => void handleCarrierAutoExport()}
-              disabled={classifying}
-              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              title={hasSelection ? '선택한 주문만' : '현재 페이지 전체'}
+            {/* 일괄 엑셀 다운로드 — split button (왼쪽: 자동 분류 / 오른쪽: 양식 선택) */}
+            <div ref={exportMenuRef} className="relative inline-flex">
+              <button
+                type="button"
+                onClick={() => void handleCarrierAutoExport()}
+                disabled={classifying}
+                className="rounded-l-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                title={hasSelection ? '선택한 주문만' : '현재 페이지 전체'}
+              >
+                {classifying
+                  ? '분류 중...'
+                  : hasSelection
+                    ? `선택 엑셀 다운로드 (${selectedOrderIds.length}건)`
+                    : '일괄 엑셀 다운로드'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setExportMenuOpen((v) => !v)}
+                disabled={classifying}
+                className="rounded-r-md border-l border-blue-700 bg-blue-600 px-1.5 py-1.5 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="다운로드 양식 선택"
+                title="다른 양식 선택"
+              >
+                <ChevronDown className="h-4 w-4" />
+              </button>
+
+              {exportMenuOpen && (
+                <div className="absolute left-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-md border bg-white shadow-lg">
+                  <div className="border-b px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    기본 양식
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setExportMenuOpen(false); void handleCarrierAutoExport() }}
+                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    택배사별 자동 분류
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setExportMenuOpen(false); void handleSingleCarrierExport('cj') }}
+                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    CJ대한통운만
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setExportMenuOpen(false); void handleSingleCarrierExport('kyungdong') }}
+                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    경동택배만
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setExportMenuOpen(false); void handleSingleCarrierExport('daesin') }}
+                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    대신택배만
+                  </button>
+
+                  <div className="border-y bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    내 양식
+                  </div>
+                  {userTemplates === null && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">불러오는 중...</div>
+                  )}
+                  {userTemplates !== null && userTemplates.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">
+                      등록된 양식이 없습니다.
+                    </div>
+                  )}
+                  {userTemplates !== null && userTemplates.length > 0 && userTemplates.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { setExportMenuOpen(false); void handleUserTemplateExport(t) }}
+                      className="block w-full cursor-pointer truncate px-3 py-2 text-left text-sm hover:bg-muted"
+                      title={t.name}
+                    >
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <a
+              href="/shipping/templates"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
+              title="새 양식 만들기 또는 기존 양식 수정"
             >
-              {classifying
-                ? '분류 중...'
-                : hasSelection
-                  ? `선택 엑셀 다운로드 (${selectedOrderIds.length}건)`
-                  : '일괄 엑셀 다운로드'}
-            </button>
+              엑셀양식등록
+            </a>
 
             <button
               type="button"

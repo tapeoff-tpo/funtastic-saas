@@ -5,12 +5,12 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Trash2, X, RefreshCw } from 'lucide-react'
 
-const MARKETPLACE_LABELS: Record<string, string> = {
+export const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡', naver: '네이버', gmarket: 'G마켓', auction: '옥션',
   '11st': '11번가', cafe24: 'Cafe24', ohouse: '오늘의집', kakao: '카카오',
   ably: '에이블리', ssgmall: 'SSG몰',
 }
-const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
+export const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
 
 interface MappingCodeRow {
   id: string
@@ -32,9 +32,9 @@ interface UnmappedItem {
   lastSeenAt: string | null
 }
 
-type SourceMode = 'product' | 'option'  // 품번매핑 / 단품매핑
+export type SourceMode = 'product' | 'option'  // 품번매핑 / 단품매핑
 
-interface SourceForm {
+export interface SourceForm {
   /** 'product' = 품번매핑(option_id=''), 'option' = 단품매핑(option_id 따로 입력) */
   mode: SourceMode
   marketplaceId: string
@@ -43,11 +43,11 @@ interface SourceForm {
   productNameSnapshot: string
   optionNameSnapshot: string
 }
-interface ComponentForm {
+export interface ComponentForm {
   sku: string
   quantity: number
 }
-interface FormState {
+export interface FormState {
   id: string | null
   code: string
   name: string
@@ -57,7 +57,7 @@ interface FormState {
   components: ComponentForm[]
 }
 
-const emptyForm = (): FormState => ({
+export const emptyForm = (): FormState => ({
   id: null, code: '', name: '', note: '', isActive: true,
   sources: [], components: [{ sku: '', quantity: 1 }],
 })
@@ -365,7 +365,7 @@ export function MappingManager() {
   )
 }
 
-interface DialogProps {
+export interface DialogProps {
   state: FormState
   onChange: (s: FormState) => void
   onClose: () => void
@@ -373,7 +373,7 @@ interface DialogProps {
   saving: boolean
 }
 
-function EditDialog({ state, onChange, onClose, onSave, saving }: DialogProps) {
+export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div

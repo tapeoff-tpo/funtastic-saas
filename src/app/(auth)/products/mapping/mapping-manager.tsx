@@ -46,6 +46,9 @@ export interface SourceForm {
 export interface ComponentForm {
   sku: string
   quantity: number
+  /** 검색으로 선택된 자체상품 표시명 — UI hint 전용, 저장 시 미사용 */
+  productNameHint?: string | null
+  optionNameHint?: string | null
 }
 export interface FormState {
   id: string | null
@@ -951,39 +954,72 @@ export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogP
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <label className="text-sm font-medium">SKU 구성품 ({state.components.length}) *</label>
-              <button
-                type="button"
-                onClick={() => onChange({
-                  ...state,
-                  components: [...state.components, { sku: '', quantity: 1 }],
-                })}
-                className="text-xs text-blue-600 hover:underline"
-              >
-                + 행 추가
-              </button>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // 검색 모달을 새 행 모드로 열기 — 현재 빈 행이 있으면 그 idx, 없으면 새 행 추가 후 그 idx
+                    const emptyIdx = state.components.findIndex((c) => !c.sku.trim())
+                    if (emptyIdx >= 0) {
+                      setSearchIdx(emptyIdx)
+                    } else {
+                      const nextIdx = state.components.length
+                      onChange({
+                        ...state,
+                        components: [...state.components, { sku: '', quantity: 1 }],
+                      })
+                      // setState 는 비동기지만 setSearchIdx 는 idx 만 저장하므로 안전
+                      setSearchIdx(nextIdx)
+                    }
+                  }}
+                  className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                >
+                  <Search className="mr-1 inline size-3" />
+                  자체상품 검색
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChange({
+                    ...state,
+                    components: [...state.components, { sku: '', quantity: 1 }],
+                  })}
+                  className="rounded border bg-background px-2 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+                >
+                  + 빈 행
+                </button>
+              </div>
             </div>
             <div className="space-y-1">
               {state.components.map((c, idx) => (
-                <div key={idx} className="grid grid-cols-[1fr_28px_80px_24px] items-center gap-1.5 rounded-md border p-1.5">
-                  <input
-                    type="text"
-                    value={c.sku}
-                    onChange={(e) => {
-                      const next = [...state.components]
-                      next[idx] = { ...next[idx], sku: e.target.value }
-                      onChange({ ...state, components: next })
-                    }}
-                    placeholder="SKU (내부 품목코드)"
-                    className="rounded border px-1.5 py-1 font-mono text-xs"
-                  />
+                <div key={idx} className="grid grid-cols-[1fr_60px_80px_24px] items-center gap-1.5 rounded-md border p-1.5">
+                  <div className="min-w-0">
+                    <input
+                      type="text"
+                      value={c.sku}
+                      onChange={(e) => {
+                        const next = [...state.components]
+                        next[idx] = { ...next[idx], sku: e.target.value, productNameHint: null, optionNameHint: null }
+                        onChange({ ...state, components: next })
+                      }}
+                      placeholder="SKU (검색 또는 직접 입력)"
+                      className="w-full rounded border px-1.5 py-1 font-mono text-xs"
+                    />
+                    {(c.productNameHint || c.optionNameHint) && (
+                      <div className="mt-0.5 truncate px-1 text-[10px] text-muted-foreground">
+                        {c.productNameHint}
+                        {c.optionNameHint && <span className="ml-1">· {c.optionNameHint}</span>}
+                      </div>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => setSearchIdx(idx)}
                     aria-label="자체상품 검색"
                     title="자체상품 검색"
-                    className="flex h-6 w-6 items-center justify-center rounded border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
+                    className="flex h-6 items-center justify-center gap-0.5 rounded border bg-background px-1.5 text-[11px] text-muted-foreground hover:bg-blue-50 hover:text-blue-700"
                   >
                     <Search className="size-3" />
+                    검색
                   </button>
                   <input
                     type="number"
@@ -1025,8 +1061,21 @@ export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogP
         onSelect={(p) => {
           if (searchIdx < 0) return
           const next = [...state.components]
-          next[searchIdx] = { ...next[searchIdx], sku: p.internalSku }
-          onChange({ ...state, components: next })
+          next[searchIdx] = {
+            ...next[searchIdx],
+            sku: p.internalSku,
+            productNameHint: p.name,
+            optionNameHint: p.optionHint ?? null,
+          }
+          // 매핑코드 / 이름이 비어있으면 첫 선택을 기준으로 자동 prefill — 사방넷 UX
+          const autoCode = !state.code.trim() ? p.internalSku : state.code
+          const autoName = !state.name.trim() ? p.name : state.name
+          onChange({
+            ...state,
+            code: autoCode,
+            name: autoName,
+            components: next,
+          })
         }}
       />
     </div>

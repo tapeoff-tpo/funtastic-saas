@@ -14,7 +14,7 @@ import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
-import { loadMappingLookup, loadSkuLookup, applyMappings, type MappingEntry } from '@/lib/products/apply-mappings'
+import { loadMappingLookup, loadSkuLookup, loadOptionLookup, applyMappings, type MappingEntry } from '@/lib/products/apply-mappings'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -49,10 +49,14 @@ export async function GET(request: NextRequest) {
       db.select().from(shipments).where(inArray(shipments.orderId, orderIds)),
     ])
 
-    // Load product name mappings + SKU lookup for this user
-    const [mappingLookup, skuLookup] = user
-      ? await Promise.all([loadMappingLookup(user.id), loadSkuLookup(user.id)])
-      : [new Map<string, MappingEntry>(), new Map<string, MappingEntry>()]
+    // Load product name mappings + SKU lookup + option-level mappings for this user
+    const [mappingLookup, skuLookup, optionLookup] = user
+      ? await Promise.all([
+          loadMappingLookup(user.id),
+          loadSkuLookup(user.id),
+          loadOptionLookup(user.id),
+        ])
+      : [new Map<string, MappingEntry>(), new Map<string, MappingEntry>(), new Map<string, string>()]
 
     // 쇼핑몰 displayName lookup (보내는분성명 = 쇼핑몰명)
     const connectionIds = [...new Set(orderRows.map((o) => o.connectionId).filter(Boolean) as string[])]
@@ -64,8 +68,28 @@ export async function GET(request: NextRequest) {
       : []
     const connectionMap = new Map(connectionRows.map((c) => [c.id, c.displayName]))
 
-    // SKU 기준 products(위치) + inventory(현재고) lookup
-    const skuSet = [...new Set(itemRows.map((i) => i.sku).filter(Boolean) as string[])]
+    // 옵션 매핑(option-level) 으로 확정 변형 SKU 를 먼저 해석 — 이후 inventory 조회 키로 사용
+    const orderById = new Map(orderRows.map((o) => [o.id, o]))
+    const confirmedSkuByItem = new Map<string, string>()
+    for (const item of itemRows) {
+      const order = orderById.get(item.orderId)
+      let sku = (item.sku ?? '').trim()
+      if (order && item.optionText) {
+        const key = `${order.marketplaceId}::${item.productName}::${item.optionText}`
+        const variantSku = optionLookup.get(key)
+        if (variantSku) sku = variantSku
+      }
+      if (sku) confirmedSkuByItem.set(item.id, sku)
+    }
+
+    // SKU 기준 products(위치) + inventory(현재고/확정옵션명) lookup
+    // raw sku 와 옵션 매핑으로 해석된 variantSku 를 모두 포함해서 한 번에 조회
+    const skuSet = [
+      ...new Set([
+        ...(itemRows.map((i) => i.sku).filter(Boolean) as string[]),
+        ...confirmedSkuByItem.values(),
+      ]),
+    ]
     const [productRows, inventoryRows] = user && skuSet.length > 0
       ? await Promise.all([
           db
@@ -78,6 +102,7 @@ export async function GET(request: NextRequest) {
               stock: inventory.availableStock,
               sectorCode: inventory.sectorCode,
               packagingUnit: inventory.packagingUnit,
+              optionName: inventory.optionName,
             })
             .from(inventory)
             .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skuSet))),
@@ -85,7 +110,10 @@ export async function GET(request: NextRequest) {
       : [[], []]
     const productMap = new Map(productRows.map((p) => [p.sku, { location: p.location, costPrice: p.costPrice }]))
     const inventoryMap = new Map(
-      inventoryRows.map((i) => [i.sku, { stock: i.stock, sectorCode: i.sectorCode, packagingUnit: i.packagingUnit }]),
+      inventoryRows.map((i) => [
+        i.sku,
+        { stock: i.stock, sectorCode: i.sectorCode, packagingUnit: i.packagingUnit, optionName: i.optionName },
+      ]),
     )
 
     // 셀러 고정값은 이제 carrier_templates.columns[].fixedValue 로 관리
@@ -108,8 +136,12 @@ export async function GET(request: NextRequest) {
       )
       const firstItem = mappedItems[0]
       const productName = firstItem?.productName ?? ''
-      const optionText = firstItem?.optionText ?? ''
-      const sku = (firstItem?.sku ?? rawFirst?.sku ?? '') as string
+      // 확정 SKU = 옵션 매핑(option-level) 으로 해석된 변형 SKU 우선, 없으면 원본 SKU
+      const resolvedSku = rawFirst ? confirmedSkuByItem.get(rawFirst.id) : undefined
+      const sku: string = resolvedSku ?? (firstItem?.sku as string | null) ?? rawFirst?.sku ?? ''
+      // 확정 옵션명 = inventory.optionName (재고관리에 등록된 옵션명)
+      // → 마켓 원본(optionText) 이 아니라 우리 내부에서 정리한 옵션명을 출력
+      const optionText = (sku ? inventoryMap.get(sku)?.optionName : '') ?? ''
 
       return {
         // 사용자 노출용 8자리 내부 주문번호

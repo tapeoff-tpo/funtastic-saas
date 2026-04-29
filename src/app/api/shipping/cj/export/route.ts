@@ -13,6 +13,7 @@ import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export'
 import { loadMappingLookup, loadSkuLookup, applyMappings } from '@/lib/products/apply-mappings'
+import { expandBundlesForExport } from '@/lib/products/expand-bundles'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -44,7 +45,10 @@ export async function GET(req: NextRequest) {
     loadSkuLookup(user.id),
   ])
 
-  const cjRows: CjOrderRow[] = orderRows.map((order) => {
+  // 주문 → 매핑 적용 → bundle 펼침 → 행 생성.
+  // 송장 1행 = 박스 1개 발송이라, 세트 SKU 는 component 행으로 펼쳐 출력한다.
+  const cjRows: CjOrderRow[] = []
+  for (const order of orderRows) {
     const items = itemRows.filter((i) => i.orderId === order.id)
     const mapped = applyMappings(
       items.map((i) => ({ ...i, marketplaceId: order.marketplaceId })),
@@ -52,34 +56,40 @@ export async function GET(req: NextRequest) {
       skuLookup,
       order.marketplaceId,
     )
-    const firstItem: (typeof mapped)[number] | undefined = mapped.length > 0 ? mapped[0] : undefined
-    const firstOriginal: (typeof items)[number] | undefined = items.length > 0 ? items[0] : undefined
+    const expanded = await expandBundlesForExport(user.id, mapped)
+
     const addr = order.shippingAddress
     const fullAddress = addr && typeof addr === 'object'
       ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
       : ''
 
-    const marketplaceItemIdRaw = firstItem ? firstItem.marketplaceItemId : null
-    const marketplaceItemId = typeof marketplaceItemIdRaw === 'string' ? marketplaceItemIdRaw : undefined
+    if (expanded.length === 0) continue
 
-    return {
-      orderId: order.id,
-      marketplaceOrderId: order.marketplaceOrderId,
-      recipientName: order.recipientName ?? '',
-      // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
-      recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
-      recipientAddress: fullAddress,
-      productName: firstItem ? firstItem.productName ?? '' : '',
-      optionText: firstItem ? firstItem.optionText ?? undefined : undefined,
-      quantity: items.reduce((s, i) => s + i.quantity, 0),
-      marketplaceItemId,
-      senderName: senderSettings?.companyName ?? '',
-      senderPhone: senderSettings?.phone ?? '',
-      senderAddress: senderSettings?.address ?? '',
-      originalProductName: firstOriginal ? firstOriginal.productName : undefined,
-      pickingLocation: firstItem ? firstItem.pickingLocation ?? undefined : undefined,
+    for (const item of expanded) {
+      const marketplaceItemIdRaw = item.marketplaceItemId
+      const marketplaceItemId = typeof marketplaceItemIdRaw === 'string' ? marketplaceItemIdRaw : undefined
+      // 펼친 행은 원본 수집상품명을 알 수 없으므로, 펼침 결과면 부모 sku 를 표기에 활용
+      const originalRow = items.find((i) => i.sku === item.parentSku) ?? items[0]
+
+      cjRows.push({
+        orderId: order.id,
+        marketplaceOrderId: order.marketplaceOrderId,
+        recipientName: order.recipientName ?? '',
+        // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
+        recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
+        recipientAddress: fullAddress,
+        productName: item.productName ?? '',
+        optionText: item.optionText ?? undefined,
+        quantity: item.quantity,
+        marketplaceItemId,
+        senderName: senderSettings?.companyName ?? '',
+        senderPhone: senderSettings?.phone ?? '',
+        senderAddress: senderSettings?.address ?? '',
+        originalProductName: originalRow?.productName,
+        pickingLocation: item.pickingLocation ?? undefined,
+      })
     }
-  })
+  }
 
   const buffer = await generateCjExcel(cjRows)
   const date = new Date().toISOString().slice(0, 10)

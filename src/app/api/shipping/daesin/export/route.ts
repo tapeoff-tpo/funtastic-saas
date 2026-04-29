@@ -11,6 +11,7 @@ import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateDaesinExcel, type DaesinOrderRow } from '@/lib/shipping/excel/daesin-export'
 import { loadMappingLookup, loadSkuLookup, applyMappings } from '@/lib/products/apply-mappings'
+import { expandBundlesForExport } from '@/lib/products/expand-bundles'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -41,7 +42,9 @@ export async function GET(req: NextRequest) {
     loadSkuLookup(user.id),
   ])
 
-  const exportRows: DaesinOrderRow[] = orderRows.map((order) => {
+  // 주문 → 매핑 → bundle 펼침. 송장 1행 = 박스 1개라 세트는 component 행으로 분리.
+  const exportRows: DaesinOrderRow[] = []
+  for (const order of orderRows) {
     const items = itemRows.filter((i) => i.orderId === order.id)
     const mapped = applyMappings(
       items.map((i) => ({ ...i, marketplaceId: order.marketplaceId })),
@@ -49,31 +52,35 @@ export async function GET(req: NextRequest) {
       skuLookup,
       order.marketplaceId,
     )
-    const firstItem = mapped[0]
+    const expanded = await expandBundlesForExport(user.id, mapped)
     const addr = order.shippingAddress
     const fullAddress = addr
       ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
       : ''
 
-    return {
-      orderId: order.id,
-      marketplaceOrderId: order.marketplaceOrderId,
-      recipientName: order.recipientName,
-      // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
-      recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
-      // 보조 = 휴대폰이 phone2 에 있으면 phone1 이 보조전화
-      recipientAltPhone: order.recipientPhone2 ? (order.recipientPhone ?? '') : '',
-      recipientAddress: fullAddress,
-      recipientZipCode: addr?.zipCode ?? '',
-      productName: firstItem?.productName ?? '',
-      quantity: items.reduce((s, i) => s + i.quantity, 0),
-      deliveryMessage: undefined,
-      senderName: senderSettings?.companyName ?? '',
-      senderPhone: senderSettings?.phone ?? '',
-      pickingLocation: firstItem?.pickingLocation ?? undefined,
-      internalSku: firstItem?.sku ?? undefined,
+    if (expanded.length === 0) continue
+
+    for (const item of expanded) {
+      exportRows.push({
+        orderId: order.id,
+        marketplaceOrderId: order.marketplaceOrderId,
+        recipientName: order.recipientName,
+        // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
+        recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
+        // 보조 = 휴대폰이 phone2 에 있으면 phone1 이 보조전화
+        recipientAltPhone: order.recipientPhone2 ? (order.recipientPhone ?? '') : '',
+        recipientAddress: fullAddress,
+        recipientZipCode: addr?.zipCode ?? '',
+        productName: item.productName ?? '',
+        quantity: item.quantity,
+        deliveryMessage: undefined,
+        senderName: senderSettings?.companyName ?? '',
+        senderPhone: senderSettings?.phone ?? '',
+        pickingLocation: item.pickingLocation ?? undefined,
+        internalSku: item.sku ?? undefined,
+      })
     }
-  })
+  }
 
   const buffer = await generateDaesinExcel(exportRows)
   const date = new Date().toISOString().slice(0, 10)

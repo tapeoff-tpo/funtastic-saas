@@ -5,13 +5,12 @@
  *   1) 상단 dense 필터 패널 (수집일자 + quick / 쇼핑몰 / 매핑선택 라디오 2그룹 / 검색)
  *   2) 툴바 (자료수 N건 + 일괄 품번/단품매핑 + 매핑해제 + 새로고침)
  *   3) 2그룹 헤더 dense 테이블 (좌: 쇼핑몰 수집 데이터 / 우: 매핑 적용 결과)
- *   4) 하단 인라인 매핑 패널 (일괄/개별 매핑 버튼 클릭 시 등장 — 모달 X)
  *
  * 매핑 워크플로우 (사방넷 스타일):
- *   - 행 선택 → [일괄 품번매핑] 또는 행의 [+ 품번]/[+ 단품] 클릭
- *   - 페이지 하단에 인라인 검색 패널 등장 (모달 아님)
- *   - 자체상품 검색 → [선택] → POST /api/products/mapping-codes 즉시 저장
- *   - 저장 후 보드 자동 재조회 + 선택 해제 + 패널 닫힘
+ *   - [일괄 품번매핑] / [일괄 단품매핑] = 선택된 행 중 *이미 매핑된* 건들을
+ *     매핑완료처리 (POST /api/orders/apply-mappings → orders.mapped_at 기록)
+ *   - 미매핑 행의 [+ 품번] / [+ 단품] = 자체상품 검색 모달 오픈 →
+ *     선택 시 POST /api/products/mapping-codes 즉시 저장
  */
 'use client'
 
@@ -133,7 +132,7 @@ export function OrderRowsBoard() {
   const [loading, setLoading] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkTarget, setBulkTarget] = useState<BulkTarget | null>(null)
-  const bulkPanelRef = useRef<HTMLDivElement>(null)
+  const [applying, setApplying] = useState(false)
 
   const pageSize = filters.pageSize
 
@@ -216,22 +215,52 @@ export function OrderRowsBoard() {
     setSelected(next)
   }
 
-  // ---------- 매핑 진입점 (인라인 패널 오픈) ----------
-  function openInlineMapping(targets: OrderRow[], mode: SourceMode) {
-    if (targets.length === 0) {
+  // ---------- 미매핑 행 → 자체상품 검색 모달 ----------
+  // 행의 [+ 품번] / [+ 단품] 버튼 클릭 시 호출. BulkMappingPanel 이 모달로 열림.
+  function openMapping(row: OrderRow, mode: SourceMode) {
+    setBulkTarget({ rows: [row], mode })
+  }
+
+  // ---------- 일괄 매핑완료처리 ----------
+  // [일괄 품번/단품매핑] 버튼: 선택된 행 중 *이미 매핑된* 건의 주문을 매핑완료로 마크.
+  // 미매핑 행은 무시 (행별 [+ 품번]/[+ 단품] 으로 처리해야 함).
+  // mode 는 표시용 — 매핑완료 처리는 mode 와 무관하게 mapped_at 만 기록.
+  async function applyBulkMapped(mode: SourceMode) {
+    const selectedRows = rows.filter((r) => selected.has(r.orderItemId))
+    if (selectedRows.length === 0) {
       alert('선택된 행이 없습니다')
       return
     }
-    setBulkTarget({ rows: targets, mode })
-  }
+    const modeLabel = mode === 'product' ? '품번매핑' : '단품매핑'
+    const matchType: OrderRow['mappingStatus'] = mode === 'product' ? 'product' : 'option'
+    const mapped = selectedRows.filter((r) => r.mappingStatus === matchType)
+    const skipped = selectedRows.length - mapped.length
+    if (mapped.length === 0) {
+      alert(`선택된 행 중 ${modeLabel} 상태인 행이 없습니다`)
+      return
+    }
+    const orderIds = Array.from(new Set(mapped.map((r) => r.orderId)))
 
-  function openMapping(row: OrderRow, mode: SourceMode) {
-    openInlineMapping([row], mode)
-  }
-
-  function openBulk(mode: SourceMode) {
-    const targets = rows.filter((r) => selected.has(r.orderItemId))
-    openInlineMapping(targets, mode)
+    setApplying(true)
+    try {
+      const res = await fetch('/api/orders/apply-mappings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderIds }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error ?? '매핑완료 처리 실패')
+        return
+      }
+      const data = await res.json() as { applied: number }
+      const skipNote = skipped > 0 ? ` (미매핑/타입불일치 ${skipped}건 제외)` : ''
+      alert(`${modeLabel} ${data.applied}건 매핑완료 처리됨${skipNote}`)
+      setSelected(new Set())
+      await reload()
+    } finally {
+      setApplying(false)
+    }
   }
 
   function openUnmap() {
@@ -245,13 +274,6 @@ export function OrderRowsBoard() {
       '매핑코드 마스터(/products/mapping-codes) 에서 해당 매핑코드를 열고 마켓상품 행을 제거하세요.',
     )
   }
-
-  // 패널이 열리면 화면에 보이도록 자동 스크롤
-  useEffect(() => {
-    if (bulkTarget && bulkPanelRef.current) {
-      bulkPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' })
-    }
-  }, [bulkTarget])
 
   // ---------- 인라인 패널 → 자체상품 선택 시 즉시 매핑 저장 ----------
   async function submitBulkMapping(product: ProductSearchResult): Promise<void> {
@@ -420,10 +442,18 @@ export function OrderRowsBoard() {
           className="text-xs [&>select]:py-0.5 [&>select]:text-xs"
         />
         <div className="ml-auto flex gap-1.5">
-          <Button onClick={() => openBulk('product')} size="sm" variant="outline" className="h-7 px-2 text-xs">
+          <Button
+            onClick={() => void applyBulkMapped('product')}
+            disabled={applying}
+            size="sm" variant="outline" className="h-7 px-2 text-xs"
+          >
             <Plus className="size-3" /> 일괄 품번매핑
           </Button>
-          <Button onClick={() => openBulk('option')} size="sm" variant="outline" className="h-7 px-2 text-xs">
+          <Button
+            onClick={() => void applyBulkMapped('option')}
+            disabled={applying}
+            size="sm" variant="outline" className="h-7 px-2 text-xs"
+          >
             <Plus className="size-3" /> 일괄 단품매핑
           </Button>
           <Button onClick={openUnmap} size="sm" variant="outline" className="h-7 px-2 text-xs">
@@ -588,27 +618,25 @@ export function OrderRowsBoard() {
         </div>
       )}
 
-      {/* ============ 인라인 매핑 패널 (모달 X — 페이지 하단에 등장) ============ */}
+      {/* ============ 자체상품 검색 모달 (행의 [+ 품번]/[+ 단품] 클릭 시) ============ */}
       {bulkTarget && (
-        <div ref={bulkPanelRef}>
-          <BulkMappingPanel
-            target={bulkTarget}
-            onClose={() => setBulkTarget(null)}
-            onSelect={submitBulkMapping}
-          />
-        </div>
+        <BulkMappingModal
+          target={bulkTarget}
+          onClose={() => setBulkTarget(null)}
+          onSelect={submitBulkMapping}
+        />
       )}
     </div>
   )
 }
 
 /**
- * 인라인 매핑 패널 — 일괄/개별 매핑 버튼 클릭 시 페이지 하단에 등장.
+ * 자체상품 검색 모달 — 미매핑 행의 [+ 품번] / [+ 단품] 클릭 시 새창(모달)으로 등장.
  * - 좌: 선택된 행 요약 (쇼핑몰 / 상품명 / 옵션 / 수량)
  * - 우: 자체상품 검색 폼 + 결과 테이블
  * - 결과 [선택] 클릭 시 onSelect(product) → 즉시 POST /api/products/mapping-codes 저장
  */
-function BulkMappingPanel({
+function BulkMappingModal({
   target,
   onClose,
   onSelect,
@@ -681,30 +709,37 @@ function BulkMappingPanel({
     : 'bg-emerald-100 text-emerald-800 border-emerald-200'
 
   return (
-    <div className="rounded-md border-2 border-blue-300 bg-blue-50/30 shadow-sm">
-      {/* 헤더 — 모드 + 선택 건수 + 닫기 */}
-      <div className="flex items-center justify-between border-b border-blue-200 bg-blue-100/50 px-3 py-2">
-        <div className="flex items-center gap-2 text-sm">
-          <span className={`rounded border px-2 py-0.5 text-xs font-medium ${modeColor}`}>
-            {modeLabel}
-          </span>
-          <span className="font-medium">자체상품 검색하여 매핑 적용</span>
-          <span className="text-muted-foreground">
-            (선택된 마켓상품 <strong className="tabular-nums">{target.rows.length}</strong>건)
-          </span>
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-background shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 헤더 — 모드 + 선택 건수 + 닫기 */}
+        <div className="flex items-center justify-between border-b bg-blue-50/60 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className={`rounded border px-2 py-0.5 text-xs font-medium ${modeColor}`}>
+              {modeLabel}
+            </span>
+            <span className="font-medium">자체상품 검색하여 매핑 적용</span>
+            <span className="text-muted-foreground">
+              (선택된 마켓상품 <strong className="tabular-nums">{target.rows.length}</strong>건)
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="닫기"
+            disabled={submitting}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            <X className="size-4" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="닫기"
-          disabled={submitting}
-          className="text-muted-foreground hover:text-foreground disabled:opacity-40"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
 
-      <div className="grid grid-cols-1 gap-3 p-3 lg:grid-cols-[300px_1fr]">
+        <div className="grid flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[300px_1fr]">
         {/* 선택된 행 요약 */}
         <div className="rounded border bg-background">
           <div className="border-b bg-muted/40 px-2 py-1 text-[11px] font-medium text-muted-foreground">
@@ -845,6 +880,7 @@ function BulkMappingPanel({
               </tbody>
             </table>
           </div>
+        </div>
         </div>
       </div>
     </div>

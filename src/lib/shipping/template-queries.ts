@@ -55,7 +55,8 @@ export async function createCarrierTemplate(
     .insert(carrierTemplates)
     .values({
       userId: data.userId,
-      carrierId: data.carrierId,
+      // carrierId 가 null 이면 그대로 NULL 저장 — 자유 양식
+      carrierId: data.carrierId ?? null,
       name: data.name,
       columns: data.columns,
       isDefault: data.isDefault,

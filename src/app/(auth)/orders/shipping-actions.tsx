@@ -14,7 +14,7 @@ import type { OrderStage } from '@/lib/orders/types'
 interface UserTemplate {
   id: string
   name: string
-  carrierId: string
+  carrierId: string | null
 }
 
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'

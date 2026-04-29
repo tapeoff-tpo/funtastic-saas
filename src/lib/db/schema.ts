@@ -306,7 +306,8 @@ export const excelImportTemplates = pgTable('excel_import_templates', {
 export const carrierTemplates = pgTable('carrier_templates', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull(),
-  carrierId: varchar('carrier_id', { length: 50 }).notNull(),
+  // 양식이 특정 택배사에 종속되지 않도록 nullable. 자유 양식은 NULL.
+  carrierId: varchar('carrier_id', { length: 50 }),
   name: varchar('name', { length: 200 }).notNull(),
   columns: jsonb('columns').$type<Array<{
     header: string

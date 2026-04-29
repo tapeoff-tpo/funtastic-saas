@@ -49,10 +49,11 @@ export interface CarrierTemplateColumn {
   required: boolean
 }
 
-/** Carrier template for Excel export customization */
+/** Excel export 양식 — 택배사 종속이 선택사항. */
 export interface CarrierTemplate {
   id: string
-  carrierId: string
+  /** null = 택배사 비종속 자유 양식 */
+  carrierId: string | null
   name: string
   columns: CarrierTemplateColumn[]
   isDefault: boolean

@@ -1,43 +1,41 @@
 'use client'
 
 import { useState } from 'react'
-import type { CarrierTemplateColumn } from '@/lib/shipping/types'
+import type { CarrierTemplate, CarrierTemplateColumn } from '@/lib/shipping/types'
 import type { OrderFieldDef } from '@/lib/shipping/excel/templates'
 
 interface TemplateClientProps {
-  carriers: Array<{ code: string; name: string }>
   availableFields: OrderFieldDef[]
+  /** 편집 대상 (있으면 수정 모드, 없으면 생성 모드) */
+  editing?: CarrierTemplate | null
   onCreateAction: (formData: FormData) => Promise<void>
   onUpdateAction: (formData: FormData) => Promise<void>
+  onCancelAction?: () => void
 }
 
 /**
- * Client component for creating/editing carrier templates.
- * Provides interactive column builder with add/remove/reorder.
+ * 엑셀 양식 빌더 — 택배사 종속을 제거하고 자유롭게 헤더/너비를 편집한다.
+ * 생성/수정 겸용 (editing prop 으로 분기).
  */
 export function TemplateClient({
-  carriers,
   availableFields,
+  editing,
   onCreateAction,
+  onUpdateAction,
+  onCancelAction,
 }: TemplateClientProps) {
-  const [showForm, setShowForm] = useState(false)
-  const [carrierId, setCarrierId] = useState(carriers[0]?.code ?? '')
-  const [name, setName] = useState('')
-  const [columns, setColumns] = useState<CarrierTemplateColumn[]>([])
+  const isEditing = !!editing
+  const [showForm, setShowForm] = useState(isEditing)
+  const [name, setName] = useState(editing?.name ?? '')
+  const [columns, setColumns] = useState<CarrierTemplateColumn[]>(editing?.columns ?? [])
   const [selectedField, setSelectedField] = useState(availableFields[0]?.field ?? '')
 
   const addColumn = () => {
     const fieldDef = availableFields.find((f) => f.field === selectedField)
     if (!fieldDef) return
-
     setColumns((prev) => [
       ...prev,
-      {
-        header: fieldDef.label,
-        field: fieldDef.field,
-        width: 15,
-        required: false,
-      },
+      { header: fieldDef.label, field: fieldDef.field, width: 15, required: false },
     ])
   }
 
@@ -55,16 +53,29 @@ export function TemplateClient({
     })
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const formData = new FormData()
-    formData.set('carrierId', carrierId)
-    formData.set('name', name)
-    formData.set('columns', JSON.stringify(columns))
-    await onCreateAction(formData)
+  const updateColumn = (index: number, patch: Partial<CarrierTemplateColumn>) => {
+    setColumns((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)))
+  }
+
+  const reset = () => {
     setShowForm(false)
     setName('')
     setColumns([])
+    onCancelAction?.()
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const formData = new FormData()
+    formData.set('name', name)
+    formData.set('columns', JSON.stringify(columns))
+    if (isEditing) {
+      formData.set('templateId', editing!.id)
+      await onUpdateAction(formData)
+    } else {
+      await onCreateAction(formData)
+    }
+    reset()
   }
 
   if (!showForm) {
@@ -81,45 +92,30 @@ export function TemplateClient({
 
   return (
     <div className="rounded-lg border bg-white p-6">
-      <h3 className="mb-4 text-lg font-semibold">새 양식 만들기</h3>
+      <h3 className="mb-4 text-lg font-semibold">
+        {isEditing ? `양식 수정: ${editing!.name}` : '새 양식 만들기'}
+      </h3>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label htmlFor="new-carrier" className="mb-1 block text-sm font-medium">
-              택배사
-            </label>
-            <select
-              id="new-carrier"
-              value={carrierId}
-              onChange={(e) => setCarrierId(e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
-            >
-              {carriers.map((c) => (
-                <option key={c.code} value={c.code}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="new-name" className="mb-1 block text-sm font-medium">
-              양식 이름
-            </label>
-            <input
-              id="new-name"
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="양식 이름"
-              className="w-full rounded-md border px-3 py-2 text-sm"
-              required
-            />
-          </div>
+        <div>
+          <label htmlFor="new-name" className="mb-1 block text-sm font-medium">
+            양식 이름
+          </label>
+          <input
+            id="new-name"
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="예: 우리회사 출고용, 거래처A 양식"
+            className="w-full rounded-md border px-3 py-2 text-sm"
+            required
+          />
         </div>
 
         {/* Column builder */}
         <div>
-          <label className="mb-2 block text-sm font-medium">열 구성</label>
+          <label className="mb-2 block text-sm font-medium">
+            열 구성 <span className="text-xs text-muted-foreground">(헤더와 너비를 자유롭게 수정 가능)</span>
+          </label>
 
           {/* Add column */}
           <div className="mb-3 flex items-center gap-2">
@@ -139,46 +135,71 @@ export function TemplateClient({
               onClick={addColumn}
               className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
             >
-              추가
+              + 추가
             </button>
           </div>
 
-          {/* Column list */}
+          {/* Column list — header text & width 인라인 편집 */}
           {columns.length > 0 && (
-            <div className="rounded-md border">
+            <div className="overflow-hidden rounded-md border">
+              <div className="grid grid-cols-[2rem_1fr_8rem_5rem_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <span>#</span>
+                <span>헤더 (Excel 표시 텍스트)</span>
+                <span>필드</span>
+                <span>너비</span>
+                <span className="text-right">동작</span>
+              </div>
               {columns.map((col, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-2 border-b px-3 py-2 last:border-b-0"
+                  className="grid grid-cols-[2rem_1fr_8rem_5rem_6rem] items-center gap-2 border-b px-3 py-1.5 last:border-b-0"
                 >
-                  <span className="w-6 text-center text-xs text-muted-foreground">
-                    {idx + 1}
+                  <span className="text-center text-xs text-muted-foreground">{idx + 1}</span>
+                  <input
+                    type="text"
+                    value={col.header}
+                    onChange={(e) => updateColumn(idx, { header: e.target.value })}
+                    className="rounded border px-2 py-1 text-sm"
+                  />
+                  <span className="truncate font-mono text-xs text-muted-foreground" title={col.field}>
+                    {col.field}
                   </span>
-                  <span className="flex-1 text-sm">{col.header}</span>
-                  <span className="font-mono text-xs text-muted-foreground">{col.field}</span>
-                  <button
-                    type="button"
-                    onClick={() => moveColumn(idx, 'up')}
-                    disabled={idx === 0}
-                    className="px-1 text-xs disabled:opacity-30"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveColumn(idx, 'down')}
-                    disabled={idx === columns.length - 1}
-                    className="px-1 text-xs disabled:opacity-30"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeColumn(idx)}
-                    className="px-1 text-xs text-red-500 hover:text-red-700"
-                  >
-                    X
-                  </button>
+                  <input
+                    type="number"
+                    min={5}
+                    max={100}
+                    value={col.width}
+                    onChange={(e) => updateColumn(idx, { width: Number(e.target.value) || 15 })}
+                    className="rounded border px-2 py-1 text-sm"
+                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      onClick={() => moveColumn(idx, 'up')}
+                      disabled={idx === 0}
+                      className="rounded px-1.5 text-xs hover:bg-muted disabled:opacity-30"
+                      aria-label="위로"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveColumn(idx, 'down')}
+                      disabled={idx === columns.length - 1}
+                      className="rounded px-1.5 text-xs hover:bg-muted disabled:opacity-30"
+                      aria-label="아래로"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeColumn(idx)}
+                      className="rounded px-1.5 text-xs text-red-500 hover:bg-red-50 hover:text-red-700"
+                      aria-label="삭제"
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -188,7 +209,7 @@ export function TemplateClient({
         <div className="flex justify-end gap-2">
           <button
             type="button"
-            onClick={() => setShowForm(false)}
+            onClick={reset}
             className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
           >
             취소
@@ -198,7 +219,7 @@ export function TemplateClient({
             disabled={!name || columns.length === 0}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
           >
-            저장
+            {isEditing ? '수정 저장' : '저장'}
           </button>
         </div>
       </form>

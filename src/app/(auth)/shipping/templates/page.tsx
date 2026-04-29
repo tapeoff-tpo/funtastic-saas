@@ -1,19 +1,18 @@
 /**
- * Carrier template management page.
+ * 엑셀 양식 관리 페이지.
  *
- * Lists existing carrier templates, allows creating/editing/deleting,
- * and seeding default templates.
+ * 택배사 종속을 제거 — 자유 양식(name + columns)만으로 정의된다.
+ * 기존에 carrier_id 가 채워진 양식도 그대로 표시되지만 신규는 NULL.
  */
 
 import {
+  getCarrierTemplateById,
   getCarrierTemplates,
-  seedDefaultTemplates,
   deleteCarrierTemplate,
   createCarrierTemplate,
   updateCarrierTemplate,
 } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
-import { CARRIERS } from '@/lib/shipping/carrier-codes'
 import type { CarrierTemplateColumn } from '@/lib/shipping/types'
 import type { Metadata } from 'next'
 import { revalidatePath } from 'next/cache'
@@ -22,25 +21,22 @@ import { TemplateClient } from './client'
 import { createClient } from '@/lib/supabase/server'
 
 export const metadata: Metadata = {
-  title: '택배사 양식 관리',
+  title: '엑셀 양식 관리',
 }
 
-export default async function TemplatesPage() {
+interface PageProps {
+  searchParams: Promise<{ edit?: string }>
+}
+
+export default async function TemplatesPage({ searchParams }: PageProps) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
   const userId = user.id
+  const { edit: editId } = await searchParams
   const templates = await getCarrierTemplates(userId)
-
-  async function handleSeedDefaults() {
-    'use server'
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-    await seedDefaultTemplates(user.id)
-    revalidatePath('/shipping/templates')
-  }
+  const editing = editId ? await getCarrierTemplateById(editId) : null
 
   async function handleDelete(formData: FormData) {
     'use server'
@@ -56,16 +52,15 @@ export default async function TemplatesPage() {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
-    const carrierId = formData.get('carrierId') as string
     const name = formData.get('name') as string
     const columnsJson = formData.get('columns') as string
 
-    if (!carrierId || !name || !columnsJson) return
+    if (!name || !columnsJson) return
 
     const columns = JSON.parse(columnsJson) as CarrierTemplateColumn[]
     await createCarrierTemplate({
       userId: user.id,
-      carrierId,
+      carrierId: null,
       name,
       columns,
       isDefault: false,
@@ -87,30 +82,21 @@ export default async function TemplatesPage() {
       columns,
     })
     revalidatePath('/shipping/templates')
+    redirect('/shipping/templates')
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">택배사 양식 관리</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            엑셀 내보내기용 택배사별 열 레이아웃을 관리합니다
-          </p>
-        </div>
-        <form action={handleSeedDefaults}>
-          <button
-            type="submit"
-            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
-          >
-            기본 양식 초기화
-          </button>
-        </form>
+      <div>
+        <h1 className="text-2xl font-bold">엑셀 양식 관리</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          주문 엑셀 다운로드용 양식을 자유롭게 만들고 관리합니다. 헤더 텍스트와 너비를 원하는 대로 지정하세요.
+        </p>
       </div>
 
       {templates.length === 0 ? (
-        <div className="rounded-md border p-8 text-center text-muted-foreground">
-          등록된 양식이 없습니다. "기본 양식 초기화"를 클릭하세요.
+        <div className="rounded-md border bg-muted/30 p-8 text-center text-sm text-muted-foreground">
+          등록된 양식이 없습니다. 아래 [새 양식 만들기] 버튼으로 시작하세요.
         </div>
       ) : (
         <div className="space-y-4">
@@ -119,24 +105,37 @@ export default async function TemplatesPage() {
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <h3 className="font-medium">{template.name}</h3>
-                  <span className="rounded bg-muted px-2 py-0.5 text-xs">
-                    {template.carrierId}
-                  </span>
+                  {template.carrierId && (
+                    <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground" title="이 양식은 택배사에 연결됨">
+                      {template.carrierId}
+                    </span>
+                  )}
                   {template.isDefault && (
                     <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
                       기본
                     </span>
                   )}
+                  <span className="text-xs text-muted-foreground">
+                    {template.columns.length}개 열
+                  </span>
                 </div>
-                <form action={handleDelete}>
-                  <input type="hidden" name="templateId" value={template.id} />
-                  <button
-                    type="submit"
-                    className="rounded-md border border-red-300 px-3 py-1 text-xs text-red-600 hover:bg-red-50"
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`/shipping/templates?edit=${template.id}`}
+                    className="rounded-md border px-3 py-1 text-xs hover:bg-muted"
                   >
-                    삭제
-                  </button>
-                </form>
+                    수정
+                  </a>
+                  <form action={handleDelete}>
+                    <input type="hidden" name="templateId" value={template.id} />
+                    <button
+                      type="submit"
+                      className="rounded-md border border-red-300 px-3 py-1 text-xs text-red-600 hover:bg-red-50"
+                    >
+                      삭제
+                    </button>
+                  </form>
+                </div>
               </div>
 
               {/* Column list */}
@@ -147,16 +146,14 @@ export default async function TemplatesPage() {
                       <th className="px-3 py-1.5 text-left font-medium">헤더</th>
                       <th className="px-3 py-1.5 text-left font-medium">필드</th>
                       <th className="px-3 py-1.5 text-left font-medium">너비</th>
-                      <th className="px-3 py-1.5 text-left font-medium">필수</th>
                     </tr>
                   </thead>
                   <tbody>
                     {template.columns.map((col, idx) => (
                       <tr key={idx} className="border-t">
                         <td className="px-3 py-1.5">{col.header}</td>
-                        <td className="px-3 py-1.5 font-mono text-xs">{col.field}</td>
+                        <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{col.field}</td>
                         <td className="px-3 py-1.5">{col.width}</td>
-                        <td className="px-3 py-1.5">{col.required ? 'Y' : '-'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -167,10 +164,10 @@ export default async function TemplatesPage() {
         </div>
       )}
 
-      {/* Create new template */}
+      {/* Create / edit form */}
       <TemplateClient
-        carriers={CARRIERS.map((c) => ({ code: c.code, name: c.koreanName }))}
         availableFields={AVAILABLE_ORDER_FIELDS}
+        editing={editing}
         onCreateAction={handleCreate}
         onUpdateAction={handleUpdate}
       />

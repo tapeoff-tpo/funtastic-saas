@@ -112,6 +112,16 @@ export function MappingManager() {
         productNameSnapshot: prefillSource.productName ?? '',
         optionNameSnapshot: prefillSource.optionText ?? '',
       })
+    } else {
+      // 빈 폼 생성 시에도 선택한 모드의 빈 source 행 1개 자동 추가
+      form.sources.push({
+        mode: prefillMode,
+        marketplaceId: '',
+        marketplaceProductId: '',
+        marketplaceOptionId: '',
+        productNameSnapshot: '',
+        optionNameSnapshot: '',
+      })
     }
     setEditing(form)
   }
@@ -210,9 +220,13 @@ export function MappingManager() {
             placeholder="코드 또는 이름 검색"
             className="flex-1 rounded-md border px-3 py-1.5 text-sm"
           />
-          <Button onClick={() => openCreate()} size="sm">
+          <Button onClick={() => openCreate(undefined, 'product')} size="sm">
             <Plus className="size-3.5" />
-            신규 매핑
+            신규 품번매핑
+          </Button>
+          <Button onClick={() => openCreate(undefined, 'option')} size="sm">
+            <Plus className="size-3.5" />
+            신규 단품매핑
           </Button>
           <Button onClick={() => void reload()} size="sm" variant="outline">
             <RefreshCw className="size-3.5" />

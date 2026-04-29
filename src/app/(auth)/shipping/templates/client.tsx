@@ -4,6 +4,16 @@ import { useState } from 'react'
 import type { CarrierTemplate, CarrierTemplateColumn } from '@/lib/shipping/types'
 import type { OrderFieldDef } from '@/lib/shipping/excel/templates'
 
+/** 합치기 구분자 프리셋 — value 는 실제 join 문자열, label 은 화면 표시용 */
+const JOIN_SEPARATORS: { value: string; label: string }[] = [
+  { value: ' ', label: '공백' },
+  { value: '[,]', label: '[,]' },
+  { value: '(,)', label: '(,)' },
+  { value: ' / ', label: ' / ' },
+  { value: '#', label: '#' },
+  { value: '<,>', label: '<,>' },
+]
+
 interface TemplateClientProps {
   availableFields: OrderFieldDef[]
   /** 편집 대상 (있으면 수정 모드, 없으면 생성 모드) */
@@ -240,6 +250,21 @@ export function TemplateClient({
                           </option>
                         ))}
                     </select>
+                    {(col.extraFields ?? []).length > 0 && (
+                      <select
+                        value={col.joinSeparator ?? ' '}
+                        onChange={(e) => updateColumn(idx, { joinSeparator: e.target.value })}
+                        className="rounded border bg-white px-1 py-0.5 text-[11px]"
+                        aria-label="구분자"
+                        title="합쳐진 값 사이에 들어갈 구분자"
+                      >
+                        {JOIN_SEPARATORS.map((s) => (
+                          <option key={s.value} value={s.value}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
                   <input
                     type="text"

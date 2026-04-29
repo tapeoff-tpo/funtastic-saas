@@ -170,9 +170,14 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                         <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
                           {col.field}
                           {col.extraFields && col.extraFields.length > 0 && (
-                            <span className="ml-1 text-emerald-700">
-                              {col.extraFields.map((f) => ` + ${f}`).join('')}
-                            </span>
+                            <>
+                              <span className="ml-1 text-emerald-700">
+                                {col.extraFields.map((f) => ` + ${f}`).join('')}
+                              </span>
+                              <span className="ml-1 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
+                                구분자: {col.joinSeparator === ' ' || !col.joinSeparator ? '공백' : col.joinSeparator}
+                              </span>
+                            </>
                           )}
                         </td>
                         <td className="px-3 py-1.5 text-xs">

@@ -88,7 +88,7 @@ export async function exportToCarrierExcel(
           .map((f) => getNestedValue(order, f))
           .filter((v) => v !== undefined && v !== null && v !== '')
           .map((v) => String(v))
-        rowData[col.field] = parts.join(' ')
+        rowData[col.field] = parts.join(col.joinSeparator ?? ' ')
       } else {
         rowData[col.field] = getNestedValue(order, col.field)
       }

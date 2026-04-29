@@ -513,9 +513,12 @@ export class CoupangAdapter implements MarketplaceAdapter {
       marketplaceStatus: sheet.status,
       status: mapCoupangStatus(sheet.status),
       buyerName: sheet.orderer.name,
-      buyerPhone: sheet.orderer.safeNumber || undefined,
+      // 쿠팡은 안심번호(safeNumber, 휴대폰) 만 제공 → phone2 (휴대폰) 에 저장
+      buyerPhone2: sheet.orderer.safeNumber || undefined,
       recipientName: sheet.receiver.name,
-      recipientPhone: sheet.receiver.safeNumber || sheet.receiver.receiverNumber || undefined,
+      // safeNumber(안심번호=휴대폰) → phone2, 일반 receiverNumber 가 있으면 phone1 에도 채움
+      recipientPhone: sheet.receiver.receiverNumber || undefined,
+      recipientPhone2: sheet.receiver.safeNumber || undefined,
       shippingAddress: {
         zipCode: sheet.receiver.postCode,
         address1: sheet.receiver.addr1,

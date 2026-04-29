@@ -98,9 +98,15 @@ export const orders = pgTable(
     status: orderStatusEnum('status').notNull().default('new'),
     previousStatus: orderStatusEnum('previous_status'),
     buyerName: varchar('buyer_name', { length: 200 }).notNull(),
+    /** 구매자 전화번호1 — 일반전화/집전화 */
     buyerPhone: varchar('buyer_phone', { length: 50 }),
+    /** 구매자 전화번호2 — 휴대폰 (기본 표기용, 우선순위 위) */
+    buyerPhone2: varchar('buyer_phone2', { length: 50 }),
     recipientName: varchar('recipient_name', { length: 200 }).notNull(),
+    /** 수령인 전화번호1 — 일반전화/집전화 */
     recipientPhone: varchar('recipient_phone', { length: 50 }),
+    /** 수령인 전화번호2 — 휴대폰 (기본 표기용, 우선순위 위) */
+    recipientPhone2: varchar('recipient_phone2', { length: 50 }),
     shippingAddress: jsonb('shipping_address').$type<{
       zipCode: string
       address1: string
@@ -124,6 +130,12 @@ export const orders = pgTable(
     shippingFee: numeric('shipping_fee', { precision: 12, scale: 2 }),
     /** 복사된 주문 표시 — true 이면 unique 제약에서 제외됨 (migration 016) */
     isCopy: boolean('is_copy').notNull().default(false),
+    /** 매핑 적용 시점 (apply-mappings API 실행 시각) — migration 020 */
+    mappedAt: timestamp('mapped_at', { withTimezone: true }),
+    /** 매핑을 적용한 사용자 ID — migration 020 */
+    mappedByUserId: uuid('mapped_by_user_id'),
+    /** 출고준비(preparing) 전환 시점 — migration 020 */
+    preparingAt: timestamp('preparing_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -707,5 +719,28 @@ export const devLogEntries = pgTable(
   },
   (table) => [
     index("dev_log_entries_log_date_idx").on(table.logDate, table.createdAt),
+  ],
+)
+
+// ─── Scan Logs ───────────────────────────────────────────────────
+// 바코드 스캔 이력 — 정상/중복/비정상 모두 기록 (migration 020).
+// 상세 페이지의 "바코드 스캔 여부" 섹션에서 이 테이블을 조회한다.
+
+export const scanLogs = pgTable(
+  'scan_logs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    shipmentId: uuid('shipment_id').references(() => shipments.id, { onDelete: 'set null' }),
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+    trackingNumber: varchar('tracking_number', { length: 100 }).notNull(),
+    /** ok=정상, duplicate=중복, not_found=비정상 */
+    status: varchar('status', { length: 20 }).notNull(),
+    scannedAt: timestamp('scanned_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('scan_logs_order_id_idx').on(table.orderId),
+    index('scan_logs_shipment_id_idx').on(table.shipmentId),
+    index('scan_logs_user_id_scanned_at_idx').on(table.userId, table.scannedAt),
   ],
 )

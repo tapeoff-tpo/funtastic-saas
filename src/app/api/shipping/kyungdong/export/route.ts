@@ -55,8 +55,10 @@ export async function GET(req: NextRequest) {
     return {
       orderId: order.id,
       recipientName: order.recipientName,
-      recipientPhone: order.recipientPhone ?? '',
-      recipientAltPhone: '',
+      // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
+      recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
+      // 보조 = 휴대폰이 phone2 에 있으면 phone1 이 보조전화
+      recipientAltPhone: order.recipientPhone2 ? (order.recipientPhone ?? '') : '',
       recipientAddress: addr?.address1 ?? '',
       recipientDetailAddress: addr?.address2 ?? '',
       recipientZipCode: addr?.zipCode ?? '',

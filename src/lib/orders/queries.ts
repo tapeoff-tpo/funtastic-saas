@@ -7,7 +7,7 @@
 
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory, shipmentGroups, shipmentGroupOrders } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, productNameMappings, productOptionMappings, products, productVariants, productBundleItems, inventory, shipmentGroups, shipmentGroupOrders, scanLogs } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
@@ -584,7 +584,7 @@ export async function getOrderById(id: string, userId?: string) {
 
   if (!order) return null
 
-  const [orderItemRows, claimRows, memoRows, shipmentRows] = await Promise.all([
+  const [orderItemRows, claimRows, memoRows, shipmentRows, scanLogRows] = await Promise.all([
     // 수집상품명(productName) + 확정상품명 동시 반환
     // 확정상품명 fallback: product_name_mappings.display_name → products.name (SKU 직접 매칭) → null
     db
@@ -627,6 +627,12 @@ export async function getOrderById(id: string, userId?: string) {
       .where(eq(orderMemos.orderId, id))
       .orderBy(desc(orderMemos.createdAt)),
     db.select().from(shipments).where(eq(shipments.orderId, id)),
+    // 바코드 스캔 이력 — 최신순. 상세 페이지의 '바코드 스캔 여부' 섹션 표시용.
+    db
+      .select()
+      .from(scanLogs)
+      .where(eq(scanLogs.orderId, id))
+      .orderBy(desc(scanLogs.scannedAt)),
   ])
 
   const latestShipment =
@@ -657,6 +663,10 @@ export async function getOrderById(id: string, userId?: string) {
     claims: claimRows,
     memos: memoRows,
     shipment: latestShipment,
+    /** 모든 송장 — 송장정보 섹션에서 다중 송장(분할배송)도 표시할 수 있도록 */
+    shipments: shipmentRows,
+    /** 바코드 스캔 이력 — 최신순 */
+    scanLogs: scanLogRows,
   }
 }
 

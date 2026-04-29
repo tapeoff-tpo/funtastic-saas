@@ -69,9 +69,15 @@ export interface NormalizedOrder {
   marketplaceStatus: string
   status: OrderStatus
   buyerName: string
+  /** 구매자 전화번호1 — 일반전화/집전화 */
   buyerPhone?: string
+  /** 구매자 전화번호2 — 휴대폰 (기본 표기 우선순위) */
+  buyerPhone2?: string
   recipientName: string
+  /** 수령인 전화번호1 — 일반전화/집전화 */
   recipientPhone?: string
+  /** 수령인 전화번호2 — 휴대폰 (기본 표기 우선순위) */
+  recipientPhone2?: string
   shippingAddress: {
     zipCode: string
     address1: string

@@ -66,7 +66,8 @@ export async function GET(req: NextRequest) {
       orderId: order.id,
       marketplaceOrderId: order.marketplaceOrderId,
       recipientName: order.recipientName ?? '',
-      recipientPhone: order.recipientPhone ?? '',
+      // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
+      recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
       recipientAddress: fullAddress,
       productName: firstItem ? firstItem.productName ?? '' : '',
       optionText: firstItem ? firstItem.optionText ?? undefined : undefined,

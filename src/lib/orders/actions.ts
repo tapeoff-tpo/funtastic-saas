@@ -55,6 +55,9 @@ export async function updateOrderStatus(
       .set({
         status: newStatus,
         previousStatus: order.status,
+        // 출고준비 전환 시점 기록 — 상세 페이지의 '출고준비일자' 표시용.
+        // 다른 상태 전환은 기록하지 않으므로 undefined 분기.
+        ...(newStatus === 'preparing' ? { preparingAt: new Date() } : {}),
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId))

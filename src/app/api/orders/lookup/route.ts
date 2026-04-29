@@ -34,6 +34,7 @@ export async function GET(req: NextRequest) {
       buyerName: orders.buyerName,
       recipientName: orders.recipientName,
       recipientPhone: orders.recipientPhone,
+      recipientPhone2: orders.recipientPhone2,
     })
     .from(orders)
     .where(whereClause)

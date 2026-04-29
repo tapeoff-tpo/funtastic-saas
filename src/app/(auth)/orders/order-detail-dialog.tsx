@@ -29,8 +29,10 @@ interface OrderDetail {
   totalAmount: string
   buyerName: string
   buyerPhone: string | null
+  buyerPhone2?: string | null
   recipientName: string
   recipientPhone: string | null
+  recipientPhone2?: string | null
   shippingAddress: {
     zipCode: string
     address1: string
@@ -155,18 +157,19 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                     <dt className="text-muted-foreground">구매자</dt>
                     <dd>
                       {order.buyerName}
-                      {order.buyerPhone && (
+                      {/* 기본 표기: 휴대폰(phone2) 우선, 없으면 일반전화(phone1) */}
+                      {(order.buyerPhone2 || order.buyerPhone) && (
                         <span className="ml-2 font-mono text-muted-foreground">
-                          {order.buyerPhone}
+                          {order.buyerPhone2 || order.buyerPhone}
                         </span>
                       )}
                     </dd>
                     <dt className="text-muted-foreground">수취인</dt>
                     <dd>
                       {order.recipientName}
-                      {order.recipientPhone && (
+                      {(order.recipientPhone2 || order.recipientPhone) && (
                         <span className="ml-2 font-mono text-muted-foreground">
-                          {order.recipientPhone}
+                          {order.recipientPhone2 || order.recipientPhone}
                         </span>
                       )}
                     </dd>

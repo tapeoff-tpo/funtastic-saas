@@ -5,6 +5,7 @@ import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
 import { getOrderById, getStockDeductionPreview } from '@/lib/orders/queries'
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
+import { getUserDisplayNames } from '@/lib/supabase/admin'
 import { ClaimList } from './client'
 
 export const metadata: Metadata = {
@@ -22,6 +23,23 @@ const CLAIM_STATUS_LABELS: Record<string, string> = {
   processing: '처리중',
   completed: '완료',
   rejected: '거절',
+}
+
+const SCAN_STATUS_LABELS: Record<string, string> = {
+  ok: '정상',
+  duplicate: '중복',
+  not_found: '비정상',
+}
+
+/** yyyy-MM-dd HH:mm:ss 포맷 (없으면 '-') */
+function fmtDateTime(value: Date | string | null | undefined): string {
+  if (!value) return '-'
+  return format(new Date(value), 'yyyy-MM-dd HH:mm:ss')
+}
+
+/** 기본 표기 연락처: phone2(휴대폰) 우선, 없으면 phone1(일반전화). */
+function primaryPhone(phone1?: string | null, phone2?: string | null): string {
+  return (phone2 ?? phone1 ?? '').trim() || '-'
 }
 
 export default async function OrderDetailPage({
@@ -44,9 +62,32 @@ export default async function OrderDetailPage({
     | { zipCode: string; address1: string; address2?: string }
     | null
 
+  // 매핑자/스캔자 사용자 ID 모음 → 이름 일괄 조회
+  const userIds = [
+    order.mappedByUserId ?? null,
+    ...order.scanLogs.map((s) => s.userId),
+  ].filter((x): x is string => Boolean(x))
+  const userNames = userIds.length > 0 ? await getUserDisplayNames(userIds) : new Map<string, string>()
+  const mapperName = order.mappedByUserId ? userNames.get(order.mappedByUserId) ?? null : null
+
+  // 클레임에서 가장 이른 접수일 / 가장 최근 완료일
+  const claimRequestedAt = order.claims.length > 0
+    ? order.claims.reduce<Date | null>((min, c) => {
+        const t = new Date(c.requestedAt)
+        return !min || t < min ? t : min
+      }, null)
+    : null
+  const completedClaims = order.claims.filter((c) => c.claimStatus === 'completed')
+  const claimCompletedAt = completedClaims.length > 0
+    ? completedClaims.reduce<Date | null>((max, c) => {
+        const t = new Date(c.updatedAt)
+        return !max || t > max ? t : max
+      }, null)
+    : null
+
   return (
     <div className="space-y-6">
-      {/* Breadcrumb + title */}
+      {/* Breadcrumb + title + status */}
       <div>
         <nav className="mb-1 text-sm text-muted-foreground">
           <Link href="/orders" className="hover:underline">
@@ -58,46 +99,62 @@ export default async function OrderDetailPage({
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           주문상세정보
         </p>
-        <div className="flex items-baseline justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">
-              {order.marketplaceOrderId}
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold">{order.marketplaceOrderId}</h1>
+              {/* 상단 주문상태 배지 — 더 크고 눈에 띄게 */}
+              <span className="rounded-full bg-primary px-3 py-1 text-sm font-semibold text-primary-foreground">
+                {ORDER_STATUS_LABELS[order.status as OrderStatus]}
+              </span>
+              {order.isHeld && (
+                <span className="rounded-full bg-red-100 px-3 py-1 text-sm font-semibold text-red-700">
+                  보류중
+                </span>
+              )}
+            </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {order.marketplaceId} · {format(new Date(order.orderedAt), 'yyyy-MM-dd HH:mm')}
+              {order.marketplaceId} · {fmtDateTime(order.orderedAt)}
             </p>
           </div>
-          <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
-            {ORDER_STATUS_LABELS[order.status as OrderStatus]}
-          </span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Left column (2/3): order details */}
+        {/* Left column (2/3) */}
         <div className="space-y-6 lg:col-span-2">
-          {/* Buyer + recipient + shipping address */}
+          {/* 배송 정보 */}
           <section className="rounded-lg border bg-white p-5">
             <h2 className="mb-3 text-lg font-semibold">배송 정보</h2>
-            <dl className="grid grid-cols-2 gap-y-2 text-sm">
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
               <dt className="text-muted-foreground">구매자</dt>
               <dd>
                 {order.buyerName}
-                {order.buyerPhone && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {order.buyerPhone}
-                  </span>
-                )}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {primaryPhone(order.buyerPhone, order.buyerPhone2)}
+                </span>
               </dd>
+
+              <dt className="text-muted-foreground">구매자 전화1</dt>
+              <dd className="text-xs text-muted-foreground">{order.buyerPhone || '-'}</dd>
+
+              <dt className="text-muted-foreground">구매자 전화2 (휴대폰)</dt>
+              <dd className="text-xs text-muted-foreground">{order.buyerPhone2 || '-'}</dd>
+
               <dt className="text-muted-foreground">수령인</dt>
               <dd>
                 {order.recipientName}
-                {order.recipientPhone && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {order.recipientPhone}
-                  </span>
-                )}
+                <span className="ml-2 text-xs text-muted-foreground">
+                  {primaryPhone(order.recipientPhone, order.recipientPhone2)}
+                </span>
               </dd>
+
+              <dt className="text-muted-foreground">수령인 전화1</dt>
+              <dd className="text-xs text-muted-foreground">{order.recipientPhone || '-'}</dd>
+
+              <dt className="text-muted-foreground">수령인 전화2 (휴대폰)</dt>
+              <dd className="text-xs text-muted-foreground">{order.recipientPhone2 || '-'}</dd>
+
               <dt className="text-muted-foreground">배송지</dt>
               <dd>
                 {shippingAddr
@@ -106,35 +163,25 @@ export default async function OrderDetailPage({
                     }`
                   : '-'}
               </dd>
+
+              <dt className="text-muted-foreground">배송메세지</dt>
+              <dd className="whitespace-pre-wrap">{order.deliveryMessage || '-'}</dd>
+
               <dt className="text-muted-foreground">총 금액</dt>
               <dd className="font-semibold">
                 {Number(order.totalAmount).toLocaleString('ko-KR')}원
               </dd>
-              {order.shipment && (
-                <>
-                  <dt className="text-muted-foreground">송장</dt>
-                  <dd>
-                    <span className="font-mono">
-                      {order.shipment.carrierName} · {order.shipment.trackingNumber}
-                    </span>
-                    <span className="ml-2 rounded bg-muted px-2 py-0.5 text-xs">
-                      {order.shipment.uploadStatus}
-                    </span>
-                  </dd>
-                </>
-              )}
+
               {order.isHeld && (
                 <>
-                  <dt className="text-muted-foreground">보류</dt>
-                  <dd className="text-red-600">
-                    {order.holdReason ?? '(사유 없음)'}
-                  </dd>
+                  <dt className="text-muted-foreground">보류 사유</dt>
+                  <dd className="text-red-600">{order.holdReason ?? '(사유 없음)'}</dd>
                 </>
               )}
             </dl>
           </section>
 
-          {/* Items */}
+          {/* 주문 상품 */}
           <section className="rounded-lg border bg-white p-5">
             <h2 className="mb-3 text-lg font-semibold">
               주문 상품 ({order.items.length}건)
@@ -143,15 +190,15 @@ export default async function OrderDetailPage({
               {order.items.map((item) => (
                 <li key={item.id} className="flex justify-between gap-4 py-3 text-sm">
                   <div className="flex-1 space-y-1">
-                    {/* 수집상품명 — 마켓에서 받아온 원본 */}
+                    {/* 수집상품명 */}
                     <div className="flex gap-2">
                       <span className="shrink-0 rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-muted-foreground">
                         수집상품명
                       </span>
                       <span>{item.productName}</span>
                     </div>
-                    {/* 확정상품명 — product_name_mappings.display_name */}
-                    <div className="flex gap-2">
+                    {/* 확정상품명 + 옵션 — 같은 라인에 정렬 */}
+                    <div className="flex flex-wrap items-baseline gap-2">
                       <span className="shrink-0 rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
                         확정상품명
                       </span>
@@ -160,12 +207,12 @@ export default async function OrderDetailPage({
                       ) : (
                         <span className="italic text-muted-foreground">미매핑</span>
                       )}
+                      {item.optionText && (
+                        <span className="text-xs text-muted-foreground">
+                          · 옵션: {item.optionText}
+                        </span>
+                      )}
                     </div>
-                    {item.optionText && (
-                      <p className="text-xs text-muted-foreground">
-                        옵션: {item.optionText}
-                      </p>
-                    )}
                     {item.sku && (
                       <p className="mt-1 text-xs font-mono text-muted-foreground">
                         SKU: {item.sku}
@@ -182,7 +229,66 @@ export default async function OrderDetailPage({
             </ul>
           </section>
 
-          {/* Claims */}
+          {/* 주문 상태 — 진행 시점 타임라인 */}
+          <section className="rounded-lg border bg-white p-5">
+            <h2 className="mb-3 text-lg font-semibold">주문 상태</h2>
+            <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
+              <dt className="text-muted-foreground">실제 마켓 주문일자</dt>
+              <dd className="font-mono">{fmtDateTime(order.orderedAt)}</dd>
+
+              <dt className="text-muted-foreground">주문수집일</dt>
+              <dd className="font-mono">{fmtDateTime(order.collectedAt)}</dd>
+
+              <dt className="text-muted-foreground">매핑일자</dt>
+              <dd className="font-mono">
+                {fmtDateTime(order.mappedAt)}
+                {mapperName && (
+                  <span className="ml-2 font-sans text-xs text-muted-foreground">
+                    ({mapperName})
+                  </span>
+                )}
+              </dd>
+
+              <dt className="text-muted-foreground">출고준비일자</dt>
+              <dd className="font-mono">{fmtDateTime(order.preparingAt)}</dd>
+
+              <dt className="text-muted-foreground">출고완료일자</dt>
+              <dd className="font-mono">{fmtDateTime(order.shipment?.shippedAt)}</dd>
+
+              <dt className="text-muted-foreground">송장송신일자</dt>
+              <dd className="font-mono">{fmtDateTime(order.shipment?.lastUploadAt)}</dd>
+
+              <dt className="text-muted-foreground">반품/교환 접수일자</dt>
+              <dd className="font-mono">{fmtDateTime(claimRequestedAt)}</dd>
+
+              <dt className="text-muted-foreground">반품/교환 완료일자</dt>
+              <dd className="font-mono">{fmtDateTime(claimCompletedAt)}</dd>
+            </dl>
+          </section>
+
+          {/* 송장정보 */}
+          <section className="rounded-lg border bg-white p-5">
+            <h2 className="mb-3 text-lg font-semibold">송장정보</h2>
+            {order.shipments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">등록된 송장이 없습니다.</p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {order.shipments.map((s) => (
+                  <li key={s.id} className="flex items-center justify-between gap-4 rounded border bg-gray-50 px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <span className="font-medium">{s.carrierName}</span>
+                      <span className="font-mono">{s.trackingNumber}</span>
+                    </div>
+                    <span className="rounded bg-muted px-2 py-0.5 text-xs">
+                      {s.uploadStatus}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* 클레임 */}
           {order.claims.length > 0 && (
             <section className="rounded-lg border bg-white p-5">
               <h2 className="mb-3 text-lg font-semibold">클레임</h2>
@@ -199,9 +305,51 @@ export default async function OrderDetailPage({
               />
             </section>
           )}
+
+          {/* 바코드 스캔 여부 — 가장 하단 */}
+          <section className="rounded-lg border bg-white p-5">
+            <h2 className="mb-3 text-lg font-semibold">바코드 스캔 여부</h2>
+            {order.scanLogs.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                스캔 이력이 없습니다.
+              </p>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {order.scanLogs.map((log) => {
+                  // 정상=Y-Y, 비정상/중복=Y-N (스캔 자체는 완료되었으나 정상 처리 X)
+                  const code = log.status === 'ok' ? 'Y-Y' : 'Y-N'
+                  const colorClass =
+                    log.status === 'ok'
+                      ? 'bg-green-100 text-green-700'
+                      : log.status === 'duplicate'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-red-100 text-red-700'
+                  const scannerName = userNames.get(log.userId) ?? log.userId.slice(0, 8)
+                  return (
+                    <li
+                      key={log.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded border bg-gray-50 px-3 py-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`rounded px-2 py-0.5 text-xs font-semibold ${colorClass}`}>
+                          {code} · {SCAN_STATUS_LABELS[log.status] ?? log.status}
+                        </span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {fmtDateTime(log.scannedAt)}
+                        </span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">
+                        스캔: {scannerName}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
         </div>
 
-        {/* Right column: stock deduction preview */}
+        {/* Right column: 재고 차감 미리보기 */}
         <div className="lg:col-span-1">
           <section className="rounded-lg border bg-white p-5">
             <div className="mb-3 flex items-baseline justify-between">

@@ -106,8 +106,10 @@ export interface OrderRow {
   marketplaceOrderId: string
   buyerName: string
   buyerPhone?: string | null
+  buyerPhone2?: string | null
   recipientName?: string | null
   recipientPhone?: string | null
+  recipientPhone2?: string | null
   status: OrderStatus
   orderedAt: Date | string
   collectedAt?: Date | string | null
@@ -507,9 +509,10 @@ export const columns: ColumnDef<OrderRow>[] = [
           <div>
             <span className="inline-block w-7 text-[10px] text-muted-foreground">수취</span>
             <span className="font-medium">{order.recipientName ?? '-'}</span>
-            {order.recipientPhone && (
+            {/* 기본 표기: 휴대폰(phone2) 우선, 없으면 일반전화(phone1) */}
+            {(order.recipientPhone2 || order.recipientPhone) && (
               <span className="ml-1 font-mono text-[10px] text-muted-foreground">
-                {formatPhone(order.recipientPhone)}
+                {formatPhone(order.recipientPhone2 || order.recipientPhone || '')}
               </span>
             )}
           </div>

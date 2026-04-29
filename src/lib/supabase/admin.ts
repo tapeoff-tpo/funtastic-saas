@@ -69,6 +69,42 @@ export async function readCredential(
 }
 
 /**
+ * 사용자 ID 로 표시 이름을 조회 — 매핑자/스캔자 표시용.
+ * 우선순위: user_metadata.full_name → user_metadata.name → email 의 @ 앞 → user_id 앞 8자리.
+ * 알 수 없으면 null 반환.
+ */
+export async function getUserDisplayName(userId: string): Promise<string | null> {
+  if (!userId) return null
+  try {
+    const admin = createAdminClient()
+    const { data, error } = await admin.auth.admin.getUserById(userId)
+    if (error || !data?.user) return userId.slice(0, 8)
+    const meta = (data.user.user_metadata ?? {}) as Record<string, unknown>
+    const fullName = typeof meta.full_name === 'string' ? meta.full_name : undefined
+    const name = typeof meta.name === 'string' ? meta.name : undefined
+    const emailLocal = data.user.email?.split('@')[0]
+    return fullName || name || emailLocal || userId.slice(0, 8)
+  } catch {
+    return userId.slice(0, 8)
+  }
+}
+
+/**
+ * 여러 사용자 ID 의 표시 이름을 한 번에 조회.
+ */
+export async function getUserDisplayNames(userIds: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(userIds.filter(Boolean))]
+  const result = new Map<string, string>()
+  await Promise.all(
+    unique.map(async (id) => {
+      const name = await getUserDisplayName(id)
+      if (name) result.set(id, name)
+    }),
+  )
+  return result
+}
+
+/**
  * Delete a credential from Supabase Vault.
  */
 export async function deleteCredential(

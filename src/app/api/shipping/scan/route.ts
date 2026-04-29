@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { shipments, orders, orderItems } from '@/lib/db/schema'
+import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
 import { eq, and, gte, count } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 
@@ -49,6 +49,14 @@ export async function POST(req: NextRequest) {
 
   // 비정상: 시스템에 없는 운송장
   if (!shipment) {
+    // 비정상 스캔도 이력으로 남김 (shipment_id/order_id = null)
+    await db.insert(scanLogs).values({
+      userId: user.id,
+      shipmentId: null,
+      orderId: null,
+      trackingNumber,
+      status: 'not_found',
+    })
     return NextResponse.json({
       status: 'not_found',
       message: '비정상입니다',
@@ -63,6 +71,14 @@ export async function POST(req: NextRequest) {
     const [order] = await db
       .select({ recipientName: orders.recipientName, marketplaceId: orders.marketplaceId })
       .from(orders).where(eq(orders.id, shipment.orderId)).limit(1)
+
+    await db.insert(scanLogs).values({
+      userId: user.id,
+      shipmentId: shipment.id,
+      orderId: shipment.orderId,
+      trackingNumber,
+      status: 'duplicate',
+    })
 
     return NextResponse.json({
       status: 'duplicate',
@@ -87,6 +103,14 @@ export async function POST(req: NextRequest) {
     .update(orders)
     .set({ status: 'ready', updatedAt: new Date() })
     .where(and(eq(orders.id, shipment.orderId), eq(orders.status, 'preparing')))
+
+  await db.insert(scanLogs).values({
+    userId: user.id,
+    shipmentId: shipment.id,
+    orderId: shipment.orderId,
+    trackingNumber,
+    status: 'ok',
+  })
 
   // Fetch order + item info for display
   const [order] = await db

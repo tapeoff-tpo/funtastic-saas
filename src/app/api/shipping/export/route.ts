@@ -152,9 +152,11 @@ export async function GET(request: NextRequest) {
         marketplaceItemId: rawFirst?.marketplaceItemId ?? '',
         marketplaceId: order.marketplaceId,
         buyerName: order.buyerName,
-        buyerPhone: order.buyerPhone,
+        // 기본 '구매자연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
+        buyerPhone: order.buyerPhone2 || order.buyerPhone || '',
         recipientName: order.recipientName,
-        recipientPhone: order.recipientPhone,
+        // 기본 '수령인연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
+        recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
         shippingAddress: order.shippingAddress,
         productName,
         optionText,
@@ -181,9 +183,10 @@ export async function GET(request: NextRequest) {
         senderName: order.connectionId ? connectionMap.get(order.connectionId) ?? '' : '',
         // 배송메세지 — 구매자가 마켓에서 입력한 배송 요청 (쿠팡 parcelPrintMessage 등)
         deliveryMessage: order.deliveryMessage ?? '',
+        // 명시적 phone2 (휴대폰) 출력항목 — migration 020 이후 DB 에 직접 저장됨
+        recipientPhone2: order.recipientPhone2 ?? '',
+        buyerPhone2: order.buyerPhone2 ?? '',
         // ─ DB 컬럼 미존재 — 사용자가 fixedValue 로 채우거나 비워둠 ─
-        recipientPhone2: '',
-        buyerPhone2: '',
         supplyPrice: '',
         // 수집일자 — yyyy-mm-dd 포맷
         collectedAt: order.collectedAt ? new Date(order.collectedAt).toISOString().slice(0, 10) : '',

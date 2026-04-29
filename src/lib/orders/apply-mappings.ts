@@ -186,6 +186,18 @@ export async function applyMappingsForUser(
     }
   }
 
+  // 매핑이 실제로 적용된 주문에 audit 기록 — 상세 페이지의 '매핑일자/매핑자' 표시용
+  if (touchedOrderIds.length > 0) {
+    try {
+      await db
+        .update(orders)
+        .set({ mappedAt: new Date(), mappedByUserId: userId })
+        .where(and(eq(orders.userId, userId), inArray(orders.id, touchedOrderIds)))
+    } catch (err) {
+      console.error('[apply-mappings] mapped audit update failed:', err)
+    }
+  }
+
   // 자동 합포장 (수령인 이름+주소+전화 동일 주문 2건 이상)
   if (updated > 0 && touchedOrderIds.length > 0) {
     try {

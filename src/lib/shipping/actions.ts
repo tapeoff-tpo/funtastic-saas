@@ -137,6 +137,7 @@ export async function reprocessHeldOrder(
         .update(orders)
         .set({
           status: 'preparing',
+          preparingAt: new Date(),
           isHeld: false,
           holdReason: null,
           updatedAt: new Date(),

@@ -8,7 +8,7 @@
  *  - 확장(export route 가 계산): senderName(쇼핑몰명), productCode(SKU),
  *           productPlusOption, collectedProductName, collectedOption,
  *           stock(현재고), location(위치)
- *  - 고정: senderPhone, senderAddress, boxCount, freightType, baseFreight
+ *  - 고정(fixedValue): senderPhone, senderAddress, boxCount, freightType, baseFreight
  */
 import postgres from 'postgres'
 
@@ -23,16 +23,16 @@ const columns = [
   { header: '받는분기타연락처',            field: 'buyerPhone',               width: 14, required: false },
   { header: '받는분주소(전체? 분할)',      field: 'shippingAddress.address1', width: 40, required: true },
   { header: '상품명',                      field: 'productName',              width: 30, required: true },
-  { header: '박스수량',                    field: 'boxCount',                 width: 8,  required: false },
-  { header: '운임구분',                    field: 'freightType',              width: 8,  required: false },
-  { header: '기본운임',                    field: 'baseFreight',              width: 10, required: false },
+  { header: '박스수량',                    field: 'boxCount',                 width: 8,  required: false, fixedValue: '1' },
+  { header: '운임구분',                    field: 'freightType',              width: 8,  required: false, fixedValue: '3' },
+  { header: '기본운임',                    field: 'baseFreight',              width: 10, required: false, fixedValue: '1850' },
   { header: '배송메세지',                  field: 'shippingMessage',          width: 20, required: false },
   { header: '고객주문번호',                field: 'marketplaceOrderId',       width: 16, required: false },
   { header: '내품수량',                    field: 'quantity',                 width: 8,  required: true },
   { header: '내품명',                      field: 'optionText',               width: 20, required: false },
   { header: '보내는분성명',                field: 'senderName',               width: 12, required: false },
-  { header: '보내는분전화번호',            field: 'senderPhone',              width: 14, required: false },
-  { header: '보내는분주소(전체? 분할)',    field: 'senderAddress',            width: 40, required: false },
+  { header: '보내는분전화번호',            field: 'senderPhone',              width: 14, required: false, fixedValue: '070-7525-7771' },
+  { header: '보내는분주소(전체? 분할)',    field: 'senderAddress',            width: 40, required: false, fixedValue: '경기 광주시 직동로 8(직동) 물류창고' },
   { header: '상품코드',                    field: 'productCode',              width: 14, required: false },
   { header: '쇼핑몰 상품코드',             field: 'marketProductCode',        width: 14, required: false },
   { header: '쇼핑몰 주문번호',             field: 'marketplaceOrderId',       width: 20, required: false },

@@ -47,6 +47,8 @@ export interface CarrierTemplateColumn {
   field: string
   width: number
   required: boolean
+  /** 고정 출력값 — 설정 시 모든 행에 동일하게 채워진다 (field 매핑보다 우선) */
+  fixedValue?: string
 }
 
 /** Excel export 양식 — 택배사 종속이 선택사항. */

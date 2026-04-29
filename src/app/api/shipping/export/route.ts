@@ -81,12 +81,8 @@ export async function GET(request: NextRequest) {
     const productMap = new Map(productRows.map((p) => [p.sku, p.location]))
     const inventoryMap = new Map(inventoryRows.map((i) => [i.sku, i.stock]))
 
-    // 셀러 고정값 (CJ대한통운 발주서 양식 기준 — 추후 settings 테이블로 분리 가능)
-    const FIXED_SENDER_PHONE = '070-7525-7771'
-    const FIXED_SENDER_ADDRESS = '경기 광주시 직동로 8(직동) 물류창고'
-    const FIXED_BOX_COUNT = 1
-    const FIXED_FREIGHT_TYPE = 3
-    const FIXED_BASE_FREIGHT = 1850
+    // 셀러 고정값은 이제 carrier_templates.columns[].fixedValue 로 관리
+    // (boxCount, freightType, baseFreight, senderPhone, senderAddress 등)
 
     // Build flat order records for export
     const exportData: Record<string, unknown>[] = orderRows.map((order) => {
@@ -135,11 +131,6 @@ export async function GET(request: NextRequest) {
         stock: sku ? inventoryMap.get(sku) ?? '' : '',
         location: sku ? productMap.get(sku) ?? '' : '',
         senderName: order.connectionId ? connectionMap.get(order.connectionId) ?? '' : '',
-        senderPhone: FIXED_SENDER_PHONE,
-        senderAddress: FIXED_SENDER_ADDRESS,
-        boxCount: FIXED_BOX_COUNT,
-        freightType: FIXED_FREIGHT_TYPE,
-        baseFreight: FIXED_BASE_FREIGHT,
       }
     })
 

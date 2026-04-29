@@ -114,7 +114,7 @@ export function TemplateClient({
         {/* Column builder */}
         <div>
           <label className="mb-2 block text-sm font-medium">
-            열 구성 <span className="text-xs text-muted-foreground">(헤더와 너비를 자유롭게 수정 가능)</span>
+            열 구성 <span className="text-xs text-muted-foreground">(헤더와 출력내용을 자유롭게 수정 가능 — 출력내용에 값을 넣으면 모든 행에 고정값이 채워집니다)</span>
           </label>
 
           {/* Add column */}
@@ -139,20 +139,20 @@ export function TemplateClient({
             </button>
           </div>
 
-          {/* Column list — header text & width 인라인 편집 */}
+          {/* Column list — header text & 출력내용(고정값) 인라인 편집 */}
           {columns.length > 0 && (
             <div className="overflow-hidden rounded-md border">
-              <div className="grid grid-cols-[2rem_1fr_8rem_5rem_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="grid grid-cols-[2rem_1fr_8rem_1fr_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <span>#</span>
                 <span>헤더 (Excel 표시 텍스트)</span>
                 <span>필드</span>
-                <span>너비</span>
+                <span>출력내용 <span className="normal-case text-[10px] text-muted-foreground/80">(비우면 자동, 입력 시 모든 행에 고정)</span></span>
                 <span className="text-right">동작</span>
               </div>
               {columns.map((col, idx) => (
                 <div
                   key={idx}
-                  className="grid grid-cols-[2rem_1fr_8rem_5rem_6rem] items-center gap-2 border-b px-3 py-1.5 last:border-b-0"
+                  className="grid grid-cols-[2rem_1fr_8rem_1fr_6rem] items-center gap-2 border-b px-3 py-1.5 last:border-b-0"
                 >
                   <span className="text-center text-xs text-muted-foreground">{idx + 1}</span>
                   <input
@@ -165,11 +165,10 @@ export function TemplateClient({
                     {col.field}
                   </span>
                   <input
-                    type="number"
-                    min={5}
-                    max={100}
-                    value={col.width}
-                    onChange={(e) => updateColumn(idx, { width: Number(e.target.value) || 15 })}
+                    type="text"
+                    value={col.fixedValue ?? ''}
+                    onChange={(e) => updateColumn(idx, { fixedValue: e.target.value })}
+                    placeholder="자동 (필드값 사용)"
                     className="rounded border px-2 py-1 text-sm"
                   />
                   <div className="flex items-center justify-end gap-1">

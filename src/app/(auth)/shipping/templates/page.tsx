@@ -145,7 +145,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                     <tr>
                       <th className="px-3 py-1.5 text-left font-medium">헤더</th>
                       <th className="px-3 py-1.5 text-left font-medium">필드</th>
-                      <th className="px-3 py-1.5 text-left font-medium">너비</th>
+                      <th className="px-3 py-1.5 text-left font-medium">출력내용</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -153,7 +153,11 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                       <tr key={idx} className="border-t">
                         <td className="px-3 py-1.5">{col.header}</td>
                         <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{col.field}</td>
-                        <td className="px-3 py-1.5">{col.width}</td>
+                        <td className="px-3 py-1.5 text-xs">
+                          {col.fixedValue
+                            ? <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">{col.fixedValue}</span>
+                            : <span className="text-muted-foreground">자동</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -55,6 +55,8 @@ export const AVAILABLE_ORDER_FIELDS: OrderFieldDef[] = [
   { field: 'costPrice', label: '원가' },
   { field: 'collectedAt', label: '수집일자(yyyy-mm-dd)' },
   { field: 'collectedOption', label: '옵션(수집)' },
+  { field: 'pickingLocation', label: 'Location' },
+  { field: 'packaging', label: '포장' },
   { field: 'etc1', label: '기타1' },
   { field: 'etc2', label: '기타2' },
   { field: 'etc3', label: '기타3' },

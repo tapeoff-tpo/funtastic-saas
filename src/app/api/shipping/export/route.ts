@@ -73,13 +73,20 @@ export async function GET(request: NextRequest) {
             .from(products)
             .where(and(eq(products.userId, user.id), inArray(products.internalSku, skuSet))),
           db
-            .select({ sku: inventory.sku, stock: inventory.availableStock })
+            .select({
+              sku: inventory.sku,
+              stock: inventory.availableStock,
+              sectorCode: inventory.sectorCode,
+              packagingUnit: inventory.packagingUnit,
+            })
             .from(inventory)
             .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skuSet))),
         ])
       : [[], []]
     const productMap = new Map(productRows.map((p) => [p.sku, { location: p.location, costPrice: p.costPrice }]))
-    const inventoryMap = new Map(inventoryRows.map((i) => [i.sku, i.stock]))
+    const inventoryMap = new Map(
+      inventoryRows.map((i) => [i.sku, { stock: i.stock, sectorCode: i.sectorCode, packagingUnit: i.packagingUnit }]),
+    )
 
     // 셀러 고정값은 이제 carrier_templates.columns[].fixedValue 로 관리
     // (boxCount, freightType, baseFreight, senderPhone, senderAddress 등)
@@ -130,9 +137,13 @@ export async function GET(request: NextRequest) {
         productPlusOption: optionText ? `${productName} [${optionText}]` : productName,
         collectedProductName: rawFirst?.productName ?? '',
         collectedOption: rawFirst?.optionText ?? '',
-        stock: sku ? inventoryMap.get(sku) ?? '' : '',
+        stock: sku ? inventoryMap.get(sku)?.stock ?? '' : '',
         location: sku ? productMap.get(sku)?.location ?? '' : '',
         costPrice: sku ? productMap.get(sku)?.costPrice ?? '' : '',
+        // 피킹위치 (inventory.sectorCode) — 출력항목 'Location'
+        pickingLocation: sku ? inventoryMap.get(sku)?.sectorCode ?? '' : '',
+        // 포장 박스 종류 (inventory.packagingUnit) — 출력항목 '포장'
+        packaging: sku ? inventoryMap.get(sku)?.packagingUnit ?? '' : '',
         senderName: order.connectionId ? connectionMap.get(order.connectionId) ?? '' : '',
         // ─ DB 컬럼 미존재 — 사용자가 fixedValue 로 채우거나 비워둠 ─
         recipientPhone2: '',

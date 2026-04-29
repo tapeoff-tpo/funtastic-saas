@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     { header: '상품코드', key: 'sku', width: 18 },
     { header: '상품명', key: 'productName', width: 32 },
     { header: '옵션명', key: 'optionName', width: 20 },
-    { header: '박스단위', key: 'packagingUnit', width: 14 },
+    { header: '포장', key: 'packagingUnit', width: 14 },
     { header: '창고', key: 'warehouseZone', width: 10 },
     { header: '피킹위치', key: 'sectorCode', width: 14 },
     { header: '현재고(총)', key: 'totalStock', width: 10 },

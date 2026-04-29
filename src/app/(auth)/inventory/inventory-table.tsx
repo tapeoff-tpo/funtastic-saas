@@ -270,7 +270,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
       },
     }),
     columnHelper.accessor('packagingUnit', {
-      header: '박스단위',
+      header: '포장',
       cell: (info) => {
         const val = info.getValue()
         return val ? <span className="text-xs text-muted-foreground">{val}</span> : '-'

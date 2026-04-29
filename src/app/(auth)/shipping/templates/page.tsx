@@ -101,9 +101,24 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
       ) : (
         <div className="space-y-4">
           {templates.map((template) => (
-            <div key={template.id} className="rounded-lg border bg-white p-4">
-              <div className="mb-3 flex items-center justify-between">
+            <details
+              key={template.id}
+              className="group rounded-lg border bg-white open:shadow-sm"
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 hover:bg-muted/30">
                 <div className="flex items-center gap-2">
+                  <svg
+                    className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M7.21 14.77a.75.75 0 0 1 .02-1.06L10.94 10 7.23 6.29a.75.75 0 1 1 1.04-1.08l4.25 4.25a.75.75 0 0 1 0 1.08l-4.25 4.25a.75.75 0 0 1-1.06-.02Z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
                   <h3 className="font-medium">{template.name}</h3>
                   {template.carrierId && (
                     <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground" title="이 양식은 택배사에 연결됨">
@@ -136,10 +151,10 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                     </button>
                   </form>
                 </div>
-              </div>
+              </summary>
 
               {/* Column list */}
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto border-t">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
@@ -163,7 +178,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                   </tbody>
                 </table>
               </div>
-            </div>
+            </details>
           ))}
         </div>
       )}

@@ -426,10 +426,10 @@ export const columns: ColumnDef<OrderRow>[] = [
           </button>
           <div className="flex items-center gap-1.5">
             <span
-              className="font-mono text-[10px] text-muted-foreground break-all"
+              className="font-mono text-[10px] text-muted-foreground"
               title={order.id}
             >
-              #{order.id}
+              #{order.id.slice(0, 8)}
             </span>
             <CopyOrderButton orderId={order.id} />
             {order.isCopy && (

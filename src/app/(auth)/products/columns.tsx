@@ -58,9 +58,12 @@ export const columns: ColumnDef<ProductRow>[] = [
     accessorKey: 'internalSku',
     header: '상품코드',
     cell: ({ row }) => (
-      <span className="font-mono text-sm">
+      <a
+        href={`/products/${row.original.id}`}
+        className="font-mono text-sm text-blue-600 hover:underline"
+      >
         {row.getValue('internalSku')}
-      </span>
+      </a>
     ),
     size: 140,
   },
@@ -69,9 +72,13 @@ export const columns: ColumnDef<ProductRow>[] = [
     accessorKey: 'name',
     header: '상품명',
     cell: ({ row }) => (
-      <div className="max-w-[300px] truncate" title={row.getValue('name')}>
+      <a
+        href={`/products/${row.original.id}`}
+        className="block max-w-[300px] truncate text-blue-600 hover:underline"
+        title={row.getValue('name')}
+      >
         {row.getValue('name')}
-      </div>
+      </a>
     ),
     size: 300,
   },

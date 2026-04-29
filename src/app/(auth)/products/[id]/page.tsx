@@ -23,6 +23,9 @@ const FIELD_LABELS: Record<string, string> = {
   internal_sku: '상품코드',
   base_price: '판매가',
   cost_price: '원가',
+  shipping_cost: '배송비',
+  warehouse_location: '창고위치',
+  manage_inventory: '재고관리',
   description: '설명',
   category_id: '카테고리',
 }
@@ -44,6 +47,9 @@ export default function EditProductPage() {
   const [description, setDescription] = useState('')
   const [basePrice, setBasePrice] = useState('')
   const [costPrice, setCostPrice] = useState('')
+  const [shippingCost, setShippingCost] = useState('')
+  const [warehouseLocation, setWarehouseLocation] = useState('')
+  const [manageInventory, setManageInventory] = useState(false)
   const [categoryId, setCategoryId] = useState('')
   const [defaultCarrierId, setDefaultCarrierId] = useState('')
   const [variants, setVariants] = useState<VariantFormData[]>([])
@@ -71,6 +77,9 @@ export default function EditProductPage() {
       setDescription(data.description ?? '')
       setBasePrice(data.basePrice)
       setCostPrice(data.costPrice ?? '')
+      setShippingCost(data.shippingCost ?? '')
+      setWarehouseLocation(data.warehouseLocation ?? '')
+      setManageInventory(data.manageInventory)
       setCategoryId(data.categoryId ?? '')
       setDefaultCarrierId(data.defaultCarrierId ?? '')
       setVariants(
@@ -138,6 +147,9 @@ export default function EditProductPage() {
         description: description.trim() || undefined,
         basePrice: Number(basePrice),
         costPrice: costPrice ? Number(costPrice) : undefined,
+        shippingCost: shippingCost ? Number(shippingCost) : undefined,
+        warehouseLocation: warehouseLocation.trim() || undefined,
+        manageInventory,
         categoryId: categoryId || undefined,
         defaultCarrierId: defaultCarrierId || undefined,
         variants: variants.map((v) => ({
@@ -260,7 +272,7 @@ export default function EditProductPage() {
             />
           </div>
 
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-3 gap-4">
             <div className="flex flex-col gap-1">
               <label htmlFor="basePrice" className="text-sm font-medium">판매가 *</label>
               <input
@@ -282,6 +294,28 @@ export default function EditProductPage() {
                 onChange={(e) => setCostPrice(e.target.value)}
                 className="rounded-md border px-3 py-1.5 text-sm"
                 min="0"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="shippingCost" className="text-sm font-medium">배송비</label>
+              <input
+                id="shippingCost"
+                type="number"
+                value={shippingCost}
+                onChange={(e) => setShippingCost(e.target.value)}
+                className="rounded-md border px-3 py-1.5 text-sm"
+                min="0"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="warehouseLocation" className="text-sm font-medium">창고위치</label>
+              <input
+                id="warehouseLocation"
+                type="text"
+                value={warehouseLocation}
+                onChange={(e) => setWarehouseLocation(e.target.value)}
+                placeholder="A-3-2"
+                className="rounded-md border px-3 py-1.5 text-sm"
               />
             </div>
             <div className="flex flex-col gap-1">
@@ -310,6 +344,19 @@ export default function EditProductPage() {
               </select>
             </div>
           </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={manageInventory}
+              onChange={(e) => setManageInventory(e.target.checked)}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            <span className="font-medium">재고관리용으로 사용</span>
+            <span className="text-xs text-muted-foreground">
+              체크 시 재고관리 페이지에 노출되고 입출고 추적 대상이 됩니다.
+            </span>
+          </label>
         </div>
 
         {/* Variant builder */}

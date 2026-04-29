@@ -316,6 +316,8 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
               costPrice: r.costPrice ?? null,
               warehouseLocation: location,
               defaultCarrierId: r.carrierId ?? null,
+              // 재고관리 엑셀 업로드로 들어온 상품은 자동으로 재고관리 대상
+              manageInventory: true,
               status: 'active' as const,
             }
           }),
@@ -327,6 +329,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
             warehouseLocation: sql`excluded.warehouse_location`,
             costPrice: sql`excluded.cost_price`,
             basePrice: sql`excluded.base_price`,
+            manageInventory: sql`true`,
             defaultCarrierId: sql`excluded.default_carrier_id`,
             updatedAt: new Date(),
           },

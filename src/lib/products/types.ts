@@ -24,6 +24,8 @@ export interface Product {
   costPrice: string | null
   warehouseLocation: string | null
   defaultCarrierId: string | null
+  shippingCost: string | null
+  manageInventory: boolean
   categoryId: string | null
   status: ProductStatus
   images: ProductImage[] | null
@@ -79,6 +81,9 @@ export interface ProductFormData {
   internalSku: string
   basePrice: number
   costPrice?: number
+  shippingCost?: number
+  warehouseLocation?: string
+  manageInventory?: boolean
   categoryId?: string
   defaultCarrierId?: string
   images?: ProductImage[]

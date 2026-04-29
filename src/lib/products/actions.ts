@@ -105,6 +105,9 @@ export async function updateProduct(
         { field: 'internal_sku', old: existing.internalSku, new: formData.internalSku },
         { field: 'base_price', old: existing.basePrice, new: String(formData.basePrice) },
         { field: 'cost_price', old: existing.costPrice, new: formData.costPrice != null ? String(formData.costPrice) : null },
+        { field: 'shipping_cost', old: existing.shippingCost, new: formData.shippingCost != null ? String(formData.shippingCost) : null },
+        { field: 'warehouse_location', old: existing.warehouseLocation, new: formData.warehouseLocation ?? null },
+        { field: 'manage_inventory', old: String(existing.manageInventory), new: String(formData.manageInventory ?? existing.manageInventory) },
         { field: 'category_id', old: existing.categoryId, new: formData.categoryId ?? null },
       ]
       const changes = fieldsToTrack
@@ -123,6 +126,9 @@ export async function updateProduct(
           description: formData.description ?? null,
           basePrice: String(formData.basePrice),
           costPrice: formData.costPrice != null ? String(formData.costPrice) : null,
+          shippingCost: formData.shippingCost != null ? String(formData.shippingCost) : null,
+          warehouseLocation: formData.warehouseLocation ?? null,
+          manageInventory: formData.manageInventory ?? existing.manageInventory,
           categoryId: formData.categoryId ?? null,
           defaultCarrierId: formData.defaultCarrierId ?? null,
           images: formData.images ?? null,
@@ -188,11 +194,19 @@ export async function updateProduct(
         }
       }
 
-      return newVariantSkus
-    }).then(async (newSkus) => {
+      return { newVariantSkus, manageInventory: formData.manageInventory ?? existing.manageInventory }
+    }).then(async ({ newVariantSkus, manageInventory }) => {
       // Create inventory records for new variants
-      for (const sku of newSkus) {
+      for (const sku of newVariantSkus) {
         await setStock(userId, sku, formData.name, 0)
+      }
+      // 재고관리 대상으로 토글된 경우, 메인 SKU 의 inventory 행이 없으면 자동 생성
+      if (manageInventory) {
+        const { getInventoryBySku } = await import('@/lib/inventory/queries')
+        const existingRow = await getInventoryBySku(userId, formData.internalSku)
+        if (!existingRow) {
+          await setStock(userId, formData.internalSku, formData.name, 0)
+        }
       }
     })
 

@@ -28,6 +28,8 @@ export async function getInventoryList(
   const conditions: SQL[] = [
     eq(products.userId, userId),
     ne(products.status, 'deleted'),
+    // 재고관리 대상으로 체크된 상품만 노출 (migration 023)
+    eq(products.manageInventory, true),
   ]
 
   if (filters.search) {

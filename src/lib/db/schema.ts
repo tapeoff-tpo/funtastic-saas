@@ -428,6 +428,8 @@ export const products = pgTable(
     defaultCarrierId: varchar('default_carrier_id', { length: 50 }),
     /** SaaS 등록 배송비(원가) — 재고관리에서 수동 입력. NULL 허용. (Phase 8 / migration 012) */
     shippingCost: numeric('shipping_cost', { precision: 12, scale: 2 }),
+    /** 재고관리 대상 여부. TRUE 인 상품만 재고관리 페이지에 노출/추적. (migration 023) */
+    manageInventory: boolean('manage_inventory').notNull().default(false),
     status: productStatusEnum('status').notNull().default('draft'),
     images: jsonb('images').$type<Array<{ url: string; sortOrder: number }>>(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),

@@ -63,21 +63,25 @@ export default async function OrderDetailPage({
     | null
 
   // 매핑자/스캔자 사용자 ID 모음 → 이름 일괄 조회
+  // 신규 컬럼이라 기존 데이터가 없는 주문은 scanLogs/shipments 가 비어 있을 수 있음 → 방어적 fallback
+  const scanLogList = (order as { scanLogs?: typeof order.scanLogs }).scanLogs ?? []
+  const shipmentList = (order as { shipments?: typeof order.shipments }).shipments ?? []
+  const claimList = (order as { claims?: typeof order.claims }).claims ?? []
   const userIds = [
     order.mappedByUserId ?? null,
-    ...order.scanLogs.map((s) => s.userId),
+    ...scanLogList.map((s) => s.userId),
   ].filter((x): x is string => Boolean(x))
   const userNames = userIds.length > 0 ? await getUserDisplayNames(userIds) : new Map<string, string>()
   const mapperName = order.mappedByUserId ? userNames.get(order.mappedByUserId) ?? null : null
 
   // 클레임에서 가장 이른 접수일 / 가장 최근 완료일
-  const claimRequestedAt = order.claims.length > 0
-    ? order.claims.reduce<Date | null>((min, c) => {
+  const claimRequestedAt = claimList.length > 0
+    ? claimList.reduce<Date | null>((min, c) => {
         const t = new Date(c.requestedAt)
         return !min || t < min ? t : min
       }, null)
     : null
-  const completedClaims = order.claims.filter((c) => c.claimStatus === 'completed')
+  const completedClaims = claimList.filter((c) => c.claimStatus === 'completed')
   const claimCompletedAt = completedClaims.length > 0
     ? completedClaims.reduce<Date | null>((max, c) => {
         const t = new Date(c.updatedAt)
@@ -269,11 +273,11 @@ export default async function OrderDetailPage({
           {/* 송장정보 */}
           <section className="rounded-lg border bg-white p-5">
             <h2 className="mb-3 text-lg font-semibold">송장정보</h2>
-            {order.shipments.length === 0 ? (
+            {shipmentList.length === 0 ? (
               <p className="text-sm text-muted-foreground">등록된 송장이 없습니다.</p>
             ) : (
               <ul className="space-y-2 text-sm">
-                {order.shipments.map((s) => (
+                {shipmentList.map((s) => (
                   <li key={s.id} className="flex items-center justify-between gap-4 rounded border bg-gray-50 px-3 py-2">
                     <div className="flex items-center gap-3">
                       <span className="font-medium">{s.carrierName}</span>
@@ -289,11 +293,11 @@ export default async function OrderDetailPage({
           </section>
 
           {/* 클레임 */}
-          {order.claims.length > 0 && (
+          {claimList.length > 0 && (
             <section className="rounded-lg border bg-white p-5">
               <h2 className="mb-3 text-lg font-semibold">클레임</h2>
               <ClaimList
-                claims={order.claims.map((c) => ({
+                claims={claimList.map((c) => ({
                   id: c.id,
                   claimType: c.claimType,
                   claimStatus: c.claimStatus,
@@ -309,13 +313,13 @@ export default async function OrderDetailPage({
           {/* 바코드 스캔 여부 — 가장 하단 */}
           <section className="rounded-lg border bg-white p-5">
             <h2 className="mb-3 text-lg font-semibold">바코드 스캔 여부</h2>
-            {order.scanLogs.length === 0 ? (
+            {scanLogList.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 스캔 이력이 없습니다.
               </p>
             ) : (
               <ul className="space-y-2 text-sm">
-                {order.scanLogs.map((log) => {
+                {scanLogList.map((log) => {
                   // 정상=Y-Y, 비정상/중복=Y-N (스캔 자체는 완료되었으나 정상 처리 X)
                   const code = log.status === 'ok' ? 'Y-Y' : 'Y-N'
                   const colorClass =

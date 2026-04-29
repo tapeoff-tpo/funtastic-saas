@@ -85,7 +85,7 @@ export default async function HeldShipmentsPage() {
                   마켓
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-medium text-muted-foreground">
-                  주문번호
+                  마켓 주문번호
                 </th>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-medium text-muted-foreground">
                   수령인

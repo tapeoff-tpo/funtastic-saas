@@ -135,7 +135,7 @@ export function ExcelImportDialog({
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label htmlFor="order-col" className="mb-1 block text-sm font-medium">
-                주문번호 열
+                마켓 주문번호 열
               </label>
               <select
                 id="order-col"
@@ -217,7 +217,7 @@ export function ExcelImportDialog({
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
                       <tr>
-                        <th className="px-3 py-1.5 text-left font-medium">주문번호</th>
+                        <th className="px-3 py-1.5 text-left font-medium">마켓 주문번호</th>
                         <th className="px-3 py-1.5 text-left font-medium">송장번호</th>
                         <th className="px-3 py-1.5 text-left font-medium">택배사</th>
                       </tr>

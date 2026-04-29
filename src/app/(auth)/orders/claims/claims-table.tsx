@@ -179,7 +179,7 @@ export function ClaimsTable({ claims, total, page, pageSize }: ClaimsTableProps)
           <thead className="bg-gray-50 text-xs font-medium text-gray-500 uppercase tracking-wide">
             <tr>
               <th className="px-3 py-3">마켓</th>
-              <th className="px-3 py-3">주문번호</th>
+              <th className="px-3 py-3">마켓 주문번호</th>
               <th className="px-3 py-3">구매자</th>
               <th className="px-3 py-3">상품명</th>
               <th className="px-3 py-3">클레임유형</th>

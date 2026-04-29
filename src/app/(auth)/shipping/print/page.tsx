@@ -166,7 +166,7 @@ export default async function PrintPage({
 
               {/* Order ID */}
               <div className="border-t pt-2 text-xs text-gray-400">
-                주문번호: {label.marketplaceOrderId}
+                마켓 주문번호: {label.marketplaceOrderId}
               </div>
             </div>
           ))}

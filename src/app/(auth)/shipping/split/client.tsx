@@ -51,7 +51,7 @@ export function SplitShippingClient() {
   const handleSearch = async () => {
     const q = orderQuery.trim()
     if (!q) {
-      toast.error('주문번호 또는 주문ID를 입력하세요')
+      toast.error('마켓 주문번호 또는 내부 주문번호를 입력하세요')
       return
     }
     setSearching(true)
@@ -145,7 +145,7 @@ export function SplitShippingClient() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') void handleSearch()
             }}
-            placeholder="마켓 주문번호 또는 주문 ID"
+            placeholder="마켓 주문번호 또는 내부 주문번호"
             className="flex-1 rounded-md border px-3 py-2 text-sm"
           />
           <button
@@ -164,7 +164,7 @@ export function SplitShippingClient() {
         <div className="rounded-lg border bg-white p-4">
           <div className="mb-3 grid grid-cols-3 gap-4 text-sm">
             <div>
-              <div className="text-xs text-muted-foreground">주문번호</div>
+              <div className="text-xs text-muted-foreground">마켓 주문번호</div>
               <div className="font-mono">{order.marketplaceOrderId}</div>
             </div>
             <div>

@@ -12,6 +12,7 @@
 import { db } from '@/lib/db'
 import { mappingSources, mappingComponents, inventory } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
+import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
 
 export type ExpandedRow = {
   /** 원본 orderItem id (참조용) */
@@ -74,44 +75,52 @@ export async function expandOrderItemsWithMapping(
 
   const orderById = new Map(orders.map((o) => [o.id, o]))
 
-  // 매핑 lookup 키 수집: (marketplaceId, marketplaceItemId)
-  const sourceKeys = new Set<string>()
-  for (const it of items) {
-    if (!it.marketplaceItemId) continue
-    const ord = orderById.get(it.orderId)
-    if (!ord) continue
-    sourceKeys.add(`${ord.marketplaceId}:${it.marketplaceItemId}`)
+  // mapping_sources + components join (userId 스코프) — 사방넷 품번/단품 둘 다.
+  const mappingRows = await db
+    .select({
+      mappingCodeId: mappingSources.mappingCodeId,
+      marketplaceId: mappingSources.marketplaceId,
+      marketplaceProductId: mappingSources.marketplaceProductId,
+      marketplaceOptionId: mappingSources.marketplaceOptionId,
+      componentSku: mappingComponents.sku,
+      componentQuantity: mappingComponents.quantity,
+    })
+    .from(mappingSources)
+    .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
+    .where(eq(mappingSources.userId, userId))
+
+  // mappingCodeId 별 components 모음 (중복 제거)
+  const componentsByCode = new Map<string, Array<{ sku: string; quantity: number }>>()
+  for (const m of mappingRows) {
+    const list = componentsByCode.get(m.mappingCodeId) ?? []
+    if (!list.some((c) => c.sku === m.componentSku && c.quantity === m.componentQuantity)) {
+      list.push({ sku: m.componentSku, quantity: m.componentQuantity })
+    }
+    componentsByCode.set(m.mappingCodeId, list)
   }
 
-  // mapping_sources + components join (userId 스코프)
-  const mappingRows = sourceKeys.size > 0
-    ? await db
-        .select({
-          marketplaceId: mappingSources.marketplaceId,
-          marketplaceProductId: mappingSources.marketplaceProductId,
-          componentSku: mappingComponents.sku,
-          componentQuantity: mappingComponents.quantity,
-        })
-        .from(mappingSources)
-        .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
-        .where(eq(mappingSources.userId, userId))
-    : []
-
-  const mappingByKey = new Map<string, Array<{ sku: string; quantity: number }>>()
-  for (const row of mappingRows) {
-    const key = `${row.marketplaceId}:${row.marketplaceProductId}`
-    if (!sourceKeys.has(key)) continue
-    const list = mappingByKey.get(key) ?? []
-    list.push({ sku: row.componentSku, quantity: row.componentQuantity })
-    mappingByKey.set(key, list)
+  // sources index (단품/품번 매칭)
+  const sourcesForIndex: MappingSource[] = []
+  const seenSrc = new Set<string>()
+  for (const m of mappingRows) {
+    const key = `${m.marketplaceId}:${m.marketplaceProductId}:${m.marketplaceOptionId}`
+    if (seenSrc.has(key)) continue
+    seenSrc.add(key)
+    sourcesForIndex.push({
+      marketplaceId: m.marketplaceId,
+      marketplaceProductId: m.marketplaceProductId,
+      marketplaceOptionId: m.marketplaceOptionId,
+      ref: m.mappingCodeId,
+    })
   }
+  const mappingIndex = buildMappingIndex(sourcesForIndex)
 
   // 출력 SKU 모두 모아서 inventory 메타 한번에 lookup
   const allSkus = new Set<string>()
   for (const it of items) {
     if (it.sku) allSkus.add(it.sku)
   }
-  for (const list of mappingByKey.values()) {
+  for (const list of componentsByCode.values()) {
     for (const c of list) allSkus.add(c.sku)
   }
 
@@ -132,10 +141,10 @@ export async function expandOrderItemsWithMapping(
   for (const it of items) {
     const ord = orderById.get(it.orderId)
     const orderQty = it.quantity * (it.skuMultiplier ?? 1)
-    const key = it.marketplaceItemId && ord
-      ? `${ord.marketplaceId}:${it.marketplaceItemId}`
+    const mappingCodeId = it.marketplaceItemId && ord
+      ? lookupMappingRef(mappingIndex, ord.marketplaceId, it.marketplaceItemId)
       : null
-    const components = key ? mappingByKey.get(key) : null
+    const components = mappingCodeId ? componentsByCode.get(mappingCodeId) : null
 
     if (components && components.length > 0) {
       for (const c of components) {

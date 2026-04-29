@@ -32,7 +32,11 @@ interface UnmappedItem {
   lastSeenAt: string | null
 }
 
+type SourceMode = 'product' | 'option'  // 품번매핑 / 단품매핑
+
 interface SourceForm {
+  /** 'product' = 품번매핑(option_id=''), 'option' = 단품매핑(option_id 따로 입력) */
+  mode: SourceMode
   marketplaceId: string
   marketplaceProductId: string
   marketplaceOptionId: string
@@ -88,14 +92,23 @@ export function MappingManager() {
     return c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
   })
 
-  async function openCreate(prefillSource?: UnmappedItem) {
+  async function openCreate(prefillSource?: UnmappedItem, prefillMode: SourceMode = 'option') {
     const form = emptyForm()
     if (prefillSource) {
       form.name = prefillSource.productName ?? ''
+      // marketplaceItemId 가 `{prod}-{opt}` 형태면 split, 아니면 그대로 productId 로 사용
+      const id = prefillSource.marketplaceItemId
+      const sepIdx = id.indexOf('-')
+      const split = prefillMode === 'option' && sepIdx > 0
+        ? { product: id.slice(0, sepIdx), option: id.slice(sepIdx + 1) }
+        : prefillMode === 'product' && sepIdx > 0
+          ? { product: id.slice(0, sepIdx), option: '' }
+          : { product: id, option: '' }
       form.sources.push({
+        mode: split.option ? 'option' : 'product',
         marketplaceId: prefillSource.marketplaceId,
-        marketplaceProductId: prefillSource.marketplaceItemId,
-        marketplaceOptionId: '',
+        marketplaceProductId: split.product,
+        marketplaceOptionId: split.option,
         productNameSnapshot: prefillSource.productName ?? '',
         optionNameSnapshot: prefillSource.optionText ?? '',
       })
@@ -117,6 +130,7 @@ export function MappingManager() {
         marketplaceId: string; marketplaceProductId: string; marketplaceOptionId: string
         productNameSnapshot: string | null; optionNameSnapshot: string | null
       }) => ({
+        mode: (s.marketplaceOptionId ? 'option' : 'product') as SourceMode,
         marketplaceId: s.marketplaceId,
         marketplaceProductId: s.marketplaceProductId,
         marketplaceOptionId: s.marketplaceOptionId ?? '',
@@ -155,7 +169,8 @@ export function MappingManager() {
           sources: editing.sources.filter((s) => s.marketplaceId && s.marketplaceProductId).map((s) => ({
             marketplaceId: s.marketplaceId,
             marketplaceProductId: s.marketplaceProductId.trim(),
-            marketplaceOptionId: s.marketplaceOptionId.trim(),
+            // mode === 'product' 이면 option_id 강제 비움 (품번매핑)
+            marketplaceOptionId: s.mode === 'option' ? s.marketplaceOptionId.trim() : '',
             productNameSnapshot: s.productNameSnapshot.trim() || null,
             optionNameSnapshot: s.optionNameSnapshot.trim() || null,
           })),
@@ -270,28 +285,55 @@ export function MappingManager() {
               <div className="py-6 text-center text-xs text-muted-foreground">불러오는 중...</div>
             ) : unmapped.length === 0 ? (
               <div className="py-6 text-center text-xs text-muted-foreground">미매핑 항목 없음</div>
-            ) : unmapped.map((u) => (
-              <button
-                key={`${u.marketplaceId}:${u.marketplaceItemId}`}
-                type="button"
-                onClick={() => void openCreate(u)}
-                className="block w-full border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/40"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium">
-                    {marketLabel(u.marketplaceId)}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">{u.occurrences}건</span>
+            ) : unmapped.map((u) => {
+              const sepIdx = u.marketplaceItemId.indexOf('-')
+              const hasOptionPart = sepIdx > 0
+              const productPart = hasOptionPart ? u.marketplaceItemId.slice(0, sepIdx) : u.marketplaceItemId
+              const optionPart = hasOptionPart ? u.marketplaceItemId.slice(sepIdx + 1) : ''
+              return (
+                <div
+                  key={`${u.marketplaceId}:${u.marketplaceItemId}`}
+                  className="block w-full border-b px-3 py-2 last:border-b-0 hover:bg-muted/40"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-block rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium">
+                      {marketLabel(u.marketplaceId)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">{u.occurrences}건</span>
+                  </div>
+                  <div className="mt-1 truncate text-xs">{u.productName ?? '(이름 없음)'}</div>
+                  {u.optionText && (
+                    <div className="truncate text-[10px] text-muted-foreground">{u.optionText}</div>
+                  )}
+                  <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
+                    {u.marketplaceItemId}
+                    {hasOptionPart && (
+                      <span className="ml-1 text-[10px] text-muted-foreground/70">
+                        (품번 <strong>{productPart}</strong> / 단품 <strong>{optionPart}</strong>)
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1.5 flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => void openCreate(u, 'product')}
+                      className="rounded border bg-background px-2 py-0.5 text-[10px] hover:bg-muted"
+                      title={hasOptionPart ? `품번 ${productPart} 으로 매핑 (모든 옵션)` : `${u.marketplaceItemId} 품번매핑`}
+                    >
+                      + 품번매핑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void openCreate(u, 'option')}
+                      className="rounded border bg-background px-2 py-0.5 text-[10px] hover:bg-muted"
+                      title={hasOptionPart ? `단품 ${u.marketplaceItemId} 만 매핑` : '단품매핑 — 코드 분리 필요'}
+                    >
+                      + 단품매핑
+                    </button>
+                  </div>
                 </div>
-                <div className="mt-1 truncate text-xs">{u.productName ?? '(이름 없음)'}</div>
-                {u.optionText && (
-                  <div className="truncate text-[10px] text-muted-foreground">{u.optionText}</div>
-                )}
-                <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">
-                  {u.marketplaceItemId}
-                </div>
-              </button>
-            ))}
+              )
+            })}
           </div>
         </div>
       </div>
@@ -378,72 +420,128 @@ function EditDialog({ state, onChange, onClose, onSave, saving }: DialogProps) {
           <div>
             <div className="mb-1.5 flex items-center justify-between">
               <label className="text-sm font-medium">마켓상품 ({state.sources.length})</label>
-              <button
-                type="button"
-                onClick={() => onChange({
-                  ...state,
-                  sources: [...state.sources, {
-                    marketplaceId: '', marketplaceProductId: '', marketplaceOptionId: '',
-                    productNameSnapshot: '', optionNameSnapshot: '',
-                  }],
-                })}
-                className="text-xs text-blue-600 hover:underline"
-              >
-                + 행 추가
-              </button>
+              <div className="flex gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => onChange({
+                    ...state,
+                    sources: [...state.sources, {
+                      mode: 'product',
+                      marketplaceId: '', marketplaceProductId: '', marketplaceOptionId: '',
+                      productNameSnapshot: '', optionNameSnapshot: '',
+                    }],
+                  })}
+                  className="text-blue-600 hover:underline"
+                >
+                  + 품번매핑
+                </button>
+                <span className="text-muted-foreground">|</span>
+                <button
+                  type="button"
+                  onClick={() => onChange({
+                    ...state,
+                    sources: [...state.sources, {
+                      mode: 'option',
+                      marketplaceId: '', marketplaceProductId: '', marketplaceOptionId: '',
+                      productNameSnapshot: '', optionNameSnapshot: '',
+                    }],
+                  })}
+                  className="text-blue-600 hover:underline"
+                >
+                  + 단품매핑
+                </button>
+              </div>
             </div>
-            <div className="space-y-1">
+            <div className="rounded-md bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+              <strong>품번매핑</strong>: 상품ID 만 입력 — 그 품번 아래 모든 옵션이 자동 매핑.
+              <strong> 단품매핑</strong>: 상품ID + 단품코드 — 특정 옵션만 매핑 (단품매핑이 품번매핑보다 우선).
+              예) 마켓 상품코드가 <code>111924-0001</code> 이면 품번 = <code>111924</code>, 단품 = <code>0001</code>.
+            </div>
+            <div className="space-y-1 mt-1">
               {state.sources.length === 0 && (
                 <div className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
                   마켓상품을 추가하지 않으면 자동매핑이 동작하지 않습니다
                 </div>
               )}
               {state.sources.map((s, idx) => (
-                <div key={idx} className="grid grid-cols-[80px_140px_1fr_24px] items-center gap-1.5 rounded-md border p-1.5">
-                  <select
-                    value={s.marketplaceId}
-                    onChange={(e) => {
-                      const next = [...state.sources]
-                      next[idx] = { ...next[idx], marketplaceId: e.target.value }
-                      onChange({ ...state, sources: next })
-                    }}
-                    className="rounded border px-1.5 py-1 text-xs"
-                  >
-                    <option value="">마켓</option>
-                    {Object.entries(MARKETPLACE_LABELS).map(([id, label]) => (
-                      <option key={id} value={id}>{label}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="text"
-                    value={s.marketplaceProductId}
-                    onChange={(e) => {
-                      const next = [...state.sources]
-                      next[idx] = { ...next[idx], marketplaceProductId: e.target.value }
-                      onChange({ ...state, sources: next })
-                    }}
-                    placeholder="상품ID"
-                    className="rounded border px-1.5 py-1 font-mono text-xs"
-                  />
-                  <input
-                    type="text"
-                    value={s.productNameSnapshot}
-                    onChange={(e) => {
-                      const next = [...state.sources]
-                      next[idx] = { ...next[idx], productNameSnapshot: e.target.value }
-                      onChange({ ...state, sources: next })
-                    }}
-                    placeholder="상품명 (참조용)"
-                    className="rounded border px-1.5 py-1 text-xs"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => onChange({ ...state, sources: state.sources.filter((_, i) => i !== idx) })}
-                    aria-label="행 제거"
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <X className="size-3" />
-                  </button>
+                <div key={idx} className="rounded-md border p-1.5">
+                  <div className="grid grid-cols-[64px_80px_120px_100px_1fr_24px] items-center gap-1.5">
+                    <select
+                      value={s.mode}
+                      onChange={(e) => {
+                        const next = [...state.sources]
+                        const newMode = e.target.value as SourceMode
+                        next[idx] = {
+                          ...next[idx],
+                          mode: newMode,
+                          // 품번매핑으로 전환 시 단품코드 초기화
+                          marketplaceOptionId: newMode === 'product' ? '' : next[idx].marketplaceOptionId,
+                        }
+                        onChange({ ...state, sources: next })
+                      }}
+                      className="rounded border px-1 py-1 text-[11px]"
+                      title="매핑 종류"
+                    >
+                      <option value="product">품번</option>
+                      <option value="option">단품</option>
+                    </select>
+                    <select
+                      value={s.marketplaceId}
+                      onChange={(e) => {
+                        const next = [...state.sources]
+                        next[idx] = { ...next[idx], marketplaceId: e.target.value }
+                        onChange({ ...state, sources: next })
+                      }}
+                      className="rounded border px-1.5 py-1 text-xs"
+                    >
+                      <option value="">마켓</option>
+                      {Object.entries(MARKETPLACE_LABELS).map(([id, label]) => (
+                        <option key={id} value={id}>{label}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={s.marketplaceProductId}
+                      onChange={(e) => {
+                        const next = [...state.sources]
+                        next[idx] = { ...next[idx], marketplaceProductId: e.target.value }
+                        onChange({ ...state, sources: next })
+                      }}
+                      placeholder="상품ID(품번)"
+                      className="rounded border px-1.5 py-1 font-mono text-xs"
+                    />
+                    <input
+                      type="text"
+                      value={s.marketplaceOptionId}
+                      onChange={(e) => {
+                        const next = [...state.sources]
+                        next[idx] = { ...next[idx], marketplaceOptionId: e.target.value }
+                        onChange({ ...state, sources: next })
+                      }}
+                      placeholder={s.mode === 'option' ? '단품코드' : '(품번매핑)'}
+                      disabled={s.mode === 'product'}
+                      className="rounded border px-1.5 py-1 font-mono text-xs disabled:bg-muted/40 disabled:text-muted-foreground"
+                    />
+                    <input
+                      type="text"
+                      value={s.productNameSnapshot}
+                      onChange={(e) => {
+                        const next = [...state.sources]
+                        next[idx] = { ...next[idx], productNameSnapshot: e.target.value }
+                        onChange({ ...state, sources: next })
+                      }}
+                      placeholder="상품명 (참조용)"
+                      className="rounded border px-1.5 py-1 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onChange({ ...state, sources: state.sources.filter((_, i) => i !== idx) })}
+                      aria-label="행 제거"
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

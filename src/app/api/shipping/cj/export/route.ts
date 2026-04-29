@@ -81,7 +81,7 @@ export async function GET(req: NextRequest) {
         senderName: senderSettings?.companyName ?? '',
         senderPhone: senderSettings?.phone ?? '',
         senderAddress: senderSettings?.address ?? '',
-        originalProductName: row.source.productName,
+        originalProductName: row.source.productName ?? undefined,
         pickingLocation: undefined,
       })
     }

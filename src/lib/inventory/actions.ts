@@ -13,6 +13,7 @@ import { db } from '@/lib/db'
 import { inventory, inventoryHistory, orderItems, orders, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, and, isNotNull } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
+import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
 type ActionResult = { success: boolean; error?: string; newTotal?: number }
 
@@ -194,37 +195,45 @@ async function expandOrderItemsForDeduction(
 
   if (rawItems.length === 0) return []
 
-  // 매핑 lookup 을 위해 (marketplaceId, marketplaceItemId) 셋 수집
-  const sourceKeys = new Set<string>()
-  for (const r of rawItems) {
-    if (r.marketplaceItemId) {
-      sourceKeys.add(`${r.orderMarketplaceId}:${r.marketplaceItemId}`)
+  // mapping_sources + components 한 번에 join — 사방넷 품번/단품 둘 다.
+  const mappingRows = await tx
+    .select({
+      mappingCodeId: mappingSources.mappingCodeId,
+      marketplaceId: mappingSources.marketplaceId,
+      marketplaceProductId: mappingSources.marketplaceProductId,
+      marketplaceOptionId: mappingSources.marketplaceOptionId,
+      componentSku: mappingComponents.sku,
+      componentQuantity: mappingComponents.quantity,
+    })
+    .from(mappingSources)
+    .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
+    .where(eq(mappingSources.userId, userId))
+
+  // mappingCodeId 별 components 모음
+  const componentsByCode = new Map<string, Array<{ sku: string; quantity: number }>>()
+  for (const m of mappingRows) {
+    const list = componentsByCode.get(m.mappingCodeId) ?? []
+    if (!list.some((c) => c.sku === m.componentSku && c.quantity === m.componentQuantity)) {
+      list.push({ sku: m.componentSku, quantity: m.componentQuantity })
     }
+    componentsByCode.set(m.mappingCodeId, list)
   }
 
-  // mapping_sources + components 한 번에 join 으로 가져옴
-  const mappingRows = sourceKeys.size > 0
-    ? await tx
-        .select({
-          marketplaceId: mappingSources.marketplaceId,
-          marketplaceProductId: mappingSources.marketplaceProductId,
-          componentSku: mappingComponents.sku,
-          componentQuantity: mappingComponents.quantity,
-        })
-        .from(mappingSources)
-        .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
-        .where(eq(mappingSources.userId, userId))
-    : []
-
-  // (marketplaceId:marketplaceItemId) → [{sku, quantity}, ...]
-  const mappingByKey = new Map<string, Array<{ sku: string; quantity: number }>>()
-  for (const row of mappingRows) {
-    const key = `${row.marketplaceId}:${row.marketplaceProductId}`
-    if (!sourceKeys.has(key)) continue
-    const existing = mappingByKey.get(key) ?? []
-    existing.push({ sku: row.componentSku, quantity: row.componentQuantity })
-    mappingByKey.set(key, existing)
+  // sources index — 단품 우선, 품번 fallback
+  const sourcesForIndex: MappingSource[] = []
+  const seenSrc = new Set<string>()
+  for (const m of mappingRows) {
+    const key = `${m.marketplaceId}:${m.marketplaceProductId}:${m.marketplaceOptionId}`
+    if (seenSrc.has(key)) continue
+    seenSrc.add(key)
+    sourcesForIndex.push({
+      marketplaceId: m.marketplaceId,
+      marketplaceProductId: m.marketplaceProductId,
+      marketplaceOptionId: m.marketplaceOptionId,
+      ref: m.mappingCodeId,
+    })
   }
+  const mappingIndex = buildMappingIndex(sourcesForIndex)
 
   // 합산 (같은 SKU 여러 번 → 한 번에 차감)
   const accumulated = new Map<string, number>()
@@ -234,10 +243,10 @@ async function expandOrderItemsForDeduction(
 
   for (const r of rawItems) {
     const orderQty = r.quantity * (r.skuMultiplier ?? 1)
-    const key = r.marketplaceItemId
-      ? `${r.orderMarketplaceId}:${r.marketplaceItemId}`
+    const mappingCodeId = r.marketplaceItemId
+      ? lookupMappingRef(mappingIndex, r.orderMarketplaceId, r.marketplaceItemId)
       : null
-    const components = key ? mappingByKey.get(key) : null
+    const components = mappingCodeId ? componentsByCode.get(mappingCodeId) : null
 
     if (components && components.length > 0) {
       for (const c of components) add(c.sku, orderQty * c.quantity)

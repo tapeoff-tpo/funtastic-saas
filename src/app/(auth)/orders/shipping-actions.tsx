@@ -17,11 +17,7 @@ interface UserTemplate {
   carrierId: string
 }
 
-const CARRIER_LABELS: Record<string, string> = {
-  cj: 'CJ',
-  kyungdong: '경동',
-  daesin: '대신',
-}
+const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]
@@ -70,7 +66,23 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
   const [combining, setCombining] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [userTemplates, setUserTemplates] = useState<UserTemplate[] | null>(null)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+
+  // localStorage 에서 마지막 선택 양식 복원
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? window.localStorage.getItem(SELECTED_TEMPLATE_KEY) : null
+    if (saved) setSelectedTemplateId(saved)
+  }, [])
+
+  // 컴포넌트 mount 시 양식 목록 1회 fetch (메인 버튼 라벨 표시용)
+  useEffect(() => {
+    if (userTemplates !== null) return
+    fetch('/api/shipping/templates')
+      .then((r) => r.ok ? r.json() : { templates: [] })
+      .then((d: { templates: UserTemplate[] }) => setUserTemplates(d.templates ?? []))
+      .catch(() => setUserTemplates([]))
+  }, [userTemplates])
 
   // 드롭다운 외부 클릭 시 닫기
   useEffect(() => {
@@ -84,16 +96,18 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [exportMenuOpen])
 
-  // 메뉴 처음 열릴 때 사용자 템플릿 lazy fetch
-  useEffect(() => {
-    if (!exportMenuOpen || userTemplates !== null) return
-    fetch('/api/shipping/templates')
-      .then((r) => r.ok ? r.json() : { templates: [] })
-      .then((d: { templates: UserTemplate[] }) => setUserTemplates(d.templates ?? []))
-      .catch(() => setUserTemplates([]))
-  }, [exportMenuOpen, userTemplates])
-
   const hasSelection = selectedOrderIds.length > 0
+
+  // 현재 선택된 양식 — localStorage 에 저장된 ID 가 목록에 없으면 첫 번째로 fallback
+  const activeTemplate = useMemo<UserTemplate | null>(() => {
+    if (!userTemplates || userTemplates.length === 0) return null
+    return userTemplates.find((t) => t.id === selectedTemplateId) ?? userTemplates[0]
+  }, [userTemplates, selectedTemplateId])
+
+  const pickTemplate = (id: string) => {
+    setSelectedTemplateId(id)
+    if (typeof window !== 'undefined') window.localStorage.setItem(SELECTED_TEMPLATE_KEY, id)
+  }
 
   // For 일괄 매핑: 선택된 주문이 있으면 그 중 미매핑만, 없으면 전체 미매핑 카운트
   const ordersForMapping = selectedOrders.length > 0 ? selectedOrders : allOrders
@@ -101,105 +115,8 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
     return ordersForMapping.filter((o) => o.mappingStatus !== 'mapped').length
   }, [ordersForMapping])
 
-  const handleCarrierAutoExport = async () => {
-    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
-    if (scope.length === 0) {
-      toast.error('대상 주문이 없습니다.')
-      return
-    }
-    setClassifying(true)
-    try {
-      const params = new URLSearchParams()
-      params.set('orderIds', scope.join(','))
-      const classifyRes = await fetch(`/api/shipping/classify?${params.toString()}`)
-      if (!classifyRes.ok) {
-        const text = await classifyRes.text()
-        toast.error(`분류 실패 [${classifyRes.status}]: ${text.slice(0, 200)}`)
-        return
-      }
-      const data = await classifyRes.json() as Record<string, string[]>
-
-      const carriers = ['cj', 'kyungdong', 'daesin'] as const
-      const summary: string[] = []
-      const failures: string[] = []
-      const date = new Date().toISOString().slice(0, 10)
-
-      for (const carrier of carriers) {
-        const ids = data[carrier] ?? []
-        if (ids.length === 0) continue
-
-        const p = new URLSearchParams()
-        p.set('orderIds', ids.join(','))
-        const label = CARRIER_LABELS[carrier]
-        const result = await downloadExcel(
-          `/api/shipping/${carrier}/export?${p.toString()}`,
-          `${label}_${date}.xlsx`,
-        )
-        if (result.success) {
-          summary.push(`${label} ${ids.length}건`)
-        } else {
-          failures.push(`${label}: ${result.error}`)
-        }
-      }
-
-      const unassigned = data.unassigned ?? []
-      if (failures.length > 0) {
-        toast.error(`내보내기 실패:\n${failures.join('\n')}`, { duration: 10000 })
-      }
-      if (summary.length > 0) {
-        const note = unassigned.length > 0 ? ` (${unassigned.length}건 미지정)` : ''
-        toast.success(`${summary.join(', ')}${note} 다운로드`)
-      } else if (failures.length === 0) {
-        toast.error('택배사가 지정된 주문이 없습니다. 상품 페이지에서 택배사를 설정하세요.')
-      }
-    } catch (err) {
-      toast.error(`내보내기 실패: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setClassifying(false)
-    }
-  }
-
-  // 단일 택배사 — classify 후 해당 택배사 IDs 만 다운로드
-  const handleSingleCarrierExport = async (carrier: 'cj' | 'kyungdong' | 'daesin') => {
-    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
-    if (scope.length === 0) {
-      toast.error('대상 주문이 없습니다.')
-      return
-    }
-    setClassifying(true)
-    try {
-      const params = new URLSearchParams()
-      params.set('orderIds', scope.join(','))
-      const classifyRes = await fetch(`/api/shipping/classify?${params.toString()}`)
-      if (!classifyRes.ok) {
-        toast.error(`분류 실패 [${classifyRes.status}]`)
-        return
-      }
-      const data = await classifyRes.json() as Record<string, string[]>
-      const ids = data[carrier] ?? []
-      if (ids.length === 0) {
-        toast.error(`${CARRIER_LABELS[carrier]}로 지정된 주문이 없습니다.`)
-        return
-      }
-      const p = new URLSearchParams()
-      p.set('orderIds', ids.join(','))
-      const date = new Date().toISOString().slice(0, 10)
-      const result = await downloadExcel(
-        `/api/shipping/${carrier}/export?${p.toString()}`,
-        `${CARRIER_LABELS[carrier]}_${date}.xlsx`,
-      )
-      if (result.success) {
-        toast.success(`${CARRIER_LABELS[carrier]} ${ids.length}건 다운로드`)
-      } else {
-        toast.error(`다운로드 실패: ${result.error}`)
-      }
-    } finally {
-      setClassifying(false)
-    }
-  }
-
-  // 사용자 등록 양식 — 선택 주문 전체를 해당 양식으로 다운로드
-  const handleUserTemplateExport = async (template: UserTemplate) => {
+  // 선택된 양식으로 주문 일괄 다운로드 — 단일 Excel 파일
+  const handleExport = async (template: UserTemplate) => {
     const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
     if (scope.length === 0) {
       toast.error('대상 주문이 없습니다.')
@@ -296,28 +213,32 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
 
         {showInvoice && (
           <>
-            {/* 일괄 엑셀 다운로드 — split button (왼쪽: 자동 분류 / 오른쪽: 양식 선택) */}
+            {/* 엑셀 다운로드 — 선택된 양식 하나로 단일 파일 출력. 우측 ▼ 으로 양식 변경. */}
             <div ref={exportMenuRef} className="relative inline-flex">
               <button
                 type="button"
-                onClick={() => void handleCarrierAutoExport()}
-                disabled={classifying}
+                onClick={() => activeTemplate && void handleExport(activeTemplate)}
+                disabled={classifying || !activeTemplate}
                 className="rounded-l-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                title={hasSelection ? '선택한 주문만' : '현재 페이지 전체'}
+                title={
+                  !activeTemplate
+                    ? '먼저 우측 [엑셀양식등록] 에서 양식을 만드세요'
+                    : `양식: ${activeTemplate.name} — ${hasSelection ? '선택한 주문만' : '현재 페이지 전체'}`
+                }
               >
                 {classifying
-                  ? '분류 중...'
-                  : hasSelection
-                    ? `선택 엑셀 다운로드 (${selectedOrderIds.length}건)`
-                    : '일괄 엑셀 다운로드'}
+                  ? '다운로드 중...'
+                  : activeTemplate
+                    ? `${activeTemplate.name} 다운로드${hasSelection ? ` (${selectedOrderIds.length}건)` : ''}`
+                    : '엑셀 다운로드 (양식 없음)'}
               </button>
               <button
                 type="button"
                 onClick={() => setExportMenuOpen((v) => !v)}
                 disabled={classifying}
                 className="rounded-r-md border-l border-blue-700 bg-blue-600 px-1.5 py-1.5 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                aria-label="다운로드 양식 선택"
-                title="다른 양식 선택"
+                aria-label="다운로드 양식 변경"
+                title="양식 변경"
               >
                 <ChevronDown className="h-4 w-4" />
               </button>
@@ -325,59 +246,32 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
               {exportMenuOpen && (
                 <div className="absolute left-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-md border bg-white shadow-lg">
                   <div className="border-b px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    기본 양식
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { setExportMenuOpen(false); void handleCarrierAutoExport() }}
-                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
-                  >
-                    택배사별 자동 분류
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setExportMenuOpen(false); void handleSingleCarrierExport('cj') }}
-                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
-                  >
-                    CJ대한통운만
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setExportMenuOpen(false); void handleSingleCarrierExport('kyungdong') }}
-                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
-                  >
-                    경동택배만
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setExportMenuOpen(false); void handleSingleCarrierExport('daesin') }}
-                    className="block w-full cursor-pointer px-3 py-2 text-left text-sm hover:bg-muted"
-                  >
-                    대신택배만
-                  </button>
-
-                  <div className="border-y bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    내 양식
+                    다운로드 양식 선택
                   </div>
                   {userTemplates === null && (
                     <div className="px-3 py-2 text-xs text-muted-foreground">불러오는 중...</div>
                   )}
                   {userTemplates !== null && userTemplates.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-muted-foreground">
-                      등록된 양식이 없습니다.
+                    <div className="px-3 py-3 text-xs text-muted-foreground">
+                      등록된 양식이 없습니다.<br />
+                      우측 [엑셀양식등록] 버튼으로 추가하세요.
                     </div>
                   )}
-                  {userTemplates !== null && userTemplates.length > 0 && userTemplates.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => { setExportMenuOpen(false); void handleUserTemplateExport(t) }}
-                      className="block w-full cursor-pointer truncate px-3 py-2 text-left text-sm hover:bg-muted"
-                      title={t.name}
-                    >
-                      {t.name}
-                    </button>
-                  ))}
+                  {userTemplates !== null && userTemplates.length > 0 && userTemplates.map((t) => {
+                    const isActive = activeTemplate?.id === t.id
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => { pickTemplate(t.id); setExportMenuOpen(false) }}
+                        className={`flex w-full cursor-pointer items-center gap-2 truncate px-3 py-2 text-left text-sm hover:bg-muted ${isActive ? 'font-semibold text-blue-700' : ''}`}
+                        title={t.name}
+                      >
+                        <span className="w-3 text-center">{isActive ? '●' : ''}</span>
+                        <span className="truncate">{t.name}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>

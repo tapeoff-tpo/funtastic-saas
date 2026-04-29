@@ -376,165 +376,6 @@ export interface DialogProps {
   saving: boolean
 }
 
-interface ExistingCodeRow {
-  id: string
-  code: string
-  name: string
-  sourcesCount: number
-  componentsCount: number
-}
-
-/**
- * 신규 매핑 작업 시 prefill 된 source(들)을 기존 매핑코드에 추가하기 위한 검색 패널.
- *
- * 사용 흐름:
- *   1) [+ 품번매핑] / [+ 단품매핑] 클릭 → EditDialog 가 prefill 상태로 열림 (state.id === null)
- *   2) 검색창에 매핑코드/이름 입력 → 매칭 dropdown
- *   3) 선택 → GET /api/products/mapping-codes/:id 로 전체 데이터 fetch
- *   4) prefill 된 sources 는 유지하고 기존 코드의 데이터(code/name/note/components/sources)를 병합
- *   5) 저장 시 PATCH 로 update (state.id 가 채워졌으므로 handleSave 가 자동 분기)
- */
-function ExistingCodePicker({
-  state,
-  onChange,
-}: {
-  state: FormState
-  onChange: (s: FormState) => void
-}) {
-  const [query, setQuery] = useState('')
-  const [allCodes, setAllCodes] = useState<ExistingCodeRow[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [open, setOpen] = useState(false)
-  const [picking, setPicking] = useState(false)
-
-  // 첫 포커스 시점에 1회 fetch — 캐시 후 클라이언트 필터링
-  const ensureLoaded = useCallback(async () => {
-    if (allCodes !== null || loading) return
-    setLoading(true)
-    try {
-      const res = await fetch('/api/products/mapping-codes')
-      if (!res.ok) return
-      const data = await res.json() as { codes: ExistingCodeRow[] }
-      setAllCodes(data.codes)
-    } finally {
-      setLoading(false)
-    }
-  }, [allCodes, loading])
-
-  const matches = (() => {
-    if (!allCodes || !query.trim()) return [] as ExistingCodeRow[]
-    const q = query.trim().toLowerCase()
-    return allCodes
-      .filter((c) => c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q))
-      .slice(0, 8)
-  })()
-
-  async function pickCode(id: string) {
-    setPicking(true)
-    try {
-      const res = await fetch(`/api/products/mapping-codes/${id}`)
-      if (!res.ok) {
-        alert('매핑코드 조회 실패')
-        return
-      }
-      const data = await res.json() as {
-        code: { id: string; code: string; name: string; note: string | null; isActive: boolean }
-        sources: Array<{ marketplaceId: string; marketplaceProductId: string; marketplaceOptionId: string; productNameSnapshot: string | null; optionNameSnapshot: string | null }>
-        components: Array<{ sku: string; quantity: number }>
-      }
-
-      // prefill 된 source(들)는 유지 — 기존 코드의 sources 와 중복 제거 후 합침
-      const existingKeys = new Set(
-        data.sources.map((s) => `${s.marketplaceId}:${s.marketplaceProductId}:${s.marketplaceOptionId}`),
-      )
-      const prefilled = state.sources.filter((s) => {
-        const key = `${s.marketplaceId}:${s.marketplaceProductId}:${s.mode === 'option' ? s.marketplaceOptionId : ''}`
-        return s.marketplaceId && s.marketplaceProductId && !existingKeys.has(key)
-      })
-
-      const mergedSources: SourceForm[] = [
-        ...data.sources.map((s) => ({
-          mode: (s.marketplaceOptionId ? 'option' : 'product') as SourceMode,
-          marketplaceId: s.marketplaceId,
-          marketplaceProductId: s.marketplaceProductId,
-          marketplaceOptionId: s.marketplaceOptionId ?? '',
-          productNameSnapshot: s.productNameSnapshot ?? '',
-          optionNameSnapshot: s.optionNameSnapshot ?? '',
-        })),
-        ...prefilled,
-      ]
-
-      onChange({
-        id: data.code.id,
-        code: data.code.code,
-        name: data.code.name,
-        note: data.code.note ?? '',
-        isActive: data.code.isActive,
-        sources: mergedSources,
-        components: data.components.length > 0
-          ? data.components.map((c) => ({ sku: c.sku, quantity: c.quantity }))
-          : [{ sku: '', quantity: 1 }],
-      })
-      setOpen(false)
-      setQuery('')
-    } finally {
-      setPicking(false)
-    }
-  }
-
-  // 이미 기존 매핑코드를 편집 중이면 검색 패널 숨김
-  if (state.id) return null
-
-  return (
-    <div className="rounded-md border border-amber-200 bg-amber-50/60 p-2.5">
-      <div className="mb-1.5 flex items-center justify-between">
-        <label className="text-xs font-medium text-amber-900">기존 매핑코드에 추가</label>
-        <span className="text-[10px] text-amber-700">검색 후 선택하면 그 매핑코드에 위 마켓상품을 추가합니다</span>
-      </div>
-      <div className="relative">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
-          onFocus={() => { setOpen(true); void ensureLoaded() }}
-          onBlur={() => { setTimeout(() => setOpen(false), 150) }}
-          placeholder="매핑코드 또는 이름 검색"
-          disabled={picking}
-          className="w-full rounded-md border bg-background px-2.5 py-1.5 text-xs"
-        />
-        {open && query.trim() && (
-          <div className="absolute z-10 mt-0.5 max-h-64 w-full overflow-auto rounded-md border bg-background shadow-lg">
-            {loading ? (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">불러오는 중...</div>
-            ) : matches.length === 0 ? (
-              <div className="px-2 py-1.5 text-xs text-muted-foreground">검색 결과 없음</div>
-            ) : (
-              matches.map((c) => (
-                <button
-                  type="button"
-                  key={c.id}
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => pickCode(c.id)}
-                  disabled={picking}
-                  className="flex w-full items-center justify-between gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted disabled:opacity-50"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-mono">{c.code}</div>
-                    <div className="truncate text-[10px] text-muted-foreground">{c.name}</div>
-                  </div>
-                  <div className="shrink-0 text-[10px] text-muted-foreground">
-                    마켓상품 {c.sourcesCount} · SKU {c.componentsCount}
-                  </div>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 interface ProductSearchResult {
   id: string
   internalSku: string
@@ -761,7 +602,9 @@ export function ProductSearchDialog({
 
 export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogProps) {
   // 자체상품 검색 모달 — 어떤 components 행을 채울지 idx 로 추적 (-1 = 닫힘)
-  const [searchIdx, setSearchIdx] = useState<number>(-1)
+  // 신규 매핑(state.id === null) 일 때는 EditDialog 가 열리는 즉시 0번 행 검색을 자동 오픈 — 사방넷 UX
+  const isNew = state.id === null
+  const [searchIdx, setSearchIdx] = useState<number>(isNew ? 0 : -1)
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div
@@ -776,7 +619,6 @@ export function EditDialog({ state, onChange, onClose, onSave, saving }: DialogP
         </div>
 
         <div className="space-y-4">
-          <ExistingCodePicker state={state} onChange={onChange} />
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted-foreground">매핑코드 *</label>

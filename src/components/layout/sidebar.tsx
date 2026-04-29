@@ -15,6 +15,8 @@ import {
   BarChart3,
   Store,
   Settings,
+  FileText,
+  Users,
   LogOut,
   ChevronsLeft,
   Download,
@@ -75,6 +77,13 @@ const navSections: NavSection[] = [
     items: [
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
       { href: '/settings', label: '설정', icon: Settings },
+    ],
+  },
+  {
+    title: '관리자',
+    items: [
+      { href: '/admin/dev-log', label: '개발로그', icon: FileText },
+      { href: '/admin/accounts', label: '계정관리', icon: Users },
     ],
   },
 ]

@@ -8,8 +8,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { orders, orderItems, shipments } from '@/lib/db/schema'
-import { eq, inArray } from 'drizzle-orm'
+import { orders, orderItems, shipments, marketplaceConnections, products, inventory } from '@/lib/db/schema'
+import { and, eq, inArray } from 'drizzle-orm'
 import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
@@ -54,10 +54,47 @@ export async function GET(request: NextRequest) {
       ? await Promise.all([loadMappingLookup(user.id), loadSkuLookup(user.id)])
       : [new Map<string, MappingEntry>(), new Map<string, MappingEntry>()]
 
+    // 쇼핑몰 displayName lookup (보내는분성명 = 쇼핑몰명)
+    const connectionIds = [...new Set(orderRows.map((o) => o.connectionId).filter(Boolean) as string[])]
+    const connectionRows = connectionIds.length > 0
+      ? await db
+          .select({ id: marketplaceConnections.id, displayName: marketplaceConnections.displayName })
+          .from(marketplaceConnections)
+          .where(inArray(marketplaceConnections.id, connectionIds))
+      : []
+    const connectionMap = new Map(connectionRows.map((c) => [c.id, c.displayName]))
+
+    // SKU 기준 products(위치) + inventory(현재고) lookup
+    const skuSet = [...new Set(itemRows.map((i) => i.sku).filter(Boolean) as string[])]
+    const [productRows, inventoryRows] = user && skuSet.length > 0
+      ? await Promise.all([
+          db
+            .select({ sku: products.internalSku, location: products.warehouseLocation })
+            .from(products)
+            .where(and(eq(products.userId, user.id), inArray(products.internalSku, skuSet))),
+          db
+            .select({ sku: inventory.sku, stock: inventory.availableStock })
+            .from(inventory)
+            .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skuSet))),
+        ])
+      : [[], []]
+    const productMap = new Map(productRows.map((p) => [p.sku, p.location]))
+    const inventoryMap = new Map(inventoryRows.map((i) => [i.sku, i.stock]))
+
+    // 셀러 고정값 (CJ대한통운 발주서 양식 기준 — 추후 settings 테이블로 분리 가능)
+    const FIXED_SENDER_PHONE = '070-7525-7771'
+    const FIXED_SENDER_ADDRESS = '경기 광주시 직동로 8(직동) 물류창고'
+    const FIXED_BOX_COUNT = 1
+    const FIXED_FREIGHT_TYPE = 3
+    const FIXED_BASE_FREIGHT = 1850
+
     // Build flat order records for export
     const exportData: Record<string, unknown>[] = orderRows.map((order) => {
       const items = itemRows.filter((item) => item.orderId === order.id)
       const shipment = shipmentRows.find((s) => s.orderId === order.id)
+
+      // 매핑 전 원본 (수집상품명/수집옵션명 용)
+      const rawFirst = items[0]
 
       // Apply product name mappings — swaps marketplace names with internal names
       const mappedItems = applyMappings(
@@ -67,6 +104,9 @@ export async function GET(request: NextRequest) {
         order.marketplaceId,
       )
       const firstItem = mappedItems[0]
+      const productName = firstItem?.productName ?? ''
+      const optionText = firstItem?.optionText ?? ''
+      const sku = (firstItem?.sku ?? rawFirst?.sku ?? '') as string
 
       return {
         orderId: order.id,
@@ -77,8 +117,8 @@ export async function GET(request: NextRequest) {
         recipientName: order.recipientName,
         recipientPhone: order.recipientPhone,
         shippingAddress: order.shippingAddress,
-        productName: firstItem?.productName ?? '',
-        optionText: firstItem?.optionText ?? '',
+        productName,
+        optionText,
         quantity: items.reduce((sum, item) => sum + item.quantity, 0),
         unitPrice: firstItem?.unitPrice ?? '0',
         totalAmount: order.totalAmount,
@@ -86,6 +126,20 @@ export async function GET(request: NextRequest) {
         carrierName: shipment?.carrierName ?? '',
         orderedAt: order.orderedAt,
         status: order.status,
+        // ─ 발주서 양식용 확장 필드 ─
+        logisticsMessage: order.logisticsMessage ?? '',
+        productCode: sku,
+        productPlusOption: optionText ? `${productName} [${optionText}]` : productName,
+        collectedProductName: rawFirst?.productName ?? '',
+        collectedOption: rawFirst?.optionText ?? '',
+        stock: sku ? inventoryMap.get(sku) ?? '' : '',
+        location: sku ? productMap.get(sku) ?? '' : '',
+        senderName: order.connectionId ? connectionMap.get(order.connectionId) ?? '' : '',
+        senderPhone: FIXED_SENDER_PHONE,
+        senderAddress: FIXED_SENDER_ADDRESS,
+        boxCount: FIXED_BOX_COUNT,
+        freightType: FIXED_FREIGHT_TYPE,
+        baseFreight: FIXED_BASE_FREIGHT,
       }
     })
 

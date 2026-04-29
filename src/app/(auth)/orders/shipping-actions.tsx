@@ -236,11 +236,11 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
                 type="button"
                 onClick={() => setExportMenuOpen((v) => !v)}
                 disabled={classifying}
-                className="rounded-r-md border-l border-blue-700 bg-blue-600 px-1.5 py-1.5 text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center justify-center rounded-r-md border-l-2 border-blue-800 bg-blue-700 px-2.5 py-1.5 text-white hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="다운로드 양식 변경"
                 title="양식 변경"
               >
-                <ChevronDown className="h-4 w-4" />
+                <ChevronDown className="h-5 w-5" strokeWidth={2.5} />
               </button>
 
               {exportMenuOpen && (

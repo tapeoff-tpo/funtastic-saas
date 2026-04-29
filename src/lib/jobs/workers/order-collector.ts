@@ -282,6 +282,7 @@ async function upsertOrder(
       shippingAddress: order.shippingAddress,
       orderedAt: order.orderedAt,
       totalAmount: String(order.totalAmount ?? 0),
+      deliveryMessage: order.deliveryMessage ?? null,
       rawData: order.rawData,
       collectedAt: new Date(),
     })
@@ -292,6 +293,7 @@ async function upsertOrder(
       set: {
         status: order.status,
         marketplaceStatus: order.marketplaceStatus,
+        deliveryMessage: order.deliveryMessage ?? null,
         rawData: order.rawData,
         updatedAt: new Date(),
       },

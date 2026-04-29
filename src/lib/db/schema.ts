@@ -113,6 +113,8 @@ export const orders = pgTable(
     heldAt: timestamp('held_at', { withTimezone: true }),
     /** 물류메세지 — 출고 담당자 참고용 (예: "경동택배 미발건", "출고 전 취소요청") */
     logisticsMessage: varchar('logistics_message', { length: 200 }),
+    /** 배송메세지 — 구매자가 마켓에서 입력한 배송 요청사항 (쿠팡 parcelPrintMessage 등). migration 019. */
+    deliveryMessage: varchar('delivery_message', { length: 500 }),
     rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
     marketplaceStatus: varchar('marketplace_status', { length: 100 }),
     collectedAt: timestamp('collected_at', { withTimezone: true }),

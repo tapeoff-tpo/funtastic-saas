@@ -84,6 +84,8 @@ export interface NormalizedOrder {
   shippingType?: string | null
   /** 마켓에서 수집된 배송비 (KRW). Phase 8. */
   shippingFee?: number | null
+  /** 배송메세지 — 구매자가 마켓에서 입력한 배송 요청사항 (쿠팡 parcelPrintMessage 등). */
+  deliveryMessage?: string | null
   rawData: Record<string, unknown>
 }
 

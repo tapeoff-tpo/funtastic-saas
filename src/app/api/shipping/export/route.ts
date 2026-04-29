@@ -177,10 +177,11 @@ export async function GET(request: NextRequest) {
         // 포장 박스 종류 (inventory.packagingUnit) — 출력항목 '포장'
         packaging: sku ? inventoryMap.get(sku)?.packagingUnit ?? '' : '',
         senderName: order.connectionId ? connectionMap.get(order.connectionId) ?? '' : '',
+        // 배송메세지 — 구매자가 마켓에서 입력한 배송 요청 (쿠팡 parcelPrintMessage 등)
+        deliveryMessage: order.deliveryMessage ?? '',
         // ─ DB 컬럼 미존재 — 사용자가 fixedValue 로 채우거나 비워둠 ─
         recipientPhone2: '',
         buyerPhone2: '',
-        deliveryMessage: '',
         supplyPrice: '',
         // 수집일자 — yyyy-mm-dd 포맷
         collectedAt: order.collectedAt ? new Date(order.collectedAt).toISOString().slice(0, 10) : '',

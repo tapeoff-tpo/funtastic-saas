@@ -530,6 +530,8 @@ export class CoupangAdapter implements MarketplaceAdapter {
       shippingType: normalizeCoupangShippingType(
         sheet.deliveryChargeTypeName ?? sheet.parcelPrintMessage ?? sheet.shipmentType,
       ),
+      // 배송메세지 — 구매자가 입력한 배송 요청사항
+      deliveryMessage: sheet.parcelPrintMessage || undefined,
       rawData: sheet as unknown as Record<string, unknown>,
     }
   }

@@ -11,6 +11,7 @@ import {
   numeric,
   uniqueIndex,
   index,
+  date,
 } from 'drizzle-orm/pg-core'
 
 // ─── Phase 1: Marketplace Connections ───────────────────────────
@@ -678,3 +679,25 @@ export const jobLogs = pgTable('job_logs', {
     .defaultNow()
     .notNull(),
 })
+
+
+// ─── Admin: Dev Log ─────────────────────────────────────────────
+// 개발 작업 일지 — 팀 3인(상철/기환/지은) 공동 기록.
+// 사용자별 데이터 아님 (관리자 메뉴 내부 공유 테이블).
+
+export const DEV_LOG_AUTHORS = ["상철", "기환", "지은"] as const
+export type DevLogAuthor = (typeof DEV_LOG_AUTHORS)[number]
+
+export const devLogEntries = pgTable(
+  "dev_log_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    author: varchar("author", { length: 20 }).notNull().$type<DevLogAuthor>(),
+    logDate: date("log_date").notNull(),
+    content: text("content").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("dev_log_entries_log_date_idx").on(table.logDate, table.createdAt),
+  ],
+)

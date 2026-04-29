@@ -57,6 +57,28 @@ export function TemplateClient({
     setColumns((prev) => prev.map((c, i) => (i === index ? { ...c, ...patch } : c)))
   }
 
+  const addExtraField = (index: number, field: string) => {
+    if (!field) return
+    setColumns((prev) =>
+      prev.map((c, i) => {
+        if (i !== index) return c
+        const current = c.extraFields ?? []
+        if (c.field === field || current.includes(field)) return c
+        return { ...c, extraFields: [...current, field] }
+      }),
+    )
+  }
+
+  const removeExtraField = (index: number, field: string) => {
+    setColumns((prev) =>
+      prev.map((c, i) => {
+        if (i !== index) return c
+        const next = (c.extraFields ?? []).filter((f) => f !== field)
+        return { ...c, extraFields: next.length > 0 ? next : undefined }
+      }),
+    )
+  }
+
   const reset = () => {
     setShowForm(false)
     setName('')
@@ -142,28 +164,72 @@ export function TemplateClient({
           {/* Column list — header text & 출력내용(고정값) 인라인 편집 */}
           {columns.length > 0 && (
             <div className="overflow-hidden rounded-md border">
-              <div className="grid grid-cols-[2rem_1fr_8rem_1fr_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <div className="grid grid-cols-[2rem_1fr_14rem_1fr_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                 <span>#</span>
                 <span>헤더 (Excel 표시 텍스트)</span>
-                <span>필드</span>
+                <span>필드 <span className="normal-case text-[10px] text-muted-foreground/80">(+ 합치면 공백 join)</span></span>
                 <span>출력내용 <span className="normal-case text-[10px] text-muted-foreground/80">(비우면 자동, 입력 시 모든 행에 고정)</span></span>
                 <span className="text-right">동작</span>
               </div>
               {columns.map((col, idx) => (
                 <div
                   key={idx}
-                  className="grid grid-cols-[2rem_1fr_8rem_1fr_6rem] items-center gap-2 border-b px-3 py-1.5 last:border-b-0"
+                  className="grid grid-cols-[2rem_1fr_14rem_1fr_6rem] items-start gap-2 border-b px-3 py-1.5 last:border-b-0"
                 >
-                  <span className="text-center text-xs text-muted-foreground">{idx + 1}</span>
+                  <span className="pt-1.5 text-center text-xs text-muted-foreground">{idx + 1}</span>
                   <input
                     type="text"
                     value={col.header}
                     onChange={(e) => updateColumn(idx, { header: e.target.value })}
                     className="rounded border px-2 py-1 text-sm"
                   />
-                  <span className="truncate font-mono text-xs text-muted-foreground" title={col.field}>
-                    {col.field}
-                  </span>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span
+                      className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+                      title={col.field}
+                    >
+                      {col.field}
+                    </span>
+                    {(col.extraFields ?? []).map((extra) => (
+                      <span
+                        key={extra}
+                        className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] text-emerald-700"
+                      >
+                        + {extra}
+                        <button
+                          type="button"
+                          onClick={() => removeExtraField(idx, extra)}
+                          className="text-emerald-500 hover:text-emerald-800"
+                          aria-label={`${extra} 합치기 해제`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        addExtraField(idx, e.target.value)
+                        e.currentTarget.value = ''
+                      }}
+                      className="rounded border bg-white px-1 py-0.5 text-[11px] text-muted-foreground"
+                      aria-label="필드 합치기"
+                      title="이 컬럼에 합칠 필드 선택"
+                    >
+                      <option value="">+ 합치기</option>
+                      {availableFields
+                        .filter(
+                          (f) =>
+                            f.field !== col.field &&
+                            !(col.extraFields ?? []).includes(f.field),
+                        )
+                        .map((f) => (
+                          <option key={f.field} value={f.field}>
+                            {f.label} ({f.field})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                   <input
                     type="text"
                     value={col.fixedValue ?? ''}
@@ -171,7 +237,7 @@ export function TemplateClient({
                     placeholder="자동 (필드값 사용)"
                     className="rounded border px-2 py-1 text-sm"
                   />
-                  <div className="flex items-center justify-end gap-1">
+                  <div className="flex items-center justify-end gap-1 pt-0.5">
                     <button
                       type="button"
                       onClick={() => moveColumn(idx, 'up')}

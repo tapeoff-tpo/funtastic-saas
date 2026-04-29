@@ -167,7 +167,14 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                     {template.columns.map((col, idx) => (
                       <tr key={idx} className="border-t">
                         <td className="px-3 py-1.5">{col.header}</td>
-                        <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{col.field}</td>
+                        <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                          {col.field}
+                          {col.extraFields && col.extraFields.length > 0 && (
+                            <span className="ml-1 text-emerald-700">
+                              {col.extraFields.map((f) => ` + ${f}`).join('')}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-1.5 text-xs">
                           {col.fixedValue
                             ? <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">{col.fixedValue}</span>

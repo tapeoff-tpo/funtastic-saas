@@ -49,6 +49,8 @@ export interface CarrierTemplateColumn {
   required: boolean
   /** 고정 출력값 — 설정 시 모든 행에 동일하게 채워진다 (field 매핑보다 우선) */
   fixedValue?: string
+  /** 합칠 필드 — 설정 시 primary field 값 + 각 extra field 값을 공백으로 join 한다 */
+  extraFields?: string[]
 }
 
 /** Excel export 양식 — 택배사 종속이 선택사항. */

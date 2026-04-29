@@ -75,13 +75,23 @@ export async function exportToCarrierExcel(
     cell.border = THIN_BORDER
   })
 
-  // Add data rows — fixedValue 가 설정된 컬럼은 모든 행에 동일 값을 채운다
+  // Add data rows
+  // - fixedValue 우선 (모든 행 동일 값)
+  // - extraFields 가 있으면 primary + extras 를 공백으로 합쳐서 출력
   for (const order of orders) {
     const rowData: Record<string, unknown> = {}
     for (const col of template.columns) {
-      rowData[col.field] = col.fixedValue !== undefined && col.fixedValue !== ''
-        ? col.fixedValue
-        : getNestedValue(order, col.field)
+      if (col.fixedValue !== undefined && col.fixedValue !== '') {
+        rowData[col.field] = col.fixedValue
+      } else if (col.extraFields && col.extraFields.length > 0) {
+        const parts = [col.field, ...col.extraFields]
+          .map((f) => getNestedValue(order, f))
+          .filter((v) => v !== undefined && v !== null && v !== '')
+          .map((v) => String(v))
+        rowData[col.field] = parts.join(' ')
+      } else {
+        rowData[col.field] = getNestedValue(order, col.field)
+      }
     }
     worksheet.addRow(rowData)
   }

@@ -9,6 +9,7 @@ export interface ProductRow {
   id: string
   internalSku: string
   name: string
+  optionName: string | null
   categoryId: string | null
   basePrice: string
   costPrice: string | null
@@ -81,6 +82,21 @@ export const columns: ColumnDef<ProductRow>[] = [
       </a>
     ),
     size: 300,
+  },
+  // 옵션명
+  {
+    accessorKey: 'optionName',
+    header: '옵션명',
+    enableSorting: false,
+    cell: ({ row }) => {
+      const opt = row.getValue('optionName') as string | null
+      return opt ? (
+        <span className="block max-w-[200px] truncate text-sm" title={opt}>{opt}</span>
+      ) : (
+        <span className="text-muted-foreground">-</span>
+      )
+    },
+    size: 200,
   },
   // 카테고리
   {

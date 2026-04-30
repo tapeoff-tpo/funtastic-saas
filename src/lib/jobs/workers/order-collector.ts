@@ -144,7 +144,8 @@ export async function collectOrdersForConnection(params: {
     // 10x10 notifies first orders after a delay and operators often test with
     // older newly-notified orders, so use the safer scheduled window manually too.
     const now = Date.now()
-    const lookbackLabel = jobType === 'manual-order-collection' && marketplaceId !== '10x10'
+    const extendedManualMarketplaces = new Set(['10x10', 'naver'])
+    const lookbackLabel = jobType === 'manual-order-collection' && !extendedManualMarketplaces.has(marketplaceId)
       ? '1일'
       : '7일'
     const lookbackMs = marketplaceId === '10x10'

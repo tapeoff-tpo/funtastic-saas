@@ -18,6 +18,8 @@ import { ExcelUploadDialog } from './excel-upload-dialog'
 import { IncomingDialog } from './incoming-dialog'
 import { Pagination } from '@/components/ui/pagination'
 import { Input } from '@/components/ui/input'
+import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
+import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import { updateShippingCost } from './actions'
 
 export interface InventoryRow {
@@ -475,6 +477,9 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
 
   const pageCount = Math.ceil(total / pageSize)
 
+  // 컬럼 너비 — localStorage 에 저장해서 재방문 시에도 유지
+  const [columnSizing, setColumnSizing] = useColumnSizing('inventory-table')
+
   const table = useReactTable({
     data,
     columns,
@@ -483,12 +488,15 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
     manualSorting: true,
     manualFiltering: true,
     enableRowSelection: true,
+    columnResizeMode: 'onChange',
     pageCount,
     state: {
       pagination: { pageIndex: page - 1, pageSize },
       rowSelection,
+      columnSizing,
     },
     onRowSelectionChange: setRowSelection,
+    onColumnSizingChange: setColumnSizing,
   })
 
   const hasFilters =
@@ -681,19 +689,31 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
           검색 조건을 입력하고 <span className="font-medium text-foreground">검색</span> 버튼을 눌러주세요.
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-md border">
-          <table className="w-full text-xs">
+        <SyncedScrollContainer>
+          <table className="text-xs" style={{ width: table.getTotalSize() }}>
             <thead className="sticky top-0 z-[1] bg-muted/50">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b">
                   {headerGroup.headers.map((header) => (
                     <th
                       key={header.id}
-                      className="whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
+                      style={{ width: header.getSize() }}
+                      className="relative whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
                     >
                       {header.isPlaceholder
                         ? null
                         : flexRender(header.column.columnDef.header, header.getContext())}
+                      {header.column.getCanResize() && (
+                        <div
+                          onMouseDown={header.getResizeHandler()}
+                          onTouchStart={header.getResizeHandler()}
+                          onClick={(e) => e.stopPropagation()}
+                          className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none bg-transparent hover:bg-blue-400 ${
+                            header.column.getIsResizing() ? 'bg-blue-500' : ''
+                          }`}
+                          aria-label="컬럼 너비 조절"
+                        />
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -718,7 +738,11 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
                     }`}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="whitespace-nowrap px-2 py-1">
+                      <td
+                        key={cell.id}
+                        style={{ width: cell.column.getSize() }}
+                        className="overflow-hidden whitespace-nowrap px-2 py-1"
+                      >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     ))}
@@ -727,7 +751,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
               )}
             </tbody>
           </table>
-        </div>
+        </SyncedScrollContainer>
       )}
 
       {/* Dialogs */}

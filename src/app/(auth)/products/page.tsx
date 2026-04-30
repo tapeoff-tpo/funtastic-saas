@@ -59,6 +59,7 @@ export default async function ProductsPage({
     id: item.id,
     internalSku: item.internalSku,
     name: item.name,
+    optionName: item.optionName ?? null,
     categoryId: item.categoryId,
     basePrice: item.basePrice,
     costPrice: item.costPrice ?? null,

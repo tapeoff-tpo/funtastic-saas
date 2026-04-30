@@ -10,6 +10,7 @@ import {
   products,
   productVariants,
   productMarketplaceLinks,
+  inventory,
 } from '@/lib/db/schema'
 import { eq, and, or, ilike, desc, asc, count, ne, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
@@ -95,9 +96,15 @@ export async function getProducts(
         createdAt: products.createdAt,
         updatedAt: products.updatedAt,
         variantCount: sql<number>`cast(count(${productVariants.id}) as int)`,
+        // inventory.sku == products.internal_sku 1:1. MAX 로 집계 (groupBy 충족용).
+        optionName: sql<string | null>`max(${inventory.optionName})`,
       })
       .from(products)
       .leftJoin(productVariants, eq(products.id, productVariants.productId))
+      .leftJoin(
+        inventory,
+        and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
+      )
       .where(whereClause)
       .groupBy(products.id)
       .orderBy(sortDirection(sortColumn))

@@ -143,13 +143,18 @@ export async function collectOrdersForConnection(params: {
     // 4. Fetch orders — manual: 1 day, scheduled: 7 days.
     // 10x10 notifies first orders after a delay and operators often test with
     // older newly-notified orders, so use the safer scheduled window manually too.
-    const lookbackDays = jobType === 'manual-order-collection' && marketplaceId !== '10x10'
-      ? 1
-      : 7
-    const lookbackMs = lookbackDays * 24 * 60 * 60 * 1000
-    const since = new Date(Date.now() - lookbackMs)
+    const now = Date.now()
+    const lookbackLabel = jobType === 'manual-order-collection' && marketplaceId !== '10x10'
+      ? '1일'
+      : '7일'
+    const lookbackMs = marketplaceId === '10x10'
+      ? (7 * 24 * 60 * 60 * 1000) - (10 * 60 * 1000)
+      : lookbackLabel === '1일'
+        ? 1 * 24 * 60 * 60 * 1000
+        : 7 * 24 * 60 * 60 * 1000
+    const since = new Date(now - lookbackMs)
 
-    await setProgress(`변경된 주문 조회 중... (최근 ${lookbackDays}일)`)
+    await setProgress(`변경된 주문 조회 중... (최근 ${lookbackLabel})`)
     const normalizedOrders = await adapter.getOrders(since)
     await setProgress(`${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ' — 저장 중...' : ''}`)
 

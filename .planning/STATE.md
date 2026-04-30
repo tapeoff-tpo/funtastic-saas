@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-03)
 Phase: 08 (orders-ux-improvements) — EXECUTING
 Plan: 4 of 4
 Status: Ready to execute
-Last activity: 2026-04-29 - Completed quick task 260429-wnp: 매핑관리 페이지 사방넷 스타일 리디자인
+Last activity: 2026-04-30 - Completed quick task 260430-gbu: 매핑보드 dense UI 추가요구 반영
 
 Progress: [##########] 100%
 
@@ -143,6 +143,7 @@ None yet.
 | 260409-0jm | Cafe24 상품 역수집 — reverse-collect에 Cafe24 지원 추가, 상품 페이지에 마켓플레이스 가져오기 UI | 2026-04-09 | f0fed98 | [260409-0jm-cafe24-reverse-collect-cafe24-ui](.planning/quick/260409-0jm-cafe24-reverse-collect-cafe24-ui/) |
 | 260424-oz0 | 사이드바 접기/펼치기 기능 추가 (<< 버튼 + localStorage 상태 저장) | 2026-04-24 | 5b59f1d | [260424-oz0-localstorage](.planning/quick/260424-oz0-localstorage/) |
 | 260429-wnp | 매핑관리 페이지를 사방넷 주문서확정관리 스타일로 리디자인 | 2026-04-29 | e007f31 | [260429-wnp-mapping-page-redesign](.planning/quick/260429-wnp-mapping-page-redesign/) |
+| 260430-gbu | 매핑보드 dense UI 추가요구 반영 (searched sentinel + 선택사항 I~IV + 주문금액/확정여부 + 일괄주문확정/다운로드/선택삭제) | 2026-04-30 | 0ce3edd | [260430-gbu-dense-2](.planning/quick/260430-gbu-dense-2/) |
 
 ## Session Continuity
 

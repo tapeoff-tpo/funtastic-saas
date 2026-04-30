@@ -15,6 +15,7 @@ import { ChevronRight, ChevronDown } from 'lucide-react'
 import { columns, type ProductRow } from './columns'
 import { ProductActions } from './product-actions'
 import { Pagination } from '@/components/ui/pagination'
+import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 
 /** 품번(internalSku 의 '-' 앞) prefix */
 function skuPrefix(sku: string | null | undefined): string {
@@ -53,6 +54,9 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
 
   const sorting: SortingState = sort ? [{ id: sort, desc: order === 'desc' }] : []
 
+  // 컬럼 너비 — localStorage 에 저장해서 재방문 시에도 유지
+  const [columnSizing, setColumnSizing] = useColumnSizing('products-table')
+
   const table = useReactTable({
     data,
     columns,
@@ -60,15 +64,18 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
     manualPagination: true,
     manualSorting: true,
     manualFiltering: true,
+    columnResizeMode: 'onChange',
     pageCount,
     state: {
       columnVisibility,
       rowSelection,
       pagination: { pageIndex: page - 1, pageSize },
       sorting,
+      columnSizing,
     },
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    onColumnSizingChange: setColumnSizing,
     onSortingChange: (updater) => {
       const next = typeof updater === 'function' ? updater(sorting) : updater
       if (next.length > 0) {
@@ -111,7 +118,7 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className={`px-3 py-2.5 text-left font-medium text-muted-foreground ${
+                    className={`relative px-3 py-2.5 text-left font-medium text-muted-foreground ${
                       header.column.getCanSort() ? 'cursor-pointer select-none hover:text-foreground' : ''
                     }`}
                     style={{ width: header.getSize() }}
@@ -130,6 +137,17 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
                           </span>
                         )}
                       </div>
+                    )}
+                    {header.column.getCanResize() && (
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none bg-transparent hover:bg-blue-400 ${
+                          header.column.getIsResizing() ? 'bg-blue-500' : ''
+                        }`}
+                        aria-label="컬럼 너비 조절"
+                      />
                     )}
                   </th>
                 ))}

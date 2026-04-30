@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { Pagination } from '@/components/ui/pagination'
 
 const MARKETPLACE_LABELS: Record<string, string> = {
@@ -26,10 +27,18 @@ interface CategoryRow {
 export default function MarketplaceCategoriesPage() {
   const [categories, setCategories] = useState<CategoryRow[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedMarket, setSelectedMarket] = useState<string>('all')
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+
+  // 탭 전환 후 복원되도록 URL 쿼리스트링에 저장 (탭바가 마지막 URL 기억).
+  const [filters, setFilters] = useQueryStates({
+    market: parseAsString.withDefault('all'),
+    q: parseAsString.withDefault(''),
+    page: parseAsInteger.withDefault(1),
+    pageSize: parseAsInteger.withDefault(20),
+  })
+  const selectedMarket = filters.market
+  const search = filters.q
+  const page = filters.page
+  const pageSize = filters.pageSize
 
   useEffect(() => {
     let cancelled = false
@@ -76,7 +85,7 @@ export default function MarketplaceCategoriesPage() {
       <div className="flex flex-wrap items-center gap-2">
         <select
           value={selectedMarket}
-          onChange={(e) => { setSelectedMarket(e.target.value); setPage(1) }}
+          onChange={(e) => void setFilters({ market: e.target.value, page: 1 })}
           className="rounded-md border px-3 py-1.5 text-sm"
         >
           <option value="all">전체 마켓</option>
@@ -88,7 +97,7 @@ export default function MarketplaceCategoriesPage() {
         <input
           type="text"
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+          onChange={(e) => void setFilters({ q: e.target.value, page: 1 })}
           placeholder="카테고리 ID 또는 이름 검색"
           className="flex-1 max-w-[400px] rounded-md border px-3 py-1.5 text-sm"
         />
@@ -145,8 +154,8 @@ export default function MarketplaceCategoriesPage() {
               page={currentPage}
               pageSize={pageSize}
               total={filtered.length}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
+              onPageChange={(p) => void setFilters({ page: p })}
+              onPageSizeChange={(s) => void setFilters({ pageSize: s, page: 1 })}
             />
           </div>
         </div>

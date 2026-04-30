@@ -182,18 +182,21 @@ export async function collectOrdersForConnection(params: {
       }
     }
 
-    // 5. Fetch claims (per D-09: collected alongside orders)
-    try {
-      const normalizedClaims = await adapter.getClaimsOrders(since)
-      for (const claim of normalizedClaims) {
-        const wasUpserted = await upsertClaim(claim, userId)
-        if (wasUpserted) {
-          claimsCollected++
+    // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 신규주문만 수집)
+    //    스케줄 잡(7일치)은 그대로 클레임도 수집해 놓치는 건 없게 함.
+    if (jobType !== 'manual-order-collection') {
+      try {
+        const normalizedClaims = await adapter.getClaimsOrders(since)
+        for (const claim of normalizedClaims) {
+          const wasUpserted = await upsertClaim(claim, userId)
+          if (wasUpserted) {
+            claimsCollected++
+          }
         }
+      } catch (claimError) {
+        console.warn(`[OrderCollector] Claims collection failed for ${marketplaceId}:`, claimError instanceof Error ? claimError.message : claimError)
+        // Don't let claims failure block order collection success
       }
-    } catch (claimError) {
-      console.warn(`[OrderCollector] Claims collection failed for ${marketplaceId}:`, claimError instanceof Error ? claimError.message : claimError)
-      // Don't let claims failure block order collection success
     }
 
     // 6. Update job log with success

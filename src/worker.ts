@@ -24,13 +24,13 @@ async function main() {
 
   const conn = getConnection()
 
-  // Order collection worker (concurrency 2: two marketplaces in parallel)
+  // Order collection worker (concurrency 5: 멀티 스토어 병렬 처리)
   const orderWorker = new Worker(
     'order-collection',
     processOrderCollection,
     {
       connection: conn,
-      concurrency: 2,
+      concurrency: 5,
     }
   )
 

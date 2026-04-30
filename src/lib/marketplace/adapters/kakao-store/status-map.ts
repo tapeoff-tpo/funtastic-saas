@@ -9,11 +9,20 @@ import type { OrderStatus } from '@/lib/orders/types'
 
 /** 카카오톡스토어 order status -> internal OrderStatus mapping */
 export const KAKAO_STORE_STATUS_MAP: Record<string, OrderStatus> = {
-  ORDERED: 'new',        // 주문완료
-  ACCEPTED: 'confirmed', // 접수완료
-  PREPARING: 'preparing', // 상품준비중
-  SHIPPING: 'shipped',   // 배송중
-  DELIVERED: 'delivered', // 배송완료
+  PayComplete: 'new',
+  ShippingRequest: 'new',
+  ShippingWaiting: 'confirmed',
+  ShippingProgress: 'shipped',
+  ShippingComplete: 'delivered',
+  PayCancelComplete: 'cancelled',
+  ShippingCancelComplete: 'cancelled',
+  ReturnCancelComplete: 'cancelled',
+  ExchangeShippingComplete: 'delivered',
+  ORDERED: 'new',
+  ACCEPTED: 'confirmed',
+  PREPARING: 'preparing',
+  SHIPPING: 'shipped',
+  DELIVERED: 'delivered',
 }
 
 /**

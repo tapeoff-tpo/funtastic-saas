@@ -1,25 +1,20 @@
-/**
- * 카카오톡스토어 API client with API key authentication.
- *
- * Uses API key authorization header for REST API calls.
- * JSON-based API.
- */
-
 import ky from 'ky'
 
-const KAKAO_STORE_API_BASE = 'https://store-api.kakao.com/api/v1'
+const KAKAO_SHOPPING_API_BASE = 'https://kapi.kakao.com'
 
-/**
- * Create a ky HTTP client pre-configured for 카카오톡스토어 API calls.
- * Uses API key authentication via X-Api-Key header.
- */
-export function createKakaoStoreClient(apiKey: string) {
+export function createKakaoStoreClient(credentials: {
+  admin_app_key: string
+  seller_app_key: string
+  channel_ids?: string
+}) {
   return ky.create({
-    prefixUrl: KAKAO_STORE_API_BASE,
+    prefixUrl: KAKAO_SHOPPING_API_BASE,
     hooks: {
       beforeRequest: [
         (request: Request) => {
-          request.headers.set('X-Api-Key', apiKey)
+          request.headers.set('Authorization', `KakaoAK ${credentials.admin_app_key}`)
+          request.headers.set('Target-Authorization', `KakaoAK ${credentials.seller_app_key}`)
+          request.headers.set('channel-ids', credentials.channel_ids || '101')
           request.headers.set('Content-Type', 'application/json')
         },
       ],

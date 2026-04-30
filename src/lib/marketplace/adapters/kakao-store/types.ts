@@ -1,54 +1,83 @@
-/**
- * 카카오톡스토어 API response types.
- *
- * 카카오톡스토어 uses a JSON REST API with API key authentication.
- * These types represent the parsed response structures.
- */
-
-/** A single order from 카카오톡스토어 orders API */
-export interface KakaoStoreOrder {
-  order_no: string
-  ordered_at: string
-  status: string
-  buyer_name: string
-  buyer_phone: string
-  receiver_name: string
-  receiver_phone: string
-  receiver_zipcode: string
-  receiver_address: string
-  receiver_address_detail: string
-  items: KakaoStoreOrderItem[]
-  total_amount: number
+export interface KakaoStoreChangedOrder {
+  orderId: number
+  paymentId?: number
+  orderStatus: string
+  createdAt?: string
+  modifiedAt?: string
+  paidAt?: string
+  deliveryRequestAt?: string
 }
 
-/** An order item within a 카카오톡스토어 order */
-export interface KakaoStoreOrderItem {
-  item_id: string
-  product_name: string
-  option_text: string
-  quantity: number
-  price: number
-  sku?: string
+export interface KakaoStoreChangedOrdersResponse {
+  contents?: KakaoStoreChangedOrder[]
+  content?: KakaoStoreChangedOrder[]
+  token?: {
+    lastOrderId?: number
+    lastModifiedAt?: string
+  }
 }
 
-/** Wrapper for 카카오톡스토어 order list response */
-export interface KakaoStoreOrderResponse {
-  orders: KakaoStoreOrder[]
+export interface KakaoStoreOrderDetail {
+  id: number
+  orderBase?: {
+    id?: number
+    paymentId?: number
+    channelType?: string
+    status?: string
+    createdAt?: string
+    paidAt?: string
+    modifiedAt?: string
+  }
+  orderer?: {
+    phoneNumber?: string
+  }
+  orderProduct?: {
+    id?: number
+    name?: string
+    sellerItemNo?: string
+    optionContent?: string
+    quantity?: number
+    productPrice?: number
+    optionPrice?: number
+    deliveryAmount?: number
+  }
+  orderDelivery?: {
+    deliveryRequestAt?: string
+    confirmedAt?: string
+    invoiceRegisteredAt?: string
+    shippingMethod?: string
+    deliveryCompanyCode?: string
+    invoiceNumber?: string
+  }
+  orderDeliveryRequest?: {
+    receiverName?: string
+    receiverAddress?: string
+    receiverAddress1?: string
+    receiverAddress2?: string
+    receiverPhoneNumber?: string
+    receiverMobileNumber?: string
+    zipcode?: string
+    roadZipCode?: string
+    requirement?: string
+  }
+  orderClaimCancel?: KakaoStoreClaimDetail
+  orderClaimExchange?: KakaoStoreClaimDetail
+  orderClaimReturn?: KakaoStoreClaimDetail
 }
 
-/** A claim from 카카오톡스토어 API */
-export interface KakaoStoreClaim {
-  claim_id: string
-  order_no: string
-  claim_type: string
-  claim_status: string
-  claim_reason: string
-  claimed_at: string
+export interface KakaoStoreBulkOrdersResponse {
+  content?: KakaoStoreOrderDetail[]
+  fail?: number[]
 }
 
-/** Wrapper for 카카오톡스토어 claims response */
-export interface KakaoStoreClaimResponse {
-  claims: KakaoStoreClaim[]
+export interface KakaoStoreClaimDetail {
+  claimId?: number
+  claimItemId?: number
+  claimItemStatus?: string
+  reasonCodeName?: string
+  reasonComment?: string
+  createdAt?: string
+  modifiedAt?: string
 }
 
 /** A single product from 카카오톡스토어 products API */

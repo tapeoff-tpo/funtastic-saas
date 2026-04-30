@@ -323,7 +323,7 @@ const kakaoStoreAdapter = createStubAdapter({
   name: '카카오톡스토어',
   authType: 'api_key',
   rateLimitPerSecond: 30,
-  requiredCredentials: ['api_key', 'store_id'],
+  requiredCredentials: ['admin_app_key', 'seller_app_key'],
 })
 
 // --- Tier 2: 도매꾹, 온채널, 오너클랜, 신세계몰, 에이블리 ---

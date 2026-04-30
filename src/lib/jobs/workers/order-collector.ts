@@ -16,6 +16,7 @@ import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
 import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
 import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
 import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
+import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -61,6 +62,12 @@ export function createAdapter(
     case 'elevenst':
       return new ElevenstAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
+      })
+    case 'kakao-store':
+      return new KakaoStoreAdapter({
+        admin_app_key: credentials.admin_app_key ?? credentials.adminAppKey ?? '',
+        seller_app_key: credentials.seller_app_key ?? credentials.sellerAppKey ?? credentials.api_key ?? '',
+        channel_ids: credentials.channel_ids ?? credentials.channelIds ?? '101',
       })
     case 'gmarket':
       return new EsmAdapter({

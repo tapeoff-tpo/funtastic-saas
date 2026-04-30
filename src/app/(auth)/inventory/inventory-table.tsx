@@ -278,6 +278,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
   const columns = [
     columnHelper.display({
       id: 'select',
+      size: 32,
       header: ({ table }) => (
         <input
           type="checkbox"
@@ -298,6 +299,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
     }),
     columnHelper.display({
       id: 'rowNum',
+      size: 44,
       header: 'No.',
       cell: (info) => (
         <span className="text-muted-foreground text-xs">
@@ -306,6 +308,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       ),
     }),
     columnHelper.accessor('sku', {
+      size: 110,
       header: () => (
         <button type="button" onClick={() => handleSort('sku')} className="hover:text-foreground">
           상품코드{getSortIndicator('sku')}
@@ -313,7 +316,9 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       ),
       cell: (info) => <span className="font-mono text-xs">{info.getValue()}</span>,
     }),
+    // 상품명/옵션명 — 너비 기본값 크게 (사용자 요구: 이 두 열은 최소화 제외)
     columnHelper.accessor('productName', {
+      size: 260,
       header: () => (
         <button type="button" onClick={() => handleSort('productName')} className="hover:text-foreground">
           상품명{getSortIndicator('productName')}
@@ -321,20 +326,15 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       ),
     }),
     columnHelper.accessor('optionName', {
+      size: 200,
       header: '옵션명',
       cell: (info) => {
         const val = info.getValue()
         return val ? <span className="text-xs text-muted-foreground">{val}</span> : '-'
       },
     }),
-    columnHelper.accessor('packagingUnit', {
-      header: '포장',
-      cell: (info) => {
-        const val = info.getValue()
-        return val ? <span className="text-xs text-muted-foreground">{val}</span> : '-'
-      },
-    }),
     columnHelper.accessor('warehouseZone', {
+      size: 70,
       header: () => (
         <button type="button" onClick={() => handleSort('warehouseZone')} className="hover:text-foreground">
           창고{getSortIndicator('warehouseZone')}
@@ -342,18 +342,8 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       ),
       cell: (info) => info.getValue() ?? '-',
     }),
-    columnHelper.accessor('sectorCode', {
-      header: () => (
-        <button type="button" onClick={() => handleSort('sectorCode')} className="hover:text-foreground">
-          피킹위치{getSortIndicator('sectorCode')}
-        </button>
-      ),
-      cell: (info) => {
-        const val = info.getValue()
-        return val ? <span className="font-mono text-xs">{val}</span> : '-'
-      },
-    }),
     columnHelper.accessor('totalStock', {
+      size: 70,
       header: () => (
         <button type="button" onClick={() => handleSort('totalStock')} className="hover:text-foreground">
           총재고{getSortIndicator('totalStock')}
@@ -362,6 +352,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       cell: (info) => info.getValue().toLocaleString('ko-KR'),
     }),
     columnHelper.accessor('reservedStock', {
+      size: 56,
       header: () => (
         <button type="button" onClick={() => handleSort('reservedStock')} className="hover:text-foreground">
           예약{getSortIndicator('reservedStock')}
@@ -370,6 +361,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       cell: (info) => info.getValue().toLocaleString('ko-KR'),
     }),
     columnHelper.accessor('availableStock', {
+      size: 56,
       header: () => (
         <button type="button" onClick={() => handleSort('availableStock')} className="hover:text-foreground">
           가용{getSortIndicator('availableStock')}
@@ -378,6 +370,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       cell: (info) => <StockCell value={info.getValue()} />,
     }),
     columnHelper.accessor('monthlyIncoming', {
+      size: 72,
       header: '당월입고',
       cell: (info) => {
         const v = info.getValue()
@@ -387,6 +380,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       },
     }),
     columnHelper.accessor('monthlyOutgoing', {
+      size: 72,
       header: '당월출고',
       cell: (info) => {
         const v = info.getValue()
@@ -399,6 +393,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
     ...(showShippingCost
       ? [
           columnHelper.accessor('shippingCost', {
+            size: 140,
             header: 'SaaS 배송비(원가)',
             cell: (info) => (
               <ShippingCostCell
@@ -410,6 +405,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
         ]
       : []),
     columnHelper.accessor('lastIncomingAt', {
+      size: 96,
       header: '최종입고일',
       cell: (info) => {
         const d = info.getValue()
@@ -417,13 +413,36 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       },
     }),
     columnHelper.accessor('lastOutgoingAt', {
+      size: 96,
       header: '최종출고일',
       cell: (info) => {
         const d = info.getValue()
         return d ? new Date(d).toLocaleDateString('ko-KR') : '-'
       },
     }),
+    // 포장/피킹위치 — 사용자 요구: 최종출고일 뒤로 이동
+    columnHelper.accessor('packagingUnit', {
+      size: 64,
+      header: '포장',
+      cell: (info) => {
+        const val = info.getValue()
+        return val ? <span className="text-xs text-muted-foreground">{val}</span> : '-'
+      },
+    }),
+    columnHelper.accessor('sectorCode', {
+      size: 84,
+      header: () => (
+        <button type="button" onClick={() => handleSort('sectorCode')} className="hover:text-foreground">
+          피킹위치{getSortIndicator('sectorCode')}
+        </button>
+      ),
+      cell: (info) => {
+        const val = info.getValue()
+        return val ? <span className="font-mono text-xs">{val}</span> : '-'
+      },
+    }),
     columnHelper.accessor('updatedAt', {
+      size: 96,
       header: () => (
         <button type="button" onClick={() => handleSort('updatedAt')} className="hover:text-foreground">
           최종수정{getSortIndicator('updatedAt')}
@@ -436,6 +455,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
     }),
     columnHelper.display({
       id: 'actions',
+      size: 100,
       header: '작업',
       cell: (info) => {
         const row = info.row.original

@@ -32,7 +32,7 @@ export function OrderFilters() {
     dateFrom: parseAsString,
     dateTo: parseAsString,
     page: parseAsInteger.withDefault(1),
-    pageSize: parseAsInteger.withDefault(50),
+    pageSize: parseAsInteger.withDefault(25),
   }, { shallow: false })
 
   // Local state for search input — only pushed to URL on explicit submit

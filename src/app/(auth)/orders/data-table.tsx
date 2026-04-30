@@ -43,7 +43,7 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
   )
   const [, setPageSize] = useQueryState(
     'pageSize',
-    parseAsInteger.withDefault(50).withOptions({ shallow: false }),
+    parseAsInteger.withDefault(25).withOptions({ shallow: false }),
   )
 
   const pageCount = Math.ceil(total / pageSize)

@@ -144,7 +144,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   )
   const [, setPageSize] = useQueryState(
     'pageSize',
-    parseAsInteger.withDefault(50).withOptions({ shallow: false }),
+    parseAsInteger.withDefault(25).withOptions({ shallow: false }),
   )
   const [filters, setFilters] = useQueryStates({
     search: parseAsString,

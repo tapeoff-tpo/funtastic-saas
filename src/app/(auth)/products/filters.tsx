@@ -22,7 +22,9 @@ export function ProductFilters() {
     category: parseAsString,
     search: parseAsString,
     page: parseAsInteger.withDefault(1),
-    pageSize: parseAsInteger.withDefault(50),
+    pageSize: parseAsInteger.withDefault(25),
+    // 검색 트리거 sentinel — 이게 있어야 page.tsx 가 fetch 한다.
+    searched: parseAsString,
   }, { shallow: false })
 
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
@@ -31,7 +33,8 @@ export function ProductFilters() {
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
       startTransition(() => {
-        void setFilters({ ...updates, page: 1 })
+        // 필터 변경은 곧 검색 — searched sentinel 도 함께 켜준다.
+        void setFilters({ ...updates, page: 1, searched: '1' })
       })
     },
     [setFilters],
@@ -50,6 +53,7 @@ export function ProductFilters() {
       search: null,
       page: 1,
       pageSize: filters.pageSize,
+      searched: null,
     })
   }, [setFilters, filters.pageSize])
 

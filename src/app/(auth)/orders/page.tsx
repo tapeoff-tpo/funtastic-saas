@@ -22,7 +22,7 @@ export const metadata: Metadata = {
 
 const searchParamsCache = createSearchParamsCache({
   page: parseAsInteger.withDefault(1),
-  pageSize: parseAsInteger.withDefault(50),
+  pageSize: parseAsInteger.withDefault(25),
   status: parseAsString,
   marketplace: parseAsString,
   search: parseAsString,

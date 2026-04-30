@@ -45,7 +45,7 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
   }
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1).withOptions({ shallow: false }))
-  const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(50).withOptions({ shallow: false }))
+  const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(25).withOptions({ shallow: false }))
   const [sort, setSort] = useQueryState('sort', parseAsString.withOptions({ shallow: false }))
   const [order, setOrder] = useQueryState('order', parseAsString.withOptions({ shallow: false }))
 

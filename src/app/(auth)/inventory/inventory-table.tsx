@@ -46,6 +46,8 @@ interface InventoryTableProps {
   page: number
   pageSize: number
   warehouseZones: string[]
+  /** 검색 sentinel — false 면 안내 메시지만 표시하고 fetch 안 함 */
+  searched: boolean
 }
 
 
@@ -119,7 +121,7 @@ function ShippingCostCell({
   )
 }
 
-export function InventoryTable({ data, total, page, pageSize, warehouseZones }: InventoryTableProps) {
+export function InventoryTable({ data, total, page, pageSize, warehouseZones, searched }: InventoryTableProps) {
   const [adjustDialog, setAdjustDialog] = useState<{
     open: boolean
     mode: 'set' | 'adjust'
@@ -148,23 +150,70 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
   )
   const [filters, setFilters] = useQueryStates({
     search: parseAsString,
+    productCode: parseAsString,
+    optionCode: parseAsString,
+    maxStock: parseAsInteger,
     sort: parseAsString,
     order: parseAsString,
     page: parseAsInteger.withDefault(1),
     warehouseZone: parseAsString,
+    // 검색 트리거 sentinel — page.tsx 가 이게 켜졌을 때만 fetch
+    searched: parseAsString,
   }, { shallow: false })
 
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
+  const [productCodeInput, setProductCodeInput] = useState(filters.productCode ?? '')
+  const [optionCodeInput, setOptionCodeInput] = useState(filters.optionCode ?? '')
+  const [maxStockInput, setMaxStockInput] = useState(
+    filters.maxStock != null ? String(filters.maxStock) : '',
+  )
   useEffect(() => { setSearchInput(filters.search ?? '') }, [filters.search])
+  useEffect(() => { setProductCodeInput(filters.productCode ?? '') }, [filters.productCode])
+  useEffect(() => { setOptionCodeInput(filters.optionCode ?? '') }, [filters.optionCode])
+  useEffect(() => {
+    setMaxStockInput(filters.maxStock != null ? String(filters.maxStock) : '')
+  }, [filters.maxStock])
 
   const submitSearch = useCallback(() => {
-    const trimmed = searchInput.trim()
+    const trimmedSearch = searchInput.trim()
+    const trimmedProduct = productCodeInput.trim()
+    const trimmedOption = optionCodeInput.trim()
+    const trimmedMax = maxStockInput.trim()
+    const maxStockNum = trimmedMax === '' ? null : Number(trimmedMax)
+    if (maxStockNum !== null && (Number.isNaN(maxStockNum) || maxStockNum < 0)) {
+      toast.error('재고수량은 0 이상의 숫자만 입력 가능합니다')
+      return
+    }
     startTransition(() => {
-      void setFilters({ search: trimmed || null, page: 1 })
+      void setFilters({
+        search: trimmedSearch || null,
+        productCode: trimmedProduct || null,
+        optionCode: trimmedOption || null,
+        maxStock: maxStockNum,
+        page: 1,
+        // 검색 sentinel 켜기
+        searched: '1',
+      })
     })
-  }, [searchInput, setFilters])
+  }, [searchInput, productCodeInput, optionCodeInput, maxStockInput, setFilters])
+
+  const handleResetFilters = useCallback(() => {
+    setSearchInput('')
+    setProductCodeInput('')
+    setOptionCodeInput('')
+    setMaxStockInput('')
+    void setFilters({
+      search: null,
+      productCode: null,
+      optionCode: null,
+      maxStock: null,
+      warehouseZone: null,
+      page: 1,
+      searched: null,
+    })
+  }, [setFilters])
 
   const handleSort = useCallback(
     (columnId: string) => {
@@ -422,49 +471,124 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
     onRowSelectionChange: setRowSelection,
   })
 
+  const hasFilters =
+    !!filters.search ||
+    !!filters.productCode ||
+    !!filters.optionCode ||
+    filters.maxStock != null ||
+    !!filters.warehouseZone
+
   return (
     <div className="space-y-2">
-      {/* Toolbar: search + filter + buttons */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <form
-            onSubmit={(e) => { e.preventDefault(); submitSearch() }}
-            className="flex items-center gap-1"
-          >
+      {/* Filter panel — 사방넷 스타일 dense form */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); submitSearch() }}
+        className="rounded-md border bg-muted/30 p-2"
+      >
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <label className="flex items-center gap-1 text-xs">
+            <span className="text-muted-foreground">창고</span>
+            <select
+              value={filters.warehouseZone ?? ''}
+              onChange={(e) => {
+                void setFilters({
+                  warehouseZone: e.target.value || null,
+                  page: 1,
+                  searched: '1',
+                })
+              }}
+              className="rounded-md border bg-white px-2 py-1 text-xs"
+            >
+              <option value="">전체</option>
+              {warehouseZones.map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex items-center gap-1 text-xs">
+            <span className="text-muted-foreground">상품명</span>
             <input
               type="text"
-              placeholder="상품코드 또는 상품명"
+              placeholder="상품명 검색"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
-              className="w-[200px] rounded-md border px-2 py-1 text-xs placeholder:text-muted-foreground"
+              className="w-[180px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
             />
+          </label>
+          <label className="flex items-center gap-1 text-xs">
+            <span className="text-muted-foreground">품번코드</span>
+            <input
+              type="text"
+              placeholder="품번 검색"
+              value={productCodeInput}
+              onChange={(e) => setProductCodeInput(e.target.value)}
+              className="w-[140px] rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs">
+            <span className="text-muted-foreground">단품코드</span>
+            <input
+              type="text"
+              placeholder="옵션/단품 SKU"
+              value={optionCodeInput}
+              onChange={(e) => setOptionCodeInput(e.target.value)}
+              className="w-[140px] rounded-md border bg-white px-2 py-1 text-xs font-mono placeholder:font-sans placeholder:text-muted-foreground"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs">
+            <span className="text-muted-foreground">재고수량</span>
+            <input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              placeholder="N"
+              value={maxStockInput}
+              onChange={(e) => setMaxStockInput(e.target.value)}
+              className="w-[70px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
+            />
+            <span className="text-muted-foreground">개 이하</span>
+          </label>
+          <div className="ml-auto flex items-center gap-1">
             <button
               type="submit"
               disabled={isPending}
-              className="rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
             >
               {isPending ? '검색중...' : '검색'}
             </button>
-          </form>
-          <select
-            value={filters.warehouseZone ?? ''}
-            onChange={(e) => {
-              void setFilters({
-                warehouseZone: e.target.value || null,
-                page: 1,
-              })
-            }}
-            className="rounded-md border px-2 py-1 text-xs"
-          >
-            <option value="">전체 창고</option>
-            {warehouseZones.map((zone) => (
-              <option key={zone} value={zone}>
-                {zone}
-              </option>
-            ))}
-          </select>
+            {hasFilters && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="rounded-md border border-dashed px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted"
+              >
+                초기화
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+      </form>
+
+      {/* Top toolbar: pagination + bulk actions */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-y bg-muted/10 py-1.5">
+        <div className="flex-1 min-w-0">
+          {searched && (
+            <Pagination
+              page={page}
+              pageSize={pageSize}
+              total={total}
+              onPageChange={(p) => {
+                void setPage(p).then(() => router.refresh())
+              }}
+              onPageSizeChange={(s) => {
+                void setPageSize(s).then(() => router.refresh())
+              }}
+            />
+          )}
+        </div>
+        <div className="flex items-center gap-1">
           <select
             value={dlYear}
             onChange={(e) => setDlYear(Number(e.target.value))}
@@ -522,66 +646,60 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones }: 
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-xs">
-          <thead className="sticky top-0 z-[1] bg-muted/50">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id} className="border-b">
-                {headerGroup.headers.map((header) => (
-                  <th
-                    key={header.id}
-                    className="whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={columns.length}
-                  className="h-32 text-center text-muted-foreground"
-                >
-                  재고 항목이 없습니다.
-                </td>
-              </tr>
-            ) : (
-              table.getRowModel().rows.map((row, idx) => (
-                <tr
-                  key={row.id}
-                  className={`border-b transition-colors hover:bg-muted/50 ${
-                    idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
-                  }`}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="whitespace-nowrap px-2 py-1">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
+      {/* Table — searched 가드 */}
+      {!searched ? (
+        <div className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+          검색 조건을 입력하고 <span className="font-medium text-foreground">검색</span> 버튼을 눌러주세요.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 z-[1] bg-muted/50">
+              {table.getHeaderGroups().map((headerGroup) => (
+                <tr key={headerGroup.id} className="border-b">
+                  {headerGroup.headers.map((header) => (
+                    <th
+                      key={header.id}
+                      className="whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </th>
                   ))}
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <Pagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPageChange={(p) => {
-          void setPage(p).then(() => router.refresh())
-        }}
-        onPageSizeChange={(s) => {
-          void setPageSize(s).then(() => router.refresh())
-        }}
-      />
+              ))}
+            </thead>
+            <tbody>
+              {table.getRowModel().rows.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={columns.length}
+                    className="h-32 text-center text-muted-foreground"
+                  >
+                    재고 항목이 없습니다.
+                  </td>
+                </tr>
+              ) : (
+                table.getRowModel().rows.map((row, idx) => (
+                  <tr
+                    key={row.id}
+                    className={`border-b transition-colors hover:bg-muted/50 ${
+                      idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                    }`}
+                  >
+                    {row.getVisibleCells().map((cell) => (
+                      <td key={cell.id} className="whitespace-nowrap px-2 py-1">
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Dialogs */}
       {adjustDialog.open && (

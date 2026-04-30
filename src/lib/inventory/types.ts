@@ -46,7 +46,14 @@ export interface InventoryHistoryRecord {
 export interface InventoryFilters {
   page?: number
   pageSize?: number
+  /** 상품명 검색 (products.name ilike) */
   search?: string
+  /** 품번코드 검색 (products.internalSku ilike) */
+  productCode?: string
+  /** 단품코드/옵션명 검색 (inventory.optionName 또는 inventory.sku ilike) */
+  optionCode?: string
+  /** 재고가 N개 이하인 항목만 조회 */
+  maxStock?: number
   sort?: string
   order?: 'asc' | 'desc'
   warehouseZone?: string

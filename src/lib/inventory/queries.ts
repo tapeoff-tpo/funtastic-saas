@@ -32,6 +32,7 @@ export async function getInventoryList(
     eq(products.manageInventory, true),
   ]
 
+  // 통합 검색 — 기존 호환성 유지: 품번 또는 상품명 OR 매칭
   if (filters.search) {
     const searchPattern = `%${filters.search}%`
     conditions.push(
@@ -40,6 +41,24 @@ export async function getInventoryList(
         ilike(products.name, searchPattern),
       )!,
     )
+  }
+
+  // 품번코드 검색 — products.internalSku 부분 일치
+  if (filters.productCode) {
+    conditions.push(ilike(products.internalSku, `%${filters.productCode}%`))
+  }
+
+  // 단품코드 검색 — inventory.optionName 또는 inventory.sku 부분 일치
+  if (filters.optionCode) {
+    const pattern = `%${filters.optionCode}%`
+    conditions.push(
+      or(ilike(inventory.optionName, pattern), ilike(inventory.sku, pattern))!,
+    )
+  }
+
+  // 재고수량 N개 이하 — totalStock 이 NULL 이면 0 으로 취급
+  if (typeof filters.maxStock === 'number' && Number.isFinite(filters.maxStock)) {
+    conditions.push(sql`COALESCE(${inventory.totalStock}, 0) <= ${filters.maxStock}`)
   }
 
   if (filters.warehouseZone) {

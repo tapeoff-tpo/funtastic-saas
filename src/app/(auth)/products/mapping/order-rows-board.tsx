@@ -47,6 +47,12 @@ interface OrderRow {
   mappingCode: string | null
   mappingName: string | null
   components: OrderRowComponent[]
+  /** oi.unit_price (decimal as string) */
+  unitPrice: string | null
+  /** unitPrice * quantity — 서버 계산 */
+  totalAmount: string | null
+  /** orders.mapped_at — null = 미확정, value = 확정완료 */
+  mappedAt: string | null
 }
 
 interface OrderRowsResponse {
@@ -86,6 +92,29 @@ const OPTION_MATCH_OPTIONS = [
   { value: 'sku', label: 'SKU매핑' },
 ] as const
 
+// 선택사항 II — 카테고리 (placeholder, 후속 plan 에서 실제 카테고리 채움)
+const CATEGORY_OPTIONS = [
+  { value: '', label: '전체 카테고리' },
+] as const
+
+// 선택사항 III — 주문상태
+const ORDER_STATUS_OPTIONS = [
+  { value: '', label: '전체 상태' },
+  { value: 'new', label: '신규' },
+  { value: 'confirmed', label: '확인' },
+  { value: 'preparing', label: '출고준비' },
+  { value: 'shipped', label: '배송중' },
+  { value: 'delivered', label: '배송완료' },
+  { value: 'cancelled', label: '취소' },
+] as const
+
+// 선택사항 IV — 기타
+const ETC_OPTIONS = [
+  { value: '', label: '기타 — 전체' },
+  { value: 'has_memo', label: '메모 있음' },
+  { value: 'gift', label: '선물주문' },
+] as const
+
 function todayKst(): string {
   // 사용자가 한국 시간 기준으로 입력하므로 KST 로 yyyy-mm-dd 생성
   const d = new Date()
@@ -113,12 +142,17 @@ export function OrderRowsBoard() {
   const [filters, setFilters] = useQueryStates({
     from: parseAsString,
     to: parseAsString,
-    mkt: parseAsString, // comma separated
+    mkt: parseAsString, // comma separated (선택사항 I — 쇼핑몰)
+    category: parseAsString,    // 선택사항 II — 카테고리 (UI plumbing 만, 서버 미적용)
+    orderStatus: parseAsString, // 선택사항 III — 주문상태 (UI plumbing 만, 서버 미적용)
+    etc: parseAsString,         // 선택사항 IV — 기타 (UI plumbing 만, 서버 미적용)
     productMatch: parseAsStringEnum(['all', 'matched', 'unmatched']).withDefault('all'),
     optionMatch: parseAsStringEnum(['all', 'matched', 'unmatched', 'sku']).withDefault('all'),
     q: parseAsString,
     page: parseAsInteger.withDefault(1),
-    pageSize: parseAsInteger.withDefault(50),
+    pageSize: parseAsInteger.withDefault(25),
+    /** 0 = 미검색(안내문구만 노출, fetch 차단). 1 = 검색됨(자동 reload). */
+    searched: parseAsInteger.withDefault(0),
   }, { shallow: false })
 
   const [searchInput, setSearchInput] = useState(filters.q ?? '')
@@ -139,6 +173,15 @@ export function OrderRowsBoard() {
   const pageSize = filters.pageSize
 
   const reload = useCallback(async () => {
+    // sentinel: 검색 버튼을 누르기 전에는 fetch 자체를 실행하지 않음.
+    // /orders 페이지의 tab-sentinel 패턴과 일치 — 진입 시 안내문구만 보이고
+    // 네트워크 요청 0회 보장.
+    if (filters.searched !== 1) {
+      setRows([])
+      setTotal(0)
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const params = new URLSearchParams()
@@ -148,6 +191,8 @@ export function OrderRowsBoard() {
       if (filters.productMatch !== 'all') params.set('productMatch', filters.productMatch)
       if (filters.optionMatch !== 'all') params.set('optionMatch', filters.optionMatch)
       if (filters.q) params.set('q', filters.q)
+      // category / orderStatus / etc 는 이번 plan 에서 서버 필터 미적용 — UI plumbing 만 노출.
+      // 후속 plan 에서 API 확장 시 여기에 params.set 추가.
       params.set('page', String(filters.page))
       params.set('pageSize', String(pageSize))
 
@@ -163,7 +208,7 @@ export function OrderRowsBoard() {
     } finally {
       setLoading(false)
     }
-  }, [filters.from, filters.to, filters.productMatch, filters.optionMatch, filters.q, filters.page, filters.pageSize, selectedMarkets, pageSize])
+  }, [filters.searched, filters.from, filters.to, filters.productMatch, filters.optionMatch, filters.q, filters.page, filters.pageSize, filters.category, filters.orderStatus, filters.etc, selectedMarkets, pageSize])
 
   useEffect(() => { void reload() }, [reload])
 
@@ -192,15 +237,18 @@ export function OrderRowsBoard() {
   }
 
   const submitSearch = () => {
-    void setFilters({ q: searchInput.trim() || null, page: 1 })
+    // 조회 버튼 클릭 → searched=1 sentinel 세팅. 이 이후로 reload 가 실제 fetch 수행.
+    void setFilters({ q: searchInput.trim() || null, page: 1, searched: 1 })
   }
 
   const resetFilters = () => {
     setSearchInput('')
+    // 초기화 → searched=0 으로 되돌려서 다시 안내문구 화면으로 (fetch 차단).
     void setFilters({
       from: null, to: null, mkt: null,
+      category: null, orderStatus: null, etc: null,
       productMatch: 'all', optionMatch: 'all',
-      q: null, page: 1,
+      q: null, page: 1, searched: 0,
     })
   }
 
@@ -267,6 +315,48 @@ export function OrderRowsBoard() {
     } finally {
       setApplying(false)
     }
+  }
+
+  // ---------- 일괄주문확정 — 선택된 행의 unique orderId 전체에 대해 mode 무관하게 매핑확정 ----------
+  async function applyBulkOrderConfirm() {
+    const selRows = rows.filter((r) => selected.has(r.orderItemId))
+    if (selRows.length === 0) {
+      alert('선택된 행이 없습니다')
+      return
+    }
+    const orderIds = Array.from(new Set(selRows.map((r) => r.orderId)))
+    if (!confirm(`선택된 ${orderIds.length}건의 주문을 매핑확정 처리합니다. 진행할까요?`)) return
+
+    setApplying(true)
+    try {
+      const res = await fetch('/api/orders/apply-mappings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderIds }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        alert(err.error ?? '주문확정 실패')
+        return
+      }
+      const data = await res.json() as { applied: number }
+      alert(`주문확정 ${data.applied}건 처리됨`)
+      setSelected(new Set())
+      await reload()
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  // ---------- 다운로드 (plumbing only — 후속 plan) ----------
+  function handleDownload() {
+    alert('다운로드 기능은 후속 plan 에서 구현됩니다 (현재 필터+선택행 기준 Excel export 예정)')
+  }
+
+  // ---------- 선택삭제 (plumbing only — 후속 plan) ----------
+  function handleSelectDelete() {
+    if (selected.size === 0) return
+    alert(`선택삭제는 후속 plan 에서 구현됩니다 (선택 ${selected.size}건)`)
   }
 
   function openUnmap() {
@@ -375,36 +465,68 @@ export function OrderRowsBoard() {
           )}
         </div>
 
-        {/* Row 3 — 매핑선택 라디오 그룹 A + B */}
-        <div className="flex flex-wrap items-center gap-3 border-b py-1.5">
+        {/* Row 2.5 — 선택사항 II / III / IV (카테고리 / 주문상태 / 기타) */}
+        <div className="flex flex-wrap items-center gap-2 border-b py-1.5">
+          <span className="w-16 shrink-0 text-muted-foreground">선택사항</span>
+          <select
+            value={filters.category ?? ''}
+            onChange={(e) => setFilters({ category: e.target.value || null, page: 1 })}
+            className="rounded border bg-background px-2 py-0.5 text-xs"
+          >
+            {CATEGORY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            value={filters.orderStatus ?? ''}
+            onChange={(e) => setFilters({ orderStatus: e.target.value || null, page: 1 })}
+            className="rounded border bg-background px-2 py-0.5 text-xs"
+          >
+            {ORDER_STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <select
+            value={filters.etc ?? ''}
+            onChange={(e) => setFilters({ etc: e.target.value || null, page: 1 })}
+            className="rounded border bg-background px-2 py-0.5 text-xs"
+          >
+            {ETC_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Row 3 — 매핑선택 라디오 (1줄: 품번매핑 그룹) */}
+        <div className="flex flex-wrap items-center gap-2 border-b py-1">
           <span className="w-16 shrink-0 text-muted-foreground">매핑선택</span>
-          <div className="flex items-center gap-2">
-            {PRODUCT_MATCH_OPTIONS.map((opt) => (
-              <label key={opt.value} className="inline-flex items-center gap-1">
-                <input
-                  type="radio"
-                  name="productMatch"
-                  checked={filters.productMatch === opt.value}
-                  onChange={() => setFilters({ productMatch: opt.value, page: 1 })}
-                />
-                {opt.label}
-              </label>
-            ))}
-          </div>
-          <span className="text-muted-foreground">|</span>
-          <div className="flex items-center gap-2">
-            {OPTION_MATCH_OPTIONS.map((opt) => (
-              <label key={opt.value} className="inline-flex items-center gap-1">
-                <input
-                  type="radio"
-                  name="optionMatch"
-                  checked={filters.optionMatch === opt.value}
-                  onChange={() => setFilters({ optionMatch: opt.value, page: 1 })}
-                />
-                {opt.label}
-              </label>
-            ))}
-          </div>
+          {PRODUCT_MATCH_OPTIONS.map((opt) => (
+            <label key={opt.value} className="inline-flex items-center gap-1">
+              <input
+                type="radio"
+                name="productMatch"
+                checked={filters.productMatch === opt.value}
+                onChange={() => setFilters({ productMatch: opt.value, page: 1 })}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+
+        {/* Row 3.5 — 매핑선택 라디오 (2줄: 단품매핑 그룹) */}
+        <div className="flex flex-wrap items-center gap-2 border-b py-1">
+          <span className="w-16 shrink-0 text-muted-foreground"></span>
+          {OPTION_MATCH_OPTIONS.map((opt) => (
+            <label key={opt.value} className="inline-flex items-center gap-1">
+              <input
+                type="radio"
+                name="optionMatch"
+                checked={filters.optionMatch === opt.value}
+                onChange={() => setFilters({ optionMatch: opt.value, page: 1 })}
+              />
+              {opt.label}
+            </label>
+          ))}
         </div>
 
         {/* Row 4 — 검색 */}
@@ -412,12 +534,15 @@ export function OrderRowsBoard() {
           onSubmit={(e) => { e.preventDefault(); submitSearch() }}
           className="flex flex-wrap items-center gap-2 pt-1.5"
         >
-          <span className="w-16 shrink-0 text-muted-foreground">검색</span>
+          <span className="w-16 shrink-0 text-muted-foreground">검색항목</span>
+          <select disabled className="rounded border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+            <option>쇼핑몰상품코드/상품명/옵션</option>
+          </select>
           <input
             type="text"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="쇼핑몰상품코드 / 상품명 / 옵션"
+            placeholder="검색어 입력"
             className="flex-1 min-w-[200px] rounded border px-2 py-0.5"
           />
           <button type="submit" className="inline-flex items-center gap-1 rounded border bg-background px-2 py-0.5 hover:bg-muted">
@@ -462,6 +587,23 @@ export function OrderRowsBoard() {
           >
             <Plus className="size-3" /> 일괄 단품매핑
           </Button>
+          <Button
+            onClick={() => void applyBulkOrderConfirm()}
+            disabled={applying}
+            size="sm" variant="outline" className="h-7 px-2 text-xs"
+          >
+            일괄주문확정
+          </Button>
+          <Button onClick={handleDownload} size="sm" variant="outline" className="h-7 px-2 text-xs">
+            다운로드
+          </Button>
+          <Button
+            onClick={handleSelectDelete}
+            disabled={selected.size === 0}
+            size="sm" variant="outline" className="h-7 px-2 text-xs"
+          >
+            선택삭제
+          </Button>
           <Button onClick={openUnmap} size="sm" variant="outline" className="h-7 px-2 text-xs">
             매핑해제
           </Button>
@@ -471,7 +613,12 @@ export function OrderRowsBoard() {
         </div>
       </div>
 
-      {/* ============ 2그룹 헤더 dense 테이블 ============ */}
+      {/* ============ 2그룹 헤더 dense 테이블 (또는 안내문구) ============ */}
+      {filters.searched !== 1 ? (
+        <div className="rounded-md border bg-muted/30 px-6 py-12 text-center text-sm text-muted-foreground">
+          상단 필터 설정 후 [조회] 버튼을 눌러 매핑관리 데이터를 불러오세요.
+        </div>
+      ) : (
       <div className="overflow-auto rounded-md border">
         <table className="w-full border-collapse text-xs">
           <thead className="bg-muted/50">
@@ -479,10 +626,10 @@ export function OrderRowsBoard() {
               <th rowSpan={2} className="w-8 border-b px-1 py-1">
                 <input type="checkbox" checked={allSelected} onChange={toggleAll} />
               </th>
-              <th colSpan={6} className="border-b border-r bg-blue-50/50 px-2 py-1 text-center font-medium">
+              <th colSpan={7} className="border-b border-r bg-blue-50/50 px-2 py-1 text-center font-medium">
                 쇼핑몰 수집 데이터
               </th>
-              <th colSpan={4} className="border-b bg-emerald-50/50 px-2 py-1 text-center font-medium">
+              <th colSpan={5} className="border-b bg-emerald-50/50 px-2 py-1 text-center font-medium">
                 매핑 적용 결과
               </th>
             </tr>
@@ -492,18 +639,20 @@ export function OrderRowsBoard() {
               <th className="border-b px-1.5 py-1 text-left font-medium">쇼핑몰상품코드</th>
               <th className="border-b px-1.5 py-1 text-left font-medium">상품명/옵션</th>
               <th className="border-b px-1.5 py-1 text-right font-medium">수량</th>
+              <th className="border-b px-1.5 py-1 text-right font-medium">주문금액</th>
               <th className="border-b border-r px-1.5 py-1 text-center font-medium">매핑여부</th>
               <th className="border-b px-1.5 py-1 text-left font-medium">품번-단품</th>
               <th className="border-b px-1.5 py-1 text-left font-medium">SKU</th>
               <th className="border-b px-1.5 py-1 text-left font-medium">상품명/옵션(재고)</th>
               <th className="border-b px-1.5 py-1 text-right font-medium">수량</th>
+              <th className="border-b px-1.5 py-1 text-center font-medium">확정여부</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={11} className="py-6 text-center text-muted-foreground">불러오는 중...</td></tr>
+              <tr><td colSpan={13} className="py-6 text-center text-muted-foreground">불러오는 중...</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={11} className="py-6 text-center text-muted-foreground">조회 결과가 없습니다</td></tr>
+              <tr><td colSpan={13} className="py-6 text-center text-muted-foreground">조회 결과가 없습니다</td></tr>
             ) : rows.map((r) => {
               const split = splitProductOption(r.marketplaceItemId)
               const compsOrEmpty: (OrderRowComponent | null)[] = r.components.length > 0
@@ -541,6 +690,9 @@ export function OrderRowsBoard() {
                       </td>
                       <td rowSpan={compsOrEmpty.length} className="px-1.5 py-1 text-right align-top tabular-nums">
                         {r.quantity}
+                      </td>
+                      <td rowSpan={compsOrEmpty.length} className="px-1.5 py-1 text-right align-top tabular-nums">
+                        {r.totalAmount != null ? Number(r.totalAmount).toLocaleString('ko-KR') : '-'}
                       </td>
                       <td rowSpan={compsOrEmpty.length} className="border-r px-1.5 py-1 align-top">
                         {r.mappingStatus === 'both' ? (
@@ -594,12 +746,23 @@ export function OrderRowsBoard() {
                   ) : (
                     <td colSpan={4} className="px-1.5 py-1 text-muted-foreground">—</td>
                   )}
+                  {/* 확정여부 — 행(orderItem) 단위. 첫 component row 에 rowSpan 으로 한 번만. */}
+                  {ci === 0 && (
+                    <td rowSpan={compsOrEmpty.length} className="px-1.5 py-1 text-center align-top">
+                      {r.mappedAt ? (
+                        <Badge className="bg-violet-100 text-violet-800 hover:bg-violet-100">확정완료</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-muted-foreground">미확정</Badge>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))
             })}
           </tbody>
         </table>
       </div>
+      )}
 
       {/* ============ 페이지네이션 ============ */}
       {totalPages > 1 && (

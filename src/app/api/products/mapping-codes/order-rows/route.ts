@@ -48,6 +48,12 @@ interface OrderRow {
   mappingCode: string | null
   mappingName: string | null
   components: ComponentSummary[]
+  /** oi.unit_price — Postgres numeric 컬럼은 string 으로 반환됨 */
+  unitPrice: string | null
+  /** unitPrice * quantity — 서버에서 곱한 값 (decimal as string) */
+  totalAmount: string | null
+  /** orders.mapped_at — null = 미확정, value = 확정완료 */
+  mappedAt: string | null
 }
 
 function parseProductMatch(v: string | null): ProductMatch {
@@ -170,6 +176,9 @@ export async function GET(req: NextRequest) {
       oi.product_name                 AS "productName",
       oi.option_text                  AS "optionText",
       oi.quantity                     AS "quantity",
+      oi.unit_price                   AS "unitPrice",
+      (oi.unit_price * oi.quantity)   AS "totalAmount",
+      o.mapped_at                     AS "mappedAt",
       ms.id                           AS "mappingSourceId",
       ms.marketplace_option_id        AS "msOptionId",
       mc.id                           AS "mappingCodeId",
@@ -267,6 +276,13 @@ export async function GET(req: NextRequest) {
       mappingCode: (r.mappingCode as string | null) ?? null,
       mappingName: (r.mappingName as string | null) ?? null,
       components,
+      unitPrice: r.unitPrice == null ? null : String(r.unitPrice),
+      totalAmount: r.totalAmount == null ? null : String(r.totalAmount),
+      mappedAt: r.mappedAt
+        ? (r.mappedAt instanceof Date
+            ? r.mappedAt.toISOString()
+            : String(r.mappedAt))
+        : null,
     }
   })
 

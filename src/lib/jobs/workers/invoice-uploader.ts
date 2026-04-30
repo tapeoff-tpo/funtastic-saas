@@ -12,11 +12,31 @@
 
 import { Worker } from 'bullmq'
 import type { Job } from 'bullmq'
+import { eq } from 'drizzle-orm'
 import { getConnection } from '../connection'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { updateShipmentStatus } from '@/lib/shipping/queries'
+import { db } from '@/lib/db'
+import { orders } from '@/lib/db/schema'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
 import type { InvoiceData } from '@/lib/marketplace/types'
+
+/**
+ * For 10x10, look up detailIdx from the order's stored rawData.
+ * Returns the first detail's DetailIdx — multi-line orders need separate work.
+ */
+async function resolveTenByTenDetailIdx(orderId: string): Promise<string | null> {
+  const [row] = await db
+    .select({ rawData: orders.rawData })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1)
+  if (!row?.rawData) return null
+  const raw = row.rawData as Record<string, unknown>
+  const details = raw.details as Array<{ DetailIdx?: string | number }> | undefined
+  if (!details || details.length === 0) return null
+  return details[0].DetailIdx != null ? String(details[0].DetailIdx) : null
+}
 
 /**
  * Process a single invoice upload job.
@@ -27,6 +47,7 @@ export async function processInvoiceUpload(
   job: Job<InvoiceUploadJobData>,
 ): Promise<void> {
   const {
+    orderId,
     shipmentId,
     marketplaceId,
     marketplaceOrderId,
@@ -40,10 +61,14 @@ export async function processInvoiceUpload(
   // 2. Get marketplace adapter
   const adapter = marketplaceRegistry.get(marketplaceId)
 
-  // 3. Build invoice data
+  // 3. Build invoice data (with marketplace-specific extras)
   const invoiceData: InvoiceData = {
     trackingNumber,
     carrierId,
+  }
+  if (marketplaceId === '10x10') {
+    const detailIdx = await resolveTenByTenDetailIdx(orderId)
+    if (detailIdx) invoiceData.detailIdx = detailIdx
   }
 
   // 4. Call adapter

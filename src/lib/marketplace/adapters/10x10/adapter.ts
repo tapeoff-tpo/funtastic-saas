@@ -150,6 +150,25 @@ function parseTenByTenDate(s: string | null | undefined): Date {
   return isNaN(d.getTime()) ? new Date() : d
 }
 
+async function toTenByTenApiError(action: string, error: unknown): Promise<MarketplaceApiError> {
+  if (error instanceof Error && 'response' in error) {
+    const response = (error as { response: Response }).response
+    const body = await response.text().catch(() => '')
+    const detail = body ? `: ${body.slice(0, 500)}` : ''
+    return new MarketplaceApiError(
+      '10x10',
+      response.status,
+      `${action} failed: ${response.status} ${response.statusText}${detail}`,
+    )
+  }
+
+  return new MarketplaceApiError(
+    '10x10',
+    500,
+    `${action} failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+  )
+}
+
 /**
  * Map 10x10 orderState → our OrderStatus.
  * - 5(주문통보), 6(상품준비) → 'new'
@@ -226,7 +245,8 @@ export class TenByTenAdapter implements MarketplaceAdapter {
       if (env.hasError) return { success: false, error: env.message || 'API returned error' }
       return { success: true }
     } catch (e) {
-      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
+      const error = await toTenByTenApiError('testConnection', e)
+      return { success: false, error: error.message }
     }
   }
 
@@ -243,9 +263,14 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     })
     if (creds.shop_id) search.set('brandId', String(creds.shop_id))
 
-    const env = await this.client(creds)
-      .get(`orders?${search.toString()}`)
-      .json<TenByTenEnvelope<OrdersListResponse>>()
+    let env: TenByTenEnvelope<OrdersListResponse>
+    try {
+      env = await this.client(creds)
+        .get(`orders?${search.toString()}`)
+        .json<TenByTenEnvelope<OrdersListResponse>>()
+    } catch (error) {
+      throw await toTenByTenApiError('getOrders', error)
+    }
 
     if (env.hasError) {
       throw new MarketplaceApiError('10x10', 500, env.message || 'getOrders failed')

@@ -21,6 +21,7 @@ const credentialLabels: Record<string, string> = {
   client_id: '클라이언트 ID',
   client_secret: '클라이언트 시크릿',
   api_key: 'API 키',
+  shop_id: '브랜드 ID (brandId)',
   mall_id: '몰 ID',
   access_token: '액세스 토큰',
   store_id: '스토어 ID',

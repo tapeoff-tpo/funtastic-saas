@@ -19,12 +19,14 @@ export const metadata: Metadata = {
 
 const searchParamsCache = createSearchParamsCache({
   page: parseAsInteger.withDefault(1),
-  pageSize: parseAsInteger.withDefault(50),
+  pageSize: parseAsInteger.withDefault(25),
   status: parseAsString,
   category: parseAsString,
   search: parseAsString,
   sort: parseAsString,
   order: parseAsString,
+  // 검색 트리거 sentinel — 이게 없으면 페이지 진입 직후엔 fetch 하지 않는다.
+  searched: parseAsString,
 })
 
 export default async function ProductsPage({
@@ -53,7 +55,11 @@ export default async function ProductsPage({
     order: (params.order as 'asc' | 'desc') ?? undefined,
   }
 
-  const { items, total } = await getProducts(user.id, filters)
+  // 검색 버튼 누르기 전엔 fetch 하지 않음. searched sentinel 이 켜졌을 때만 조회.
+  const searched = !!params.searched
+  const { items, total } = searched
+    ? await getProducts(user.id, filters)
+    : { items: [] as Awaited<ReturnType<typeof getProducts>>['items'], total: 0 }
 
   const data: ProductRow[] = items.map((item) => ({
     id: item.id,
@@ -108,13 +114,19 @@ export default async function ProductsPage({
         <ProductFilters />
       </Suspense>
 
-      {/* Data Table */}
-      <ProductDataTable
-        data={data}
-        total={total}
-        page={params.page}
-        pageSize={params.pageSize}
-      />
+      {/* Data Table — 검색 전엔 안내, 후엔 결과 */}
+      {!searched ? (
+        <div className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+          검색 조건을 입력하고 <span className="font-medium text-foreground">검색</span> 버튼을 눌러주세요.
+        </div>
+      ) : (
+        <ProductDataTable
+          data={data}
+          total={total}
+          page={params.page}
+          pageSize={params.pageSize}
+        />
+      )}
     </div>
   )
 }

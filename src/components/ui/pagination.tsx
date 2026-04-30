@@ -45,7 +45,7 @@ export function PageSizeSelector({
 
 /**
  * 공용 페이지네이션 — 최대 10개 페이지 번호 + 화살표로 다음 그룹 이동
- * 페이지당 10/20/50/100 선택 (`hidePageSize` 로 숨길 수 있음)
+ * 페이지당 25/50/100/200/500/1000 선택 (`hidePageSize` 로 숨길 수 있음)
  */
 export function Pagination({
   page,
@@ -53,7 +53,7 @@ export function Pagination({
   total,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [10, 20, 50, 100],
+  pageSizeOptions = [25, 50, 100, 200, 500, 1000],
   hidePageSize = false,
 }: {
   page: number

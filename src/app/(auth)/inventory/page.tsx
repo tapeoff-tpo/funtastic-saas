@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 
 const searchParamsCache = createSearchParamsCache({
   page: parseAsInteger.withDefault(1),
-  pageSize: parseAsInteger.withDefault(50),
+  pageSize: parseAsInteger.withDefault(25),
   search: parseAsString,
   sort: parseAsString,
   order: parseAsString,

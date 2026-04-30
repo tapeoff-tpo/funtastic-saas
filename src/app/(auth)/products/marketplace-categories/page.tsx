@@ -26,21 +26,32 @@ interface CategoryRow {
 
 export default function MarketplaceCategoriesPage() {
   const [categories, setCategories] = useState<CategoryRow[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [searchInput, setSearchInput] = useState('')
 
   // 탭 전환 후 복원되도록 URL 쿼리스트링에 저장 (탭바가 마지막 URL 기억).
   const [filters, setFilters] = useQueryStates({
     market: parseAsString.withDefault('all'),
     q: parseAsString.withDefault(''),
     page: parseAsInteger.withDefault(1),
-    pageSize: parseAsInteger.withDefault(20),
+    pageSize: parseAsInteger.withDefault(25),
+    // 검색 트리거 sentinel — 이게 켜져야 fetch 한다.
+    searched: parseAsString,
   })
   const selectedMarket = filters.market
   const search = filters.q
   const page = filters.page
   const pageSize = filters.pageSize
+  const searched = !!filters.searched
 
+  useEffect(() => { setSearchInput(search) }, [search])
+
+  // searched 가 켜졌을 때만 fetch.
   useEffect(() => {
+    if (!searched) {
+      setCategories([])
+      return
+    }
     let cancelled = false
     async function load() {
       setLoading(true)
@@ -54,7 +65,11 @@ export default function MarketplaceCategoriesPage() {
     }
     void load()
     return () => { cancelled = true }
-  }, [])
+  }, [searched])
+
+  const submitSearch = () => {
+    void setFilters({ q: searchInput, page: 1, searched: '1' })
+  }
 
   const allMarkets = Array.from(new Set(categories.map((c) => c.marketplaceId))).sort()
 
@@ -81,8 +96,11 @@ export default function MarketplaceCategoriesPage() {
         </p>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Filters — manual submit, 검색 버튼 누르기 전엔 fetch 안 함 */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); submitSearch() }}
+        className="flex flex-wrap items-center gap-2"
+      >
         <select
           value={selectedMarket}
           onChange={(e) => void setFilters({ market: e.target.value, page: 1 })}
@@ -96,14 +114,24 @@ export default function MarketplaceCategoriesPage() {
 
         <input
           type="text"
-          value={search}
-          onChange={(e) => void setFilters({ q: e.target.value, page: 1 })}
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
           placeholder="카테고리 ID 또는 이름 검색"
           className="flex-1 max-w-[400px] rounded-md border px-3 py-1.5 text-sm"
         />
-      </div>
+        <button
+          type="submit"
+          className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          검색
+        </button>
+      </form>
 
-      {loading ? (
+      {!searched ? (
+        <div className="rounded-lg border border-dashed py-16 text-center text-sm text-muted-foreground">
+          검색 조건을 입력하고 <span className="font-medium text-foreground">검색</span> 버튼을 눌러주세요.
+        </div>
+      ) : loading ? (
         <div className="py-10 text-center text-sm text-muted-foreground">불러오는 중...</div>
       ) : filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed py-10 text-center text-sm text-muted-foreground">

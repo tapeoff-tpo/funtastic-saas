@@ -33,7 +33,16 @@ interface OrderRow {
   productName: string
   optionText: string | null
   quantity: number
-  mappingStatus: 'option' | 'product' | 'unmapped'
+  /**
+   * 매핑 상태:
+   *  - 'both'    : 품번 + 단품 둘 다 매핑됨 (매핑완료)
+   *  - 'option'  : 단품만
+   *  - 'product' : 품번만
+   *  - 'unmapped': 둘 다 없음
+   */
+  mappingStatus: 'both' | 'option' | 'product' | 'unmapped'
+  hasProductMapping: boolean
+  hasOptionMapping: boolean
   mappingSourceId: string | null
   mappingCodeId: string | null
   mappingCode: string | null
@@ -166,6 +175,23 @@ export async function GET(req: NextRequest) {
       mc.id                           AS "mappingCodeId",
       mc.code                         AS "mappingCode",
       mc.name                         AS "mappingName",
+      -- 품번 매핑(option_id 빈 문자열) 별도 존재 여부. LATERAL JOIN 은 단품 우선이라
+      -- 둘 다 있을 때 단품만 채택되어 품번 존재가 가려지므로 별도 EXISTS 로 확인.
+      EXISTS (
+        SELECT 1 FROM mapping_sources s2
+        WHERE s2.user_id = o.user_id
+          AND s2.marketplace_id = o.marketplace_id
+          AND s2.marketplace_option_id = ''
+          AND (oi.marketplace_item_id = s2.marketplace_product_id
+            OR oi.marketplace_item_id LIKE s2.marketplace_product_id || '-%')
+      )                               AS "hasProductMapping",
+      EXISTS (
+        SELECT 1 FROM mapping_sources s3
+        WHERE s3.user_id = o.user_id
+          AND s3.marketplace_id = o.marketplace_id
+          AND s3.marketplace_option_id <> ''
+          AND oi.marketplace_item_id = s3.marketplace_product_id || '-' || s3.marketplace_option_id
+      )                               AS "hasOptionMapping",
       COALESCE(
         (
           SELECT json_agg(
@@ -200,11 +226,16 @@ export async function GET(req: NextRequest) {
     : ((rowsResult as { rows?: Record<string, unknown>[] }).rows ?? [])
 
   const rows: OrderRow[] = rawRows.map((r) => {
-    const msOptionId = (r.msOptionId as string | null) ?? null
     const mappingCodeId = (r.mappingCodeId as string | null) ?? null
-    let status: 'option' | 'product' | 'unmapped' = 'unmapped'
-    if (mappingCodeId) {
-      status = msOptionId && msOptionId !== '' ? 'option' : 'product'
+    const hasProductMapping = Boolean(r.hasProductMapping)
+    const hasOptionMapping = Boolean(r.hasOptionMapping)
+    let status: 'both' | 'option' | 'product' | 'unmapped' = 'unmapped'
+    if (hasProductMapping && hasOptionMapping) {
+      status = 'both'
+    } else if (hasOptionMapping) {
+      status = 'option'
+    } else if (hasProductMapping) {
+      status = 'product'
     }
     const componentsRaw = r.components
     const components: ComponentSummary[] = Array.isArray(componentsRaw)
@@ -229,6 +260,8 @@ export async function GET(req: NextRequest) {
       optionText: (r.optionText as string | null) ?? null,
       quantity: Number(r.quantity ?? 0),
       mappingStatus: status,
+      hasProductMapping,
+      hasOptionMapping,
       mappingSourceId: (r.mappingSourceId as string | null) ?? null,
       mappingCodeId,
       mappingCode: (r.mappingCode as string | null) ?? null,

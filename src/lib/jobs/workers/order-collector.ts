@@ -12,6 +12,7 @@ import {
 import { readCredential } from '@/lib/supabase/admin'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
+import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -42,6 +43,11 @@ export function createAdapter(
       return new NaverAdapter({
         client_id: credentials.client_id ?? credentials.clientId ?? '',
         client_secret: credentials.client_secret ?? credentials.clientSecret ?? '',
+      })
+    case '10x10':
+      return new TenByTenAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        shop_id: credentials.shop_id ?? credentials.shopId ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

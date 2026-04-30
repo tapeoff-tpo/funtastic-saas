@@ -1,16 +1,21 @@
 /**
- * TenByTen (텐바이텐) marketplace adapter implementing MarketplaceAdapter.
+ * TenByTen (텐바이텐) marketplace adapter.
  *
- * Stub implementation -- API integration pending.
- * // TODO: Implement when API access is available
+ * API base: https://api.10x10.co.kr/v2/
+ * Auth: Authorization: bearer {api_key}
+ * Required credentials: api_key, shop_id (brandId)
+ *
+ * Spec captured 2026-04-29 from https://api.10x10.co.kr/document/index.html
  */
 
+import ky from 'ky'
 import type {
   MarketplaceAdapter,
   MarketplaceConfig,
   MarketplaceCredentials,
   NormalizedOrder,
   NormalizedClaim,
+  NormalizedOrderItem,
   NormalizedProduct,
   InvoiceData,
 } from '../../types'
@@ -24,64 +29,411 @@ const TENBYTEN_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['api_key', 'shop_id'],
 }
 
+const BASE_URL = 'https://api.10x10.co.kr/v2'
+
+/** Common envelope wrapping every 10x10 response */
+interface TenByTenEnvelope<T> {
+  hasError: boolean
+  hasAlert: boolean
+  message: string
+  code: string
+  inputValue?: string
+  outPutValue: T
+}
+
+interface OrdersListResponse {
+  TotalCount: number
+  datas: OrderMaster[]
+}
+
+interface OrderMaster {
+  OrderSerial: string
+  OrderDivision?: string
+  UserId?: string
+  AccountDivision?: string
+  AccountNumber?: string
+  /** 0:대기 1:실패 2:접수 4:결제완료 5:주문통보 6:상품준비 7:일부출고 8:상품출고 */
+  orderState?: string
+  depositDate?: string
+  orderDate?: string
+  ordererName?: string
+  ordererPhone?: string
+  ordererCellPhone?: string
+  ordererEmail?: string
+  receiverName?: string
+  receiverPhone?: string
+  receiverCellPhone?: string
+  receiverZipCode?: string
+  receiverAddress?: string
+  receiverAddressDetail?: string
+  orderComment?: string
+  shippingPrice?: number
+  flowerdate?: string
+  flowertime?: string
+  cardribbon?: string
+  flowermessage?: string
+  flowername?: string
+  customernumber?: string
+  OrderCancel?: string
+  details?: OrderDetail[]
+}
+
+interface OrderDetail {
+  DetailIdx: number
+  itemId: number
+  itemName?: string
+  itemOption?: string
+  itemOptionName?: string
+  quantity: number
+  VendorItemId?: string
+  BrandId?: string
+  /** 2:업체통보 3:상품준비 7:출고완료 */
+  DetailOrderState?: string
+  RequireMemo?: string
+  OrgItemPrice?: number
+  NotCouponPrice?: number
+  Price?: number
+  BonusCouponPlusPrice?: number
+  EtcSalePrice?: number
+  buycash?: number
+  OrderCancel?: string
+}
+
+interface OrderCancelItem {
+  OrderSerial: string
+  DetailIdx: string
+  cancel?: number
+  orderqty?: number
+  itemId?: string
+  RegDate?: string
+  FinishDate?: string | null
+  itemoption?: string
+  itemoptionname?: string
+  BrandId?: string
+  CsId: number
+  currentStatus?: string
+}
+
+interface ClaimItem {
+  OrderSerial: string
+  DetailIdx: string
+  CsId: number
+  RegDate?: string
+  FinishDate?: string | null
+  cancel?: number
+  itemId?: string
+  itemName?: string
+  itemoption?: string
+  itemoptionname?: string
+  BrandId?: string
+  CurrentStatus?: string
+  Reason?: string
+  [key: string]: unknown
+}
+
+function fmtDate(d: Date): string {
+  // 10x10 expects YYYY-MM-DD HH:mm:ss
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`
+}
+
+function parseTenByTenDate(s: string | null | undefined): Date {
+  if (!s) return new Date()
+  // formats: "2023-09-12 21:59" or "2023-09-12 21:59:00"
+  const iso = s.replace(' ', 'T') + (s.length === 16 ? ':00' : '') + '+09:00'
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? new Date() : d
+}
+
+/**
+ * Map 10x10 orderState → our OrderStatus.
+ * - 5(주문통보), 6(상품준비) → 'new'
+ * - 7(일부출고), 8(상품출고) → 'shipped'
+ */
+function mapOrderStatus(state: string | undefined): NormalizedOrder['status'] {
+  switch (state) {
+    case '5':
+    case '6':
+      return 'new'
+    case '7':
+    case '8':
+      return 'shipped'
+    default:
+      return 'new'
+  }
+}
+
+function mapClaimStatus(
+  current: string | undefined,
+  finishDate: string | null | undefined,
+): NormalizedClaim['claimStatus'] {
+  if (finishDate) return 'completed'
+  if (!current) return 'requested'
+  if (/완료/.test(current)) return 'completed'
+  if (/처리|진행/.test(current)) return 'processing'
+  if (/거부|반려|불가/.test(current)) return 'rejected'
+  return 'requested'
+}
+
 export class TenByTenAdapter implements MarketplaceAdapter {
   readonly config = TENBYTEN_CONFIG
+  private credentials?: MarketplaceCredentials
+
+  constructor(credentials?: MarketplaceCredentials) {
+    this.credentials = credentials
+  }
+
+  private getCreds(passed?: MarketplaceCredentials): MarketplaceCredentials {
+    const c = passed ?? this.credentials
+    if (!c) throw new MarketplaceApiError('10x10', 401, 'Credentials not provided')
+    if (!c.api_key) throw new MarketplaceApiError('10x10', 401, 'api_key missing')
+    return c
+  }
+
+  private client(creds: MarketplaceCredentials) {
+    return ky.create({
+      prefixUrl: BASE_URL,
+      headers: {
+        Authorization: `bearer ${creds.api_key}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 30000,
+      retry: { limit: 2, methods: ['get'], statusCodes: [408, 429, 500, 502, 503, 504] },
+    })
+  }
 
   async testConnection(
-    _credentials?: MarketplaceCredentials
+    credentials?: MarketplaceCredentials,
   ): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
-    return {
-      success: false,
-      error: 'API integration pending - 텐바이텐 API documentation required',
+    try {
+      const creds = this.getCreds(credentials)
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      const search = new URLSearchParams({
+        startdate: fmtDate(since),
+        enddate: fmtDate(new Date()),
+      })
+      if (creds.shop_id) search.set('brandId', String(creds.shop_id))
+
+      const env = await this.client(creds)
+        .get(`orders?${search.toString()}`)
+        .json<TenByTenEnvelope<OrdersListResponse>>()
+
+      if (env.hasError) return { success: false, error: env.message || 'API returned error' }
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
     }
   }
 
   async authenticate(): Promise<{ success: boolean; expiresAt?: Date }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) adapter not yet implemented')
+    const r = await this.testConnection()
+    return { success: r.success }
   }
 
-  async getOrders(_since: Date): Promise<NormalizedOrder[]> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) getOrders not yet implemented')
+  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+    const creds = this.getCreds()
+    const search = new URLSearchParams({
+      startdate: fmtDate(since),
+      enddate: fmtDate(new Date()),
+    })
+    if (creds.shop_id) search.set('brandId', String(creds.shop_id))
+
+    const env = await this.client(creds)
+      .get(`orders?${search.toString()}`)
+      .json<TenByTenEnvelope<OrdersListResponse>>()
+
+    if (env.hasError) {
+      throw new MarketplaceApiError('10x10', 500, env.message || 'getOrders failed')
+    }
+
+    const list = env.outPutValue?.datas ?? []
+    return list.map((o) => this.toNormalizedOrder(o))
   }
 
-  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) getClaimsOrders not yet implemented')
+  private toNormalizedOrder(o: OrderMaster): NormalizedOrder {
+    const items: NormalizedOrderItem[] = (o.details ?? []).map((d) => ({
+      marketplaceItemId: String(d.itemId),
+      productName: d.itemName ?? '',
+      optionText: d.itemOptionName || d.itemOption || undefined,
+      quantity: d.quantity ?? 1,
+      unitPrice: Number(d.Price ?? d.OrgItemPrice ?? 0),
+      sku: d.VendorItemId || undefined,
+    }))
+
+    const totalAmount = items.reduce((sum, it) => sum + it.unitPrice * it.quantity, 0)
+
+    return {
+      marketplaceOrderId: o.OrderSerial,
+      marketplaceId: '10x10',
+      marketplaceStatus: o.orderState ?? '',
+      status: mapOrderStatus(o.orderState),
+      buyerName: o.ordererName ?? '',
+      buyerPhone: o.ordererPhone || undefined,
+      buyerPhone2: o.ordererCellPhone || undefined,
+      recipientName: o.receiverName ?? o.ordererName ?? '',
+      recipientPhone: o.receiverPhone || undefined,
+      recipientPhone2: o.receiverCellPhone || undefined,
+      shippingAddress: {
+        zipCode: o.receiverZipCode ?? '',
+        address1: o.receiverAddress ?? '',
+        address2: o.receiverAddressDetail || undefined,
+      },
+      items,
+      orderedAt: parseTenByTenDate(o.orderDate),
+      totalAmount,
+      shippingFee: o.shippingPrice ?? null,
+      shippingType: null,
+      deliveryMessage: o.orderComment ?? null,
+      rawData: o as unknown as Record<string, unknown>,
+    }
+  }
+
+  async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
+    const creds = this.getCreds()
+    const baseQs = new URLSearchParams({
+      startdate: fmtDate(since),
+      enddate: fmtDate(new Date()),
+    })
+    if (creds.shop_id) baseQs.set('brandId', String(creds.shop_id))
+
+    const client = this.client(creds)
+    const claims: NormalizedClaim[] = []
+
+    // 1. cancels — GET /v2/orders/ordercancel (7-day window per spec)
+    try {
+      const env = await client
+        .get(`orders/ordercancel?${baseQs.toString()}`)
+        .json<TenByTenEnvelope<OrderCancelItem[]>>()
+      if (!env.hasError && Array.isArray(env.outPutValue)) {
+        for (const c of env.outPutValue) {
+          claims.push({
+            marketplaceClaimId: `cancel-${c.CsId}`,
+            marketplaceId: '10x10',
+            marketplaceOrderId: c.OrderSerial,
+            claimType: 'cancel',
+            claimStatus: mapClaimStatus(c.currentStatus, c.FinishDate),
+            reason: c.itemoptionname || undefined,
+            requestedAt: parseTenByTenDate(c.RegDate),
+            rawData: c as unknown as Record<string, unknown>,
+          })
+        }
+      }
+    } catch {
+      /* swallow — try other claim types */
+    }
+
+    // 2. returns — GET /v2/retruns/lists (typo "retruns" matches official spec)
+    try {
+      const env = await client
+        .get(`retruns/lists?${baseQs.toString()}`)
+        .json<TenByTenEnvelope<ClaimItem[]>>()
+      if (!env.hasError && Array.isArray(env.outPutValue)) {
+        for (const r of env.outPutValue) {
+          claims.push({
+            marketplaceClaimId: `return-${r.CsId}`,
+            marketplaceId: '10x10',
+            marketplaceOrderId: r.OrderSerial,
+            claimType: 'return',
+            claimStatus: mapClaimStatus(r.CurrentStatus, r.FinishDate),
+            reason: r.Reason || r.itemoptionname || undefined,
+            requestedAt: parseTenByTenDate(r.RegDate),
+            rawData: r as unknown as Record<string, unknown>,
+          })
+        }
+      }
+    } catch {
+      /* swallow */
+    }
+
+    // 3. exchanges — GET /v2/exchange/lists
+    try {
+      const env = await client
+        .get(`exchange/lists?${baseQs.toString()}`)
+        .json<TenByTenEnvelope<ClaimItem[]>>()
+      if (!env.hasError && Array.isArray(env.outPutValue)) {
+        for (const r of env.outPutValue) {
+          claims.push({
+            marketplaceClaimId: `exchange-${r.CsId}`,
+            marketplaceId: '10x10',
+            marketplaceOrderId: r.OrderSerial,
+            claimType: 'exchange',
+            claimStatus: mapClaimStatus(r.CurrentStatus, r.FinishDate),
+            reason: r.Reason || r.itemoptionname || undefined,
+            requestedAt: parseTenByTenDate(r.RegDate),
+            rawData: r as unknown as Record<string, unknown>,
+          })
+        }
+      }
+    } catch {
+      /* swallow */
+    }
+
+    return claims
   }
 
   async uploadInvoice(
-    _orderId: string,
-    _invoice: InvoiceData
+    orderId: string,
+    invoice: InvoiceData,
   ): Promise<{ success: boolean; error?: string }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) uploadInvoice not yet implemented')
+    const creds = this.getCreds()
+    // 10x10 송장입력 requires `detailIdx` (per-line) in addition to orderSerial.
+    // Caller passes it via the loose `[key: string]: unknown` field of InvoiceData.
+    const detailIdx = (invoice as Record<string, unknown>).detailIdx as
+      | string
+      | number
+      | undefined
+    if (!detailIdx) {
+      return {
+        success: false,
+        error: 'detailIdx required for 10x10 — pass via InvoiceData.detailIdx',
+      }
+    }
+
+    try {
+      const env = await this.client(creds)
+        .post('orders/orderconfirm', {
+          json: {
+            orderSerial: orderId,
+            detailIdx: String(detailIdx),
+            songjangDiv: invoice.carrierId,
+            songjangNo: invoice.trackingNumber,
+          },
+        })
+        .json<TenByTenEnvelope<unknown>>()
+      if (env.hasError) return { success: false, error: env.message || 'uploadInvoice failed' }
+      return { success: true }
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }
+    }
   }
 
   async confirmOrder(
     _marketplaceOrderId: string,
+    _rawData?: Record<string, unknown>,
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+    // 10x10 auto-confirms on getOrders ("신규주문조회 ... 동시에 주문 확인이 됩니다")
+    return { success: true }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) getProducts not yet implemented')
+    throw new MarketplaceApiError('10x10', 501, 'getProducts not yet implemented')
   }
 
   async registerProduct(
-    _product: NormalizedProduct
+    _product: NormalizedProduct,
   ): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) registerProduct not yet implemented')
+    throw new MarketplaceApiError('10x10', 501, 'registerProduct not yet implemented')
   }
 
   async updateProduct(
     _marketplaceProductId: string,
-    _product: Partial<NormalizedProduct>
+    _product: Partial<NormalizedProduct>,
   ): Promise<{ success: boolean; error?: string }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('10x10', 501, 'TenByTen (텐바이텐) updateProduct not yet implemented')
+    throw new MarketplaceApiError('10x10', 501, 'updateProduct not yet implemented')
   }
 }

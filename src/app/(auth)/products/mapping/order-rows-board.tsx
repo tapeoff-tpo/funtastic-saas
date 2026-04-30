@@ -674,7 +674,11 @@ function BulkMappingModal({
     }
     setLoading(true)
     try {
-      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}`)
+      // 품번매핑 모드면 SKU prefix 단위로 그룹화된 결과를 받아온다.
+      // 단품 행을 잘못 골라서 mapping_code 가 단품 단위로 만들어지는 사고 방지.
+      const res = await fetch(
+        `/api/products/search?q=${encodeURIComponent(q)}&mode=${target.mode}`,
+      )
       if (!res.ok) {
         setResults([])
         return
@@ -685,7 +689,7 @@ function BulkMappingModal({
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [target.mode])
 
   const handleQueryChange = (v: string) => {
     setQuery(v)

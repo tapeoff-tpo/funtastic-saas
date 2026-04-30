@@ -1,15 +1,28 @@
 'use client'
 
 import { createContext, useCallback, useContext, useEffect, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { usePathname, useSearchParams } from 'next/navigation'
 
 const TABS_KEY = 'funtastic-tabs'
 const FAVS_KEY = 'funtastic-favorites'
 const MAX_TABS = 12
 
 export interface OpenTab {
+  /** Full URL including query string (e.g. "/products/mapping?q=글라손&page=3").
+   *  Stored full so reopening the tab restores nuqs/useQueryStates filter state. */
   href: string
   label: string
+}
+
+/** Strip query string — tabs are identified by pathname only, but href remembers state. */
+function stripQuery(href: string): string {
+  const i = href.indexOf('?')
+  return i === -1 ? href : href.slice(0, i)
+}
+
+/** Public helper — used by tab-bar to compare tab.href against current pathname. */
+export function tabPathname(tab: { href: string }): string {
+  return stripQuery(tab.href)
 }
 
 /**
@@ -65,6 +78,7 @@ const NavStateContext = createContext<NavStateValue | null>(null)
 
 export function NavStateProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [favorites, setFavorites] = useState<string[]>([])
   const [hydrated, setHydrated] = useState(false)
@@ -103,23 +117,37 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
   }, [favorites, hydrated])
 
   // Track current route as a tab. /login and /dashboard root excluded from auto-add to avoid clutter.
+  // Tab is identified by pathname; href stores the *full* URL (with query string) so that
+  // reopening the tab restores filter/page/sort state held in URL search params.
   useEffect(() => {
     if (!hydrated) return
     if (!pathname || pathname === '/dashboard') return
+    const search = searchParams?.toString() ?? ''
+    const fullHref = search ? `${pathname}?${search}` : pathname
     setTabs((prev) => {
-      if (prev.some((t) => t.href === pathname)) return prev
-      const next: OpenTab = { href: pathname, label: getRouteLabel(pathname) }
+      const idx = prev.findIndex((t) => stripQuery(t.href) === pathname)
+      if (idx >= 0) {
+        // Existing tab — refresh its href to the latest URL so the next reopen restores state.
+        if (prev[idx].href === fullHref) return prev
+        const updated = prev.slice()
+        updated[idx] = { ...prev[idx], href: fullHref }
+        return updated
+      }
+      const next: OpenTab = { href: fullHref, label: getRouteLabel(pathname) }
       const updated = [...prev, next]
       return updated.length > MAX_TABS ? updated.slice(-MAX_TABS) : updated
     })
-  }, [pathname, hydrated])
+  }, [pathname, searchParams, hydrated])
 
+  // Close handlers match by pathname — caller may pass full href or bare path.
   const closeTab = useCallback((href: string) => {
-    setTabs((prev) => prev.filter((t) => t.href !== href))
+    const path = stripQuery(href)
+    setTabs((prev) => prev.filter((t) => stripQuery(t.href) !== path))
   }, [])
 
   const closeOthers = useCallback((href: string) => {
-    setTabs((prev) => prev.filter((t) => t.href === href))
+    const path = stripQuery(href)
+    setTabs((prev) => prev.filter((t) => stripQuery(t.href) === path))
   }, [])
 
   const closeAll = useCallback(() => {

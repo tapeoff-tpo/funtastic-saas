@@ -12,7 +12,6 @@
 import type {
   MarketplaceAdapter,
   MarketplaceConfig,
-  MarketplaceCredentials,
   NormalizedOrder,
   NormalizedClaim,
   NormalizedProduct,
@@ -53,7 +52,7 @@ export class NaverAdapter implements MarketplaceAdapter {
     this.naverClient = createNaverClient(credentials.client_id, credentials.client_secret)
   }
 
-  async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
+  async testConnection(): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
       const token = await this.naverClient.getToken()
       if (!token) {
@@ -93,8 +92,18 @@ export class NaverAdapter implements MarketplaceAdapter {
       // Step 2: Fetch full product order details
       const productOrders = await this.fetchProductOrderDetails(changedIds)
 
-      // Step 3: Normalize to NormalizedOrder[]
-      return productOrders.map((po) => this.normalizeOrder(po))
+      // Step 3: Group by Naver's general order ID.
+      // lastChangedStatuses works in product-order IDs, but our order table should
+      // represent the customer-facing order number once with multiple items.
+      const groups = new Map<string, NaverProductOrder[]>()
+      for (const po of productOrders) {
+        const orderId = this.getNaverOrder(po).orderId
+        const current = groups.get(orderId) ?? []
+        current.push(po)
+        groups.set(orderId, current)
+      }
+
+      return [...groups.values()].map((group) => this.normalizeOrderGroup(group))
     } catch (error) {
       if (error instanceof MarketplaceApiError || error instanceof MarketplaceAuthError) throw error
       throw new MarketplaceApiError('naver', 500, error instanceof Error ? error.message : 'Unknown error')
@@ -116,17 +125,20 @@ export class NaverAdapter implements MarketplaceAdapter {
 
   async confirmOrder(
     marketplaceOrderId: string,
+    rawData?: Record<string, unknown>,
   ): Promise<{ success: boolean; error?: string }> {
     try {
+      const productOrderIds = this.extractProductOrderIds(rawData) ?? [marketplaceOrderId]
       const response = await this.naverClient.client.post(
         'external/v1/pay-order/seller/product-orders/place-order',
-        { json: { productOrderIds: [marketplaceOrderId] } },
+        { json: { productOrderIds } },
       ).json<{
         data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
       }>()
 
-      if (response.data.failProductOrderIds?.includes(marketplaceOrderId)) {
-        return { success: false, error: `발주확인 실패: ${marketplaceOrderId}` }
+      const failed = response.data.failProductOrderIds?.filter((id) => productOrderIds.includes(id)) ?? []
+      if (failed.length > 0) {
+        return { success: false, error: `발주확인 실패: ${failed.join(', ')}` }
       }
 
       return { success: true }
@@ -137,9 +149,14 @@ export class NaverAdapter implements MarketplaceAdapter {
 
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     try {
+      const productOrderIds =
+        this.extractProductOrderIds(invoice.rawData as Record<string, unknown> | undefined) ??
+        this.extractProductOrderIds(invoice as Record<string, unknown>) ??
+        [orderId]
+
       // Step 1: Place-order confirmation if not already confirmed
       if (invoice.requiresConfirmation) {
-        const confirmResult = await this.confirmOrder(orderId)
+        const confirmResult = await this.confirmOrder(orderId, { productOrderIds })
         if (!confirmResult.success) {
           return confirmResult
         }
@@ -150,23 +167,22 @@ export class NaverAdapter implements MarketplaceAdapter {
         'external/v1/pay-order/seller/product-orders/dispatch',
         {
           json: {
-            dispatchProductOrders: [
-              {
-                productOrderId: orderId,
-                deliveryMethod: 'DELIVERY',
-                deliveryCompanyCode: mapCarrierCode('naver', invoice.carrierId),
-                trackingNumber: invoice.trackingNumber,
-                dispatchDate: new Date().toISOString(),
-              },
-            ],
+            dispatchProductOrders: productOrderIds.map((productOrderId) => ({
+              productOrderId,
+              deliveryMethod: 'DELIVERY',
+              deliveryCompanyCode: mapCarrierCode('naver', invoice.carrierId),
+              trackingNumber: invoice.trackingNumber,
+              dispatchDate: new Date().toISOString(),
+            })),
           },
         },
       ).json<{
         data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
       }>()
 
-      if (dispatchResponse.data.failProductOrderIds?.includes(orderId)) {
-        return { success: false, error: `Dispatch failed for ${orderId}` }
+      const failed = dispatchResponse.data.failProductOrderIds?.filter((id) => productOrderIds.includes(id)) ?? []
+      if (failed.length > 0) {
+        return { success: false, error: `Dispatch failed for ${failed.join(', ')}` }
       }
 
       return { success: true }
@@ -425,14 +441,17 @@ export class NaverAdapter implements MarketplaceAdapter {
     return response.data || []
   }
 
-  private normalizeOrder(po: NaverProductOrder): NormalizedOrder {
-    const { order, productOrder } = po
-    const addr = productOrder.shippingAddress
+  private normalizeOrderGroup(productOrders: NaverProductOrder[]): NormalizedOrder {
+    const first = productOrders[0]
+    const order = this.getNaverOrder(first)
+    const firstProductOrder = this.getNaverProductOrder(first)
+    const addr = firstProductOrder.shippingAddress
+    const productOrderIds = productOrders.map((po) => this.getNaverProductOrder(po).productOrderId)
     return {
-      marketplaceOrderId: productOrder.productOrderId,
+      marketplaceOrderId: order.orderId,
       marketplaceId: 'naver',
-      marketplaceStatus: productOrder.productOrderStatus,
-      status: mapNaverStatus(productOrder.productOrderStatus),
+      marketplaceStatus: firstProductOrder.productOrderStatus,
+      status: mapNaverStatus(firstProductOrder.productOrderStatus),
       buyerName: order.ordererName,
       buyerPhone: order.ordererTel || undefined,
       recipientName: addr?.name ?? order.ordererName,
@@ -442,8 +461,9 @@ export class NaverAdapter implements MarketplaceAdapter {
         address1: addr.baseAddress ?? '',
         address2: addr.detailedAddress || undefined,
       } : { zipCode: '', address1: '' },
-      items: [
-        {
+      items: productOrders.map((po) => {
+        const productOrder = this.getNaverProductOrder(po)
+        return {
           marketplaceItemId: productOrder.productOrderId,
           productName: productOrder.productName,
           optionText: productOrder.productOption || undefined,
@@ -452,16 +472,22 @@ export class NaverAdapter implements MarketplaceAdapter {
           sku: (productOrder as Record<string, unknown>).optionManageCode
             ? String((productOrder as Record<string, unknown>).optionManageCode)
             : undefined,
-        },
-      ],
+        }
+      }),
       orderedAt: order.paymentDate ? new Date(order.paymentDate) : new Date(order.orderDate),
-      totalAmount: productOrder.totalPaymentAmount,
-      rawData: po as unknown as Record<string, unknown>,
+      totalAmount: productOrders.reduce((sum, po) => sum + this.getNaverProductOrder(po).totalPaymentAmount, 0),
+      rawData: {
+        order,
+        productOrders: productOrders.map((po) => this.getNaverProductOrder(po)),
+        productOrderIds,
+        originalData: productOrders,
+      },
     }
   }
 
   private normalizeClaim(po: NaverProductOrder): NormalizedClaim {
-    const { order, productOrder } = po
+    const order = this.getNaverOrder(po)
+    const productOrder = this.getNaverProductOrder(po)
     const claimType = productOrder.claimType
       ? (NAVER_CLAIM_TYPE_MAP[productOrder.claimType] || 'cancel')
       : 'cancel'
@@ -469,12 +495,80 @@ export class NaverAdapter implements MarketplaceAdapter {
     return {
       marketplaceClaimId: productOrder.productOrderId,
       marketplaceId: 'naver',
-      marketplaceOrderId: productOrder.productOrderId,
+      marketplaceOrderId: order.orderId,
       claimType,
       claimStatus: productOrder.claimStatus ? mapNaverClaimStatus(productOrder.claimStatus) : 'requested',
       reason: productOrder.claimReason || undefined,
       requestedAt: order.paymentDate ? new Date(order.paymentDate) : new Date(order.orderDate),
       rawData: po as unknown as Record<string, unknown>,
     }
+  }
+
+  private getNaverOrder(po: NaverProductOrder): NaverProductOrder['order'] {
+    if (po.order) return po.order
+
+    const flat = po as unknown as Record<string, unknown>
+    return {
+      orderId: String(flat.orderId ?? ''),
+      orderDate: String(flat.orderDate ?? flat.paymentDate ?? ''),
+      ordererName: String(flat.ordererName ?? ''),
+      ordererTel: flat.ordererTel ? String(flat.ordererTel) : undefined,
+      paymentDate: flat.paymentDate ? String(flat.paymentDate) : undefined,
+    }
+  }
+
+  private getNaverProductOrder(po: NaverProductOrder): NaverProductOrder['productOrder'] {
+    if (po.productOrder) return po.productOrder
+
+    const flat = po as unknown as Record<string, unknown>
+    const shippingAddress = flat.shippingAddress as NaverProductOrder['productOrder']['shippingAddress']
+    return {
+      productOrderId: String(flat.productOrderId ?? ''),
+      productOrderStatus: String(flat.productOrderStatus ?? ''),
+      quantity: Number(flat.quantity ?? 0),
+      unitPrice: Number(flat.unitPrice ?? 0),
+      productName: String(flat.productName ?? ''),
+      productOption: flat.productOption
+        ? String(flat.productOption)
+        : flat.optionInfo
+          ? String(flat.optionInfo)
+          : undefined,
+      totalPaymentAmount: Number(flat.totalPaymentAmount ?? 0),
+      shippingAddress,
+      claimType: flat.claimType ? String(flat.claimType) : undefined,
+      claimStatus: flat.claimStatus ? String(flat.claimStatus) : undefined,
+      claimReason: flat.claimReason ? String(flat.claimReason) : undefined,
+    }
+  }
+
+  private extractProductOrderIds(rawData?: Record<string, unknown>): string[] | null {
+    const orderIdentity = rawData?.orderIdentity
+    if (orderIdentity && typeof orderIdentity === 'object') {
+      const itemIds = (orderIdentity as Record<string, unknown>).itemIds
+      if (Array.isArray(itemIds)) {
+        const normalized = itemIds.map((id) => String(id)).filter(Boolean)
+        if (normalized.length > 0) return normalized
+      }
+    }
+
+    const ids = rawData?.productOrderIds
+    if (Array.isArray(ids)) {
+      const normalized = ids.map((id) => String(id)).filter(Boolean)
+      return normalized.length > 0 ? normalized : null
+    }
+
+    const productOrders = rawData?.productOrders
+    if (Array.isArray(productOrders)) {
+      const normalized = productOrders
+        .map((po) => {
+          if (!po || typeof po !== 'object') return null
+          return (po as Record<string, unknown>).productOrderId
+        })
+        .filter((id): id is string | number => typeof id === 'string' || typeof id === 'number')
+        .map((id) => String(id))
+      return normalized.length > 0 ? normalized : null
+    }
+
+    return null
   }
 }

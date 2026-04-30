@@ -19,6 +19,7 @@ import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
 import type {
   MarketplaceAdapter,
+  MarketplaceOrderIdentity,
   NormalizedOrder,
   NormalizedClaim,
 } from '@/lib/marketplace/types'
@@ -156,7 +157,8 @@ export async function collectOrdersForConnection(params: {
     const since = new Date(now - lookbackMs)
 
     await setProgress(`변경된 주문 조회 중... (최근 ${lookbackLabel})`)
-    const normalizedOrders = await adapter.getOrders(since)
+    const fetchedOrders = await adapter.getOrders(since)
+    const normalizedOrders = mergeNormalizedOrdersByOrderId(fetchedOrders)
     await setProgress(`${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ' — 저장 중...' : ''}`)
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)
@@ -195,7 +197,7 @@ export async function collectOrdersForConnection(params: {
         newOrderIds.push({
           id: upsertedOrder.id,
           marketplaceOrderId: order.marketplaceOrderId,
-          rawData: (order.rawData ?? null) as Record<string, unknown> | null,
+          rawData: enrichOrderRawData(order),
         })
       }
     }
@@ -342,6 +344,8 @@ async function upsertOrder(
   connectionId: string,
   userId: string
 ) {
+  const rawData = enrichOrderRawData(order)
+
   return db
     .insert(orders)
     .values({
@@ -362,7 +366,7 @@ async function upsertOrder(
       orderedAt: order.orderedAt,
       totalAmount: String(order.totalAmount ?? 0),
       deliveryMessage: order.deliveryMessage ?? null,
-      rawData: order.rawData,
+      rawData,
       collectedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -373,11 +377,59 @@ async function upsertOrder(
         status: order.status,
         marketplaceStatus: order.marketplaceStatus,
         deliveryMessage: order.deliveryMessage ?? null,
-        rawData: order.rawData,
+        rawData,
         updatedAt: new Date(),
       },
     })
     .returning({ id: orders.id, status: orders.status })
+}
+
+function mergeNormalizedOrdersByOrderId(ordersToMerge: NormalizedOrder[]): NormalizedOrder[] {
+  const grouped = new Map<string, NormalizedOrder[]>()
+
+  for (const order of ordersToMerge) {
+    const key = `${order.marketplaceId}:${order.marketplaceOrderId}`
+    const current = grouped.get(key) ?? []
+    current.push(order)
+    grouped.set(key, current)
+  }
+
+  return Array.from(grouped.values()).map((group) => {
+    if (group.length === 1) return group[0]
+
+    const first = group[0]
+    const items = group.flatMap((order) => order.items)
+    const itemTotal = items.reduce(
+      (sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0),
+      0
+    )
+
+    return {
+      ...first,
+      items,
+      totalAmount: itemTotal > 0 ? itemTotal : first.totalAmount,
+      rawData: {
+        ...(first.rawData ?? {}),
+        mergedOrders: group.map((order) => order.rawData),
+      },
+    }
+  })
+}
+
+function enrichOrderRawData(order: NormalizedOrder): Record<string, unknown> {
+  const itemIds = order.items
+    .map((item) => item.marketplaceItemId)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+
+  const orderIdentity: MarketplaceOrderIdentity = {
+    orderId: order.marketplaceOrderId,
+    itemIds,
+  }
+
+  return {
+    ...(order.rawData ?? {}),
+    orderIdentity,
+  }
 }
 
 /**
@@ -401,11 +453,27 @@ async function upsertClaim(
     )
 
   if (matchingOrders.length === 0) {
-    console.warn(
-      `[OrderCollector] Skipping claim ${claim.marketplaceClaimId}: ` +
-        `no matching order found for ${claim.marketplaceOrderId}`
-    )
-    return false
+    const [itemMatchedOrder] = await db
+      .select({ id: orders.id })
+      .from(orderItems)
+      .innerJoin(orders, eq(orderItems.orderId, orders.id))
+      .where(
+        and(
+          eq(orders.marketplaceId, claim.marketplaceId),
+          eq(orderItems.marketplaceItemId, claim.marketplaceClaimId)
+        )
+      )
+      .limit(1)
+
+    if (!itemMatchedOrder) {
+      console.warn(
+        `[OrderCollector] Skipping claim ${claim.marketplaceClaimId}: ` +
+          `no matching order found for ${claim.marketplaceOrderId}`
+      )
+      return false
+    }
+
+    matchingOrders.push(itemMatchedOrder)
   }
 
   const orderId = matchingOrders[0].id

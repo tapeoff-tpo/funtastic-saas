@@ -52,7 +52,12 @@ export interface MarketplaceCredentials {
   [key: string]: string
 }
 
-/** Normalized order item from marketplace */
+/**
+ * Normalized order item from marketplace.
+ *
+ * marketplaceItemId is the marketplace's line/product-order identifier.
+ * If a marketplace only exposes one order identifier, use the order ID here too.
+ */
 export interface NormalizedOrderItem {
   marketplaceItemId: string
   productName: string
@@ -62,8 +67,20 @@ export interface NormalizedOrderItem {
   sku?: string
 }
 
+/** Normalized marketplace order identity retained in orders.rawData for downstream actions. */
+export interface MarketplaceOrderIdentity {
+  /** Customer-facing/general marketplace order number. */
+  orderId: string
+  /** Product/line/order-item identifiers used by marketplace APIs for item-level actions. */
+  itemIds: string[]
+}
+
 /** Normalized order shape -- fully typed for Phase 2 adapters */
 export interface NormalizedOrder {
+  /**
+   * Customer-facing/general marketplace order number.
+   * Do not store product-order/order-item IDs here; those belong in items[].marketplaceItemId.
+   */
   marketplaceOrderId: string
   marketplaceId: MarketplaceId
   marketplaceStatus: string

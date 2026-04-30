@@ -14,7 +14,7 @@ import {
   MOCK_NAVER_PRODUCT_ORDERS,
   MOCK_NAVER_CLAIM_PRODUCT_ORDERS,
 } from '../helpers/msw-handlers'
-import { mapNaverStatus, mapNaverClaimStatus, NAVER_STATUS_MAP } from '@/lib/marketplace/adapters/naver/status-map'
+import { mapNaverStatus, mapNaverClaimStatus } from '@/lib/marketplace/adapters/naver/status-map'
 import { createNaverClient } from '@/lib/marketplace/adapters/naver/client'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 
@@ -169,7 +169,7 @@ describe('NaverAdapter', () => {
 
       // Check first order normalization
       const first = orders[0]
-      expect(first.marketplaceOrderId).toBe('PO-2026040201001')
+      expect(first.marketplaceOrderId).toBe('NO-2026040201001')
       expect(first.marketplaceId).toBe('naver')
       expect(first.marketplaceStatus).toBe('PAYED')
       expect(first.status).toBe('new')
@@ -177,6 +177,7 @@ describe('NaverAdapter', () => {
       expect(first.shippingAddress.zipCode).toBe('03088')
       expect(first.shippingAddress.address1).toBe('서울특별시 종로구 율곡로 10')
       expect(first.items).toHaveLength(1)
+      expect(first.items[0].marketplaceItemId).toBe('PO-2026040201001')
       expect(first.items[0].productName).toBe('네이버 테스트 상품 1')
       expect(first.items[0].quantity).toBe(3)
       expect(first.items[0].optionText).toBe('색상: 빨강 / 사이즈: L')
@@ -200,7 +201,7 @@ describe('NaverAdapter', () => {
       const claim = claims[0]
       expect(claim.marketplaceClaimId).toBe('PO-2026040201003')
       expect(claim.marketplaceId).toBe('naver')
-      expect(claim.marketplaceOrderId).toBe('PO-2026040201003')
+      expect(claim.marketplaceOrderId).toBe('NO-2026040201003')
       expect(claim.claimType).toBe('cancel')
       expect(claim.claimStatus).toBe('completed')
       expect(claim.reason).toBe('단순변심')

@@ -371,10 +371,10 @@ const naverHandlers = [
 
   http.get('https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/last-changed-statuses', ({ request }) => {
     const url = new URL(request.url)
-    const lastChangedType = url.searchParams.getAll('lastChangedType').join(',')
+    const lastChangedTypes = url.searchParams.getAll('lastChangedType')
 
     // Return claim statuses if claim types are requested
-    if (lastChangedType.includes('CLAIM') || lastChangedType.includes('COLLECT')) {
+    if (lastChangedTypes.some((type) => type.includes('CLAIM') || type.includes('COLLECT') || type.includes('CANCEL') || type.includes('RETURN') || type.includes('EXCHANGE'))) {
       return HttpResponse.json(MOCK_NAVER_CLAIM_CHANGED_STATUSES)
     }
 

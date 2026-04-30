@@ -38,6 +38,15 @@ async function resolveTenByTenDetailIdx(orderId: string): Promise<string | null>
   return details[0].DetailIdx != null ? String(details[0].DetailIdx) : null
 }
 
+async function resolveOrderRawData(orderId: string): Promise<Record<string, unknown> | null> {
+  const [row] = await db
+    .select({ rawData: orders.rawData })
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1)
+  return (row?.rawData ?? null) as Record<string, unknown> | null
+}
+
 /**
  * Process a single invoice upload job.
  *
@@ -66,8 +75,13 @@ export async function processInvoiceUpload(
     trackingNumber,
     carrierId,
   }
+  const rawData = await resolveOrderRawData(orderId)
+  if (rawData) invoiceData.rawData = rawData
   if (marketplaceId === '10x10') {
-    const detailIdx = await resolveTenByTenDetailIdx(orderId)
+    const details = rawData?.details as Array<{ DetailIdx?: string | number }> | undefined
+    const detailIdx = details?.[0]?.DetailIdx != null
+      ? String(details[0].DetailIdx)
+      : await resolveTenByTenDetailIdx(orderId)
     if (detailIdx) invoiceData.detailIdx = detailIdx
   }
 

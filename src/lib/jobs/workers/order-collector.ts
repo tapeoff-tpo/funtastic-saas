@@ -140,13 +140,16 @@ export async function collectOrdersForConnection(params: {
     // 3. Create adapter with credentials
     const adapter = createAdapter(marketplaceId, credentials)
 
-    // 4. Fetch orders — manual: 1 day, scheduled: 7 days
-    const lookbackMs = jobType === 'manual-order-collection'
-      ? 1 * 24 * 60 * 60 * 1000   // 수동: 1일
-      : 7 * 24 * 60 * 60 * 1000   // 스케줄: 7일 (놓친 주문 보완)
+    // 4. Fetch orders — manual: 1 day, scheduled: 7 days.
+    // 10x10 notifies first orders after a delay and operators often test with
+    // older newly-notified orders, so use the safer scheduled window manually too.
+    const lookbackDays = jobType === 'manual-order-collection' && marketplaceId !== '10x10'
+      ? 1
+      : 7
+    const lookbackMs = lookbackDays * 24 * 60 * 60 * 1000
     const since = new Date(Date.now() - lookbackMs)
 
-    await setProgress('변경된 주문 조회 중...')
+    await setProgress(`변경된 주문 조회 중... (최근 ${lookbackDays}일)`)
     const normalizedOrders = await adapter.getOrders(since)
     await setProgress(`${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ' — 저장 중...' : ''}`)
 
@@ -260,6 +263,17 @@ export async function collectOrdersForConnection(params: {
         },
       })
 
+    await db
+      .update(marketplaceConnections)
+      .set({
+        status: 'connected',
+        lastCheckedAt: new Date(),
+        lastSuccessAt: new Date(),
+        lastErrorMessage: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(marketplaceConnections.id, connectionId))
+
     return { ordersCollected, claimsCollected }
   } catch (error) {
     // Log error to job_logs
@@ -284,6 +298,16 @@ export async function collectOrdersForConnection(params: {
           completedAt: new Date(),
         },
       })
+
+    await db
+      .update(marketplaceConnections)
+      .set({
+        status: 'error',
+        lastCheckedAt: new Date(),
+        lastErrorMessage: errorMessage,
+        updatedAt: new Date(),
+      })
+      .where(eq(marketplaceConnections.id, connectionId))
 
     throw error
   }

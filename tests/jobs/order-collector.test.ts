@@ -3,6 +3,12 @@ import type { Job } from 'bullmq'
 import type { OrderCollectionJobData } from '@/lib/jobs/queues'
 import type { NormalizedOrder } from '@/lib/marketplace/types'
 
+const adapterMocks = vi.hoisted(() => ({
+  getOrders: vi.fn().mockResolvedValue([]),
+  getClaimsOrders: vi.fn().mockResolvedValue([]),
+  confirmOrder: vi.fn().mockResolvedValue({ success: true }),
+}))
+
 // Mock db module — supports both .values().returning() and .values().onConflictDoUpdate().returning()
 function createValuesChain() {
   const returning = vi.fn().mockResolvedValue([{ id: 'order-uuid-1' }])
@@ -17,12 +23,23 @@ const mockDelete = vi.fn().mockReturnValue({
   where: vi.fn().mockResolvedValue(undefined),
 })
 
-const mockSelectFrom = vi.fn()
+const mockSelectFrom = vi.fn().mockReturnValue({
+  where: vi.fn().mockReturnValue({
+    limit: vi.fn().mockResolvedValue([{ storeAlias: 'default' }]),
+  }),
+})
+
+const mockUpdate = vi.fn().mockReturnValue({
+  set: vi.fn().mockReturnValue({
+    where: vi.fn().mockResolvedValue(undefined),
+  }),
+})
 
 vi.mock('@/lib/db', () => ({
   db: {
     insert: (...args: unknown[]) => mockInsert(...args),
     delete: (...args: unknown[]) => mockDelete(...args),
+    update: (...args: unknown[]) => mockUpdate(...args),
     select: vi.fn().mockReturnValue({
       from: (...args: unknown[]) => mockSelectFrom(...args),
     }),
@@ -32,6 +49,7 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/db/schema', () => ({
   orders: {
     id: 'id',
+    status: 'status',
     marketplaceId: 'marketplace_id',
     marketplaceOrderId: 'marketplace_order_id',
   },
@@ -41,6 +59,10 @@ vi.mock('@/lib/db/schema', () => ({
     marketplaceClaimId: 'marketplace_claim_id',
   },
   jobLogs: { id: 'id' },
+  marketplaceConnections: {
+    id: 'id',
+    storeAlias: 'store_alias',
+  },
 }))
 
 vi.mock('@/lib/supabase/admin', () => ({
@@ -48,8 +70,9 @@ vi.mock('@/lib/supabase/admin', () => ({
 }))
 
 // Shared mock adapter that tests can customize per-test
-const mockGetOrders = vi.fn().mockResolvedValue([])
-const mockGetClaimsOrders = vi.fn().mockResolvedValue([])
+const mockGetOrders = adapterMocks.getOrders
+const mockGetClaimsOrders = adapterMocks.getClaimsOrders
+const mockConfirmOrder = adapterMocks.confirmOrder
 
 vi.mock('@/lib/marketplace/registry', () => ({
   marketplaceRegistry: {
@@ -66,6 +89,24 @@ vi.mock('@/lib/marketplace/registry', () => ({
     }),
     has: vi.fn().mockReturnValue(true),
   },
+}))
+
+vi.mock('@/lib/marketplace/adapters/coupang/adapter', () => ({
+  CoupangAdapter: vi.fn().mockImplementation(function MockCoupangAdapter() {
+    return {
+      config: {
+        id: 'coupang',
+        name: '쿠팡',
+        authType: 'hmac',
+        rateLimitPerSecond: 100,
+        requiredCredentials: ['access_key', 'secret_key', 'vendor_id'],
+      },
+      getOrders: adapterMocks.getOrders,
+      getClaimsOrders: adapterMocks.getClaimsOrders,
+      confirmOrder: adapterMocks.confirmOrder,
+      uploadInvoice: vi.fn(),
+    }
+  }),
 }))
 
 const sampleOrder: NormalizedOrder = {
@@ -114,6 +155,7 @@ describe('processOrderCollection', () => {
     mockInsert.mockImplementation(() => createValuesChain())
     mockGetOrders.mockResolvedValue([])
     mockGetClaimsOrders.mockResolvedValue([])
+    mockConfirmOrder.mockResolvedValue({ success: true })
   })
 
   it('should fetch orders from adapter and UPSERT into database', async () => {

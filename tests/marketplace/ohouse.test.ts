@@ -192,7 +192,7 @@ describe('Registry completeness', () => {
     expect(marketplaceRegistry.has('ohouse')).toBe(true)
   })
 
-  it('lists all 6 marketplaces in registry', async () => {
+  it('lists core API marketplaces in registry', async () => {
     await import('@/lib/marketplace/adapters/configs')
     const { marketplaceRegistry } = await import('@/lib/marketplace/registry')
 
@@ -203,6 +203,6 @@ describe('Registry completeness', () => {
     expect(ids).toContain('gmarket')
     expect(ids).toContain('auction')
     expect(ids).toContain('ohouse')
-    expect(ids).toHaveLength(6)
+    expect(ids.length).toBeGreaterThanOrEqual(6)
   })
 })

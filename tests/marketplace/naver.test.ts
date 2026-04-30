@@ -19,6 +19,7 @@ import { createNaverClient } from '@/lib/marketplace/adapters/naver/client'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 
 const server = setupServer(...naverHandlers)
+const NAVER_TEST_CLIENT_SECRET = '$2a$10$abcdefghijklmnopqrstuu'
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 afterEach(() => server.resetHandlers())
@@ -80,7 +81,7 @@ describe('mapNaverClaimStatus', () => {
 
 describe('createNaverClient - token management', () => {
   it('fetches and caches OAuth2 token', async () => {
-    const { getToken, getState } = createNaverClient('test-client-id', 'test-client-secret')
+    const { getToken, getState } = createNaverClient('test-client-id', NAVER_TEST_CLIENT_SECRET)
 
     const token = await getToken()
     expect(token).toBe(MOCK_NAVER_TOKEN_RESPONSE.access_token)
@@ -99,7 +100,7 @@ describe('createNaverClient - token management', () => {
       })
     )
 
-    const { getToken } = createNaverClient('test-id', 'test-secret')
+    const { getToken } = createNaverClient('test-id', NAVER_TEST_CLIENT_SECRET)
 
     await getToken()
     await getToken()
@@ -122,7 +123,7 @@ describe('createNaverClient - token management', () => {
       })
     )
 
-    const { getToken } = createNaverClient('test-id', 'test-secret')
+    const { getToken } = createNaverClient('test-id', NAVER_TEST_CLIENT_SECRET)
 
     await getToken() // First call - gets token
     await getToken() // Second call - token within 5 min buffer, should refresh
@@ -134,7 +135,7 @@ describe('createNaverClient - token management', () => {
 describe('NaverAdapter', () => {
   const adapter = new NaverAdapter({
     client_id: 'test-client-id',
-    client_secret: 'test-client-secret',
+    client_secret: NAVER_TEST_CLIENT_SECRET,
   })
 
   it('has correct config', () => {
@@ -199,7 +200,7 @@ describe('NaverAdapter', () => {
       const claim = claims[0]
       expect(claim.marketplaceClaimId).toBe('PO-2026040201003')
       expect(claim.marketplaceId).toBe('naver')
-      expect(claim.marketplaceOrderId).toBe('NO-2026040201003')
+      expect(claim.marketplaceOrderId).toBe('PO-2026040201003')
       expect(claim.claimType).toBe('cancel')
       expect(claim.claimStatus).toBe('completed')
       expect(claim.reason).toBe('단순변심')

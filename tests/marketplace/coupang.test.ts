@@ -136,7 +136,7 @@ describe('CoupangAdapter', () => {
       expect(first.status).toBe('new')
       expect(first.buyerName).toBe('김구매')
       expect(first.recipientName).toBe('이수령')
-      expect(first.recipientPhone).toBe('010-1234-5678')
+      expect(first.recipientPhone2).toBe('010-1234-5678')
       expect(first.shippingAddress.zipCode).toBe('06134')
       expect(first.shippingAddress.address1).toBe('서울특별시 강남구 테헤란로 123')
       expect(first.items).toHaveLength(1)

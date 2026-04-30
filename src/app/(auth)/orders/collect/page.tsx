@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { marketplaceConnections } from '@/lib/db/schema'
+import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
 import type { Metadata } from 'next'
 
@@ -24,6 +24,16 @@ export default async function OrdersCollectPage() {
     .select()
     .from(marketplaceConnections)
     .where(eq(marketplaceConnections.userId, user.id))
+
+  const importTemplates = await db
+    .select({
+      id: excelImportTemplates.id,
+      name: excelImportTemplates.name,
+      mappings: excelImportTemplates.mappings,
+      isDefault: excelImportTemplates.isDefault,
+    })
+    .from(excelImportTemplates)
+    .where(eq(excelImportTemplates.userId, user.id))
 
   if (connections.length === 0) {
     return (
@@ -58,6 +68,7 @@ export default async function OrdersCollectPage() {
           expiresAt: c.expiresAt,
           isManual: c.isManual,
         }))}
+        importTemplates={importTemplates}
       />
     </div>
   )

@@ -310,6 +310,9 @@ export const excelImportTemplates = pgTable('excel_import_templates', {
   mappings: jsonb('mappings').$type<Array<{
     field: string
     excelColumn: string
+    fixedValue?: string
+    extraColumns?: string[]
+    joinSeparator?: string
   }>>().notNull(),
   isDefault: boolean('is_default').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true })

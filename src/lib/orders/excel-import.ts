@@ -7,6 +7,11 @@
 
 import ExcelJS from 'exceljs'
 import { z } from 'zod'
+import {
+  ORDER_IMPORT_FIELD_LABELS,
+  REQUIRED_ORDER_IMPORT_FIELDS,
+  type OrderImportMapping,
+} from './excel-import-fields'
 
 /** Map of Korean header names to internal field keys */
 const HEADER_MAP: Record<string, string> = {
@@ -23,8 +28,6 @@ const HEADER_MAP: Record<string, string> = {
   '금액(원)': 'totalAmount',
   'SKU': 'sku',
 }
-
-const REQUIRED_HEADERS = ['주문번호', '주문자명', '수령자명', '수령자주소', '주문일시', '상품명', '수량', '금액(원)']
 
 /** Zod schema for each row */
 const orderRowSchema = z.object({
@@ -75,6 +78,7 @@ export interface ParseResult {
  */
 export async function parseOrderExcel(
   buffer: Buffer | ArrayBuffer | Uint8Array,
+  mappings?: OrderImportMapping[],
 ): Promise<ParseResult> {
   const workbook = new ExcelJS.Workbook()
   // ExcelJS types don't account for Node.js 24+ Buffer changes
@@ -89,17 +93,60 @@ export async function parseOrderExcel(
   const headerRow = worksheet.getRow(1)
   const colMap: Record<string, number> = {}
 
+  const normalizedMappings = mappings
+    ?.map((m) => ({
+      field: m.field.trim(),
+      excelColumn: m.excelColumn.trim(),
+      fixedValue: m.fixedValue?.trim(),
+      extraColumns: m.extraColumns?.map((col) => col.trim()).filter(Boolean),
+      joinSeparator: m.joinSeparator ?? ' ',
+    }))
+    .filter((m) => m.field && (m.excelColumn || m.fixedValue))
+
+  const mappedColumnNumbers = new Map<string, number[]>()
+
   headerRow.eachCell((cell, colNumber) => {
     const value = String(cell.value ?? '').trim()
-    for (const [korean, fieldKey] of Object.entries(HEADER_MAP)) {
-      if (value === korean || value.includes(korean)) {
+    if (!value) return
+
+    if (normalizedMappings && normalizedMappings.length > 0) {
+      for (const mapping of normalizedMappings) {
+        if (value === mapping.excelColumn || value.includes(mapping.excelColumn)) {
+          colMap[mapping.field] = colNumber
+          const existing = mappedColumnNumbers.get(mapping.field) ?? []
+          mappedColumnNumbers.set(mapping.field, [...existing, colNumber])
+        }
+        for (const extraColumn of mapping.extraColumns ?? []) {
+          if (value === extraColumn || value.includes(extraColumn)) {
+            const existing = mappedColumnNumbers.get(mapping.field) ?? []
+            mappedColumnNumbers.set(mapping.field, [...existing, colNumber])
+          }
+        }
+      }
+      return
+    }
+
+    for (const [headerLabel, fieldKey] of Object.entries(HEADER_MAP)) {
+      if (value === headerLabel || value.includes(headerLabel)) {
         colMap[fieldKey] = colNumber
       }
     }
   })
 
   // Verify required headers are present
-  const missingHeaders = REQUIRED_HEADERS.filter((h) => !colMap[HEADER_MAP[h]])
+  const missingHeaders = REQUIRED_ORDER_IMPORT_FIELDS
+    .filter((field) => {
+      const mapping = normalizedMappings?.find((m) => m.field === field)
+      if (mapping?.fixedValue) return false
+      if (normalizedMappings && normalizedMappings.length > 0) {
+        return (mappedColumnNumbers.get(field)?.length ?? 0) === 0
+      }
+      return !colMap[field]
+    })
+    .map((field) => {
+      const customLabel = normalizedMappings?.find((m) => m.field === field)?.excelColumn
+      return customLabel ?? ORDER_IMPORT_FIELD_LABELS[field] ?? field
+    })
   if (missingHeaders.length > 0) {
     return {
       rows: [],
@@ -111,6 +158,20 @@ export async function parseOrderExcel(
   const errors: ParseError[] = []
 
   const getCellString = (row: ExcelJS.Row, key: string): string => {
+    const mapping = normalizedMappings?.find((m) => m.field === key)
+    if (mapping?.fixedValue) return mapping.fixedValue
+    const mappedColumns = mappedColumnNumbers.get(key)
+    if (mappedColumns && mappedColumns.length > 0) {
+      return mappedColumns
+        .map((colNumber) => {
+          const val = row.getCell(colNumber).value
+          if (val === null || val === undefined) return ''
+          if (val instanceof Date) return val.toISOString()
+          return String(val).trim()
+        })
+        .filter(Boolean)
+        .join(mapping?.joinSeparator ?? ' ')
+    }
     if (!colMap[key]) return ''
     const val = row.getCell(colMap[key]).value
     if (val === null || val === undefined) return ''
@@ -119,10 +180,9 @@ export async function parseOrderExcel(
   }
 
   const getCellNumber = (row: ExcelJS.Row, key: string): number => {
-    if (!colMap[key]) return 0
-    const val = row.getCell(colMap[key]).value
-    if (val === null || val === undefined) return 0
-    const num = Number(val)
+    const value = getCellString(row, key)
+    if (!value) return 0
+    const num = Number(value.replaceAll(',', ''))
     return isNaN(num) ? 0 : num
   }
 

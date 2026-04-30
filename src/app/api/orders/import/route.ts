@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { parseOrderExcel } from '@/lib/orders/excel-import'
 import { db } from '@/lib/db'
-import { orders, orderItems } from '@/lib/db/schema'
+import { excelImportTemplates, orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 
@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData()
   const file = formData.get('file') as File | null
   const marketplaceId = formData.get('marketplaceId') as string | null
+  const templateId = formData.get('templateId') as string | null
 
   if (!file) {
     return NextResponse.json({ error: '파일을 선택해주세요' }, { status: 400 })
@@ -47,8 +48,22 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
+    let templateMappings: Array<{ field: string; excelColumn: string }> | undefined
+    if (templateId) {
+      const [template] = await db
+        .select({ mappings: excelImportTemplates.mappings })
+        .from(excelImportTemplates)
+        .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, user.id)))
+        .limit(1)
+
+      if (!template) {
+        return NextResponse.json({ error: '선택한 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
+      }
+      templateMappings = template.mappings
+    }
+
     // Parse Excel
-    const parseResult = await parseOrderExcel(buffer)
+    const parseResult = await parseOrderExcel(buffer, templateMappings)
 
     if (parseResult.rows.length === 0 && parseResult.errors.length > 0) {
       return NextResponse.json({

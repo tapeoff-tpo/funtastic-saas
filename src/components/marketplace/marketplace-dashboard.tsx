@@ -7,7 +7,14 @@ import { StatusBadge } from './status-badge'
 import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
-import { addManualChannel } from '@/app/(auth)/orders/collect/actions'
+import {
+  addManualChannel,
+  createExcelImportTemplate,
+  deleteExcelImportTemplate,
+  updateExcelImportTemplate,
+  type ExcelImportTemplateView,
+} from '@/app/(auth)/orders/collect/actions'
+import { ORDER_IMPORT_FIELDS, type OrderImportMapping } from '@/lib/orders/excel-import-fields'
 
 interface Connection {
   id: string
@@ -22,6 +29,7 @@ interface Connection {
 
 interface MarketplaceDashboardProps {
   connections: Connection[]
+  importTemplates: ExcelImportTemplateView[]
 }
 
 function formatRelativeTime(date: Date): string {
@@ -57,9 +65,31 @@ function riskScore(c: Connection): number {
 
 type FilterKey = 'all' | 'connected' | 'error' | 'expiring' | 'disconnected' | 'manual'
 
-export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps) {
+const DEFAULT_IMPORT_MAPPINGS: OrderImportMapping[] = ORDER_IMPORT_FIELDS.map((field) => ({
+  field: field.field,
+  excelColumn: field.label,
+}))
+
+const JOIN_SEPARATORS: { value: string; label: string }[] = [
+  { value: ' ', label: '공백' },
+  { value: '[,]', label: '[,]' },
+  { value: '(,)', label: '(,)' },
+  { value: ' / ', label: ' / ' },
+  { value: '#', label: '#' },
+  { value: '<,>', label: '<,>' },
+]
+
+const IMPORT_TEMPLATE_KEY = 'orders.collect.selectedImportTemplateId'
+
+export function MarketplaceDashboard({ connections, importTemplates: initialImportTemplates }: MarketplaceDashboardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showImportTemplateModal, setShowImportTemplateModal] = useState(false)
+  const [importTemplates, setImportTemplates] = useState(initialImportTemplates)
+  const [selectedImportTemplateId, setSelectedImportTemplateId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null
+    return window.localStorage.getItem(IMPORT_TEMPLATE_KEY)
+  })
   const [filter, setFilter] = useState<FilterKey>('all')
   const [search, setSearch] = useState('')
   const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
@@ -113,6 +143,18 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
     () => visible.filter((c) => !c.isManual && c.status !== 'disconnected'),
     [visible]
   )
+  const visibleSections = useMemo(() => {
+    const auto = visible.filter((c) => !c.isManual)
+    const manual = visible.filter((c) => c.isManual)
+    return [
+      { key: 'auto', label: '자동몰', description: 'API 연동 주문수집', rows: auto },
+      { key: 'manual', label: '수동몰', description: '엑셀 업로드 주문수집', rows: manual },
+    ].filter((section) => section.rows.length > 0)
+  }, [visible])
+  const activeImportTemplate = useMemo(() => {
+    if (importTemplates.length === 0) return null
+    return importTemplates.find((t) => t.id === selectedImportTemplateId) ?? importTemplates[0]
+  }, [importTemplates, selectedImportTemplateId])
   const allEligibleSelected =
     eligibleSelectable.length > 0 && eligibleSelectable.every((c) => selected.has(c.id))
   const someEligibleSelected =
@@ -226,6 +268,11 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
     { key: 'manual', label: '엑셀', count: counts.manual, dot: 'bg-blue-500' },
   ]
 
+  const pickImportTemplate = (templateId: string) => {
+    setSelectedImportTemplateId(templateId)
+    window.localStorage.setItem(IMPORT_TEMPLATE_KEY, templateId)
+  }
+
   return (
     <div className="space-y-3">
       {/* 상단 툴바: 필터칩 + 검색 + 일괄수집/추가 */}
@@ -299,6 +346,28 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
           >
             + 수동 쇼핑몰
           </button>
+          {importTemplates.length > 0 && (
+            <select
+              value={activeImportTemplate?.id ?? ''}
+              onChange={(e) => pickImportTemplate(e.target.value)}
+              className="rounded-md border bg-white px-2 py-1 text-xs"
+              title="엑셀 업로드에 사용할 주문수집 양식"
+            >
+              {importTemplates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowImportTemplateModal(true)}
+            className="rounded-md border bg-white px-3 py-1 text-xs font-medium hover:bg-muted"
+            title="주문수집 엑셀 양식 만들기 또는 수정"
+          >
+            엑셀양식관리
+          </button>
         </div>
       </div>
 
@@ -343,15 +412,15 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
               </tr>
             </thead>
             <tbody>
-              {visible.map((conn, idx) => (
-                <ConnRow
-                  key={conn.id}
-                  conn={conn}
-                  isSelected={selected.has(conn.id)}
+              {visibleSections.map((section) => (
+                <SectionRows
+                  key={section.key}
+                  section={section}
+                  selected={selected}
                   onToggle={toggleSelect}
                   onCollectOne={handleCollectOne}
                   collecting={collecting}
-                  zebra={idx % 2 === 1}
+                  importTemplate={activeImportTemplate}
                   sizeOf={sizeOf}
                 />
               ))}
@@ -363,6 +432,14 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
       {/* Add manual channel modal */}
       {showAddModal && (
         <AddManualChannelModal onClose={() => setShowAddModal(false)} />
+      )}
+
+      {showImportTemplateModal && (
+        <ExcelImportTemplateModal
+          templates={importTemplates}
+          onTemplatesChange={setImportTemplates}
+          onClose={() => setShowImportTemplateModal(false)}
+        />
       )}
 
       {/* Results modal */}
@@ -438,12 +515,65 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
   )
 }
 
+function SectionRows({
+  section,
+  selected,
+  onToggle,
+  onCollectOne,
+  collecting,
+  importTemplate,
+  sizeOf,
+}: {
+  section: {
+    key: string
+    label: string
+    description: string
+    rows: Connection[]
+  }
+  selected: Set<string>
+  onToggle: (id: string) => void
+  onCollectOne: (id: string) => void
+  collecting: boolean
+  importTemplate: ExcelImportTemplateView | null
+  sizeOf: (id: string) => number
+}) {
+  return (
+    <>
+      <tr className="border-y bg-muted/40">
+        <td colSpan={8} className="px-2 py-1.5">
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="font-semibold text-foreground">{section.label}</span>
+            <span className="text-muted-foreground">{section.description}</span>
+            <span className="ml-auto rounded-full bg-background px-2 py-0.5 font-medium text-muted-foreground">
+              {section.rows.length}개
+            </span>
+          </div>
+        </td>
+      </tr>
+      {section.rows.map((conn, idx) => (
+        <ConnRow
+          key={conn.id}
+          conn={conn}
+          isSelected={selected.has(conn.id)}
+          onToggle={onToggle}
+          onCollectOne={onCollectOne}
+          collecting={collecting}
+          importTemplate={importTemplate}
+          zebra={idx % 2 === 1}
+          sizeOf={sizeOf}
+        />
+      ))}
+    </>
+  )
+}
+
 function ConnRow({
   conn,
   isSelected,
   onToggle,
   onCollectOne,
   collecting,
+  importTemplate,
   zebra,
   sizeOf,
 }: {
@@ -452,6 +582,7 @@ function ConnRow({
   onToggle: (id: string) => void
   onCollectOne: (id: string) => void
   collecting: boolean
+  importTemplate: ExcelImportTemplateView | null
   zebra: boolean
   sizeOf: (id: string) => number
 }) {
@@ -545,6 +676,7 @@ function ConnRow({
           <ExcelUploadButton
             displayName={conn.displayName}
             disabled={isDisconnected}
+            template={importTemplate}
           />
         </div>
       </td>
@@ -628,7 +760,15 @@ function AddManualChannelModal({ onClose }: { onClose: () => void }) {
   )
 }
 
-function ExcelUploadButton({ displayName, disabled }: { displayName: string; disabled: boolean }) {
+function ExcelUploadButton({
+  displayName,
+  disabled,
+  template,
+}: {
+  displayName: string
+  disabled: boolean
+  template: ExcelImportTemplateView | null
+}) {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
@@ -644,6 +784,7 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
       const formData = new FormData()
       formData.append('file', file)
       formData.append('marketplaceId', displayName)
+      if (template) formData.append('templateId', template.id)
 
       const res = await fetch('/api/orders/import', { method: 'POST', body: formData })
       const data = await res.json()
@@ -681,7 +822,11 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
         type="button"
         onClick={() => !disabled && !uploading && inputRef.current?.click()}
         disabled={disabled || uploading}
-        title={result ? `${result.inserted}건 등록${result.skipped ? ` (${result.skipped} 중복)` : ''}` : error ?? '엑셀 업로드'}
+        title={
+          result
+            ? `${result.inserted}건 등록${result.skipped ? ` (${result.skipped} 중복)` : ''}`
+            : error ?? `엑셀 업로드${template ? ` (${template.name})` : ' (기본 양식)'}`
+        }
         className={`rounded border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50 ${
           error ? 'border-red-300 text-red-600' : result ? 'border-emerald-300 text-emerald-600' : ''
         }`}
@@ -700,6 +845,385 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
         )}
       </button>
     </>
+  )
+}
+
+function ExcelImportTemplateModal({
+  templates,
+  onTemplatesChange,
+  onClose,
+}: {
+  templates: ExcelImportTemplateView[]
+  onTemplatesChange: (templates: ExcelImportTemplateView[]) => void
+  onClose: () => void
+}) {
+  const [editing, setEditing] = useState<ExcelImportTemplateView | null>(null)
+  const [name, setName] = useState('')
+  const [mappings, setMappings] = useState<OrderImportMapping[]>(DEFAULT_IMPORT_MAPPINGS)
+  const [selectedField, setSelectedField] = useState(ORDER_IMPORT_FIELDS[0]?.field ?? '')
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  const startCreate = () => {
+    setEditing(null)
+    setName('')
+    setMappings(DEFAULT_IMPORT_MAPPINGS)
+    setError(null)
+  }
+
+  const startEdit = (template: ExcelImportTemplateView) => {
+    setEditing(template)
+    setName(template.name)
+    setMappings(template.mappings.length > 0 ? template.mappings : DEFAULT_IMPORT_MAPPINGS)
+    setError(null)
+  }
+
+  const addMapping = () => {
+    const fieldDef = ORDER_IMPORT_FIELDS.find((field) => field.field === selectedField)
+    if (!fieldDef) return
+    setMappings((prev) => [
+      ...prev,
+      { field: fieldDef.field, excelColumn: fieldDef.label, joinSeparator: ' ' },
+    ])
+  }
+
+  const updateMapping = (index: number, patch: Partial<OrderImportMapping>) => {
+    setMappings((prev) => prev.map((mapping, idx) => (idx === index ? { ...mapping, ...patch } : mapping)))
+  }
+
+  const removeMapping = (index: number) => {
+    setMappings((prev) => prev.filter((_, idx) => idx !== index))
+  }
+
+  const moveMapping = (index: number, direction: 'up' | 'down') => {
+    setMappings((prev) => {
+      const next = [...prev]
+      const swapIndex = direction === 'up' ? index - 1 : index + 1
+      if (swapIndex < 0 || swapIndex >= next.length) return prev
+      ;[next[index], next[swapIndex]] = [next[swapIndex], next[index]]
+      return next
+    })
+  }
+
+  const addExtraColumn = (index: number, columnName: string) => {
+    const trimmed = columnName.trim()
+    if (!trimmed) return
+    setMappings((prev) =>
+      prev.map((mapping, idx) => {
+        if (idx !== index) return mapping
+        const current = mapping.extraColumns ?? []
+        if (current.includes(trimmed)) return mapping
+        return { ...mapping, extraColumns: [...current, trimmed], joinSeparator: mapping.joinSeparator ?? ' ' }
+      }),
+    )
+  }
+
+  const removeExtraColumn = (index: number, columnName: string) => {
+    setMappings((prev) =>
+      prev.map((mapping, idx) => {
+        if (idx !== index) return mapping
+        const next = (mapping.extraColumns ?? []).filter((col) => col !== columnName)
+        return { ...mapping, extraColumns: next.length > 0 ? next : undefined }
+      }),
+    )
+  }
+
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setError(null)
+    const formData = new FormData()
+    formData.set('name', name)
+    formData.set('mappings', JSON.stringify(mappings))
+    if (editing) formData.set('templateId', editing.id)
+
+    startTransition(async () => {
+      const result = editing
+        ? await updateExcelImportTemplate(formData)
+        : await createExcelImportTemplate(formData)
+
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+      if (result.templates) onTemplatesChange(result.templates)
+      startCreate()
+    })
+  }
+
+  const handleDelete = (template: ExcelImportTemplateView) => {
+    if (!window.confirm(`${template.name} 양식을 삭제할까요?`)) return
+    setError(null)
+
+    startTransition(async () => {
+      const result = await deleteExcelImportTemplate(template.id)
+      if (result.error) {
+        setError(result.error)
+        return
+      }
+      if (result.templates) onTemplatesChange(result.templates)
+      if (editing?.id === template.id) startCreate()
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="flex max-h-[86vh] w-full max-w-4xl flex-col rounded-xl border bg-background shadow-2xl">
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h2 className="text-base font-semibold">주문수집 엑셀양식관리</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              업로드할 엑셀의 헤더명을 주문 필드에 맞춰 저장합니다.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="닫기"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-[240px_1fr] overflow-hidden">
+          <aside className="overflow-y-auto border-r bg-muted/20 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">저장된 양식</h3>
+              <button
+                type="button"
+                onClick={startCreate}
+                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-muted"
+              >
+                새 양식
+              </button>
+            </div>
+            {templates.length === 0 ? (
+              <p className="rounded-md border border-dashed bg-white px-3 py-6 text-center text-xs text-muted-foreground">
+                저장된 주문수집 양식이 없습니다.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {templates.map((template) => (
+                  <div
+                    key={template.id}
+                    className={`rounded-md border bg-white p-2 ${
+                      editing?.id === template.id ? 'border-primary' : ''
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => startEdit(template)}
+                      className="block w-full truncate text-left text-sm font-medium hover:underline"
+                      title={template.name}
+                    >
+                      {template.name}
+                    </button>
+                    <div className="mt-2 flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">{template.mappings.length}개 매핑</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(template)}
+                        disabled={isPending}
+                        className="text-red-600 hover:underline disabled:opacity-50"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </aside>
+
+          <form onSubmit={handleSubmit} className="min-h-0 overflow-y-auto p-5">
+            <div className="mb-4">
+              <label htmlFor="import-template-name" className="mb-1 block text-sm font-medium">
+                양식 이름
+              </label>
+              <input
+                id="import-template-name"
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="예: 스마트스토어 수동수집, 자사몰 주문서"
+                className="w-full rounded-md border px-3 py-2 text-sm"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                열 구성 <span className="text-xs text-muted-foreground">(헤더, 출력 항목, 출력내용, 합치기를 자유롭게 수정)</span>
+              </label>
+              <div className="mb-3 flex items-center gap-2">
+                <select
+                  value={selectedField}
+                  onChange={(e) => setSelectedField(e.target.value)}
+                  className="flex-1 rounded-md border px-3 py-2 text-sm"
+                >
+                  {ORDER_IMPORT_FIELDS.map((field) => (
+                    <option key={field.field} value={field.field}>
+                      {field.label} ({field.field})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={addMapping}
+                  className="rounded-md border px-3 py-2 text-sm hover:bg-muted"
+                >
+                  행추가
+                </button>
+              </div>
+
+              <div className="overflow-hidden rounded-md border">
+                <div className="grid grid-cols-[2rem_1fr_16rem_1fr_6rem] items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  <span>#</span>
+                  <span>헤더 <span className="normal-case text-[10px] text-muted-foreground/80">(Excel 헤더명)</span></span>
+                  <span>출력 항목 <span className="normal-case text-[10px] text-muted-foreground/80">(저장될 주문 필드 + 합치기)</span></span>
+                  <span>출력내용 <span className="normal-case text-[10px] text-muted-foreground/80">(비우면 Excel 값, 입력 시 고정)</span></span>
+                  <span className="text-right">동작</span>
+                </div>
+                {mappings.map((mapping, idx) => {
+                  const fieldDef = ORDER_IMPORT_FIELDS.find((field) => field.field === mapping.field)
+                  return (
+                    <div
+                      key={`${mapping.field}-${idx}`}
+                      className="grid grid-cols-[2rem_1fr_16rem_1fr_6rem] items-start gap-2 border-b px-3 py-1.5 last:border-b-0"
+                    >
+                      <span className="pt-1.5 text-center text-xs text-muted-foreground">{idx + 1}</span>
+                      <input
+                        type="text"
+                        value={mapping.excelColumn}
+                        onChange={(e) => updateMapping(idx, { excelColumn: e.target.value })}
+                        placeholder={fieldDef?.label ?? 'Excel 헤더명'}
+                        className="rounded border px-2 py-1 text-sm"
+                      />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <select
+                          value={mapping.field}
+                          onChange={(e) => updateMapping(idx, { field: e.target.value })}
+                          className="rounded border bg-white px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+                          aria-label="출력 항목 선택"
+                        >
+                          {ORDER_IMPORT_FIELDS.map((field) => (
+                            <option key={field.field} value={field.field}>
+                              {field.label} ({field.field})
+                            </option>
+                          ))}
+                        </select>
+                        {(mapping.extraColumns ?? []).map((extraColumn) => (
+                          <span
+                            key={extraColumn}
+                            className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] text-emerald-700"
+                          >
+                            + {extraColumn}
+                            <button
+                              type="button"
+                              onClick={() => removeExtraColumn(idx, extraColumn)}
+                              className="text-emerald-500 hover:text-emerald-800"
+                              aria-label={`${extraColumn} 합치기 해제`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          type="text"
+                          placeholder="+ 합칠 헤더"
+                          className="w-24 rounded border px-1 py-0.5 text-[11px]"
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return
+                            e.preventDefault()
+                            addExtraColumn(idx, e.currentTarget.value)
+                            e.currentTarget.value = ''
+                          }}
+                          onBlur={(e) => {
+                            addExtraColumn(idx, e.currentTarget.value)
+                            e.currentTarget.value = ''
+                          }}
+                        />
+                        {(mapping.extraColumns ?? []).length > 0 && (
+                          <select
+                            value={mapping.joinSeparator ?? ' '}
+                            onChange={(e) => updateMapping(idx, { joinSeparator: e.target.value })}
+                            className="rounded border bg-white px-1 py-0.5 text-[11px]"
+                            aria-label="구분자"
+                            title="합쳐진 값 사이에 들어갈 구분자"
+                          >
+                            {JOIN_SEPARATORS.map((separator) => (
+                              <option key={separator.value} value={separator.value}>
+                                {separator.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        value={mapping.fixedValue ?? ''}
+                        onChange={(e) => updateMapping(idx, { fixedValue: e.target.value })}
+                        placeholder="자동 (Excel 값 사용)"
+                        className="rounded border px-2 py-1 text-sm"
+                      />
+                      <div className="flex items-center justify-end gap-1 pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => moveMapping(idx, 'up')}
+                          disabled={idx === 0}
+                          className="rounded px-1.5 text-xs hover:bg-muted disabled:opacity-30"
+                          aria-label="위로"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveMapping(idx, 'down')}
+                          disabled={idx === mappings.length - 1}
+                          className="rounded px-1.5 text-xs hover:bg-muted disabled:opacity-30"
+                          aria-label="아래로"
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeMapping(idx)}
+                          className="rounded px-1.5 text-xs text-red-500 hover:bg-red-50 hover:text-red-700"
+                          aria-label="삭제"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={startCreate}
+                className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
+              >
+                초기화
+              </button>
+              <button
+                type="submit"
+                disabled={isPending || !name.trim()}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {isPending ? '저장 중...' : editing ? '수정 저장' : '저장'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   )
 }
 

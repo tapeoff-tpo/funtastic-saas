@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Home, X } from 'lucide-react'
-import { useNavState } from './nav-state'
+import { tabPathname, useNavState } from './nav-state'
 
 export function TabBar() {
   const pathname = usePathname()
@@ -27,10 +27,12 @@ export function TabBar() {
       </Link>
 
       {tabs.map((tab) => {
-        const active = pathname === tab.href
+        // tab.href may include query string (e.g. "/orders?from=...") so compare by pathname.
+        const tabPath = tabPathname(tab)
+        const active = pathname === tabPath
         return (
           <div
-            key={tab.href}
+            key={tabPath}
             className={`group flex items-center transition-colors ${
               active
                 ? 'border-t-2 border-blue-500 bg-white text-gray-900'

@@ -618,6 +618,11 @@ export const jobLogs = pgTable('job_logs', {
   ordersCollected: integer('orders_collected'),
   claimsCollected: integer('claims_collected'),
   errorMessage: text('error_message'),
+  /**
+   * 사용자에게 진행 상황을 보여주는 사람용 메시지.
+   * 워커가 단계별로 갱신: "변경된 주문 조회 중...", "5건 처리 중 (3/5)" 등.
+   */
+  progressMessage: text('progress_message'),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true })

@@ -40,6 +40,7 @@ export async function GET(request: NextRequest) {
       ordersCollected: jobLogs.ordersCollected,
       claimsCollected: jobLogs.claimsCollected,
       errorMessage: jobLogs.errorMessage,
+      progressMessage: jobLogs.progressMessage,
       completedAt: jobLogs.completedAt,
     })
     .from(jobLogs)

@@ -569,7 +569,8 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
   const isCompleted = log.status === 'completed'
   const isFailed = log.status === 'failed'
   const isCancelled = log.status === 'cancelled'
-  const isPending = !isCompleted && !isFailed && !isCancelled
+  const isRunning = log.status === 'running'
+  const isQueued = log.status === 'queued' || (!isCompleted && !isFailed && !isCancelled && !isRunning)
 
   return (
     <div className="flex items-start gap-3 py-3">
@@ -577,7 +578,7 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
         {isCompleted && '✅'}
         {isFailed && '❌'}
         {isCancelled && '⏹'}
-        {isPending && (
+        {(isRunning || isQueued) && (
           <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
         )}
       </span>
@@ -595,7 +596,12 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
           <p className="break-words text-sm text-red-500">{log.errorMessage ?? '알 수 없는 오류'}</p>
         )}
         {isCancelled && <p className="text-sm text-muted-foreground">취소됨</p>}
-        {isPending && <p className="text-sm text-muted-foreground">대기 중...</p>}
+        {isRunning && (
+          <p className="text-sm text-muted-foreground">
+            {log.progressMessage ?? '수집 중...'}
+          </p>
+        )}
+        {isQueued && <p className="text-sm text-muted-foreground">대기 중...</p>}
       </div>
     </div>
   )

@@ -8,6 +8,7 @@ export interface JobLogResult {
   ordersCollected: number | null
   claimsCollected: number | null
   errorMessage: string | null
+  progressMessage: string | null
   completedAt: string | null
 }
 
@@ -96,6 +97,7 @@ export function useCollectPoll(): UseCollectPollReturn {
               ordersCollected: null,
               claimsCollected: null,
               errorMessage: data.error || '주문 수집 요청 실패',
+              progressMessage: null,
               completedAt: null,
             },
           ])
@@ -115,6 +117,7 @@ export function useCollectPoll(): UseCollectPollReturn {
             ordersCollected: null,
             claimsCollected: null,
             errorMessage: '네트워크 오류',
+            progressMessage: null,
             completedAt: null,
           },
         ])

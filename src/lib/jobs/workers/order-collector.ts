@@ -92,7 +92,19 @@ export async function collectOrdersForConnection(params: {
   let ordersCollected = 0
   let claimsCollected = 0
 
+  // Helper: 사용자에게 보여줄 진행 상태 메시지를 job_logs에 기록.
+  // 최선의 노력으로 실행하고 실패해도 본 수집 흐름을 막지 않음.
+  const setProgress = async (message: string) => {
+    try {
+      await db.update(jobLogs).set({ progressMessage: message }).where(eq(jobLogs.id, logId))
+    } catch {
+      // 로그 갱신 실패는 무시
+    }
+  }
+
   try {
+    await setProgress('인증 정보 확인 중...')
+
     // 2. Look up connection to get storeAlias
     const [connection] = await db
       .select({ storeAlias: marketplaceConnections.storeAlias })
@@ -127,13 +139,19 @@ export async function collectOrdersForConnection(params: {
       ? 1 * 24 * 60 * 60 * 1000   // 수동: 1일
       : 7 * 24 * 60 * 60 * 1000   // 스케줄: 7일 (놓친 주문 보완)
     const since = new Date(Date.now() - lookbackMs)
+
+    await setProgress('변경된 주문 조회 중...')
     const normalizedOrders = await adapter.getOrders(since)
+    await setProgress(`${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ' — 저장 중...' : ''}`)
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)
     // Track newly inserted 'new' status orders for auto-confirm
     const newOrderIds: Array<{ id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }> = []
 
+    const totalOrders = normalizedOrders.length
+    let idx = 0
     for (const order of normalizedOrders) {
+      idx++
       const [upsertedOrder] = await upsertOrder(order, connectionId, userId)
       // Re-insert order items (delete existing first to handle updates)
       await db.delete(orderItems).where(eq(orderItems.orderId, upsertedOrder.id))
@@ -152,6 +170,11 @@ export async function collectOrdersForConnection(params: {
       }
       ordersCollected++
 
+      // 진행률 표시(많은 주문 시): 5건마다 또는 마지막 1건에서 갱신
+      if (totalOrders >= 5 && (idx % 5 === 0 || idx === totalOrders)) {
+        await setProgress(`주문 저장 중 (${idx}/${totalOrders})`)
+      }
+
       // Collect newly-new orders for auto-confirm
       if (upsertedOrder.status === 'new') {
         newOrderIds.push({
@@ -166,7 +189,10 @@ export async function collectOrdersForConnection(params: {
     // 이유: 수집 후 처리 시간 동안 구매자 취소 가능성을 줄이기 위함
     // confirmOrder 실패한 주문은 'new' 상태 유지 → 확정 대기 탭에서 수동 재시도
     if (newOrderIds.length > 0 && typeof adapter.confirmOrder === 'function') {
+      await setProgress(`신규 주문 확인 중 (0/${newOrderIds.length})`)
+      let confirmIdx = 0
       for (const o of newOrderIds) {
+        confirmIdx++
         try {
           const result = await adapter.confirmOrder(o.marketplaceOrderId, o.rawData ?? undefined)
           if (result.success) {
@@ -179,12 +205,16 @@ export async function collectOrdersForConnection(params: {
           console.warn(`[OrderCollector] Auto-confirm failed for ${marketplaceId} order ${o.marketplaceOrderId}:`, err instanceof Error ? err.message : err)
           // 실패 시 status는 'new' 유지 — 사용자가 확정 대기 탭에서 수동으로 재시도
         }
+        if (confirmIdx === newOrderIds.length || confirmIdx % 5 === 0) {
+          await setProgress(`신규 주문 확인 중 (${confirmIdx}/${newOrderIds.length})`)
+        }
       }
     }
 
     // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 신규주문만 수집)
     //    스케줄 잡(7일치)은 그대로 클레임도 수집해 놓치는 건 없게 함.
     if (jobType !== 'manual-order-collection') {
+      await setProgress('클레임(취소/교환/반품) 조회 중...')
       try {
         const normalizedClaims = await adapter.getClaimsOrders(since)
         for (const claim of normalizedClaims) {
@@ -210,6 +240,7 @@ export async function collectOrdersForConnection(params: {
         status: 'completed',
         ordersCollected,
         claimsCollected,
+        progressMessage: null,
         completedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -218,6 +249,7 @@ export async function collectOrdersForConnection(params: {
           status: 'completed',
           ordersCollected,
           claimsCollected,
+          progressMessage: null,
           completedAt: new Date(),
         },
       })

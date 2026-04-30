@@ -3,14 +3,13 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
-import { queueManualCollection } from '@/lib/jobs/queues'
+import { collectOrdersForConnection } from '@/lib/jobs/workers/order-collector'
 
 /**
  * POST /api/orders/collect
  *
  * Manually trigger order collection for selected marketplaces.
- * Creates job_logs entries (status: 'queued') and adds jobs to the BullMQ queue.
- * The actual marketplace API calls happen on the worker process (which has a whitelisted IP).
+ * Runs collection directly in the background (no BullMQ worker needed).
  *
  * Body: { connectionIds: string[] }
  * Response: { jobLogIds: string[] }
@@ -58,11 +57,10 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Create job_logs entries (status: queued) and add BullMQ jobs
+  // Pre-create job_log entries (status: queued) and run collection in background
   const jobLogIds: string[] = []
 
   for (const conn of connections) {
-    // 1. Pre-create job_log with 'queued' status
     const [logRow] = await db
       .insert(jobLogs)
       .values({
@@ -73,15 +71,18 @@ export async function POST(request: NextRequest) {
       })
       .returning({ id: jobLogs.id })
 
-    // 2. Add job to BullMQ queue (worker will pick it up)
-    await queueManualCollection({
+    jobLogIds.push(logRow.id)
+
+    // Run in background — do not await
+    collectOrdersForConnection({
       marketplaceId: conn.marketplaceId,
       connectionId: conn.id,
       userId: user.id,
+      jobType: 'manual-order-collection',
       jobLogId: logRow.id,
+    }).catch((err) => {
+      console.error('[collect] Background collection failed:', err)
     })
-
-    jobLogIds.push(logRow.id)
   }
 
   return NextResponse.json({ jobLogIds })

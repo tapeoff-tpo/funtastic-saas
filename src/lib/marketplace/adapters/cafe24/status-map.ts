@@ -10,8 +10,8 @@ import type { OrderStatus } from '@/lib/orders/types'
 /** Cafe24 order status code -> internal OrderStatus mapping */
 export const CAFE24_STATUS_MAP: Record<string, OrderStatus> = {
   N00: 'new',         // 입금전
-  N10: 'confirmed',   // 결제완료
-  N20: 'preparing',   // 상품준비중
+  N10: 'new',         // 결제완료/발주확인 전
+  N20: 'confirmed',   // 상품준비중/발주확인 완료
   N30: 'shipped',     // 배송중
   N40: 'delivered',   // 배송완료
 }

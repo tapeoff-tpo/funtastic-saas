@@ -551,6 +551,7 @@ export const MOCK_ELEVENST_ORDERS = [
     rcvrDtlAddr: '5층 501호',
     ordDt: '2026-04-02T10:00:00Z',
     ordStCd: '202',
+    dlvNo: '38600468',
   },
   {
     ordNo: 'E2026040200002',
@@ -568,6 +569,7 @@ export const MOCK_ELEVENST_ORDERS = [
     rcvrDtlAddr: '',
     ordDt: '2026-04-02T11:00:00Z',
     ordStCd: '303',
+    dlvNo: '38600469',
   },
 ]
 
@@ -620,6 +622,9 @@ ${MOCK_ELEVENST_CLAIMS.map((c) => `
 
   http.post('https://api.11st.co.kr/openapi/v3/orders/:orderId/delivery', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
 <result><resultCode>200</resultCode><resultMessage>OK</resultMessage></result>`)),
+
+  http.get('https://api.11st.co.kr/rest/ordservices/reqpackaging/:ordNo/:ordPrdSeq/:addPrdYn/:addPrdNo/:dlvNo', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
+<ResultOrder><result_code>0</result_code><result_text>전체 1건이 정상적으로 발주처리가 되었습니다.</result_text></ResultOrder>`)),
 ]
 
 // ============================================================================

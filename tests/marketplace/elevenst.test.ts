@@ -192,4 +192,22 @@ describe('ElevenstAdapter', () => {
       expect(result.success).toBe(true)
     })
   })
+
+  describe('confirmOrder', () => {
+    it('returns success for a confirmable order row', async () => {
+      const result = await adapter.confirmOrder('E2026040200001', MOCK_ELEVENST_ORDERS[0])
+
+      expect(result.success).toBe(true)
+    })
+
+    it('returns an error when delivery number is missing', async () => {
+      const result = await adapter.confirmOrder('E2026040200001', {
+        ordNo: 'E2026040200001',
+        ordPrdSeq: '1',
+      })
+
+      expect(result.success).toBe(false)
+      expect(result.error).toContain('dlvNo')
+    })
+  })
 })

@@ -57,6 +57,40 @@ function formatDateCompact(date: Date): string {
   return formatDate(date).replaceAll('-', '')
 }
 
+function asString(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value
+  if (typeof value === 'number') return String(value)
+  return undefined
+}
+
+function getConfirmableRows(
+  marketplaceOrderId: string,
+  rawData?: Record<string, unknown>,
+): Array<{ ordNo: string; ordPrdSeq: string; addPrdYn: string; addPrdNo: string; dlvNo: string }> {
+  const rawRows = Array.isArray(rawData?.mergedOrders)
+    ? rawData.mergedOrders
+    : rawData
+      ? [rawData]
+      : []
+
+  return rawRows.flatMap((row) => {
+    if (!row || typeof row !== 'object') return []
+    const source = row as Record<string, unknown>
+    const ordNo = asString(source.ordNo) ?? marketplaceOrderId
+    const ordPrdSeq = asString(source.ordPrdSeq)
+    const dlvNo = asString(source.dlvNo)
+    if (!ordPrdSeq || !dlvNo) return []
+
+    return [{
+      ordNo,
+      ordPrdSeq,
+      addPrdYn: asString(source.addPrdYn) ?? 'N',
+      addPrdNo: asString(source.addPrdNo) ?? 'null',
+      dlvNo,
+    }]
+  })
+}
+
 export class ElevenstAdapter implements MarketplaceAdapter {
   readonly config = ELEVENST_CONFIG
 
@@ -144,9 +178,43 @@ export class ElevenstAdapter implements MarketplaceAdapter {
   }
 
   async confirmOrder(
-    _marketplaceOrderId: string,
+    marketplaceOrderId: string,
+    rawData?: Record<string, unknown>,
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+    const rows = getConfirmableRows(marketplaceOrderId, rawData)
+    if (rows.length === 0) {
+      return {
+        success: false,
+        error: '11번가 발주확인에 필요한 주문순번(ordPrdSeq) 또는 배송번호(dlvNo)가 없습니다.',
+      }
+    }
+
+    for (const row of rows) {
+      try {
+        const path = [
+          'rest/ordservices/reqpackaging',
+          encodeURIComponent(row.ordNo),
+          encodeURIComponent(row.ordPrdSeq),
+          encodeURIComponent(row.addPrdYn),
+          encodeURIComponent(row.addPrdNo),
+          encodeURIComponent(row.dlvNo),
+        ].join('/')
+        const response = await readElevenstXml(await this.client.get(path))
+        const parsed = parseXmlResponse<{ ResultOrder?: { result_code?: string; result_text?: string } }>(response)
+        const resultCode = parsed.ResultOrder?.result_code
+
+        if (resultCode !== '0') {
+          return {
+            success: false,
+            error: `11번가 발주확인 실패: ${resultCode ?? 'UNKNOWN'} ${parsed.ResultOrder?.result_text ?? response}`,
+          }
+        }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+      }
+    }
+
+    return { success: true }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {

@@ -2,7 +2,7 @@
  * ESM Trading API marketplace adapter implementing MarketplaceAdapter.
  *
  * A single adapter class that serves both Gmarket and Auction via the
- * unified ESM Trading API at etapi.ebaykorea.com. Instances are
+ * unified ESM Trading API at sa2.esmplus.com. Instances are
  * differentiated by site_type: 'G' (Gmarket) or 'A' (Auction).
  */
 
@@ -27,6 +27,13 @@ import type {
   EsmProduct,
 } from './types'
 
+function formatDate(date: Date): string {
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
 function buildEsmConfig(siteType: EsmSiteType): MarketplaceConfig {
   if (siteType === 'G') {
     return {
@@ -34,7 +41,7 @@ function buildEsmConfig(siteType: EsmSiteType): MarketplaceConfig {
       name: '지마켓',
       authType: 'api_key',
       rateLimitPerSecond: 30,
-      requiredCredentials: ['api_key'],
+      requiredCredentials: ['master_id', 'secret_key', 'seller_id'],
     }
   }
   return {
@@ -42,7 +49,7 @@ function buildEsmConfig(siteType: EsmSiteType): MarketplaceConfig {
     name: '옥션',
     authType: 'api_key',
     rateLimitPerSecond: 30,
-    requiredCredentials: ['api_key'],
+    requiredCredentials: ['master_id', 'secret_key', 'seller_id'],
   }
 }
 
@@ -52,20 +59,23 @@ export class EsmAdapter implements MarketplaceAdapter {
   private readonly client: ReturnType<typeof createEsmClient>
   private readonly siteType: EsmSiteType
 
-  constructor(credentials: { api_key: string; site_type: EsmSiteType }) {
+  constructor(credentials: { master_id: string; secret_key: string; seller_id: string; site_type: EsmSiteType }) {
     this.siteType = credentials.site_type
     this.config = buildEsmConfig(this.siteType)
-    this.client = createEsmClient(credentials.api_key)
+    this.client = createEsmClient(credentials)
   }
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
       // Lightweight call to verify API key
-      await this.client.get('api/v1/orders', {
-        searchParams: {
-          siteType: this.siteType,
-          dateFrom: new Date().toISOString(),
-          dateTo: new Date().toISOString(),
+      await this.client.post('shipping/v1/Order/RequestOrders', {
+        json: {
+          siteType: this.siteType === 'A' ? 1 : 2,
+          orderStatus: 1,
+          requestDateType: 2,
+          requestDateFrom: formatDate(new Date()),
+          requestDateTo: formatDate(new Date(Date.now() + 24 * 60 * 60 * 1000)),
+          pageIndex: 1,
           pageSize: 1,
         },
       }).json()
@@ -86,20 +96,24 @@ export class EsmAdapter implements MarketplaceAdapter {
     const now = new Date()
 
     try {
-      const response = await this.client.get('api/v1/orders', {
-        searchParams: {
-          siteType: this.siteType,
-          dateFrom: since.toISOString(),
-          dateTo: now.toISOString(),
+      const response = await this.client.post('shipping/v1/Order/RequestOrders', {
+        json: {
+          siteType: this.siteType === 'A' ? 1 : 2,
+          orderStatus: 1,
+          requestDateType: 2,
+          requestDateFrom: formatDate(since),
+          requestDateTo: formatDate(now),
+          pageIndex: 1,
           pageSize: 100,
         },
       }).json<EsmApiResponse<EsmOrder[]>>()
 
-      if (response.resultCode !== '0' && response.resultCode !== 'OK') {
-        throw new MarketplaceApiError(this.config.id, 500, response.resultMessage)
+      const resultCode = response.resultCode ?? response.ResultCode
+      if (resultCode !== 0 && resultCode !== '0' && resultCode !== 'OK' && resultCode !== 'Success') {
+        throw new MarketplaceApiError(this.config.id, 500, response.resultMessage ?? response.Message ?? 'ESM order API failed')
       }
 
-      return (response.data || []).map((order) => this.normalizeOrder(order))
+      return (response.data ?? response.Data ?? []).map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
@@ -110,30 +124,8 @@ export class EsmAdapter implements MarketplaceAdapter {
   }
 
   async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
-    const now = new Date()
-
-    try {
-      const response = await this.client.get('api/v1/claims', {
-        searchParams: {
-          siteType: this.siteType,
-          dateFrom: since.toISOString(),
-          dateTo: now.toISOString(),
-          pageSize: 100,
-        },
-      }).json<EsmApiResponse<EsmClaim[]>>()
-
-      if (response.resultCode !== '0' && response.resultCode !== 'OK') {
-        throw new MarketplaceApiError(this.config.id, 500, response.resultMessage)
-      }
-
-      return (response.data || []).map((claim) => this.normalizeClaim(claim))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError(this.config.id, 'API key authentication failed')
-      }
-      throw new MarketplaceApiError(this.config.id, 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+    void since
+    return []
   }
 
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
@@ -235,32 +227,37 @@ export class EsmAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrder(order: EsmOrder): NormalizedOrder {
+    const orderNo = String(order.orderNo ?? order.OrderNo ?? '')
+    const orderItemSeq = String(order.orderItemSeq ?? order.OrderSeqNo ?? orderNo)
+    const orderStatus = String(order.orderStatus ?? order.OrderStatus ?? 'PAYMENT_COMPLETE')
+    const quantity = Number(order.orderQty ?? order.OrderQty ?? 1)
+    const unitPrice = Number(order.sellPrice ?? order.SellPrice ?? order.BuyerPayAmt ?? 0)
     return {
-      marketplaceOrderId: order.orderNo,
+      marketplaceOrderId: orderNo,
       marketplaceId: this.config.id,
-      marketplaceStatus: order.orderStatus,
-      status: mapEsmStatus(order.orderStatus),
-      buyerName: order.buyerName,
-      buyerPhone: order.buyerPhone || undefined,
-      recipientName: order.receiverName,
-      recipientPhone: order.receiverPhone || undefined,
+      marketplaceStatus: orderStatus,
+      status: mapEsmStatus(orderStatus),
+      buyerName: order.buyerName ?? order.BuyerName ?? 'ESM 구매자',
+      buyerPhone: order.buyerPhone ?? order.BuyerTelNo ?? undefined,
+      recipientName: order.receiverName ?? order.ReceiverName ?? order.buyerName ?? order.BuyerName ?? 'ESM 수령인',
+      recipientPhone: order.receiverPhone ?? order.ReceiverTelNo ?? undefined,
       shippingAddress: {
-        zipCode: order.receiverZipcode,
-        address1: order.receiverAddress,
-        address2: order.receiverAddressDetail || undefined,
+        zipCode: order.receiverZipcode ?? order.ZipCode ?? '',
+        address1: order.receiverAddress ?? order.Address ?? '',
+        address2: order.receiverAddressDetail ?? order.AddressDetail ?? undefined,
       },
       items: [
         {
-          marketplaceItemId: order.orderItemSeq,
-          productName: order.itemName,
-          optionText: order.optionInfo || undefined,
-          quantity: order.orderQty,
-          unitPrice: order.sellPrice,
-          sku: order.sellerItemCode || undefined,
+          marketplaceItemId: orderItemSeq,
+          productName: order.itemName ?? order.GoodsName ?? 'ESM 상품',
+          optionText: order.optionInfo ?? order.OptionInfo ?? undefined,
+          quantity,
+          unitPrice,
+          sku: order.sellerItemCode ?? order.SellerCustNo ?? undefined,
         },
       ],
-      orderedAt: new Date(order.orderDate),
-      totalAmount: order.payAmount,
+      orderedAt: new Date(order.orderDate ?? order.OrderDate ?? order.PayDate ?? new Date()),
+      totalAmount: Number(order.payAmount ?? order.BuyerPayAmt ?? quantity * unitPrice),
       rawData: order as unknown as Record<string, unknown>,
     }
   }

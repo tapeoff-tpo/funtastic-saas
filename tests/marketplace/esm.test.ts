@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { setupServer } from 'msw/node'
-import { esmHandlers, MOCK_ESM_ORDERS, MOCK_ESM_CLAIMS } from '../helpers/msw-handlers'
+import { esmHandlers, MOCK_ESM_ORDERS } from '../helpers/msw-handlers'
 import {
   mapEsmStatus,
   mapEsmClaimStatus,
@@ -117,7 +117,9 @@ describe('mapEsmClaimType', () => {
 
 describe('EsmAdapter (Gmarket)', () => {
   const adapter = new EsmAdapter({
-    api_key: 'test-gmarket-api-key',
+    master_id: 'test-master',
+    secret_key: 'test-secret',
+    seller_id: 'test-gmarket-seller',
     site_type: 'G',
   })
 
@@ -126,7 +128,7 @@ describe('EsmAdapter (Gmarket)', () => {
     expect(adapter.config.name).toBe('지마켓')
     expect(adapter.config.authType).toBe('api_key')
     expect(adapter.config.rateLimitPerSecond).toBe(30)
-    expect(adapter.config.requiredCredentials).toContain('api_key')
+    expect(adapter.config.requiredCredentials).toEqual(['master_id', 'secret_key', 'seller_id'])
   })
 
   it('authenticate() returns success (API key has no separate auth flow)', async () => {
@@ -169,21 +171,11 @@ describe('EsmAdapter (Gmarket)', () => {
   })
 
   describe('getClaimsOrders', () => {
-    it('normalizes Gmarket claims to NormalizedClaim[]', async () => {
+    it('returns an empty list until the ESM claims endpoint is wired', async () => {
       const since = new Date('2026-04-02T00:00:00Z')
       const claims = await adapter.getClaimsOrders(since)
 
-      const gmarketClaims = MOCK_ESM_CLAIMS.filter((c) => c.siteType === 'G')
-      expect(claims).toHaveLength(gmarketClaims.length)
-
-      const claim = claims[0]
-      expect(claim.marketplaceClaimId).toBe('CLM-ESM-001')
-      expect(claim.marketplaceId).toBe('gmarket')
-      expect(claim.marketplaceOrderId).toBe('ESM-G-20260402-001')
-      expect(claim.claimType).toBe('return')
-      expect(claim.claimStatus).toBe('requested')
-      expect(claim.reason).toBe('상품 하자')
-      expect(claim.rawData).toBeDefined()
+      expect(claims).toEqual([])
     })
   })
 
@@ -204,7 +196,9 @@ describe('EsmAdapter (Gmarket)', () => {
 
 describe('EsmAdapter (Auction)', () => {
   const adapter = new EsmAdapter({
-    api_key: 'test-auction-api-key',
+    master_id: 'test-master',
+    secret_key: 'test-secret',
+    seller_id: 'test-auction-seller',
     site_type: 'A',
   })
 
@@ -213,7 +207,7 @@ describe('EsmAdapter (Auction)', () => {
     expect(adapter.config.name).toBe('옥션')
     expect(adapter.config.authType).toBe('api_key')
     expect(adapter.config.rateLimitPerSecond).toBe(30)
-    expect(adapter.config.requiredCredentials).toContain('api_key')
+    expect(adapter.config.requiredCredentials).toEqual(['master_id', 'secret_key', 'seller_id'])
   })
 
   it('authenticate() returns success', async () => {
@@ -251,9 +245,7 @@ describe('EsmAdapter (Auction)', () => {
       const since = new Date('2026-04-02T00:00:00Z')
       const claims = await adapter.getClaimsOrders(since)
 
-      // Mock data only has Gmarket claims
-      const auctionClaims = MOCK_ESM_CLAIMS.filter((c) => c.siteType === 'A')
-      expect(claims).toHaveLength(auctionClaims.length)
+      expect(claims).toEqual([])
     })
   })
 

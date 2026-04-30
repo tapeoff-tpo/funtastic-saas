@@ -178,7 +178,7 @@ const gmarketAdapter: MarketplaceAdapter = {
     name: '지마켓',
     authType: 'api_key',
     rateLimitPerSecond: 30,
-    requiredCredentials: ['api_key'],
+    requiredCredentials: ['master_id', 'secret_key', 'seller_id'],
   },
   async testConnection(_credentials: MarketplaceCredentials) {
     return { success: false, error: 'Not implemented yet' }
@@ -218,7 +218,7 @@ const auctionAdapter: MarketplaceAdapter = {
     name: '옥션',
     authType: 'api_key',
     rateLimitPerSecond: 30,
-    requiredCredentials: ['api_key'],
+    requiredCredentials: ['master_id', 'secret_key', 'seller_id'],
   },
   async testConnection(_credentials: MarketplaceCredentials) {
     return { success: false, error: 'Not implemented yet' }

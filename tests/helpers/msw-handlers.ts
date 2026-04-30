@@ -399,18 +399,18 @@ const naverHandlers = [
 // ============================================================================
 
 const esmHandlers = [
-  http.get('https://etapi.ebaykorea.com/api/v1/orders', ({ request }) => {
-    const url = new URL(request.url)
-    const siteType = url.searchParams.get('siteType')
+  http.post('https://sa2.esmplus.com/shipping/v1/Order/RequestOrders', async ({ request }) => {
+    const body = await request.json() as { siteType?: number }
+    const siteType = body.siteType === 1 ? 'A' : body.siteType === 2 ? 'G' : undefined
 
     const filtered = siteType
       ? MOCK_ESM_ORDERS.filter((o) => o.siteType === siteType)
       : MOCK_ESM_ORDERS
 
     return HttpResponse.json({
-      resultCode: '0',
-      resultMessage: 'OK',
-      data: filtered,
+      ResultCode: 0,
+      Message: 'OK',
+      Data: filtered,
     })
   }),
 
@@ -429,7 +429,7 @@ const esmHandlers = [
     })
   }),
 
-  http.post('https://etapi.ebaykorea.com/api/v1/orders/:orderId/delivery', () => {
+  http.post('https://sa2.esmplus.com/api/v1/orders/:orderId/delivery', () => {
     return HttpResponse.json({
       resultCode: '0',
       resultMessage: 'OK',

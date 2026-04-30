@@ -20,6 +20,7 @@ const credentialLabels: Record<string, string> = {
   vendor_id: '벤더 ID',
   client_id: '클라이언트 ID',
   client_secret: '클라이언트 시크릿',
+  master_id: 'ESM+ 마스터 ID',
   api_key: 'API 키',
   shop_id: '브랜드 ID (brandId)',
   mall_id: '몰 ID',

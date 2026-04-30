@@ -31,10 +31,12 @@ const credentialLabels: Record<string, string> = {
   vendor_id: '벤더 ID',
   client_id: '클라이언트 ID',
   client_secret: '클라이언트 시크릿',
+  master_id: 'ESM+ 마스터 ID',
   api_key: 'API 키',
   shop_id: '브랜드 ID (brandId)',
   mall_id: '몰 ID (예: mymall)',
   access_token: '액세스 토큰',
+  seller_id: '판매자 ID',
 }
 
 export function CredentialForm({ marketplaces }: CredentialFormProps) {

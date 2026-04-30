@@ -15,6 +15,7 @@ import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
 import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
 import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
+import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -60,6 +61,20 @@ export function createAdapter(
     case 'elevenst':
       return new ElevenstAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
+      })
+    case 'gmarket':
+      return new EsmAdapter({
+        master_id: credentials.master_id ?? credentials.masterId ?? '',
+        secret_key: credentials.secret_key ?? credentials.secretKey ?? '',
+        seller_id: credentials.seller_id ?? credentials.sellerId ?? '',
+        site_type: 'G',
+      })
+    case 'auction':
+      return new EsmAdapter({
+        master_id: credentials.master_id ?? credentials.masterId ?? '',
+        secret_key: credentials.secret_key ?? credentials.secretKey ?? '',
+        seller_id: credentials.seller_id ?? credentials.sellerId ?? '',
+        site_type: 'A',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

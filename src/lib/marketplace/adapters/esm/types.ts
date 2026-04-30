@@ -7,9 +7,13 @@
 
 /** Standard ESM API response wrapper */
 export interface EsmApiResponse<T> {
-  resultCode: string
-  resultMessage: string
-  data: T
+  resultCode?: string | number
+  ResultCode?: string | number
+  resultMessage?: string
+  Message?: string
+  data?: T
+  Data?: T
+  TotalCount?: number
 }
 
 /** Site type discriminator: 'G' for Gmarket, 'A' for Auction */
@@ -17,24 +21,42 @@ export type EsmSiteType = 'G' | 'A'
 
 /** A single order from the ESM Trading API */
 export interface EsmOrder {
-  orderNo: string
+  orderNo?: string
+  OrderNo?: number | string
   siteType: EsmSiteType
-  orderItemSeq: string
-  itemName: string
-  orderQty: number
-  buyerName: string
-  buyerPhone: string
-  receiverName: string
-  receiverPhone: string
-  receiverZipcode: string
-  receiverAddress: string
-  receiverAddressDetail: string
-  orderDate: string
-  orderStatus: string
-  sellPrice: number
-  payAmount: number
+  orderItemSeq?: string
+  OrderSeqNo?: number | string
+  itemName?: string
+  GoodsName?: string
+  orderQty?: number
+  OrderQty?: number
+  buyerName?: string
+  BuyerName?: string
+  buyerPhone?: string
+  BuyerTelNo?: string
+  receiverName?: string
+  ReceiverName?: string
+  receiverPhone?: string
+  ReceiverTelNo?: string
+  receiverZipcode?: string
+  ZipCode?: string
+  receiverAddress?: string
+  Address?: string
+  receiverAddressDetail?: string
+  AddressDetail?: string
+  orderDate?: string
+  OrderDate?: string
+  PayDate?: string
+  orderStatus?: string
+  OrderStatus?: string | number
+  sellPrice?: number
+  SellPrice?: number
+  payAmount?: number
+  BuyerPayAmt?: number
   sellerItemCode?: string
+  SellerCustNo?: string
   optionInfo?: string
+  OptionInfo?: string
 }
 
 /** A single claim from the ESM Trading API */

@@ -40,6 +40,11 @@ export async function proxy(request: NextRequest) {
     return supabaseResponse
   }
 
+  // Allow debug endpoints (no sensitive data exposure)
+  if (pathname.startsWith('/api/debug/')) {
+    return supabaseResponse
+  }
+
   // Redirect unauthenticated users to login (except /login and /auth/callback)
   if (!user && pathname !== '/login' && !pathname.startsWith('/auth/callback')) {
     const url = request.nextUrl.clone()

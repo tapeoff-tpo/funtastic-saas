@@ -17,6 +17,7 @@ import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
 import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
 import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
+import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -83,9 +84,18 @@ export function createAdapter(
         seller_id: credentials.seller_id ?? credentials.sellerId ?? '',
         site_type: 'A',
       })
+    case 'toss-shopping':
+      return new TossShoppingAdapter({
+        access_key: credentials.access_key ?? credentials.accessKey ?? '',
+        secret_key: credentials.secret_key ?? credentials.secretKey ?? '',
+      })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)
   }
+}
+
+function shouldAutoConfirmOrders(): boolean {
+  return process.env.MARKETPLACE_AUTO_CONFIRM_ON_COLLECT === '1'
 }
 
 async function refreshCafe24AccessToken(params: {
@@ -287,7 +297,11 @@ export async function collectOrdersForConnection(params: {
     // 4.5 Auto-confirm: 신규 주문을 즉시 주문확인(몰 통보)으로 전환
     // 이유: 수집 후 처리 시간 동안 구매자 취소 가능성을 줄이기 위함
     // confirmOrder 실패한 주문은 'new' 상태 유지 → 확정 대기 탭에서 수동 재시도
-    if (newOrderIds.length > 0 && typeof adapter.confirmOrder === 'function') {
+    if (
+      newOrderIds.length > 0 &&
+      typeof adapter.confirmOrder === 'function' &&
+      shouldAutoConfirmOrders()
+    ) {
       await setProgress(`신규 주문 확인 중 (0/${newOrderIds.length})`)
       let confirmIdx = 0
       for (const o of newOrderIds) {
@@ -308,6 +322,10 @@ export async function collectOrdersForConnection(params: {
           await setProgress(`신규 주문 확인 중 (${confirmIdx}/${newOrderIds.length})`)
         }
       }
+    } else if (newOrderIds.length > 0 && !shouldAutoConfirmOrders()) {
+      await setProgress(
+        `${newOrderIds.length} new orders saved; auto-confirm disabled for parallel Sabangnet run`
+      )
     }
 
     // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 신규주문만 수집)

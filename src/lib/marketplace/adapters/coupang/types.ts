@@ -127,3 +127,38 @@ export interface CoupangInquiriesResponse {
   data?: CoupangOnlineInquiry[]
   message?: string
 }
+
+export interface CoupangSellerProductImage {
+  cdnPath: string
+  imageOrder?: number
+  imageType?: string
+}
+
+export interface CoupangSellerProductAttribute {
+  attributeTypeName: string
+  valueName: string
+}
+
+export interface CoupangSellerProductItem {
+  vendorItemId: number
+  itemName: string
+  salePrice: number
+  externalVendorSku?: string | null
+  images?: CoupangSellerProductImage[]
+  attributes?: CoupangSellerProductAttribute[]
+}
+
+export interface CoupangSellerProduct {
+  sellerProductId: number
+  sellerProductName: string
+  displayCategoryCode?: number | string | null
+  statusName?: string
+  items: CoupangSellerProductItem[]
+}
+
+export interface CoupangSellerProductsResponse {
+  code: number | string
+  message: string
+  data?: CoupangSellerProduct[]
+  nextToken?: string
+}

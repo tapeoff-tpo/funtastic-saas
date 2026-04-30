@@ -431,9 +431,9 @@ const tenByTenAdapter = createStubAdapter({
 const tossShoppingAdapter = createStubAdapter({
   id: 'toss-shopping',
   name: '토스쇼핑',
-  authType: 'api_key',
-  rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  authType: 'oauth2',
+  rateLimitPerSecond: 50,
+  requiredCredentials: ['access_key', 'secret_key'],
 })
 
 const tobizonAdapter = createStubAdapter({

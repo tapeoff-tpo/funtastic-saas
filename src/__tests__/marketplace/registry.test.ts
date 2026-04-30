@@ -31,6 +31,15 @@ function createMockAdapter(overrides: Partial<MarketplaceAdapter['config']> = {}
     async getProducts() {
       return []
     },
+    async confirmOrder() {
+      return { success: true }
+    },
+    async registerProduct() {
+      return { success: true }
+    },
+    async updateProduct() {
+      return { success: true }
+    },
   }
 }
 

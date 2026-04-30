@@ -41,8 +41,8 @@ export function generateCoupangAuth(
   accessKey: string,
   secretKey: string,
 ): string {
-  const cleanAccessKey = accessKey.trim()
-  const cleanSecretKey = secretKey.trim()
+  const cleanAccessKey = accessKey.replace(/\s+/g, '')
+  const cleanSecretKey = secretKey.replace(/\s+/g, '')
 
   const datetime = formatCoupangDatetime(new Date())
   const message = `${datetime}${method}${path}${query}`
@@ -85,6 +85,7 @@ export function createCoupangClient(accessKey: string, secretKey: string, vendor
           const auth = generateCoupangAuth(method, path, query, accessKey, secretKey)
           request.headers.set('Authorization', auth)
           request.headers.set('X-Requested-By', vendorId)
+          request.headers.set('X-MARKET', 'KR')
           request.headers.set('Content-Type', 'application/json;charset=UTF-8')
         },
       ],

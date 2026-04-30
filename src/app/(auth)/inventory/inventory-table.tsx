@@ -157,9 +157,14 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
     order: parseAsString,
     page: parseAsInteger.withDefault(1),
     warehouseZone: parseAsString,
+    // SaaS 배송비(원가) 컬럼 표시 토글 — 검색폼 체크박스로 제어
+    showShippingCost: parseAsString,
     // 검색 트리거 sentinel — page.tsx 가 이게 켜졌을 때만 fetch
     searched: parseAsString,
   }, { shallow: false })
+
+  // 컬럼 노출 여부 — '1' 일 때만 SaaS 배송비 컬럼 보임
+  const showShippingCost = filters.showShippingCost === '1'
 
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
@@ -169,12 +174,15 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
   const [maxStockInput, setMaxStockInput] = useState(
     filters.maxStock != null ? String(filters.maxStock) : '',
   )
+  // 배송비 컬럼 토글 — 체크박스 입력 상태(검색 시 URL 에 반영)
+  const [showShippingInput, setShowShippingInput] = useState(showShippingCost)
   useEffect(() => { setSearchInput(filters.search ?? '') }, [filters.search])
   useEffect(() => { setProductCodeInput(filters.productCode ?? '') }, [filters.productCode])
   useEffect(() => { setOptionCodeInput(filters.optionCode ?? '') }, [filters.optionCode])
   useEffect(() => {
     setMaxStockInput(filters.maxStock != null ? String(filters.maxStock) : '')
   }, [filters.maxStock])
+  useEffect(() => { setShowShippingInput(showShippingCost) }, [showShippingCost])
 
   const submitSearch = useCallback(() => {
     const trimmedSearch = searchInput.trim()
@@ -192,24 +200,27 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
         productCode: trimmedProduct || null,
         optionCode: trimmedOption || null,
         maxStock: maxStockNum,
+        showShippingCost: showShippingInput ? '1' : null,
         page: 1,
         // 검색 sentinel 켜기
         searched: '1',
       })
     })
-  }, [searchInput, productCodeInput, optionCodeInput, maxStockInput, setFilters])
+  }, [searchInput, productCodeInput, optionCodeInput, maxStockInput, showShippingInput, setFilters])
 
   const handleResetFilters = useCallback(() => {
     setSearchInput('')
     setProductCodeInput('')
     setOptionCodeInput('')
     setMaxStockInput('')
+    setShowShippingInput(false)
     void setFilters({
       search: null,
       productCode: null,
       optionCode: null,
       maxStock: null,
       warehouseZone: null,
+      showShippingCost: null,
       page: 1,
       searched: null,
     })
@@ -364,29 +375,38 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       ),
       cell: (info) => <StockCell value={info.getValue()} />,
     }),
-    columnHelper.accessor('shippingCost', {
-      header: 'SaaS 배송비(원가)',
-      cell: (info) => (
-        <ShippingCostCell
-          productId={info.row.original.productId}
-          value={info.getValue()}
-        />
-      ),
-    }),
     columnHelper.accessor('monthlyIncoming', {
       header: '당월입고',
       cell: (info) => {
         const v = info.getValue()
-        return v > 0 ? <span className="text-blue-600">{v.toLocaleString('ko-KR')}</span> : '-'
+        return v > 0
+          ? <span className="text-blue-600">{v.toLocaleString('ko-KR')}</span>
+          : <span className="text-muted-foreground">0</span>
       },
     }),
     columnHelper.accessor('monthlyOutgoing', {
       header: '당월출고',
       cell: (info) => {
         const v = info.getValue()
-        return v > 0 ? <span className="text-orange-600">{v.toLocaleString('ko-KR')}</span> : '-'
+        return v > 0
+          ? <span className="text-orange-600">{v.toLocaleString('ko-KR')}</span>
+          : <span className="text-muted-foreground">0</span>
       },
     }),
+    // SaaS 배송비(원가) — 검색폼의 "배송비 표시" 체크 후에만 노출
+    ...(showShippingCost
+      ? [
+          columnHelper.accessor('shippingCost', {
+            header: 'SaaS 배송비(원가)',
+            cell: (info) => (
+              <ShippingCostCell
+                productId={info.row.original.productId}
+                value={info.getValue()}
+              />
+            ),
+          }),
+        ]
+      : []),
     columnHelper.accessor('lastIncomingAt', {
       header: '최종입고일',
       cell: (info) => {
@@ -549,6 +569,15 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
               className="w-[70px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
             />
             <span className="text-muted-foreground">개 이하</span>
+          </label>
+          <label className="flex items-center gap-1 text-xs">
+            <input
+              type="checkbox"
+              checked={showShippingInput}
+              onChange={(e) => setShowShippingInput(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            <span className="text-muted-foreground">SaaS 배송비(원가) 표시</span>
           </label>
           <div className="ml-auto flex items-center gap-1">
             <button

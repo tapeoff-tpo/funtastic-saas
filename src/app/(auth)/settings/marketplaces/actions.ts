@@ -6,6 +6,8 @@ import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import '@/lib/marketplace/adapters/configs'
+import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
+import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
@@ -83,6 +85,52 @@ export async function getMarketplaceCredentials(
       requiredCredentials: [...config.requiredCredentials],
       values,
     },
+  }
+}
+
+/**
+ * 폼에 입력된 자격증명으로 실제 마켓플레이스 API 호출 시도.
+ * 저장 전에 값이 유효한지 검증할 때 사용. Vault에 저장하지 않고 메모리에서만 사용.
+ */
+export async function testMarketplaceCredentials(
+  marketplaceId: string,
+  credentials: Record<string, string>
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+  if (authError || !user) return { success: false, error: '인증이 필요합니다.' }
+
+  try {
+    let result: { success: boolean; error?: string }
+    switch (marketplaceId) {
+      case 'naver':
+        result = await new NaverAdapter({
+          client_id: credentials.client_id?.trim() ?? '',
+          client_secret: credentials.client_secret?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'coupang':
+        result = await new CoupangAdapter({
+          access_key: credentials.access_key?.trim() ?? '',
+          secret_key: credentials.secret_key?.trim() ?? '',
+          vendor_id: credentials.vendor_id?.trim() ?? '',
+        }).testConnection()
+        break
+      default:
+        return {
+          success: false,
+          error: `${marketplaceId}는 테스트 연결이 아직 지원되지 않습니다. 저장 후 실제 수집으로 검증하세요.`,
+        }
+    }
+    return result
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : '알 수 없는 오류',
+    }
   }
 }
 

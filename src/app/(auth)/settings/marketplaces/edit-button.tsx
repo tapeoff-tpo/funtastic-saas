@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import {
   getMarketplaceCredentials,
   registerMarketplaceCredentials,
+  testMarketplaceCredentials,
 } from './actions'
 import { DeleteConnectionButton } from './delete-button'
 import { StatusBadge } from '@/components/marketplace/status-badge'
@@ -48,6 +49,7 @@ export function ConnectionRow({
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<LoadedData | null>(null)
   const [reveal, setReveal] = useState<Record<string, boolean>>({})
+  const [testing, setTesting] = useState(false)
   const [state, formAction, isPending] = useActionState(
     registerMarketplaceCredentials,
     null,
@@ -78,6 +80,23 @@ export function ConnectionRow({
       toast.error(state.error)
     }
   }, [state])
+
+  async function handleTest(form: HTMLFormElement) {
+    if (!data) return
+    setTesting(true)
+    const fd = new FormData(form)
+    const credentials: Record<string, string> = {}
+    for (const credKey of data.requiredCredentials) {
+      credentials[credKey] = (fd.get(credKey) as string) ?? ''
+    }
+    const result = await testMarketplaceCredentials(data.marketplaceId, credentials)
+    setTesting(false)
+    if (result.success) {
+      toast.success('연결 성공')
+    } else {
+      toast.error(result.error ?? '연결 실패')
+    }
+  }
 
   return (
     <div className="px-4 py-3">
@@ -144,8 +163,20 @@ export function ConnectionRow({
           })}
 
           <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={isPending}>
+            <Button type="submit" size="sm" disabled={isPending || testing}>
               {isPending ? '저장 중...' : '저장'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={testing || isPending}
+              onClick={(e) => {
+                const form = e.currentTarget.closest('form') as HTMLFormElement | null
+                if (form) handleTest(form)
+              }}
+            >
+              {testing ? '테스트 중...' : '테스트 연결'}
             </Button>
             <Button
               type="button"

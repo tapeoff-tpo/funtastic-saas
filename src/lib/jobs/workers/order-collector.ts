@@ -13,6 +13,7 @@ import { readCredential } from '@/lib/supabase/admin'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
+import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -48,6 +49,11 @@ export function createAdapter(
       return new TenByTenAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
         shop_id: credentials.shop_id ?? credentials.shopId ?? '',
+      })
+    case 'cafe24':
+      return new Cafe24Adapter({
+        access_token: credentials.access_token ?? '',
+        mall_id: credentials.mall_id ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

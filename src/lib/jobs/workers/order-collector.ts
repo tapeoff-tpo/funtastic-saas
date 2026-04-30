@@ -142,15 +142,17 @@ export async function collectOrdersForConnection(params: {
     const adapter = createAdapter(marketplaceId, credentials)
 
     // 4. Fetch orders — manual: 1 day, scheduled: 7 days.
-    // 10x10 notifies first orders after a delay and operators often test with
-    // older newly-notified orders, so use the safer scheduled window manually too.
+    // 10x10 rejects requests outside "within 7 days" and appears to count
+    // calendar dates inclusively, so keep its manual range safely inside.
     const now = Date.now()
     const extendedManualMarketplaces = new Set(['10x10', 'naver'])
-    const lookbackLabel = jobType === 'manual-order-collection' && !extendedManualMarketplaces.has(marketplaceId)
+    const lookbackLabel = jobType === 'manual-order-collection' && marketplaceId === '10x10'
+      ? '6일'
+      : jobType === 'manual-order-collection' && !extendedManualMarketplaces.has(marketplaceId)
       ? '1일'
       : '7일'
     const lookbackMs = marketplaceId === '10x10'
-      ? (7 * 24 * 60 * 60 * 1000) - (10 * 60 * 1000)
+      ? 6 * 24 * 60 * 60 * 1000
       : lookbackLabel === '1일'
         ? 1 * 24 * 60 * 60 * 1000
         : 7 * 24 * 60 * 60 * 1000

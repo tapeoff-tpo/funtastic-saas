@@ -12,7 +12,7 @@ import { queueManualCollection } from '@/lib/jobs/queues'
  * Creates job_logs entries (status: 'queued') and adds jobs to the BullMQ queue.
  * The actual marketplace API calls happen on the worker process (which has a whitelisted IP).
  *
- * Body: { marketplaceIds: string[] }
+ * Body: { connectionIds: string[] }
  * Response: { jobLogIds: string[] }
  */
 export async function POST(request: NextRequest) {
@@ -26,28 +26,28 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: { marketplaceIds: string[] }
+  let body: { connectionIds: string[] }
   try {
     body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  if (!Array.isArray(body.marketplaceIds) || body.marketplaceIds.length === 0) {
+  if (!Array.isArray(body.connectionIds) || body.connectionIds.length === 0) {
     return NextResponse.json(
-      { error: 'marketplaceIds must be a non-empty array' },
+      { error: 'connectionIds must be a non-empty array' },
       { status: 400 }
     )
   }
 
-  // Find connected marketplaces for this user
+  // Find connections for this user
   const connections = await db
     .select()
     .from(marketplaceConnections)
     .where(
       and(
         eq(marketplaceConnections.userId, user.id),
-        inArray(marketplaceConnections.marketplaceId, body.marketplaceIds)
+        inArray(marketplaceConnections.id, body.connectionIds)
       )
     )
 

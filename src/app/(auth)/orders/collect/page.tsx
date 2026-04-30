@@ -49,6 +49,7 @@ export default async function OrdersCollectPage() {
       <h1 className="text-2xl font-bold">주문 수집</h1>
       <MarketplaceDashboard
         connections={connections.map((c) => ({
+          id: c.id,
           marketplaceId: c.marketplaceId,
           displayName: c.displayName,
           status: c.status,

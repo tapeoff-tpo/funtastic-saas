@@ -14,6 +14,7 @@ import type { ConnectionStatus } from '@/lib/marketplace/types'
 import { addManualChannel } from '@/app/(auth)/orders/collect/actions'
 
 interface Connection {
+  id: string
   marketplaceId: string
   displayName: string
   status: string
@@ -65,7 +66,7 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
 
   const handleCollectSelected = () => {
     const ids = [...selected].filter((id) =>
-      connectedMarkets.some((c) => c.marketplaceId === id)
+      connectedMarkets.some((c) => c.id === id)
     )
     if (ids.length === 0) return
     startCollect(ids)
@@ -73,16 +74,18 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
 
   const handleCollectAll = () => {
     if (connectedMarkets.length === 0) return
-    startCollect(connectedMarkets.map((c) => c.marketplaceId))
+    startCollect(connectedMarkets.map((c) => c.id))
   }
 
   const nameMap = Object.fromEntries(
-    connections.map((c) => [c.marketplaceId, c.displayName])
+    connections.map((c) => [c.id, c.displayName])
   )
 
   const enrichedLogs = logs?.map((l) => ({
     ...l,
-    displayName: l.marketplaceId ? (nameMap[l.marketplaceId] ?? l.marketplaceId) : '오류',
+    displayName: l.connectionId
+      ? (nameMap[l.connectionId] ?? l.marketplaceId ?? '오류')
+      : (l.marketplaceId ?? '오류'),
   }))
 
   const allDone = enrichedLogs && enrichedLogs.every(
@@ -180,7 +183,7 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
               <MarketCard
                 key={conn.id}
                 conn={conn}
-                isSelected={selected.has(conn.marketplaceId)}
+                isSelected={selected.has(conn.id)}
                 onToggle={toggleSelect}
               />
             ))}
@@ -319,7 +322,7 @@ function MarketCard({
               : 'cursor-pointer hover:shadow-md'
       }`}
       onClick={() => {
-        if (!isDisconnected && !isManual) onToggle(conn.marketplaceId)
+        if (!isDisconnected && !isManual) onToggle(conn.id)
       }}
     >
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">

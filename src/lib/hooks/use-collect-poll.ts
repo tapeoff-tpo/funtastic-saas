@@ -3,6 +3,7 @@ import { useState, useRef, useCallback } from 'react'
 export interface JobLogResult {
   id: string
   marketplaceId: string | null
+  connectionId: string | null
   status: string
   ordersCollected: number | null
   claimsCollected: number | null
@@ -14,7 +15,7 @@ interface UseCollectPollReturn {
   collecting: boolean
   logs: JobLogResult[] | null
   jobLogIds: string[]
-  startCollect: (marketplaceIds: string[]) => Promise<void>
+  startCollect: (connectionIds: string[]) => Promise<void>
   cancelCollect: () => Promise<void>
   clearResults: () => void
 }
@@ -71,7 +72,7 @@ export function useCollectPoll(): UseCollectPollReturn {
   )
 
   const startCollect = useCallback(
-    async (marketplaceIds: string[]) => {
+    async (connectionIds: string[]) => {
       setCollecting(true)
       setLogs(null)
       setJobLogIds([])
@@ -81,7 +82,7 @@ export function useCollectPoll(): UseCollectPollReturn {
         const res = await fetch('/api/orders/collect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ marketplaceIds }),
+          body: JSON.stringify({ connectionIds }),
         })
         const data = await res.json()
 
@@ -90,6 +91,7 @@ export function useCollectPoll(): UseCollectPollReturn {
             {
               id: '__error__',
               marketplaceId: null,
+              connectionId: null,
               status: 'failed',
               ordersCollected: null,
               claimsCollected: null,
@@ -108,6 +110,7 @@ export function useCollectPoll(): UseCollectPollReturn {
           {
             id: '__error__',
             marketplaceId: null,
+            connectionId: null,
             status: 'failed',
             ordersCollected: null,
             claimsCollected: null,

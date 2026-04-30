@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
     .select({
       id: jobLogs.id,
       marketplaceId: jobLogs.marketplaceId,
+      connectionId: jobLogs.connectionId,
       status: jobLogs.status,
       ordersCollected: jobLogs.ordersCollected,
       claimsCollected: jobLogs.claimsCollected,

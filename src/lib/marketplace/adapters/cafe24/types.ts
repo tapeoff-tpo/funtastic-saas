@@ -9,16 +9,24 @@
 export interface Cafe24Order {
   order_id: string
   order_date: string
-  order_status: string
-  buyer_name: string
-  buyer_cellphone: string
-  receiver_name: string
-  receiver_cellphone: string
-  receiver_zipcode: string
-  receiver_address1: string
-  receiver_address2: string
-  items: Cafe24OrderItem[]
-  total_amount: number
+  order_status?: string
+  buyer_name?: string
+  buyer_cellphone?: string
+  billing_name?: string
+  member_id?: string
+  member_email?: string
+  receiver_name?: string
+  receiver_cellphone?: string
+  receiver_zipcode?: string
+  receiver_address1?: string
+  receiver_address2?: string
+  items?: Cafe24OrderItem[]
+  total_amount?: number | string
+  payment_amount?: number | string
+  actual_order_amount?: {
+    payment_amount?: number | string
+    order_price_amount?: number | string
+  }
 }
 
 /** An order item within a Cafe24 order */

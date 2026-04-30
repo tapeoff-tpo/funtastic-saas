@@ -46,6 +46,15 @@ function formatDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function toNumber(value: number | string | null | undefined): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  if (typeof value === 'string') {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
 export class Cafe24Adapter implements MarketplaceAdapter {
   readonly config = CAFE24_CONFIG
 
@@ -279,24 +288,26 @@ export class Cafe24Adapter implements MarketplaceAdapter {
       unitPrice: item.product_price,
       sku: item.sku || undefined,
     }))
+    const buyerName = order.buyer_name || order.billing_name || order.member_id || order.member_email || 'Cafe24 구매자'
+    const recipientName = order.receiver_name || buyerName
 
     return {
       marketplaceOrderId: order.order_id,
       marketplaceId: 'cafe24',
-      marketplaceStatus: order.order_status,
-      status: mapCafe24Status(order.order_status),
-      buyerName: order.buyer_name,
+      marketplaceStatus: order.order_status ?? 'UNKNOWN',
+      status: mapCafe24Status(order.order_status ?? 'UNKNOWN'),
+      buyerName,
       buyerPhone: order.buyer_cellphone || undefined,
-      recipientName: order.receiver_name,
+      recipientName,
       recipientPhone: order.receiver_cellphone || undefined,
       shippingAddress: {
-        zipCode: order.receiver_zipcode,
-        address1: order.receiver_address1,
+        zipCode: order.receiver_zipcode || '',
+        address1: order.receiver_address1 || '',
         address2: order.receiver_address2 || undefined,
       },
       items,
       orderedAt: new Date(order.order_date),
-      totalAmount: order.total_amount,
+      totalAmount: toNumber(order.total_amount ?? order.payment_amount ?? order.actual_order_amount?.payment_amount),
       rawData: order as unknown as Record<string, unknown>,
     }
   }

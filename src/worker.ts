@@ -1,7 +1,7 @@
 /**
  * BullMQ worker process entrypoint.
  *
- * Start command: node --import tsx src/worker.ts
+ * Start: node --import tsx src/worker.ts
  *
  * Starts two workers:
  *   - order-collection: polls marketplace APIs every 5 min per connection

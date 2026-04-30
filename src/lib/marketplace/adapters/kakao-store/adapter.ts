@@ -68,6 +68,7 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
+      await this.registerSeller()
       await this.client.get('v2/shopping/orders', {
         searchParams: {
           size: 1,
@@ -89,6 +90,7 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
     try {
+      await this.registerSeller()
       const changed = await this.getChangedOrders(since)
       const orderIds = Array.from(new Set(changed.map((order) => order.orderId).filter(Boolean)))
       if (orderIds.length === 0) return []
@@ -258,6 +260,10 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
     }
 
     return orders
+  }
+
+  private async registerSeller(): Promise<void> {
+    await this.client.post('v1/store/register')
   }
 
   private normalizeOrder(order: KakaoStoreOrderDetail): NormalizedOrder {

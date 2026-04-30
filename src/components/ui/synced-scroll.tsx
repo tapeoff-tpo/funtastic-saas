@@ -82,12 +82,35 @@ export function SyncedScrollContainer({
 
   return (
     <div className={className}>
+      {/* macOS 기본 설정에서도 항상 보이도록 스크롤바 강제 표시 */}
+      <style>{`
+        .synced-top-scroll {
+          overflow-x: scroll;
+          scrollbar-width: thin;
+          scrollbar-color: rgb(148 163 184) transparent;
+        }
+        .synced-top-scroll::-webkit-scrollbar {
+          height: 12px;
+          -webkit-appearance: none;
+        }
+        .synced-top-scroll::-webkit-scrollbar-track {
+          background: rgb(241 245 249);
+          border-radius: 6px;
+        }
+        .synced-top-scroll::-webkit-scrollbar-thumb {
+          background: rgb(148 163 184);
+          border-radius: 6px;
+          border: 2px solid rgb(241 245 249);
+        }
+        .synced-top-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgb(100 116 139);
+        }
+      `}</style>
       {/* 상단 가짜 스크롤바 — 테이블이 가로로 넘칠 때만 의미 있음 */}
       <div
         ref={topRef}
         onScroll={onTopScroll}
-        className="overflow-x-auto rounded-t-md border border-b-0"
-        style={{ scrollbarWidth: 'thin' }}
+        className="synced-top-scroll rounded-t-md border border-b-0 bg-slate-50"
       >
         <div style={{ width: contentWidth, height: 1 }} />
       </div>

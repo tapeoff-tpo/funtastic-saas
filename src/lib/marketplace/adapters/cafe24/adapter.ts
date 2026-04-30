@@ -148,9 +148,34 @@ export class Cafe24Adapter implements MarketplaceAdapter {
   }
 
   async confirmOrder(
-    _marketplaceOrderId: string,
+    marketplaceOrderId: string,
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+    try {
+      await this.client.put(`admin/orders/${marketplaceOrderId}`, {
+        json: {
+          order: {
+            shop_no: 1,
+            process_status: 'prepare',
+          },
+        },
+      }).json()
+
+      return { success: true }
+    } catch (error) {
+      if (error instanceof Error && 'response' in error) {
+        const response = (error as { response: Response }).response
+        const body = await response.text().catch(() => '')
+        return {
+          success: false,
+          error: `Cafe24 발주확인 실패: ${response.status} ${response.statusText}${body ? `: ${body}` : ''}`,
+        }
+      }
+
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {

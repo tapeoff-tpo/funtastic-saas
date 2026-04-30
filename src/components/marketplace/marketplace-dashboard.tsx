@@ -1,15 +1,11 @@
 'use client'
 
-import { useState, useRef, useTransition } from 'react'
+import { useState, useRef, useTransition, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useCollectPoll, type JobLogResult } from '@/lib/hooks/use-collect-poll'
 import { StatusBadge } from './status-badge'
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
+import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
 import { addManualChannel } from '@/app/(auth)/orders/collect/actions'
 
@@ -45,23 +41,102 @@ function isExpiringSoon(expiresAt: Date): boolean {
   return expiresAt.getTime() - now.getTime() < sevenDays
 }
 
+/**
+ * 위험순 점수 — 작을수록 화면 상단으로.
+ * 0 오류 → 1 만료임박 → 2 미수집(lastCheckedAt 없음) → 3 연결됨(오래된순) → 4 미연결 → 5 엑셀(수동)
+ */
+function riskScore(c: Connection): number {
+  if (c.isManual) return 5
+  if (c.status === 'error') return 0
+  if (c.expiresAt && isExpiringSoon(c.expiresAt)) return 1
+  if (c.status === 'disconnected') return 4
+  if (c.lastCheckedAt == null) return 2
+  return 3
+}
+
+type FilterKey = 'all' | 'connected' | 'error' | 'expiring' | 'disconnected' | 'manual'
+
 export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showAddModal, setShowAddModal] = useState(false)
+  const [filter, setFilter] = useState<FilterKey>('all')
+  const [search, setSearch] = useState('')
   const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
 
-  const connectedMarkets = connections.filter((c) => c.status !== 'disconnected' && !c.isManual)
-  const autoConnections = connections.filter((c) => !c.isManual)
-  const manualConnections = connections.filter((c) => c.isManual)
+  const connectedMarkets = useMemo(
+    () => connections.filter((c) => c.status !== 'disconnected' && !c.isManual),
+    [connections]
+  )
 
-  const toggleSelect = (id: string) => {
+  // 필터 카운트 — 칩에 표시
+  const counts = useMemo(() => {
+    const c = { all: connections.length, connected: 0, error: 0, expiring: 0, disconnected: 0, manual: 0 }
+    for (const conn of connections) {
+      if (conn.isManual) c.manual++
+      else if (conn.status === 'error') c.error++
+      else if (conn.status === 'disconnected') c.disconnected++
+      else {
+        c.connected++
+        if (conn.expiresAt && isExpiringSoon(conn.expiresAt)) c.expiring++
+      }
+    }
+    return c
+  }, [connections])
+
+  // 필터 + 검색 + 위험순 정렬
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return connections
+      .filter((c) => {
+        if (filter === 'connected') return !c.isManual && c.status !== 'disconnected' && c.status !== 'error'
+        if (filter === 'error') return c.status === 'error'
+        if (filter === 'expiring') return !c.isManual && !!c.expiresAt && isExpiringSoon(c.expiresAt)
+        if (filter === 'disconnected') return c.status === 'disconnected'
+        if (filter === 'manual') return c.isManual
+        return true
+      })
+      .filter((c) => (q ? c.displayName.toLowerCase().includes(q) : true))
+      .sort((a, b) => {
+        const ra = riskScore(a)
+        const rb = riskScore(b)
+        if (ra !== rb) return ra - rb
+        // 같은 점수면 lastCheckedAt 오래된 순 (null 먼저)
+        const ta = a.lastCheckedAt?.getTime() ?? 0
+        const tb = b.lastCheckedAt?.getTime() ?? 0
+        if (ta !== tb) return ta - tb
+        return a.displayName.localeCompare(b.displayName, 'ko-KR')
+      })
+  }, [connections, filter, search])
+
+  const eligibleSelectable = useMemo(
+    () => visible.filter((c) => !c.isManual && c.status !== 'disconnected'),
+    [visible]
+  )
+  const allEligibleSelected =
+    eligibleSelectable.length > 0 && eligibleSelectable.every((c) => selected.has(c.marketplaceId))
+  const someEligibleSelected =
+    eligibleSelectable.some((c) => selected.has(c.marketplaceId)) && !allEligibleSelected
+
+  const toggleSelect = useCallback((id: string) => {
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
     })
-  }
+  }, [])
+
+  const toggleSelectAll = useCallback(() => {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (allEligibleSelected) {
+        for (const c of eligibleSelectable) next.delete(c.marketplaceId)
+      } else {
+        for (const c of eligibleSelectable) next.add(c.marketplaceId)
+      }
+      return next
+    })
+  }, [allEligibleSelected, eligibleSelectable])
 
   const handleCollectSelected = () => {
     const ids = [...selected].filter((id) =>
@@ -74,6 +149,10 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
   const handleCollectAll = () => {
     if (connectedMarkets.length === 0) return
     startCollect(connectedMarkets.map((c) => c.marketplaceId))
+  }
+
+  const handleCollectOne = (marketplaceId: string) => {
+    startCollect([marketplaceId])
   }
 
   const nameMap = Object.fromEntries(
@@ -96,126 +175,187 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
   const failCount = enrichedLogs?.filter((r) => r.status === 'failed').length ?? 0
   const cancelledCount = enrichedLogs?.filter((r) => r.status === 'cancelled').length ?? 0
 
+  // 컬럼 너비 — localStorage 에 저장
+  const [columnSizing, setColumnSizing] = useColumnSizing('marketplace-dashboard')
+
+  // 테이블 헤더 정의
+  const cols = [
+    { id: 'select', label: '', size: 36 },
+    { id: 'type', label: '타입', size: 50 },
+    { id: 'name', label: '마켓명', size: 200 },
+    { id: 'status', label: '상태', size: 90 },
+    { id: 'lastCheck', label: '마지막수집', size: 110 },
+    { id: 'expires', label: '만료', size: 90 },
+    { id: 'note', label: '알림', size: 260 },
+    { id: 'actions', label: '액션', size: 180 },
+  ]
+  const totalWidth = cols.reduce((s, c) => s + (columnSizing[c.id] ?? c.size), 0)
+  const sizeOf = (id: string) => columnSizing[id] ?? cols.find((c) => c.id === id)!.size
+
+  const onResize = (id: string) => (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault()
+    const startX = 'touches' in e ? e.touches[0].clientX : e.clientX
+    const startSize = sizeOf(id)
+    const move = (ev: MouseEvent | TouchEvent) => {
+      const x = 'touches' in ev ? ev.touches[0].clientX : ev.clientX
+      const delta = x - startX
+      const next = Math.max(40, startSize + delta)
+      setColumnSizing((prev) => ({ ...prev, [id]: next }))
+    }
+    const up = () => {
+      window.removeEventListener('mousemove', move)
+      window.removeEventListener('touchmove', move)
+      window.removeEventListener('mouseup', up)
+      window.removeEventListener('touchend', up)
+    }
+    window.addEventListener('mousemove', move)
+    window.addEventListener('touchmove', move)
+    window.addEventListener('mouseup', up)
+    window.addEventListener('touchend', up)
+  }
+
+  const filterChips: { key: FilterKey; label: string; count: number; dot?: string }[] = [
+    { key: 'all', label: '전체', count: counts.all },
+    { key: 'connected', label: '연결됨', count: counts.connected, dot: 'bg-green-500' },
+    { key: 'error', label: '오류', count: counts.error, dot: 'bg-red-500' },
+    { key: 'expiring', label: '만료임박', count: counts.expiring, dot: 'bg-amber-500' },
+    { key: 'disconnected', label: '미연결', count: counts.disconnected, dot: 'bg-gray-400' },
+    { key: 'manual', label: '엑셀', count: counts.manual, dot: 'bg-blue-500' },
+  ]
+
   return (
-    <div>
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">마켓플레이스 연동 현황</h1>
-          <p className="mt-1 text-muted-foreground">
-            마켓을 클릭하여 선택 후 수집하거나, 전체 수집을 실행하세요.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-        {selected.size > 0 && (
-          <>
-            <span className="rounded-full bg-primary/10 px-3 py-1 text-sm font-medium text-primary">
-              {selected.size}개 선택
-            </span>
-            <button
-              onClick={handleCollectSelected}
-              disabled={collecting}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80 disabled:opacity-70"
-            >
-              {collecting ? (
-                <span className="flex items-center gap-2">
-                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                  수집 중...
-                </span>
-              ) : (
-                '선택 수집'
-              )}
-            </button>
-            <button
-              onClick={() => setSelected(new Set())}
-              className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-muted"
-            >
-              선택 해제
-            </button>
-          </>
-        )}
-        {selected.size === 0 && connectedMarkets.length > 0 && (
+    <div className="space-y-3">
+      {/* 상단 툴바: 필터칩 + 검색 + 일괄수집/추가 */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
+        {filterChips.map((chip) => (
           <button
-            onClick={handleCollectAll}
-            disabled={collecting}
-            className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80 disabled:opacity-70"
+            key={chip.key}
+            type="button"
+            onClick={() => setFilter(chip.key)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              filter === chip.key
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'bg-white hover:bg-muted'
+            }`}
           >
-            {collecting ? (
-              <span className="flex items-center gap-2">
-                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
-                수집 중...
-              </span>
-            ) : (
-              `전체 수집 (${connectedMarkets.length}개)`
-            )}
+            {chip.dot && <span className={`h-2 w-2 rounded-full ${chip.dot}`} />}
+            {chip.label}
+            <span
+              className={`rounded-full px-1.5 text-[10px] ${
+                filter === chip.key ? 'bg-primary-foreground/20' : 'bg-muted-foreground/10'
+              }`}
+            >
+              {chip.count}
+            </span>
           </button>
-        )}
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted"
-        >
-          + 수동 쇼핑몰 추가
-        </button>
+        ))}
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="마켓명 검색"
+          className="ml-2 w-[180px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
+        />
+        <div className="ml-auto flex items-center gap-1">
+          {selected.size > 0 && (
+            <>
+              <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
+                {selected.size}개 선택
+              </span>
+              <button
+                type="button"
+                onClick={handleCollectSelected}
+                disabled={collecting}
+                className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/80 disabled:opacity-50"
+              >
+                {collecting ? '수집 중...' : '선택 수집'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+              >
+                선택 해제
+              </button>
+            </>
+          )}
+          {selected.size === 0 && connectedMarkets.length > 0 && (
+            <button
+              type="button"
+              onClick={handleCollectAll}
+              disabled={collecting}
+              className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/80 disabled:opacity-50"
+            >
+              {collecting ? '수집 중...' : `전체 수집 (${connectedMarkets.length})`}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowAddModal(true)}
+            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
+          >
+            + 수동 쇼핑몰
+          </button>
         </div>
       </div>
 
-      {/* 자동수집몰 */}
-      <section className="mt-6">
-        <div className="mb-3 flex items-baseline gap-2">
-          <h2 className="text-base font-semibold">자동수집몰</h2>
-          <span className="text-xs text-muted-foreground">
-            API 연동 — 클릭하여 선택 후 수집
-          </span>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {autoConnections.length}개
-          </span>
+      {/* 테이블 */}
+      {visible.length === 0 ? (
+        <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-12 text-center text-sm text-muted-foreground">
+          {connections.length === 0
+            ? '연결된 마켓플레이스가 없습니다.'
+            : '조건에 맞는 마켓이 없습니다.'}
         </div>
-        {autoConnections.length === 0 ? (
-          <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
-            연동된 자동수집몰이 없습니다.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {autoConnections.map((conn) => (
-              <MarketCard
-                key={conn.marketplaceId}
-                conn={conn}
-                isSelected={selected.has(conn.marketplaceId)}
-                onToggle={toggleSelect}
-              />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* 수동수집몰 */}
-      <section className="mt-8">
-        <div className="mb-3 flex items-baseline gap-2">
-          <h2 className="text-base font-semibold">수동수집몰</h2>
-          <span className="text-xs text-muted-foreground">
-            엑셀 업로드 전용
-          </span>
-          <span className="ml-auto text-xs text-muted-foreground">
-            {manualConnections.length}개
-          </span>
-        </div>
-        {manualConnections.length === 0 ? (
-          <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-8 text-center text-sm text-muted-foreground">
-            등록된 수동수집몰이 없습니다. 우측 상단 "+ 수동 쇼핑몰 추가" 버튼으로 추가하세요.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {manualConnections.map((conn) => (
-              <MarketCard
-                key={conn.marketplaceId}
-                conn={conn}
-                isSelected={false}
-                onToggle={toggleSelect}
-              />
-            ))}
-          </div>
-        )}
-      </section>
+      ) : (
+        <SyncedScrollContainer>
+          <table className="text-xs" style={{ width: totalWidth }}>
+            <thead className="sticky top-0 z-[1] bg-muted/50">
+              <tr className="border-b">
+                {cols.map((c) => (
+                  <th
+                    key={c.id}
+                    style={{ width: sizeOf(c.id) }}
+                    className="relative whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
+                  >
+                    {c.id === 'select' ? (
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5"
+                        checked={allEligibleSelected}
+                        ref={(el) => { if (el) el.indeterminate = someEligibleSelected }}
+                        onChange={toggleSelectAll}
+                        aria-label="모두 선택"
+                      />
+                    ) : (
+                      c.label
+                    )}
+                    <div
+                      onMouseDown={onResize(c.id)}
+                      onTouchStart={onResize(c.id)}
+                      className="absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none bg-transparent hover:bg-blue-400"
+                      aria-label="컬럼 너비 조절"
+                    />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((conn, idx) => (
+                <ConnRow
+                  key={conn.marketplaceId}
+                  conn={conn}
+                  isSelected={selected.has(conn.marketplaceId)}
+                  onToggle={toggleSelect}
+                  onCollectOne={handleCollectOne}
+                  collecting={collecting}
+                  zebra={idx % 2 === 1}
+                  sizeOf={sizeOf}
+                />
+              ))}
+            </tbody>
+          </table>
+        </SyncedScrollContainer>
+      )}
 
       {/* Add manual channel modal */}
       {showAddModal && (
@@ -295,98 +435,117 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
   )
 }
 
-function MarketCard({
+function ConnRow({
   conn,
   isSelected,
   onToggle,
+  onCollectOne,
+  collecting,
+  zebra,
+  sizeOf,
 }: {
   conn: Connection
   isSelected: boolean
   onToggle: (id: string) => void
+  onCollectOne: (id: string) => void
+  collecting: boolean
+  zebra: boolean
+  sizeOf: (id: string) => number
 }) {
   const isDisconnected = conn.status === 'disconnected'
   const isManual = conn.isManual
+  const eligibleForCollect = !isManual && !isDisconnected
+  const expiringSoon = !!conn.expiresAt && isExpiringSoon(conn.expiresAt)
+  const errorMsg = conn.status === 'error' ? conn.lastErrorMessage : null
 
   return (
-    <Card
-      className={`transition-all ${
-        isManual
-          ? 'border-blue-200'
-          : isSelected
-            ? 'cursor-pointer ring-2 ring-primary ring-offset-2'
-            : isDisconnected
-              ? 'cursor-pointer opacity-60'
-              : 'cursor-pointer hover:shadow-md'
-      }`}
-      onClick={() => {
-        if (!isDisconnected && !isManual) onToggle(conn.marketplaceId)
-      }}
+    <tr
+      className={`group border-b transition-colors hover:bg-muted/50 ${zebra ? 'bg-gray-50/50' : 'bg-white'}`}
     >
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <div className="flex items-center gap-2">
-          {!isDisconnected && !isManual && (
-            <div
-              className={`flex h-5 w-5 items-center justify-center rounded border ${
-                isSelected
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-gray-300'
-              }`}
-            >
-              {isSelected && (
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              )}
-            </div>
-          )}
-          <CardTitle className="text-sm font-medium">{conn.displayName}</CardTitle>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {isManual && (
-            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
-              수동
-            </span>
-          )}
+      {/* select */}
+      <td style={{ width: sizeOf('select') }} className="px-2 py-1.5 align-middle">
+        {eligibleForCollect ? (
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5"
+            checked={isSelected}
+            onChange={() => onToggle(conn.marketplaceId)}
+            aria-label={`${conn.displayName} 선택`}
+          />
+        ) : (
+          <span className="inline-block h-3.5 w-3.5" />
+        )}
+      </td>
+      {/* type */}
+      <td style={{ width: sizeOf('type') }} className="px-2 py-1.5 align-middle">
+        <span
+          className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
+            isManual ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+          }`}
+        >
+          {isManual ? '엑셀' : 'API'}
+        </span>
+      </td>
+      {/* name */}
+      <td style={{ width: sizeOf('name') }} className="overflow-hidden whitespace-nowrap px-2 py-1.5 align-middle">
+        <span className="truncate font-medium">{conn.displayName}</span>
+      </td>
+      {/* status */}
+      <td style={{ width: sizeOf('status') }} className="px-2 py-1.5 align-middle">
+        {isManual ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
           <StatusBadge status={conn.status as ConnectionStatus} />
-        </div>
-      </CardHeader>
-      <CardContent>
-        {!isManual && (
-          <div className="space-y-1 text-sm text-muted-foreground">
-            <p>
-              마지막 확인:{' '}
-              {conn.lastCheckedAt ? formatRelativeTime(conn.lastCheckedAt) : '확인 안됨'}
-            </p>
-            {conn.status === 'error' && conn.lastErrorMessage && (
-              <p className="text-red-600">
-                {conn.lastErrorMessage.length > 100
-                  ? `${conn.lastErrorMessage.slice(0, 100)}...`
-                  : conn.lastErrorMessage}
-              </p>
-            )}
-            {conn.expiresAt && isExpiringSoon(conn.expiresAt) && (
-              <p className="text-amber-600">
-                인증 만료 예정: {conn.expiresAt.toLocaleDateString('ko-KR')}
-              </p>
-            )}
-          </div>
         )}
-
-        {isManual && (
-          <p className="text-sm text-muted-foreground">
-            엑셀 업로드로 주문을 관리합니다.
-          </p>
+      </td>
+      {/* lastCheck */}
+      <td style={{ width: sizeOf('lastCheck') }} className="whitespace-nowrap px-2 py-1.5 align-middle text-muted-foreground">
+        {isManual ? '—' : conn.lastCheckedAt ? formatRelativeTime(conn.lastCheckedAt) : '확인 안됨'}
+      </td>
+      {/* expires */}
+      <td style={{ width: sizeOf('expires') }} className="whitespace-nowrap px-2 py-1.5 align-middle">
+        {isManual || !conn.expiresAt ? (
+          <span className="text-muted-foreground">—</span>
+        ) : expiringSoon ? (
+          <span className="text-amber-600">{conn.expiresAt.toLocaleDateString('ko-KR')}</span>
+        ) : (
+          <span className="text-muted-foreground">{conn.expiresAt.toLocaleDateString('ko-KR')}</span>
         )}
-
-        {/* Excel upload -- inline, stops click propagation */}
-        <div onClick={(e) => e.stopPropagation()} className="mt-3">
+      </td>
+      {/* note */}
+      <td style={{ width: sizeOf('note') }} className="overflow-hidden px-2 py-1.5 align-middle">
+        {errorMsg ? (
+          <span className="line-clamp-2 text-red-600" title={errorMsg}>
+            {errorMsg}
+          </span>
+        ) : expiringSoon ? (
+          <span className="text-amber-600">인증 만료 임박</span>
+        ) : isManual ? (
+          <span className="text-muted-foreground">엑셀 업로드 전용</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+      {/* actions */}
+      <td style={{ width: sizeOf('actions') }} className="px-2 py-1.5 align-middle">
+        <div className="flex items-center gap-1">
+          {eligibleForCollect && (
+            <button
+              type="button"
+              onClick={() => onCollectOne(conn.marketplaceId)}
+              disabled={collecting}
+              className="rounded border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
+            >
+              수집
+            </button>
+          )}
           <ExcelUploadButton
             displayName={conn.displayName}
             disabled={isDisconnected}
           />
         </div>
-      </CardContent>
-    </Card>
+      </td>
+    </tr>
   )
 }
 
@@ -470,7 +629,6 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
-  const [dragOver, setDragOver] = useState(false)
   const [result, setResult] = useState<{ inserted: number; skipped: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -504,18 +662,8 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
     }
   }
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragOver(false)
-    if (disabled || uploading) return
-    const file = e.dataTransfer.files[0]
-    if (file?.name.endsWith('.xlsx')) handleFile(file)
-    else setError('.xlsx 파일만 가능합니다')
-  }
-
   return (
-    <div className="space-y-1">
+    <>
       <input
         ref={inputRef}
         type="file"
@@ -526,39 +674,29 @@ function ExcelUploadButton({ displayName, disabled }: { displayName: string; dis
           if (f) handleFile(f)
         }}
       />
-      <div
-        onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (!disabled && !uploading) setDragOver(true) }}
-        onDragLeave={(e) => { e.stopPropagation(); setDragOver(false) }}
-        onDrop={handleDrop}
+      <button
+        type="button"
         onClick={() => !disabled && !uploading && inputRef.current?.click()}
-        className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-          disabled
-            ? 'cursor-not-allowed border-gray-200 text-gray-400'
-            : dragOver
-              ? 'border-primary bg-primary/5 text-primary'
-              : uploading
-                ? 'border-gray-200 text-gray-400'
-                : 'hover:bg-muted'
+        disabled={disabled || uploading}
+        title={result ? `${result.inserted}건 등록${result.skipped ? ` (${result.skipped} 중복)` : ''}` : error ?? '엑셀 업로드'}
+        className={`rounded border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50 ${
+          error ? 'border-red-300 text-red-600' : result ? 'border-emerald-300 text-emerald-600' : ''
         }`}
       >
         {uploading ? (
-          <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent" />
+            업로드중
+          </span>
+        ) : result ? (
+          `${result.inserted}건↑`
+        ) : error ? (
+          '실패'
         ) : (
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="17 8 12 3 7 8"/>
-            <line x1="12" x2="12" y1="3" y2="15"/>
-          </svg>
+          '엑셀'
         )}
-        {uploading ? '업로드 중...' : dragOver ? '여기에 놓기' : '엑셀 업로드'}
-      </div>
-      {result && (
-        <p className="text-xs text-emerald-600">
-          {result.inserted}건 등록{result.skipped > 0 ? ` (${result.skipped}건 중복 스킵)` : ''} → 신규주문으로 이동 중
-        </p>
-      )}
-      {error && <p className="text-xs text-red-500">{error}</p>}
-    </div>
+      </button>
+    </>
   )
 }
 

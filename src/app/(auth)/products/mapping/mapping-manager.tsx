@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { useQueryState, parseAsString } from 'nuqs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Plus, Trash2, X, RefreshCw, Search } from 'lucide-react'
@@ -69,7 +70,8 @@ export function MappingManager() {
   const [codes, setCodes] = useState<MappingCodeRow[]>([])
   const [unmapped, setUnmapped] = useState<UnmappedItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
+  // 탭 전환 후 복원되도록 URL 쿼리스트링에 저장 (탭바가 마지막 URL 기억).
+  const [search, setSearch] = useQueryState('q', parseAsString.withDefault(''))
   const [editing, setEditing] = useState<FormState | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -219,7 +221,7 @@ export function MappingManager() {
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => void setSearch(e.target.value)}
             placeholder="코드 또는 이름 검색"
             className="flex-1 rounded-md border px-3 py-1.5 text-sm"
           />

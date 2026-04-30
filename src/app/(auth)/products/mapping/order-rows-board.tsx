@@ -39,7 +39,9 @@ interface OrderRow {
   productName: string
   optionText: string | null
   quantity: number
-  mappingStatus: 'option' | 'product' | 'unmapped'
+  mappingStatus: 'both' | 'option' | 'product' | 'unmapped'
+  hasProductMapping: boolean
+  hasOptionMapping: boolean
   mappingSourceId: string | null
   mappingCodeId: string | null
   mappingCode: string | null
@@ -232,8 +234,12 @@ export function OrderRowsBoard() {
       return
     }
     const modeLabel = mode === 'product' ? '품번매핑' : '단품매핑'
-    const matchType: OrderRow['mappingStatus'] = mode === 'product' ? 'product' : 'option'
-    const mapped = selectedRows.filter((r) => r.mappingStatus === matchType)
+    // 'both' 행은 양쪽 모두 매핑된 상태이므로 어느 일괄버튼이든 매핑완료 대상에 포함.
+    const mapped = selectedRows.filter((r) =>
+      mode === 'product'
+        ? r.hasProductMapping
+        : r.hasOptionMapping,
+    )
     const skipped = selectedRows.length - mapped.length
     if (mapped.length === 0) {
       alert(`선택된 행 중 ${modeLabel} 상태인 행이 없습니다`)
@@ -537,7 +543,9 @@ export function OrderRowsBoard() {
                         {r.quantity}
                       </td>
                       <td rowSpan={compsOrEmpty.length} className="border-r px-1.5 py-1 align-top">
-                        {r.mappingStatus === 'option' ? (
+                        {r.mappingStatus === 'both' ? (
+                          <Badge className="bg-violet-100 text-violet-800 hover:bg-violet-100">매핑완료</Badge>
+                        ) : r.mappingStatus === 'option' ? (
                           <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">단품매핑</Badge>
                         ) : r.mappingStatus === 'product' ? (
                           <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">품번매핑</Badge>

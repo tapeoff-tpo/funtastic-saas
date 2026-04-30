@@ -14,6 +14,7 @@ import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
 import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
+import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -55,6 +56,10 @@ export function createAdapter(
       return new Cafe24Adapter({
         access_token: credentials.access_token ?? '',
         mall_id: credentials.mall_id ?? '',
+      })
+    case 'elevenst':
+      return new ElevenstAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

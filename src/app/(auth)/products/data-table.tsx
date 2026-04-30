@@ -117,11 +117,29 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
                 </td>
               </tr>
             ) : (
-              table.getRowModel().rows.map((row, idx) => (
+              (() => {
+                // 품번(internalSku 의 '-' 앞) 단위로 시각적 그룹핑.
+                // 같은 품번 = 같은 배경색, 그룹 경계엔 두꺼운 구분선.
+                // 인접 prefix 비교로 한 번만 순회해서 그룹 인덱스 계산.
+                const rows = table.getRowModel().rows
+                const meta = rows.map((row, idx) => {
+                  const prefix = (row.original.internalSku ?? '').split('-')[0]
+                  return { row, prefix, idx }
+                })
+                let runningGroup = 0
+                const enriched = meta.map((m, i) => {
+                  if (i > 0 && meta[i - 1].prefix !== m.prefix) runningGroup++
+                  return { ...m, groupIdx: runningGroup, isGroupStart: i > 0 && meta[i - 1].prefix !== m.prefix }
+                })
+                return enriched.map(({ row, isGroupStart, groupIdx }) => {
+                const groupBg = groupIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                return (
                 <tr
                   key={row.id}
-                  className={`border-b transition-colors hover:bg-muted/50 ${
-                    row.getIsSelected() ? 'bg-muted' : idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'
+                  className={`transition-colors hover:bg-muted/50 ${
+                    isGroupStart ? 'border-t-2 border-t-gray-300' : 'border-b'
+                  } ${
+                    row.getIsSelected() ? 'bg-muted' : groupBg
                   }`}
                 >
                   {row.getVisibleCells().map((cell) => (
@@ -141,7 +159,9 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
                     </div>
                   </td>
                 </tr>
-              ))
+                )
+              })
+              })()
             )}
           </tbody>
         </table>

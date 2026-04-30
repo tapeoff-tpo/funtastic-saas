@@ -154,15 +154,4 @@ export const columns: ColumnDef<ProductRow>[] = [
     },
     size: 100,
   },
-  // 옵션수
-  {
-    accessorKey: 'variantCount',
-    header: '옵션수',
-    enableSorting: false,
-    cell: ({ row }) => {
-      const count = row.getValue('variantCount') as number
-      return <span className="text-sm">{count}</span>
-    },
-    size: 80,
-  },
 ]

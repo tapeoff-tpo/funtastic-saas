@@ -8,7 +8,7 @@
 import ky from 'ky'
 import { XMLParser } from 'fast-xml-parser'
 
-const ELEVENST_API_BASE = 'https://openapi.11st.co.kr'
+const ELEVENST_API_BASE = 'https://api.11st.co.kr'
 
 /** Shared XML parser instance with consistent options */
 const xmlParser = new XMLParser({
@@ -24,6 +24,16 @@ const xmlParser = new XMLParser({
  */
 export function parseXmlResponse<T>(xmlText: string): T {
   return xmlParser.parse(xmlText) as T
+}
+
+export async function readElevenstXml(response: Response): Promise<string> {
+  const bytes = await response.arrayBuffer()
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+  const prefix = new TextDecoder('utf-8').decode(bytes.slice(0, 120)).toLowerCase()
+  const encoding = contentType.includes('utf-8') || prefix.includes('encoding="utf-8"')
+    ? 'utf-8'
+    : 'euc-kr'
+  return new TextDecoder(encoding).decode(bytes)
 }
 
 /**

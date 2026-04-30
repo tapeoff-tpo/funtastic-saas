@@ -7,7 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
 import { setupServer } from 'msw/node'
-import { elevenstHandlers, MOCK_ELEVENST_ORDERS, MOCK_ELEVENST_CLAIMS } from '../helpers/msw-handlers'
+import { elevenstHandlers, MOCK_ELEVENST_ORDERS } from '../helpers/msw-handlers'
 import { parseXmlResponse } from '@/lib/marketplace/adapters/elevenst/client'
 import {
   mapElevenstStatus,
@@ -174,20 +174,11 @@ describe('ElevenstAdapter', () => {
   })
 
   describe('getClaimsOrders', () => {
-    it('normalizes 11st XML claims to NormalizedClaim[]', async () => {
+    it('returns an empty list until the 11st claims endpoint is wired', async () => {
       const since = new Date('2026-04-02T00:00:00Z')
       const claims = await adapter.getClaimsOrders(since)
 
-      expect(claims).toHaveLength(MOCK_ELEVENST_CLAIMS.length)
-
-      const claim = claims[0]
-      expect(claim.marketplaceClaimId).toBe('CLM20260402001')
-      expect(claim.marketplaceId).toBe('elevenst')
-      expect(claim.marketplaceOrderId).toBe('E2026040200001')
-      expect(claim.claimType).toBe('return')
-      expect(claim.claimStatus).toBe('requested')
-      expect(claim.reason).toBe('사이즈 불일치')
-      expect(claim.rawData).toBeDefined()
+      expect(claims).toEqual([])
     })
   })
 

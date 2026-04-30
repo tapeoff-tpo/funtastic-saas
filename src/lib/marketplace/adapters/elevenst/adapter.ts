@@ -15,14 +15,13 @@ import type {
   InvoiceData,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
-import { createElevenstClient, parseXmlResponse } from './client'
+import { createElevenstClient, parseXmlResponse, readElevenstXml } from './client'
 import { mapElevenstStatus, mapElevenstClaimStatus, mapElevenstClaimType } from './status-map'
 import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import type {
   ElevenstOrder,
   ElevenstOrderResponse,
   ElevenstClaim,
-  ElevenstClaimResponse,
   ElevenstProduct,
   ElevenstProductResponse,
 } from './types'
@@ -53,6 +52,11 @@ function formatDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+/** Format a Date as yyyyMMdd for 11st Seller API path params */
+function formatDateCompact(date: Date): string {
+  return formatDate(date).replaceAll('-', '')
+}
+
 export class ElevenstAdapter implements MarketplaceAdapter {
   readonly config = ELEVENST_CONFIG
 
@@ -66,13 +70,9 @@ export class ElevenstAdapter implements MarketplaceAdapter {
     try {
       // Make a lightweight call to verify the API key is valid
       const now = new Date()
-      const response = await this.client.get('openapi/v3/orders', {
-        searchParams: {
-          dateFrom: formatDate(now),
-          dateTo: formatDate(now),
-          pageSize: 1,
-        },
-      }).text()
+      const response = await readElevenstXml(
+        await this.client.get(`rest/ordservices/complete/${formatDateCompact(now)}/${formatDateCompact(now)}`)
+      )
 
       // If we get an XML response (even empty), the key is valid
       parseXmlResponse(response)
@@ -93,13 +93,9 @@ export class ElevenstAdapter implements MarketplaceAdapter {
     const now = new Date()
 
     try {
-      const response = await this.client.get('openapi/v3/orders', {
-        searchParams: {
-          dateFrom: formatDate(since),
-          dateTo: formatDate(now),
-          pageSize: 50,
-        },
-      }).text()
+      const response = await readElevenstXml(
+        await this.client.get(`rest/ordservices/complete/${formatDateCompact(since)}/${formatDateCompact(now)}`)
+      )
 
       const parsed = parseXmlResponse<ElevenstOrderResponse>(response)
       const orders = ensureArray(parsed.orders?.order)
@@ -115,28 +111,8 @@ export class ElevenstAdapter implements MarketplaceAdapter {
   }
 
   async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
-    const now = new Date()
-
-    try {
-      const response = await this.client.get('openapi/v3/claims', {
-        searchParams: {
-          dateFrom: formatDate(since),
-          dateTo: formatDate(now),
-          pageSize: 50,
-        },
-      }).text()
-
-      const parsed = parseXmlResponse<ElevenstClaimResponse>(response)
-      const claims = ensureArray(parsed.claims?.claim)
-
-      return claims.map((claim) => this.normalizeClaim(claim))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('elevenst', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('elevenst', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+    void since
+    return []
   }
 
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {

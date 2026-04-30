@@ -583,7 +583,7 @@ export const MOCK_ELEVENST_CLAIMS = [
 ]
 
 const elevenstHandlers = [
-  http.get('https://openapi.11st.co.kr/openapi/v3/orders', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
+  http.get('https://api.11st.co.kr/rest/ordservices/complete/:dateFrom/:dateTo', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
 <orders>
 ${MOCK_ELEVENST_ORDERS.map((o) => `
   <order>
@@ -605,7 +605,7 @@ ${MOCK_ELEVENST_ORDERS.map((o) => `
   </order>`).join('')}
 </orders>`)),
 
-  http.get('https://openapi.11st.co.kr/openapi/v3/claims', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
+  http.get('https://api.11st.co.kr/openapi/v3/claims', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
 <claims>
 ${MOCK_ELEVENST_CLAIMS.map((c) => `
   <claim>
@@ -618,7 +618,7 @@ ${MOCK_ELEVENST_CLAIMS.map((c) => `
   </claim>`).join('')}
 </claims>`)),
 
-  http.post('https://openapi.11st.co.kr/openapi/v3/orders/:orderId/delivery', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
+  http.post('https://api.11st.co.kr/openapi/v3/orders/:orderId/delivery', () => HttpResponse.xml(`<?xml version="1.0" encoding="UTF-8"?>
 <result><resultCode>200</resultCode><resultMessage>OK</resultMessage></result>`)),
 ]
 

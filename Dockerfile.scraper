@@ -1,0 +1,35 @@
+# Dockerfile for the scraper-worker service.
+#
+# Uses Microsoft's official Playwright image which includes Chromium + all
+# system deps (fonts, libraries) pre-installed. Avoids the headache of
+# managing Chromium runtime deps in nixpacks.
+#
+# Railway service configuration:
+#   - In Railway dashboard, create a new service named `scrape-worker`
+#   - Set Build → Source: this repo
+#   - Set Build → Builder: Dockerfile
+#   - Set Build → Dockerfile path: Dockerfile.scraper
+#   - Set Deploy → Start command: leave empty (uses CMD below)
+#   - Set Deploy → Healthcheck: leave empty
+#   - Add same environment variables as the existing worker service
+#     (DATABASE_URL, REDIS_URL, NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+#
+# Local dev: don't use this Dockerfile — just run `npm run scrape-worker:dev`
+
+FROM mcr.microsoft.com/playwright:v1.59.1-jammy
+
+WORKDIR /app
+
+# Copy lockfile + package.json first for cache friendliness
+COPY package.json package-lock.json ./
+RUN npm ci --omit=optional
+
+# Copy the rest of the project
+COPY . .
+
+# Headless by default in Railway (no display)
+ENV HEADLESS=true
+ENV NODE_ENV=production
+
+# Run the scrape-worker (uses tsx to execute TS at runtime)
+CMD ["npx", "tsx", "src/scrapers/worker.ts"]

@@ -4,6 +4,7 @@ import { getConnection } from './connection'
 import { db } from '@/lib/db'
 import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
+import type { ScrapeJobData } from '@/scrapers/types'
 
 /** Job data shape for order collection jobs */
 export interface OrderCollectionJobData {
@@ -19,6 +20,14 @@ export interface OrderCollectionJobData {
 
 let _orderQueue: Queue<OrderCollectionJobData> | null = null
 let _invoiceQueue: Queue<InvoiceUploadJobData> | null = null
+let _scrapeQueue: Queue<ScrapeJobData> | null = null
+
+export function getMarketplaceScrapeQueue(): Queue<ScrapeJobData> {
+  if (!_scrapeQueue) {
+    _scrapeQueue = new Queue('marketplace-scrape', { connection: getConnection() })
+  }
+  return _scrapeQueue
+}
 
 export function getOrderCollectionQueue(): Queue<OrderCollectionJobData> {
   if (!_orderQueue) {

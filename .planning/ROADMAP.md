@@ -246,3 +246,13 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 7. 추가 마켓플레이스 연동 | 5/5 | Complete   | 2026-04-03 |
 | 8. 주문관리 UX 개선 | 0/0 | Not planned | - |
 | 9. 관리자 계정 관리 | 0/4 | Planned | - |
+
+### Phase 10: 마켓플레이스 스크래핑 봇 — 비공개 API 마켓을 Playwright로 자동 수집/송장업로드/클레임 처리 (사방넷 대체용)
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 9
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 10 to break down)

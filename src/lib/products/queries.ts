@@ -66,11 +66,15 @@ export async function getProducts(
       case 'warehouseLocation': return products.warehouseLocation
       case 'status': return products.status
       case 'updatedAt': return products.updatedAt
-      default: return products.createdAt
+      // 기본: 같은 품번끼리 인접하도록 internalSku asc.
+      default: return products.internalSku
     }
   })()
 
-  const sortDirection = filters.order === 'asc' ? asc : desc
+  // 정렬 미지정 시 internalSku asc (품번 그룹핑). 그 외엔 사용자 선택 따름.
+  const sortDirection = filters.sort
+    ? (filters.order === 'asc' ? asc : desc)
+    : asc
 
   const [rows, [{ total }]] = await Promise.all([
     db

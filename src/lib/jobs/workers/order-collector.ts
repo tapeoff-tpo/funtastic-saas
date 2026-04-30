@@ -9,7 +9,7 @@ import {
   jobLogs,
   marketplaceConnections,
 } from '@/lib/db/schema'
-import { readCredential } from '@/lib/supabase/admin'
+import { readCredential, storeCredential } from '@/lib/supabase/admin'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
@@ -58,6 +58,49 @@ export function createAdapter(
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)
+  }
+}
+
+async function refreshCafe24AccessToken(params: {
+  userId: string
+  credentials: Record<string, string>
+  aliasTag: string
+}): Promise<void> {
+  const { userId, credentials, aliasTag } = params
+  const clientId = credentials.client_id
+  const clientSecret = credentials.client_secret
+  const mallId = credentials.mall_id
+  const refreshToken = await readCredential('cafe24', userId, `refresh_token${aliasTag}`)
+
+  if (!clientId || !clientSecret || !mallId || !refreshToken) return
+
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+  const res = await fetch(`https://${mallId}.cafe24api.com/api/v2/oauth/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    }).toString(),
+  })
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`Cafe24 token refresh failed: ${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
+  }
+
+  const tokenData = await res.json() as { access_token?: string; refresh_token?: string }
+  if (!tokenData.access_token) {
+    throw new Error(`Cafe24 token refresh failed: access_token missing`)
+  }
+
+  credentials.access_token = tokenData.access_token
+  await storeCredential('cafe24', userId, `access_token${aliasTag}`, tokenData.access_token)
+  if (tokenData.refresh_token) {
+    await storeCredential('cafe24', userId, `refresh_token${aliasTag}`, tokenData.refresh_token)
   }
 }
 
@@ -136,6 +179,11 @@ export async function collectOrdersForConnection(params: {
         )
       }
       credentials[credKey] = value
+    }
+
+    if (marketplaceId === 'cafe24') {
+      await setProgress('Cafe24 토큰 갱신 중...')
+      await refreshCafe24AccessToken({ userId, credentials, aliasTag })
     }
 
     // 3. Create adapter with credentials

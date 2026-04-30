@@ -239,7 +239,7 @@ describe('processOrderCollection', () => {
     expect(mockInsert).toHaveBeenCalled()
   })
 
-  it('should deduplicate orders via UPSERT on (marketplaceId, marketplaceOrderId)', async () => {
+  it('should merge duplicate marketplace orders before UPSERT', async () => {
     const duplicateOrders = [sampleOrder, { ...sampleOrder }]
     mockGetOrders.mockResolvedValue(duplicateOrders)
 
@@ -255,7 +255,6 @@ describe('processOrderCollection', () => {
 
     const result = await processOrderCollection(job)
 
-    // Both orders processed through UPSERT (DB handles dedup)
-    expect(result.ordersCollected).toBe(2)
+    expect(result.ordersCollected).toBe(1)
   })
 })

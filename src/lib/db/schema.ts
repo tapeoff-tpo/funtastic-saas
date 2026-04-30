@@ -626,6 +626,61 @@ export const jobLogs = pgTable('job_logs', {
 })
 
 
+// ─── Admin: Account Management (Phase 9) ────────────────────────
+
+export const userRoleEnum = pgEnum('user_role', ['super_admin', 'admin'])
+
+export const userProfiles = pgTable(
+  'user_profiles',
+  {
+    id: uuid('id').primaryKey(), // FK to auth.users.id (declared in migration SQL)
+    email: text('email').notNull(),
+    role: userRoleEnum('role').notNull().default('admin'),
+    displayName: text('display_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    createdBy: uuid('created_by'), // FK to user_profiles.id, nullable for backfilled rows
+    deactivatedAt: timestamp('deactivated_at', { withTimezone: true }),
+    deactivatedBy: uuid('deactivated_by'),
+  },
+  (table) => [
+    uniqueIndex('user_profiles_email_idx').on(table.email),
+    index('user_profiles_role_idx').on(table.role),
+    index('user_profiles_active_idx').on(table.deactivatedAt),
+  ],
+)
+
+export type UserProfile = typeof userProfiles.$inferSelect
+export type UserRole = (typeof userRoleEnum.enumValues)[number]
+
+export const auditActionEnum = pgEnum('audit_action', [
+  'account.create',
+  'account.role_change',
+  'account.deactivate',
+  'account.reactivate',
+  'account.password_reset',
+  'password.self_change',
+])
+
+export const auditLogs = pgTable(
+  'audit_logs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    actorId: uuid('actor_id').notNull(),
+    action: auditActionEnum('action').notNull(),
+    targetId: uuid('target_id'),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('audit_logs_actor_idx').on(table.actorId, table.createdAt),
+    index('audit_logs_target_idx').on(table.targetId, table.createdAt),
+    index('audit_logs_action_idx').on(table.action, table.createdAt),
+  ],
+)
+
+export type AuditLog = typeof auditLogs.$inferSelect
+export type AuditAction = (typeof auditActionEnum.enumValues)[number]
+
 // ─── Admin: Dev Log ─────────────────────────────────────────────
 // 개발 작업 일지 — 팀 3인(상철/기환/지은) 공동 기록.
 // 사용자별 데이터 아님 (관리자 메뉴 내부 공유 테이블).

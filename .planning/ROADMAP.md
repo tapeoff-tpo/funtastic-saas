@@ -20,6 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Marketplace Expansion** - Add 11번가, 지마켓/옥션, 오늘의집 adapters to complete top-5 coverage (completed 2026-04-03)
 - [x] **Phase 7: 추가 마켓플레이스 연동** - Add 18 additional marketplace adapters (Cafe24, CJ온스타일, 현대홈쇼핑, NS홈쇼핑, 도매꾹, 온채널, 오너클랜 등)
 - [ ] **Phase 8: 주문관리 UX 개선** - 취소 탭 활성화, 단계별 필터, 클레임 인디케이터 통합, 매핑 상품명 표시, 배송구분/SaaS 배송비 노출
+- [ ] **Phase 9: 관리자 계정 관리** - 직원 여러 명을 관리자로 등록/관리할 수 있는 계정 생성/관리 기능
 
 ## Phase Details
 
@@ -169,6 +170,25 @@ Plans:
 
 **Note:** 매출관리(원가/배송비/판매가/수령배송비 기반 수익 계산)는 별도 phase로 분리 예정 — Phase 8은 데이터 노출과 입력 UI까지만 담당.
 
+### Phase 9: 관리자 계정 관리
+**Goal**: 오너가 직원 여러 명을 관리자 계정으로 직접 생성/관리할 수 있고, 모든 계정 변경이 audit log로 추적된다 — 이메일 인프라 없이 동작
+**Depends on**: Phase 1 (Auth/Foundation)
+**Requirements**: ADMIN-01, ADMIN-02, ADMIN-03, ADMIN-04, ADMIN-05, ADMIN-06
+**Success Criteria** (what must be TRUE):
+  1. super_admin이 관리자 페이지에서 이메일+역할 입력만으로 새 admin 계정을 생성할 수 있고, 생성된 계정은 즉시 로그인 가능하다 (초기 비밀번호는 환경변수 `INITIAL_USER_PASSWORD`)
+  2. super_admin이 관리자 목록에서 역할 변경, 비밀번호 초기화, 비활성화/재활성화를 할 수 있고, 각 동작은 audit_logs 테이블에 기록된다
+  3. 일반 admin 사용자는 관리자 계정관리 페이지 자체에 접근할 수 없다 (서버 측 차단)
+  4. 모든 관리자가 본인 설정 페이지에서 self-service 비밀번호 변경을 할 수 있다
+  5. 비활성화된 계정은 로그인 시도가 거부된다
+  6. 마지막 super_admin을 admin으로 강등하거나 본인을 비활성화하는 시도는 거부된다
+  7. user_profiles 테이블의 RLS 정책이 정상 동작한다 (본인 행만 SELECT 가능, super_admin은 전체 가능)
+**Plans:** 4 plans
+Plans:
+- [ ] 09-01-PLAN.md — DB schema + migration + RLS + backfill of 10 pre-existing auth.users (ADMIN-01, ADMIN-02, ADMIN-05, ADMIN-06)
+- [ ] 09-02-PLAN.md — Server actions + helpers + tests (createAccount, changeRole, resetPassword, deactivate, reactivate, selfChangePassword) (ADMIN-01, ADMIN-02, ADMIN-04, ADMIN-06)
+- [ ] 09-03-PLAN.md — UI: Dialog primitive, /admin/accounts page (TanStack Table + add dialog + row actions), /settings/account password form (ADMIN-01, ADMIN-02, ADMIN-04)
+- [ ] 09-04-PLAN.md — Auth gating: deactivated-user redirect, super_admin layout gate, audit trail E2E verification, BOOTSTRAP.md (ADMIN-03, ADMIN-05, ADMIN-06)
+
 ## Backlog
 
 ### Phase 999.1: OAuth2 마켓플레이스 인앱 연동 (BACKLOG)
@@ -225,3 +245,4 @@ Note: Phase 4 and Phase 5 can execute in parallel (Phase 4 depends on Phase 2, P
 | 6. Marketplace Expansion | 3/3 | Complete   | 2026-04-03 |
 | 7. 추가 마켓플레이스 연동 | 5/5 | Complete   | 2026-04-03 |
 | 8. 주문관리 UX 개선 | 0/0 | Not planned | - |
+| 9. 관리자 계정 관리 | 0/4 | Planned | - |

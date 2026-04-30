@@ -178,7 +178,7 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {autoConnections.map((conn) => (
               <MarketCard
-                key={conn.marketplaceId}
+                key={conn.id}
                 conn={conn}
                 isSelected={selected.has(conn.marketplaceId)}
                 onToggle={toggleSelect}
@@ -207,7 +207,7 @@ export function MarketplaceDashboard({ connections }: MarketplaceDashboardProps)
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {manualConnections.map((conn) => (
               <MarketCard
-                key={conn.marketplaceId}
+                key={conn.id}
                 conn={conn}
                 isSelected={false}
                 onToggle={toggleSelect}

@@ -76,6 +76,15 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **MKT-05**: 오늘의집 API 연동 (주문수집, 송장업로드)
 - [x] **MKT-06**: 추가 마켓플레이스 어댑터를 모듈식으로 확장할 수 있는 구조
 
+### Admin Account Management (관리자 계정 관리 — Phase 9)
+
+- [ ] **ADMIN-01**: super_admin이 관리자 페이지에서 이메일+역할 입력만으로 새 admin 계정을 생성할 수 있다 (초기 비밀번호는 환경변수 `INITIAL_USER_PASSWORD`에서 자동 적용, `auth.admin.createUser` 사용, 이메일 인증 메일 미발송)
+- [ ] **ADMIN-02**: super_admin이 관리자 목록에서 역할 변경, 비밀번호 초기화, 비활성화/재활성화를 할 수 있고, 모든 변경은 audit_logs 테이블에 기록된다
+- [ ] **ADMIN-03**: 일반 admin 사용자는 `/admin/accounts` 페이지에 접근할 수 없다 (서버 측 차단 — 레이아웃 가드 또는 redirect)
+- [ ] **ADMIN-04**: 모든 인증된 사용자가 본인 설정 페이지에서 self-service 비밀번호 변경을 할 수 있다 (`auth.updateUser({ password })`)
+- [ ] **ADMIN-05**: 비활성화된 계정은 로그인 시도가 거부되고, 활성 세션이 있더라도 다음 페이지 진입 시 `/login`으로 리다이렉트된다
+- [ ] **ADMIN-06**: 마지막 활성 super_admin을 admin으로 강등하거나 비활성화하는 시도는 거부된다 (트랜잭션 + `FOR UPDATE` 락으로 race-safe)
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
@@ -110,6 +119,16 @@ Deferred to future release. Tracked but not in current roadmap.
 
 - **MKT-V2**: CJ온스타일, 현대홈쇼핑, 스페셜오퍼, 스마일배송, 올웨이즈, Cafe24, GS샵, NS홈쇼핑, 도매꾹, 도매매, 오너클랜, 온채널, 도매의신, 도매창고, 카카오톡스토어, 텐바이텐, 토스쇼핑, 투비즈온, 카카오선물하기, 에이블리, 신세계몰, 바나나B2B
 
+### Admin Account Management v2
+
+- **ADMIN-V2-01**: audit_logs 조회 UI / 필터 / CSV 내보내기 (Phase 9 deferred)
+- **ADMIN-V2-02**: 기능별 RBAC 게이팅 (admin이 X 못함 같은 세분화)
+- **ADMIN-V2-03**: MFA / TOTP / 패스키
+- **ADMIN-V2-04**: 비밀번호 강도 / 만료 정책
+- **ADMIN-V2-05**: SSO (Google / Naver / Kakao)
+- **ADMIN-V2-06**: 강제 로그아웃 / 세션 관리
+- **ADMIN-V2-07**: 직원 프로필 상세 (사진, 부서, 연락처)
+
 ## Out of Scope
 
 Explicitly excluded. Documented to prevent scope creep.
@@ -124,6 +143,8 @@ Explicitly excluded. Documented to prevent scope creep.
 | 입점대행 | 서비스 비즈니스, 소프트웨어 기능 아님 |
 | 위탁판매/발주 자동화 | 자체배송 우선 설계, 드롭십 워크플로우는 별도 |
 | 실시간 전체 동기화 | API rate limit으로 불가, 준실시간(5-15분) 대체 |
+| 이메일 인증 메일 / 비밀번호 재설정 링크 | 이메일 발송 인프라 0개 유지 (Phase 9 결정) |
+| 하드 삭제 (계정 영구 제거) | Phase 9는 soft delete만 지원 (deactivated_at) |
 
 ## Traceability
 
@@ -179,12 +200,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 >>>>>>> worktree-agent-ab876716
 | MKT-05 | Phase 6 | Complete |
 | MKT-06 | Phase 1 | Complete |
+| ADMIN-01 | Phase 9 | Pending |
+| ADMIN-02 | Phase 9 | Pending |
+| ADMIN-03 | Phase 9 | Pending |
+| ADMIN-04 | Phase 9 | Pending |
+| ADMIN-05 | Phase 9 | Pending |
+| ADMIN-06 | Phase 9 | Pending |
 
 **Coverage:**
-- v1 requirements: 37 total
-- Mapped to phases: 37
+- v1 requirements: 43 total (37 prior + 6 ADMIN-* added 2026-04-29)
+- Mapped to phases: 43
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-03*
-*Last updated: 2026-04-03 after gap analysis (added PROD-04 역수집, PROD-05 옵션관리, SHIP-04/05 합포장 고도화)*
+*Last updated: 2026-04-29 — added ADMIN-01..ADMIN-06 for Phase 9 (관리자 계정 관리). Pre-existing merge conflict markers in PROD-* and MKT-* sections preserved (out of Phase 9 scope).*

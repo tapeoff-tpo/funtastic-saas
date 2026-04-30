@@ -89,6 +89,9 @@ async function refreshCafe24AccessToken(params: {
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
+    if (res.status === 400 && body.includes('invalid_grant')) {
+      throw new Error('Cafe24 재연동이 필요합니다. 저장된 refresh_token이 만료되었거나 무효화되었습니다.')
+    }
     throw new Error(`Cafe24 token refresh failed: ${res.status} ${res.statusText}${body ? `: ${body}` : ''}`)
   }
 

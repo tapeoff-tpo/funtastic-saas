@@ -306,7 +306,8 @@ export async function collectOrdersForConnection(params: {
     if (
       newOrderIds.length > 0 &&
       typeof adapter.confirmOrder === 'function' &&
-      shouldAutoConfirmOrders()
+      shouldAutoConfirmOrders() &&
+      marketplaceId !== '10x10'
     ) {
       await setProgress(`신규 주문 확인 중 (0/${newOrderIds.length})`)
       let confirmIdx = 0

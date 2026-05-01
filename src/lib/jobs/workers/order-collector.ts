@@ -95,7 +95,7 @@ export function createAdapter(
 }
 
 function shouldAutoConfirmOrders(): boolean {
-  return process.env.MARKETPLACE_AUTO_CONFIRM_ON_COLLECT === '1'
+  return process.env.MARKETPLACE_AUTO_CONFIRM_ON_COLLECT !== '0'
 }
 
 async function refreshCafe24AccessToken(params: {
@@ -324,7 +324,7 @@ export async function collectOrdersForConnection(params: {
       }
     } else if (newOrderIds.length > 0 && !shouldAutoConfirmOrders()) {
       await setProgress(
-        `${newOrderIds.length} new orders saved; auto-confirm disabled for parallel Sabangnet run`
+        `${newOrderIds.length} new orders saved; auto-confirm disabled`
       )
     }
 

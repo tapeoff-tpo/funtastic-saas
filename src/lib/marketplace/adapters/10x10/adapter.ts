@@ -290,11 +290,23 @@ export class TenByTenAdapter implements MarketplaceAdapter {
 
   private async fetchOrderList(path: 'orders' | 'orders/orderhistory', since: Date): Promise<OrderMaster[]> {
     const creds = this.getCreds()
+    const withBrandId = await this.fetchOrderListWithBrandOption(path, since, true)
+    if (withBrandId.length > 0 || !creds.shop_id) return withBrandId
+
+    return this.fetchOrderListWithBrandOption(path, since, false)
+  }
+
+  private async fetchOrderListWithBrandOption(
+    path: 'orders' | 'orders/orderhistory',
+    since: Date,
+    includeBrandId: boolean,
+  ): Promise<OrderMaster[]> {
+    const creds = this.getCreds()
     const search = new URLSearchParams({
       startdate: fmtDate(since),
       enddate: fmtDate(new Date()),
     })
-    if (creds.shop_id) search.set('brandId', String(creds.shop_id))
+    if (includeBrandId && creds.shop_id) search.set('brandId', String(creds.shop_id))
 
     let env: TenByTenEnvelope<OrdersListResponse>
     try {

@@ -122,4 +122,30 @@ describe('TenByTenAdapter', () => {
 
     expect(orders.map((o) => o.marketplaceOrderId)).toEqual(['T-1002'])
   })
+
+  it('retries without brandId when brand-filtered 10x10 order search returns empty', async () => {
+    const get = vi.fn((url: string) => ({
+      json: async () => {
+        if (url.includes('brandId=brand')) {
+          return envelope([])
+        }
+        if (url.startsWith('orders/orderhistory?')) {
+          return envelope([])
+        }
+        if (url.startsWith('orders?')) {
+          return envelope([order('T-1003', '브랜드 미필터 상품')])
+        }
+        throw new Error(`Unexpected URL: ${url}`)
+      },
+    }))
+
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new TenByTenAdapter({ api_key: 'api-key', shop_id: 'brand' })
+    const orders = await adapter.getOrders(new Date('2026-05-01T00:00:00+09:00'))
+
+    expect(get).toHaveBeenCalledWith(expect.stringContaining('brandId=brand'))
+    expect(get).toHaveBeenCalledWith(expect.not.stringContaining('brandId=brand'))
+    expect(orders.map((o) => o.marketplaceOrderId)).toEqual(['T-1003'])
+  })
 })

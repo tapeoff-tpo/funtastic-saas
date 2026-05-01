@@ -444,6 +444,14 @@ const tobizonAdapter = createStubAdapter({
   requiredCredentials: ['api_key', 'partner_id'],
 })
 
+const funtasticB2bAdapter = createStubAdapter({
+  id: 'funtastic-b2b',
+  name: 'Funtastic B2B',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_base_url', 'api_token'],
+})
+
 export function registerDefaultAdapters() {
   if (!marketplaceRegistry.has('coupang')) {
     marketplaceRegistry.register(coupangAdapter)
@@ -520,6 +528,9 @@ export function registerDefaultAdapters() {
   }
   if (!marketplaceRegistry.has('tobizon')) {
     marketplaceRegistry.register(tobizonAdapter)
+  }
+  if (!marketplaceRegistry.has('funtastic-b2b')) {
+    marketplaceRegistry.register(funtasticB2bAdapter)
   }
 }
 

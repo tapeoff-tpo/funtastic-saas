@@ -9,6 +9,7 @@ import '@/lib/marketplace/adapters/configs'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
+import { FuntasticB2bAdapter } from '@/lib/marketplace/adapters/funtastic-b2b/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
@@ -124,6 +125,12 @@ export async function testMarketplaceCredentials(
         result = await new TossShoppingAdapter({
           access_key: credentials.access_key?.trim() ?? '',
           secret_key: credentials.secret_key?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'funtastic-b2b':
+        result = await new FuntasticB2bAdapter({
+          api_base_url: credentials.api_base_url?.trim() ?? '',
+          api_token: credentials.api_token?.trim() ?? '',
         }).testConnection()
         break
       default:

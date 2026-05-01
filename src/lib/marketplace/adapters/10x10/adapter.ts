@@ -132,13 +132,15 @@ interface ClaimItem {
 }
 
 function fmtDate(d: Date): string {
-  // 10x10 expects YYYY-MM-DD HH:mm:ss
-  const yyyy = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  const hh = String(d.getHours()).padStart(2, '0')
-  const mi = String(d.getMinutes()).padStart(2, '0')
-  const ss = String(d.getSeconds()).padStart(2, '0')
+  // 10x10 expects KST wall-clock time as YYYY-MM-DD HH:mm:ss.
+  // Railway hosts can run in UTC, which would otherwise miss same-day Korean orders.
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+  const yyyy = kst.getUTCFullYear()
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(kst.getUTCDate()).padStart(2, '0')
+  const hh = String(kst.getUTCHours()).padStart(2, '0')
+  const mi = String(kst.getUTCMinutes()).padStart(2, '0')
+  const ss = String(kst.getUTCSeconds()).padStart(2, '0')
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`
 }
 
@@ -256,6 +258,37 @@ export class TenByTenAdapter implements MarketplaceAdapter {
   }
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
+    const [newOrdersResult, confirmedUnshippedOrdersResult] = await Promise.allSettled([
+      this.fetchOrderList('orders', since),
+      this.fetchOrderList('orders/orderhistory', since),
+    ])
+
+    const failures = [newOrdersResult, confirmedUnshippedOrdersResult].filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    )
+    if (failures.length === 2) {
+      const message = failures
+        .map((failure) => failure.reason instanceof Error ? failure.reason.message : String(failure.reason))
+        .join('; ')
+      throw new MarketplaceApiError('10x10', 500, message || 'getOrders failed')
+    }
+
+    const newOrders = newOrdersResult.status === 'fulfilled' ? newOrdersResult.value : []
+    const confirmedUnshippedOrders = confirmedUnshippedOrdersResult.status === 'fulfilled'
+      ? confirmedUnshippedOrdersResult.value
+      : []
+
+    const byOrderSerial = new Map<string, OrderMaster>()
+    for (const order of [...confirmedUnshippedOrders, ...newOrders]) {
+      if (order.OrderSerial) {
+        byOrderSerial.set(order.OrderSerial, order)
+      }
+    }
+
+    return Array.from(byOrderSerial.values()).map((o) => this.toNormalizedOrder(o))
+  }
+
+  private async fetchOrderList(path: 'orders' | 'orders/orderhistory', since: Date): Promise<OrderMaster[]> {
     const creds = this.getCreds()
     const search = new URLSearchParams({
       startdate: fmtDate(since),
@@ -266,18 +299,17 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     let env: TenByTenEnvelope<OrdersListResponse>
     try {
       env = await this.client(creds)
-        .get(`orders?${search.toString()}`)
+        .get(`${path}?${search.toString()}`)
         .json<TenByTenEnvelope<OrdersListResponse>>()
     } catch (error) {
-      throw await toTenByTenApiError('getOrders', error)
+      throw await toTenByTenApiError(path, error)
     }
 
     if (env.hasError) {
-      throw new MarketplaceApiError('10x10', 500, env.message || 'getOrders failed')
+      throw new MarketplaceApiError('10x10', 500, env.message || `${path} failed`)
     }
 
-    const list = env.outPutValue?.datas ?? []
-    return list.map((o) => this.toNormalizedOrder(o))
+    return env.outPutValue?.datas ?? []
   }
 
   private toNormalizedOrder(o: OrderMaster): NormalizedOrder {

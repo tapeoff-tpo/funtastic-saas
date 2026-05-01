@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useTransition } from 'react'
+import { useState, useMemo, useTransition, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { bulkDeleteOrdersAction } from './actions'
 import {
@@ -23,19 +23,25 @@ interface DataTableProps {
   pageSize: number
   page: number
   stage?: OrderStage
+  showMappingAction?: boolean
 }
 
 
-export function DataTable({ data, total, pageSize, page, stage }: DataTableProps) {
+export function DataTable({ data, total, pageSize, page, stage, showMappingAction = false }: DataTableProps) {
+  const showMappingColumn = stage === 'mapping' || showMappingAction
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
     // 매핑 컬럼은 매핑 필요 스테이지에서만 노출
-    { mappingStatus: stage === 'mapping' },
+    { mappingStatus: showMappingColumn },
   )
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [showColumnToggle, setShowColumnToggle] = useState(false)
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
   const [deletePending, startDelete] = useTransition()
   const router = useRouter()
+
+  useEffect(() => {
+    setColumnVisibility((prev) => ({ ...prev, mappingStatus: showMappingColumn }))
+  }, [showMappingColumn])
 
   const [, setPage] = useQueryState(
     'page',
@@ -99,6 +105,7 @@ export function DataTable({ data, total, pageSize, page, stage }: DataTableProps
           selectedOrders={selectedOrders}
           allOrders={data}
           stage={stage}
+          showMappingAction={showMappingAction}
         />
         {selectedCount > 0 && (
           <span className="text-sm text-muted-foreground">

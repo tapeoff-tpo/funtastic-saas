@@ -49,6 +49,7 @@ export default async function OrdersPage({
   if (!user) redirect('/login')
 
   const params = await searchParamsCache.parse(searchParams)
+  const isNewTab = params.status === 'new'
 
   // 탭 미선택(사이드바 진입 직후) — 어떤 쿼리도 실행하지 않는다.
   // 탭(전체/신규/.../반품) 클릭 시점에만 status/claimType/cancel/tab 중 하나가 붙어 fetch 시작.
@@ -151,6 +152,7 @@ export default async function OrdersPage({
           total={total}
           page={params.page}
           pageSize={params.pageSize}
+          showMappingAction={isNewTab}
         />
       ) : (
         <div className="rounded border bg-muted/30 px-6 py-12 text-center text-sm text-muted-foreground">

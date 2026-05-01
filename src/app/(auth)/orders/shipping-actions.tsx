@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef } from 'react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import { ChevronDown } from 'lucide-react'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
@@ -24,6 +25,7 @@ interface ShippingActionsProps {
   /** All orders on the current page — used as fallback when nothing is selected (e.g. 일괄 매핑) */
   allOrders?: OrderRow[]
   stage?: OrderStage
+  showMappingAction?: boolean
 }
 
 /** Download a file by fetching — allows catching errors from the server */
@@ -56,7 +58,13 @@ async function downloadExcel(url: string, filename: string): Promise<{ success: 
   }
 }
 
-export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrders = [], stage }: ShippingActionsProps) {
+export function ShippingActions({
+  selectedOrderIds,
+  selectedOrders = [],
+  allOrders = [],
+  stage,
+  showMappingAction = false,
+}: ShippingActionsProps) {
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
@@ -175,7 +183,7 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
   }
 
   // Determine which action groups to show based on stage
-  const showMapping = !stage || stage === 'mapping' || unmappedOrderCount > 0
+  const showMapping = showMappingAction || stage === 'mapping'
   const showInvoice = !stage || stage === 'invoice' || stage === 'confirm'
   const showShipping = !stage || stage === 'shipping' || stage === 'invoice'
   const showPrint = !stage || stage === 'shipping' || stage === 'done'
@@ -183,13 +191,13 @@ export function ShippingActions({ selectedOrderIds, selectedOrders = [], allOrde
   return (
     <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
-        {stage === 'mapping' && (
-          <a
+        {showMapping && (
+          <Link
             href="/products/mapping"
             className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
           >
             매핑관리로 이동 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
-          </a>
+          </Link>
         )}
 
         {stage === 'confirm' && (

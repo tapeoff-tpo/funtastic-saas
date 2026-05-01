@@ -444,9 +444,9 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
 
       {/* Results modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-full max-w-md rounded-xl border bg-background shadow-2xl">
-            <div className="flex items-center justify-between border-b px-5 py-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border bg-background shadow-2xl">
+            <div className="flex shrink-0 items-center justify-between border-b px-5 py-4">
               <h2 className="text-base font-semibold">
                 {allDone ? '수집 결과' : '수집 진행 중...'}
               </h2>
@@ -474,14 +474,14 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
               </div>
             </div>
 
-            <div className="divide-y px-5">
+            <div className="min-h-0 flex-1 divide-y overflow-y-auto px-5">
               {enrichedLogs!.map((r, i) => (
                 <ResultRow key={i} log={r} />
               ))}
             </div>
 
             {allDone && (
-              <div className="border-t bg-muted/30 px-5 py-3">
+              <div className="shrink-0 border-t bg-muted/30 px-5 py-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-muted-foreground">
                     {successCount > 0 && (

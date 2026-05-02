@@ -142,66 +142,97 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   }
 
   if (filters.search) {
-    // 부분일치 검색 — 입력값이 양끝 공백이라도 trim 한 뒤 wrap.
-    // 대상: 주문번호(마켓+내부) / 구매자명 / 수취인명 / 상품명(orderItems.productName + 매핑된 displayName) / 송장번호(shipments).
-    // productName/trackingNumber/displayName 는 다른 테이블이라 EXISTS 서브쿼리로 매칭.
-    // 내부주문번호: '#xxxxxxxx' 또는 'xxxxxxxx' 형식 (UUID 앞 8자리). orders.id::text prefix 매칭.
     const trimmed = filters.search.trim()
     const searchPattern = `%${trimmed}%`
-    const internalIdPattern = `${trimmed.replace(/^#/, '')}%`
-    conditions.push(
-      or(
-        ilike(orders.marketplaceOrderId, searchPattern),
-        ilike(orders.buyerName, searchPattern),
-        ilike(orders.recipientName, searchPattern),
-        // 내부 주문번호(UUID 앞자리) 검색 — '#8520bd19' 또는 '8520bd19' 형태 모두 허용
-        ilike(sql`${orders.id}::text`, internalIdPattern),
-        // 마켓상품명(원문) 매칭
-        exists(
-          db
-            .select({ x: sql`1` })
-            .from(orderItems)
-            .where(
-              and(
-                eq(orderItems.orderId, orders.id),
-                ilike(orderItems.productName, searchPattern),
-              ),
-            ),
-        ),
-        // 매핑된 상품명(products.name) 매칭 — orderItems.sku ↔ products.internalSku 조인.
-        // 기존 productNameMappings.displayName 검색 경로는 매핑 시스템 재설계로 제거됨.
-        exists(
-          db
-            .select({ x: sql`1` })
-            .from(orderItems)
-            .innerJoin(
-              products,
-              and(
-                eq(products.userId, orders.userId),
-                eq(products.internalSku, orderItems.sku),
-              ),
-            )
-            .where(
-              and(
-                eq(orderItems.orderId, orders.id),
-                ilike(products.name, searchPattern),
-              ),
-            ),
-        ),
-        // 송장번호 매칭
-        exists(
-          db
-            .select({ x: sql`1` })
-            .from(shipments)
-            .where(
-              and(
-                eq(shipments.orderId, orders.id),
-                ilike(shipments.trackingNumber, searchPattern),
-              ),
-            ),
-        ),
-      )!,
+    const searchField = filters.searchField ?? 'all'
+    const itemExists = (condition: SQL<unknown>) => exists(
+      db
+        .select({ x: sql`1` })
+        .from(orderItems)
+        .where(and(eq(orderItems.orderId, orders.id), condition)),
     )
+    const confirmedProductExists = exists(
+      db
+        .select({ x: sql`1` })
+        .from(orderItems)
+        .innerJoin(
+          products,
+          and(
+            eq(products.userId, orders.userId),
+            eq(products.internalSku, orderItems.sku),
+          ),
+        )
+        .where(
+          and(
+            eq(orderItems.orderId, orders.id),
+            ilike(products.name, searchPattern),
+          ),
+        ),
+    )
+    const trackingExists = exists(
+      db
+        .select({ x: sql`1` })
+        .from(shipments)
+        .where(
+          and(
+            eq(shipments.orderId, orders.id),
+            ilike(shipments.trackingNumber, searchPattern),
+          ),
+        ),
+    )
+
+    const searchCondition = (() => {
+      switch (searchField) {
+        case 'buyerName':
+          return ilike(orders.buyerName, searchPattern)
+        case 'recipientName':
+          return ilike(orders.recipientName, searchPattern)
+        case 'marketplaceOrderId':
+          return ilike(orders.marketplaceOrderId, searchPattern)
+        case 'internalNo':
+          return ilike(orders.internalNo, `%${trimmed.replace(/^#/, '')}%`)
+        case 'sku':
+          return itemExists(ilike(orderItems.sku, searchPattern))
+        case 'marketplaceProductCode':
+          return itemExists(ilike(orderItems.marketplaceItemId, searchPattern))
+        case 'collectedProductName':
+          return itemExists(ilike(orderItems.productName, searchPattern))
+        case 'confirmedProductName':
+          return confirmedProductExists
+        case 'recipientPhone':
+          return ilike(orders.recipientPhone, searchPattern)
+        case 'recipientPhone2':
+          return ilike(orders.recipientPhone2, searchPattern)
+        case 'buyerPhone':
+          return ilike(orders.buyerPhone, searchPattern)
+        case 'buyerPhone2':
+          return ilike(orders.buyerPhone2, searchPattern)
+        case 'trackingNumber':
+          return trackingExists
+        case 'logisticsMessage':
+          return ilike(orders.logisticsMessage, searchPattern)
+        case 'all':
+        default:
+          return or(
+            ilike(orders.marketplaceOrderId, searchPattern),
+            ilike(orders.internalNo, `%${trimmed.replace(/^#/, '')}%`),
+            ilike(orders.buyerName, searchPattern),
+            ilike(orders.buyerPhone, searchPattern),
+            ilike(orders.buyerPhone2, searchPattern),
+            ilike(orders.recipientName, searchPattern),
+            ilike(orders.recipientPhone, searchPattern),
+            ilike(orders.recipientPhone2, searchPattern),
+            ilike(orders.logisticsMessage, searchPattern),
+            itemExists(ilike(orderItems.marketplaceItemId, searchPattern)),
+            itemExists(ilike(orderItems.sku, searchPattern)),
+            itemExists(ilike(orderItems.productName, searchPattern)),
+            confirmedProductExists,
+            trackingExists,
+          )
+      }
+    })()
+
+    if (searchCondition) conditions.push(searchCondition)
   }
 
   if (filters.isHeld) {

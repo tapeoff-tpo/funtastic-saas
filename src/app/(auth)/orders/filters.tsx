@@ -2,7 +2,7 @@
 
 import { useCallback, useState, useTransition } from 'react'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
-import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
+import { ORDER_STATUS_LABELS, type OrderSearchField, type OrderStatus } from '@/lib/orders/types'
 
 const MARKETPLACE_OPTIONS = [
   { value: '', label: '전체 마켓' },
@@ -28,6 +28,24 @@ const MAPPING_OPTIONS = [
   { value: 'unmapped', label: '매핑안됨' },
 ]
 
+const SEARCH_FIELD_OPTIONS: Array<{ value: OrderSearchField; label: string }> = [
+  { value: 'all', label: '전체검색' },
+  { value: 'buyerName', label: '주문자명' },
+  { value: 'recipientName', label: '수취인명' },
+  { value: 'marketplaceOrderId', label: '쇼핑몰주문번호' },
+  { value: 'internalNo', label: '내부주문번호' },
+  { value: 'sku', label: '품번코드' },
+  { value: 'marketplaceProductCode', label: '쇼핑몰상품코드' },
+  { value: 'collectedProductName', label: '수집상품명' },
+  { value: 'confirmedProductName', label: '확정상품명' },
+  { value: 'recipientPhone', label: '수취인전화번호1' },
+  { value: 'recipientPhone2', label: '수취인전화번호2' },
+  { value: 'buyerPhone', label: '주문자전화번호1' },
+  { value: 'buyerPhone2', label: '주문자전화번호2' },
+  { value: 'trackingNumber', label: '송장번호' },
+  { value: 'logisticsMessage', label: '물류메세지' },
+]
+
 export function OrderFilters() {
   const [isPending, startTransition] = useTransition()
 
@@ -36,6 +54,7 @@ export function OrderFilters() {
     mapping: parseAsString,
     marketplace: parseAsString,
     search: parseAsString,
+    searchField: parseAsString,
     dateFrom: parseAsString,
     dateTo: parseAsString,
     page: parseAsInteger.withDefault(1),
@@ -67,6 +86,7 @@ export function OrderFilters() {
       mapping: null,
       marketplace: null,
       search: null,
+      searchField: null,
       dateFrom: null,
       dateTo: null,
       page: 1,
@@ -178,10 +198,23 @@ export function OrderFilters() {
           }}
           className="flex items-center gap-1"
         >
+          <select
+            id="filter-search-field"
+            value={filters.searchField ?? 'all'}
+            onChange={(e) => updateFilter({ searchField: e.target.value === 'all' ? null : e.target.value })}
+            className="rounded-md border px-3 py-1.5 text-sm"
+            aria-label="검색종류"
+          >
+            {SEARCH_FIELD_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <input
             id="filter-search"
             type="text"
-            placeholder="마켓/내부 주문번호 · 상품명 · 구매자 · 수취인 · 송장번호"
+            placeholder="검색어 입력"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             className="w-[220px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"

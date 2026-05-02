@@ -7,13 +7,18 @@ import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
-import { useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { copyOrderAction } from './actions'
 
 /** Helper to get openDetail from table.options.meta safely */
 function getOpenDetail(table: Table<OrderRow>): ((id: string) => void) | undefined {
   const meta = table.options.meta as { openDetail?: (id: string) => void } | undefined
   return meta?.openDetail
+}
+
+function getRefresh(table: Table<OrderRow>): (() => void) | undefined {
+  const meta = table.options.meta as { refresh?: () => void } | undefined
+  return meta?.refresh
 }
 
 /** Copy-order button (shown under internal order id) — duplicates order + items with new internal UUID */
@@ -38,6 +43,55 @@ function CopyOrderButton({ orderId }: { orderId: string }) {
     >
       <Copy className="h-2.5 w-2.5" />
     </button>
+  )
+}
+
+function ClaimCreateButton({ orderId, table }: { orderId: string; table: Table<OrderRow> }) {
+  const [open, setOpen] = useState(false)
+  const [pending, startTransition] = useTransition()
+  const refresh = getRefresh(table)
+
+  function createClaim(claimType: 'return' | 'exchange') {
+    const label = claimType === 'return' ? '반품' : '교환'
+    const reason = window.prompt(`${label} 접수 사유를 입력하세요.`, '')
+    if (reason === null) return
+    setOpen(false)
+    startTransition(async () => {
+      const res = await fetch('/api/orders/claims', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderId, claimType, reason }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string }
+        window.alert(data.error ?? `${label} 접수 실패`)
+        return
+      }
+      refresh?.()
+    })
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        disabled={pending}
+        className="w-fit rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+      >
+        {pending ? '접수중' : 'Claim'}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 min-w-[92px] rounded-md border bg-white py-1 shadow-lg">
+          <button type="button" onClick={() => createClaim('return')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
+            반품 접수
+          </button>
+          <button type="button" onClick={() => createClaim('exchange')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
+            교환 접수
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -346,13 +400,17 @@ export const columns: ColumnDef<OrderRow>[] = [
               reason={order.claimReason ?? null}
             />
           ) : (
-            <button
-              type="button"
-              onClick={() => openDetail?.(order.id)}
-              className="w-fit rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100"
-            >
-              Claim
-            </button>
+            <div className="flex items-center gap-1">
+              <ClaimCreateButton orderId={order.id} table={table} />
+              <button
+                type="button"
+                onClick={() => openDetail?.(order.id)}
+                className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
+                title="주문 상세"
+              >
+                상세
+              </button>
+            </div>
           )}
         </div>
       )

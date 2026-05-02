@@ -73,6 +73,7 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
     enableRowSelection: true,
     meta: {
       openDetail: (id: string) => setDetailOrderId(id),
+      refresh: () => router.refresh(),
     },
   })
 

@@ -116,6 +116,8 @@ export interface OrderRow {
   /** 복사된 주문 여부 — true 이면 주문번호 아래 'copy' 배지 표시 */
   isCopy?: boolean
   items: {
+    id: string
+    marketplaceItemId?: string | null
     productName: string
     /** Phase 8 — product_name_mappings.display_name (null → fallback to productName) */
     displayName?: string | null

@@ -79,6 +79,13 @@ interface BulkTarget {
   mode: SourceMode
 }
 
+interface MappingComponentDraft {
+  sku: string
+  quantity: number
+  productName: string
+  optionName: string | null
+}
+
 const PRODUCT_MATCH_OPTIONS = [
   { value: 'all', label: '전체' },
   { value: 'matched', label: '품번매핑' },
@@ -208,7 +215,7 @@ export function OrderRowsBoard() {
     } finally {
       setLoading(false)
     }
-  }, [filters.searched, filters.from, filters.to, filters.productMatch, filters.optionMatch, filters.q, filters.page, filters.pageSize, filters.category, filters.orderStatus, filters.etc, selectedMarkets, pageSize])
+  }, [filters.searched, filters.from, filters.to, filters.productMatch, filters.optionMatch, filters.q, filters.page, selectedMarkets, pageSize])
 
   useEffect(() => { void reload() }, [reload])
 
@@ -372,8 +379,13 @@ export function OrderRowsBoard() {
   }
 
   // ---------- 인라인 패널 → 자체상품 선택 시 즉시 매핑 저장 ----------
-  async function submitBulkMapping(product: ProductSearchResult): Promise<void> {
+  async function submitBulkMapping(components: MappingComponentDraft[]): Promise<void> {
     if (!bulkTarget) return
+    const validComponents = components.filter((c) => c.sku.trim() && c.quantity > 0)
+    if (validComponents.length === 0) {
+      alert('재고관리코드를 1개 이상 선택하세요')
+      return
+    }
     const sources = bulkTarget.rows.map((r) => {
       const split = splitProductOption(r.marketplaceItemId)
       return {
@@ -384,16 +396,31 @@ export function OrderRowsBoard() {
         optionNameSnapshot: r.optionText || null,
       }
     })
+    const firstRow = bulkTarget.rows[0]
+    const firstComponent = validComponents[0]
+    const firstSource = sources[0]
+    const sourceKey = firstSource
+      ? `${firstSource.marketplaceId}-${firstSource.marketplaceProductId}${firstSource.marketplaceOptionId ? `-${firstSource.marketplaceOptionId}` : ''}`
+      : 'manual'
+    const code = `${firstComponent.sku}-${sourceKey}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100)
+    const setLabel = validComponents.length > 1
+      ? ` 외 ${validComponents.length - 1}개`
+      : firstComponent.quantity > 1
+        ? ` x${firstComponent.quantity}`
+        : ''
     const res = await fetch('/api/products/mapping-codes', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        code: product.internalSku,
-        name: product.name,
+        code,
+        name: firstRow?.productName || `${firstComponent.productName}${setLabel}`,
         note: null,
         isActive: true,
         sources,
-        components: [{ sku: product.internalSku, quantity: 1 }],
+        components: validComponents.map((component) => ({
+          sku: component.sku,
+          quantity: component.quantity,
+        })),
       }),
     })
     if (!res.ok) {
@@ -655,6 +682,8 @@ export function OrderRowsBoard() {
               <tr><td colSpan={13} className="py-6 text-center text-muted-foreground">조회 결과가 없습니다</td></tr>
             ) : rows.map((r) => {
               const split = splitProductOption(r.marketplaceItemId)
+              const canAddProductMapping = !r.hasProductMapping
+              const canAddOptionMapping = !r.hasOptionMapping && split.option
               const compsOrEmpty: (OrderRowComponent | null)[] = r.components.length > 0
                 ? r.components
                 : [null]
@@ -695,35 +724,41 @@ export function OrderRowsBoard() {
                         {r.totalAmount != null ? Number(r.totalAmount).toLocaleString('ko-KR') : '-'}
                       </td>
                       <td rowSpan={compsOrEmpty.length} className="border-r px-1.5 py-1 align-top">
-                        {r.mappingStatus === 'both' ? (
-                          <Badge className="bg-violet-100 text-violet-800 hover:bg-violet-100">매핑완료</Badge>
-                        ) : r.mappingStatus === 'option' ? (
-                          <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">단품매핑</Badge>
-                        ) : r.mappingStatus === 'product' ? (
-                          <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">품번매핑</Badge>
-                        ) : (
-                          <div className="space-y-1">
+                        <div className="space-y-1">
+                          {r.mappingStatus === 'both' ? (
+                            <Badge className="bg-violet-100 text-violet-800 hover:bg-violet-100">매핑완료</Badge>
+                          ) : r.mappingStatus === 'option' ? (
+                            <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">단품매핑</Badge>
+                          ) : r.mappingStatus === 'product' ? (
+                            <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">품번매핑</Badge>
+                          ) : (
                             <Badge variant="outline" className="text-muted-foreground">미매핑</Badge>
-                            <div className="flex gap-1">
-                              <button
-                                type="button"
-                                onClick={() => openMapping(r, 'product')}
-                                className="rounded border bg-background px-1.5 py-0.5 text-[10px] hover:bg-muted"
-                                title={`품번 ${split.product} 으로 매핑`}
-                              >
-                                + 품번
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => openMapping(r, 'option')}
-                                className="rounded border bg-background px-1.5 py-0.5 text-[10px] hover:bg-muted"
-                                title={`단품 ${r.marketplaceItemId} 만 매핑`}
-                              >
-                                + 단품
-                              </button>
+                          )}
+                          {(canAddProductMapping || canAddOptionMapping) && (
+                            <div className="flex flex-wrap gap-1">
+                              {canAddProductMapping && (
+                                <button
+                                  type="button"
+                                  onClick={() => openMapping(r, 'product')}
+                                  className="rounded border bg-background px-1.5 py-0.5 text-[10px] hover:bg-muted"
+                                  title={`품번 ${split.product} 으로 매핑`}
+                                >
+                                  + 품번
+                                </button>
+                              )}
+                              {canAddOptionMapping && (
+                                <button
+                                  type="button"
+                                  onClick={() => openMapping(r, 'option')}
+                                  className="rounded border bg-background px-1.5 py-0.5 text-[10px] hover:bg-muted"
+                                  title={`단품 ${r.marketplaceItemId} 만 매핑`}
+                                >
+                                  + 단품
+                                </button>
+                              )}
                             </div>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </>
                   )}
@@ -794,7 +829,7 @@ export function OrderRowsBoard() {
         <BulkMappingModal
           target={bulkTarget}
           onClose={() => setBulkTarget(null)}
-          onSelect={submitBulkMapping}
+          onSave={submitBulkMapping}
         />
       )}
     </div>
@@ -810,14 +845,15 @@ export function OrderRowsBoard() {
 function BulkMappingModal({
   target,
   onClose,
-  onSelect,
+  onSave,
 }: {
   target: BulkTarget
   onClose: () => void
-  onSelect: (p: ProductSearchResult) => Promise<void>
+  onSave: (components: MappingComponentDraft[]) => Promise<void>
 }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ProductSearchResult[]>([])
+  const [components, setComponents] = useState<MappingComponentDraft[]>([])
   const [loading, setLoading] = useState(false)
   const [searched, setSearched] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -866,10 +902,48 @@ function BulkMappingModal({
     void search(query)
   }
 
-  const handlePick = async (p: ProductSearchResult) => {
+  const addComponent = (p: ProductSearchResult) => {
+    setComponents((prev) => {
+      const existingIdx = prev.findIndex((component) => component.sku === p.internalSku)
+      if (existingIdx >= 0) {
+        return prev.map((component, idx) => (
+          idx === existingIdx
+            ? { ...component, quantity: component.quantity + 1 }
+            : component
+        ))
+      }
+      return [
+        ...prev,
+        {
+          sku: p.internalSku,
+          quantity: 1,
+          productName: p.name,
+          optionName: p.optionHint ?? p.optionName ?? null,
+        },
+      ]
+    })
+  }
+
+  const updateComponentQuantity = (idx: number, quantity: number) => {
+    setComponents((prev) => prev.map((component, componentIdx) => (
+      componentIdx === idx
+        ? { ...component, quantity: Math.max(1, quantity || 1) }
+        : component
+    )))
+  }
+
+  const removeComponent = (idx: number) => {
+    setComponents((prev) => prev.filter((_, componentIdx) => componentIdx !== idx))
+  }
+
+  const handleSave = async () => {
+    if (components.length === 0) {
+      alert('재고관리코드를 1개 이상 선택하세요')
+      return
+    }
     setSubmitting(true)
     try {
-      await onSelect(p)
+      await onSave(components)
     } finally {
       setSubmitting(false)
     }
@@ -898,7 +972,7 @@ function BulkMappingModal({
             <span className={`rounded border px-2 py-0.5 text-xs font-medium ${modeColor}`}>
               {modeLabel}
             </span>
-            <span className="font-medium">자체상품 검색하여 매핑 적용</span>
+            <span className="font-medium">재고관리코드로 매핑 적용</span>
             <span className="text-muted-foreground">
               (선택된 마켓상품 <strong className="tabular-nums">{target.rows.length}</strong>건)
             </span>
@@ -964,7 +1038,7 @@ function BulkMappingModal({
                 type="text"
                 value={query}
                 onChange={(e) => handleQueryChange(e.target.value)}
-                placeholder="품번코드 또는 상품명 검색"
+                placeholder="재고관리코드 또는 상품명 검색"
                 disabled={submitting}
                 className="flex-1 rounded border bg-background px-2 py-1 text-sm"
               />
@@ -975,17 +1049,63 @@ function BulkMappingModal({
             </div>
           </form>
 
-          <div className="max-h-80 overflow-auto">
+          <div className="border-b bg-amber-50/60 px-3 py-2">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-semibold text-amber-900">매핑할 재고 구성</span>
+              <span className="text-[11px] text-amber-800">
+                4ea는 수량 4, 세트는 SKU를 여러 개 추가
+              </span>
+            </div>
+            {components.length === 0 ? (
+              <div className="rounded border border-dashed border-amber-200 bg-white/60 px-3 py-2 text-xs text-amber-800">
+                아래 검색 결과에서 재고관리코드를 선택하세요.
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {components.map((component, idx) => (
+                  <div key={`${component.sku}-${idx}`} className="grid grid-cols-[1fr_72px_24px] items-center gap-2 rounded border bg-white px-2 py-1">
+                    <div className="min-w-0">
+                      <div className="truncate font-mono text-xs">{component.sku}</div>
+                      <div className="truncate text-[10px] text-muted-foreground">
+                        {component.productName}
+                        {component.optionName ? ` · ${component.optionName}` : ''}
+                      </div>
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      value={component.quantity}
+                      onChange={(e) => updateComponentQuantity(idx, parseInt(e.target.value, 10))}
+                      disabled={submitting}
+                      className="rounded border px-1.5 py-1 text-right text-xs tabular-nums"
+                      aria-label={`${component.sku} 구성 수량`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeComponent(idx)}
+                      disabled={submitting}
+                      className="text-muted-foreground hover:text-destructive disabled:opacity-40"
+                      aria-label="구성품 제거"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="max-h-72 overflow-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-[1] bg-muted/60">
                 <tr className="border-b">
                   <th className="w-10 px-2 py-1.5 text-center font-medium">No</th>
-                  <th className="px-2 py-1.5 text-left font-medium">품번코드</th>
+                  <th className="px-2 py-1.5 text-left font-medium">재고관리코드</th>
                   <th className="px-2 py-1.5 text-left font-medium">상품명 / 옵션</th>
                   <th className="px-2 py-1.5 text-right font-medium">판매가</th>
                   <th className="px-2 py-1.5 text-right font-medium">원가 / 이익률</th>
                   <th className="px-2 py-1.5 text-right font-medium">재고</th>
-                  <th className="w-16 px-2 py-1.5 text-center font-medium">선택</th>
+                  <th className="w-20 px-2 py-1.5 text-center font-medium">추가</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -998,7 +1118,7 @@ function BulkMappingModal({
                 ) : !searched ? (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-muted-foreground">
-                      품번코드 또는 상품명을 입력하고 검색하세요
+                    재고관리코드 또는 상품명을 입력하고 검색하세요
                     </td>
                   </tr>
                 ) : results.length === 0 ? (
@@ -1041,11 +1161,11 @@ function BulkMappingModal({
                         <td className="px-2 py-1.5 text-center">
                           <button
                             type="button"
-                            onClick={() => void handlePick(p)}
+                            onClick={() => addComponent(p)}
                             disabled={submitting}
                             className="rounded border bg-background px-2 py-0.5 text-[11px] hover:bg-blue-50 hover:border-blue-300 disabled:cursor-not-allowed disabled:opacity-40"
                           >
-                            {submitting ? '저장 중...' : '선택'}
+                            추가
                           </button>
                         </td>
                       </tr>
@@ -1056,6 +1176,20 @@ function BulkMappingModal({
             </table>
           </div>
         </div>
+        </div>
+
+        <div className="flex items-center justify-between border-t bg-muted/20 px-4 py-3">
+          <div className="text-xs text-muted-foreground">
+            주문 수량에 구성 수량이 곱해져 재고/출고 수량으로 전개됩니다.
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={submitting}>
+              취소
+            </Button>
+            <Button type="button" size="sm" onClick={() => void handleSave()} disabled={submitting || components.length === 0}>
+              {submitting ? '저장 중...' : `매핑 저장 (${components.length})`}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

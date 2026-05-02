@@ -162,6 +162,8 @@ export interface OrderListItem {
   /** Phase 8 — 이 주문에 마켓 문의가 1건 이상 존재하는가 */
   hasInquiries: boolean
   items: Array<{
+    id: string
+    marketplaceItemId: string | null
     productName: string
     /** Phase 8 — product_name_mappings.display_name (매핑 없을 때 null → fallback to productName) */
     displayName: string | null

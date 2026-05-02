@@ -1,9 +1,9 @@
 /**
- * 매핑관리 — 사방넷 주문서확정관리 스타일.
+ * 매핑관리 — 주문 수집상품을 재고관리코드 구성으로 연결.
  *
  * 상단 dense 필터 + 툴바 + 2그룹 헤더 테이블. 행 단위로 [+ 품번매핑]/[+ 단품매핑] 인라인 매핑.
- * 매핑코드 마스터(생성/편집/삭제/검색) 는 /products/mapping-codes 에서.
  */
+import Link from 'next/link'
 import { OrderRowsBoard } from './order-rows-board'
 
 export default function MappingPage() {
@@ -12,8 +12,9 @@ export default function MappingPage() {
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold">매핑관리</h1>
         <p className="text-sm text-muted-foreground">
-          쇼핑몰 수집 주문을 품번/단품 단위로 매핑합니다. 매핑코드 마스터는{' '}
-          <a href="/products/mapping-codes" className="underline">매핑코드 마스터</a> 에서.
+          신규 주문의 미매핑 상품을 재고관리코드와 수량으로 연결합니다. 세트상품은 재고관리코드를 여러 개 추가하세요.
+          기존 매핑 전체 관리는{' '}
+          <Link href="/products/mapping-codes" className="underline">재고 매핑 목록</Link> 에서 볼 수 있습니다.
         </p>
       </header>
       <OrderRowsBoard />

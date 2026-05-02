@@ -2,8 +2,9 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Search, X } from 'lucide-react'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
 import { LogisticsMessageDialog } from './logistics-message-dialog'
@@ -15,6 +16,35 @@ interface UserTemplate {
   id: string
   name: string
   carrierId: string | null
+}
+
+interface ProductSearchResult {
+  id: string
+  internalSku: string
+  name: string
+  warehouseLocation: string | null
+  basePrice: string | null
+  costPrice: string | null
+  optionName: string | null
+  optionHint: string | null
+  availableStock: number | null
+}
+
+interface MappingComponentDraft {
+  sku: string
+  quantity: number
+  productName: string
+  optionName: string | null
+}
+
+interface MappingTarget {
+  orderId: string
+  marketplaceId: string
+  marketplaceOrderId: string
+  marketplaceItemId: string
+  productName: string
+  optionText: string | null
+  quantity: number
 }
 
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
@@ -65,9 +95,11 @@ export function ShippingActions({
   stage,
   showMappingAction = false,
 }: ShippingActionsProps) {
+  const router = useRouter()
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
+  const [mappingDialogOpen, setMappingDialogOpen] = useState(false)
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
@@ -119,6 +151,22 @@ export function ShippingActions({
   const ordersForMapping = selectedOrders.length > 0 ? selectedOrders : allOrders
   const unmappedOrderCount = useMemo(() => {
     return ordersForMapping.filter((o) => o.mappingStatus !== 'mapped').length
+  }, [ordersForMapping])
+
+  const mappingTargets = useMemo<MappingTarget[]>(() => {
+    return ordersForMapping
+      .filter((order) => order.mappingStatus !== 'mapped')
+      .flatMap((order) => order.items
+        .filter((item) => item.marketplaceItemId)
+        .map((item) => ({
+          orderId: order.id,
+          marketplaceId: order.marketplaceId,
+          marketplaceOrderId: order.marketplaceOrderId,
+          marketplaceItemId: item.marketplaceItemId!,
+          productName: item.productName,
+          optionText: item.optionText,
+          quantity: item.quantity,
+        })))
   }, [ordersForMapping])
 
   // 선택된 양식으로 주문 일괄 다운로드 — 단일 Excel 파일
@@ -192,12 +240,27 @@ export function ShippingActions({
     <>
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
         {showMapping && (
-          <Link
-            href="/products/mapping"
-            className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
-          >
-            매핑관리로 이동 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
-          </Link>
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                if (mappingTargets.length === 0) {
+                  toast.info('미매핑 상품이 없습니다.')
+                  return
+                }
+                setMappingDialogOpen(true)
+              }}
+              className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
+            >
+              재고매핑 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
+            </button>
+            <Link
+              href="/products/mapping"
+              className="rounded-md border border-orange-200 bg-white px-3 py-1.5 text-sm font-medium text-orange-700 hover:bg-orange-50"
+            >
+              매핑관리
+            </Link>
+          </>
         )}
 
         {stage === 'confirm' && (
@@ -355,6 +418,314 @@ export function ShippingActions({
         onOpenChange={setLogisticsMsgOpen}
         selectedOrderIds={selectedOrderIds}
       />
+
+      <InventoryMappingDialog
+        open={mappingDialogOpen}
+        onOpenChange={setMappingDialogOpen}
+        targets={mappingTargets}
+        onSaved={() => router.refresh()}
+      />
     </>
+  )
+}
+
+function splitProductOption(itemId: string): { product: string; option: string } {
+  const idx = itemId.indexOf('-')
+  if (idx <= 0) return { product: itemId, option: '' }
+  return { product: itemId.slice(0, idx), option: itemId.slice(idx + 1) }
+}
+
+function InventoryMappingDialog({
+  open,
+  onOpenChange,
+  targets,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  targets: MappingTarget[]
+  onSaved: () => void
+}) {
+  const [selectedKey, setSelectedKey] = useState('')
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<ProductSearchResult[]>([])
+  const [components, setComponents] = useState<MappingComponentDraft[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const selectedTarget = useMemo(() => {
+    return targets.find((target) => `${target.orderId}:${target.marketplaceItemId}` === selectedKey) ?? targets[0] ?? null
+  }, [selectedKey, targets])
+
+  useEffect(() => {
+    if (!open) return
+    const first = targets[0]
+    setSelectedKey(first ? `${first.orderId}:${first.marketplaceItemId}` : '')
+    setQuery('')
+    setResults([])
+    setComponents([])
+  }, [open, targets])
+
+  async function searchProducts(q: string) {
+    if (!q.trim()) {
+      setResults([])
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&mode=option`)
+      if (!res.ok) {
+        setResults([])
+        return
+      }
+      const data = await res.json() as { results: ProductSearchResult[] }
+      setResults(data.results ?? [])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleQueryChange(value: string) {
+    setQuery(value)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => void searchProducts(value), 250)
+  }
+
+  function addComponent(product: ProductSearchResult) {
+    setComponents((prev) => {
+      const existingIdx = prev.findIndex((component) => component.sku === product.internalSku)
+      if (existingIdx >= 0) {
+        return prev.map((component, idx) => (
+          idx === existingIdx ? { ...component, quantity: component.quantity + 1 } : component
+        ))
+      }
+      return [
+        ...prev,
+        {
+          sku: product.internalSku,
+          quantity: 1,
+          productName: product.name,
+          optionName: product.optionHint ?? product.optionName ?? null,
+        },
+      ]
+    })
+  }
+
+  function updateQuantity(idx: number, quantity: number) {
+    setComponents((prev) => prev.map((component, componentIdx) => (
+      componentIdx === idx
+        ? { ...component, quantity: Math.max(1, quantity || 1) }
+        : component
+    )))
+  }
+
+  async function saveMapping() {
+    if (!selectedTarget) {
+      toast.error('매핑할 상품을 선택하세요.')
+      return
+    }
+    const validComponents = components.filter((component) => component.sku.trim() && component.quantity > 0)
+    if (validComponents.length === 0) {
+      toast.error('재고관리코드를 1개 이상 추가하세요.')
+      return
+    }
+
+    const split = splitProductOption(selectedTarget.marketplaceItemId)
+    const sourceKey = `${selectedTarget.marketplaceId}-${split.product}${split.option ? `-${split.option}` : ''}`
+    const code = `${validComponents[0].sku}-${sourceKey}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100)
+
+    setSaving(true)
+    try {
+      const res = await fetch('/api/products/mapping-codes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          code,
+          name: selectedTarget.productName,
+          note: '주문관리 신규 탭에서 생성',
+          isActive: true,
+          sources: [{
+            marketplaceId: selectedTarget.marketplaceId,
+            marketplaceProductId: split.product,
+            marketplaceOptionId: split.option,
+            productNameSnapshot: selectedTarget.productName,
+            optionNameSnapshot: selectedTarget.optionText,
+          }],
+          components: validComponents.map((component) => ({
+            sku: component.sku,
+            quantity: component.quantity,
+          })),
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? '매핑 저장 실패')
+        return
+      }
+      toast.success('재고매핑 저장 완료')
+      onOpenChange(false)
+      onSaved()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => onOpenChange(false)}>
+      <div
+        className="grid max-h-[88vh] w-full max-w-5xl grid-rows-[auto_1fr_auto] overflow-hidden rounded-lg bg-background shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b px-5 py-3">
+          <div>
+            <h2 className="text-base font-semibold">신규 주문 재고매핑</h2>
+            <p className="text-xs text-muted-foreground">4ea는 수량 4, 세트상품은 재고관리코드를 여러 개 추가하세요.</p>
+          </div>
+          <button type="button" onClick={() => onOpenChange(false)} className="text-muted-foreground hover:text-foreground" aria-label="닫기">
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 grid-cols-1 gap-3 overflow-hidden p-4 lg:grid-cols-[320px_1fr]">
+          <div className="min-h-0 rounded-md border">
+            <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">미매핑 상품</div>
+            <div className="max-h-full overflow-auto">
+              {targets.map((target) => {
+                const key = `${target.orderId}:${target.marketplaceItemId}`
+                const active = selectedKey === key
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedKey(key)
+                      setComponents([])
+                    }}
+                    className={`block w-full border-b px-3 py-2 text-left text-xs hover:bg-muted/50 ${active ? 'bg-orange-50' : ''}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px]">{target.marketplaceId}</span>
+                      <span className="font-mono text-[10px] text-muted-foreground">{target.marketplaceOrderId}</span>
+                    </div>
+                    <div className="mt-1 truncate font-medium">{target.productName}</div>
+                    {target.optionText && <div className="truncate text-[10px] text-muted-foreground">{target.optionText}</div>}
+                    <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{target.marketplaceItemId}</div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="min-h-0 rounded-md border">
+            <form
+              className="border-b bg-muted/30 px-3 py-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void searchProducts(query)
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <input
+                  value={query}
+                  onChange={(event) => handleQueryChange(event.target.value)}
+                  placeholder="재고관리코드 또는 상품명 검색"
+                  className="flex-1 rounded border bg-background px-3 py-1.5 text-sm"
+                />
+                <button type="submit" className="inline-flex items-center gap-1 rounded border bg-background px-3 py-1.5 text-sm hover:bg-muted">
+                  <Search className="size-3.5" />
+                  검색
+                </button>
+              </div>
+            </form>
+
+            <div className="border-b bg-amber-50/60 px-3 py-2">
+              <div className="mb-1 text-xs font-semibold text-amber-900">매핑할 재고 구성</div>
+              {components.length === 0 ? (
+                <div className="rounded border border-dashed border-amber-200 bg-white/70 px-3 py-2 text-xs text-amber-800">
+                  아래 검색 결과에서 재고관리코드를 추가하세요.
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {components.map((component, idx) => (
+                    <div key={`${component.sku}-${idx}`} className="grid grid-cols-[1fr_72px_24px] items-center gap-2 rounded border bg-white px-2 py-1">
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-xs">{component.sku}</div>
+                        <div className="truncate text-[10px] text-muted-foreground">
+                          {component.productName}{component.optionName ? ` · ${component.optionName}` : ''}
+                        </div>
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        value={component.quantity}
+                        onChange={(event) => updateQuantity(idx, parseInt(event.target.value, 10))}
+                        className="rounded border px-1.5 py-1 text-right text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setComponents((prev) => prev.filter((_, componentIdx) => componentIdx !== idx))}
+                        className="text-muted-foreground hover:text-destructive"
+                        aria-label="구성품 제거"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="max-h-[330px] overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-muted/60">
+                  <tr className="border-b">
+                    <th className="px-2 py-2 text-left font-medium">재고관리코드</th>
+                    <th className="px-2 py-2 text-left font-medium">상품명 / 옵션</th>
+                    <th className="px-2 py-2 text-right font-medium">재고</th>
+                    <th className="w-16 px-2 py-2 text-center font-medium">추가</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {loading ? (
+                    <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">검색 중...</td></tr>
+                  ) : results.length === 0 ? (
+                    <tr><td colSpan={4} className="py-8 text-center text-muted-foreground">재고관리코드를 검색하세요.</td></tr>
+                  ) : results.map((product) => (
+                    <tr key={product.id} className="hover:bg-muted/40">
+                      <td className="px-2 py-1.5 font-mono">{product.internalSku}</td>
+                      <td className="px-2 py-1.5">
+                        <div className="truncate">{product.name}</div>
+                        {product.optionHint && <div className="truncate text-[10px] text-muted-foreground">{product.optionHint}</div>}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums">{product.availableStock ?? '-'}</td>
+                      <td className="px-2 py-1.5 text-center">
+                        <button type="button" onClick={() => addComponent(product)} className="rounded border px-2 py-0.5 hover:bg-blue-50">
+                          추가
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border-t bg-muted/20 px-5 py-3">
+          <span className="text-xs text-muted-foreground">저장하면 같은 마켓상품코드는 다음 신규 주문부터 자동 매핑됩니다.</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => onOpenChange(false)} className="rounded border px-3 py-1.5 text-sm hover:bg-muted" disabled={saving}>
+              취소
+            </button>
+            <button type="button" onClick={() => void saveMapping()} className="rounded bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-50" disabled={saving || components.length === 0}>
+              {saving ? '저장 중...' : '재고매핑 저장'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }

@@ -29,6 +29,7 @@ const credentialLabels: Record<string, string> = {
   seller_id: '셀러 ID',
   admin_app_key: '연동대행사 Admin 키',
   seller_app_key: '판매자 API 인증키',
+  vendor_password: '공급사 PW',
 }
 
 interface ConnectionRowProps {

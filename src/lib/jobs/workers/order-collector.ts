@@ -92,8 +92,8 @@ export function createAdapter(
       })
     case 'ownerclan':
       return new OwnerclanAdapter({
-        username: credentials.username ?? credentials.vendor_id ?? credentials.seller_id ?? '',
-        password: credentials.password ?? credentials.vendor_password ?? credentials.api_key ?? '',
+        vendor_id: credentials.vendor_id ?? credentials.username ?? credentials.seller_id ?? '',
+        vendor_password: credentials.vendor_password ?? credentials.password ?? credentials.api_key ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

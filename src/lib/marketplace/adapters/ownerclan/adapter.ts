@@ -22,7 +22,7 @@ const OWNERCLAN_CONFIG: MarketplaceConfig = {
   name: '오너클랜',
   authType: 'api_key',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['username', 'password'],
+  requiredCredentials: ['vendor_id', 'vendor_password'],
 }
 
 const ORDER_FIELDS = `
@@ -154,11 +154,11 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
   private readonly client: ReturnType<typeof createOwnerclanClient>
 
-  constructor(credentials: { username: string; password: string; api_key?: string; seller_id?: string; vendor_id?: string; vendor_password?: string }) {
+  constructor(credentials: { username?: string; password?: string; api_key?: string; seller_id?: string; vendor_id?: string; vendor_password?: string }) {
     this.client = createOwnerclanClient({
-      username: credentials.username || credentials.seller_id || credentials.vendor_id || '',
-      password: credentials.password || credentials.api_key || credentials.vendor_password || '',
-      userType: 'seller',
+      username: credentials.vendor_id || credentials.username || credentials.seller_id || '',
+      password: credentials.vendor_password || credentials.password || credentials.api_key || '',
+      userType: 'vendor',
     })
   }
 

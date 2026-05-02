@@ -2,6 +2,8 @@ import ky, { HTTPError, type KyInstance } from 'ky'
 
 const OWNERCLAN_GRAPHQL_URL = 'https://api.ownerclan.com/v1/graphql'
 const OWNERCLAN_AUTH_URL = 'https://auth.ownerclan.com/auth'
+const OWNERCLAN_GRAPHQL_INTERVAL_MS = 2_500
+const OWNERCLAN_RATE_LIMIT_BACKOFF_MS = 15_000
 
 interface OwnerclanAuthResponse {
   token?: string
@@ -17,6 +19,7 @@ export interface OwnerclanGraphqlResponse<T> {
 
 export class OwnerclanClient {
   private token: string | null = null
+  private nextGraphqlRequestAt = 0
 
   constructor(
     private readonly credentials: { username: string; password: string; userType?: 'seller' | 'vendor' },
@@ -24,7 +27,7 @@ export class OwnerclanClient {
       timeout: 30_000,
       retry: {
         limit: 2,
-        statusCodes: [408, 429, 500, 502, 503, 504],
+        statusCodes: [408, 500, 502, 503, 504],
       },
     }),
   ) {}
@@ -52,37 +55,18 @@ export class OwnerclanClient {
   }
 
   async query<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
-    const token = await this.authenticate()
-    let response: OwnerclanGraphqlResponse<T>
-    try {
-      response = await this.http.post(OWNERCLAN_GRAPHQL_URL, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        json: {
-          query,
-          variables,
-        },
-      }).json<OwnerclanGraphqlResponse<T>>()
-    } catch (error) {
-      throw await enrichHttpError(error)
-    }
-
-    if (response.errors && response.errors.length > 0) {
-      throw new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
-    }
-
-    if (!response.data) {
-      throw new Error('Ownerclan GraphQL response did not include data')
-    }
-
-    return response.data
+    return this.graphqlRequest<T>(query, variables)
   }
 
   async mutate<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    return this.graphqlRequest<T>(query, variables)
+  }
+
+  private async graphqlRequest<T>(query: string, variables?: Record<string, unknown>, attempt = 0): Promise<T> {
     const token = await this.authenticate()
     let response: OwnerclanGraphqlResponse<T>
     try {
+      await this.waitForGraphqlSlot()
       response = await this.http.post(OWNERCLAN_GRAPHQL_URL, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -93,11 +77,21 @@ export class OwnerclanClient {
         },
       }).json<OwnerclanGraphqlResponse<T>>()
     } catch (error) {
-      throw await enrichHttpError(error)
+      const enrichedError = await enrichHttpError(error)
+      if (attempt === 0 && isRateLimitError(enrichedError)) {
+        await sleep(OWNERCLAN_RATE_LIMIT_BACKOFF_MS)
+        return this.graphqlRequest<T>(query, variables, attempt + 1)
+      }
+      throw enrichedError
     }
 
     if (response.errors && response.errors.length > 0) {
-      throw new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
+      const error = new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
+      if (attempt === 0 && isRateLimitError(error)) {
+        await sleep(OWNERCLAN_RATE_LIMIT_BACKOFF_MS)
+        return this.graphqlRequest<T>(query, variables, attempt + 1)
+      }
+      throw error
     }
 
     if (!response.data) {
@@ -106,6 +100,22 @@ export class OwnerclanClient {
 
     return response.data
   }
+
+  private async waitForGraphqlSlot(): Promise<void> {
+    const now = Date.now()
+    const waitMs = Math.max(0, this.nextGraphqlRequestAt - now)
+    this.nextGraphqlRequestAt = Math.max(now, this.nextGraphqlRequestAt) + OWNERCLAN_GRAPHQL_INTERVAL_MS
+    if (waitMs > 0) await sleep(waitMs)
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isRateLimitError(error: Error): boolean {
+  const message = error.message.toLowerCase()
+  return message.includes('too many requests') || message.includes('429')
 }
 
 async function enrichHttpError(error: unknown): Promise<Error> {

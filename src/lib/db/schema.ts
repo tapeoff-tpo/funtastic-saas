@@ -393,6 +393,7 @@ export const inventory = pgTable(
     totalStock: integer('total_stock').notNull().default(0),
     reservedStock: integer('reserved_stock').notNull().default(0),
     availableStock: integer('available_stock').notNull().default(0),
+    defectiveStock: integer('defective_stock').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

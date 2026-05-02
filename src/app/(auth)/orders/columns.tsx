@@ -46,27 +46,63 @@ function CopyOrderButton({ orderId }: { orderId: string }) {
   )
 }
 
-function ClaimCreateButton({ orderId, table }: { orderId: string; table: Table<OrderRow> }) {
+const CLAIM_REASON_OPTIONS = [
+  { value: 'change_of_mind', label: '변심' },
+  { value: 'wrong_delivery', label: '오배송' },
+  { value: 'defective', label: '불량' },
+  { value: 'other', label: '기타사유' },
+] as const
+
+type ClaimReasonCode = (typeof CLAIM_REASON_OPTIONS)[number]['value']
+
+function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<OrderRow> }) {
   const [open, setOpen] = useState(false)
+  const [modalType, setModalType] = useState<'return' | 'exchange' | null>(null)
+  const [reasonCode, setReasonCode] = useState<ClaimReasonCode>('change_of_mind')
+  const [reasonDetail, setReasonDetail] = useState('')
+  const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [pending, startTransition] = useTransition()
   const refresh = getRefresh(table)
 
-  function createClaim(claimType: 'return' | 'exchange') {
-    const label = claimType === 'return' ? '반품' : '교환'
-    const reason = window.prompt(`${label} 접수 사유를 입력하세요.`, '')
-    if (reason === null) return
+  function openClaimModal(claimType: 'return' | 'exchange') {
+    setModalType(claimType)
+    setReasonCode('change_of_mind')
+    setReasonDetail('')
+    setQuantities(Object.fromEntries(order.items.map((item) => [item.id, item.quantity])))
     setOpen(false)
+  }
+
+  function createClaim() {
+    if (!modalType) return
+    const claimType = modalType
+    const label = claimType === 'return' ? '반품' : '교환'
+    const claimItems = order.items.map((item) => ({
+      orderItemId: item.id,
+      quantity: Number(quantities[item.id] ?? 0),
+    })).filter((item) => item.quantity > 0)
+    if (claimItems.length === 0) {
+      window.alert('접수 수량을 1개 이상 입력해주세요.')
+      return
+    }
+
     startTransition(async () => {
       const res = await fetch('/api/orders/claims', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ orderId, claimType, reason }),
+        body: JSON.stringify({
+          orderId: order.id,
+          claimType,
+          reasonCode,
+          reasonDetail,
+          quantities: claimItems,
+        }),
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({})) as { error?: string }
         window.alert(data.error ?? `${label} 접수 실패`)
         return
       }
+      setModalType(null)
       refresh?.()
     })
   }
@@ -83,12 +119,77 @@ function ClaimCreateButton({ orderId, table }: { orderId: string; table: Table<O
       </button>
       {open && (
         <div className="absolute left-0 top-full z-20 mt-1 min-w-[92px] rounded-md border bg-white py-1 shadow-lg">
-          <button type="button" onClick={() => createClaim('return')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
+          <button type="button" onClick={() => openClaimModal('return')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
             반품 접수
           </button>
-          <button type="button" onClick={() => createClaim('exchange')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
+          <button type="button" onClick={() => openClaimModal('exchange')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
             교환 접수
           </button>
+        </div>
+      )}
+      {modalType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-xl">
+            <div className="mb-3">
+              <h3 className="text-base font-semibold">{modalType === 'return' ? '반품 접수' : '교환 접수'}</h3>
+            </div>
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              {CLAIM_REASON_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setReasonCode(option.value)}
+                  className={`rounded border px-3 py-2 text-sm ${reasonCode === option.value ? 'border-blue-500 bg-blue-50 text-blue-700' : ''}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <textarea
+              value={reasonDetail}
+              onChange={(event) => setReasonDetail(event.target.value)}
+              placeholder="상세 사유"
+              className="mb-3 h-20 w-full resize-none rounded border px-3 py-2 text-sm"
+            />
+            <div className="max-h-64 overflow-auto rounded border">
+              {order.items.map((item) => (
+                <div key={item.id} className="grid grid-cols-[1fr_88px] items-center gap-2 border-b p-2 last:border-b-0">
+                  <div className="min-w-0">
+                    <div className="truncate text-xs font-medium" title={item.displayName ?? item.productName}>
+                      {item.displayName ?? item.productName}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      주문수량 {item.quantity}개
+                    </div>
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    max={item.quantity}
+                    value={quantities[item.id] ?? 0}
+                    onChange={(event) => {
+                      const next = Math.min(item.quantity, Math.max(0, Number(event.target.value)))
+                      setQuantities((prev) => ({ ...prev, [item.id]: next }))
+                    }}
+                    className="h-8 rounded border px-2 text-right text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setModalType(null)} className="rounded border px-3 py-1.5 text-sm">
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={createClaim}
+                disabled={pending}
+                className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {pending ? '접수중' : '접수'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -401,7 +502,7 @@ export const columns: ColumnDef<OrderRow>[] = [
             />
           ) : (
             <div className="flex items-center gap-1">
-              <ClaimCreateButton orderId={order.id} table={table} />
+              <ClaimCreateButton order={order} table={table} />
               <button
                 type="button"
                 onClick={() => openDetail?.(order.id)}

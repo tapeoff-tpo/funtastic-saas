@@ -10,8 +10,8 @@
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, orderItems, orders, mappingSources, mappingComponents } from '@/lib/db/schema'
-import { eq, and, isNotNull } from 'drizzle-orm'
+import { claims, inventory, inventoryHistory, orderItems, orders, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { eq, and } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
@@ -176,7 +176,7 @@ export async function setStock(
  *
  * 같은 SKU 가 여러 번 등장할 수 있으므로 합산해서 한 번에 차감.
  */
-async function expandOrderItemsForDeduction(
+export async function expandOrderItemsForDeduction(
   tx: DrizzleTransaction,
   userId: string,
   orderId: string,
@@ -324,5 +324,110 @@ export async function restoreForClaim(
         console.warn(`[inventory] restoreForClaim: SKU '${item.sku}' not found for order ${orderId}, skipping`)
       }
     }
+  })
+}
+
+export async function getReturnableItemsForClaim(
+  userId: string,
+  claimId: string,
+): Promise<Array<{ sku: string; quantity: number }>> {
+  return db.transaction(async (tx) => {
+    const [claim] = await tx
+      .select({ orderId: claims.orderId })
+      .from(claims)
+      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), eq(claims.claimType, 'return')))
+      .limit(1)
+
+    if (!claim) return []
+    return expandOrderItemsForDeduction(tx, userId, claim.orderId)
+  })
+}
+
+export async function completeReturnClaim(
+  userId: string,
+  claimId: string,
+  disposition: 'available' | 'defective',
+  quantities: Array<{ sku: string; quantity: number }>,
+): Promise<ActionResult> {
+  return db.transaction(async (tx) => {
+    const [claim] = await tx
+      .select({
+        id: claims.id,
+        orderId: claims.orderId,
+        claimStatus: claims.claimStatus,
+      })
+      .from(claims)
+      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), eq(claims.claimType, 'return')))
+      .for('update')
+      .limit(1)
+
+    if (!claim) return { success: false, error: '반품 클레임을 찾을 수 없습니다.' }
+    if (claim.claimStatus === 'completed') return { success: false, error: '이미 반품완료 처리된 건입니다.' }
+
+    const maxItems = await expandOrderItemsForDeduction(tx, userId, claim.orderId)
+    const maxBySku = new Map(maxItems.map((item) => [item.sku, item.quantity]))
+    const requested = new Map<string, number>()
+
+    for (const item of quantities) {
+      const sku = item.sku?.trim()
+      const quantity = Number(item.quantity)
+      if (!sku || !Number.isInteger(quantity) || quantity < 0) {
+        return { success: false, error: '반품 수량이 올바르지 않습니다.' }
+      }
+      requested.set(sku, (requested.get(sku) ?? 0) + quantity)
+    }
+
+    for (const [sku, quantity] of requested) {
+      const max = maxBySku.get(sku)
+      if (max == null) return { success: false, error: `반품 대상 SKU가 아닙니다: ${sku}` }
+      if (quantity > max) return { success: false, error: `${sku} 수량은 최대 ${max}개까지 처리할 수 있습니다.` }
+      if (quantity === 0) continue
+
+      const [record] = await tx
+        .select()
+        .from(inventory)
+        .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku)))
+        .for('update')
+
+      if (!record) {
+        return { success: false, error: `재고관리 SKU가 없습니다: ${sku}` }
+      }
+
+      const previousTotal = record.totalStock
+      const newTotal = previousTotal + quantity
+      const patch = disposition === 'available'
+        ? {
+            totalStock: newTotal,
+            availableStock: record.availableStock + quantity,
+            updatedAt: new Date(),
+          }
+        : {
+            totalStock: newTotal,
+            defectiveStock: record.defectiveStock + quantity,
+            updatedAt: new Date(),
+          }
+
+      await tx.update(inventory).set(patch).where(eq(inventory.id, record.id))
+      await tx.insert(inventoryHistory).values({
+        inventoryId: record.id,
+        userId,
+        adjustmentReason: disposition === 'available' ? 'return' : 'defective',
+        delta: quantity,
+        previousTotal,
+        newTotal,
+        note: disposition === 'available' ? '반품완료 가용재고 입고' : '반품완료 불용재고 입고',
+        orderId: claim.orderId,
+      })
+    }
+
+    await tx
+      .update(claims)
+      .set({
+        claimStatus: 'completed',
+        updatedAt: new Date(),
+      })
+      .where(eq(claims.id, claim.id))
+
+    return { success: true }
   })
 }

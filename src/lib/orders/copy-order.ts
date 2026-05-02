@@ -8,6 +8,7 @@ import { db } from '@/lib/db'
 import { orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { generateInternalNo } from './internal-no'
+import type { OrderStatus } from './types'
 
 export interface CopyOrderResult {
   success: boolean
@@ -15,7 +16,18 @@ export interface CopyOrderResult {
   error?: string
 }
 
-export async function copyOrder(orderId: string, userId: string): Promise<CopyOrderResult> {
+interface CopyOrderOptions {
+  status?: OrderStatus
+  logisticsMessage?: string | null
+  rawData?: Record<string, unknown> | null
+  itemQuantities?: Array<{ orderItemId: string; quantity: number }>
+}
+
+export async function copyOrder(
+  orderId: string,
+  userId: string,
+  options: CopyOrderOptions = {},
+): Promise<CopyOrderResult> {
   // 원본 주문 — userId 스코프로 권한 검증 겸용
   const [src] = await db
     .select()
@@ -25,6 +37,19 @@ export async function copyOrder(orderId: string, userId: string): Promise<CopyOr
   if (!src) return { success: false, error: '원본 주문을 찾을 수 없습니다.' }
 
   const srcItems = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId))
+  const quantityByItemId = new Map(
+    options.itemQuantities
+      ?.map((item) => [item.orderItemId, Math.max(0, Math.floor(item.quantity))] as const)
+      .filter(([, quantity]) => quantity > 0) ?? [],
+  )
+  const itemsToCopy = quantityByItemId.size > 0
+    ? srcItems
+        .map((it) => ({ ...it, quantity: Math.min(it.quantity, quantityByItemId.get(it.id) ?? 0) }))
+        .filter((it) => it.quantity > 0)
+    : srcItems
+  if (quantityByItemId.size > 0 && itemsToCopy.length === 0) {
+    return { success: false, error: '복사할 접수 수량이 없습니다.' }
+  }
 
   const [inserted] = await db
     .insert(orders)
@@ -34,20 +59,23 @@ export async function copyOrder(orderId: string, userId: string): Promise<CopyOr
       connectionId: src.connectionId,
       marketplaceId: src.marketplaceId,
       marketplaceOrderId: src.marketplaceOrderId,
-      status: 'new',
+      status: options.status ?? 'new',
       previousStatus: null,
       buyerName: src.buyerName,
       buyerPhone: src.buyerPhone,
+      buyerPhone2: src.buyerPhone2,
       recipientName: src.recipientName,
       recipientPhone: src.recipientPhone,
+      recipientPhone2: src.recipientPhone2,
       shippingAddress: src.shippingAddress,
       orderedAt: src.orderedAt,
       totalAmount: src.totalAmount,
       isHeld: false,
       holdReason: null,
       heldAt: null,
-      logisticsMessage: src.logisticsMessage,
-      rawData: src.rawData,
+      logisticsMessage: options.logisticsMessage ?? src.logisticsMessage,
+      deliveryMessage: src.deliveryMessage,
+      rawData: options.rawData ?? src.rawData,
       marketplaceStatus: src.marketplaceStatus,
       collectedAt: src.collectedAt,
       shippingType: src.shippingType,
@@ -58,9 +86,9 @@ export async function copyOrder(orderId: string, userId: string): Promise<CopyOr
 
   if (!inserted) return { success: false, error: '복사 실패 (insert returned no row)' }
 
-  if (srcItems.length > 0) {
+  if (itemsToCopy.length > 0) {
     await db.insert(orderItems).values(
-      srcItems.map((it) => ({
+      itemsToCopy.map((it) => ({
         orderId: inserted.id,
         marketplaceItemId: it.marketplaceItemId,
         productName: it.productName,

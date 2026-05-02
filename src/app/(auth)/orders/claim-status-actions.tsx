@@ -49,6 +49,10 @@ const NEXT_STATES: Record<ClaimStatus, ClaimStatus[]> = {
 export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: Props) {
   const router = useRouter()
   const [pendingStatus, setPendingStatus] = useState<ClaimStatus | null>(null)
+  const [returnItems, setReturnItems] = useState<Array<{ sku: string; quantity: number }> | null>(null)
+  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({})
+  const [returnDisposition, setReturnDisposition] = useState<'available' | 'defective'>('available')
+  const [returnModalOpen, setReturnModalOpen] = useState(false)
   const [, startTransition] = useTransition()
 
   const nextStates = NEXT_STATES[claimStatus]
@@ -70,6 +74,63 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
         router.refresh()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '상태 변경 실패')
+      } finally {
+        setPendingStatus(null)
+      }
+    })
+  }
+
+  function openReturnComplete() {
+    setPendingStatus('completed')
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/claims/${claimId}`)
+        if (!res.ok) {
+          const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+          throw new Error(error ?? '반품 상품 조회 실패')
+        }
+        const data = await res.json() as { items?: Array<{ sku: string; quantity: number }> }
+        const items = data.items ?? []
+        setReturnItems(items)
+        setReturnQuantities(Object.fromEntries(items.map((item) => [item.sku, item.quantity])))
+        setReturnDisposition('available')
+        setReturnModalOpen(true)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : '반품 상품 조회 실패')
+      } finally {
+        setPendingStatus(null)
+      }
+    })
+  }
+
+  function completeReturn() {
+    const items = returnItems ?? []
+    setPendingStatus('completed')
+    startTransition(async () => {
+      try {
+        const res = await fetch(`/api/claims/${claimId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            claimStatus: 'completed',
+            returnCompletion: {
+              disposition: returnDisposition,
+              quantities: items.map((item) => ({
+                sku: item.sku,
+                quantity: Number(returnQuantities[item.sku] ?? 0),
+              })),
+            },
+          }),
+        })
+        if (!res.ok) {
+          const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+          throw new Error(error ?? '반품완료 실패')
+        }
+        toast.success('반품완료 처리됨')
+        setReturnModalOpen(false)
+        router.refresh()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : '반품완료 실패')
       } finally {
         setPendingStatus(null)
       }
@@ -108,6 +169,83 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
               → {STATUS_LABELS[next]}
             </button>
           ))}
+          {claimType === 'return' && claimStatus !== 'completed' && (
+            <button
+              type="button"
+              onClick={openReturnComplete}
+              disabled={pendingStatus !== null}
+              className="rounded border border-green-300 px-1.5 py-0.5 text-[10px] font-medium text-green-700 transition-colors hover:bg-green-50 disabled:opacity-50"
+            >
+              반품완료
+            </button>
+          )}
+        </div>
+      )}
+      {returnModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
+            <div className="mb-3">
+              <h3 className="text-base font-semibold">반품완료 처리</h3>
+            </div>
+            <div className="mb-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setReturnDisposition('available')}
+                className={`rounded border px-3 py-1 text-sm ${returnDisposition === 'available' ? 'border-green-500 bg-green-50 text-green-700' : ''}`}
+              >
+                가용
+              </button>
+              <button
+                type="button"
+                onClick={() => setReturnDisposition('defective')}
+                className={`rounded border px-3 py-1 text-sm ${returnDisposition === 'defective' ? 'border-red-500 bg-red-50 text-red-700' : ''}`}
+              >
+                불용
+              </button>
+            </div>
+            <div className="max-h-64 overflow-auto rounded border">
+              {(returnItems ?? []).length === 0 ? (
+                <div className="p-3 text-sm text-muted-foreground">반품 처리할 매핑 상품이 없습니다.</div>
+              ) : (
+                (returnItems ?? []).map((item) => (
+                  <div key={item.sku} className="grid grid-cols-[1fr_88px] items-center gap-2 border-b p-2 last:border-b-0">
+                    <div>
+                      <div className="font-mono text-xs">{item.sku}</div>
+                      <div className="text-[11px] text-muted-foreground">최대 {item.quantity}개</div>
+                    </div>
+                    <input
+                      type="number"
+                      min={0}
+                      max={item.quantity}
+                      value={returnQuantities[item.sku] ?? 0}
+                      onChange={(event) => setReturnQuantities((prev) => ({
+                        ...prev,
+                        [item.sku]: Number(event.target.value),
+                      }))}
+                      className="h-8 rounded border px-2 text-right text-sm"
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setReturnModalOpen(false)}
+                className="rounded border px-3 py-1.5 text-sm"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={completeReturn}
+                disabled={pendingStatus !== null || (returnItems ?? []).length === 0}
+                className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                완료
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

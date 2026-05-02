@@ -240,14 +240,13 @@ export async function collectOrdersForConnection(params: {
     // calendar dates inclusively, so keep its manual range safely inside.
     const now = Date.now()
     const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver', 'ownerclan'])
-    const lookbackLabel = jobType === 'manual-order-collection' && marketplaceId === '10x10'
+    const sixDayManualMarketplaces = new Set(['10x10', 'cafe24', 'ownerclan'])
+    const lookbackLabel = jobType === 'manual-order-collection' && sixDayManualMarketplaces.has(marketplaceId)
       ? '6일'
-      : jobType === 'manual-order-collection' && marketplaceId === 'cafe24'
-        ? '6일'
       : jobType === 'manual-order-collection' && !extendedManualMarketplaces.has(marketplaceId)
       ? '1일'
       : '7일'
-    const lookbackMs = marketplaceId === '10x10' || marketplaceId === 'cafe24'
+    const lookbackMs = sixDayManualMarketplaces.has(marketplaceId)
       ? 6 * 24 * 60 * 60 * 1000
       : lookbackLabel === '1일'
         ? 1 * 24 * 60 * 60 * 1000

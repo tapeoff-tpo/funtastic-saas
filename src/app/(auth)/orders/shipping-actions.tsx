@@ -4,10 +4,11 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { ChevronDown, Search, X } from 'lucide-react'
+import { ChevronDown, Search, Settings, X } from 'lucide-react'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
 import { LogisticsMessageDialog } from './logistics-message-dialog'
+import { GiftRulesDialog } from './gift-rules-dialog'
 import { bulkCombineByContactAction } from './combined-actions'
 import { forceBulkChangeStatusAction } from './actions'
 import type { OrderRow } from './columns'
@@ -102,8 +103,10 @@ export function ShippingActions({
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false)
+  const [giftRulesOpen, setGiftRulesOpen] = useState(false)
   const [applyingMappings, setApplyingMappings] = useState(false)
   const [splittingSets, setSplittingSets] = useState(false)
+  const [applyingGifts, setApplyingGifts] = useState(false)
   const [confirmingMapped, setConfirmingMapped] = useState(false)
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
@@ -327,6 +330,36 @@ export function ShippingActions({
     }
   }
 
+  const handleApplyGifts = async () => {
+    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((order) => order.id)
+    if (scope.length === 0) {
+      toast.error('사은품을 적용할 주문이 없습니다.')
+      return
+    }
+
+    setApplyingGifts(true)
+    try {
+      const res = await fetch('/api/orders/apply-gifts', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderIds: scope }),
+      })
+      const data = await res.json().catch(() => ({})) as { applied?: number; message?: string; error?: string }
+      if (!res.ok) {
+        toast.error(data.error ?? '사은품 적용 실패')
+        return
+      }
+      if ((data.applied ?? 0) === 0) {
+        toast.info(data.message ?? '적용할 사은품이 없습니다.')
+      } else {
+        toast.success(`사은품 ${data.applied}건 추가`)
+      }
+      router.refresh()
+    } finally {
+      setApplyingGifts(false)
+    }
+  }
+
   // Determine which action groups to show based on stage
   const showMapping = showMappingAction || stage === 'mapping'
   const hideFulfillmentActions = showMappingAction
@@ -389,6 +422,26 @@ export function ShippingActions({
                 ? '확정 중...'
                 : `확정${existingMappedOrders.length > 0 ? ` (${existingMappedOrders.length})` : ''}`}
             </button>
+            <div className="inline-flex">
+              <button
+                type="button"
+                onClick={() => void handleApplyGifts()}
+                disabled={applyingGifts || allOrders.length === 0}
+                className="rounded-l-md border border-pink-200 bg-white px-3 py-1.5 text-sm font-medium text-pink-700 hover:bg-pink-50 disabled:cursor-not-allowed disabled:opacity-50"
+                title={hasSelection ? '선택한 신규 주문에 사은품 규칙 적용' : '현재 페이지 신규 주문에 사은품 규칙 적용'}
+              >
+                {applyingGifts ? '적용 중...' : '사은품세팅'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setGiftRulesOpen(true)}
+                className="flex items-center justify-center rounded-r-md border border-l-0 border-pink-200 bg-white px-2.5 py-1.5 text-pink-700 hover:bg-pink-50"
+                title="사은품 규칙 설정"
+                aria-label="사은품 규칙 설정"
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+            </div>
           </>
         )}
 
@@ -555,6 +608,11 @@ export function ShippingActions({
         onOpenChange={setMappingDialogOpen}
         targets={mappingTargets}
         onSaved={() => router.refresh()}
+      />
+
+      <GiftRulesDialog
+        open={giftRulesOpen}
+        onOpenChange={setGiftRulesOpen}
       />
     </>
   )

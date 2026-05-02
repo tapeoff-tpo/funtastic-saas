@@ -1,0 +1,131 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { and, eq, inArray, or } from 'drizzle-orm'
+import { createClient } from '@/lib/supabase/server'
+import { db } from '@/lib/db'
+import { giftRules, inventory, orderItems, orders } from '@/lib/db/schema'
+import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
+import { ensureGiftRulesTable } from '@/lib/orders/gift-rules'
+
+interface ApplyGiftsBody {
+  orderIds?: string[]
+}
+
+export async function POST(req: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
+  let body: ApplyGiftsBody
+  try {
+    body = await req.json() as ApplyGiftsBody
+  } catch {
+    return NextResponse.json({ error: 'invalid JSON' }, { status: 400 })
+  }
+
+  const orderIds = Array.isArray(body.orderIds)
+    ? Array.from(new Set(body.orderIds.filter((id): id is string => typeof id === 'string' && id.length > 0)))
+    : []
+  if (orderIds.length === 0) {
+    return NextResponse.json({ error: 'orderIds must be a non-empty array' }, { status: 400 })
+  }
+
+  await ensureGiftRulesTable()
+
+  const [targetOrders, rules] = await Promise.all([
+    db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.userId, user.id), eq(orders.status, 'new'), inArray(orders.id, orderIds))),
+    db
+      .select()
+      .from(giftRules)
+      .where(and(eq(giftRules.userId, user.id), eq(giftRules.isActive, true))),
+  ])
+
+  if (targetOrders.length === 0) return NextResponse.json({ applied: 0, skipped: orderIds.length })
+  if (rules.length === 0) return NextResponse.json({ applied: 0, skipped: targetOrders.length, message: '사은품 규칙이 없습니다.' })
+
+  const targetOrderIds = targetOrders.map((order) => order.id)
+  const sourceItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, targetOrderIds))
+  const merchandiseAmountByOrder = new Map<string, number>()
+  for (const item of sourceItems) {
+    if (item.fulfillmentCode === 'gift') continue
+    const current = merchandiseAmountByOrder.get(item.orderId) ?? 0
+    merchandiseAmountByOrder.set(item.orderId, current + (Number(item.unitPrice) || 0) * item.quantity)
+  }
+
+  const expandedRows = await expandOrderItemsWithMapping(
+    user.id,
+    targetOrders.map((order) => ({ id: order.id, marketplaceId: order.marketplaceId })),
+    sourceItems,
+  )
+
+  const skusByOrder = new Map<string, Set<string>>()
+  for (const row of expandedRows) {
+    if (!row.sku) continue
+    const set = skusByOrder.get(row.orderId) ?? new Set<string>()
+    set.add(row.sku)
+    set.add(row.sku.split('-')[0])
+    skusByOrder.set(row.orderId, set)
+  }
+
+  const giftSkus = Array.from(new Set(rules.map((rule) => rule.giftSku)))
+  const giftInventoryRows = giftSkus.length > 0
+    ? await db
+        .select({
+          sku: inventory.sku,
+          productName: inventory.productName,
+          optionName: inventory.optionName,
+        })
+        .from(inventory)
+        .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, giftSkus)))
+    : []
+  const giftInventory = new Map(giftInventoryRows.map((row) => [row.sku, row]))
+
+  const existingGiftRows = await db
+    .select({
+      orderId: orderItems.orderId,
+      marketplaceItemId: orderItems.marketplaceItemId,
+    })
+    .from(orderItems)
+    .where(
+      and(
+        inArray(orderItems.orderId, targetOrderIds),
+        or(...rules.map((rule) => eq(orderItems.marketplaceItemId, `gift:${rule.id}`)))!,
+      ),
+    )
+  const existingGiftKeys = new Set(existingGiftRows.map((row) => `${row.orderId}:${row.marketplaceItemId}`))
+
+  const values: Array<typeof orderItems.$inferInsert> = []
+  for (const order of targetOrders) {
+    const orderSkuSet = skusByOrder.get(order.id) ?? new Set<string>()
+    for (const rule of rules) {
+      if (rule.marketplaceId && rule.marketplaceId !== order.marketplaceId) continue
+      const merchandiseAmount = merchandiseAmountByOrder.get(order.id) ?? Math.max(0, Number(order.totalAmount) - Number(order.shippingFee ?? 0))
+      const matches = rule.conditionType === 'amount'
+        ? merchandiseAmount >= Number(rule.minAmount ?? 0)
+        : !!rule.triggerSku && orderSkuSet.has(rule.triggerSku)
+      if (!matches) continue
+
+      const marker = `gift:${rule.id}`
+      if (existingGiftKeys.has(`${order.id}:${marker}`)) continue
+
+      const gift = giftInventory.get(rule.giftSku)
+      values.push({
+        orderId: order.id,
+        marketplaceItemId: marker,
+        productName: gift?.productName ?? rule.giftSku,
+        optionText: gift?.optionName ?? null,
+        quantity: rule.giftQuantity,
+        unitPrice: '0',
+        sku: rule.giftSku,
+        skuMultiplier: 1,
+        fulfillmentCode: 'gift',
+      })
+    }
+  }
+
+  if (values.length > 0) await db.insert(orderItems).values(values)
+
+  return NextResponse.json({ applied: values.length, skipped: targetOrders.length - new Set(values.map((v) => v.orderId)).size })
+}

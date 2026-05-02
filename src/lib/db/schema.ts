@@ -188,6 +188,28 @@ export const orderMemos = pgTable(
   ],
 )
 
+export const giftRules = pgTable(
+  'gift_rules',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    name: varchar('name', { length: 200 }).notNull(),
+    marketplaceId: varchar('marketplace_id', { length: 50 }),
+    conditionType: varchar('condition_type', { length: 20 }).notNull(),
+    minAmount: numeric('min_amount', { precision: 12, scale: 2 }),
+    triggerSku: varchar('trigger_sku', { length: 100 }),
+    giftSku: varchar('gift_sku', { length: 100 }).notNull(),
+    giftQuantity: integer('gift_quantity').notNull().default(1),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('gift_rules_user_active').on(table.userId, table.isActive),
+    index('gift_rules_user_marketplace').on(table.userId, table.marketplaceId),
+  ],
+)
+
 export const claims = pgTable(
   'claims',
   {

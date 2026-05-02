@@ -17,7 +17,7 @@ import type {
 
 const FUNTASTIC_B2B_CONFIG: MarketplaceConfig = {
   id: 'funtastic-b2b',
-  name: 'Funtastic B2B',
+  name: '퍼스트몰',
   authType: 'api_key',
   rateLimitPerSecond: 20,
   requiredCredentials: ['api_base_url', 'api_token'],
@@ -35,7 +35,7 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
   async testConnection(): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
       const res = await this.client.get('health').json<{ success?: boolean; error?: string }>()
-      if (res.success === false) return { success: false, error: res.error ?? 'Funtastic B2B health check failed' }
+      if (res.success === false) return { success: false, error: res.error ?? '퍼스트몰 health check failed' }
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -107,14 +107,14 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
   async registerProduct(
     _product: NormalizedProduct,
   ): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
-    return { success: false, error: 'Funtastic B2B product registration not implemented yet' }
+    return { success: false, error: '퍼스트몰 product registration not implemented yet' }
   }
 
   async updateProduct(
     _marketplaceProductId: string,
     _product: Partial<NormalizedProduct>,
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: 'Funtastic B2B product update not implemented yet' }
+    return { success: false, error: '퍼스트몰 product update not implemented yet' }
   }
 
   private normalizeOrder(order: FuntasticB2bOrder): NormalizedOrder {

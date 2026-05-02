@@ -446,7 +446,7 @@ const tobizonAdapter = createStubAdapter({
 
 const funtasticB2bAdapter = createStubAdapter({
   id: 'funtastic-b2b',
-  name: 'Funtastic B2B',
+  name: '퍼스트몰',
   authType: 'api_key',
   rateLimitPerSecond: 20,
   requiredCredentials: ['api_base_url', 'api_token'],

@@ -25,7 +25,7 @@ import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mappi
  */
 const getMappingLookupsCached = unstable_cache(
   async (userId: string) => {
-    const [productSkus, variantSkus, sources] = await Promise.all([
+    const [productSkus, variantSkus, sources, components] = await Promise.all([
       db
         .select({ sku: products.internalSku })
         .from(products)
@@ -37,14 +37,32 @@ const getMappingLookupsCached = unstable_cache(
         .where(eq(products.userId, userId)),
       db
         .select({
+          mappingCodeId: mappingSources.mappingCodeId,
           marketplaceId: mappingSources.marketplaceId,
           marketplaceProductId: mappingSources.marketplaceProductId,
           marketplaceOptionId: mappingSources.marketplaceOptionId,
         })
         .from(mappingSources)
         .where(eq(mappingSources.userId, userId)),
+      db
+        .select({
+          mappingCodeId: mappingComponents.mappingCodeId,
+          sku: mappingComponents.sku,
+          quantity: mappingComponents.quantity,
+          productName: inventory.productName,
+          optionName: inventory.optionName,
+        })
+        .from(mappingComponents)
+        .leftJoin(
+          inventory,
+          and(
+            eq(inventory.userId, mappingComponents.userId),
+            eq(inventory.sku, mappingComponents.sku),
+          ),
+        )
+        .where(eq(mappingComponents.userId, userId)),
     ])
-    return { productSkus, variantSkus, sources }
+    return { productSkus, variantSkus, sources, components }
   },
   ['order-mapping-lookups'],
   { revalidate: 60, tags: ['product-mappings'] },
@@ -258,7 +276,19 @@ export async function getOrders(filters: OrderFilters = {}) {
     : Promise.resolve({
         productSkus: [] as Array<{ sku: string }>,
         variantSkus: [] as Array<{ sku: string }>,
-        sources: [] as Array<{ marketplaceId: string; marketplaceProductId: string; marketplaceOptionId: string }>,
+        sources: [] as Array<{
+          mappingCodeId: string
+          marketplaceId: string
+          marketplaceProductId: string
+          marketplaceOptionId: string
+        }>,
+        components: [] as Array<{
+          mappingCodeId: string
+          sku: string
+          quantity: number
+          productName: string | null
+          optionName: string | null
+        }>,
       })
 
   // orderRows + total count — claimType 분기 안에서도 두 쿼리는 같은 IDs 를 공유하므로
@@ -304,7 +334,7 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const [
     { orderRows, total: orderTotal },
-    { productSkus, variantSkus, sources: mappingSourceRows },
+    { productSkus, variantSkus, sources: mappingSourceRows, components: mappingComponentRows },
   ] = await Promise.all([ordersAndCountPromise, userScopedPromise])
 
   // Fetch items/claims/shipments/shipmentGroups in parallel.
@@ -387,9 +417,8 @@ export async function getOrders(filters: OrderFilters = {}) {
         [] as Awaited<ReturnType<typeof listInquiriesByOrderIds>>,
       ]
 
-  // Phase 8 — orderItems shape used downstream (mapping status / sortable item arrays)
-  // We keep an "items" alias matching the legacy shape to avoid touching mappingStatus logic.
-  const items = itemRows.map((r) => ({
+  // Phase 8 — base orderItems shape. displayName is enriched below after mapping index is built.
+  const baseItems = itemRows.map((r) => ({
     id: r.id,
     orderId: r.orderId,
     marketplaceItemId: r.marketplaceItemId,
@@ -400,7 +429,8 @@ export async function getOrders(filters: OrderFilters = {}) {
     sku: r.sku,
     skuMultiplier: r.skuMultiplier,
     fulfillmentCode: r.fulfillmentCode,
-    // 확정상품명: SKU→products.name 직접 매칭만 사용 (Phase A 매핑 재설계)
+    orderMarketplaceId: r.orderMarketplaceId,
+    // 직접 SKU 매칭 표시명. 매핑 규칙 표시명은 mappingIndex 생성 후 아래에서 채운다.
     displayName: r.productInternalName ?? null,
     shippingCost: r.shippingCost,
     availableStock: r.availableStock,
@@ -424,15 +454,6 @@ export async function getOrders(filters: OrderFilters = {}) {
     if (!existing || shipment.createdAt > existing.createdAt) {
       shipmentByOrderId.set(shipment.orderId, shipment)
     }
-  }
-
-  // Group items by orderId — Phase 8 shape (orderItems base + displayName + shippingCost)
-  type ItemRow = typeof items[number]
-  const itemsByOrderId = new Map<string, ItemRow[]>()
-  for (const item of items) {
-    const existing = itemsByOrderId.get(item.orderId) ?? []
-    existing.push(item)
-    itemsByOrderId.set(item.orderId, existing)
   }
 
   // Map first claim (most recent by requestedAt) per order — need id/status for inline CS actions
@@ -464,9 +485,37 @@ export async function getOrders(filters: OrderFilters = {}) {
       marketplaceId: s.marketplaceId,
       marketplaceProductId: s.marketplaceProductId,
       marketplaceOptionId: s.marketplaceOptionId,
-      ref: '1', // queries.ts 는 hit 여부만 체크. 어떤 매핑인지 ref 는 필요 없음.
+      ref: s.mappingCodeId,
     })),
   )
+
+  const componentsByCode = new Map<string, typeof mappingComponentRows>()
+  for (const component of mappingComponentRows) {
+    const list = componentsByCode.get(component.mappingCodeId) ?? []
+    list.push(component)
+    componentsByCode.set(component.mappingCodeId, list)
+  }
+
+  const getMappedDisplayName = (marketplaceId: string, marketplaceItemId: string | null): string | null => {
+    if (!marketplaceItemId) return null
+    const mappingCodeId = lookupMappingRef(mappingIndex, marketplaceId, marketplaceItemId)
+    if (!mappingCodeId) return null
+    const components = componentsByCode.get(mappingCodeId) ?? []
+    if (components.length === 0) return null
+    return components
+      .map((component) => {
+        const name = component.productName ?? component.sku
+        const option = component.optionName ? ` ${component.optionName}` : ''
+        const quantity = component.quantity > 1 ? ` x${component.quantity}` : ''
+        return `${name}${option}${quantity}`
+      })
+      .join(' + ')
+  }
+
+  const items = baseItems.map((item) => ({
+    ...item,
+    displayName: getMappedDisplayName(item.orderMarketplaceId, item.marketplaceItemId) ?? item.displayName,
+  }))
 
   const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
     if (orderItems.length === 0) return 'unmapped'
@@ -481,6 +530,15 @@ export async function getOrders(filters: OrderFilters = {}) {
     if (mappedCount === orderItems.length) return 'mapped'
     if (mappedCount === 0) return 'unmapped'
     return 'partial'
+  }
+
+  // Group items by orderId — Phase 8 shape (orderItems base + displayName + shippingCost)
+  type ItemRow = typeof items[number]
+  const itemsByOrderId = new Map<string, ItemRow[]>()
+  for (const item of items) {
+    const existing = itemsByOrderId.get(item.orderId) ?? []
+    existing.push(item)
+    itemsByOrderId.set(item.orderId, existing)
   }
 
   // Combine orders with items, claim, shipment info, and mapping status

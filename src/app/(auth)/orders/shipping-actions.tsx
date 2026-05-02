@@ -102,6 +102,7 @@ export function ShippingActions({
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false)
   const [applyingMappings, setApplyingMappings] = useState(false)
+  const [splittingSets, setSplittingSets] = useState(false)
   const [confirmingMapped, setConfirmingMapped] = useState(false)
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
@@ -305,6 +306,43 @@ export function ShippingActions({
     }
   }
 
+  const handleSplitSetOrders = async () => {
+    if (existingMappedOrders.length === 0) {
+      toast.info('세트분리할 매핑완료 주문이 없습니다.')
+      return
+    }
+
+    setSplittingSets(true)
+    try {
+      const orderIds = Array.from(new Set(existingMappedOrders.map((order) => order.id)))
+      const res = await fetch('/api/orders/split-sets', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderIds }),
+      })
+      const data = await res.json().catch(() => ({})) as {
+        splitOrders?: number
+        createdCopies?: number
+        skipped?: number
+        error?: string
+      }
+
+      if (!res.ok) {
+        toast.error(data.error ?? '세트분리 실패')
+        return
+      }
+
+      if ((data.splitOrders ?? 0) === 0) {
+        toast.info('분리할 세트 주문이 없습니다.')
+      } else {
+        toast.success(`세트분리 완료: ${data.splitOrders}건 분리, ${data.createdCopies ?? 0}건 추가`)
+      }
+      router.refresh()
+    } finally {
+      setSplittingSets(false)
+    }
+  }
+
   // Determine which action groups to show based on stage
   const showMapping = showMappingAction || stage === 'mapping'
   const hideFulfillmentActions = showMappingAction
@@ -347,6 +385,15 @@ export function ShippingActions({
             >
               매핑관리
             </Link>
+            <button
+              type="button"
+              onClick={() => void handleSplitSetOrders()}
+              disabled={splittingSets || existingMappedOrders.length === 0}
+              className="rounded-md border border-sky-200 bg-white px-3 py-1.5 text-sm font-medium text-sky-700 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title={hasSelection ? '선택한 매핑완료 주문 중 세트 구성품을 주문 줄로 분리' : '현재 페이지의 매핑완료 주문 중 세트 구성품을 주문 줄로 분리'}
+            >
+              {splittingSets ? '분리 중...' : '세트분리'}
+            </button>
             <button
               type="button"
               onClick={() => void handleConfirmMappedOrders()}

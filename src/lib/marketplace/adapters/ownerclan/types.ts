@@ -9,6 +9,7 @@ export interface OwnerclanOrderProduct {
     price?: number | null
   } | null
   trackingNumber?: string | null
+  trackingCompanyCode?: string | null
   shippingCompanyCode?: string | null
   shippingCompanyName?: string | null
   shippedDate?: number | null

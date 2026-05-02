@@ -19,7 +19,7 @@ export class OwnerclanClient {
   private token: string | null = null
 
   constructor(
-    private readonly credentials: { username: string; password: string },
+    private readonly credentials: { username: string; password: string; userType?: 'seller' | 'vendor' },
     private readonly http: KyInstance = ky.create({
       timeout: 30_000,
       retry: {
@@ -35,7 +35,7 @@ export class OwnerclanClient {
     const response = await this.http.post(OWNERCLAN_AUTH_URL, {
       json: {
         service: 'ownerclan',
-        userType: 'seller',
+        userType: this.credentials.userType ?? 'vendor',
         username: this.credentials.username,
         password: this.credentials.password,
       },
@@ -100,6 +100,6 @@ export class OwnerclanClient {
   }
 }
 
-export function createOwnerclanClient(credentials: { username: string; password: string }) {
+export function createOwnerclanClient(credentials: { username: string; password: string; userType?: 'seller' | 'vendor' }) {
   return new OwnerclanClient(credentials)
 }

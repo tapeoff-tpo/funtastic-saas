@@ -349,7 +349,7 @@ const ownerclanAdapter = createStubAdapter({
   name: '오너클랜',
   authType: 'api_key',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['username', 'password'],
+  requiredCredentials: ['vendor_id', 'vendor_password'],
 })
 
 const ssgmallAdapter = createStubAdapter({

@@ -22,7 +22,7 @@ const OWNERCLAN_CONFIG: MarketplaceConfig = {
   name: '오너클랜',
   authType: 'api_key',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['username', 'password'],
+  requiredCredentials: ['vendor_id', 'vendor_password'],
 }
 
 const ORDER_FIELDS = `
@@ -42,7 +42,7 @@ const ORDER_FIELDS = `
       price
     }
     trackingNumber
-    shippingCompanyCode
+    trackingCompanyCode
     shippingCompanyName
     shippedDate
     additionalAttributes {
@@ -152,6 +152,7 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     this.client = createOwnerclanClient({
       username: credentials.username || credentials.seller_id || '',
       password: credentials.password || credentials.api_key || '',
+      userType: 'vendor',
     })
   }
 

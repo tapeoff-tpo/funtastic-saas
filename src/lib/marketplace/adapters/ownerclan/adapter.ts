@@ -42,7 +42,7 @@ const ORDER_FIELDS = `
       price
     }
     trackingNumber
-    trackingCompanyCode
+    shippingCompanyCode
     shippingCompanyName
     shippedDate
     additionalAttributes {

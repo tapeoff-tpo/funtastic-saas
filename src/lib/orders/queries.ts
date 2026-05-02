@@ -51,6 +51,7 @@ const getMappingLookupsCached = unstable_cache(
           quantity: mappingComponents.quantity,
           productName: inventory.productName,
           optionName: inventory.optionName,
+          availableStock: inventory.availableStock,
         })
         .from(mappingComponents)
         .leftJoin(
@@ -288,6 +289,7 @@ export async function getOrders(filters: OrderFilters = {}) {
           quantity: number
           productName: string | null
           optionName: string | null
+          availableStock: number | null
         }>,
       })
 
@@ -496,26 +498,51 @@ export async function getOrders(filters: OrderFilters = {}) {
     componentsByCode.set(component.mappingCodeId, list)
   }
 
-  const getMappedDisplayName = (marketplaceId: string, marketplaceItemId: string | null): string | null => {
+  const getMappedItemInfo = (
+    marketplaceId: string,
+    marketplaceItemId: string | null,
+    orderQuantity: number,
+  ): {
+    displayName: string
+    quantity: number
+    sku: string | null
+    availableStock: number | null
+  } | null => {
     if (!marketplaceItemId) return null
     const mappingCodeId = lookupMappingRef(mappingIndex, marketplaceId, marketplaceItemId)
     if (!mappingCodeId) return null
     const components = componentsByCode.get(mappingCodeId) ?? []
     if (components.length === 0) return null
-    return components
+    const displayName = components
       .map((component) => {
         const name = component.productName ?? component.sku
         const option = component.optionName ? ` ${component.optionName}` : ''
-        const quantity = component.quantity > 1 ? ` x${component.quantity}` : ''
-        return `${name}${option}${quantity}`
+        return `${name}${option}`
       })
       .join(' + ')
+    const mappedQuantity = components.reduce(
+      (sum, component) => sum + (component.quantity * orderQuantity),
+      0,
+    )
+    return {
+      displayName,
+      quantity: mappedQuantity > 0 ? mappedQuantity : orderQuantity,
+      sku: components.length === 1 ? components[0].sku : null,
+      availableStock: components.length === 1 ? components[0].availableStock : null,
+    }
   }
 
-  const items = baseItems.map((item) => ({
-    ...item,
-    displayName: getMappedDisplayName(item.orderMarketplaceId, item.marketplaceItemId) ?? item.displayName,
-  }))
+  const items = baseItems.map((item) => {
+    const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.quantity)
+    if (!mapped) return item
+    return {
+      ...item,
+      displayName: mapped.displayName,
+      quantity: mapped.quantity,
+      sku: mapped.sku ?? item.sku,
+      availableStock: mapped.availableStock ?? item.availableStock,
+    }
+  })
 
   const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
     if (orderItems.length === 0) return 'unmapped'

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState, useTransition } from 'react'
+import { useCallback, useState, useTransition } from 'react'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
 
@@ -22,11 +22,18 @@ const STATUS_OPTIONS: { value: '' | OrderStatus; label: string }[] = [
   })),
 ]
 
+const MAPPING_OPTIONS = [
+  { value: '', label: '매핑 전체' },
+  { value: 'mapped', label: '매핑됨' },
+  { value: 'unmapped', label: '매핑안됨' },
+]
+
 export function OrderFilters() {
   const [isPending, startTransition] = useTransition()
 
   const [filters, setFilters] = useQueryStates({
     status: parseAsString,
+    mapping: parseAsString,
     marketplace: parseAsString,
     search: parseAsString,
     dateFrom: parseAsString,
@@ -37,11 +44,7 @@ export function OrderFilters() {
 
   // Local state for search input — only pushed to URL on explicit submit
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
-
-  // Keep local input in sync if URL changes externally (e.g. 초기화)
-  useEffect(() => {
-    setSearchInput(filters.search ?? '')
-  }, [filters.search])
+  const isNewTab = filters.status === 'new'
 
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
@@ -61,6 +64,7 @@ export function OrderFilters() {
     setSearchInput('')
     void setFilters({
       status: null,
+      mapping: null,
       marketplace: null,
       search: null,
       dateFrom: null,
@@ -99,7 +103,13 @@ export function OrderFilters() {
         <select
           id="filter-status"
           value={filters.status ?? ''}
-          onChange={(e) => updateFilter({ status: e.target.value || null })}
+          onChange={(e) => {
+            const nextStatus = e.target.value || null
+            updateFilter({
+              status: nextStatus,
+              mapping: nextStatus === 'new' ? filters.mapping : null,
+            })
+          }}
           className="rounded-md border px-3 py-1.5 text-sm"
         >
           {STATUS_OPTIONS.map((opt) => (
@@ -109,6 +119,26 @@ export function OrderFilters() {
           ))}
         </select>
       </div>
+
+      {isNewTab && (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="filter-mapping" className="text-xs font-medium text-muted-foreground">
+            매핑 상태
+          </label>
+          <select
+            id="filter-mapping"
+            value={filters.mapping ?? ''}
+            onChange={(e) => updateFilter({ mapping: e.target.value || null })}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            {MAPPING_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Date range */}
       <div className="flex flex-col gap-1">

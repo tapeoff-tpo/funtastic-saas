@@ -7,6 +7,7 @@ import {
   holdOrder,
   releaseOrder,
   bulkUpdateStatus,
+  forceBulkUpdateStatus,
 } from '@/lib/orders/actions'
 import {
   queueInvoiceUpload,
@@ -67,6 +68,24 @@ export async function bulkChangeStatusAction(
   newStatus: OrderStatus,
 ): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
   const result = await bulkUpdateStatus(orderIds, newStatus)
+  revalidatePath('/orders')
+  revalidateTag('orders', 'max')
+  return result
+}
+
+/**
+ * Server action: selected orders manual status override.
+ * This is intentionally "status only": no marketplace notification, no inventory side effects.
+ */
+export async function forceBulkChangeStatusAction(
+  orderIds: string[],
+  newStatus: OrderStatus,
+): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { updated: 0, errors: [{ orderId: '', error: 'Unauthorized' }] }
+
+  const result = await forceBulkUpdateStatus(user.id, orderIds, newStatus)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result

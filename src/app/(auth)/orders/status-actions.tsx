@@ -6,7 +6,7 @@ import {
   ORDER_STATUS_LABELS,
   type OrderStatus,
 } from '@/lib/orders/types'
-import { changeStatusAction, bulkChangeStatusAction } from './actions'
+import { changeStatusAction, bulkChangeStatusAction, forceBulkChangeStatusAction } from './actions'
 import { toast } from 'sonner'
 
 interface StatusDropdownProps {
@@ -71,6 +71,76 @@ export function StatusDropdown({ orderId, currentStatus, isHeld }: StatusDropdow
 interface BulkActionBarProps {
   selectedIds: string[]
   onClear: () => void
+}
+
+interface ManualStatusChangeButtonProps {
+  selectedIds: string[]
+  onChanged?: () => void
+}
+
+const ALL_ORDER_STATUSES = Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]
+
+export function ManualStatusChangeButton({ selectedIds, onChanged }: ManualStatusChangeButtonProps) {
+  const [open, setOpen] = useState(false)
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = selectedIds.length
+
+  const handleChange = (newStatus: OrderStatus) => {
+    if (selectedCount === 0) {
+      toast.info('상태를 변경할 주문을 선택하세요.')
+      return
+    }
+
+    setOpen(false)
+    if (
+      !window.confirm(
+        `선택한 ${selectedCount}건의 주문상태를 '${ORDER_STATUS_LABELS[newStatus]}'(으)로 변경하시겠습니까?`,
+      )
+    ) {
+      return
+    }
+
+    startTransition(async () => {
+      const result = await forceBulkChangeStatusAction(selectedIds, newStatus)
+      if (result.errors.length === 0) {
+        toast.success(`${result.updated}건의 주문상태가 변경되었습니다.`)
+      } else {
+        toast.warning(`${result.updated}건 변경, ${result.errors.length}건 실패`)
+        for (const failure of result.errors.slice(0, 3)) {
+          toast.error(failure.error, { duration: 7000 })
+        }
+      }
+      onChanged?.()
+    })
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        disabled={selectedCount === 0 || isPending}
+        className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+        title="선택한 주문의 상태만 변경합니다. 몰 통보와 재고 차감은 실행하지 않습니다."
+      >
+        {isPending ? '변경 중...' : `주문상태변경${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-md border bg-white py-1 shadow-lg">
+          {ALL_ORDER_STATUSES.map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => handleChange(status)}
+              className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
+            >
+              {ORDER_STATUS_LABELS[status]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 /**

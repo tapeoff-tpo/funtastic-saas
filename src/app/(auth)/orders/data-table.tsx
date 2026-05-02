@@ -14,6 +14,7 @@ import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
 import { ShippingActions } from './shipping-actions'
 import { OrderDetailDialog } from './order-detail-dialog'
+import { ManualStatusChangeButton } from './status-actions'
 import { Pagination, PageSizeSelector } from '@/components/ui/pagination'
 import type { OrderStage } from '@/lib/orders/types'
 
@@ -174,6 +175,13 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
             </div>
           )}
         </div>
+        <ManualStatusChangeButton
+          selectedIds={selectedIds}
+          onChanged={() => {
+            setRowSelection({})
+            router.refresh()
+          }}
+        />
         <PageSizeSelector
           pageSize={pageSize}
           total={total}

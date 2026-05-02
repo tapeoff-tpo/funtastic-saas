@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import type { OrderStatus } from './types'
 import { isValidTransition } from './types'
 import { deductForOrder, restoreForOrder } from '@/lib/inventory/actions'
@@ -179,4 +179,45 @@ export async function bulkUpdateStatus(
   }
 
   return { updated, errors }
+}
+
+/**
+ * Manual status override for admin/user operations.
+ *
+ * Unlike updateOrderStatus(), this intentionally does not validate workflow
+ * direction and does not trigger marketplace calls or inventory side effects.
+ * It is used for correction cases such as 출고대기 → 신규.
+ */
+export async function forceBulkUpdateStatus(
+  userId: string,
+  orderIds: string[],
+  newStatus: OrderStatus,
+): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  const uniqueIds = Array.from(new Set(orderIds.filter(Boolean)))
+  if (uniqueIds.length === 0) return { updated: 0, errors: [] }
+
+  const ownedOrders = await db
+    .select({ id: orders.id, status: orders.status })
+    .from(orders)
+    .where(and(eq(orders.userId, userId), inArray(orders.id, uniqueIds)))
+
+  const ownedIds = new Set(ownedOrders.map((order) => order.id))
+  const errors = uniqueIds
+    .filter((id) => !ownedIds.has(id))
+    .map((orderId) => ({ orderId, error: 'Order not found' }))
+
+  if (ownedOrders.length === 0) return { updated: 0, errors }
+
+  const result = await db
+    .update(orders)
+    .set({
+      status: newStatus,
+      previousStatus: null,
+      preparingAt: newStatus === 'preparing' ? new Date() : null,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(orders.userId, userId), inArray(orders.id, ownedOrders.map((order) => order.id))))
+    .returning({ id: orders.id })
+
+  return { updated: result.length, errors }
 }

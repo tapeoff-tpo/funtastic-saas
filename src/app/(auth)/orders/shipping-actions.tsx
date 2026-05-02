@@ -9,6 +9,7 @@ import { InvoiceUploadDialog } from './invoice-upload-dialog'
 import { ExcelImportDialog } from './excel-import-dialog'
 import { LogisticsMessageDialog } from './logistics-message-dialog'
 import { bulkCombineByContactAction } from './combined-actions'
+import { forceBulkChangeStatusAction } from './actions'
 import type { OrderRow } from './columns'
 import type { OrderStage } from '@/lib/orders/types'
 
@@ -273,31 +274,14 @@ export function ShippingActions({
     setConfirmingMapped(true)
     try {
       const orderIds = Array.from(new Set(existingMappedOrders.map((order) => order.id)))
-      const res = await fetch('/api/orders/confirm', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ orderIds }),
-      })
-      const data = await res.json().catch(() => ({})) as {
-        successCount?: number
-        failCount?: number
-        error?: string
-        results?: Array<{ success: boolean; marketplaceOrderId: string; error?: string }>
-      }
+      const result = await forceBulkChangeStatusAction(orderIds, 'confirmed')
 
-      if (!res.ok) {
-        toast.error(data.error ?? '확정 처리 실패')
-        return
-      }
-
-      const successCount = data.successCount ?? 0
-      const failCount = data.failCount ?? 0
-      if (failCount === 0) {
-        toast.success(`${successCount}건 확인 탭으로 이동`)
+      if (result.errors.length === 0) {
+        toast.success(`${result.updated}건 확인 탭으로 이동`)
       } else {
-        toast.warning(`${successCount}건 확정, ${failCount}건 실패`)
-        for (const failure of (data.results ?? []).filter((result) => !result.success).slice(0, 3)) {
-          toast.error(`${failure.marketplaceOrderId}: ${failure.error ?? '확정 실패'}`, { duration: 8000 })
+        toast.warning(`${result.updated}건 이동, ${result.errors.length}건 실패`)
+        for (const failure of result.errors.slice(0, 3)) {
+          toast.error(failure.error, { duration: 8000 })
         }
       }
       router.refresh()
@@ -399,7 +383,7 @@ export function ShippingActions({
               onClick={() => void handleConfirmMappedOrders()}
               disabled={confirmingMapped || existingMappedOrders.length === 0}
               className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-              title={hasSelection ? '선택한 주문 중 매핑완료 주문을 확인 탭으로 이동' : '현재 페이지의 매핑완료 주문을 확인 탭으로 이동'}
+              title={hasSelection ? '선택한 매핑완료 주문을 확인 탭으로 이동 (몰 API 호출 없음)' : '현재 페이지의 매핑완료 주문을 확인 탭으로 이동 (몰 API 호출 없음)'}
             >
               {confirmingMapped
                 ? '확정 중...'

@@ -17,9 +17,10 @@ interface GiftRule {
   id: string
   name: string
   marketplaceId: string | null
-  conditionType: 'amount' | 'sku'
+  conditionType: 'amount' | 'sku' | 'marketplaceProductCode'
   minAmount: string | null
   triggerSku: string | null
+  conditions: GiftCondition[]
   giftSku: string
   giftQuantity: number
   isActive: boolean
@@ -30,6 +31,11 @@ interface GiftRule {
 interface GiftRulesDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+}
+
+interface GiftCondition {
+  type: 'amount' | 'sku' | 'marketplaceProductCode'
+  value: string
 }
 
 const MARKETPLACE_OPTIONS = [
@@ -51,9 +57,7 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
   const [saving, setSaving] = useState(false)
   const [name, setName] = useState('')
   const [marketplaceId, setMarketplaceId] = useState('')
-  const [conditionType, setConditionType] = useState<'amount' | 'sku'>('amount')
-  const [minAmount, setMinAmount] = useState('')
-  const [triggerSku, setTriggerSku] = useState('')
+  const [conditions, setConditions] = useState<GiftCondition[]>([{ type: 'amount', value: '' }])
   const [giftSku, setGiftSku] = useState('')
   const [giftName, setGiftName] = useState('')
   const [giftQuantity, setGiftQuantity] = useState(1)
@@ -110,12 +114,13 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
       toast.error('규칙명을 입력하세요.')
       return
     }
-    if (conditionType === 'amount' && Number(minAmount) <= 0) {
-      toast.error('금액 조건을 입력하세요.')
+    const validConditions = conditions.filter((condition) => condition.value.trim())
+    if (validConditions.length === 0) {
+      toast.error('조건을 1개 이상 입력하세요.')
       return
     }
-    if (conditionType === 'sku' && !triggerSku.trim()) {
-      toast.error('품번코드를 입력하세요.')
+    if (validConditions.some((condition) => condition.type === 'amount' && Number(condition.value) <= 0)) {
+      toast.error('상품금액 조건을 확인하세요.')
       return
     }
     if (!giftSku) {
@@ -131,9 +136,10 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
         body: JSON.stringify({
           name: name.trim(),
           marketplaceId: marketplaceId || null,
-          conditionType,
-          minAmount: conditionType === 'amount' ? minAmount : null,
-          triggerSku: conditionType === 'sku' ? triggerSku.trim() : null,
+          conditionType: validConditions[0].type,
+          minAmount: validConditions.find((condition) => condition.type === 'amount')?.value ?? null,
+          triggerSku: validConditions.find((condition) => condition.type === 'sku')?.value ?? null,
+          conditions: validConditions,
           giftSku,
           giftQuantity,
         }),
@@ -145,8 +151,7 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
       }
       toast.success('사은품 규칙 저장 완료')
       setName('')
-      setMinAmount('')
-      setTriggerSku('')
+      setConditions([{ type: 'amount', value: '' }])
       setGiftSku('')
       setGiftName('')
       setGiftQuantity(1)
@@ -154,6 +159,33 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
     } finally {
       setSaving(false)
     }
+  }
+
+  function updateCondition(index: number, patch: Partial<GiftCondition>) {
+    setConditions((current) => current.map((condition, idx) => (
+      idx === index ? { ...condition, ...patch, value: patch.type && patch.type !== condition.type ? '' : patch.value ?? condition.value } : condition
+    )))
+  }
+
+  function addCondition() {
+    setConditions((current) => [...current, { type: 'amount', value: '' }])
+  }
+
+  function removeCondition(index: number) {
+    setConditions((current) => current.length <= 1 ? current : current.filter((_, idx) => idx !== index))
+  }
+
+  function conditionLabel(condition: GiftCondition) {
+    if (condition.type === 'amount') return `상품금액 ${Number(condition.value).toLocaleString('ko-KR')}원 이상`
+    if (condition.type === 'sku') return `내부 품번 ${condition.value}`
+    return `쇼핑몰 상품코드 ${condition.value}`
+  }
+
+  function displayConditions(rule: GiftRule): GiftCondition[] {
+    if (Array.isArray(rule.conditions) && rule.conditions.length > 0) return rule.conditions
+    if (rule.conditionType === 'amount' && rule.minAmount) return [{ type: 'amount', value: rule.minAmount }]
+    if (rule.conditionType === 'sku' && rule.triggerSku) return [{ type: 'sku', value: rule.triggerSku }]
+    return []
   }
 
   async function handleDelete(id: string) {
@@ -192,26 +224,51 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
                   {MARKETPLACE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                 </select>
               </label>
-              <label className="text-xs font-medium text-muted-foreground">
-                조건
-                <select value={conditionType} onChange={(e) => setConditionType(e.target.value as 'amount' | 'sku')} className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm">
-                  <option value="amount">상품금액 이상</option>
-                  <option value="sku">내부 품번코드 포함</option>
-                </select>
-              </label>
             </div>
 
-            {conditionType === 'amount' ? (
-              <label className="block text-xs font-medium text-muted-foreground">
-                상품금액 (배송비 제외)
-                <input type="number" min={0} value={minAmount} onChange={(e) => setMinAmount(e.target.value)} className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm" placeholder="예: 30000" />
-              </label>
-            ) : (
-              <label className="block text-xs font-medium text-muted-foreground">
-                내부 품번코드
-                <input value={triggerSku} onChange={(e) => setTriggerSku(e.target.value)} className="mt-1 w-full rounded-md border px-3 py-1.5 text-sm" placeholder="예: 111700" />
-              </label>
-            )}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-medium text-muted-foreground">조건 (모두 만족)</div>
+                <button type="button" onClick={addCondition} className="rounded-md border px-2 py-1 text-xs hover:bg-muted">
+                  조건 추가
+                </button>
+              </div>
+              {conditions.map((condition, index) => (
+                <div key={index} className="grid grid-cols-[130px_1fr_auto] gap-1">
+                  <select
+                    value={condition.type}
+                    onChange={(e) => updateCondition(index, { type: e.target.value as GiftCondition['type'] })}
+                    className="rounded-md border px-2 py-1.5 text-xs"
+                  >
+                    <option value="amount">상품금액 이상</option>
+                    <option value="sku">내부 품번코드</option>
+                    <option value="marketplaceProductCode">쇼핑몰 상품코드</option>
+                  </select>
+                  <input
+                    type={condition.type === 'amount' ? 'number' : 'text'}
+                    min={condition.type === 'amount' ? 0 : undefined}
+                    value={condition.value}
+                    onChange={(e) => updateCondition(index, { value: e.target.value })}
+                    className="rounded-md border px-2 py-1.5 text-xs"
+                    placeholder={
+                      condition.type === 'amount'
+                        ? '배송비 제외 금액'
+                        : condition.type === 'sku'
+                          ? '예: 111700'
+                          : '예: 123'
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeCondition(index)}
+                    disabled={conditions.length <= 1}
+                    className="rounded-md border px-2 py-1.5 text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    삭제
+                  </button>
+                </div>
+              ))}
+            </div>
 
             <div className="space-y-2">
               <label className="block text-xs font-medium text-muted-foreground">
@@ -261,7 +318,7 @@ export function GiftRulesDialog({ open, onOpenChange }: GiftRulesDialogProps) {
                   <div>
                     <div className="font-medium">{rule.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {rule.marketplaceId ?? '모든 쇼핑몰'} · {rule.conditionType === 'amount' ? `상품금액 ${Number(rule.minAmount ?? 0).toLocaleString('ko-KR')}원 이상` : `내부 품번 ${rule.triggerSku}`}
+                      {rule.marketplaceId ?? '모든 쇼핑몰'} · {displayConditions(rule).map(conditionLabel).join(' + ')}
                     </div>
                     <div className="mt-1 text-xs">
                       사은품: {rule.giftProductName ?? rule.giftSku}{rule.giftOptionName ? ` / ${rule.giftOptionName}` : ''} × {rule.giftQuantity}

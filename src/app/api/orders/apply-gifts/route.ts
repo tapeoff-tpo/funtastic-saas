@@ -4,10 +4,30 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { giftRules, inventory, orderItems, orders } from '@/lib/db/schema'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
-import { ensureGiftRulesTable } from '@/lib/orders/gift-rules'
+import { ensureGiftRulesTable, type GiftRuleCondition } from '@/lib/orders/gift-rules'
 
 interface ApplyGiftsBody {
   orderIds?: string[]
+}
+
+type GiftRuleRow = typeof giftRules.$inferSelect
+
+function getRuleConditions(rule: GiftRuleRow): GiftRuleCondition[] {
+  if (Array.isArray(rule.conditions) && rule.conditions.length > 0) {
+    return rule.conditions
+      .map((condition) => ({
+        type: condition.type,
+        value: String(condition.value ?? '').trim(),
+      }))
+      .filter((condition): condition is GiftRuleCondition => (
+        (condition.type === 'amount' || condition.type === 'sku' || condition.type === 'marketplaceProductCode') &&
+        condition.value.length > 0
+      ))
+  }
+
+  if (rule.conditionType === 'amount' && rule.minAmount) return [{ type: 'amount', value: String(rule.minAmount) }]
+  if (rule.conditionType === 'sku' && rule.triggerSku) return [{ type: 'sku', value: rule.triggerSku }]
+  return []
 }
 
 export async function POST(req: NextRequest) {
@@ -48,10 +68,17 @@ export async function POST(req: NextRequest) {
   const targetOrderIds = targetOrders.map((order) => order.id)
   const sourceItems = await db.select().from(orderItems).where(inArray(orderItems.orderId, targetOrderIds))
   const merchandiseAmountByOrder = new Map<string, number>()
+  const marketplaceCodesByOrder = new Map<string, Set<string>>()
   for (const item of sourceItems) {
     if (item.fulfillmentCode === 'gift') continue
     const current = merchandiseAmountByOrder.get(item.orderId) ?? 0
     merchandiseAmountByOrder.set(item.orderId, current + (Number(item.unitPrice) || 0) * item.quantity)
+    if (item.marketplaceItemId) {
+      const set = marketplaceCodesByOrder.get(item.orderId) ?? new Set<string>()
+      set.add(item.marketplaceItemId)
+      set.add(item.marketplaceItemId.split('-')[0])
+      marketplaceCodesByOrder.set(item.orderId, set)
+    }
   }
 
   const expandedRows = await expandOrderItemsWithMapping(
@@ -99,12 +126,17 @@ export async function POST(req: NextRequest) {
   const values: Array<typeof orderItems.$inferInsert> = []
   for (const order of targetOrders) {
     const orderSkuSet = skusByOrder.get(order.id) ?? new Set<string>()
+    const marketplaceCodeSet = marketplaceCodesByOrder.get(order.id) ?? new Set<string>()
     for (const rule of rules) {
       if (rule.marketplaceId && rule.marketplaceId !== order.marketplaceId) continue
       const merchandiseAmount = merchandiseAmountByOrder.get(order.id) ?? Math.max(0, Number(order.totalAmount) - Number(order.shippingFee ?? 0))
-      const matches = rule.conditionType === 'amount'
-        ? merchandiseAmount >= Number(rule.minAmount ?? 0)
-        : !!rule.triggerSku && orderSkuSet.has(rule.triggerSku)
+      const conditions = getRuleConditions(rule)
+      const matches = conditions.length > 0 && conditions.every((condition) => {
+        if (condition.type === 'amount') return merchandiseAmount >= Number(condition.value)
+        if (condition.type === 'sku') return orderSkuSet.has(condition.value)
+        if (condition.type === 'marketplaceProductCode') return marketplaceCodeSet.has(condition.value)
+        return false
+      })
       if (!matches) continue
 
       const marker = `gift:${rule.id}`

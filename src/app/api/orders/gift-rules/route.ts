@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createGiftRule, listGiftRules, type GiftConditionType } from '@/lib/orders/gift-rules'
+import { createGiftRule, listGiftRules, type GiftConditionType, type GiftRuleCondition } from '@/lib/orders/gift-rules'
 
 interface CreateGiftRuleBody {
   name?: string
@@ -8,8 +8,22 @@ interface CreateGiftRuleBody {
   conditionType?: GiftConditionType
   minAmount?: string | null
   triggerSku?: string | null
+  conditions?: GiftRuleCondition[]
   giftSku?: string
   giftQuantity?: number
+}
+
+function normalizeConditions(body: CreateGiftRuleBody): GiftRuleCondition[] {
+  const raw = Array.isArray(body.conditions) ? body.conditions : []
+  return raw
+    .map((condition) => ({
+      type: condition.type,
+      value: String(condition.value ?? '').trim(),
+    }))
+    .filter((condition): condition is GiftRuleCondition => (
+      (condition.type === 'amount' || condition.type === 'sku' || condition.type === 'marketplaceProductCode') &&
+      condition.value.length > 0
+    ))
 }
 
 export async function GET() {
@@ -34,19 +48,17 @@ export async function POST(req: NextRequest) {
   }
 
   const name = body.name?.trim()
-  const conditionType = body.conditionType
+  const conditions = normalizeConditions(body)
+  const conditionType = body.conditionType ?? conditions[0]?.type
   const giftSku = body.giftSku?.trim()
   const giftQuantity = Math.max(1, Number(body.giftQuantity ?? 1))
 
   if (!name) return NextResponse.json({ error: '규칙명을 입력하세요.' }, { status: 400 })
-  if (conditionType !== 'amount' && conditionType !== 'sku') {
-    return NextResponse.json({ error: '조건 종류를 선택하세요.' }, { status: 400 })
+  if (conditions.length === 0) {
+    return NextResponse.json({ error: '조건을 1개 이상 입력하세요.' }, { status: 400 })
   }
-  if (conditionType === 'amount' && Number(body.minAmount ?? 0) <= 0) {
-    return NextResponse.json({ error: '금액 조건을 입력하세요.' }, { status: 400 })
-  }
-  if (conditionType === 'sku' && !body.triggerSku?.trim()) {
-    return NextResponse.json({ error: '품번코드 조건을 입력하세요.' }, { status: 400 })
+  if (conditions.some((condition) => condition.type === 'amount' && Number(condition.value) <= 0)) {
+    return NextResponse.json({ error: '금액 조건을 확인하세요.' }, { status: 400 })
   }
   if (!giftSku) return NextResponse.json({ error: '사은품 SKU를 선택하세요.' }, { status: 400 })
 
@@ -54,8 +66,9 @@ export async function POST(req: NextRequest) {
     name,
     marketplaceId: body.marketplaceId?.trim() || null,
     conditionType,
-    minAmount: body.minAmount ?? null,
-    triggerSku: body.triggerSku?.trim() || null,
+    minAmount: conditions.find((condition) => condition.type === 'amount')?.value ?? body.minAmount ?? null,
+    triggerSku: conditions.find((condition) => condition.type === 'sku')?.value ?? body.triggerSku?.trim() ?? null,
+    conditions,
     giftSku,
     giftQuantity,
   })

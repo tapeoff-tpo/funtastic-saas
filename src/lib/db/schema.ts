@@ -198,6 +198,7 @@ export const giftRules = pgTable(
     conditionType: varchar('condition_type', { length: 20 }).notNull(),
     minAmount: numeric('min_amount', { precision: 12, scale: 2 }),
     triggerSku: varchar('trigger_sku', { length: 100 }),
+    conditions: jsonb('conditions').$type<Array<{ type: string; value: string }>>().notNull().default([]),
     giftSku: varchar('gift_sku', { length: 100 }).notNull(),
     giftQuantity: integer('gift_quantity').notNull().default(1),
     isActive: boolean('is_active').notNull().default(true),

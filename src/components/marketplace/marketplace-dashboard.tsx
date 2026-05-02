@@ -14,7 +14,11 @@ import {
   updateExcelImportTemplate,
   type ExcelImportTemplateView,
 } from '@/app/(auth)/orders/collect/actions'
-import { ORDER_IMPORT_FIELDS, type OrderImportMapping } from '@/lib/orders/excel-import-fields'
+import {
+  ORDER_IMPORT_FIELDS,
+  type OrderImportField,
+  type OrderImportMapping,
+} from '@/lib/orders/excel-import-fields'
 
 interface Connection {
   id: string
@@ -860,7 +864,9 @@ function ExcelImportTemplateModal({
   const [editing, setEditing] = useState<ExcelImportTemplateView | null>(null)
   const [name, setName] = useState('')
   const [mappings, setMappings] = useState<OrderImportMapping[]>(DEFAULT_IMPORT_MAPPINGS)
-  const [selectedField, setSelectedField] = useState(ORDER_IMPORT_FIELDS[0]?.field ?? '')
+  const [selectedField, setSelectedField] = useState<OrderImportField>(
+    ORDER_IMPORT_FIELDS[0]?.field ?? 'orderNumber',
+  )
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
@@ -934,10 +940,10 @@ function ExcelImportTemplateModal({
     const formData = new FormData()
     formData.set('name', name)
     formData.set('mappings', JSON.stringify(mappings))
-    if (editing) formData.set('templateId', editing.id)
+    if (editing && !editing.isDefault) formData.set('templateId', editing.id)
 
     startTransition(async () => {
-      const result = editing
+      const result = editing && !editing.isDefault
         ? await updateExcelImportTemplate(formData)
         : await createExcelImportTemplate(formData)
 
@@ -1022,14 +1028,18 @@ function ExcelImportTemplateModal({
                     </button>
                     <div className="mt-2 flex items-center justify-between text-xs">
                       <span className="text-muted-foreground">{template.mappings.length}개 매핑</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(template)}
-                        disabled={isPending}
-                        className="text-red-600 hover:underline disabled:opacity-50"
-                      >
-                        삭제
-                      </button>
+                      {template.isDefault ? (
+                        <span className="text-muted-foreground">기본</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(template)}
+                          disabled={isPending}
+                          className="text-red-600 hover:underline disabled:opacity-50"
+                        >
+                          삭제
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -1060,7 +1070,7 @@ function ExcelImportTemplateModal({
               <div className="mb-3 flex items-center gap-2">
                 <select
                   value={selectedField}
-                  onChange={(e) => setSelectedField(e.target.value)}
+                  onChange={(e) => setSelectedField(e.target.value as OrderImportField)}
                   className="flex-1 rounded-md border px-3 py-2 text-sm"
                 >
                   {ORDER_IMPORT_FIELDS.map((field) => (

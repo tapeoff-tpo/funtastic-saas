@@ -5,6 +5,11 @@ import { db } from '@/lib/db'
 import { excelImportTemplates, orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { generateInternalNo } from '@/lib/orders/internal-no'
+import {
+  FIRSTMALL_ORDER_IMPORT_MAPPINGS,
+  FIRSTMALL_ORDER_IMPORT_TEMPLATE_ID,
+  type OrderImportMapping,
+} from '@/lib/orders/excel-import-fields'
 
 /**
  * POST /api/orders/import
@@ -48,18 +53,22 @@ export async function POST(request: NextRequest) {
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
 
-    let templateMappings: Array<{ field: string; excelColumn: string }> | undefined
+    let templateMappings: OrderImportMapping[] | undefined
     if (templateId) {
-      const [template] = await db
-        .select({ mappings: excelImportTemplates.mappings })
-        .from(excelImportTemplates)
-        .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, user.id)))
-        .limit(1)
+      if (templateId === FIRSTMALL_ORDER_IMPORT_TEMPLATE_ID) {
+        templateMappings = FIRSTMALL_ORDER_IMPORT_MAPPINGS
+      } else {
+        const [template] = await db
+          .select({ mappings: excelImportTemplates.mappings })
+          .from(excelImportTemplates)
+          .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, user.id)))
+          .limit(1)
 
-      if (!template) {
-        return NextResponse.json({ error: '선택한 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
+        if (!template) {
+          return NextResponse.json({ error: '선택한 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
+        }
+        templateMappings = template.mappings
       }
-      templateMappings = template.mappings
     }
 
     // Parse Excel
@@ -139,15 +148,21 @@ export async function POST(request: NextRequest) {
               marketplaceOrderId: orderNumber,
               status: 'confirmed',
               buyerName: first.buyerName,
+              buyerPhone2: first.buyerPhone ?? null,
               recipientName: first.recipientName,
-              recipientPhone: first.recipientPhone ?? null,
+              recipientPhone2: first.recipientPhone ?? null,
               shippingAddress: {
                 zipCode: first.zipCode ?? '',
                 address1: first.recipientAddress,
               },
               orderedAt,
               totalAmount: String(totalAmount),
-              rawData: null,
+              shippingFee: first.shippingFee == null ? null : String(first.shippingFee),
+              deliveryMessage: first.deliveryMessage ?? null,
+              rawData: {
+                importTemplateId: templateId ?? null,
+                sourceFileName: file.name,
+              },
             })
             .returning({ id: orders.id })
 
@@ -155,6 +170,7 @@ export async function POST(request: NextRequest) {
           await tx.insert(orderItems).values(
             items.map((item) => ({
               orderId: newOrder.id,
+              marketplaceItemId: item.marketplaceItemId ?? null,
               productName: item.productName,
               optionText: item.optionText ?? null,
               quantity: item.quantity,

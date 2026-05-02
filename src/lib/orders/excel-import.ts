@@ -17,16 +17,34 @@ import {
 const HEADER_MAP: Record<string, string> = {
   '주문번호': 'orderNumber',
   '주문자명': 'buyerName',
+  '주문자전화': 'buyerPhone',
+  '주문자휴대폰': 'buyerPhone',
   '수령자명': 'recipientName',
+  '수령인': 'recipientName',
   '수령자주소': 'recipientAddress',
+  '전체주소(도로명)': 'recipientAddress',
+  '전체주소(지번)': 'recipientAddress',
   '수령자전화': 'recipientPhone',
+  '수령인휴대폰': 'recipientPhone',
+  '수령인연락처': 'recipientPhone',
   '우편번호': 'zipCode',
   '주문일시': 'orderedAt',
+  '주문일': 'orderedAt',
   '상품명': 'productName',
   '옵션': 'optionText',
+  '추가입력옵션': 'optionText',
   '수량': 'quantity',
+  '주문수량': 'quantity',
   '금액(원)': 'totalAmount',
+  '할인가x수량': 'totalAmount',
   'SKU': 'sku',
+  '바코드': 'sku',
+  '상품고유번호': 'sku',
+  '마켓상품주문번호': 'marketplaceItemId',
+  '주문번호+출고그룹': 'marketplaceItemId',
+  '배송메시지': 'deliveryMessage',
+  '사용자메모': 'deliveryMessage',
+  '배송비': 'shippingFee',
 }
 
 /** Zod schema for each row */
@@ -39,10 +57,14 @@ const orderRowSchema = z.object({
   productName: z.string().min(1, '상품명이 비어있습니다'),
   quantity: z.number().int().positive('수량은 1 이상이어야 합니다'),
   totalAmount: z.number().nonnegative('금액은 0 이상이어야 합니다'),
+  buyerPhone: z.string().optional(),
   recipientPhone: z.string().optional(),
   zipCode: z.string().optional(),
   optionText: z.string().optional(),
   sku: z.string().optional(),
+  marketplaceItemId: z.string().optional(),
+  deliveryMessage: z.string().optional(),
+  shippingFee: z.number().nonnegative('배송비는 0 이상이어야 합니다').optional(),
 })
 
 export interface ParsedOrderRow {
@@ -54,10 +76,14 @@ export interface ParsedOrderRow {
   productName: string
   quantity: number
   totalAmount: number
+  buyerPhone?: string
   recipientPhone?: string
   zipCode?: string
   optionText?: string
   sku?: string
+  marketplaceItemId?: string
+  deliveryMessage?: string
+  shippingFee?: number
 }
 
 export interface ParseError {
@@ -111,13 +137,13 @@ export async function parseOrderExcel(
 
     if (normalizedMappings && normalizedMappings.length > 0) {
       for (const mapping of normalizedMappings) {
-        if (value === mapping.excelColumn || value.includes(mapping.excelColumn)) {
+        if (value === mapping.excelColumn) {
           colMap[mapping.field] = colNumber
           const existing = mappedColumnNumbers.get(mapping.field) ?? []
           mappedColumnNumbers.set(mapping.field, [...existing, colNumber])
         }
         for (const extraColumn of mapping.extraColumns ?? []) {
-          if (value === extraColumn || value.includes(extraColumn)) {
+          if (value === extraColumn) {
             const existing = mappedColumnNumbers.get(mapping.field) ?? []
             mappedColumnNumbers.set(mapping.field, [...existing, colNumber])
           }
@@ -192,6 +218,7 @@ export async function parseOrderExcel(
     const raw = {
       orderNumber: getCellString(row, 'orderNumber'),
       buyerName: getCellString(row, 'buyerName'),
+      buyerPhone: getCellString(row, 'buyerPhone') || undefined,
       recipientName: getCellString(row, 'recipientName'),
       recipientAddress: getCellString(row, 'recipientAddress'),
       recipientPhone: getCellString(row, 'recipientPhone') || undefined,
@@ -202,6 +229,9 @@ export async function parseOrderExcel(
       quantity: getCellNumber(row, 'quantity') || 1,
       totalAmount: getCellNumber(row, 'totalAmount'),
       sku: getCellString(row, 'sku') || undefined,
+      marketplaceItemId: getCellString(row, 'marketplaceItemId') || undefined,
+      deliveryMessage: getCellString(row, 'deliveryMessage') || undefined,
+      shippingFee: getCellString(row, 'shippingFee') ? getCellNumber(row, 'shippingFee') : undefined,
     }
 
     // Skip completely empty rows

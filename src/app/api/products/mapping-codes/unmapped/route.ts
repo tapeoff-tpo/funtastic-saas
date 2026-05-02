@@ -4,15 +4,16 @@
  * 사용자의 주문에 등장한 (marketplaceId, marketplaceItemId) 중에서
  * mapping_sources 에 등록되지 않은 항목을 빈도순으로 반환.
  */
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const exactOptionId = '__exact__'
 
   // 최근 90일 내 주문에 등장한 마켓상품 중 매핑되지 않은 항목.
   // 사방넷 방식 매칭:
@@ -41,7 +42,11 @@ export async function GET(_req: NextRequest) {
           AND (
             -- 단품매핑 정확일치
             (ms.marketplace_option_id <> ''
-              AND oi.marketplace_item_id = ms.marketplace_product_id || '-' || ms.marketplace_option_id)
+              AND (
+                oi.marketplace_item_id = ms.marketplace_product_id || '-' || ms.marketplace_option_id
+                OR (ms.marketplace_option_id = ${exactOptionId}
+                  AND oi.marketplace_item_id = ms.marketplace_product_id)
+              ))
             -- 품번매핑: 풀 일치 또는 productId+ "-" prefix
             OR (ms.marketplace_option_id = ''
               AND (oi.marketplace_item_id = ms.marketplace_product_id

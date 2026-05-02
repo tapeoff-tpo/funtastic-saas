@@ -12,6 +12,7 @@ export const MARKETPLACE_LABELS: Record<string, string> = {
   ably: '에이블리', ssgmall: 'SSG몰',
 }
 export const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
+const EXACT_OPTION_ID = '__exact__'
 
 interface MappingCodeRow {
   id: string
@@ -108,7 +109,7 @@ export function MappingManager() {
         ? { product: id.slice(0, sepIdx), option: id.slice(sepIdx + 1) }
         : prefillMode === 'product' && sepIdx > 0
           ? { product: id.slice(0, sepIdx), option: '' }
-          : { product: id, option: '' }
+          : { product: id, option: prefillMode === 'option' ? EXACT_OPTION_ID : '' }
       form.sources.push({
         mode: split.option ? 'option' : 'product',
         marketplaceId: prefillSource.marketplaceId,

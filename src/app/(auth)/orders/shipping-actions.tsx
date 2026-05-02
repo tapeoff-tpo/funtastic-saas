@@ -48,6 +48,7 @@ interface MappingTarget {
 }
 
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
+const EXACT_OPTION_ID = '__exact__'
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]
@@ -548,7 +549,7 @@ function InventoryMappingDialog({
           sources: [{
             marketplaceId: selectedTarget.marketplaceId,
             marketplaceProductId: split.product,
-            marketplaceOptionId: split.option,
+            marketplaceOptionId: split.option || EXACT_OPTION_ID,
             productNameSnapshot: selectedTarget.productName,
             optionNameSnapshot: selectedTarget.optionText,
           }],

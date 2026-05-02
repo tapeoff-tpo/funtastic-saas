@@ -22,6 +22,8 @@ import { PageSizeSelector } from '@/components/ui/pagination'
 import { RefreshCw, Plus, Search, X } from 'lucide-react'
 import { MARKETPLACE_LABELS, marketLabel, type SourceMode } from './mapping-manager'
 
+const EXACT_OPTION_ID = '__exact__'
+
 interface OrderRowComponent {
   sku: string
   quantity: number
@@ -391,7 +393,7 @@ export function OrderRowsBoard() {
       return {
         marketplaceId: r.marketplaceId,
         marketplaceProductId: split.product,
-        marketplaceOptionId: bulkTarget.mode === 'option' ? split.option : '',
+        marketplaceOptionId: bulkTarget.mode === 'option' ? (split.option || EXACT_OPTION_ID) : '',
         productNameSnapshot: r.productName || null,
         optionNameSnapshot: r.optionText || null,
       }
@@ -683,7 +685,7 @@ export function OrderRowsBoard() {
             ) : rows.map((r) => {
               const split = splitProductOption(r.marketplaceItemId)
               const canAddProductMapping = !r.hasProductMapping
-              const canAddOptionMapping = !r.hasOptionMapping && split.option
+              const canAddOptionMapping = !r.hasOptionMapping
               const compsOrEmpty: (OrderRowComponent | null)[] = r.components.length > 0
                 ? r.components
                 : [null]

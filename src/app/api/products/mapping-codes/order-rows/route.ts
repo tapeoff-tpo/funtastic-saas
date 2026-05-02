@@ -83,6 +83,7 @@ export async function GET(req: NextRequest) {
   const pageSizeRaw = parseInt(sp.get('pageSize') ?? '50', 10) || 50
   const pageSize = Math.min(200, Math.max(1, pageSizeRaw))
   const offset = (page - 1) * pageSize
+  const exactOptionId = '__exact__'
 
   // ---------- 동적 WHERE 절 (parametrized) ----------
   // o.user_id = user.id 는 항상.
@@ -142,7 +143,11 @@ export async function GET(req: NextRequest) {
         AND s.marketplace_id = o.marketplace_id
         AND (
           (s.marketplace_option_id <> ''
-            AND oi.marketplace_item_id = s.marketplace_product_id || '-' || s.marketplace_option_id)
+            AND (
+              oi.marketplace_item_id = s.marketplace_product_id || '-' || s.marketplace_option_id
+              OR (s.marketplace_option_id = ${exactOptionId}
+                AND oi.marketplace_item_id = s.marketplace_product_id)
+            ))
           OR (s.marketplace_option_id = ''
             AND (oi.marketplace_item_id = s.marketplace_product_id
               OR oi.marketplace_item_id LIKE s.marketplace_product_id || '-%'))
@@ -199,7 +204,11 @@ export async function GET(req: NextRequest) {
         WHERE s3.user_id = o.user_id
           AND s3.marketplace_id = o.marketplace_id
           AND s3.marketplace_option_id <> ''
-          AND oi.marketplace_item_id = s3.marketplace_product_id || '-' || s3.marketplace_option_id
+          AND (
+            oi.marketplace_item_id = s3.marketplace_product_id || '-' || s3.marketplace_option_id
+            OR (s3.marketplace_option_id = ${exactOptionId}
+              AND oi.marketplace_item_id = s3.marketplace_product_id)
+          )
       )                               AS "hasOptionMapping",
       COALESCE(
         (

@@ -14,6 +14,7 @@
  */
 
 export const MAPPING_SEPARATOR = '-'
+export const EXACT_OPTION_ID = '__exact__'
 
 export type MappingSource = {
   marketplaceId: string
@@ -37,6 +38,9 @@ export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
     if (s.marketplaceOptionId) {
       const key = `${s.marketplaceId}:${s.marketplaceProductId}${MAPPING_SEPARATOR}${s.marketplaceOptionId}`
       optionMap.set(key, s.ref)
+      if (s.marketplaceOptionId === EXACT_OPTION_ID) {
+        optionMap.set(`${s.marketplaceId}:${s.marketplaceProductId}`, s.ref)
+      }
     } else {
       const key = `${s.marketplaceId}:${s.marketplaceProductId}`
       productMap.set(key, s.ref)

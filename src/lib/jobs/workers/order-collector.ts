@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import type { OrderCollectionJobData } from '../queues'
 import { db } from '@/lib/db'
 import {
@@ -256,15 +256,23 @@ export async function collectOrdersForConnection(params: {
     await setProgress(`변경된 주문 조회 중... (최근 ${lookbackLabel})`)
     const fetchedOrders = await adapter.getOrders(since)
     const normalizedOrders = mergeNormalizedOrdersByOrderId(fetchedOrders)
-    await setProgress(`${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ' — 저장 중...' : ''}`)
+    const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
+    const ordersToSave = normalizedOrders.filter((order) => {
+      const key = `${order.marketplaceId}:${order.marketplaceOrderId}`
+      return !existingOrderKeys.has(key)
+    })
+    const skippedExistingCount = normalizedOrders.length - ordersToSave.length
+    await setProgress(
+      `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` — 신규 ${ordersToSave.length}건 저장, 기존 ${skippedExistingCount}건 건너뜀` : ''}`,
+    )
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)
     // Track newly inserted 'new' status orders for auto-confirm
     const newOrderIds: Array<{ id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }> = []
 
-    const totalOrders = normalizedOrders.length
+    const totalOrders = ordersToSave.length
     let idx = 0
-    for (const order of normalizedOrders) {
+    for (const order of ordersToSave) {
       idx++
       const [upsertedOrder] = await upsertOrder(order, connectionId, userId)
       // Re-insert order items (delete existing first to handle updates)
@@ -438,6 +446,34 @@ export async function processOrderCollection(
     jobLogId: job.data.jobLogId,
     jobType: job.data.jobType,
   })
+}
+
+async function findExistingOrderKeys(
+  userId: string,
+  marketplaceId: string,
+  normalizedOrders: NormalizedOrder[],
+): Promise<Set<string>> {
+  const marketplaceOrderIds = Array.from(
+    new Set(normalizedOrders.map((order) => order.marketplaceOrderId).filter(Boolean)),
+  )
+  if (marketplaceOrderIds.length === 0) return new Set()
+
+  const existingOrders = await db
+    .select({
+      marketplaceId: orders.marketplaceId,
+      marketplaceOrderId: orders.marketplaceOrderId,
+    })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.userId, userId),
+        eq(orders.marketplaceId, marketplaceId),
+        eq(orders.isCopy, false),
+        inArray(orders.marketplaceOrderId, marketplaceOrderIds),
+      ),
+    )
+
+  return new Set(existingOrders.map((order) => `${order.marketplaceId}:${order.marketplaceOrderId}`))
 }
 
 /**

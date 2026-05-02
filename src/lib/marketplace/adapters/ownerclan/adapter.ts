@@ -50,14 +50,12 @@ const ORDER_FIELDS = `
       value
     }
     taxFree
-    sellerNote
   }
   status
   shippingInfo {
     sender {
       name
       phoneNumber
-      email
     }
     recipient {
       name
@@ -72,15 +70,13 @@ const ORDER_FIELDS = `
   }
   createdAt
   updatedAt
-  note
   ordererNote
-  sellerNote
   isBeingMediated
 `
 
 const ALL_ORDERS_QUERY = `
-  query OwnerclanAllOrders($first: Int!, $after: String, $dateFrom: Timestamp, $dateTo: Timestamp) {
-    allOrders(first: $first, after: $after, dateFrom: $dateFrom, dateTo: $dateTo) {
+  query OwnerclanAllOrders($first: Int!, $dateFrom: Timestamp, $dateTo: Timestamp) {
+    allOrders(first: $first, dateFrom: $dateFrom, dateTo: $dateTo) {
       pageInfo {
         hasNextPage
         endCursor
@@ -187,7 +183,6 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
       for (let page = 0; page < 20; page++) {
         const response: OwnerclanAllOrdersResponse = await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
           first: 100,
-          after,
           dateFrom: toUnixSeconds(since),
           dateTo: toUnixSeconds(new Date()),
         })

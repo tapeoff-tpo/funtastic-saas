@@ -1,4 +1,4 @@
-import ky, { type KyInstance } from 'ky'
+import ky, { HTTPError, type KyInstance } from 'ky'
 
 const OWNERCLAN_GRAPHQL_URL = 'https://api.ownerclan.com/v1/graphql'
 const OWNERCLAN_AUTH_URL = 'https://auth.ownerclan.com/auth'
@@ -53,15 +53,20 @@ export class OwnerclanClient {
 
   async query<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
     const token = await this.authenticate()
-    const response = await this.http.get(OWNERCLAN_GRAPHQL_URL, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      searchParams: {
-        query,
-        ...(variables ? { variables: JSON.stringify(variables) } : {}),
-      },
-    }).json<OwnerclanGraphqlResponse<T>>()
+    let response: OwnerclanGraphqlResponse<T>
+    try {
+      response = await this.http.get(OWNERCLAN_GRAPHQL_URL, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        searchParams: {
+          query,
+          ...(variables ? { variables: JSON.stringify(variables) } : {}),
+        },
+      }).json<OwnerclanGraphqlResponse<T>>()
+    } catch (error) {
+      throw await enrichHttpError(error)
+    }
 
     if (response.errors && response.errors.length > 0) {
       throw new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
@@ -76,15 +81,20 @@ export class OwnerclanClient {
 
   async mutate<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
     const token = await this.authenticate()
-    const response = await this.http.post(OWNERCLAN_GRAPHQL_URL, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      json: {
-        query,
-        variables,
-      },
-    }).json<OwnerclanGraphqlResponse<T>>()
+    let response: OwnerclanGraphqlResponse<T>
+    try {
+      response = await this.http.post(OWNERCLAN_GRAPHQL_URL, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        json: {
+          query,
+          variables,
+        },
+      }).json<OwnerclanGraphqlResponse<T>>()
+    } catch (error) {
+      throw await enrichHttpError(error)
+    }
 
     if (response.errors && response.errors.length > 0) {
       throw new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
@@ -96,6 +106,14 @@ export class OwnerclanClient {
 
     return response.data
   }
+}
+
+async function enrichHttpError(error: unknown): Promise<Error> {
+  if (error instanceof HTTPError) {
+    const body = await error.response.text().catch(() => '')
+    return new Error(`${error.message}${body ? `: ${body}` : ''}`)
+  }
+  return error instanceof Error ? error : new Error('Unknown Ownerclan HTTP error')
 }
 
 function parseAuthToken(responseText: string): string | undefined {

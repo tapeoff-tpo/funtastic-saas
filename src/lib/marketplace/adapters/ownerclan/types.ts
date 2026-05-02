@@ -15,7 +15,6 @@ export interface OwnerclanOrderProduct {
   shippedDate?: number | null
   additionalAttributes?: Array<{ key?: string | null; value?: string | null }> | null
   taxFree?: boolean | null
-  sellerNote?: string | null
 }
 
 export interface OwnerclanOrder {
@@ -27,7 +26,6 @@ export interface OwnerclanOrder {
     sender?: {
       name?: string | null
       phoneNumber?: string | null
-      email?: string | null
     } | null
     recipient?: {
       name?: string | null
@@ -42,9 +40,7 @@ export interface OwnerclanOrder {
   } | null
   createdAt?: number | null
   updatedAt?: number | null
-  note?: string | null
   ordererNote?: string | null
-  sellerNote?: string | null
   isBeingMediated?: boolean | null
 }
 

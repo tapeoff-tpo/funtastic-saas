@@ -75,8 +75,8 @@ const ORDER_FIELDS = `
 `
 
 const ALL_ORDERS_QUERY = `
-  query OwnerclanAllOrders($first: Int!, $dateFrom: Timestamp, $dateTo: Timestamp) {
-    allOrders(first: $first, dateFrom: $dateFrom, dateTo: $dateTo) {
+  query OwnerclanAllOrders($first: Int!, $after: String, $dateFrom: Timestamp, $dateTo: Timestamp) {
+    allOrders(first: $first, after: $after, dateFrom: $dateFrom, dateTo: $dateTo) {
       pageInfo {
         hasNextPage
         endCursor
@@ -177,22 +177,33 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
     const collected: NormalizedOrder[] = []
-    let after: string | null = null
+    const seenOrderIds = new Set<string>()
+    const now = new Date()
 
     try {
-      for (let page = 0; page < 20; page++) {
-        const response: OwnerclanAllOrdersResponse = await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
-          first: 100,
-          dateFrom: toUnixSeconds(since),
-          dateTo: toUnixSeconds(new Date()),
-        })
+      for (let windowStart = new Date(since); windowStart < now;) {
+        const windowEnd = new Date(Math.min(windowStart.getTime() + 24 * 60 * 60 * 1000, now.getTime()))
+        let after: string | null = null
 
-        for (const edge of response.allOrders.edges ?? []) {
-          collected.push(this.normalizeOrder(edge.node))
+        for (let page = 0; page < 20; page++) {
+          const response: OwnerclanAllOrdersResponse = await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
+            first: 50,
+            after,
+            dateFrom: toUnixSeconds(windowStart),
+            dateTo: toUnixSeconds(windowEnd),
+          })
+
+          for (const edge of response.allOrders.edges ?? []) {
+            if (seenOrderIds.has(edge.node.key)) continue
+            seenOrderIds.add(edge.node.key)
+            collected.push(this.normalizeOrder(edge.node))
+          }
+
+          if (!response.allOrders.pageInfo.hasNextPage || !response.allOrders.pageInfo.endCursor) break
+          after = response.allOrders.pageInfo.endCursor
         }
 
-        if (!response.allOrders.pageInfo.hasNextPage || !response.allOrders.pageInfo.endCursor) break
-        after = response.allOrders.pageInfo.endCursor
+        windowStart = windowEnd
       }
 
       return collected

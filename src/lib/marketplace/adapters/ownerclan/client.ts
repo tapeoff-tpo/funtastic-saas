@@ -55,13 +55,13 @@ export class OwnerclanClient {
     const token = await this.authenticate()
     let response: OwnerclanGraphqlResponse<T>
     try {
-      response = await this.http.get(OWNERCLAN_GRAPHQL_URL, {
+      response = await this.http.post(OWNERCLAN_GRAPHQL_URL, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
-        searchParams: {
+        json: {
           query,
-          ...(variables ? { variables: JSON.stringify(variables) } : {}),
+          variables,
         },
       }).json<OwnerclanGraphqlResponse<T>>()
     } catch (error) {

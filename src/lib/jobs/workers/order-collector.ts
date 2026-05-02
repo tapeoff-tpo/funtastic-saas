@@ -239,7 +239,7 @@ export async function collectOrdersForConnection(params: {
     // 10x10 rejects requests outside "within 7 days" and appears to count
     // calendar dates inclusively, so keep its manual range safely inside.
     const now = Date.now()
-    const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver'])
+    const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver', 'ownerclan'])
     const lookbackLabel = jobType === 'manual-order-collection' && marketplaceId === '10x10'
       ? '6일'
       : jobType === 'manual-order-collection' && marketplaceId === 'cafe24'

@@ -101,6 +101,8 @@ export function ShippingActions({
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false)
+  const [applyingMappings, setApplyingMappings] = useState(false)
+  const [confirmingMapped, setConfirmingMapped] = useState(false)
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
@@ -152,6 +154,9 @@ export function ShippingActions({
   const ordersForMapping = selectedOrders.length > 0 ? selectedOrders : allOrders
   const unmappedOrderCount = useMemo(() => {
     return ordersForMapping.filter((o) => o.mappingStatus !== 'mapped').length
+  }, [ordersForMapping])
+  const existingMappedOrders = useMemo(() => {
+    return ordersForMapping.filter((order) => order.mappingStatus === 'mapped')
   }, [ordersForMapping])
 
   const mappingTargets = useMemo<MappingTarget[]>(() => {
@@ -231,6 +236,75 @@ export function ShippingActions({
     window.open(`/shipping/print?${params.toString()}`, '_blank')
   }
 
+  const handleApplyExistingMappings = async () => {
+    if (existingMappedOrders.length === 0) {
+      toast.info('기존 매핑이 적용된 주문이 없습니다.')
+      return
+    }
+
+    setApplyingMappings(true)
+    try {
+      const orderIds = Array.from(new Set(existingMappedOrders.map((order) => order.id)))
+      const res = await fetch('/api/orders/apply-mappings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderIds }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        toast.error(err.error ?? '매핑 처리 실패')
+        return
+      }
+      const data = await res.json() as { applied: number }
+      toast.success(`${data.applied}건 매핑 완료`)
+      router.refresh()
+    } finally {
+      setApplyingMappings(false)
+    }
+  }
+
+  const handleConfirmMappedOrders = async () => {
+    if (existingMappedOrders.length === 0) {
+      toast.info('확정할 매핑완료 주문이 없습니다.')
+      return
+    }
+
+    setConfirmingMapped(true)
+    try {
+      const orderIds = Array.from(new Set(existingMappedOrders.map((order) => order.id)))
+      const res = await fetch('/api/orders/confirm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderIds }),
+      })
+      const data = await res.json().catch(() => ({})) as {
+        successCount?: number
+        failCount?: number
+        error?: string
+        results?: Array<{ success: boolean; marketplaceOrderId: string; error?: string }>
+      }
+
+      if (!res.ok) {
+        toast.error(data.error ?? '확정 처리 실패')
+        return
+      }
+
+      const successCount = data.successCount ?? 0
+      const failCount = data.failCount ?? 0
+      if (failCount === 0) {
+        toast.success(`${successCount}건 확인 탭으로 이동`)
+      } else {
+        toast.warning(`${successCount}건 확정, ${failCount}건 실패`)
+        for (const failure of (data.results ?? []).filter((result) => !result.success).slice(0, 3)) {
+          toast.error(`${failure.marketplaceOrderId}: ${failure.error ?? '확정 실패'}`, { duration: 8000 })
+        }
+      }
+      router.refresh()
+    } finally {
+      setConfirmingMapped(false)
+    }
+  }
+
   // Determine which action groups to show based on stage
   const showMapping = showMappingAction || stage === 'mapping'
   const showInvoice = !stage || stage === 'invoice' || stage === 'confirm'
@@ -242,6 +316,17 @@ export function ShippingActions({
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-muted/30 p-2">
         {showMapping && (
           <>
+            <button
+              type="button"
+              onClick={() => void handleApplyExistingMappings()}
+              disabled={applyingMappings || existingMappedOrders.length === 0}
+              className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              title={hasSelection ? '선택한 주문 중 기존 매핑이 있는 주문을 매핑완료 처리' : '현재 페이지에서 기존 매핑이 있는 주문을 매핑완료 처리'}
+            >
+              {applyingMappings
+                ? '매핑 중...'
+                : `매핑${existingMappedOrders.length > 0 ? ` (${existingMappedOrders.length})` : ''}`}
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -261,6 +346,17 @@ export function ShippingActions({
             >
               매핑관리
             </Link>
+            <button
+              type="button"
+              onClick={() => void handleConfirmMappedOrders()}
+              disabled={confirmingMapped || existingMappedOrders.length === 0}
+              className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              title={hasSelection ? '선택한 주문 중 매핑완료 주문을 확인 탭으로 이동' : '현재 페이지의 매핑완료 주문을 확인 탭으로 이동'}
+            >
+              {confirmingMapped
+                ? '확정 중...'
+                : `확정${existingMappedOrders.length > 0 ? ` (${existingMappedOrders.length})` : ''}`}
+            </button>
           </>
         )}
 

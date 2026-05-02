@@ -91,6 +91,11 @@ const ALL_ORDERS_QUERY = `
   }
 `
 
+const OWNERCLAN_PAGE_SIZE = 20
+const OWNERCLAN_MAX_PAGES_PER_WINDOW = 10
+const OWNERCLAN_WINDOW_MS = 6 * 60 * 60 * 1000
+const OWNERCLAN_MIN_WINDOW_MS = 60 * 60 * 1000
+
 const ORDER_QUERY = `
   query OwnerclanOrder($key: String!) {
     order(key: $key) {
@@ -110,6 +115,11 @@ function fromUnixSeconds(value?: number | null): Date {
 function asNumber(value: unknown): number {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+function isTimeoutError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
+  return message.includes('timed out') || message.includes('timeout')
 }
 
 function buildOptionText(product: OwnerclanOrderProduct): string | undefined {
@@ -157,7 +167,8 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
       await this.client.authenticate()
       await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
         first: 1,
-        dateFrom: toUnixSeconds(new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        after: null,
+        dateFrom: toUnixSeconds(new Date(Date.now() - OWNERCLAN_MIN_WINDOW_MS)),
         dateTo: toUnixSeconds(new Date()),
       })
       return { success: true }
@@ -182,27 +193,8 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
     try {
       for (let windowStart = new Date(since); windowStart < now;) {
-        const windowEnd = new Date(Math.min(windowStart.getTime() + 24 * 60 * 60 * 1000, now.getTime()))
-        let after: string | null = null
-
-        for (let page = 0; page < 20; page++) {
-          const response: OwnerclanAllOrdersResponse = await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
-            first: 50,
-            after,
-            dateFrom: toUnixSeconds(windowStart),
-            dateTo: toUnixSeconds(windowEnd),
-          })
-
-          for (const edge of response.allOrders.edges ?? []) {
-            if (seenOrderIds.has(edge.node.key)) continue
-            seenOrderIds.add(edge.node.key)
-            collected.push(this.normalizeOrder(edge.node))
-          }
-
-          if (!response.allOrders.pageInfo.hasNextPage || !response.allOrders.pageInfo.endCursor) break
-          after = response.allOrders.pageInfo.endCursor
-        }
-
+        const windowEnd = new Date(Math.min(windowStart.getTime() + OWNERCLAN_WINDOW_MS, now.getTime()))
+        await this.collectOrdersWindow(windowStart, windowEnd, collected, seenOrderIds)
         windowStart = windowEnd
       }
 
@@ -214,6 +206,53 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
         throw new MarketplaceAuthError('ownerclan', message)
       }
       throw new MarketplaceApiError('ownerclan', 500, message)
+    }
+  }
+
+  private async collectOrdersWindow(
+    dateFrom: Date,
+    dateTo: Date,
+    collected: NormalizedOrder[],
+    seenOrderIds: Set<string>,
+  ): Promise<void> {
+    try {
+      await this.fetchOrdersWindow(dateFrom, dateTo, collected, seenOrderIds)
+    } catch (error) {
+      const windowMs = dateTo.getTime() - dateFrom.getTime()
+      if (isTimeoutError(error) && windowMs > OWNERCLAN_MIN_WINDOW_MS) {
+        const midpoint = new Date(dateFrom.getTime() + Math.floor(windowMs / 2))
+        await this.collectOrdersWindow(dateFrom, midpoint, collected, seenOrderIds)
+        await this.collectOrdersWindow(midpoint, dateTo, collected, seenOrderIds)
+        return
+      }
+      throw error
+    }
+  }
+
+  private async fetchOrdersWindow(
+    dateFrom: Date,
+    dateTo: Date,
+    collected: NormalizedOrder[],
+    seenOrderIds: Set<string>,
+  ): Promise<void> {
+    let after: string | null = null
+
+    for (let page = 0; page < OWNERCLAN_MAX_PAGES_PER_WINDOW; page++) {
+      const response: OwnerclanAllOrdersResponse = await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
+        first: OWNERCLAN_PAGE_SIZE,
+        after,
+        dateFrom: toUnixSeconds(dateFrom),
+        dateTo: toUnixSeconds(dateTo),
+      })
+
+      for (const edge of response.allOrders.edges ?? []) {
+        if (seenOrderIds.has(edge.node.key)) continue
+        seenOrderIds.add(edge.node.key)
+        collected.push(this.normalizeOrder(edge.node))
+      }
+
+      if (!response.allOrders.pageInfo.hasNextPage || !response.allOrders.pageInfo.endCursor) break
+      after = response.allOrders.pageInfo.endCursor
     }
   }
 

@@ -153,7 +153,7 @@ export async function parseOrderExcel(
     }
 
     for (const [headerLabel, fieldKey] of Object.entries(HEADER_MAP)) {
-      if (value === headerLabel || value.includes(headerLabel)) {
+      if (value === headerLabel || (!colMap[fieldKey] && value.includes(headerLabel))) {
         colMap[fieldKey] = colNumber
       }
     }

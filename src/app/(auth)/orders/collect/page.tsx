@@ -4,10 +4,6 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
-import {
-  FIRSTMALL_ORDER_IMPORT_MAPPINGS,
-  FIRSTMALL_ORDER_IMPORT_TEMPLATE_ID,
-} from '@/lib/orders/excel-import-fields'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -38,15 +34,6 @@ export default async function OrdersCollectPage() {
     })
     .from(excelImportTemplates)
     .where(eq(excelImportTemplates.userId, user.id))
-
-  const builtInImportTemplates = [
-    {
-      id: FIRSTMALL_ORDER_IMPORT_TEMPLATE_ID,
-      name: '퍼스트몰 주문서',
-      mappings: FIRSTMALL_ORDER_IMPORT_MAPPINGS,
-      isDefault: true,
-    },
-  ]
 
   if (connections.length === 0) {
     return (
@@ -81,7 +68,7 @@ export default async function OrdersCollectPage() {
           expiresAt: c.expiresAt,
           isManual: c.isManual,
         }))}
-        importTemplates={[...builtInImportTemplates, ...importTemplates]}
+        importTemplates={importTemplates}
       />
     </div>
   )

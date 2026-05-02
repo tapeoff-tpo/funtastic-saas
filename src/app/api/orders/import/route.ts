@@ -5,11 +5,7 @@ import { db } from '@/lib/db'
 import { excelImportTemplates, orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { generateInternalNo } from '@/lib/orders/internal-no'
-import {
-  FIRSTMALL_ORDER_IMPORT_MAPPINGS,
-  FIRSTMALL_ORDER_IMPORT_TEMPLATE_ID,
-  type OrderImportMapping,
-} from '@/lib/orders/excel-import-fields'
+import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 
 /**
  * POST /api/orders/import
@@ -55,20 +51,16 @@ export async function POST(request: NextRequest) {
 
     let templateMappings: OrderImportMapping[] | undefined
     if (templateId) {
-      if (templateId === FIRSTMALL_ORDER_IMPORT_TEMPLATE_ID) {
-        templateMappings = FIRSTMALL_ORDER_IMPORT_MAPPINGS
-      } else {
-        const [template] = await db
-          .select({ mappings: excelImportTemplates.mappings })
-          .from(excelImportTemplates)
-          .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, user.id)))
-          .limit(1)
+      const [template] = await db
+        .select({ mappings: excelImportTemplates.mappings })
+        .from(excelImportTemplates)
+        .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, user.id)))
+        .limit(1)
 
-        if (!template) {
-          return NextResponse.json({ error: '선택한 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
-        }
-        templateMappings = template.mappings
+      if (!template) {
+        return NextResponse.json({ error: '선택한 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
       }
+      templateMappings = template.mappings
     }
 
     // Parse Excel

@@ -34,24 +34,3 @@ export const ORDER_IMPORT_FIELD_LABELS: Record<string, string> = Object.fromEntr
 export const REQUIRED_ORDER_IMPORT_FIELDS = ORDER_IMPORT_FIELDS
   .filter((field) => field.required)
   .map((field) => field.field)
-
-export const FIRSTMALL_ORDER_IMPORT_TEMPLATE_ID = '__builtin_firstmall_order_export__'
-
-export const FIRSTMALL_ORDER_IMPORT_MAPPINGS: OrderImportMapping[] = [
-  { field: 'orderNumber', excelColumn: '주문번호' },
-  { field: 'buyerName', excelColumn: '주문자명' },
-  { field: 'buyerPhone', excelColumn: '주문자휴대폰' },
-  { field: 'recipientName', excelColumn: '수령인' },
-  { field: 'recipientPhone', excelColumn: '수령인휴대폰' },
-  { field: 'zipCode', excelColumn: '우편번호' },
-  { field: 'recipientAddress', excelColumn: '전체주소(도로명)' },
-  { field: 'orderedAt', excelColumn: '주문일' },
-  { field: 'productName', excelColumn: '상품명' },
-  { field: 'optionText', excelColumn: '추가입력옵션' },
-  { field: 'quantity', excelColumn: '주문수량' },
-  { field: 'totalAmount', excelColumn: '할인가x수량' },
-  { field: 'sku', excelColumn: '바코드' },
-  { field: 'marketplaceItemId', excelColumn: '주문번호+출고그룹' },
-  { field: 'deliveryMessage', excelColumn: '사용자메모' },
-  { field: 'shippingFee', excelColumn: '배송비' },
-]

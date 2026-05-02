@@ -32,18 +32,16 @@ export class OwnerclanClient {
   async authenticate(): Promise<string> {
     if (this.token) return this.token
 
-    const response = await this.http.post(OWNERCLAN_AUTH_URL, {
+    const responseText = await this.http.post(OWNERCLAN_AUTH_URL, {
       json: {
         service: 'ownerclan',
         userType: this.credentials.userType ?? 'vendor',
         username: this.credentials.username,
         password: this.credentials.password,
       },
-    }).json<OwnerclanAuthResponse | string>()
+    }).text()
 
-    const token = typeof response === 'string'
-      ? response
-      : response.token ?? response.accessToken ?? response.access_token ?? response.jwt
+    const token = parseAuthToken(responseText)
 
     if (!token) {
       throw new Error('Ownerclan auth token was not returned')
@@ -97,6 +95,19 @@ export class OwnerclanClient {
     }
 
     return response.data
+  }
+}
+
+function parseAuthToken(responseText: string): string | undefined {
+  const trimmed = responseText.trim()
+  if (!trimmed) return undefined
+  if (trimmed.startsWith('eyJ')) return trimmed
+
+  try {
+    const parsed = JSON.parse(trimmed) as OwnerclanAuthResponse
+    return parsed.token ?? parsed.accessToken ?? parsed.access_token ?? parsed.jwt
+  } catch {
+    return trimmed
   }
 }
 

@@ -18,6 +18,7 @@ import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
 import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
+import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -88,6 +89,11 @@ export function createAdapter(
       return new TossShoppingAdapter({
         access_key: credentials.access_key ?? credentials.accessKey ?? '',
         secret_key: credentials.secret_key ?? credentials.secretKey ?? '',
+      })
+    case 'ownerclan':
+      return new OwnerclanAdapter({
+        username: credentials.username ?? credentials.seller_id ?? '',
+        password: credentials.password ?? credentials.api_key ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

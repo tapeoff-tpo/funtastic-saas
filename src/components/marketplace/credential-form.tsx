@@ -39,6 +39,8 @@ const credentialLabels: Record<string, string> = {
   seller_id: '판매자 ID',
   admin_app_key: '연동대행사 Admin 키',
   seller_app_key: '판매자 API 인증키',
+  username: '판매사 ID',
+  password: '판매사 PW',
 }
 
 export function CredentialForm({ marketplaces }: CredentialFormProps) {

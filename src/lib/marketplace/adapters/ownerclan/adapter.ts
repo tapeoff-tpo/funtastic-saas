@@ -1,12 +1,3 @@
-/**
- * Ownerclan (오너클랜) marketplace adapter implementing MarketplaceAdapter.
- *
- * Uses API key authentication with JSON responses.
- *
- * NOTE: API details are best-effort (per D-03). Endpoints will be updated
- * when real API docs become available.
- */
-
 import type {
   MarketplaceAdapter,
   MarketplaceConfig,
@@ -18,13 +9,12 @@ import type {
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createOwnerclanClient } from './client'
-import { mapOwnerclanStatus, mapOwnerclanClaimType, mapOwnerclanClaimStatus } from './status-map'
-import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
+import { mapOwnerclanStatus } from './status-map'
 import type {
-  OwnerclanApiResponse,
+  OwnerclanAllOrdersResponse,
   OwnerclanOrder,
-  OwnerclanClaim,
-  OwnerclanProduct,
+  OwnerclanOrderProduct,
+  OwnerclanOrderResponse,
 } from './types'
 
 const OWNERCLAN_CONFIG: MarketplaceConfig = {
@@ -32,257 +22,265 @@ const OWNERCLAN_CONFIG: MarketplaceConfig = {
   name: '오너클랜',
   authType: 'api_key',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  requiredCredentials: ['username', 'password'],
 }
 
-/** Format a Date as ISO date string (yyyy-MM-dd) for API date params */
-function formatDate(date: Date): string {
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
+const ORDER_FIELDS = `
+  key
+  id
+  products {
+    quantity
+    price
+    shippingType
+    itemKey
+    productName
+    itemOptionInfo {
+      optionAttributes {
+        name
+        value
+      }
+      price
+    }
+    trackingNumber
+    shippingCompanyCode
+    shippingCompanyName
+    shippedDate
+    additionalAttributes {
+      key
+      value
+    }
+    taxFree
+    sellerNote
+  }
+  status
+  shippingInfo {
+    sender {
+      name
+      phoneNumber
+      email
+    }
+    recipient {
+      name
+      phoneNumber
+      destinationAddress {
+        addr1
+        addr2
+        postalCode
+      }
+    }
+    shippingFee
+  }
+  createdAt
+  updatedAt
+  note
+  ordererNote
+  sellerNote
+  isBeingMediated
+`
+
+const ALL_ORDERS_QUERY = `
+  query OwnerclanAllOrders($first: Int!, $after: String, $dateFrom: Timestamp, $dateTo: Timestamp) {
+    allOrders(first: $first, after: $after, dateFrom: $dateFrom, dateTo: $dateTo) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      edges {
+        cursor
+        node {
+          ${ORDER_FIELDS}
+        }
+      }
+    }
+  }
+`
+
+const ORDER_QUERY = `
+  query OwnerclanOrder($key: String!) {
+    order(key: $key) {
+      ${ORDER_FIELDS}
+    }
+  }
+`
+
+function toUnixSeconds(date: Date): number {
+  return Math.floor(date.getTime() / 1000)
+}
+
+function fromUnixSeconds(value?: number | null): Date {
+  return value ? new Date(value * 1000) : new Date()
+}
+
+function asNumber(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function buildOptionText(product: OwnerclanOrderProduct): string | undefined {
+  const optionParts = product.itemOptionInfo?.optionAttributes
+    ?.map((attr) => {
+      const name = attr.name?.trim()
+      const value = attr.value?.trim()
+      if (!name && !value) return ''
+      if (!name) return value ?? ''
+      if (!value) return name
+      return `${name}: ${value}`
+    })
+    .filter(Boolean) ?? []
+
+  const additionalParts = product.additionalAttributes
+    ?.map((attr) => {
+      const name = attr.key?.trim()
+      const value = attr.value?.trim()
+      if (!name && !value) return ''
+      if (!name) return value ?? ''
+      if (!value) return name
+      return `${name}: ${value}`
+    })
+    .filter(Boolean) ?? []
+
+  const text = [...optionParts, ...additionalParts].join(' / ')
+  return text || undefined
 }
 
 export class OwnerclanAdapter implements MarketplaceAdapter {
   readonly config = OWNERCLAN_CONFIG
 
   private readonly client: ReturnType<typeof createOwnerclanClient>
-  private readonly sellerId: string
 
-  constructor(credentials: { api_key: string; seller_id: string }) {
-    this.client = createOwnerclanClient(credentials.api_key)
-    this.sellerId = credentials.seller_id
+  constructor(credentials: { username: string; password: string; api_key?: string; seller_id?: string }) {
+    this.client = createOwnerclanClient({
+      username: credentials.username || credentials.seller_id || '',
+      password: credentials.password || credentials.api_key || '',
+    })
   }
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      const now = new Date()
-      const response = await this.client.get('orders', {
-        searchParams: {
-          sellerId: this.sellerId,
-          dateFrom: formatDate(now),
-          dateTo: formatDate(now),
-          pageSize: '1',
-        },
-      }).json<OwnerclanApiResponse<OwnerclanOrder[]>>()
-
-      if (response.success) {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Unknown error' }
+      await this.client.authenticate()
+      await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
+        first: 1,
+        dateFrom: toUnixSeconds(new Date(Date.now() - 24 * 60 * 60 * 1000)),
+        dateTo: toUnixSeconds(new Date()),
+      })
+      return { success: true }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      return { success: false, error: message }
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   }
 
   async authenticate(): Promise<{ success: boolean; expiresAt?: Date }> {
-    return { success: true }
+    try {
+      await this.client.authenticate()
+      return { success: true }
+    } catch (error) {
+      throw new MarketplaceAuthError('ownerclan', error instanceof Error ? error.message : 'Authentication failed')
+    }
   }
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
-    const now = new Date()
+    const collected: NormalizedOrder[] = []
+    let after: string | null = null
 
     try {
-      const response = await this.client.get('orders', {
-        searchParams: {
-          sellerId: this.sellerId,
-          dateFrom: formatDate(since),
-          dateTo: formatDate(now),
-          pageSize: '50',
-        },
-      }).json<OwnerclanApiResponse<OwnerclanOrder[]>>()
+      for (let page = 0; page < 20; page++) {
+        const response: OwnerclanAllOrdersResponse = await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
+          first: 100,
+          after,
+          dateFrom: toUnixSeconds(since),
+          dateTo: toUnixSeconds(new Date()),
+        })
 
-      if (!response.success) {
-        throw new MarketplaceApiError('ownerclan', 400, response.message || 'Failed to fetch orders')
+        for (const edge of response.allOrders.edges ?? []) {
+          collected.push(this.normalizeOrder(edge.node))
+        }
+
+        if (!response.allOrders.pageInfo.hasNextPage || !response.allOrders.pageInfo.endCursor) break
+        after = response.allOrders.pageInfo.endCursor
       }
 
-      const orders = response.data || []
-      return orders.map((order) => this.normalizeOrder(order))
+      return collected
     } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('ownerclan', 'API key authentication failed')
+      if (error instanceof MarketplaceApiError || error instanceof MarketplaceAuthError) throw error
+      const message = error instanceof Error ? error.message : 'Unknown error'
+      if (message.includes('401') || message.includes('403') || message.toLowerCase().includes('auth')) {
+        throw new MarketplaceAuthError('ownerclan', message)
       }
-      throw new MarketplaceApiError('ownerclan', 500, error instanceof Error ? error.message : 'Unknown error')
+      throw new MarketplaceApiError('ownerclan', 500, message)
     }
   }
 
-  async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
-    const now = new Date()
-
-    try {
-      const response = await this.client.get('claims', {
-        searchParams: {
-          sellerId: this.sellerId,
-          dateFrom: formatDate(since),
-          dateTo: formatDate(now),
-          pageSize: '50',
-        },
-      }).json<OwnerclanApiResponse<OwnerclanClaim[]>>()
-
-      if (!response.success) {
-        throw new MarketplaceApiError('ownerclan', 400, response.message || 'Failed to fetch claims')
-      }
-
-      const claims = response.data || []
-      return claims.map((claim) => this.normalizeClaim(claim))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('ownerclan', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('ownerclan', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
+    return []
   }
 
-  async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '오너클랜 송장 업로드 API는 매뉴얼에서 확인되지 않아 비활성화했습니다.' }
+  }
+
+  async confirmOrder(marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const carrierCode = mapCarrierCode('ownerclan', invoice.carrierId)
-
-      const response = await this.client.post(`orders/${orderId}/invoice`, {
-        json: {
-          sellerId: this.sellerId,
-          carrierCode,
-          trackingNumber: invoice.trackingNumber,
-        },
-      }).json<OwnerclanApiResponse<null>>()
-
-      if (response.success) {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Invoice upload failed' }
+      const response = await this.client.query<OwnerclanOrderResponse>(ORDER_QUERY, { key: marketplaceOrderId })
+      if (!response.order) return { success: false, error: '오너클랜 주문을 찾을 수 없습니다.' }
+      return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
-  }
-
-  async confirmOrder(
-    _marketplaceOrderId: string,
-  ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    try {
-      const response = await this.client.get('products', {
-        searchParams: {
-          sellerId: this.sellerId,
-          pageSize: '50',
-        },
-      }).json<OwnerclanApiResponse<OwnerclanProduct[]>>()
-
-      if (!response.success) {
-        throw new MarketplaceApiError('ownerclan', 400, response.message || 'Failed to fetch products')
-      }
-
-      const products = response.data || []
-      return products.map((product) => this.normalizeProduct(product))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('ownerclan', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('ownerclan', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+    return []
   }
 
-  async registerProduct(product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
-    try {
-      const response = await this.client.post('products', {
-        json: {
-          sellerId: this.sellerId,
-          name: product.name,
-          price: product.price,
-          sku: product.sku,
-          description: product.description,
-        },
-      }).json<OwnerclanApiResponse<{ productId: string }>>()
-
-      if (response.success) {
-        return {
-          success: true,
-          marketplaceProductId: response.data.productId,
-        }
-      }
-      return { success: false, error: response.message || 'Product registration failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    }
+  async registerProduct(): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
+    return { success: false, error: '오너클랜 상품 등록은 아직 구현되지 않았습니다.' }
   }
 
-  async updateProduct(marketplaceProductId: string, product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
-    try {
-      const response = await this.client.put(`products/${marketplaceProductId}`, {
-        json: {
-          sellerId: this.sellerId,
-          ...(product.name != null && { name: product.name }),
-          ...(product.price != null && { price: product.price }),
-          ...(product.description != null && { description: product.description }),
-        },
-      }).json<OwnerclanApiResponse<null>>()
-
-      if (response.success) {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Product update failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    }
+  async updateProduct(): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '오너클랜 상품 수정은 아직 구현되지 않았습니다.' }
   }
 
   private normalizeOrder(order: OwnerclanOrder): NormalizedOrder {
+    const products = order.products?.length ? order.products : []
+    const recipient = order.shippingInfo?.recipient
+    const destination = recipient?.destinationAddress
+    const sender = order.shippingInfo?.sender
+    const shippingFee = asNumber(order.shippingInfo?.shippingFee)
+    const items = products.map((product, index) => {
+      const quantity = asNumber(product.quantity) || 1
+      const unitPrice = asNumber(product.price ?? product.itemOptionInfo?.price)
+      return {
+        marketplaceItemId: `${order.key}-${product.itemKey ?? index}`,
+        productName: product.productName ?? product.itemKey ?? order.key,
+        optionText: buildOptionText(product),
+        quantity,
+        unitPrice,
+        sku: product.itemKey ?? undefined,
+      }
+    })
+
+    const itemTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+
     return {
-      marketplaceOrderId: order.orderId,
+      marketplaceOrderId: order.key,
       marketplaceId: 'ownerclan',
-      marketplaceStatus: order.orderStatus,
-      status: mapOwnerclanStatus(order.orderStatus),
-      buyerName: order.buyerName,
-      buyerPhone: order.buyerPhone || undefined,
-      recipientName: order.receiverName,
-      recipientPhone: order.receiverPhone || undefined,
+      marketplaceStatus: order.status ?? '',
+      status: mapOwnerclanStatus(order.status),
+      buyerName: sender?.name ?? '오너클랜',
+      buyerPhone: sender?.phoneNumber ?? undefined,
+      recipientName: recipient?.name ?? '',
+      recipientPhone: recipient?.phoneNumber ?? undefined,
       shippingAddress: {
-        zipCode: order.receiverZipcode,
-        address1: order.receiverAddress,
-        address2: order.receiverAddressDetail || undefined,
+        zipCode: destination?.postalCode ?? '',
+        address1: destination?.addr1 ?? '',
+        address2: destination?.addr2 ?? undefined,
       },
-      items: [
-        {
-          marketplaceItemId: order.orderId,
-          productName: order.productName,
-          optionText: order.options || undefined,
-          quantity: order.quantity,
-          unitPrice: order.paymentAmount / (order.quantity || 1),
-          sku: order.sellerItemCode,
-        },
-      ],
-      orderedAt: new Date(order.orderDate),
-      totalAmount: order.paymentAmount,
+      items,
+      orderedAt: fromUnixSeconds(order.createdAt),
+      totalAmount: itemTotal + shippingFee,
+      shippingFee,
+      deliveryMessage: order.ordererNote ?? null,
       rawData: order as unknown as Record<string, unknown>,
-    }
-  }
-
-  private normalizeClaim(claim: OwnerclanClaim): NormalizedClaim {
-    return {
-      marketplaceClaimId: claim.claimId,
-      marketplaceId: 'ownerclan',
-      marketplaceOrderId: claim.orderId,
-      claimType: mapOwnerclanClaimType(claim.claimType),
-      claimStatus: mapOwnerclanClaimStatus(claim.claimStatus),
-      reason: claim.reason || undefined,
-      requestedAt: new Date(claim.createdAt),
-      rawData: claim as unknown as Record<string, unknown>,
-    }
-  }
-
-  private normalizeProduct(product: OwnerclanProduct): NormalizedProduct {
-    return {
-      productId: product.productId,
-      marketplaceId: 'ownerclan',
-      name: product.name,
-      price: product.price,
-      sku: product.productId,
-      status: product.status,
     }
   }
 }

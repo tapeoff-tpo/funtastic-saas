@@ -1,33 +1,105 @@
-/**
- * Ownerclan (오너클랜) API client with API key authentication.
- *
- * Ownerclan uses JSON API with API key auth.
- * API details are best-effort (per D-03).
- */
+import ky, { type KyInstance } from 'ky'
 
-import ky from 'ky'
+const OWNERCLAN_GRAPHQL_URL = 'https://api.ownerclan.com/v1/graphql'
+const OWNERCLAN_AUTH_URL = 'https://auth.ownerclan.com/auth'
 
-const OWNERCLAN_API_BASE = 'https://api.ownerclan.com/v1'
+interface OwnerclanAuthResponse {
+  token?: string
+  accessToken?: string
+  access_token?: string
+  jwt?: string
+}
 
-/**
- * Create a ky HTTP client pre-configured for Ownerclan API calls.
- * Sets the API key in the Authorization header.
- */
-export function createOwnerclanClient(apiKey: string) {
-  return ky.create({
-    prefixUrl: OWNERCLAN_API_BASE,
-    hooks: {
-      beforeRequest: [
-        (request) => {
-          request.headers.set('Authorization', `Bearer ${apiKey}`)
-          request.headers.set('Content-Type', 'application/json;charset=UTF-8')
-        },
-      ],
-    },
-    timeout: 30_000,
-    retry: {
-      limit: 2,
-      statusCodes: [408, 429, 500, 502, 503, 504],
-    },
-  })
+export interface OwnerclanGraphqlResponse<T> {
+  data?: T
+  errors?: Array<{ message?: string }>
+}
+
+export class OwnerclanClient {
+  private token: string | null = null
+
+  constructor(
+    private readonly credentials: { username: string; password: string },
+    private readonly http: KyInstance = ky.create({
+      timeout: 30_000,
+      retry: {
+        limit: 2,
+        statusCodes: [408, 429, 500, 502, 503, 504],
+      },
+    }),
+  ) {}
+
+  async authenticate(): Promise<string> {
+    if (this.token) return this.token
+
+    const response = await this.http.post(OWNERCLAN_AUTH_URL, {
+      json: {
+        service: 'ownerclan',
+        userType: 'seller',
+        username: this.credentials.username,
+        password: this.credentials.password,
+      },
+    }).json<OwnerclanAuthResponse | string>()
+
+    const token = typeof response === 'string'
+      ? response
+      : response.token ?? response.accessToken ?? response.access_token ?? response.jwt
+
+    if (!token) {
+      throw new Error('Ownerclan auth token was not returned')
+    }
+
+    this.token = token
+    return token
+  }
+
+  async query<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    const token = await this.authenticate()
+    const response = await this.http.get(OWNERCLAN_GRAPHQL_URL, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      searchParams: {
+        query,
+        ...(variables ? { variables: JSON.stringify(variables) } : {}),
+      },
+    }).json<OwnerclanGraphqlResponse<T>>()
+
+    if (response.errors && response.errors.length > 0) {
+      throw new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
+    }
+
+    if (!response.data) {
+      throw new Error('Ownerclan GraphQL response did not include data')
+    }
+
+    return response.data
+  }
+
+  async mutate<T>(query: string, variables?: Record<string, unknown>): Promise<T> {
+    const token = await this.authenticate()
+    const response = await this.http.post(OWNERCLAN_GRAPHQL_URL, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      json: {
+        query,
+        variables,
+      },
+    }).json<OwnerclanGraphqlResponse<T>>()
+
+    if (response.errors && response.errors.length > 0) {
+      throw new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
+    }
+
+    if (!response.data) {
+      throw new Error('Ownerclan GraphQL response did not include data')
+    }
+
+    return response.data
+  }
+}
+
+export function createOwnerclanClient(credentials: { username: string; password: string }) {
+  return new OwnerclanClient(credentials)
 }

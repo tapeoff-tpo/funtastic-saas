@@ -9,6 +9,7 @@ import '@/lib/marketplace/adapters/configs'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
+import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 
@@ -124,6 +125,12 @@ export async function testMarketplaceCredentials(
         result = await new TossShoppingAdapter({
           access_key: credentials.access_key?.trim() ?? '',
           secret_key: credentials.secret_key?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'ownerclan':
+        result = await new OwnerclanAdapter({
+          username: credentials.username?.trim() ?? credentials.seller_id?.trim() ?? '',
+          password: credentials.password?.trim() ?? credentials.api_key?.trim() ?? '',
         }).testConnection()
         break
       default:

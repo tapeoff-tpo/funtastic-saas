@@ -307,9 +307,10 @@ export function ShippingActions({
 
   // Determine which action groups to show based on stage
   const showMapping = showMappingAction || stage === 'mapping'
+  const hideFulfillmentActions = showMappingAction
   const showInvoice = !stage || stage === 'invoice' || stage === 'confirm'
-  const showShipping = !stage || stage === 'shipping' || stage === 'invoice'
-  const showPrint = !stage || stage === 'shipping' || stage === 'done'
+  const showShipping = !hideFulfillmentActions && (!stage || stage === 'shipping' || stage === 'invoice')
+  const showPrint = !hideFulfillmentActions && (!stage || stage === 'shipping' || stage === 'done')
 
   return (
     <>
@@ -451,13 +452,15 @@ export function ShippingActions({
               엑셀양식등록
             </a>
 
-            <button
-              type="button"
-              onClick={() => setExcelImportOpen(true)}
-              className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
-            >
-              송장등록
-            </button>
+            {!hideFulfillmentActions && (
+              <button
+                type="button"
+                onClick={() => setExcelImportOpen(true)}
+                className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted"
+              >
+                송장등록
+              </button>
+            )}
           </>
         )}
 

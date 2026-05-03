@@ -42,6 +42,25 @@ function primaryPhone(phone1?: string | null, phone2?: string | null): string {
   return (phone2 ?? phone1 ?? '').trim() || '-'
 }
 
+type SabangnetRawData = {
+  source?: string
+  mallName?: string
+  mallAccount?: string
+  originalStatus?: string
+  note?: string
+  rows?: Array<{
+    sourceFile?: string
+    rowNumber?: number
+    raw?: Record<string, string>
+  }>
+}
+
+function getSabangnetRawData(rawData: unknown): SabangnetRawData | null {
+  if (!rawData || typeof rawData !== 'object') return null
+  const data = rawData as SabangnetRawData
+  return data.source === 'sabangnet-history-xlsx' ? data : null
+}
+
 export default async function OrderDetailPage({
   params,
 }: {
@@ -61,6 +80,7 @@ export default async function OrderDetailPage({
   const shippingAddr = order.shippingAddress as
     | { zipCode: string; address1: string; address2?: string }
     | null
+  const sabangnetRaw = getSabangnetRawData(order.rawData)
 
   // 매핑자/스캔자 사용자 ID 모음 → 이름 일괄 조회
   // 신규 컬럼이라 기존 데이터가 없는 주문은 scanLogs/shipments 가 비어 있을 수 있음 → 방어적 fallback
@@ -232,6 +252,55 @@ export default async function OrderDetailPage({
               ))}
             </ul>
           </section>
+
+          {sabangnetRaw && (
+            <section className="rounded-lg border bg-white p-5">
+              <h2 className="mb-3 text-lg font-semibold">사방넷 원본 정보</h2>
+              <dl className="mb-4 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
+                <dt className="text-muted-foreground">쇼핑몰</dt>
+                <dd>{sabangnetRaw.mallName} {sabangnetRaw.mallAccount ? `(${sabangnetRaw.mallAccount})` : ''}</dd>
+                <dt className="text-muted-foreground">원본 주문상태</dt>
+                <dd>{sabangnetRaw.originalStatus ?? '-'}</dd>
+                <dt className="text-muted-foreground">비고</dt>
+                <dd className="text-muted-foreground">{sabangnetRaw.note ?? '-'}</dd>
+              </dl>
+              <div className="overflow-x-auto rounded-md border">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">파일</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">행</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">쇼핑몰 상품코드</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">수집 상품명</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">수집 옵션</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-right font-medium">주문수량</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">사방넷 상품코드</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">택배사</th>
+                      <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">송장번호</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {(sabangnetRaw.rows ?? []).map((row, index) => {
+                      const raw = row.raw ?? {}
+                      return (
+                        <tr key={`${row.sourceFile ?? 'row'}-${row.rowNumber ?? index}`}>
+                          <td className="whitespace-nowrap px-2 py-1.5">{row.sourceFile ?? '-'}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5">{row.rowNumber ?? '-'}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['쇼핑몰 상품코드'] ?? '-'}</td>
+                          <td className="min-w-[220px] px-2 py-1.5">{raw['수집 상품명'] ?? '-'}</td>
+                          <td className="min-w-[140px] px-2 py-1.5">{raw['수집 옵션'] ?? '-'}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5 text-right">{raw['주문수량'] ?? '-'}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['사방넷 상품코드'] ?? '-'}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5">{raw['택배사'] ?? '-'}</td>
+                          <td className="whitespace-nowrap px-2 py-1.5 font-mono">{raw['송장번호'] ?? '-'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
 
           {/* 주문 상태 — 진행 시점 타임라인 */}
           <section className="rounded-lg border bg-white p-5">

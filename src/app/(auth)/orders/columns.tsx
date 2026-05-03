@@ -2,7 +2,7 @@
 
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
-import { MessageCircle, Lock, Copy } from 'lucide-react'
+import { Copy, ExternalLink } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
@@ -113,8 +113,9 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
         type="button"
         onClick={() => setOpen((value) => !value)}
         disabled={pending}
-        className="w-fit rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+        className="inline-flex h-8 w-full items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
       >
+        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         {pending ? '접수중' : 'Claim'}
       </button>
       {open && (
@@ -238,6 +239,7 @@ export interface OrderRow {
   /** 사용자에게 보이는 8자리 내부 주문번호 (orders.internal_no) */
   internalNo: string
   marketplaceId: string
+  marketplaceName?: string | null
   marketplaceOrderId: string
   buyerName: string
   buyerPhone?: string | null
@@ -262,6 +264,7 @@ export interface OrderRow {
   claimId?: string | null
   claimStatus?: ClaimStatus | null
   claimReason?: string | null
+  historicalClaimStatuses?: string[]
   invoiceStatus?: InvoiceUploadStatus | null
   trackingNumber?: string | null
   carrierName?: string | null
@@ -336,25 +339,38 @@ function ProductInfoCell({ order }: { order: OrderRow }) {
       )}
       {order.logisticsMessage && (
         <span
-          className="mt-1 inline-flex w-fit items-center gap-1 rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+          className="mt-1 inline-flex w-fit items-center rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
           title={order.logisticsMessage}
         >
-          📦 {order.logisticsMessage}
+          {order.logisticsMessage}
         </span>
       )}
     </div>
   )
 }
 
-const STATUS_VARIANT: Record<OrderStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
-  new: 'default',
-  confirmed: 'secondary',
-  preparing: 'outline',
-  ready: 'default',
-  shipped: 'secondary',
-  delivering: 'default',
-  delivered: 'secondary',
-  cancelled: 'destructive',
+const STATUS_PILL_STYLES: Record<OrderStatus, string> = {
+  new: 'border-sky-200 bg-sky-50 text-sky-700',
+  confirmed: 'border-indigo-200 bg-indigo-50 text-indigo-700',
+  preparing: 'border-amber-200 bg-amber-50 text-amber-800',
+  ready: 'border-violet-200 bg-violet-50 text-violet-700',
+  shipped: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+  delivering: 'border-blue-200 bg-blue-50 text-blue-700',
+  delivered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  cancelled: 'border-rose-200 bg-rose-100 text-rose-800',
+}
+
+const CLAIM_STATUS_LABELS: Record<ClaimStatus, string> = {
+  requested: '접수',
+  processing: '처리중',
+  completed: '완료',
+  rejected: '거절',
+}
+
+const CLAIM_PILL_STYLES: Record<ClaimType, string> = {
+  cancel: 'border-rose-200 bg-rose-100 text-rose-800',
+  exchange: 'border-blue-200 bg-blue-50 text-blue-700',
+  return: 'border-orange-200 bg-orange-50 text-orange-800',
 }
 
 const MARKETPLACE_LABELS: Record<string, string> = {
@@ -410,16 +426,57 @@ function shippingTypeLabel(t: string | null | undefined): string {
   return SHIPPING_TYPE_LABELS[t] ?? t
 }
 
-/** Phase 8 — Claim type 한글 라벨 + 배지 색 */
+/** Phase 8 — Claim type 한글 라벨 */
 const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
   cancel: '취소',
   exchange: '교환',
   return: '반품',
 }
-const CLAIM_TYPE_BADGE: Record<ClaimType, string> = {
-  cancel: 'border-red-300 bg-red-50 text-red-700',
-  exchange: 'border-blue-300 bg-blue-50 text-blue-700',
-  return: 'border-orange-300 bg-orange-50 text-orange-700',
+
+function claimSummaryLabel(order: OrderRow): string | null {
+  if (order.claimReason && /^(취소|반품|교환)/.test(order.claimReason)) {
+    return order.claimReason
+  }
+  if (!order.claimType || !order.claimStatus) return null
+  return `${CLAIM_TYPE_LABELS[order.claimType]}${CLAIM_STATUS_LABELS[order.claimStatus]}`
+}
+
+function ClaimActionDropdown({
+  claimId,
+  claimType,
+  claimStatus,
+  reason,
+}: {
+  claimId: string
+  claimType: ClaimType
+  claimStatus: ClaimStatus
+  reason: string | null
+}) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="inline-flex h-8 w-full items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+        title="클레임 처리"
+      >
+        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+        Claim
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-md border bg-white p-2 shadow-lg">
+          <ClaimStatusActions
+            claimId={claimId}
+            claimType={claimType}
+            claimStatus={claimStatus}
+            reason={reason}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 export const columns: ColumnDef<OrderRow>[] = [
@@ -456,80 +513,102 @@ export const columns: ColumnDef<OrderRow>[] = [
     cell: ({ row, table }) => {
       const order = row.original
       const openDetail = getOpenDetail(table)
+      const claimLabel = claimSummaryLabel(order)
+      const primaryLabel = claimLabel ?? ORDER_STATUS_LABELS[order.status]
+      const primaryStyle = order.claimType
+        ? CLAIM_PILL_STYLES[order.claimType]
+        : STATUS_PILL_STYLES[order.status]
+      const historicalClaimStatuses = (order.historicalClaimStatuses ?? [])
+        .filter((status) => status !== primaryLabel)
       return (
-        <div className="flex flex-col gap-1">
-          {/* 인디케이터 클러스터 — claim badge / 문의 / 미발송 */}
-          <div className="flex flex-wrap items-center gap-1">
-            <Badge variant={STATUS_VARIANT[order.status]} className="w-fit">
-              {ORDER_STATUS_LABELS[order.status]}
-            </Badge>
-            {order.claimType && (
-              <span
-                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium ${CLAIM_TYPE_BADGE[order.claimType]}`}
-                title={order.claimReason ?? CLAIM_TYPE_LABELS[order.claimType]}
-              >
-                {CLAIM_TYPE_LABELS[order.claimType]}
-              </span>
-            )}
-            {order.hasInquiries && (
-              <span title="문의 있음" className="inline-flex items-center text-blue-600">
-                <MessageCircle className="h-3.5 w-3.5" aria-label="문의" />
-              </span>
-            )}
-            {order.isHeld && (
-              <span
-                title={order.holdReason ?? '미발송'}
-                className="inline-flex items-center gap-0.5 rounded border border-purple-300 bg-purple-50 px-1 py-0.5 text-[10px] font-medium text-purple-700"
-              >
-                <Lock className="h-3 w-3" aria-label="미발송" />
-                미발송
-              </span>
-            )}
+        <div className="flex min-w-[148px] flex-col gap-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="whitespace-nowrap text-xs font-medium text-slate-700">
+              {order.claimType ? `${CLAIM_TYPE_LABELS[order.claimType]}(진행)` : '주문(진행)'}
+            </span>
+            <span
+              className={`inline-flex h-7 min-w-[72px] items-center justify-center rounded-md border px-2 text-xs font-semibold ${primaryStyle}`}
+              title={order.claimReason ?? ORDER_STATUS_LABELS[order.status]}
+            >
+              {primaryLabel}
+            </span>
           </div>
-          {/* hold reason 보조 텍스트 (Pitfall 3 — holdReason 정보 보존) */}
+          {(order.hasInquiries || order.isHeld) && (
+            <div className="flex flex-wrap gap-1">
+              {order.hasInquiries && (
+                <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
+                  문의
+                </span>
+              )}
+              {order.isHeld && (
+                <span
+                  title={order.holdReason ?? '미발송'}
+                  className="rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-700"
+                >
+                  미발송
+                </span>
+              )}
+            </div>
+          )}
+          {historicalClaimStatuses.length > 0 && (
+            <div className="flex max-w-[180px] flex-wrap gap-1">
+              {historicalClaimStatuses.map((status) => (
+                <span
+                  key={status}
+                  className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
+                  title={status}
+                >
+                  {status}
+                </span>
+              ))}
+            </div>
+          )}
           {order.isHeld && order.holdReason && (
             <span className="max-w-[180px] truncate text-[10px] text-muted-foreground" title={order.holdReason}>
               {order.holdReason}
             </span>
           )}
-          {/* Claim 액션 (기존 ClaimStatusActions) */}
-          {order.claimId && order.claimType && order.claimStatus ? (
-            <ClaimStatusActions
-              claimId={order.claimId}
-              claimType={order.claimType}
-              claimStatus={order.claimStatus}
-              reason={order.claimReason ?? null}
-            />
-          ) : (
-            <div className="flex items-center gap-1">
+          <div className="grid grid-cols-2 gap-1">
+            {order.claimId && order.claimType && order.claimStatus ? (
+              <ClaimActionDropdown
+                claimId={order.claimId}
+                claimType={order.claimType}
+                claimStatus={order.claimStatus}
+                reason={order.claimReason ?? null}
+              />
+            ) : (
               <ClaimCreateButton order={order} table={table} />
-              <button
-                type="button"
-                onClick={() => openDetail?.(order.id)}
-                className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted"
-                title="주문 상세"
-              >
-                상세
-              </button>
-            </div>
-          )}
+            )}
+            <button
+              type="button"
+              onClick={() => openDetail?.(order.id)}
+              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+              title="주문 상세"
+            >
+              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+              C/S
+            </button>
+          </div>
         </div>
       )
     },
     enableSorting: false,
-    size: 130,
+    size: 170,
   },
 
   // 쇼핑몰
   {
     accessorKey: 'marketplaceId',
     header: '쇼핑몰',
-    cell: ({ row }) => (
-      <Badge variant="outline">
-        {getMarketplaceLabel(row.getValue('marketplaceId') as string)}
-      </Badge>
-    ),
-    size: 90,
+    cell: ({ row }) => {
+      const order = row.original
+      return (
+        <Badge variant="outline" title={order.marketplaceName ?? getMarketplaceLabel(order.marketplaceId)}>
+          {order.marketplaceName ?? getMarketplaceLabel(order.marketplaceId)}
+        </Badge>
+      )
+    },
+    size: 120,
   },
 
   // 수집/주문일시

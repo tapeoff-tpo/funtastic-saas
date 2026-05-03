@@ -52,6 +52,18 @@ interface OrderDetail {
   holdReason: string | null
   logisticsMessage?: string | null
   deliveryMessage?: string | null
+  rawData?: {
+    source?: string
+    mallName?: string
+    mallAccount?: string
+    originalStatus?: string
+    note?: string
+    rows?: Array<{
+      sourceFile?: string
+      rowNumber?: number
+      raw?: Record<string, string>
+    }>
+  } | null
   items: Array<{
     id: string
     productName: string
@@ -115,6 +127,10 @@ function primaryPhone(phone1?: string | null, phone2?: string | null): string {
   return ((phone2 ?? phone1) ?? '').trim() || '-'
 }
 
+function getSabangnetRawData(order: OrderDetail | null) {
+  return order?.rawData?.source === 'sabangnet-history-xlsx' ? order.rawData : null
+}
+
 /**
  * Modal replacement for /orders/[id] — fetches detail on open,
  * 페이지(/orders/[id]) 와 동일한 섹션 구성:
@@ -127,7 +143,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
 
   useEffect(() => {
     if (!open || !orderId) return
-    setLoading(true)
+    Promise.resolve().then(() => setLoading(true))
     fetch(`/api/orders/${orderId}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -149,6 +165,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
     : [])
   const scanLogList = order?.scanLogs ?? []
   const claimList = order?.claims ?? []
+  const sabangnetRaw = getSabangnetRawData(order)
 
   // 클레임 접수 가장 이른 / 완료 가장 최근
   const claimRequestedAt = claimList.length > 0
@@ -343,6 +360,57 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                     ))}
                   </ul>
                 </section>
+
+                {sabangnetRaw && (
+                  <section className="rounded-md border p-3">
+                    <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
+                      사방넷 원본 정보
+                    </h3>
+                    <dl className="mb-3 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
+                      <dt className="text-muted-foreground">쇼핑몰</dt>
+                      <dd>
+                        {sabangnetRaw.mallName} {sabangnetRaw.mallAccount ? `(${sabangnetRaw.mallAccount})` : ''}
+                      </dd>
+                      <dt className="text-muted-foreground">원본 주문상태</dt>
+                      <dd>{sabangnetRaw.originalStatus ?? '-'}</dd>
+                      <dt className="text-muted-foreground">비고</dt>
+                      <dd className="text-muted-foreground">{sabangnetRaw.note ?? '-'}</dd>
+                    </dl>
+                    <div className="overflow-x-auto rounded border">
+                      <table className="min-w-full text-[11px]">
+                        <thead className="bg-muted/40">
+                          <tr>
+                            <th className="whitespace-nowrap px-2 py-1 text-left font-medium">파일</th>
+                            <th className="whitespace-nowrap px-2 py-1 text-left font-medium">행</th>
+                            <th className="whitespace-nowrap px-2 py-1 text-left font-medium">쇼핑몰 상품코드</th>
+                            <th className="whitespace-nowrap px-2 py-1 text-left font-medium">수집 상품명</th>
+                            <th className="whitespace-nowrap px-2 py-1 text-left font-medium">수집 옵션</th>
+                            <th className="whitespace-nowrap px-2 py-1 text-right font-medium">수량</th>
+                            <th className="whitespace-nowrap px-2 py-1 text-left font-medium">사방넷 상품코드</th>
+                            <th className="whitespace-nowrap px-2 py-1 text-left font-medium">송장번호</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {(sabangnetRaw.rows ?? []).map((row, index) => {
+                            const raw = row.raw ?? {}
+                            return (
+                              <tr key={`${row.sourceFile ?? 'row'}-${row.rowNumber ?? index}`}>
+                                <td className="whitespace-nowrap px-2 py-1">{row.sourceFile ?? '-'}</td>
+                                <td className="whitespace-nowrap px-2 py-1">{row.rowNumber ?? '-'}</td>
+                                <td className="whitespace-nowrap px-2 py-1 font-mono">{raw['쇼핑몰 상품코드'] ?? '-'}</td>
+                                <td className="min-w-[200px] px-2 py-1">{raw['수집 상품명'] ?? '-'}</td>
+                                <td className="min-w-[120px] px-2 py-1">{raw['수집 옵션'] ?? '-'}</td>
+                                <td className="whitespace-nowrap px-2 py-1 text-right">{raw['주문수량'] ?? '-'}</td>
+                                <td className="whitespace-nowrap px-2 py-1 font-mono">{raw['사방넷 상품코드'] ?? '-'}</td>
+                                <td className="whitespace-nowrap px-2 py-1 font-mono">{raw['송장번호'] ?? '-'}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
 
                 {/* 주문 상태 — 진행 시점 타임라인 */}
                 <section className="rounded-md border p-3 text-sm">

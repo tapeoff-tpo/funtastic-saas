@@ -114,6 +114,34 @@ export function matchStage(
 
 const DEFAULT_PAGE_SIZE = 50
 
+function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): string | null {
+  const rawData = order.rawData
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return null
+  const mallName = (rawData as { mallName?: unknown }).mallName
+  if (typeof mallName !== 'string') return null
+  const trimmed = mallName.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function getOrderHistoricalClaimStatuses(order: typeof orders.$inferSelect): string[] {
+  const rawData = order.rawData
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return []
+  const rows = (rawData as { rows?: unknown }).rows
+  if (!Array.isArray(rows)) return []
+
+  const statuses = new Set<string>()
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue
+    const raw = (row as { raw?: unknown }).raw
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const status = (raw as { 주문상태?: unknown }).주문상태
+    if (typeof status !== 'string') continue
+    const trimmed = status.trim()
+    if (/^(취소|반품|교환)/.test(trimmed)) statuses.add(trimmed)
+  }
+  return [...statuses].sort((a, b) => a.localeCompare(b, 'ko'))
+}
+
 /**
  * Build WHERE clause conditions from filters.
  * Exported for testability.
@@ -620,6 +648,8 @@ export async function getOrders(filters: OrderFilters = {}) {
       hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,
       mappingStatus: getMappingStatus(order.marketplaceId, orderItemsData),
+      marketplaceDisplayName: getOrderMarketplaceDisplayName(order),
+      historicalClaimStatuses: getOrderHistoricalClaimStatuses(order),
     }
   })
 

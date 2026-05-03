@@ -88,7 +88,10 @@ const IMPORT_TEMPLATE_KEY = 'orders.collect.selectedImportTemplateId'
 export function MarketplaceDashboard({ connections, importTemplates: initialImportTemplates }: MarketplaceDashboardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showAddModal, setShowAddModal] = useState(false)
-  const [showImportTemplateModal, setShowImportTemplateModal] = useState(false)
+  const [importTemplateModal, setImportTemplateModal] = useState<{
+    templateId?: string
+    draftName?: string
+  } | null>(null)
   const [importTemplates, setImportTemplates] = useState(initialImportTemplates)
   const [selectedImportTemplateId, setSelectedImportTemplateId] = useState<string | null>(() => {
     if (typeof window === 'undefined') return null
@@ -236,7 +239,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     { id: 'lastCheck', label: '마지막수집', size: 110 },
     { id: 'expires', label: '만료', size: 90 },
     { id: 'note', label: '알림', size: 260 },
-    { id: 'actions', label: '액션', size: 180 },
+    { id: 'actions', label: '액션', size: 220 },
   ]
   const totalWidth = cols.reduce((s, c) => s + (columnSizing[c.id] ?? c.size), 0)
   const sizeOf = (id: string) => columnSizing[id] ?? cols.find((c) => c.id === id)!.size
@@ -275,6 +278,13 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
   const pickImportTemplate = (templateId: string) => {
     setSelectedImportTemplateId(templateId)
     window.localStorage.setItem(IMPORT_TEMPLATE_KEY, templateId)
+  }
+
+  const openImportTemplateModal = (draftName?: string) => {
+    setImportTemplateModal({
+      templateId: activeImportTemplate?.id,
+      draftName,
+    })
   }
 
   return (
@@ -366,7 +376,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
           )}
           <button
             type="button"
-            onClick={() => setShowImportTemplateModal(true)}
+            onClick={() => openImportTemplateModal()}
             className="rounded-md border bg-white px-3 py-1 text-xs font-medium hover:bg-muted"
             title="주문수집 엑셀 양식 만들기 또는 수정"
           >
@@ -425,6 +435,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
                   onCollectOne={handleCollectOne}
                   collecting={collecting}
                   importTemplate={activeImportTemplate}
+                  onEditImportTemplate={openImportTemplateModal}
                   sizeOf={sizeOf}
                 />
               ))}
@@ -438,11 +449,14 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
         <AddManualChannelModal onClose={() => setShowAddModal(false)} />
       )}
 
-      {showImportTemplateModal && (
+      {importTemplateModal && (
         <ExcelImportTemplateModal
           templates={importTemplates}
           onTemplatesChange={setImportTemplates}
-          onClose={() => setShowImportTemplateModal(false)}
+          onTemplateSaved={pickImportTemplate}
+          initialTemplateId={importTemplateModal.templateId}
+          initialName={importTemplateModal.draftName}
+          onClose={() => setImportTemplateModal(null)}
         />
       )}
 
@@ -526,6 +540,7 @@ function SectionRows({
   onCollectOne,
   collecting,
   importTemplate,
+  onEditImportTemplate,
   sizeOf,
 }: {
   section: {
@@ -539,6 +554,7 @@ function SectionRows({
   onCollectOne: (id: string) => void
   collecting: boolean
   importTemplate: ExcelImportTemplateView | null
+  onEditImportTemplate: (draftName?: string) => void
   sizeOf: (id: string) => number
 }) {
   return (
@@ -563,6 +579,7 @@ function SectionRows({
           onCollectOne={onCollectOne}
           collecting={collecting}
           importTemplate={importTemplate}
+          onEditImportTemplate={onEditImportTemplate}
           zebra={idx % 2 === 1}
           sizeOf={sizeOf}
         />
@@ -578,6 +595,7 @@ function ConnRow({
   onCollectOne,
   collecting,
   importTemplate,
+  onEditImportTemplate,
   zebra,
   sizeOf,
 }: {
@@ -587,6 +605,7 @@ function ConnRow({
   onCollectOne: (id: string) => void
   collecting: boolean
   importTemplate: ExcelImportTemplateView | null
+  onEditImportTemplate: (draftName?: string) => void
   zebra: boolean
   sizeOf: (id: string) => number
 }) {
@@ -682,6 +701,18 @@ function ConnRow({
             disabled={isDisconnected}
             template={importTemplate}
           />
+          <button
+            type="button"
+            onClick={() => onEditImportTemplate(`${conn.displayName} 주문수집`)}
+            className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+            title={
+              importTemplate
+                ? `${importTemplate.name} 양식 수정`
+                : `${conn.displayName}용 주문수집 양식 만들기`
+            }
+          >
+            양식
+          </button>
         </div>
       </td>
     </tr>
@@ -855,15 +886,26 @@ function ExcelUploadButton({
 function ExcelImportTemplateModal({
   templates,
   onTemplatesChange,
+  onTemplateSaved,
+  initialTemplateId,
+  initialName,
   onClose,
 }: {
   templates: ExcelImportTemplateView[]
   onTemplatesChange: (templates: ExcelImportTemplateView[]) => void
+  onTemplateSaved?: (templateId: string) => void
+  initialTemplateId?: string
+  initialName?: string
   onClose: () => void
 }) {
-  const [editing, setEditing] = useState<ExcelImportTemplateView | null>(null)
-  const [name, setName] = useState('')
-  const [mappings, setMappings] = useState<OrderImportMapping[]>(DEFAULT_IMPORT_MAPPINGS)
+  const initialTemplate = initialTemplateId
+    ? templates.find((template) => template.id === initialTemplateId) ?? null
+    : null
+  const [editing, setEditing] = useState<ExcelImportTemplateView | null>(initialTemplate)
+  const [name, setName] = useState(initialTemplate?.name ?? initialName ?? '')
+  const [mappings, setMappings] = useState<OrderImportMapping[]>(
+    initialTemplate?.mappings.length ? initialTemplate.mappings : DEFAULT_IMPORT_MAPPINGS,
+  )
   const [selectedField, setSelectedField] = useState<OrderImportField>(
     ORDER_IMPORT_FIELDS[0]?.field ?? 'orderNumber',
   )
@@ -872,7 +914,7 @@ function ExcelImportTemplateModal({
 
   const startCreate = () => {
     setEditing(null)
-    setName('')
+    setName(initialName ?? '')
     setMappings(DEFAULT_IMPORT_MAPPINGS)
     setError(null)
   }
@@ -951,7 +993,15 @@ function ExcelImportTemplateModal({
         setError(result.error)
         return
       }
-      if (result.templates) onTemplatesChange(result.templates)
+      if (result.templates) {
+        onTemplatesChange(result.templates)
+        const savedTemplate = [...result.templates]
+          .reverse()
+          .find((template) =>
+            editing && !editing.isDefault ? template.id === editing.id : template.name === name.trim(),
+          )
+        if (savedTemplate) onTemplateSaved?.(savedTemplate.id)
+      }
       startCreate()
     })
   }

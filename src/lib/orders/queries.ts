@@ -581,6 +581,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   const getMappedItemInfo = (
     marketplaceId: string,
     marketplaceItemId: string | null,
+    optionText: string | null,
     orderQuantity: number,
   ): {
     displayName: string
@@ -589,7 +590,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     availableStock: number | null
   } | null => {
     if (!marketplaceItemId) return null
-    const mappingCodeId = lookupMappingRef(mappingIndex, marketplaceId, marketplaceItemId)
+    const mappingCodeId = lookupMappingRef(mappingIndex, marketplaceId, marketplaceItemId, optionText)
     if (!mappingCodeId) return null
     const components = componentsByCode.get(mappingCodeId) ?? []
     if (components.length === 0) return null
@@ -613,7 +614,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   }
 
   const items = baseItems.map((item) => {
-    const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.quantity)
+    const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.optionText, item.quantity)
     if (!mapped) return item
     return {
       ...item,
@@ -629,7 +630,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     let mappedCount = 0
     for (const item of orderItems) {
       const hasSourceMatch = item.marketplaceItemId
-        ? lookupMappingRef(mappingIndex, orderMarketplaceId, item.marketplaceItemId) !== null
+        ? lookupMappingRef(mappingIndex, orderMarketplaceId, item.marketplaceItemId, item.optionText) !== null
         : false
       const hasSkuMatch = item.sku ? skuSet.has(item.sku.trim()) : false
       if (hasSourceMatch || hasSkuMatch) mappedCount++
@@ -904,7 +905,7 @@ export async function getStockDeductionPreview(
   for (const row of rows) {
     const orderQty = row.quantity * (row.skuMultiplier ?? 1)
     const mappingCodeId = row.marketplaceItemId
-      ? lookupMappingRef(mappingIndex, row.orderMarketplaceId, row.marketplaceItemId)
+      ? lookupMappingRef(mappingIndex, row.orderMarketplaceId, row.marketplaceItemId, row.optionText)
       : null
     const components = mappingCodeId ? componentsByCode.get(mappingCodeId) : null
     const src = {

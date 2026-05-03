@@ -48,6 +48,8 @@ export async function GET() {
                   oi.marketplace_item_id = ms.marketplace_product_id || '-' || ms.marketplace_option_id
                   OR (ms.marketplace_option_id = ${exactOptionId}
                     AND oi.marketplace_item_id = ms.marketplace_product_id)
+                  OR (oi.marketplace_item_id = ms.marketplace_product_id
+                    AND LEFT(COALESCE(oi.option_text, ''), 100) = ms.marketplace_option_id)
                 ))
               -- 품번매핑: 풀 일치 또는 productId+ "-" prefix
               OR (ms.marketplace_option_id = ''
@@ -66,6 +68,8 @@ export async function GET() {
                   oi.marketplace_item_id = ms.marketplace_product_id || '-' || ms.marketplace_option_id
                   OR (ms.marketplace_option_id = ${exactOptionId}
                     AND oi.marketplace_item_id = ms.marketplace_product_id)
+                  OR (oi.marketplace_item_id = ms.marketplace_product_id
+                    AND LEFT(COALESCE(oi.option_text, ''), 100) = ms.marketplace_option_id)
                 ))
               OR (ms.marketplace_option_id = ''
                 AND (oi.marketplace_item_id = ms.marketplace_product_id

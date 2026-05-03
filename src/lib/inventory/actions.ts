@@ -185,6 +185,7 @@ export async function expandOrderItemsForDeduction(
     .select({
       marketplaceItemId: orderItems.marketplaceItemId,
       sku: orderItems.sku,
+      optionText: orderItems.optionText,
       quantity: orderItems.quantity,
       skuMultiplier: orderItems.skuMultiplier,
       orderMarketplaceId: orders.marketplaceId,
@@ -244,7 +245,7 @@ export async function expandOrderItemsForDeduction(
   for (const r of rawItems) {
     const orderQty = r.quantity * (r.skuMultiplier ?? 1)
     const mappingCodeId = r.marketplaceItemId
-      ? lookupMappingRef(mappingIndex, r.orderMarketplaceId, r.marketplaceItemId)
+      ? lookupMappingRef(mappingIndex, r.orderMarketplaceId, r.marketplaceItemId, r.optionText)
       : null
     const components = mappingCodeId ? componentsByCode.get(mappingCodeId) : null
 

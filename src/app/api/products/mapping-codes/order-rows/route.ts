@@ -146,6 +146,8 @@ export async function GET(req: NextRequest) {
               oi.marketplace_item_id = s.marketplace_product_id || '-' || s.marketplace_option_id
               OR (s.marketplace_option_id = ${exactOptionId}
                 AND oi.marketplace_item_id = s.marketplace_product_id)
+              OR (oi.marketplace_item_id = s.marketplace_product_id
+                AND LEFT(COALESCE(oi.option_text, ''), 100) = s.marketplace_option_id)
             ))
           OR (s.marketplace_option_id = ''
             AND (oi.marketplace_item_id = s.marketplace_product_id
@@ -163,6 +165,8 @@ export async function GET(req: NextRequest) {
                     oi.marketplace_item_id = sx.marketplace_product_id || '-' || sx.marketplace_option_id
                     OR (sx.marketplace_option_id = ${exactOptionId}
                       AND oi.marketplace_item_id = sx.marketplace_product_id)
+                    OR (oi.marketplace_item_id = sx.marketplace_product_id
+                      AND LEFT(COALESCE(oi.option_text, ''), 100) = sx.marketplace_option_id)
                   ))
                 OR (sx.marketplace_option_id = ''
                   AND (oi.marketplace_item_id = sx.marketplace_product_id
@@ -235,6 +239,8 @@ export async function GET(req: NextRequest) {
             oi.marketplace_item_id = s3.marketplace_product_id || '-' || s3.marketplace_option_id
             OR (s3.marketplace_option_id = ${exactOptionId}
               AND oi.marketplace_item_id = s3.marketplace_product_id)
+            OR (oi.marketplace_item_id = s3.marketplace_product_id
+              AND LEFT(COALESCE(oi.option_text, ''), 100) = s3.marketplace_option_id)
           )
           AND (
             s3.marketplace_id = o.marketplace_id
@@ -247,6 +253,8 @@ export async function GET(req: NextRequest) {
                   oi.marketplace_item_id = sx.marketplace_product_id || '-' || sx.marketplace_option_id
                   OR (sx.marketplace_option_id = ${exactOptionId}
                     AND oi.marketplace_item_id = sx.marketplace_product_id)
+                  OR (oi.marketplace_item_id = sx.marketplace_product_id
+                    AND LEFT(COALESCE(oi.option_text, ''), 100) = sx.marketplace_option_id)
                 )
             ) = 1
           )

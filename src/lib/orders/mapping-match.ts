@@ -84,11 +84,22 @@ export function lookupMappingRef(
   index: MappingIndex,
   marketplaceId: string,
   marketplaceItemId: string,
+  optionText?: string | null,
 ): string | null {
   // 1) 단품 정확매치
   const optKey = `${marketplaceId}:${marketplaceItemId}`
   const optHit = index.optionMap.get(optKey)
   if (optHit) return optHit
+
+  const normalizedOptionText = optionText?.trim().slice(0, 100)
+  if (normalizedOptionText) {
+    const optionTextKey = `${marketplaceItemId}${MAPPING_SEPARATOR}${normalizedOptionText}`
+    const optionTextHit = index.optionMap.get(`${marketplaceId}:${optionTextKey}`)
+    if (optionTextHit) return optionTextHit
+
+    const globalOptionTextHit = index.globalOptionMap.get(optionTextKey)
+    if (globalOptionTextHit) return globalOptionTextHit
+  }
 
   // 2) 품번 매치 — marketplaceItemId 자체가 productId 인 경우
   const fullProdHit = index.productMap.get(`${marketplaceId}:${marketplaceItemId}`)

@@ -101,7 +101,7 @@ export function createAdapter(
 }
 
 function shouldAutoConfirmOrders(): boolean {
-  return process.env.MARKETPLACE_AUTO_CONFIRM_ON_COLLECT !== '0'
+  return process.env.MARKETPLACE_AUTO_CONFIRM_ON_COLLECT === '1'
 }
 
 async function refreshCafe24AccessToken(params: {
@@ -307,9 +307,8 @@ export async function collectOrdersForConnection(params: {
       }
     }
 
-    // 4.5 Auto-confirm: 신규 주문을 즉시 주문확인(몰 통보)으로 전환
-    // 이유: 수집 후 처리 시간 동안 구매자 취소 가능성을 줄이기 위함
-    // confirmOrder 실패한 주문은 'new' 상태 유지 → 확정 대기 탭에서 수동 재시도
+    // 4.5 Auto-confirm is opt-in only. Default workflow:
+    // 수집 → 신규(status='new') → 매핑 → 사용자가 [확정] 클릭 → 확인(status='confirmed').
     if (
       newOrderIds.length > 0 &&
       typeof adapter.confirmOrder === 'function' &&
@@ -337,9 +336,7 @@ export async function collectOrdersForConnection(params: {
         }
       }
     } else if (newOrderIds.length > 0 && !shouldAutoConfirmOrders()) {
-      await setProgress(
-        `${newOrderIds.length} new orders saved; auto-confirm disabled`
-      )
+      await setProgress(`${newOrderIds.length}건 신규 주문 저장 완료`)
     }
 
     // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 신규주문만 수집)

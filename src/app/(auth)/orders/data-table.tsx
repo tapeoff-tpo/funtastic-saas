@@ -16,6 +16,7 @@ import { ShippingActions } from './shipping-actions'
 import { OrderDetailDialog } from './order-detail-dialog'
 import { ManualStatusChangeButton } from './status-actions'
 import { Pagination, PageSizeSelector } from '@/components/ui/pagination'
+import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import type { OrderStage } from '@/lib/orders/types'
 
 interface DataTableProps {
@@ -54,6 +55,7 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
   )
 
   const pageCount = Math.ceil(total / pageSize)
+  const [columnSizing, setColumnSizing] = useColumnSizing('orders-table')
 
   const table = useReactTable({
     data,
@@ -62,14 +64,17 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
     manualPagination: true,
     manualSorting: true,
     manualFiltering: true,
+    columnResizeMode: 'onChange',
     pageCount,
     state: {
       columnVisibility,
       rowSelection,
+      columnSizing,
       pagination: { pageIndex: page - 1, pageSize },
     },
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    onColumnSizingChange: setColumnSizing,
     enableRowSelection: true,
     meta: {
       openDetail: (id: string) => setDetailOrderId(id),
@@ -199,19 +204,30 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
 
       {/* Table */}
       <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
+        <table className="table-fixed text-xs" style={{ width: table.getTotalSize() }}>
           <thead className="sticky top-0 z-[1] bg-muted/50">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="border-b">
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="px-3 py-2.5 text-left font-medium text-muted-foreground"
+                    className="relative whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
                     style={{ width: header.getSize() }}
                   >
                     {header.isPlaceholder
                       ? null
                       : flexRender(header.column.columnDef.header, header.getContext())}
+                    {header.column.getCanResize() && (
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onClick={(event) => event.stopPropagation()}
+                        className={`absolute right-0 top-0 h-full w-1 cursor-col-resize select-none touch-none bg-transparent hover:bg-blue-400 ${
+                          header.column.getIsResizing() ? 'bg-blue-500' : ''
+                        }`}
+                        aria-label="컬럼 너비 조절"
+                      />
+                    )}
                   </th>
                 ))}
               </tr>
@@ -236,7 +252,11 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
                   }`}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-3 py-2">
+                    <td
+                      key={cell.id}
+                      className="min-w-0 px-2 py-1 align-middle"
+                      style={{ width: cell.column.getSize() }}
+                    >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}

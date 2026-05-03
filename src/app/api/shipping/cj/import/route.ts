@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
 import { shipments, orders } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
@@ -74,8 +75,19 @@ export async function POST(req: NextRequest) {
       carrierName: 'CJ대한통운',
       uploadStatus: 'pending',
     })
+    await db
+      .update(orders)
+      .set({
+        status: 'preparing',
+        preparingAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(orders.id, row.orderId), eq(orders.userId, user.id), eq(orders.status, 'confirmed')))
     matched++
   }
+
+  revalidatePath('/orders')
+  revalidateTag('orders', 'max')
 
   return NextResponse.json({ matched, unmatched, skipped, unmatchedRows })
 }

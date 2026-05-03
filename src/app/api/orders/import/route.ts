@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { parseOrderExcel } from '@/lib/orders/excel-import'
 import { db } from '@/lib/db'
 import { excelImportTemplates, orders, orderItems } from '@/lib/db/schema'
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest) {
               connectionId: null,
               marketplaceId,
               marketplaceOrderId: orderNumber,
-              status: 'confirmed',
+              status: 'new',
               buyerName: first.buyerName,
               buyerPhone2: first.buyerPhone ?? null,
               recipientName: first.recipientName,
@@ -182,6 +183,9 @@ export async function POST(request: NextRequest) {
         }
       }
     })
+
+    revalidatePath('/orders')
+    revalidateTag('orders', 'max')
 
     return NextResponse.json({
       inserted,

@@ -37,6 +37,7 @@ export async function queueInvoiceUpload(
     const [order] = await db
       .select({
         id: orders.id,
+        status: orders.status,
         marketplaceId: orders.marketplaceId,
         marketplaceOrderId: orders.marketplaceOrderId,
         connectionId: orders.connectionId,
@@ -69,6 +70,17 @@ export async function queueInvoiceUpload(
       carrierId,
       attempt: 1,
     })
+
+    if (order.status === 'confirmed') {
+      await db
+        .update(orders)
+        .set({
+          status: 'preparing',
+          preparingAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
+    }
 
     return { success: true }
   } catch (error) {

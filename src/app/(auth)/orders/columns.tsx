@@ -2,7 +2,7 @@
 
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
-import { Copy, ExternalLink } from 'lucide-react'
+import { Copy, ExternalLink, MessageSquare, RotateCcw } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
@@ -39,7 +39,7 @@ function CopyOrderButton({ orderId }: { orderId: string }) {
       }}
       title="주문 복사"
       aria-label="주문 복사"
-      className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+      className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
     >
       <Copy className="h-2.5 w-2.5" />
     </button>
@@ -113,10 +113,11 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
         type="button"
         onClick={() => setOpen((value) => !value)}
         disabled={pending}
-        className="inline-flex h-8 w-full items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+        className="inline-flex h-6 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50 disabled:opacity-50"
+        title={pending ? '접수중' : '클레임 접수'}
+        aria-label={pending ? '접수중' : '클레임 접수'}
       >
-        <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-        {pending ? '접수중' : 'Claim'}
+        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
       {open && (
         <div className="absolute left-0 top-full z-20 mt-1 min-w-[92px] rounded-md border bg-white py-1 shadow-lg">
@@ -302,46 +303,33 @@ function ProductInfoCell({ order }: { order: OrderRow }) {
     return <span className="text-muted-foreground">-</span>
 
   return (
-    <div className="flex flex-col text-xs leading-tight">
+    <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight">
       {items.map((item, index) => {
         const primaryName = item.displayName ?? item.productName
         const showOriginal =
           isNewTab && item.displayName != null && item.displayName !== item.productName
+        const option = item.optionText ? ` / ${item.optionText}` : ''
+        const collected = showOriginal ? ` (${item.productName})` : ''
+        const line = `${primaryName}${option}${collected}`
         return (
           <div
             key={item.id}
-            className={index === 0 ? 'pb-1.5' : 'border-t border-slate-100 py-1.5'}
+            className={`flex min-w-0 items-center gap-1 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
           >
             {item.sku && (
-              <span className="font-mono text-[10px] text-muted-foreground">
+              <span className="shrink-0 font-mono text-[10px] text-muted-foreground" title={item.sku}>
                 {item.sku}
               </span>
             )}
-            <span className="block max-w-[280px] whitespace-normal break-words font-medium" title={primaryName}>
-              {primaryName}
+            <span className="min-w-0 truncate font-medium" title={line}>
+              {line}
             </span>
-            {showOriginal && (
-              <span
-                className="block max-w-[280px] whitespace-normal break-words text-[10px] text-muted-foreground"
-                title={`수집상품명: ${item.productName}`}
-              >
-                ({item.productName})
-              </span>
-            )}
-            {item.optionText && (
-              <span
-                className="block max-w-[280px] whitespace-normal break-words text-[11px] text-muted-foreground"
-                title={item.optionText}
-              >
-                {item.optionText}
-              </span>
-            )}
           </div>
         )
       })}
       {order.logisticsMessage && (
         <span
-          className="mt-1 inline-flex w-fit items-center rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+          className="mt-0.5 inline-flex max-w-full items-center truncate rounded border border-blue-300 bg-blue-50 px-1 py-0.5 text-[10px] font-medium text-blue-700"
           title={order.logisticsMessage}
         >
           {order.logisticsMessage}
@@ -479,11 +467,11 @@ function ClaimActionDropdown({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="inline-flex h-8 w-full items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+        className="inline-flex h-6 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
         title="클레임 처리"
+        aria-label="클레임 처리"
       >
         <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-        Claim
       </button>
       {open && (
         <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-md border bg-white p-2 shadow-lg">
@@ -523,7 +511,10 @@ export const columns: ColumnDef<OrderRow>[] = [
     ),
     enableSorting: false,
     enableHiding: false,
+    enableResizing: false,
     size: 32,
+    minSize: 32,
+    maxSize: 32,
   },
 
   // 주문상태 + 인디케이터 통합 (claim 뱃지 / 문의 / 미발송 holdReason) — Phase 8 SC-03
@@ -541,54 +532,43 @@ export const columns: ColumnDef<OrderRow>[] = [
       const historicalClaimStatuses = (order.historicalClaimStatuses ?? [])
         .filter((status) => status !== primaryLabel)
       return (
-        <div className="flex min-w-[148px] flex-col gap-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="whitespace-nowrap text-xs font-medium text-slate-700">
-              {order.claimType ? `${CLAIM_TYPE_LABELS[order.claimType]}(진행)` : '주문(진행)'}
-            </span>
+        <div className="flex min-w-0 items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1">
             <span
-              className={`inline-flex h-7 min-w-[72px] items-center justify-center rounded-md border px-2 text-xs font-semibold ${primaryStyle}`}
+              className={`inline-flex h-6 max-w-[86px] shrink-0 items-center justify-center truncate rounded border px-1.5 text-[11px] font-semibold ${primaryStyle}`}
               title={order.claimReason ?? ORDER_STATUS_LABELS[order.status]}
             >
               {primaryLabel}
             </span>
+            {historicalClaimStatuses.slice(0, 1).map((status) => (
+              <span
+                key={status}
+                className="inline-flex h-6 max-w-[68px] shrink-0 items-center truncate rounded border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-medium text-slate-600"
+                title={status}
+              >
+                {status}
+              </span>
+            ))}
+            {order.hasInquiries && (
+              <span className="inline-flex h-6 shrink-0 items-center rounded border border-blue-200 bg-blue-50 px-1 text-[10px] font-medium text-blue-700" title="문의">
+                문의
+              </span>
+            )}
+            {order.isHeld && (
+              <span
+                title={order.holdReason ?? '미발송'}
+                className="inline-flex h-6 shrink-0 items-center rounded border border-purple-200 bg-purple-50 px-1 text-[10px] font-medium text-purple-700"
+              >
+                미발
+              </span>
+            )}
+            {order.isHeld && order.holdReason && (
+              <span className="min-w-0 truncate text-[10px] text-muted-foreground" title={order.holdReason}>
+                {order.holdReason}
+              </span>
+            )}
           </div>
-          {(order.hasInquiries || order.isHeld) && (
-            <div className="flex flex-wrap gap-1">
-              {order.hasInquiries && (
-                <span className="rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
-                  문의
-                </span>
-              )}
-              {order.isHeld && (
-                <span
-                  title={order.holdReason ?? '미발송'}
-                  className="rounded border border-purple-200 bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-700"
-                >
-                  미발송
-                </span>
-              )}
-            </div>
-          )}
-          {historicalClaimStatuses.length > 0 && (
-            <div className="flex max-w-[180px] flex-wrap gap-1">
-              {historicalClaimStatuses.map((status) => (
-                <span
-                  key={status}
-                  className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600"
-                  title={status}
-                >
-                  {status}
-                </span>
-              ))}
-            </div>
-          )}
-          {order.isHeld && order.holdReason && (
-            <span className="max-w-[180px] truncate text-[10px] text-muted-foreground" title={order.holdReason}>
-              {order.holdReason}
-            </span>
-          )}
-          <div className="grid grid-cols-2 gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             {order.claimId && order.claimType && order.claimStatus ? (
               <ClaimActionDropdown
                 claimId={order.claimId}
@@ -602,18 +582,32 @@ export const columns: ColumnDef<OrderRow>[] = [
             <button
               type="button"
               onClick={() => openDetail?.(order.id)}
-              className="inline-flex h-8 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
-              title="주문 상세"
+              className="inline-flex h-6 w-7 items-center justify-center rounded border border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:bg-slate-50"
+              title="주문 상세 / C/S"
+              aria-label="주문 상세 / C/S"
             >
-              <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-              C/S
+              <MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
           </div>
+          {historicalClaimStatuses.length > 1 && (
+            <div className="hidden">
+              {historicalClaimStatuses.slice(1).map((status) => (
+                <span
+                  key={status}
+                  title={status}
+                >
+                  {status}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       )
     },
     enableSorting: false,
-    size: 170,
+    size: 150,
+    minSize: 112,
+    maxSize: 340,
   },
 
   // 쇼핑몰
@@ -628,7 +622,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         </Badge>
       )
     },
-    size: 120,
+    size: 84,
+    minSize: 74,
+    maxSize: 180,
   },
 
   // 수집/주문일시
@@ -639,17 +635,21 @@ export const columns: ColumnDef<OrderRow>[] = [
       const ordered = row.original.orderedAt
       const collected = row.original.collectedAt
       return (
-        <div className="flex flex-col gap-0 text-xs leading-tight">
-          <span>{format(new Date(ordered), 'yyyy-MM-dd HH:mm')}</span>
+        <div className="min-w-0 text-xs leading-tight">
+          <span className="block truncate" title={format(new Date(ordered), 'yyyy-MM-dd HH:mm')}>
+            {format(new Date(ordered), 'MM-dd HH:mm')}
+          </span>
           {collected && (
-            <span className="text-muted-foreground">
+            <span className="block truncate text-[10px] text-muted-foreground" title={`수집 ${format(new Date(collected), 'yyyy-MM-dd HH:mm')}`}>
               수집 {format(new Date(collected), 'MM-dd HH:mm')}
             </span>
           )}
         </div>
       )
     },
-    size: 140,
+    size: 96,
+    minSize: 90,
+    maxSize: 180,
   },
 
   // 주문번호 (마켓 + 내부)
@@ -660,17 +660,18 @@ export const columns: ColumnDef<OrderRow>[] = [
       const order = row.original
       const openDetail = getOpenDetail(table)
       return (
-        <div className="flex flex-col gap-0 text-xs leading-tight">
+        <div className="flex min-w-0 flex-col gap-0 text-xs leading-tight">
           <button
             type="button"
             onClick={() => openDetail?.(order.id)}
-            className="text-left font-mono font-medium text-primary hover:underline"
+            className="truncate text-left font-mono font-medium text-primary hover:underline"
+            title={order.marketplaceOrderId}
           >
             {order.marketplaceOrderId}
           </button>
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-1">
             <span
-              className="font-mono text-[10px] text-muted-foreground"
+              className="min-w-0 truncate font-mono text-[10px] text-muted-foreground"
               title="내부 주문번호"
             >
               #{order.internalNo}
@@ -689,7 +690,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 180,
+    size: 132,
+    minSize: 110,
+    maxSize: 260,
   },
 
   // 상품 (SKU + 확정상품명 + 옵션 + 물류메세지) — Phase 8 SC-04
@@ -698,7 +701,9 @@ export const columns: ColumnDef<OrderRow>[] = [
     id: 'productInfo',
     header: '상품',
     cell: ({ row }) => <ProductInfoCell order={row.original} />,
-    size: 300,
+    size: 280,
+    minSize: 180,
+    maxSize: 720,
   },
 
   // 수량 — 메인: 주문 수량, 보조(괄호): 잔여 재고 (SKU 매칭 안되면 - 표시)
@@ -710,14 +715,14 @@ export const columns: ColumnDef<OrderRow>[] = [
       if (!items || items.length === 0)
         return <span className="text-muted-foreground">-</span>
       return (
-        <div className="flex flex-col items-end leading-tight tabular-nums">
+        <div className="flex min-w-0 flex-col items-end gap-0.5 leading-tight tabular-nums">
           {items.map((item, index) => {
             const stock = item.availableStock
             const lowStock = stock != null && stock < item.quantity
             return (
               <div
                 key={item.id}
-                className={`w-full text-right ${index === 0 ? 'pb-1.5' : 'border-t border-slate-100 py-1.5'}`}
+                className={`w-full truncate text-right ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
               >
                 <span className="text-sm font-semibold">{item.quantity}</span>
                 <span
@@ -734,7 +739,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 60,
+    size: 54,
+    minSize: 54,
+    maxSize: 100,
   },
 
   // 구매자 / 수취인
@@ -744,22 +751,24 @@ export const columns: ColumnDef<OrderRow>[] = [
     cell: ({ row }) => {
       const order = row.original
       return (
-        <div className="flex flex-col gap-0 text-xs leading-tight">
-          <div>
+        <div className="flex min-w-0 flex-col gap-0 text-xs leading-tight">
+          <div className="flex min-w-0 items-center">
             <span className="inline-block w-7 text-[10px] text-muted-foreground">구매</span>
-            <span className="font-medium">{order.buyerName}</span>
+            <span className="min-w-0 truncate font-medium" title={order.buyerName}>{order.buyerName}</span>
             {order.buyerPhone && (
-              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+              <span className="ml-1 shrink-0 font-mono text-[10px] text-muted-foreground">
                 {formatPhone(order.buyerPhone)}
               </span>
             )}
           </div>
-          <div>
+          <div className="flex min-w-0 items-center">
             <span className="inline-block w-7 text-[10px] text-muted-foreground">수취</span>
-            <span className="font-medium">{order.recipientName ?? '-'}</span>
+            <span className="min-w-0 truncate font-medium" title={order.recipientName ?? '-'}>
+              {order.recipientName ?? '-'}
+            </span>
             {/* 기본 표기: 휴대폰(phone2) 우선, 없으면 일반전화(phone1) */}
             {(order.recipientPhone2 || order.recipientPhone) && (
-              <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+              <span className="ml-1 shrink-0 font-mono text-[10px] text-muted-foreground">
                 {formatPhone(order.recipientPhone2 || order.recipientPhone || '')}
               </span>
             )}
@@ -779,7 +788,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 200,
+    size: 150,
+    minSize: 130,
+    maxSize: 320,
   },
 
   // 금액
@@ -796,7 +807,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         </span>
       )
     },
-    size: 100,
+    size: 78,
+    minSize: 76,
+    maxSize: 130,
   },
 
   // 매핑 — 매핑 필요 스테이지에서만 노출 (data-table이 columnVisibility로 제어)
@@ -804,7 +817,9 @@ export const columns: ColumnDef<OrderRow>[] = [
     id: 'mappingStatus',
     header: '매핑',
     cell: ({ row }) => <MappingCell order={row.original} />,
-    size: 90,
+    size: 72,
+    minSize: 70,
+    maxSize: 130,
   },
 
   // Phase 8 — 배송구분
@@ -819,7 +834,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         </Badge>
       )
     },
-    size: 80,
+    size: 68,
+    minSize: 68,
+    maxSize: 120,
   },
 
   // Phase 8 — 배송비 (수집 / 등록 통합)
@@ -845,13 +862,15 @@ export const columns: ColumnDef<OrderRow>[] = [
           : '—'
 
       return (
-        <div className="flex flex-col gap-0.5 text-xs leading-tight tabular-nums">
+        <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight tabular-nums">
           <span>{feeText}</span>
-          <span className="text-[10px] text-muted-foreground">{costText}</span>
+          <span className="truncate text-[10px] text-muted-foreground">{costText}</span>
         </div>
       )
     },
-    size: 110,
+    size: 86,
+    minSize: 86,
+    maxSize: 150,
   },
 
   // 택배사 · 송장
@@ -866,12 +885,12 @@ export const columns: ColumnDef<OrderRow>[] = [
         return <span className="text-xs text-muted-foreground">미등록</span>
       }
       return (
-        <div className="flex flex-col gap-0.5 text-xs leading-tight">
+        <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight">
           {order.carrierName && (
-            <span className="text-[11px] font-medium">{order.carrierName}</span>
+            <span className="truncate text-[11px] font-medium" title={order.carrierName}>{order.carrierName}</span>
           )}
           {trackingNumber && (
-            <span className="font-mono text-[11px] text-muted-foreground">
+            <span className="truncate font-mono text-[11px] text-muted-foreground" title={trackingNumber}>
               {trackingNumber}
             </span>
           )}
@@ -883,6 +902,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 140,
+    size: 100,
+    minSize: 92,
+    maxSize: 220,
   },
 ]

@@ -27,6 +27,7 @@ function formatMarketplaceProductCode(source: MappingSourceView): string {
 
 interface MappingSourceView {
   marketplaceId: string
+  marketplaceName?: string | null
   marketplaceProductId: string
   marketplaceOptionId: string
   productNameSnapshot: string | null
@@ -36,6 +37,8 @@ interface MappingSourceView {
 interface MappingComponentView {
   sku: string
   quantity: number
+  productName: string | null
+  optionName: string | null
 }
 
 interface MappingCodeRow {
@@ -69,6 +72,19 @@ interface UnmappedItem {
 }
 
 export type SourceMode = 'product' | 'option'  // 품번매핑 / 단품매핑
+
+function formatCollectedProductName(source: MappingSourceView | null): string {
+  if (!source) return '-'
+  const pieces = [source.productNameSnapshot, source.optionNameSnapshot].filter(Boolean)
+  return pieces.length > 0 ? pieces.join(' · ') : '-'
+}
+
+function formatConfirmedProductName(component: MappingComponentView | null, code: MappingCodeRow): string {
+  if (!component) return code.name || '-'
+  const pieces = [component.productName, component.optionName].filter(Boolean)
+  if (pieces.length > 0) return pieces.join(' · ')
+  return code.name || component.sku
+}
 
 export interface SourceForm {
   /** 'product' = 품번매핑(option_id=''), 'option' = 단품매핑(option_id 따로 입력) */
@@ -136,9 +152,16 @@ export function MappingManager() {
         s.marketplaceId.toLowerCase().includes(q) ||
         s.marketplaceProductId.toLowerCase().includes(q) ||
         s.marketplaceOptionId.toLowerCase().includes(q) ||
+        (s.marketplaceName ?? '').toLowerCase().includes(q) ||
+        (s.productNameSnapshot ?? '').toLowerCase().includes(q) ||
+        (s.optionNameSnapshot ?? '').toLowerCase().includes(q) ||
         marketLabel(s.marketplaceId).toLowerCase().includes(q)
       ) ||
-      c.components.some((component) => component.sku.toLowerCase().includes(q))
+      c.components.some((component) =>
+        component.sku.toLowerCase().includes(q) ||
+        (component.productName ?? '').toLowerCase().includes(q) ||
+        (component.optionName ?? '').toLowerCase().includes(q)
+      )
     )
   })
 
@@ -212,8 +235,13 @@ export function MappingManager() {
         productNameSnapshot: s.productNameSnapshot ?? '',
         optionNameSnapshot: s.optionNameSnapshot ?? '',
       })),
-      components: (data.components ?? []).map((c: { sku: string; quantity: number }) => ({
-        sku: c.sku, quantity: c.quantity,
+      components: (data.components ?? []).map((c: {
+        sku: string; quantity: number; productName?: string | null; optionName?: string | null
+      }) => ({
+        sku: c.sku,
+        quantity: c.quantity,
+        productNameHint: c.productName ?? null,
+        optionNameHint: c.optionName ?? null,
       })),
     })
   }
@@ -300,14 +328,15 @@ export function MappingManager() {
         </div>
 
         <div className="overflow-x-auto rounded-lg border">
-          <table className="min-w-[1180px] w-full text-sm">
+          <table className="min-w-[1320px] w-full text-sm">
             <thead className="bg-muted/50 text-xs">
               <tr>
                 <th className="w-[100px] whitespace-nowrap px-3 py-2 text-left font-medium">쇼핑몰</th>
                 <th className="w-[180px] whitespace-nowrap px-3 py-2 text-left font-medium">쇼핑몰상품코드</th>
                 <th className="w-[150px] whitespace-nowrap px-3 py-2 text-left font-medium">매핑코드</th>
                 <th className="w-[70px] whitespace-nowrap px-3 py-2 text-right font-medium">수량</th>
-                <th className="min-w-[260px] whitespace-nowrap px-3 py-2 text-left font-medium">이름</th>
+                <th className="min-w-[260px] whitespace-nowrap px-3 py-2 text-left font-medium">수집상품명</th>
+                <th className="min-w-[260px] whitespace-nowrap px-3 py-2 text-left font-medium">확정상품명</th>
                 <th className="w-[80px] whitespace-nowrap px-3 py-2 text-right font-medium">마켓상품</th>
                 <th className="w-[80px] whitespace-nowrap px-3 py-2 text-right font-medium">구성품</th>
                 <th className="w-[80px] whitespace-nowrap px-3 py-2 text-center font-medium">상태</th>
@@ -316,31 +345,23 @@ export function MappingManager() {
             </thead>
             <tbody className="divide-y">
               {loading ? (
-                <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
+                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
               ) : displayRows.length === 0 ? (
-                <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">
+                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">
                   {search ? '검색 결과가 없습니다' : '매핑코드가 없습니다. 우측 미매핑 목록에서 항목을 클릭해 추가하거나, 신규 매핑 버튼을 누르세요.'}
                 </td></tr>
               ) : displayRows.map(({ key, code: c, source, component, groupStart }) => (
                 <tr key={key} className={`hover:bg-muted/30 ${groupStart ? 'border-t-2 border-t-slate-200' : ''}`}>
                   <td className="whitespace-nowrap px-3 py-2 text-xs">
                     {source ? (
-                      <Badge variant="outline">{marketLabel(source.marketplaceId)}</Badge>
+                      <Badge variant="outline">{source.marketplaceName ?? marketLabel(source.marketplaceId)}</Badge>
                     ) : (
                       <span className="text-muted-foreground">-</span>
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
                     {source ? (
-                      <div>
-                        <div>{formatMarketplaceProductCode(source)}</div>
-                        {(source.productNameSnapshot || source.optionNameSnapshot) && (
-                          <div className="mt-0.5 max-w-[220px] truncate font-sans text-[10px] text-muted-foreground">
-                            {source.productNameSnapshot}
-                            {source.optionNameSnapshot && <span className="ml-1">· {source.optionNameSnapshot}</span>}
-                          </div>
-                        )}
-                      </div>
+                      formatMarketplaceProductCode(source)
                     ) : (
                       <span className="text-muted-foreground">-</span>
                     )}
@@ -358,7 +379,16 @@ export function MappingManager() {
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{component?.quantity ?? '-'}</td>
-                  <td className="px-3 py-2">{c.name}</td>
+                  <td className="max-w-[320px] px-3 py-2">
+                    <div className="truncate" title={formatCollectedProductName(source)}>
+                      {formatCollectedProductName(source)}
+                    </div>
+                  </td>
+                  <td className="max-w-[320px] px-3 py-2">
+                    <div className="truncate" title={formatConfirmedProductName(component, c)}>
+                      {formatConfirmedProductName(component, c)}
+                    </div>
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{c.sourcesCount}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{c.componentsCount}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-center">

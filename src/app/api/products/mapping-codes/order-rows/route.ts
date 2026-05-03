@@ -5,7 +5,7 @@
  * 우측은 mapping_sources(품번/단품 우선순위) → mapping_codes → mapping_components → inventory
  * 가 LEFT JOIN 으로 붙어 매핑 적용 결과를 그대로 보여준다.
  *
- * 매칭 우선순위 (단품 → 품번 풀매치 → 품번 prefix) 는
+ * 매칭 우선순위 (같은 쇼핑몰 단품 → 같은 쇼핑몰 품번 → 전역 유일 단품/품번 fallback) 는
  * src/app/api/products/mapping-codes/unmapped/route.ts 와 동일한 SQL 패턴을 사용.
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -140,7 +140,6 @@ export async function GET(req: NextRequest) {
       SELECT s.*
       FROM mapping_sources s
       WHERE s.user_id = o.user_id
-        AND s.marketplace_id = o.marketplace_id
         AND (
           (s.marketplace_option_id <> ''
             AND (
@@ -152,7 +151,26 @@ export async function GET(req: NextRequest) {
             AND (oi.marketplace_item_id = s.marketplace_product_id
               OR oi.marketplace_item_id LIKE s.marketplace_product_id || '-%'))
         )
-      ORDER BY (s.marketplace_option_id <> '') DESC
+        AND (
+          s.marketplace_id = o.marketplace_id
+          OR (
+            SELECT COUNT(DISTINCT sx.mapping_code_id)::int
+            FROM mapping_sources sx
+            WHERE sx.user_id = o.user_id
+              AND (
+                (sx.marketplace_option_id <> ''
+                  AND (
+                    oi.marketplace_item_id = sx.marketplace_product_id || '-' || sx.marketplace_option_id
+                    OR (sx.marketplace_option_id = ${exactOptionId}
+                      AND oi.marketplace_item_id = sx.marketplace_product_id)
+                  ))
+                OR (sx.marketplace_option_id = ''
+                  AND (oi.marketplace_item_id = sx.marketplace_product_id
+                    OR oi.marketplace_item_id LIKE sx.marketplace_product_id || '-%'))
+              )
+          ) = 1
+        )
+      ORDER BY (s.marketplace_id = o.marketplace_id) DESC, (s.marketplace_option_id <> '') DESC
       LIMIT 1
     ) ms ON TRUE
   `
@@ -194,20 +212,43 @@ export async function GET(req: NextRequest) {
       EXISTS (
         SELECT 1 FROM mapping_sources s2
         WHERE s2.user_id = o.user_id
-          AND s2.marketplace_id = o.marketplace_id
           AND s2.marketplace_option_id = ''
           AND (oi.marketplace_item_id = s2.marketplace_product_id
             OR oi.marketplace_item_id LIKE s2.marketplace_product_id || '-%')
+          AND (
+            s2.marketplace_id = o.marketplace_id
+            OR (
+              SELECT COUNT(DISTINCT sx.mapping_code_id)::int
+              FROM mapping_sources sx
+              WHERE sx.user_id = o.user_id
+                AND sx.marketplace_option_id = ''
+                AND (oi.marketplace_item_id = sx.marketplace_product_id
+                  OR oi.marketplace_item_id LIKE sx.marketplace_product_id || '-%')
+            ) = 1
+          )
       )                               AS "hasProductMapping",
       EXISTS (
         SELECT 1 FROM mapping_sources s3
         WHERE s3.user_id = o.user_id
-          AND s3.marketplace_id = o.marketplace_id
           AND s3.marketplace_option_id <> ''
           AND (
             oi.marketplace_item_id = s3.marketplace_product_id || '-' || s3.marketplace_option_id
             OR (s3.marketplace_option_id = ${exactOptionId}
               AND oi.marketplace_item_id = s3.marketplace_product_id)
+          )
+          AND (
+            s3.marketplace_id = o.marketplace_id
+            OR (
+              SELECT COUNT(DISTINCT sx.mapping_code_id)::int
+              FROM mapping_sources sx
+              WHERE sx.user_id = o.user_id
+                AND sx.marketplace_option_id <> ''
+                AND (
+                  oi.marketplace_item_id = sx.marketplace_product_id || '-' || sx.marketplace_option_id
+                  OR (sx.marketplace_option_id = ${exactOptionId}
+                    AND oi.marketplace_item_id = sx.marketplace_product_id)
+                )
+            ) = 1
           )
       )                               AS "hasOptionMapping",
       COALESCE(

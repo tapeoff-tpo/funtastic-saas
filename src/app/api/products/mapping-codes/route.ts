@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { inventory, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, sql } from 'drizzle-orm'
 
 interface SourceInput {
@@ -56,6 +56,7 @@ export async function GET() {
       )`,
       sources: sql<Array<{
         marketplaceId: string
+        marketplaceName: string | null
         marketplaceProductId: string
         marketplaceOptionId: string
         productNameSnapshot: string | null
@@ -63,6 +64,14 @@ export async function GET() {
       }>>`COALESCE((
         SELECT jsonb_agg(jsonb_build_object(
           'marketplaceId', ${mappingSources.marketplaceId},
+          'marketplaceName', COALESCE((
+            SELECT mcx.display_name
+            FROM marketplace_connections mcx
+            WHERE mcx.user_id = ${mappingSources.userId}
+              AND mcx.marketplace_id = ${mappingSources.marketplaceId}
+            ORDER BY mcx.updated_at DESC
+            LIMIT 1
+          ), ${mappingSources.marketplaceId}),
           'marketplaceProductId', ${mappingSources.marketplaceProductId},
           'marketplaceOptionId', ${mappingSources.marketplaceOptionId},
           'productNameSnapshot', ${mappingSources.productNameSnapshot},
@@ -74,12 +83,19 @@ export async function GET() {
       components: sql<Array<{
         sku: string
         quantity: number
+        productName: string | null
+        optionName: string | null
       }>>`COALESCE((
         SELECT jsonb_agg(jsonb_build_object(
           'sku', ${mappingComponents.sku},
-          'quantity', ${mappingComponents.quantity}
+          'quantity', ${mappingComponents.quantity},
+          'productName', ${inventory.productName},
+          'optionName', ${inventory.optionName}
         ) ORDER BY ${mappingComponents.sku})
         FROM ${mappingComponents}
+        LEFT JOIN ${inventory}
+          ON ${inventory.userId} = ${mappingComponents.userId}
+          AND ${inventory.sku} = ${mappingComponents.sku}
         WHERE ${mappingComponents.mappingCodeId} = ${mappingCodes.id}
       ), '[]'::jsonb)`,
     })

@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { inventory, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 
 interface SourceInput {
@@ -53,8 +53,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     .where(eq(mappingSources.mappingCodeId, id))
 
   const components = await db
-    .select()
+    .select({
+      id: mappingComponents.id,
+      userId: mappingComponents.userId,
+      mappingCodeId: mappingComponents.mappingCodeId,
+      sku: mappingComponents.sku,
+      quantity: mappingComponents.quantity,
+      createdAt: mappingComponents.createdAt,
+      updatedAt: mappingComponents.updatedAt,
+      productName: inventory.productName,
+      optionName: inventory.optionName,
+    })
     .from(mappingComponents)
+    .leftJoin(
+      inventory,
+      and(eq(inventory.userId, mappingComponents.userId), eq(inventory.sku, mappingComponents.sku)),
+    )
     .where(eq(mappingComponents.mappingCodeId, id))
 
   return NextResponse.json({ code, sources, components })

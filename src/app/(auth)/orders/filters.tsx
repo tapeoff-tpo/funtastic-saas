@@ -1,16 +1,15 @@
 'use client'
 
-import { useCallback, useState, useTransition } from 'react'
+import { useCallback, useMemo, useState, useTransition } from 'react'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { ORDER_STATUS_LABELS, type OrderSearchField, type OrderStatus } from '@/lib/orders/types'
 
 const MARKETPLACE_OPTIONS = [
-  { value: '', label: '전체 마켓' },
   { value: 'coupang', label: '쿠팡' },
   { value: 'naver', label: '네이버 스마트스토어' },
   { value: 'gmarket', label: 'G마켓' },
   { value: 'auction', label: '옥션' },
-  { value: '11st', label: '11번가' },
+  { value: 'elevenst', label: '11번가' },
   { value: 'cafe24', label: 'Cafe24' },
 ]
 
@@ -46,8 +45,22 @@ const SEARCH_FIELD_OPTIONS: Array<{ value: OrderSearchField; label: string }> = 
   { value: 'logisticsMessage', label: '물류메세지' },
 ]
 
-export function OrderFilters() {
+export function OrderFilters({
+  marketplaceOptions = [],
+}: {
+  marketplaceOptions?: Array<{ value: string; label: string }>
+}) {
   const [isPending, startTransition] = useTransition()
+  const mergedMarketplaceOptions = useMemo(() => {
+    const options = new Map<string, string>()
+    for (const option of MARKETPLACE_OPTIONS) options.set(option.value, option.label)
+    for (const option of marketplaceOptions) options.set(option.value, option.label)
+    return [
+      { value: '', label: '전체 마켓' },
+      ...Array.from(options, ([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label, 'ko-KR')),
+    ]
+  }, [marketplaceOptions])
 
   const [filters, setFilters] = useQueryStates({
     status: parseAsString,
@@ -107,7 +120,7 @@ export function OrderFilters() {
           onChange={(e) => updateFilter({ marketplace: e.target.value || null })}
           className="rounded-md border px-3 py-1.5 text-sm"
         >
-          {MARKETPLACE_OPTIONS.map((opt) => (
+          {mergedMarketplaceOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

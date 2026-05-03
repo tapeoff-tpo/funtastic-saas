@@ -8,6 +8,10 @@ import {
 } from 'nuqs/server'
 import { createClient } from '@/lib/supabase/server'
 import { getOrders } from '@/lib/orders/queries'
+import { db } from '@/lib/db'
+import { marketplaceConnections } from '@/lib/db/schema'
+import { AUTO_MARKETPLACE_OPTIONS, MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
+import { eq } from 'drizzle-orm'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { OrderTabs } from './order-tabs'
@@ -40,6 +44,37 @@ const searchParamsCache = createSearchParamsCache({
   tab: parseAsString,
 })
 
+type MarketplaceFilterOption = {
+  value: string
+  label: string
+}
+
+function buildMarketplaceFilterOptions(
+  connections: Array<{
+    marketplaceId: string
+    displayName: string
+    isManual: boolean
+  }>,
+): MarketplaceFilterOption[] {
+  const options = new Map<string, string>()
+
+  for (const marketplace of AUTO_MARKETPLACE_OPTIONS) {
+    options.set(marketplace.marketplaceId, marketplace.displayName)
+  }
+
+  for (const connection of connections) {
+    options.set(
+      connection.marketplaceId,
+      connection.isManual
+        ? connection.displayName
+        : (MARKETPLACE_DISPLAY_NAMES[connection.marketplaceId] ?? connection.displayName),
+    )
+  }
+
+  return Array.from(options, ([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label, 'ko-KR'))
+}
+
 export default async function OrdersPage({
   searchParams,
 }: {
@@ -50,6 +85,15 @@ export default async function OrdersPage({
   if (!user) redirect('/login')
 
   const params = await searchParamsCache.parse(searchParams)
+  const connectionsPromise = db
+    .select({
+      marketplaceId: marketplaceConnections.marketplaceId,
+      displayName: marketplaceConnections.displayName,
+      isManual: marketplaceConnections.isManual,
+    })
+    .from(marketplaceConnections)
+    .where(eq(marketplaceConnections.userId, user.id))
+
   const isNewTab = params.status === 'new'
   const mappingFilter = isNewTab
     ? (params.mapping === 'all'
@@ -69,8 +113,8 @@ export default async function OrdersPage({
 
   // 탭별 카운트(getOrderStats)는 매 조회마다 11개 status COUNT 쿼리를 추가로 실행해
   // 응답을 느리게 한다. 현재 선택된 탭의 total 만 헤더에 노출하면 충분하므로 제거.
-  const { orders: orderList, total } = tabSelected
-    ? await getOrders({
+  const ordersPromise = tabSelected
+    ? getOrders({
         page: params.page,
         pageSize: params.pageSize,
         userId: user.id,
@@ -89,6 +133,11 @@ export default async function OrdersPage({
         excludeClaimLikeOrders: isNewTab,
       })
     : { orders: [] as Awaited<ReturnType<typeof getOrders>>['orders'], total: 0 }
+  const [connections, { orders: orderList, total }] = await Promise.all([
+    connectionsPromise,
+    ordersPromise,
+  ])
+  const marketplaceOptions = buildMarketplaceFilterOptions(connections)
 
   const data: OrderRow[] = orderList.map((o) => ({
     id: o.id,
@@ -156,7 +205,7 @@ export default async function OrdersPage({
 
       {/* Filters — marketplace / 날짜 / 검색 (W-3 유지) */}
       <Suspense>
-        <OrderFilters />
+        <OrderFilters marketplaceOptions={marketplaceOptions} />
       </Suspense>
 
       {/* Data Table — 탭 미선택 시 안내 문구로 대체 (쿼리 0번) */}

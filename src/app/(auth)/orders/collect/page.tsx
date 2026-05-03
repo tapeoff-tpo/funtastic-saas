@@ -2,30 +2,13 @@ import { eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
+import { AUTO_MARKETPLACE_OPTIONS } from '@/lib/marketplace/collect-options'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: '주문 수집',
 }
-
-const AUTO_MARKETPLACE_OPTIONS = [
-  { marketplaceId: 'domeggook', displayName: '도매꾹' },
-  { marketplaceId: 'tobizon', displayName: '투비즈온' },
-  { marketplaceId: 'domesin', displayName: '도매의신' },
-  { marketplaceId: 'banana-b2b', displayName: '바나나B2B' },
-  { marketplaceId: 'ohouse', displayName: '오늘의집' },
-  { marketplaceId: 'ssgmall', displayName: 'SSG' },
-  { marketplaceId: 'cjonestyle', displayName: 'CJ온스타일' },
-  { marketplaceId: 'ably', displayName: '에이블리' },
-  { marketplaceId: 'hyundai-hmall', displayName: '현대홈쇼핑' },
-  { marketplaceId: 'gs-shop', displayName: 'GS샵' },
-  { marketplaceId: 'esm', displayName: 'ESM' },
-  { marketplaceId: 'always', displayName: '올웨이즈' },
-  { marketplaceId: 'elevenst', displayName: '11번가' },
-  { marketplaceId: 'zigzag', displayName: '지그재그' },
-  { marketplaceId: 'toss-shopping', displayName: '토스쇼핑' },
-] as const
 
 export default async function OrdersCollectPage() {
   const supabase = await createClient()

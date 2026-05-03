@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { inventory, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, sql } from 'drizzle-orm'
 
 interface SourceInput {
@@ -91,16 +91,16 @@ export async function GET() {
           'sku', ${mappingComponents.sku},
           'quantity', ${mappingComponents.quantity},
           'productName', (
-            SELECT MAX(${inventory.productName})
-            FROM ${inventory}
-            WHERE ${inventory.userId} = ${mappingComponents.userId}
-              AND ${inventory.sku} = ${mappingComponents.sku}
+            SELECT MAX(i.product_name)
+            FROM inventory i
+            WHERE i.user_id = mapping_components.user_id
+              AND i.sku = mapping_components.sku
           ),
           'optionName', (
-            SELECT MAX(${inventory.optionName})
-            FROM ${inventory}
-            WHERE ${inventory.userId} = ${mappingComponents.userId}
-              AND ${inventory.sku} = ${mappingComponents.sku}
+            SELECT MAX(i.option_name)
+            FROM inventory i
+            WHERE i.user_id = mapping_components.user_id
+              AND i.sku = mapping_components.sku
           )
         ) ORDER BY ${mappingComponents.sku})
         FROM ${mappingComponents}

@@ -17,65 +17,68 @@ import { listInquiriesByOrderIds } from './inquiry-queries'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
 
 /**
- * mappingStatus 계산용 SKU 인벤토리 캐시 (60초).
+ * mappingStatus/displayName 계산용 매핑 조회.
  *
- * Phase C — 매핑코드 시스템:
- * mappingStatus 는 mapping_sources(marketplaceId + marketplaceItemId) 매칭으로 판정.
- * SKU 직접 매칭은 fallback 용도로 유지 (마켓상품ID가 없는 임포트 주문 등).
+ * 매핑은 신규탭에서 바로 수정되는 작업 데이터라 서버 캐시를 타면 방금 고친 매핑이
+ * 주문 목록에 남아 보일 수 있다. 주문 화면은 항상 최신 mapping_sources/components 를 읽는다.
  */
-const getMappingLookupsCached = unstable_cache(
-  async (userId: string) => {
-    const [productSkus, variantSkus, sources, components] = await Promise.all([
-      db
-        .select({ sku: products.internalSku })
-        .from(products)
-        .where(eq(products.userId, userId)),
-      db
-        .select({ sku: productVariants.sku })
-        .from(productVariants)
-        .innerJoin(products, eq(productVariants.productId, products.id))
-        .where(eq(products.userId, userId)),
-      db
+async function getMappingLookups(userId: string) {
+  const [productSkus, variantSkus, sources, componentRows] = await Promise.all([
+    db
+      .select({ sku: products.internalSku })
+      .from(products)
+      .where(eq(products.userId, userId)),
+    db
+      .select({ sku: productVariants.sku })
+      .from(productVariants)
+      .innerJoin(products, eq(productVariants.productId, products.id))
+      .where(eq(products.userId, userId)),
+    db
+      .select({
+        mappingCodeId: mappingSources.mappingCodeId,
+        marketplaceId: mappingSources.marketplaceId,
+        marketplaceProductId: mappingSources.marketplaceProductId,
+        marketplaceOptionId: mappingSources.marketplaceOptionId,
+      })
+      .from(mappingSources)
+      .where(eq(mappingSources.userId, userId)),
+    db
+      .select({
+        mappingCodeId: mappingComponents.mappingCodeId,
+        sku: mappingComponents.sku,
+        quantity: mappingComponents.quantity,
+      })
+      .from(mappingComponents)
+      .where(eq(mappingComponents.userId, userId)),
+  ])
+
+  const componentSkus = Array.from(new Set(componentRows.map((component) => component.sku)))
+  const inventoryRows = componentSkus.length > 0
+    ? await db
         .select({
-          mappingCodeId: mappingSources.mappingCodeId,
-          marketplaceId: mappingSources.marketplaceId,
-          marketplaceProductId: mappingSources.marketplaceProductId,
-          marketplaceOptionId: mappingSources.marketplaceOptionId,
+          sku: inventory.sku,
+          productName: sql<string | null>`MAX(${inventory.productName})`,
+          optionName: sql<string | null>`MAX(${inventory.optionName})`,
+          availableStock: sql<number | null>`COALESCE(SUM(${inventory.availableStock}), 0)::int`,
         })
-        .from(mappingSources)
-        .where(eq(mappingSources.userId, userId)),
-      db
-        .select({
-          mappingCodeId: mappingComponents.mappingCodeId,
-          sku: mappingComponents.sku,
-          quantity: mappingComponents.quantity,
-          productName: sql<string | null>`(
-            SELECT MAX(${inventory.productName})
-            FROM ${inventory}
-            WHERE ${inventory.userId} = ${mappingComponents.userId}
-              AND ${inventory.sku} = ${mappingComponents.sku}
-          )`,
-          optionName: sql<string | null>`(
-            SELECT MAX(${inventory.optionName})
-            FROM ${inventory}
-            WHERE ${inventory.userId} = ${mappingComponents.userId}
-              AND ${inventory.sku} = ${mappingComponents.sku}
-          )`,
-          availableStock: sql<number | null>`(
-            SELECT COALESCE(SUM(${inventory.availableStock}), 0)::int
-            FROM ${inventory}
-            WHERE ${inventory.userId} = ${mappingComponents.userId}
-              AND ${inventory.sku} = ${mappingComponents.sku}
-          )`,
-        })
-        .from(mappingComponents)
-        .where(eq(mappingComponents.userId, userId)),
-    ])
-    return { productSkus, variantSkus, sources, components }
-  },
-  ['order-mapping-lookups'],
-  { revalidate: 60, tags: ['product-mappings'] },
-)
+        .from(inventory)
+        .where(and(eq(inventory.userId, userId), inArray(inventory.sku, componentSkus)))
+        .groupBy(inventory.sku)
+    : []
+  const inventoryBySku = new Map(inventoryRows.map((row) => [row.sku, row]))
+
+  const components = componentRows.map((component) => {
+    const inv = inventoryBySku.get(component.sku)
+    return {
+      ...component,
+      productName: inv?.productName ?? null,
+      optionName: inv?.optionName ?? null,
+      availableStock: inv?.availableStock ?? null,
+    }
+  })
+
+  return { productSkus, variantSkus, sources, components }
+}
 
 /**
  * perf: getOrderStats 는 5개 병렬 COUNT 쿼리. 탭 전환 사이엔 값이 거의 안 변함.
@@ -358,10 +361,9 @@ export async function getOrders(filters: OrderFilters = {}) {
   // 한 wave 에서 병렬 실행한다 (이전엔 4 wave 직렬 → 2 wave 로 압축).
   const userId = filters.userId
 
-  // userId-scoped mapping 인벤토리 (mappingStatus 계산용)
-  // unstable_cache 로 60초 캐시 → 탭/페이지 전환 시 DB 안 가고 메모리에서 즉시 응답
+  // userId-scoped mapping 인벤토리 (mappingStatus/displayName 계산용)
   const userScopedPromise = userId
-    ? getMappingLookupsCached(userId)
+    ? getMappingLookups(userId)
     : Promise.resolve({
         productSkus: [] as Array<{ sku: string }>,
         variantSkus: [] as Array<{ sku: string }>,

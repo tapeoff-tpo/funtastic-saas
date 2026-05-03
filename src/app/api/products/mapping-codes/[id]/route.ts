@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { inventory, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, and, sql } from 'drizzle-orm'
 
 interface SourceInput {
@@ -63,16 +63,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       createdAt: mappingComponents.createdAt,
       updatedAt: mappingComponents.updatedAt,
       productName: sql<string | null>`(
-        SELECT MAX(${inventory.productName})
-        FROM ${inventory}
-        WHERE ${inventory.userId} = ${mappingComponents.userId}
-          AND ${inventory.sku} = ${mappingComponents.sku}
+        SELECT MAX(i.product_name)
+        FROM inventory i
+        WHERE i.user_id = mapping_components.user_id
+          AND i.sku = mapping_components.sku
       )`,
       optionName: sql<string | null>`(
-        SELECT MAX(${inventory.optionName})
-        FROM ${inventory}
-        WHERE ${inventory.userId} = ${mappingComponents.userId}
-          AND ${inventory.sku} = ${mappingComponents.sku}
+        SELECT MAX(i.option_name)
+        FROM inventory i
+        WHERE i.user_id = mapping_components.user_id
+          AND i.sku = mapping_components.sku
       )`,
     })
     .from(mappingComponents)

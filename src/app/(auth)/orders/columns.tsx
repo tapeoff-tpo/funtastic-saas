@@ -532,10 +532,10 @@ export const columns: ColumnDef<OrderRow>[] = [
       const historicalClaimStatuses = (order.historicalClaimStatuses ?? [])
         .filter((status) => status !== primaryLabel)
       return (
-        <div className="flex min-w-0 items-center gap-1">
-          <div className="flex min-w-0 flex-1 items-center gap-1">
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex min-w-0 items-center gap-1">
             <span
-              className={`inline-flex h-6 max-w-[86px] shrink-0 items-center justify-center truncate rounded border px-1.5 text-[11px] font-semibold ${primaryStyle}`}
+              className={`inline-flex h-6 min-w-0 max-w-full items-center justify-center truncate rounded border px-1.5 text-[11px] font-semibold ${primaryStyle}`}
               title={order.claimReason ?? ORDER_STATUS_LABELS[order.status]}
             >
               {primaryLabel}
@@ -568,7 +568,7 @@ export const columns: ColumnDef<OrderRow>[] = [
               </span>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex items-center gap-1">
             {order.claimId && order.claimType && order.claimStatus ? (
               <ClaimActionDropdown
                 claimId={order.claimId}

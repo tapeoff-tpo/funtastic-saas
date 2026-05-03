@@ -17,6 +17,7 @@ export const MARKETPLACE_LABELS: Record<string, string> = {
 }
 export const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
 const EXACT_OPTION_ID = '__exact__'
+const DISPLAY_PAGE_SIZE = 300
 
 function formatMarketplaceProductCode(source: MappingSourceView): string {
   if (!source.marketplaceOptionId || source.marketplaceOptionId === EXACT_OPTION_ID) {
@@ -125,6 +126,7 @@ export function MappingManager() {
   const [search, setSearch] = useQueryState('q', parseAsString.withDefault(''))
   const [editing, setEditing] = useState<FormState | null>(null)
   const [saving, setSaving] = useState(false)
+  const [displayPage, setDisplayPage] = useState(1)
 
   const reload = useCallback(async () => {
     setLoading(true)
@@ -141,6 +143,7 @@ export function MappingManager() {
   }, [])
 
   useEffect(() => { void reload() }, [reload])
+  useEffect(() => { setDisplayPage(1) }, [search, codes.length])
 
   const filtered = codes.filter((c) => {
     if (!search) return true
@@ -179,6 +182,12 @@ export function MappingManager() {
       }))
     )
   })
+  const totalDisplayPages = Math.max(1, Math.ceil(displayRows.length / DISPLAY_PAGE_SIZE))
+  const safeDisplayPage = Math.min(displayPage, totalDisplayPages)
+  const visibleRows = displayRows.slice(
+    (safeDisplayPage - 1) * DISPLAY_PAGE_SIZE,
+    safeDisplayPage * DISPLAY_PAGE_SIZE,
+  )
 
   async function openCreate(prefillSource?: UnmappedItem, prefillMode: SourceMode = 'option') {
     const form = emptyForm()
@@ -327,6 +336,36 @@ export function MappingManager() {
           </Button>
         </div>
 
+        <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          <span>
+            매핑코드 {filtered.length.toLocaleString('ko-KR')}개 · 표시행 {displayRows.length.toLocaleString('ko-KR')}개
+            {displayRows.length > DISPLAY_PAGE_SIZE && (
+              <span> · 현재 {((safeDisplayPage - 1) * DISPLAY_PAGE_SIZE + 1).toLocaleString('ko-KR')}-{Math.min(safeDisplayPage * DISPLAY_PAGE_SIZE, displayRows.length).toLocaleString('ko-KR')}행</span>
+            )}
+          </span>
+          {displayRows.length > DISPLAY_PAGE_SIZE && (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setDisplayPage((p) => Math.max(1, p - 1))}
+                disabled={safeDisplayPage <= 1}
+                className="rounded border bg-background px-2 py-0.5 disabled:opacity-40"
+              >
+                이전
+              </button>
+              <span>{safeDisplayPage} / {totalDisplayPages}</span>
+              <button
+                type="button"
+                onClick={() => setDisplayPage((p) => Math.min(totalDisplayPages, p + 1))}
+                disabled={safeDisplayPage >= totalDisplayPages}
+                className="rounded border bg-background px-2 py-0.5 disabled:opacity-40"
+              >
+                다음
+              </button>
+            </div>
+          )}
+        </div>
+
         <div className="overflow-x-auto rounded-lg border">
           <table className="min-w-[1320px] w-full text-sm">
             <thead className="bg-muted/50 text-xs">
@@ -350,7 +389,7 @@ export function MappingManager() {
                 <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">
                   {search ? '검색 결과가 없습니다' : '매핑코드가 없습니다. 우측 미매핑 목록에서 항목을 클릭해 추가하거나, 신규 매핑 버튼을 누르세요.'}
                 </td></tr>
-              ) : displayRows.map(({ key, code: c, source, component, groupStart }) => (
+              ) : visibleRows.map(({ key, code: c, source, component, groupStart }) => (
                 <tr key={key} className={`hover:bg-muted/30 ${groupStart ? 'border-t-2 border-t-slate-200' : ''}`}>
                   <td className="whitespace-nowrap px-3 py-2 text-xs">
                     {source ? (

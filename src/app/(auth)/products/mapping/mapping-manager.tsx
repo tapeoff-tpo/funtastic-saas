@@ -124,6 +124,7 @@ export function MappingManager() {
   const [loading, setLoading] = useState(true)
   // 탭 전환 후 복원되도록 URL 쿼리스트링에 저장 (탭바가 마지막 URL 기억).
   const [search, setSearch] = useQueryState('q', parseAsString.withDefault(''))
+  const [searchInput, setSearchInput] = useState(search)
   const [editing, setEditing] = useState<FormState | null>(null)
   const [saving, setSaving] = useState(false)
   const [displayPage, setDisplayPage] = useState(1)
@@ -143,7 +144,18 @@ export function MappingManager() {
   }, [])
 
   useEffect(() => { void reload() }, [reload])
+  useEffect(() => { setSearchInput(search) }, [search])
   useEffect(() => { setDisplayPage(1) }, [search, codes.length])
+
+  const handleSearchSubmit = useCallback((e?: React.FormEvent) => {
+    e?.preventDefault()
+    void setSearch(searchInput.trim() || null)
+  }, [searchInput, setSearch])
+
+  const handleSearchAll = useCallback(() => {
+    setSearchInput('')
+    void setSearch(null)
+  }, [setSearch])
 
   const filtered = codes.filter((c) => {
     if (!search) return true
@@ -314,27 +326,34 @@ export function MappingManager() {
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_360px]">
       {/* 좌측 — 매핑코드 목록 */}
       <div className="space-y-3">
-        <div className="flex items-center gap-2">
+        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
           <input
             type="text"
-            value={search}
-            onChange={(e) => void setSearch(e.target.value)}
-            placeholder="코드 또는 이름 검색"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="코드, 쇼핑몰상품코드, 상품명 검색"
             className="flex-1 rounded-md border px-3 py-1.5 text-sm"
           />
-          <Button onClick={() => openCreate(undefined, 'product')} size="sm">
+          <Button type="submit" size="sm" variant="outline">
+            <Search className="size-3.5" />
+            검색
+          </Button>
+          <Button type="button" onClick={handleSearchAll} size="sm" variant="outline">
+            전체 검색
+          </Button>
+          <Button type="button" onClick={() => openCreate(undefined, 'product')} size="sm">
             <Plus className="size-3.5" />
             신규 품번매핑
           </Button>
-          <Button onClick={() => openCreate(undefined, 'option')} size="sm">
+          <Button type="button" onClick={() => openCreate(undefined, 'option')} size="sm">
             <Plus className="size-3.5" />
             신규 단품매핑
           </Button>
-          <Button onClick={() => void reload()} size="sm" variant="outline">
+          <Button type="button" onClick={() => void reload()} size="sm" variant="outline">
             <RefreshCw className="size-3.5" />
             새로고침
           </Button>
-        </div>
+        </form>
 
         <div className="flex items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
           <span>

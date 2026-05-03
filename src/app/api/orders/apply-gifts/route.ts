@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, inArray, or } from 'drizzle-orm'
+import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { giftRules, inventory, orderItems, orders } from '@/lib/db/schema'
@@ -101,11 +101,12 @@ export async function POST(req: NextRequest) {
     ? await db
         .select({
           sku: inventory.sku,
-          productName: inventory.productName,
-          optionName: inventory.optionName,
+          productName: sql<string | null>`MAX(${inventory.productName})`,
+          optionName: sql<string | null>`MAX(${inventory.optionName})`,
         })
         .from(inventory)
         .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, giftSkus)))
+        .groupBy(inventory.sku)
     : []
   const giftInventory = new Map(giftInventoryRows.map((row) => [row.sku, row]))
 

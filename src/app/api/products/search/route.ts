@@ -78,7 +78,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ results })
   }
 
-  // mode = 'option' (기존 동작)
+  // mode = 'option' (기존 동작). 창고별 inventory 행은 SKU 기준으로 합산한다.
   const rows = await db
     .select({
       id: products.id,
@@ -87,8 +87,8 @@ export async function GET(req: NextRequest) {
       warehouseLocation: products.warehouseLocation,
       basePrice: products.basePrice,
       costPrice: products.costPrice,
-      optionName: inventory.optionName,
-      availableStock: inventory.availableStock,
+      optionName: sql<string | null>`MAX(${inventory.optionName})`,
+      availableStock: sql<number>`COALESCE(SUM(${inventory.availableStock}), 0)::int`,
     })
     .from(products)
     .leftJoin(
@@ -105,6 +105,7 @@ export async function GET(req: NextRequest) {
         ),
       ),
     )
+    .groupBy(products.id)
     .limit(50)
 
   const results = rows.map((r) => ({ ...r, optionHint: r.optionName ?? null }))

@@ -744,35 +744,23 @@ export const columns: ColumnDef<OrderRow>[] = [
     maxSize: 100,
   },
 
-  // 구매자 / 수취인
+  // 구매자
   {
-    id: 'contact',
-    header: '구매자 · 수취인',
+    id: 'buyerInfo',
+    header: '구매자',
     cell: ({ row }) => {
       const order = row.original
+      const phone = order.buyerPhone2 || order.buyerPhone || ''
       return (
         <div className="flex min-w-0 flex-col gap-0 text-xs leading-tight">
-          <div className="flex min-w-0 items-center">
-            <span className="inline-block w-7 text-[10px] text-muted-foreground">구매</span>
-            <span className="min-w-0 truncate font-medium" title={order.buyerName}>{order.buyerName}</span>
-            {order.buyerPhone && (
-              <span className="ml-1 shrink-0 font-mono text-[10px] text-muted-foreground">
-                {formatPhone(order.buyerPhone)}
-              </span>
-            )}
-          </div>
-          <div className="flex min-w-0 items-center">
-            <span className="inline-block w-7 text-[10px] text-muted-foreground">수취</span>
-            <span className="min-w-0 truncate font-medium" title={order.recipientName ?? '-'}>
-              {order.recipientName ?? '-'}
+          <span className="min-w-0 truncate font-medium" title={order.buyerName}>
+            {order.buyerName}
+          </span>
+          {phone && (
+            <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground" title={phone}>
+              {formatPhone(phone)}
             </span>
-            {/* 기본 표기: 휴대폰(phone2) 우선, 없으면 일반전화(phone1) */}
-            {(order.recipientPhone2 || order.recipientPhone) && (
-              <span className="ml-1 shrink-0 font-mono text-[10px] text-muted-foreground">
-                {formatPhone(order.recipientPhone2 || order.recipientPhone || '')}
-              </span>
-            )}
-          </div>
+          )}
           {order.shipmentGroupId && (
             <span
               className={`mt-0.5 inline-flex w-fit items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium ${groupColor(order.shipmentGroupId)}`}
@@ -788,9 +776,34 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 150,
-    minSize: 130,
-    maxSize: 320,
+    size: 92,
+    minSize: 86,
+    maxSize: 220,
+  },
+
+  // 수취인
+  {
+    id: 'recipientInfo',
+    header: '수취인',
+    cell: ({ row }) => {
+      const order = row.original
+      const phone = order.recipientPhone2 || order.recipientPhone || ''
+      return (
+        <div className="flex min-w-0 flex-col gap-0 text-xs leading-tight">
+          <span className="min-w-0 truncate font-medium" title={order.recipientName ?? '-'}>
+            {order.recipientName ?? '-'}
+          </span>
+          {phone && (
+            <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground" title={phone}>
+              {formatPhone(phone)}
+            </span>
+          )}
+        </div>
+      )
+    },
+    size: 96,
+    minSize: 88,
+    maxSize: 240,
   },
 
   // 금액

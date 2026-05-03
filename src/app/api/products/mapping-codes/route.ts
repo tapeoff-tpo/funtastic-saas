@@ -89,13 +89,20 @@ export async function GET() {
         SELECT jsonb_agg(jsonb_build_object(
           'sku', ${mappingComponents.sku},
           'quantity', ${mappingComponents.quantity},
-          'productName', ${inventory.productName},
-          'optionName', ${inventory.optionName}
+          'productName', (
+            SELECT MAX(${inventory.productName})
+            FROM ${inventory}
+            WHERE ${inventory.userId} = ${mappingComponents.userId}
+              AND ${inventory.sku} = ${mappingComponents.sku}
+          ),
+          'optionName', (
+            SELECT MAX(${inventory.optionName})
+            FROM ${inventory}
+            WHERE ${inventory.userId} = ${mappingComponents.userId}
+              AND ${inventory.sku} = ${mappingComponents.sku}
+          )
         ) ORDER BY ${mappingComponents.sku})
         FROM ${mappingComponents}
-        LEFT JOIN ${inventory}
-          ON ${inventory.userId} = ${mappingComponents.userId}
-          AND ${inventory.sku} = ${mappingComponents.sku}
         WHERE ${mappingComponents.mappingCodeId} = ${mappingCodes.id}
       ), '[]'::jsonb)`,
     })

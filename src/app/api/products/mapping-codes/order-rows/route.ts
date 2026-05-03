@@ -265,13 +265,20 @@ export async function GET(req: NextRequest) {
             json_build_object(
               'sku', mcomp.sku,
               'quantity', mcomp.quantity,
-              'productName', inv.product_name,
-              'optionName', inv.option_name
+              'productName', (
+                SELECT MAX(inv.product_name)
+                FROM inventory inv
+                WHERE inv.user_id = o.user_id AND inv.sku = mcomp.sku
+              ),
+              'optionName', (
+                SELECT MAX(inv.option_name)
+                FROM inventory inv
+                WHERE inv.user_id = o.user_id AND inv.sku = mcomp.sku
+              )
             )
             ORDER BY mcomp.id
           )
           FROM mapping_components mcomp
-          LEFT JOIN inventory inv ON inv.user_id = o.user_id AND inv.sku = mcomp.sku
           WHERE mcomp.mapping_code_id = mc.id
         ),
         '[]'::json

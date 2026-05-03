@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, orderItems, shipments, marketplaceConnections, products, inventory } from '@/lib/db/schema'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
@@ -92,13 +92,14 @@ export async function GET(request: NextRequest) {
           db
             .select({
               sku: inventory.sku,
-              stock: inventory.availableStock,
-              sectorCode: inventory.sectorCode,
-              packagingUnit: inventory.packagingUnit,
-              optionName: inventory.optionName,
+              stock: sql<number>`COALESCE(SUM(${inventory.availableStock}), 0)::int`,
+              sectorCode: sql<string | null>`MAX(${inventory.sectorCode})`,
+              packagingUnit: sql<string | null>`MAX(${inventory.packagingUnit})`,
+              optionName: sql<string | null>`MAX(${inventory.optionName})`,
             })
             .from(inventory)
-            .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skuSet))),
+            .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skuSet)))
+            .groupBy(inventory.sku),
         ])
       : [[], []]
     const productMap = new Map(productRows.map((p) => [p.sku, { location: p.location, costPrice: p.costPrice }]))

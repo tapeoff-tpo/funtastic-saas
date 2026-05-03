@@ -13,7 +13,7 @@ import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { inventory } from '@/lib/db/schema'
-import { eq, and, inArray } from 'drizzle-orm'
+import { eq, and, inArray, sql } from 'drizzle-orm'
 
 /** Header name → internal key */
 const HEADER_MAP: Record<string, string> = {
@@ -154,9 +154,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // Look up current stock for all parsed SKUs
   const skus = [...new Set(parsed.map((r) => r.sku))]
   const stockRecords = await db
-    .select({ sku: inventory.sku, totalStock: inventory.totalStock })
+    .select({
+      sku: inventory.sku,
+      totalStock: sql<number>`COALESCE(SUM(${inventory.totalStock}), 0)::int`,
+    })
     .from(inventory)
     .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skus)))
+    .groupBy(inventory.sku)
 
   const stockMap = new Map(stockRecords.map((r) => [r.sku, r.totalStock]))
 

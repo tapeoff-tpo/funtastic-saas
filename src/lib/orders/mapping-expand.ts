@@ -11,7 +11,7 @@
 
 import { db } from '@/lib/db'
 import { mappingSources, mappingComponents, inventory } from '@/lib/db/schema'
-import { eq, and, inArray } from 'drizzle-orm'
+import { eq, and, inArray, sql } from 'drizzle-orm'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
 
 export type ExpandedRow = {
@@ -128,11 +128,12 @@ export async function expandOrderItemsWithMapping(
     ? await db
         .select({
           sku: inventory.sku,
-          optionName: inventory.optionName,
-          productName: inventory.productName,
+          optionName: sql<string | null>`MAX(${inventory.optionName})`,
+          productName: sql<string | null>`MAX(${inventory.productName})`,
         })
         .from(inventory)
         .where(and(eq(inventory.userId, userId), inArray(inventory.sku, Array.from(allSkus))))
+        .groupBy(inventory.sku)
     : []
   const invMap = new Map(inventoryRows.map((r) => [r.sku, r]))
 

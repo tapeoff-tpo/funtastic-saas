@@ -408,7 +408,8 @@ export const inventory = pgTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex('inventory_user_sku').on(table.userId, table.sku),
+    uniqueIndex('inventory_user_sku_warehouse').on(table.userId, table.sku, table.warehouseZone, table.sectorCode),
+    index('inventory_user_sku_idx').on(table.userId, table.sku),
     index('inventory_user_id').on(table.userId),
   ],
 )

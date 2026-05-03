@@ -57,16 +57,22 @@ export async function listGiftRules(userId: string) {
       giftSku: giftRules.giftSku,
       giftQuantity: giftRules.giftQuantity,
       isActive: giftRules.isActive,
-      giftProductName: inventory.productName,
-      giftOptionName: inventory.optionName,
+      giftProductName: sql<string | null>`(
+        SELECT MAX(${inventory.productName})
+        FROM ${inventory}
+        WHERE ${inventory.userId} = ${giftRules.userId}
+          AND ${inventory.sku} = ${giftRules.giftSku}
+      )`,
+      giftOptionName: sql<string | null>`(
+        SELECT MAX(${inventory.optionName})
+        FROM ${inventory}
+        WHERE ${inventory.userId} = ${giftRules.userId}
+          AND ${inventory.sku} = ${giftRules.giftSku}
+      )`,
       createdAt: giftRules.createdAt,
       updatedAt: giftRules.updatedAt,
     })
     .from(giftRules)
-    .leftJoin(
-      inventory,
-      and(eq(inventory.userId, giftRules.userId), eq(inventory.sku, giftRules.giftSku)),
-    )
     .where(eq(giftRules.userId, userId))
     .orderBy(sql`${giftRules.updatedAt} DESC`)
 }

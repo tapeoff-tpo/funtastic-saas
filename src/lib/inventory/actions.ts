@@ -11,7 +11,7 @@
 
 import { db } from '@/lib/db'
 import { claims, inventory, inventoryHistory, orderItems, orders, mappingSources, mappingComponents } from '@/lib/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, asc, desc, sql } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
@@ -53,6 +53,12 @@ async function adjustStockInTx(
     .select()
     .from(inventory)
     .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku)))
+    .orderBy(
+      sql`CASE WHEN ${inventory.warehouseZone} = '1창고' THEN 0 WHEN ${inventory.warehouseZone} IS NULL THEN 1 ELSE 2 END`,
+      desc(inventory.availableStock),
+      asc(inventory.createdAt),
+    )
+    .limit(1)
     .for('update')
 
   if (!record) {
@@ -103,7 +109,13 @@ export async function setStock(
     const [existing] = await tx
       .select()
       .from(inventory)
-      .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku)))
+      .where(and(
+        eq(inventory.userId, userId),
+        eq(inventory.sku, sku),
+        opts?.warehouseZone ? eq(inventory.warehouseZone, opts.warehouseZone) : sql`COALESCE(${inventory.warehouseZone}, '') = ''`,
+        opts?.sectorCode ? eq(inventory.sectorCode, opts.sectorCode) : sql`COALESCE(${inventory.sectorCode}, '') = ''`,
+      ))
+      .limit(1)
       .for('update')
 
     if (existing) {
@@ -388,6 +400,12 @@ export async function completeReturnClaim(
         .select()
         .from(inventory)
         .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku)))
+        .orderBy(
+          sql`CASE WHEN ${inventory.warehouseZone} = '1창고' THEN 0 WHEN ${inventory.warehouseZone} IS NULL THEN 1 ELSE 2 END`,
+          desc(inventory.availableStock),
+          asc(inventory.createdAt),
+        )
+        .limit(1)
         .for('update')
 
       if (!record) {

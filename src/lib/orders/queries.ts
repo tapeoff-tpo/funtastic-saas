@@ -49,18 +49,26 @@ const getMappingLookupsCached = unstable_cache(
           mappingCodeId: mappingComponents.mappingCodeId,
           sku: mappingComponents.sku,
           quantity: mappingComponents.quantity,
-          productName: inventory.productName,
-          optionName: inventory.optionName,
-          availableStock: inventory.availableStock,
+          productName: sql<string | null>`(
+            SELECT MAX(${inventory.productName})
+            FROM ${inventory}
+            WHERE ${inventory.userId} = ${mappingComponents.userId}
+              AND ${inventory.sku} = ${mappingComponents.sku}
+          )`,
+          optionName: sql<string | null>`(
+            SELECT MAX(${inventory.optionName})
+            FROM ${inventory}
+            WHERE ${inventory.userId} = ${mappingComponents.userId}
+              AND ${inventory.sku} = ${mappingComponents.sku}
+          )`,
+          availableStock: sql<number | null>`(
+            SELECT COALESCE(SUM(${inventory.availableStock}), 0)::int
+            FROM ${inventory}
+            WHERE ${inventory.userId} = ${mappingComponents.userId}
+              AND ${inventory.sku} = ${mappingComponents.sku}
+          )`,
         })
         .from(mappingComponents)
-        .leftJoin(
-          inventory,
-          and(
-            eq(inventory.userId, mappingComponents.userId),
-            eq(inventory.sku, mappingComponents.sku),
-          ),
-        )
         .where(eq(mappingComponents.userId, userId)),
     ])
     return { productSkus, variantSkus, sources, components }
@@ -440,8 +448,13 @@ export async function getOrders(filters: OrderFilters = {}) {
             // 확정상품명 — SKU가 products에 직접 매칭된 경우만 해석
             productInternalName: products.name,
             shippingCost: products.shippingCost,
-            // 잔여 재고 — orderItems.sku ↔ inventory.sku (user 스코프)
-            availableStock: inventory.availableStock,
+            // 잔여 재고 — 창고별 inventory 행을 SKU 단위로 합산
+            availableStock: sql<number | null>`(
+              SELECT COALESCE(SUM(${inventory.availableStock}), 0)::int
+              FROM ${inventory}
+              WHERE ${inventory.userId} = ${orders.userId}
+                AND ${inventory.sku} = ${orderItems.sku}
+            )`,
             orderMarketplaceId: orders.marketplaceId,
             orderUserId: orders.userId,
           })
@@ -452,13 +465,6 @@ export async function getOrders(filters: OrderFilters = {}) {
             and(
               eq(products.userId, orders.userId),
               eq(products.internalSku, orderItems.sku),
-            ),
-          )
-          .leftJoin(
-            inventory,
-            and(
-              eq(inventory.userId, orders.userId),
-              eq(inventory.sku, orderItems.sku),
             ),
           )
           .where(inArray(orderItems.orderId, orderIds)),
@@ -931,12 +937,13 @@ export async function getStockDeductionPreview(
   const invRows = await db
     .select({
       sku: inventory.sku,
-      productName: inventory.productName,
-      totalStock: inventory.totalStock,
-      availableStock: inventory.availableStock,
+      productName: sql<string | null>`MAX(${inventory.productName})`,
+      totalStock: sql<number>`COALESCE(SUM(${inventory.totalStock}), 0)::int`,
+      availableStock: sql<number>`COALESCE(SUM(${inventory.availableStock}), 0)::int`,
     })
     .from(inventory)
     .where(and(eq(inventory.userId, userId), inArray(inventory.sku, skus)))
+    .groupBy(inventory.sku)
 
   const invMap = new Map(invRows.map((r) => [r.sku, r]))
 

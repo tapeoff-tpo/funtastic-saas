@@ -277,7 +277,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
           })),
         )
         .onConflictDoUpdate({
-          target: [inventory.userId, inventory.sku],
+          target: [inventory.userId, inventory.sku, inventory.warehouseZone, inventory.sectorCode],
           set: {
             productName: sql`excluded.product_name`,
             totalStock: sql`excluded.total_stock`,

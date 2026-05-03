@@ -26,6 +26,7 @@ import type {
   MarketplaceAdapter,
   MarketplaceOrderIdentity,
   NormalizedOrder,
+  NormalizedOrderItem,
   NormalizedClaim,
 } from '@/lib/marketplace/types'
 
@@ -274,12 +275,14 @@ export async function collectOrdersForConnection(params: {
     let idx = 0
     for (const order of ordersToSave) {
       idx++
-      const [upsertedOrder] = await upsertOrder(order, connectionId, userId)
+      const items = dedupeNormalizedOrderItems(order.items)
+      const orderForSave = { ...order, items }
+      const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
       // Re-insert order items (delete existing first to handle updates)
       await db.delete(orderItems).where(eq(orderItems.orderId, upsertedOrder.id))
-      if (order.items.length > 0) {
+      if (items.length > 0) {
         await db.insert(orderItems).values(
-          order.items.map((item) => ({
+          items.map((item) => ({
             orderId: upsertedOrder.id,
             marketplaceItemId: item.marketplaceItemId,
             productName: item.productName,
@@ -302,7 +305,7 @@ export async function collectOrdersForConnection(params: {
         newOrderIds.push({
           id: upsertedOrder.id,
           marketplaceOrderId: order.marketplaceOrderId,
-          rawData: enrichOrderRawData(order),
+          rawData: enrichOrderRawData(orderForSave),
         })
       }
     }
@@ -537,7 +540,7 @@ function mergeNormalizedOrdersByOrderId(ordersToMerge: NormalizedOrder[]): Norma
     if (group.length === 1) return group[0]
 
     const first = group[0]
-    const items = group.flatMap((order) => order.items)
+    const items = dedupeNormalizedOrderItems(group.flatMap((order) => order.items))
     const itemTotal = items.reduce(
       (sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0),
       0
@@ -553,6 +556,20 @@ function mergeNormalizedOrdersByOrderId(ordersToMerge: NormalizedOrder[]): Norma
       },
     }
   })
+}
+
+function dedupeNormalizedOrderItems(items: NormalizedOrderItem[]): NormalizedOrderItem[] {
+  const seen = new Set<string>()
+  const deduped: NormalizedOrderItem[] = []
+
+  for (const item of items) {
+    const key = item.marketplaceItemId
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(item)
+  }
+
+  return deduped
 }
 
 function enrichOrderRawData(order: NormalizedOrder): Record<string, unknown> {

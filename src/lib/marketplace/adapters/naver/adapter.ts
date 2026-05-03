@@ -442,11 +442,16 @@ export class NaverAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrderGroup(productOrders: NaverProductOrder[]): NormalizedOrder {
-    const first = productOrders[0]
+    const uniqueProductOrders = Array.from(
+      new Map(
+        productOrders.map((po) => [this.getNaverProductOrder(po).productOrderId, po]),
+      ).values(),
+    )
+    const first = uniqueProductOrders[0]
     const order = this.getNaverOrder(first)
     const firstProductOrder = this.getNaverProductOrder(first)
     const addr = firstProductOrder.shippingAddress
-    const productOrderIds = productOrders.map((po) => this.getNaverProductOrder(po).productOrderId)
+    const productOrderIds = uniqueProductOrders.map((po) => this.getNaverProductOrder(po).productOrderId)
     return {
       marketplaceOrderId: order.orderId,
       marketplaceId: 'naver',
@@ -461,7 +466,7 @@ export class NaverAdapter implements MarketplaceAdapter {
         address1: addr.baseAddress ?? '',
         address2: addr.detailedAddress || undefined,
       } : { zipCode: '', address1: '' },
-      items: productOrders.map((po) => {
+      items: uniqueProductOrders.map((po) => {
         const productOrder = this.getNaverProductOrder(po)
         return {
           marketplaceItemId: productOrder.productOrderId,
@@ -475,12 +480,12 @@ export class NaverAdapter implements MarketplaceAdapter {
         }
       }),
       orderedAt: order.paymentDate ? new Date(order.paymentDate) : new Date(order.orderDate),
-      totalAmount: productOrders.reduce((sum, po) => sum + this.getNaverProductOrder(po).totalPaymentAmount, 0),
+      totalAmount: uniqueProductOrders.reduce((sum, po) => sum + this.getNaverProductOrder(po).totalPaymentAmount, 0),
       rawData: {
         order,
-        productOrders: productOrders.map((po) => this.getNaverProductOrder(po)),
+        productOrders: uniqueProductOrders.map((po) => this.getNaverProductOrder(po)),
         productOrderIds,
-        originalData: productOrders,
+        originalData: uniqueProductOrders,
       },
     }
   }

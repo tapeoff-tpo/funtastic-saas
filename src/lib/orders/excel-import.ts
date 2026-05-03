@@ -115,8 +115,6 @@ export async function parseOrderExcel(
     return { rows: [], errors: [{ row: 0, message: '시트를 찾을 수 없습니다' }] }
   }
 
-  // Build column index map from header row
-  const headerRow = worksheet.getRow(1)
   const colMap: Record<string, number> = {}
 
   const normalizedMappings = mappings
@@ -129,35 +127,84 @@ export async function parseOrderExcel(
     }))
     .filter((m) => m.field && (m.excelColumn || m.fixedValue))
 
-  const mappedColumnNumbers = new Map<string, number[]>()
+  const readCellText = (value: ExcelJS.CellValue): string => {
+    if (value === null || value === undefined) return ''
+    if (value instanceof Date) return value.toISOString()
+    if (typeof value === 'object') {
+      if ('richText' in value && Array.isArray(value.richText)) {
+        return value.richText.map((part) => part.text).join('').trim()
+      }
+      if ('text' in value && typeof value.text === 'string') return value.text.trim()
+      if ('result' in value && value.result !== undefined) return String(value.result).trim()
+    }
+    return String(value).trim()
+  }
 
-  headerRow.eachCell((cell, colNumber) => {
-    const value = String(cell.value ?? '').trim()
-    if (!value) return
+  const mapColumnsFromRow = (row: ExcelJS.Row) => {
+    const nextColMap: Record<string, number> = {}
+    const nextMappedColumnNumbers = new Map<string, number[]>()
 
-    if (normalizedMappings && normalizedMappings.length > 0) {
-      for (const mapping of normalizedMappings) {
-        if (value === mapping.excelColumn) {
-          colMap[mapping.field] = colNumber
-          const existing = mappedColumnNumbers.get(mapping.field) ?? []
-          mappedColumnNumbers.set(mapping.field, [...existing, colNumber])
-        }
-        for (const extraColumn of mapping.extraColumns ?? []) {
-          if (value === extraColumn) {
-            const existing = mappedColumnNumbers.get(mapping.field) ?? []
-            mappedColumnNumbers.set(mapping.field, [...existing, colNumber])
+    row.eachCell((cell, colNumber) => {
+      const value = readCellText(cell.value)
+      if (!value) return
+
+      if (normalizedMappings && normalizedMappings.length > 0) {
+        for (const mapping of normalizedMappings) {
+          if (value === mapping.excelColumn) {
+            nextColMap[mapping.field] = colNumber
+            const existing = nextMappedColumnNumbers.get(mapping.field) ?? []
+            nextMappedColumnNumbers.set(mapping.field, [...existing, colNumber])
+          }
+          for (const extraColumn of mapping.extraColumns ?? []) {
+            if (value === extraColumn) {
+              const existing = nextMappedColumnNumbers.get(mapping.field) ?? []
+              nextMappedColumnNumbers.set(mapping.field, [...existing, colNumber])
+            }
           }
         }
+        return
       }
-      return
-    }
 
-    for (const [headerLabel, fieldKey] of Object.entries(HEADER_MAP)) {
-      if (value === headerLabel || (!colMap[fieldKey] && value.includes(headerLabel))) {
-        colMap[fieldKey] = colNumber
+      for (const [headerLabel, fieldKey] of Object.entries(HEADER_MAP)) {
+        if (value === headerLabel || (!nextColMap[fieldKey] && value.includes(headerLabel))) {
+          nextColMap[fieldKey] = colNumber
+        }
       }
+    })
+
+    return { colMap: nextColMap, mappedColumnNumbers: nextMappedColumnNumbers }
+  }
+
+  const scoreMappedRow = (candidate: ReturnType<typeof mapColumnsFromRow>): number => {
+    const requiredScore = REQUIRED_ORDER_IMPORT_FIELDS.reduce((sum, field) => {
+      const mapping = normalizedMappings?.find((m) => m.field === field)
+      if (mapping?.fixedValue) return sum + 2
+      const hasMapped = normalizedMappings && normalizedMappings.length > 0
+        ? (candidate.mappedColumnNumbers.get(field)?.length ?? 0) > 0
+        : !!candidate.colMap[field]
+      return sum + (hasMapped ? 2 : 0)
+    }, 0)
+
+    return requiredScore + Object.keys(candidate.colMap).length + candidate.mappedColumnNumbers.size
+  }
+
+  let headerRowNumber = 1
+  let selectedColMap: Record<string, number> = {}
+  let mappedColumnNumbers = new Map<string, number[]>()
+  let bestScore = -1
+  const maxHeaderScanRows = Math.min(20, worksheet.rowCount)
+
+  for (let rowNumber = 1; rowNumber <= maxHeaderScanRows; rowNumber++) {
+    const candidate = mapColumnsFromRow(worksheet.getRow(rowNumber))
+    const score = scoreMappedRow(candidate)
+    if (score > bestScore) {
+      bestScore = score
+      headerRowNumber = rowNumber
+      selectedColMap = candidate.colMap
+      mappedColumnNumbers = candidate.mappedColumnNumbers
     }
-  })
+  }
+  Object.assign(colMap, selectedColMap)
 
   // Verify required headers are present
   const missingHeaders = REQUIRED_ORDER_IMPORT_FIELDS
@@ -190,19 +237,13 @@ export async function parseOrderExcel(
     if (mappedColumns && mappedColumns.length > 0) {
       return mappedColumns
         .map((colNumber) => {
-          const val = row.getCell(colNumber).value
-          if (val === null || val === undefined) return ''
-          if (val instanceof Date) return val.toISOString()
-          return String(val).trim()
+          return readCellText(row.getCell(colNumber).value)
         })
         .filter(Boolean)
         .join(mapping?.joinSeparator ?? ' ')
     }
     if (!colMap[key]) return ''
-    const val = row.getCell(colMap[key]).value
-    if (val === null || val === undefined) return ''
-    if (val instanceof Date) return val.toISOString()
-    return String(val).trim()
+    return readCellText(row.getCell(colMap[key]).value)
   }
 
   const getCellNumber = (row: ExcelJS.Row, key: string): number => {
@@ -213,7 +254,7 @@ export async function parseOrderExcel(
   }
 
   worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return // skip header
+    if (rowNumber <= headerRowNumber) return // skip guide/header rows
 
     const raw = {
       orderNumber: getCellString(row, 'orderNumber'),
@@ -234,8 +275,16 @@ export async function parseOrderExcel(
       shippingFee: getCellString(row, 'shippingFee') ? getCellNumber(row, 'shippingFee') : undefined,
     }
 
-    // Skip completely empty rows
+    // Skip completely empty rows and platform guide rows.
     if (!raw.orderNumber && !raw.buyerName && !raw.productName) return
+    if (
+      raw.orderNumber.includes('수정 불가') ||
+      raw.orderNumber.includes('수정 가능') ||
+      raw.productName.includes('수정 불가') ||
+      raw.productName.includes('수정 가능')
+    ) {
+      return
+    }
 
     const result = orderRowSchema.safeParse(raw)
     if (!result.success) {

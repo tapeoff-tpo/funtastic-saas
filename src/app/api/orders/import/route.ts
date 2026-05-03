@@ -30,6 +30,7 @@ export async function POST(request: NextRequest) {
   const formData = await request.formData()
   const file = formData.get('file') as File | null
   const marketplaceId = formData.get('marketplaceId') as string | null
+  const marketplaceName = String(formData.get('marketplaceName') ?? '').trim()
   const templateId = formData.get('templateId') as string | null
 
   if (!file) {
@@ -154,6 +155,7 @@ export async function POST(request: NextRequest) {
               rawData: {
                 importTemplateId: templateId ?? null,
                 sourceFileName: file.name,
+                mallName: marketplaceName || marketplaceId,
               },
             })
             .returning({ id: orders.id })

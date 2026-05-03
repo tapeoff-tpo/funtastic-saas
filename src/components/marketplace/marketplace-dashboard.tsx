@@ -85,6 +85,29 @@ const JOIN_SEPARATORS: { value: string; label: string }[] = [
 
 const IMPORT_TEMPLATE_KEY = 'orders.collect.selectedImportTemplateId'
 
+function normalizeTemplateName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\s+/g, '')
+}
+
+function findTemplateForConnection(
+  connection: Connection,
+  templates: ExcelImportTemplateView[],
+): ExcelImportTemplateView | null {
+  const displayName = normalizeTemplateName(connection.displayName)
+  const marketplaceId = normalizeTemplateName(connection.marketplaceId)
+
+  return templates.find((template) => {
+    const templateName = normalizeTemplateName(template.name)
+    return (
+      templateName.includes(displayName) ||
+      displayName.includes(templateName.replace('주문수집', '')) ||
+      templateName.includes(marketplaceId)
+    )
+  }) ?? null
+}
+
 export function MarketplaceDashboard({ connections, importTemplates: initialImportTemplates }: MarketplaceDashboardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showAddModal, setShowAddModal] = useState(false)
@@ -434,7 +457,8 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
                   onToggle={toggleSelect}
                   onCollectOne={handleCollectOne}
                   collecting={collecting}
-                  importTemplate={activeImportTemplate}
+                  importTemplates={importTemplates}
+                  fallbackImportTemplate={activeImportTemplate}
                   onEditImportTemplate={openImportTemplateModal}
                   sizeOf={sizeOf}
                 />
@@ -539,7 +563,8 @@ function SectionRows({
   onToggle,
   onCollectOne,
   collecting,
-  importTemplate,
+  importTemplates,
+  fallbackImportTemplate,
   onEditImportTemplate,
   sizeOf,
 }: {
@@ -553,7 +578,8 @@ function SectionRows({
   onToggle: (id: string) => void
   onCollectOne: (id: string) => void
   collecting: boolean
-  importTemplate: ExcelImportTemplateView | null
+  importTemplates: ExcelImportTemplateView[]
+  fallbackImportTemplate: ExcelImportTemplateView | null
   onEditImportTemplate: (draftName?: string) => void
   sizeOf: (id: string) => number
 }) {
@@ -578,7 +604,7 @@ function SectionRows({
           onToggle={onToggle}
           onCollectOne={onCollectOne}
           collecting={collecting}
-          importTemplate={importTemplate}
+          importTemplate={findTemplateForConnection(conn, importTemplates) ?? fallbackImportTemplate}
           onEditImportTemplate={onEditImportTemplate}
           zebra={idx % 2 === 1}
           sizeOf={sizeOf}
@@ -697,6 +723,7 @@ function ConnRow({
             </button>
           )}
           <ExcelUploadButton
+            marketplaceId={conn.marketplaceId}
             displayName={conn.displayName}
             disabled={false}
             template={importTemplate}
@@ -796,10 +823,12 @@ function AddManualChannelModal({ onClose }: { onClose: () => void }) {
 }
 
 function ExcelUploadButton({
+  marketplaceId,
   displayName,
   disabled,
   template,
 }: {
+  marketplaceId: string
   displayName: string
   disabled: boolean
   template: ExcelImportTemplateView | null
@@ -818,7 +847,8 @@ function ExcelUploadButton({
     try {
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('marketplaceId', displayName)
+      formData.append('marketplaceId', marketplaceId)
+      formData.append('marketplaceName', displayName)
       if (template) formData.append('templateId', template.id)
 
       const res = await fetch('/api/orders/import', { method: 'POST', body: formData })

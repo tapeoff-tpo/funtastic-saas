@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
-import { eq, and, sql } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 interface SourceInput {
   marketplaceId: string
@@ -32,7 +32,7 @@ interface CreateBody {
   components: ComponentInput[]
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
@@ -54,6 +54,34 @@ export async function GET(_req: NextRequest) {
         SELECT COUNT(*)::int FROM ${mappingComponents}
         WHERE ${mappingComponents.mappingCodeId} = ${mappingCodes.id}
       )`,
+      sources: sql<Array<{
+        marketplaceId: string
+        marketplaceProductId: string
+        marketplaceOptionId: string
+        productNameSnapshot: string | null
+        optionNameSnapshot: string | null
+      }>>`COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'marketplaceId', ${mappingSources.marketplaceId},
+          'marketplaceProductId', ${mappingSources.marketplaceProductId},
+          'marketplaceOptionId', ${mappingSources.marketplaceOptionId},
+          'productNameSnapshot', ${mappingSources.productNameSnapshot},
+          'optionNameSnapshot', ${mappingSources.optionNameSnapshot}
+        ) ORDER BY ${mappingSources.marketplaceId}, ${mappingSources.marketplaceProductId}, ${mappingSources.marketplaceOptionId})
+        FROM ${mappingSources}
+        WHERE ${mappingSources.mappingCodeId} = ${mappingCodes.id}
+      ), '[]'::jsonb)`,
+      components: sql<Array<{
+        sku: string
+        quantity: number
+      }>>`COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'sku', ${mappingComponents.sku},
+          'quantity', ${mappingComponents.quantity}
+        ) ORDER BY ${mappingComponents.sku})
+        FROM ${mappingComponents}
+        WHERE ${mappingComponents.mappingCodeId} = ${mappingCodes.id}
+      ), '[]'::jsonb)`,
     })
     .from(mappingCodes)
     .where(eq(mappingCodes.userId, user.id))

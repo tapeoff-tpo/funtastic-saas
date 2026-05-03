@@ -8,11 +8,35 @@ import { Plus, Trash2, X, RefreshCw, Search } from 'lucide-react'
 
 export const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡', naver: '네이버', gmarket: 'G마켓', auction: '옥션',
-  '11st': '11번가', cafe24: 'Cafe24', ohouse: '오늘의집', kakao: '카카오',
-  ably: '에이블리', ssgmall: 'SSG몰',
+  elevenst: '11번가', '11st': '11번가', cafe24: 'Cafe24', ohouse: '오늘의집', kakao: '카카오',
+  ably: '에이블리', ssgmall: 'SSG', domeggook: '도매꾹', tobizon: '투비즈온',
+  domesin: '도매의신', 'banana-b2b': '바나나B2B', cjonestyle: 'CJ온스타일',
+  'hyundai-hmall': '현대홈쇼핑', 'gs-shop': 'GS샵', esm: 'ESM',
+  always: '올웨이즈', zigzag: '지그재그', 'toss-shopping': '토스쇼핑',
+  ownerclan: '오너클랜', onchannel: '온채널', '10x10': '텐바이텐',
 }
 export const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
 const EXACT_OPTION_ID = '__exact__'
+
+function formatMarketplaceProductCode(source: MappingSourceView): string {
+  if (!source.marketplaceOptionId || source.marketplaceOptionId === EXACT_OPTION_ID) {
+    return source.marketplaceProductId
+  }
+  return `${source.marketplaceProductId}-${source.marketplaceOptionId}`
+}
+
+interface MappingSourceView {
+  marketplaceId: string
+  marketplaceProductId: string
+  marketplaceOptionId: string
+  productNameSnapshot: string | null
+  optionNameSnapshot: string | null
+}
+
+interface MappingComponentView {
+  sku: string
+  quantity: number
+}
 
 interface MappingCodeRow {
   id: string
@@ -22,7 +46,17 @@ interface MappingCodeRow {
   isActive: boolean
   sourcesCount: number
   componentsCount: number
+  sources: MappingSourceView[]
+  components: MappingComponentView[]
   updatedAt: string
+}
+
+interface MappingDisplayRow {
+  key: string
+  code: MappingCodeRow
+  source: MappingSourceView | null
+  component: MappingComponentView | null
+  groupStart: boolean
 }
 
 interface UnmappedItem {
@@ -80,8 +114,8 @@ export function MappingManager() {
     setLoading(true)
     try {
       const [codesRes, unmappedRes] = await Promise.all([
-        fetch('/api/products/mapping-codes').then((r) => r.json()),
-        fetch('/api/products/mapping-codes/unmapped').then((r) => r.json()),
+        fetch('/api/products/mapping-codes', { cache: 'no-store' }).then((r) => r.json()),
+        fetch('/api/products/mapping-codes/unmapped', { cache: 'no-store' }).then((r) => r.json()),
       ])
       setCodes(codesRes.codes ?? [])
       setUnmapped(unmappedRes.items ?? [])
@@ -95,7 +129,32 @@ export function MappingManager() {
   const filtered = codes.filter((c) => {
     if (!search) return true
     const q = search.toLowerCase()
-    return c.code.toLowerCase().includes(q) || c.name.toLowerCase().includes(q)
+    return (
+      c.code.toLowerCase().includes(q) ||
+      c.name.toLowerCase().includes(q) ||
+      c.sources.some((s) =>
+        s.marketplaceId.toLowerCase().includes(q) ||
+        s.marketplaceProductId.toLowerCase().includes(q) ||
+        s.marketplaceOptionId.toLowerCase().includes(q) ||
+        marketLabel(s.marketplaceId).toLowerCase().includes(q)
+      ) ||
+      c.components.some((component) => component.sku.toLowerCase().includes(q))
+    )
+  })
+
+  const displayRows: MappingDisplayRow[] = filtered.flatMap((code) => {
+    const sources = code.sources.length > 0 ? code.sources : [null]
+    const components = code.components.length > 0 ? code.components : [null]
+    let idx = 0
+    return sources.flatMap((source) =>
+      components.map((component) => ({
+        key: `${code.id}:${source?.marketplaceId ?? 'none'}:${source?.marketplaceProductId ?? 'none'}:${source?.marketplaceOptionId ?? 'none'}:${component?.sku ?? 'none'}:${idx}`,
+        code,
+        source,
+        component,
+        groupStart: idx++ === 0,
+      }))
+    )
   })
 
   async function openCreate(prefillSource?: UnmappedItem, prefillMode: SourceMode = 'option') {
@@ -240,40 +299,69 @@ export function MappingManager() {
           </Button>
         </div>
 
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="min-w-[1180px] w-full text-sm">
             <thead className="bg-muted/50 text-xs">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">매핑코드</th>
-                <th className="px-3 py-2 text-left font-medium">이름</th>
-                <th className="px-3 py-2 text-right font-medium">마켓상품</th>
-                <th className="px-3 py-2 text-right font-medium">구성품</th>
-                <th className="px-3 py-2 text-center font-medium">상태</th>
+                <th className="w-[100px] whitespace-nowrap px-3 py-2 text-left font-medium">쇼핑몰</th>
+                <th className="w-[180px] whitespace-nowrap px-3 py-2 text-left font-medium">쇼핑몰상품코드</th>
+                <th className="w-[150px] whitespace-nowrap px-3 py-2 text-left font-medium">매핑코드</th>
+                <th className="w-[70px] whitespace-nowrap px-3 py-2 text-right font-medium">수량</th>
+                <th className="min-w-[260px] whitespace-nowrap px-3 py-2 text-left font-medium">이름</th>
+                <th className="w-[80px] whitespace-nowrap px-3 py-2 text-right font-medium">마켓상품</th>
+                <th className="w-[80px] whitespace-nowrap px-3 py-2 text-right font-medium">구성품</th>
+                <th className="w-[80px] whitespace-nowrap px-3 py-2 text-center font-medium">상태</th>
                 <th className="px-3 py-2 w-24" />
               </tr>
             </thead>
             <tbody className="divide-y">
               {loading ? (
-                <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="py-8 text-center text-muted-foreground">
+                <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
+              ) : displayRows.length === 0 ? (
+                <tr><td colSpan={9} className="py-8 text-center text-muted-foreground">
                   {search ? '검색 결과가 없습니다' : '매핑코드가 없습니다. 우측 미매핑 목록에서 항목을 클릭해 추가하거나, 신규 매핑 버튼을 누르세요.'}
                 </td></tr>
-              ) : filtered.map((c) => (
-                <tr key={c.id} className="hover:bg-muted/30">
-                  <td className="px-3 py-2 font-mono text-xs">
+              ) : displayRows.map(({ key, code: c, source, component, groupStart }) => (
+                <tr key={key} className={`hover:bg-muted/30 ${groupStart ? 'border-t-2 border-t-slate-200' : ''}`}>
+                  <td className="whitespace-nowrap px-3 py-2 text-xs">
+                    {source ? (
+                      <Badge variant="outline">{marketLabel(source.marketplaceId)}</Badge>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
+                    {source ? (
+                      <div>
+                        <div>{formatMarketplaceProductCode(source)}</div>
+                        {(source.productNameSnapshot || source.optionNameSnapshot) && (
+                          <div className="mt-0.5 max-w-[220px] truncate font-sans text-[10px] text-muted-foreground">
+                            {source.productNameSnapshot}
+                            {source.optionNameSnapshot && <span className="ml-1">· {source.optionNameSnapshot}</span>}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
                     <button
                       type="button"
                       onClick={() => void openEdit(c.id)}
                       className="text-blue-600 hover:underline"
                     >
-                      {c.code}
+                      {component?.sku ?? c.code}
                     </button>
+                    {c.components.length > 1 && component && (
+                      <div className="mt-0.5 font-sans text-[10px] text-muted-foreground">세트 구성품</div>
+                    )}
                   </td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{component?.quantity ?? '-'}</td>
                   <td className="px-3 py-2">{c.name}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{c.sourcesCount}</td>
-                  <td className="px-3 py-2 text-right tabular-nums">{c.componentsCount}</td>
-                  <td className="px-3 py-2 text-center">
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{c.sourcesCount}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{c.componentsCount}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-center">
                     {c.isActive ? <Badge variant="secondary">활성</Badge> : <Badge variant="outline">비활성</Badge>}
                   </td>
                   <td className="px-3 py-2 text-right">

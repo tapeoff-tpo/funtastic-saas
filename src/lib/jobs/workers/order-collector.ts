@@ -563,7 +563,14 @@ function dedupeNormalizedOrderItems(items: NormalizedOrderItem[]): NormalizedOrd
   const deduped: NormalizedOrderItem[] = []
 
   for (const item of items) {
-    const key = item.marketplaceItemId
+    const key = [
+      item.marketplaceItemId,
+      item.productName,
+      item.optionText ?? '',
+      item.quantity,
+      item.unitPrice,
+      item.sku ?? '',
+    ].join('\u001f')
     if (seen.has(key)) continue
     seen.add(key)
     deduped.push(item)

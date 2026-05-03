@@ -5,6 +5,7 @@
  * POST: 매핑코드 + sources + components 일괄 생성 (트랜잭션).
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { inventory, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
@@ -176,6 +177,10 @@ export async function POST(req: NextRequest) {
       return created
     })
 
+    revalidateTag('product-mappings', 'max')
+    revalidateTag('orders', 'max')
+    revalidatePath('/orders')
+    revalidatePath('/products/mapping-codes')
     return NextResponse.json({ id: result.id, code: result.code })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown error'

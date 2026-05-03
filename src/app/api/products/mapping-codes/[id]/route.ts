@@ -6,6 +6,7 @@
  * DELETE: 매핑코드 + sources + components 삭제 (CASCADE).
  */
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { inventory, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
@@ -149,6 +150,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     })
 
+    revalidateTag('product-mappings', 'max')
+    revalidateTag('orders', 'max')
+    revalidatePath('/orders')
+    revalidatePath('/products/mapping-codes')
     return NextResponse.json({ ok: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown error'
@@ -174,5 +179,9 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     .returning({ id: mappingCodes.id })
 
   if (result.length === 0) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  revalidateTag('product-mappings', 'max')
+  revalidateTag('orders', 'max')
+  revalidatePath('/orders')
+  revalidatePath('/products/mapping-codes')
   return NextResponse.json({ ok: true })
 }

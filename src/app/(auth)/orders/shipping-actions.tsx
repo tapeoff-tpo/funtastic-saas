@@ -624,6 +624,23 @@ function splitProductOption(itemId: string): { product: string; option: string }
   return { product: itemId.slice(0, idx), option: itemId.slice(idx + 1) }
 }
 
+function getMappingTargetSource(target: MappingTarget): { product: string; option: string } {
+  const split = splitProductOption(target.marketplaceItemId)
+  return {
+    product: split.product,
+    option: split.option || target.optionText?.trim() || EXACT_OPTION_ID,
+  }
+}
+
+function getMappingTargetKey(target: MappingTarget): string {
+  return `${target.orderId}:${target.marketplaceItemId}:${target.optionText ?? ''}`
+}
+
+function getMappingTargetSourceKey(target: MappingTarget): string {
+  const source = getMappingTargetSource(target)
+  return `${target.marketplaceId}:${source.product}:${source.option}`
+}
+
 function InventoryMappingDialog({
   open,
   onOpenChange,
@@ -636,25 +653,38 @@ function InventoryMappingDialog({
   onSaved: () => void
 }) {
   const [selectedKey, setSelectedKey] = useState('')
+  const [completedSourceKeys, setCompletedSourceKeys] = useState<Set<string>>(new Set())
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<ProductSearchResult[]>([])
   const [components, setComponents] = useState<MappingComponentDraft[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const activeTargets = useMemo(
+    () => targets.filter((target) => !completedSourceKeys.has(getMappingTargetSourceKey(target))),
+    [completedSourceKeys, targets],
+  )
 
   const selectedTarget = useMemo(() => {
-    return targets.find((target) => `${target.orderId}:${target.marketplaceItemId}` === selectedKey) ?? targets[0] ?? null
-  }, [selectedKey, targets])
+    return activeTargets.find((target) => getMappingTargetKey(target) === selectedKey) ?? activeTargets[0] ?? null
+  }, [activeTargets, selectedKey])
 
   useEffect(() => {
     if (!open) return
+    setCompletedSourceKeys(new Set())
     const first = targets[0]
-    setSelectedKey(first ? `${first.orderId}:${first.marketplaceItemId}` : '')
+    setSelectedKey(first ? getMappingTargetKey(first) : '')
     setQuery('')
     setResults([])
     setComponents([])
   }, [open, targets])
+
+  useEffect(() => {
+    if (!open) return
+    if (selectedTarget && getMappingTargetKey(selectedTarget) === selectedKey) return
+    const first = activeTargets[0]
+    setSelectedKey(first ? getMappingTargetKey(first) : '')
+  }, [activeTargets, open, selectedKey, selectedTarget])
 
   async function searchProducts(q: string) {
     if (!q.trim()) {
@@ -720,9 +750,10 @@ function InventoryMappingDialog({
       return
     }
 
-    const split = splitProductOption(selectedTarget.marketplaceItemId)
-    const sourceKey = `${selectedTarget.marketplaceId}-${split.product}${split.option ? `-${split.option}` : ''}`
+    const source = getMappingTargetSource(selectedTarget)
+    const sourceKey = `${selectedTarget.marketplaceId}-${source.product}-${source.option}`
     const code = `${validComponents[0].sku}-${sourceKey}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100)
+    const selectedSourceKey = getMappingTargetSourceKey(selectedTarget)
 
     setSaving(true)
     try {
@@ -736,8 +767,8 @@ function InventoryMappingDialog({
           isActive: true,
           sources: [{
             marketplaceId: selectedTarget.marketplaceId,
-            marketplaceProductId: split.product,
-            marketplaceOptionId: split.option || EXACT_OPTION_ID,
+            marketplaceProductId: source.product,
+            marketplaceOptionId: source.option,
             productNameSnapshot: selectedTarget.productName,
             optionNameSnapshot: selectedTarget.optionText,
           }],
@@ -749,11 +780,17 @@ function InventoryMappingDialog({
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
-        toast.error(err.error ?? '매핑 저장 실패')
-        return
+        const message = String(err.error ?? '')
+        if (!message.includes('이미') && res.status !== 409) {
+          toast.error(err.error ?? '매핑 저장 실패')
+          return
+        }
+        toast.info('이미 매핑된 상품입니다. 다음 상품으로 넘어갑니다.')
+      } else {
+        toast.success('재고매핑 저장 완료')
       }
-      toast.success('재고매핑 저장 완료')
-      onOpenChange(false)
+      setCompletedSourceKeys((prev) => new Set(prev).add(selectedSourceKey))
+      setComponents([])
       onSaved()
     } finally {
       setSaving(false)
@@ -782,8 +819,8 @@ function InventoryMappingDialog({
           <div className="min-h-0 rounded-md border">
             <div className="border-b bg-muted/40 px-3 py-2 text-xs font-medium">미매핑 상품</div>
             <div className="max-h-full overflow-auto">
-              {targets.map((target) => {
-                const key = `${target.orderId}:${target.marketplaceItemId}`
+              {activeTargets.map((target) => {
+                const key = getMappingTargetKey(target)
                 const active = selectedKey === key
                 return (
                   <button
@@ -805,6 +842,11 @@ function InventoryMappingDialog({
                   </button>
                 )
               })}
+              {activeTargets.length === 0 && (
+                <div className="px-3 py-6 text-center text-xs text-muted-foreground">
+                  현재 페이지의 미매핑 상품을 모두 처리했습니다.
+                </div>
+              )}
             </div>
           </div>
 

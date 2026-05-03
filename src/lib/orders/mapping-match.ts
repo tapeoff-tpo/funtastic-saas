@@ -27,18 +27,24 @@ export type MappingSource = {
 export type MappingIndex = {
   /** key = `${marketplaceId}:${productId}${SEP}${optionId}` */
   optionMap: Map<string, string>
+  /** key = `${marketplaceId}:${productId}`; only matches orders without option text */
+  exactProductMap: Map<string, string>
   /** key = `${marketplaceId}:${productId}` */
   productMap: Map<string, string>
   /** key = `${productId}${SEP}${optionId}`; only kept when it points to one mapping ref */
   globalOptionMap: Map<string, string>
+  /** key = productId; only matches orders without option text and only when unique */
+  globalExactProductMap: Map<string, string>
   /** key = productId; only kept when it points to one mapping ref */
   globalProductMap: Map<string, string>
 }
 
 export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
   const optionMap = new Map<string, string>()
+  const exactProductMap = new Map<string, string>()
   const productMap = new Map<string, string>()
   const globalOptionCandidates = new Map<string, Set<string>>()
+  const globalExactProductCandidates = new Map<string, Set<string>>()
   const globalProductCandidates = new Map<string, Set<string>>()
 
   const addCandidate = (map: Map<string, Set<string>>, key: string, ref: string) => {
@@ -53,8 +59,8 @@ export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
       optionMap.set(`${s.marketplaceId}:${sourceKey}`, s.ref)
       addCandidate(globalOptionCandidates, sourceKey, s.ref)
       if (s.marketplaceOptionId === EXACT_OPTION_ID) {
-        optionMap.set(`${s.marketplaceId}:${s.marketplaceProductId}`, s.ref)
-        addCandidate(globalOptionCandidates, s.marketplaceProductId, s.ref)
+        exactProductMap.set(`${s.marketplaceId}:${s.marketplaceProductId}`, s.ref)
+        addCandidate(globalExactProductCandidates, s.marketplaceProductId, s.ref)
       }
     } else {
       const key = `${s.marketplaceId}:${s.marketplaceProductId}`
@@ -68,12 +74,17 @@ export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
     if (refs.size === 1) globalOptionMap.set(key, Array.from(refs)[0])
   }
 
+  const globalExactProductMap = new Map<string, string>()
+  for (const [key, refs] of globalExactProductCandidates) {
+    if (refs.size === 1) globalExactProductMap.set(key, Array.from(refs)[0])
+  }
+
   const globalProductMap = new Map<string, string>()
   for (const [key, refs] of globalProductCandidates) {
     if (refs.size === 1) globalProductMap.set(key, Array.from(refs)[0])
   }
 
-  return { optionMap, productMap, globalOptionMap, globalProductMap }
+  return { optionMap, exactProductMap, productMap, globalOptionMap, globalExactProductMap, globalProductMap }
 }
 
 /**
@@ -86,12 +97,13 @@ export function lookupMappingRef(
   marketplaceItemId: string,
   optionText?: string | null,
 ): string | null {
+  const normalizedOptionText = optionText?.trim().slice(0, 100)
+
   // 1) 단품 정확매치
   const optKey = `${marketplaceId}:${marketplaceItemId}`
   const optHit = index.optionMap.get(optKey)
   if (optHit) return optHit
 
-  const normalizedOptionText = optionText?.trim().slice(0, 100)
   if (normalizedOptionText) {
     const optionTextKey = `${marketplaceItemId}${MAPPING_SEPARATOR}${normalizedOptionText}`
     const optionTextHit = index.optionMap.get(`${marketplaceId}:${optionTextKey}`)
@@ -99,6 +111,12 @@ export function lookupMappingRef(
 
     const globalOptionTextHit = index.globalOptionMap.get(optionTextKey)
     if (globalOptionTextHit) return globalOptionTextHit
+  } else {
+    const exactProductHit = index.exactProductMap.get(`${marketplaceId}:${marketplaceItemId}`)
+    if (exactProductHit) return exactProductHit
+
+    const globalExactProductHit = index.globalExactProductMap.get(marketplaceItemId)
+    if (globalExactProductHit) return globalExactProductHit
   }
 
   // 2) 품번 매치 — marketplaceItemId 자체가 productId 인 경우

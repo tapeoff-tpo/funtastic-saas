@@ -23,7 +23,7 @@ const STATUS_OPTIONS: { value: '' | OrderStatus; label: string }[] = [
 ]
 
 const MAPPING_OPTIONS = [
-  { value: '', label: '매핑 전체' },
+  { value: 'all', label: '매핑 전체' },
   { value: 'mapped', label: '매핑됨' },
   { value: 'unmapped', label: '매핑안됨' },
 ]
@@ -148,7 +148,7 @@ export function OrderFilters() {
           <select
             id="filter-mapping"
             value={filters.mapping ?? 'unmapped'}
-            onChange={(e) => updateFilter({ mapping: e.target.value || null })}
+            onChange={(e) => updateFilter({ mapping: e.target.value })}
             className="rounded-md border px-3 py-1.5 text-sm"
           >
             {MAPPING_OPTIONS.map((opt) => (

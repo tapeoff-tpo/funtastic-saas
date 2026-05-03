@@ -94,7 +94,7 @@ export interface OrderFilters {
   sort?: string
   order?: 'asc' | 'desc'
   claimType?: ClaimType
-  mapping?: 'mapped' | 'unmapped'
+  mapping?: 'mapped' | 'unmapped' | 'all'
   stage?: OrderStage
   /** Filter to only held (미발송) orders */
   isHeld?: boolean

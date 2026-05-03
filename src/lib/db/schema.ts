@@ -179,6 +179,12 @@ export const orderMemos = pgTable(
     userId: uuid('user_id').notNull(),
     content: text('content').notNull(),
     memoType: varchar('memo_type', { length: 50 }).notNull().default('general'),
+    attachments: jsonb('attachments').$type<Array<{
+      name: string
+      type: string
+      dataUrl: string
+      size: number
+    }>>().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true })
       .defaultNow()
       .notNull(),

@@ -85,6 +85,12 @@ interface OrderDetail {
     id: string
     content: string
     memoType: string
+    attachments?: Array<{
+      name: string
+      type: string
+      dataUrl: string
+      size: number
+    }>
     createdAt: string
   }>
   shipment: {

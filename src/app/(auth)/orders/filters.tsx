@@ -147,7 +147,7 @@ export function OrderFilters() {
           </label>
           <select
             id="filter-mapping"
-            value={filters.mapping ?? ''}
+            value={filters.mapping ?? 'unmapped'}
             onChange={(e) => updateFilter({ mapping: e.target.value || null })}
             className="rounded-md border px-3 py-1.5 text-sm"
           >

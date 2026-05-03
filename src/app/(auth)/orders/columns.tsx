@@ -300,43 +300,45 @@ function ProductInfoCell({ order }: { order: OrderRow }) {
   const items = order.items
   if (!items || items.length === 0)
     return <span className="text-muted-foreground">-</span>
-  const first = items[0]
-  const extra = items.length - 1
-  const primaryName = first.displayName ?? first.productName
-  const showOriginal =
-    isNewTab && first.displayName != null && first.displayName !== first.productName
 
   return (
-    <div className="flex flex-col gap-0 text-xs leading-tight">
-      {first.sku && (
-        <span className="font-mono text-[10px] text-muted-foreground">
-          {first.sku}
-        </span>
-      )}
-      <span className="max-w-[280px] truncate font-medium" title={primaryName}>
-        {primaryName}
-      </span>
-      {showOriginal && (
-        <span
-          className="max-w-[280px] truncate text-[10px] text-muted-foreground"
-          title={`수집상품명: ${first.productName}`}
-        >
-          ({first.productName})
-        </span>
-      )}
-      {first.optionText && (
-        <span
-          className="max-w-[280px] truncate text-[11px] text-muted-foreground"
-          title={first.optionText}
-        >
-          {first.optionText}
-        </span>
-      )}
-      {extra > 0 && (
-        <span className="w-fit rounded bg-muted px-1.5 py-0.5 text-[10px]">
-          +{extra}건
-        </span>
-      )}
+    <div className="flex flex-col text-xs leading-tight">
+      {items.map((item, index) => {
+        const primaryName = item.displayName ?? item.productName
+        const showOriginal =
+          isNewTab && item.displayName != null && item.displayName !== item.productName
+        return (
+          <div
+            key={item.id}
+            className={index === 0 ? 'pb-1.5' : 'border-t border-slate-100 py-1.5'}
+          >
+            {item.sku && (
+              <span className="font-mono text-[10px] text-muted-foreground">
+                {item.sku}
+              </span>
+            )}
+            <span className="block max-w-[280px] whitespace-normal break-words font-medium" title={primaryName}>
+              {primaryName}
+            </span>
+            {showOriginal && (
+              <span
+                className="block max-w-[280px] whitespace-normal break-words text-[10px] text-muted-foreground"
+                title={`수집상품명: ${item.productName}`}
+              >
+                ({item.productName})
+              </span>
+            )}
+            {item.optionText && (
+              <span
+                className="block max-w-[280px] whitespace-normal break-words text-[11px] text-muted-foreground"
+                title={item.optionText}
+              >
+                {item.optionText}
+              </span>
+            )}
+          </div>
+        )
+      })}
       {order.logisticsMessage && (
         <span
           className="mt-1 inline-flex w-fit items-center rounded-md border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
@@ -707,20 +709,28 @@ export const columns: ColumnDef<OrderRow>[] = [
       const items = row.original.items
       if (!items || items.length === 0)
         return <span className="text-muted-foreground">-</span>
-      const first = items[0]
-      const stock = first.availableStock
-      const lowStock = stock != null && stock < first.quantity
       return (
-        <div className="flex flex-col items-end gap-0 leading-tight tabular-nums">
-          <span className="text-sm font-semibold">{first.quantity}</span>
-          <span
-            className={`text-[10px] ${
-              lowStock ? 'font-medium text-red-600' : 'text-muted-foreground'
-            }`}
-            title={stock == null ? 'SKU 매핑 없음' : '잔여 재고'}
-          >
-            ({stock ?? '-'})
-          </span>
+        <div className="flex flex-col items-end leading-tight tabular-nums">
+          {items.map((item, index) => {
+            const stock = item.availableStock
+            const lowStock = stock != null && stock < item.quantity
+            return (
+              <div
+                key={item.id}
+                className={`w-full text-right ${index === 0 ? 'pb-1.5' : 'border-t border-slate-100 py-1.5'}`}
+              >
+                <span className="text-sm font-semibold">{item.quantity}</span>
+                <span
+                  className={`ml-1 text-[10px] ${
+                    lowStock ? 'font-medium text-red-600' : 'text-muted-foreground'
+                  }`}
+                  title={stock == null ? 'SKU 매핑 없음' : '잔여 재고'}
+                >
+                  ({stock ?? '-'})
+                </span>
+              </div>
+            )
+          })}
         </div>
       )
     },

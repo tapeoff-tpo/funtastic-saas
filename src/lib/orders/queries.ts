@@ -287,6 +287,27 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     )
   }
 
+  if (filters.excludeClaimLikeOrders) {
+    conditions.push(
+      sql`NOT EXISTS (
+        SELECT 1
+        FROM ${claims}
+        WHERE ${claims.orderId} = ${orders.id}
+      )`,
+    )
+    conditions.push(
+      sql`NOT (
+        COALESCE(${orders.marketplaceStatus}, '') ~ '^(취소|반품|교환)'
+        OR COALESCE(${orders.rawData}->>'주문상태', '') ~ '^(취소|반품|교환)'
+        OR EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements(COALESCE(${orders.rawData}->'rows', '[]'::jsonb)) AS raw_row(value)
+          WHERE COALESCE(raw_row.value #>> '{raw,주문상태}', '') ~ '^(취소|반품|교환)'
+        )
+      )`,
+    )
+  }
+
   return conditions
 }
 

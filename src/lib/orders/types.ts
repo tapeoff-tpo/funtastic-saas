@@ -103,6 +103,11 @@ export interface OrderFilters {
    * true → orders.status='cancelled' OR claims.claimType='cancel' (distinct)
    */
   cancelTab?: boolean
+  /**
+   * 신규 매핑 작업 탭용 필터.
+   * true → 클레임 레코드가 있거나 마켓 원상태가 취소/반품/교환인 주문 제외.
+   */
+  excludeClaimLikeOrders?: boolean
 }
 
 /**

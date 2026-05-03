@@ -51,6 +51,9 @@ export default async function OrdersPage({
 
   const params = await searchParamsCache.parse(searchParams)
   const isNewTab = params.status === 'new'
+  const mappingFilter = isNewTab
+    ? ((params.mapping ?? 'unmapped') as 'mapped' | 'unmapped')
+    : ((params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined)
 
   // 탭 미선택(사이드바 진입 직후) — 어떤 쿼리도 실행하지 않는다.
   // 탭(전체/신규/.../반품) 클릭 시점에만 status/claimType/cancel/tab 중 하나가 붙어 fetch 시작.
@@ -76,9 +79,10 @@ export default async function OrdersPage({
         sort: params.sort ?? undefined,
         order: (params.order as 'asc' | 'desc') ?? undefined,
         claimType: (params.claimType ?? undefined) as ClaimType | undefined,
-        mapping: (params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined,
+        mapping: mappingFilter,
         isHeld: params.held ?? undefined,
         cancelTab: params.cancel ?? undefined,
+        excludeClaimLikeOrders: isNewTab,
       })
     : { orders: [] as Awaited<ReturnType<typeof getOrders>>['orders'], total: 0 }
 

@@ -1,6 +1,6 @@
 /**
  * GET /api/orders/[id]/memos — list memos for this order (newest first)
- * POST /api/orders/[id]/memos — add a memo { content, memoType? }
+ * POST /api/orders/[id]/memos — add a memo { content, memoType?, attachments? }
  *
  * Both verify the order belongs to the authenticated user.
  */
@@ -10,6 +10,32 @@ import { and, desc, eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orderMemos, orders } from '@/lib/db/schema'
+
+interface MemoAttachment {
+  name: string
+  type: string
+  dataUrl: string
+  size: number
+}
+
+const MAX_ATTACHMENTS = 5
+const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
+
+function normalizeAttachments(value: unknown): MemoAttachment[] {
+  if (!Array.isArray(value)) return []
+  return value.slice(0, MAX_ATTACHMENTS).flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const source = item as Partial<MemoAttachment>
+    const name = typeof source.name === 'string' ? source.name.trim().slice(0, 180) : 'image'
+    const type = typeof source.type === 'string' ? source.type.trim() : ''
+    const dataUrl = typeof source.dataUrl === 'string' ? source.dataUrl : ''
+    const size = Number(source.size)
+    if (!type.startsWith('image/')) return []
+    if (!dataUrl.startsWith(`data:${type};base64,`)) return []
+    if (!Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_BYTES) return []
+    return [{ name: name || 'image', type, dataUrl, size }]
+  })
+}
 
 async function verifyOrderOwnership(orderId: string, userId: string) {
   const [row] = await db
@@ -55,10 +81,14 @@ export async function POST(
     return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 })
   }
 
-  const body = (await req.json()) as { content?: string; memoType?: string }
-  const content = body.content?.trim()
-  if (!content) {
-    return NextResponse.json({ error: '메모 내용을 입력하세요.' }, { status: 400 })
+  const body = (await req.json()) as { content?: string; memoType?: string; attachments?: unknown }
+  const content = body.content?.trim() ?? ''
+  const attachments = normalizeAttachments(body.attachments)
+  if (!content && attachments.length === 0) {
+    return NextResponse.json({ error: '메모 내용 또는 사진을 추가하세요.' }, { status: 400 })
+  }
+  if (Array.isArray(body.attachments) && body.attachments.length > 0 && attachments.length === 0) {
+    return NextResponse.json({ error: '첨부할 수 있는 이미지는 3MB 이하 사진 파일입니다.' }, { status: 400 })
   }
 
   const [created] = await db
@@ -68,6 +98,7 @@ export async function POST(
       userId: user.id,
       content,
       memoType: body.memoType?.trim() || 'general',
+      attachments,
     })
     .returning()
 

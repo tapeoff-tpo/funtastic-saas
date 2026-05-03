@@ -378,6 +378,22 @@ const hyundaiHmallAdapter = createStubAdapter({
   requiredCredentials: ['api_key', 'seller_id'],
 })
 
+const gsShopAdapter = createStubAdapter({
+  id: 'gs-shop',
+  name: 'GS샵',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const esmAdapter = createStubAdapter({
+  id: 'esm',
+  name: 'ESM',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['master_id', 'secret_key', 'seller_id'],
+})
+
 const nsmallAdapter = createStubAdapter({
   id: 'nsmall',
   name: 'NS홈쇼핑',
@@ -418,6 +434,14 @@ const alwaysAdapter = createStubAdapter({
   authType: 'api_key',
   rateLimitPerSecond: 20,
   requiredCredentials: ['api_key', 'seller_id'],
+})
+
+const zigzagAdapter = createStubAdapter({
+  id: 'zigzag',
+  name: '지그재그',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'shop_id'],
 })
 
 const tenByTenAdapter = createStubAdapter({
@@ -496,6 +520,12 @@ export function registerDefaultAdapters() {
   if (!marketplaceRegistry.has('hyundai-hmall')) {
     marketplaceRegistry.register(hyundaiHmallAdapter)
   }
+  if (!marketplaceRegistry.has('gs-shop')) {
+    marketplaceRegistry.register(gsShopAdapter)
+  }
+  if (!marketplaceRegistry.has('esm')) {
+    marketplaceRegistry.register(esmAdapter)
+  }
   if (!marketplaceRegistry.has('nsmall')) {
     marketplaceRegistry.register(nsmallAdapter)
   }
@@ -511,6 +541,9 @@ export function registerDefaultAdapters() {
   // Tier 3B
   if (!marketplaceRegistry.has('always')) {
     marketplaceRegistry.register(alwaysAdapter)
+  }
+  if (!marketplaceRegistry.has('zigzag')) {
+    marketplaceRegistry.register(zigzagAdapter)
   }
   if (!marketplaceRegistry.has('10x10')) {
     marketplaceRegistry.register(tenByTenAdapter)

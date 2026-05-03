@@ -698,7 +698,7 @@ function ConnRow({
           )}
           <ExcelUploadButton
             displayName={conn.displayName}
-            disabled={isDisconnected}
+            disabled={false}
             template={importTemplate}
           />
           <button

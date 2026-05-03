@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
@@ -9,6 +8,24 @@ import type { Metadata } from 'next'
 export const metadata: Metadata = {
   title: '주문 수집',
 }
+
+const AUTO_MARKETPLACE_OPTIONS = [
+  { marketplaceId: 'domeggook', displayName: '도매꾹' },
+  { marketplaceId: 'tobizon', displayName: '투비즈온' },
+  { marketplaceId: 'domesin', displayName: '도매의신' },
+  { marketplaceId: 'banana-b2b', displayName: '바나나B2B' },
+  { marketplaceId: 'ohouse', displayName: '오늘의집' },
+  { marketplaceId: 'ssgmall', displayName: 'SSG' },
+  { marketplaceId: 'cjonestyle', displayName: 'CJ온스타일' },
+  { marketplaceId: 'ably', displayName: '에이블리' },
+  { marketplaceId: 'hyundai-hmall', displayName: '현대홈쇼핑' },
+  { marketplaceId: 'gs-shop', displayName: 'GS샵' },
+  { marketplaceId: 'esm', displayName: 'ESM' },
+  { marketplaceId: 'always', displayName: '올웨이즈' },
+  { marketplaceId: 'elevenst', displayName: '11번가' },
+  { marketplaceId: 'zigzag', displayName: '지그재그' },
+  { marketplaceId: 'toss-shopping', displayName: '토스쇼핑' },
+] as const
 
 export default async function OrdersCollectPage() {
   const supabase = await createClient()
@@ -35,39 +52,42 @@ export default async function OrdersCollectPage() {
     .from(excelImportTemplates)
     .where(eq(excelImportTemplates.userId, user.id))
 
-  if (connections.length === 0) {
-    return (
-      <div>
-        <h1 className="text-2xl font-bold">주문 수집</h1>
-        <div className="mt-8 rounded-lg border border-dashed border-gray-300 p-8 text-center">
-          <p className="text-muted-foreground">
-            아직 연결된 마켓플레이스가 없습니다.
-          </p>
-          <Link
-            href="/settings/marketplaces"
-            className="mt-4 inline-block rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80"
-          >
-            마켓플레이스 연동하기
-          </Link>
-        </div>
-      </div>
-    )
-  }
+  const connectionRows = connections.map((c) => ({
+    id: c.id,
+    marketplaceId: c.marketplaceId,
+    displayName: c.displayName,
+    status: c.status,
+    lastCheckedAt: c.lastCheckedAt,
+    lastErrorMessage: c.lastErrorMessage,
+    expiresAt: c.expiresAt,
+    isManual: c.isManual,
+  }))
+
+  const existingAutoMarketplaceIds = new Set(
+    connectionRows.filter((c) => !c.isManual).map((c) => c.marketplaceId)
+  )
+
+  const dashboardConnections = [
+    ...connectionRows,
+    ...AUTO_MARKETPLACE_OPTIONS
+      .filter((marketplace) => !existingAutoMarketplaceIds.has(marketplace.marketplaceId))
+      .map((marketplace) => ({
+        id: `auto-placeholder-${marketplace.marketplaceId}`,
+        marketplaceId: marketplace.marketplaceId,
+        displayName: marketplace.displayName,
+        status: 'disconnected',
+        lastCheckedAt: null,
+        lastErrorMessage: null,
+        expiresAt: null,
+        isManual: false,
+      })),
+  ]
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">주문 수집</h1>
       <MarketplaceDashboard
-        connections={connections.map((c) => ({
-          id: c.id,
-          marketplaceId: c.marketplaceId,
-          displayName: c.displayName,
-          status: c.status,
-          lastCheckedAt: c.lastCheckedAt,
-          lastErrorMessage: c.lastErrorMessage,
-          expiresAt: c.expiresAt,
-          isManual: c.isManual,
-        }))}
+        connections={dashboardConnections}
         importTemplates={importTemplates}
       />
     </div>

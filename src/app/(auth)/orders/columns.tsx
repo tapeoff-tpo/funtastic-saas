@@ -318,7 +318,10 @@ function ProductNameCell({ order }: { order: OrderRow }) {
             <span className="block truncate font-mono text-[10px] text-muted-foreground" title={item.sku ?? ''}>
               {item.sku ?? '-'}
             </span>
-            <span className="block min-w-0 truncate font-medium" title={line}>
+            <span
+              className="block min-w-0 overflow-hidden font-medium leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
+              title={line}
+            >
               {line}
             </span>
           </div>

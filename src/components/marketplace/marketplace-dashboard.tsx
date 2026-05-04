@@ -303,9 +303,9 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     window.localStorage.setItem(IMPORT_TEMPLATE_KEY, templateId)
   }
 
-  const openImportTemplateModal = (draftName?: string) => {
+  const openImportTemplateModal = (draftName?: string, templateId?: string) => {
     setImportTemplateModal({
-      templateId: activeImportTemplate?.id,
+      templateId: templateId ?? activeImportTemplate?.id,
       draftName,
     })
   }
@@ -458,7 +458,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
                   onCollectOne={handleCollectOne}
                   collecting={collecting}
                   importTemplates={importTemplates}
-                  fallbackImportTemplate={activeImportTemplate}
+                  fallbackImportTemplate={null}
                   onEditImportTemplate={openImportTemplateModal}
                   sizeOf={sizeOf}
                 />
@@ -580,7 +580,7 @@ function SectionRows({
   collecting: boolean
   importTemplates: ExcelImportTemplateView[]
   fallbackImportTemplate: ExcelImportTemplateView | null
-  onEditImportTemplate: (draftName?: string) => void
+  onEditImportTemplate: (draftName?: string, templateId?: string) => void
   sizeOf: (id: string) => number
 }) {
   return (
@@ -631,7 +631,7 @@ function ConnRow({
   onCollectOne: (id: string) => void
   collecting: boolean
   importTemplate: ExcelImportTemplateView | null
-  onEditImportTemplate: (draftName?: string) => void
+  onEditImportTemplate: (draftName?: string, templateId?: string) => void
   zebra: boolean
   sizeOf: (id: string) => number
 }) {
@@ -730,7 +730,7 @@ function ConnRow({
           />
           <button
             type="button"
-            onClick={() => onEditImportTemplate(`${conn.displayName} 주문수집`)}
+            onClick={() => onEditImportTemplate(`${conn.displayName} 주문수집`, importTemplate?.id)}
             className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
             title={
               importTemplate
@@ -857,8 +857,12 @@ function ExcelUploadButton({
       if (!res.ok) {
         setError(data.error || '업로드 실패')
       } else {
-        setResult({ inserted: data.inserted, skipped: data.skipped })
-        if (data.inserted > 0) {
+        if (Array.isArray(data.errors) && data.errors.length > 0) {
+          const firstError = data.errors[0]
+          setError(firstError?.message ?? data.error ?? '업로드 실패')
+        }
+        setResult({ inserted: data.inserted ?? 0, skipped: data.skipped ?? 0 })
+        if ((data.inserted ?? 0) > 0) {
           setTimeout(() => router.push('/orders?status=new'), 1500)
         }
         setTimeout(() => setResult(null), 5000)

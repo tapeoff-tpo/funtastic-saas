@@ -6,6 +6,7 @@ import { db } from '@/lib/db'
 import { excelImportTemplates, orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { generateInternalNo } from '@/lib/orders/internal-no'
+import { findDefaultOrderImportTemplate } from '@/lib/orders/default-import-templates'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 
 /**
@@ -52,7 +53,13 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(arrayBuffer)
 
     let templateMappings: OrderImportMapping[] | undefined
-    if (templateId) {
+    if (templateId?.startsWith('default:')) {
+      const template = findDefaultOrderImportTemplate(marketplaceId, marketplaceName)
+      if (!template || template.id !== templateId) {
+        return NextResponse.json({ error: '선택한 기본 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
+      }
+      templateMappings = template.mappings
+    } else if (templateId) {
       const [template] = await db
         .select({ mappings: excelImportTemplates.mappings })
         .from(excelImportTemplates)
@@ -63,6 +70,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: '선택한 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
       }
       templateMappings = template.mappings
+    } else {
+      templateMappings = findDefaultOrderImportTemplate(marketplaceId, marketplaceName)?.mappings
     }
 
     // Parse Excel
@@ -163,15 +172,18 @@ export async function POST(request: NextRequest) {
 
           // Insert order items
           await tx.insert(orderItems).values(
-            items.map((item) => ({
-              orderId: newOrder.id,
-              marketplaceItemId: item.marketplaceItemId ?? null,
-              productName: item.productName,
-              optionText: item.optionText ?? null,
-              quantity: item.quantity,
-              unitPrice: String(item.totalAmount / item.quantity),
-              sku: item.sku ?? null,
-            })),
+            items.map((item) => {
+              const normalized = normalizeImportedOrderItem(item, marketplaceId)
+              return {
+                orderId: newOrder.id,
+                marketplaceItemId: normalized.marketplaceItemId ?? null,
+                productName: normalized.productName,
+                optionText: normalized.optionText ?? null,
+                quantity: normalized.quantity,
+                unitPrice: String(normalized.totalAmount / normalized.quantity),
+                sku: normalized.sku ?? null,
+              }
+            }),
           )
 
           inserted++
@@ -199,4 +211,19 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     )
   }
+}
+
+type ParsedImportItem = Awaited<ReturnType<typeof parseOrderExcel>>['rows'][number]
+
+function normalizeImportedOrderItem(item: ParsedImportItem, marketplaceId: string): ParsedImportItem {
+  if (marketplaceId !== 'ownerclan') return item
+  const skuParts = item.sku?.split(/\s+/).filter(Boolean) ?? []
+  if (skuParts.length === 0) return item
+
+  const marketplaceItemId = !item.marketplaceItemId || /^\d+$/.test(item.marketplaceItemId)
+    ? skuParts[0]
+    : item.marketplaceItemId
+  const sku = skuParts.length > 1 ? skuParts.slice(1).join(' ') : item.sku
+
+  return { ...item, marketplaceItemId, sku }
 }

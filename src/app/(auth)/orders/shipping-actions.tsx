@@ -838,7 +838,10 @@ function InventoryMappingDialog({
                     </div>
                     <div className="mt-1 truncate font-medium">{target.productName}</div>
                     {target.optionText && <div className="truncate text-[10px] text-muted-foreground">{target.optionText}</div>}
-                    <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{target.marketplaceItemId}</div>
+                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span className="truncate font-mono">상품코드 {target.marketplaceItemId}</span>
+                      <span className="shrink-0 font-medium">수량 {target.quantity}</span>
+                    </div>
                   </button>
                 )
               })}

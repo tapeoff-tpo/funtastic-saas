@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
 import { AUTO_MARKETPLACE_OPTIONS } from '@/lib/marketplace/collect-options'
+import { DEFAULT_ORDER_IMPORT_TEMPLATES } from '@/lib/orders/default-import-templates'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
 import type { Metadata } from 'next'
 
@@ -25,7 +26,7 @@ export default async function OrdersCollectPage() {
     .from(marketplaceConnections)
     .where(eq(marketplaceConnections.userId, user.id))
 
-  const importTemplates = await db
+  const userImportTemplates = await db
     .select({
       id: excelImportTemplates.id,
       name: excelImportTemplates.name,
@@ -34,6 +35,12 @@ export default async function OrdersCollectPage() {
     })
     .from(excelImportTemplates)
     .where(eq(excelImportTemplates.userId, user.id))
+
+  const userTemplateNames = new Set(userImportTemplates.map((template) => template.name))
+  const importTemplates = [
+    ...userImportTemplates,
+    ...DEFAULT_ORDER_IMPORT_TEMPLATES.filter((template) => !userTemplateNames.has(template.name)),
+  ]
 
   const connectionRows = connections.map((c) => ({
     id: c.id,

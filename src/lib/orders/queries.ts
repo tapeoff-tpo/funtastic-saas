@@ -356,6 +356,9 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const sortColumn = getSortColumn(filters.sort)
   const sortDir = filters.order === 'asc' ? asc(sortColumn) : desc(sortColumn)
+  const needsComputedPagination = !!filters.mapping || !!filters.stage
+  const queryLimit = needsComputedPagination ? 10000 : pageSize
+  const queryOffset = needsComputedPagination ? 0 : offset
 
   // perf: orderRows / count / mapping-lookups 는 서로 의존성이 없으므로
   // 한 wave 에서 병렬 실행한다 (이전엔 4 wave 직렬 → 2 wave 로 압축).
@@ -405,8 +408,8 @@ export async function getOrders(filters: OrderFilters = {}) {
           .from(orders)
           .where(claimWhere)
           .orderBy(sortDir)
-          .limit(pageSize)
-          .offset(offset),
+          .limit(queryLimit)
+          .offset(queryOffset),
         db.select({ value: count(orders.id) }).from(orders).where(claimWhere),
       ])
       return { orderRows: rows, total: countRows[0]?.value ?? 0 }
@@ -417,8 +420,8 @@ export async function getOrders(filters: OrderFilters = {}) {
         .from(orders)
         .where(whereClause)
         .orderBy(sortDir)
-        .limit(pageSize)
-        .offset(offset),
+        .limit(queryLimit)
+        .offset(queryOffset),
       db.select({ value: count() }).from(orders).where(whereClause),
     ])
     return { orderRows: rows, total: countRows[0]?.value ?? 0 }
@@ -705,10 +708,16 @@ export async function getOrders(filters: OrderFilters = {}) {
     })
   }
 
-  // perf: total count 는 ordersAndCountPromise 에서 같이 가져왔다.
+  const computedTotal = ordersWithItems.length
+  const pagedOrders = needsComputedPagination
+    ? ordersWithItems.slice(offset, offset + pageSize)
+    : ordersWithItems
+
+  // perf: 일반 목록 total count 는 ordersAndCountPromise 에서 같이 가져온다.
+  // mapping/stage 는 품목/매핑 계산 뒤에 필터링해야 하므로 계산 후 total/page slice 를 적용한다.
   return {
-    orders: ordersWithItems,
-    total: orderTotal,
+    orders: pagedOrders,
+    total: needsComputedPagination ? computedTotal : orderTotal,
   }
 }
 

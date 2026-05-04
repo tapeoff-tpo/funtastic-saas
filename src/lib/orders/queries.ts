@@ -604,9 +604,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     if (components.length === 0) return null
     const displayName = components
       .map((component) => {
-        const name = component.productName ?? component.sku
-        const option = component.optionName ? ` ${component.optionName}` : ''
-        return `${name}${option}`
+        return component.productName ?? component.sku
       })
       .join(' + ')
     const mappedQuantity = components.reduce(

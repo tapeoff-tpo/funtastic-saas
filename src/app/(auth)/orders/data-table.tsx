@@ -83,6 +83,7 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
   })
 
   const selectedCount = Object.keys(rowSelection).length
+  const tableWidth = Math.max(table.getTotalSize(), 1620)
 
   // Extract selected order IDs for bulk actions
   const selectedIds = useMemo(() => {
@@ -204,14 +205,14 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
 
       {/* Table */}
       <div className="overflow-x-auto rounded-md border">
-        <table className="table-fixed text-xs" style={{ width: table.getTotalSize() }}>
+        <table className="table-fixed text-xs" style={{ width: tableWidth }}>
           <thead className="sticky top-0 z-[1] bg-muted/50">
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} className="border-b">
                 {headerGroup.headers.map((header) => (
                   <th
                     key={header.id}
-                    className="relative whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
+                    className="relative whitespace-normal break-keep px-1.5 py-1 text-left text-[11px] font-medium leading-tight text-muted-foreground"
                     style={{ width: header.getSize() }}
                   >
                     {header.isPlaceholder
@@ -254,7 +255,7 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className="min-w-0 px-2 py-1 align-middle"
+                      className="min-w-0 px-1.5 py-1 align-middle"
                       style={{ width: cell.column.getSize() }}
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

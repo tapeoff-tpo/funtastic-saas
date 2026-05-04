@@ -303,7 +303,7 @@ function ProductNameCell({ order }: { order: OrderRow }) {
     return <span className="text-muted-foreground">-</span>
 
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight">
+    <div className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-tight">
       {items.map((item, index) => {
         const primaryName = item.displayName ?? item.productName
         const showOriginal =
@@ -313,14 +313,12 @@ function ProductNameCell({ order }: { order: OrderRow }) {
         return (
           <div
             key={item.id}
-            className={`flex min-w-0 items-center gap-1 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
+            className={`min-w-0 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
           >
-            {item.sku && (
-              <span className="shrink-0 font-mono text-[10px] text-muted-foreground" title={item.sku}>
-                {item.sku}
-              </span>
-            )}
-            <span className="min-w-0 truncate font-medium" title={line}>
+            <span className="block truncate font-mono text-[10px] text-muted-foreground" title={item.sku ?? ''}>
+              {item.sku ?? '-'}
+            </span>
+            <span className="block min-w-0 truncate font-medium" title={line}>
               {line}
             </span>
           </div>
@@ -345,9 +343,11 @@ function OptionInfoCell({ order }: { order: OrderRow }) {
   }
 
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight">
+    <div className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-tight">
       {items.map((item, index) => {
-        const option = item.optionText?.trim()
+        const option = item.optionText
+          ?.replace(/^\s*(선택|옵션)\s*[:：]?\s*/i, '')
+          .trim()
         return (
           <div
             key={item.id}
@@ -645,14 +645,18 @@ export const columns: ColumnDef<OrderRow>[] = [
     cell: ({ row }) => {
       const order = row.original
       return (
-        <Badge variant="outline" title={order.marketplaceName ?? getMarketplaceLabel(order.marketplaceId)}>
+        <Badge
+          variant="outline"
+          className="max-w-full whitespace-normal break-keep leading-tight"
+          title={order.marketplaceName ?? getMarketplaceLabel(order.marketplaceId)}
+        >
           {order.marketplaceName ?? getMarketplaceLabel(order.marketplaceId)}
         </Badge>
       )
     },
-    size: 84,
-    minSize: 74,
-    maxSize: 180,
+    size: 124,
+    minSize: 104,
+    maxSize: 220,
   },
 
   // 수집/주문일시
@@ -675,8 +679,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 96,
-    minSize: 90,
+    size: 100,
+    minSize: 92,
     maxSize: 180,
   },
 
@@ -692,7 +696,7 @@ export const columns: ColumnDef<OrderRow>[] = [
           <button
             type="button"
             onClick={() => openDetail?.(order.id)}
-            className="truncate text-left font-mono font-medium text-primary hover:underline"
+            className="break-all text-left font-mono font-semibold text-primary hover:underline"
             title={order.marketplaceOrderId}
           >
             {order.marketplaceOrderId}
@@ -718,8 +722,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 132,
-    minSize: 110,
+    size: 176,
+    minSize: 156,
     maxSize: 260,
   },
 
@@ -727,19 +731,19 @@ export const columns: ColumnDef<OrderRow>[] = [
   // 신규 탭에서만 원본(수집상품명) 보조 표시, 그 외 탭은 확정상품명만 표시
   {
     id: 'productInfo',
-    header: '상품',
+    header: '상품명',
     cell: ({ row }) => <ProductNameCell order={row.original} />,
-    size: 240,
-    minSize: 170,
-    maxSize: 600,
+    size: 320,
+    minSize: 240,
+    maxSize: 620,
   },
 
   {
     id: 'optionInfo',
     header: '옵션명',
     cell: ({ row }) => <OptionInfoCell order={row.original} />,
-    size: 160,
-    minSize: 96,
+    size: 220,
+    minSize: 150,
     maxSize: 420,
   },
 
@@ -776,8 +780,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 54,
-    minSize: 54,
+    size: 48,
+    minSize: 46,
     maxSize: 100,
   },
 
@@ -813,8 +817,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 92,
-    minSize: 86,
+    size: 108,
+    minSize: 96,
     maxSize: 220,
   },
 
@@ -838,8 +842,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 96,
-    minSize: 88,
+    size: 108,
+    minSize: 96,
     maxSize: 240,
   },
 
@@ -857,8 +861,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </span>
       )
     },
-    size: 78,
-    minSize: 76,
+    size: 68,
+    minSize: 64,
     maxSize: 130,
   },
 
@@ -884,8 +888,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </Badge>
       )
     },
-    size: 68,
-    minSize: 68,
+    size: 60,
+    minSize: 58,
     maxSize: 120,
   },
 
@@ -894,7 +898,7 @@ export const columns: ColumnDef<OrderRow>[] = [
   //   하단: SaaS 등록 배송비(원가) — products.shipping_cost SUM
   {
     id: 'shippingFees',
-    header: '배송비 (수집/등록)',
+    header: '배송비',
     cell: ({ row }) => {
       const fee = row.original.shippingFee
       const items = row.original.items ?? []
@@ -912,30 +916,30 @@ export const columns: ColumnDef<OrderRow>[] = [
           : '—'
 
       return (
-        <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight tabular-nums">
+        <div className="flex min-w-0 flex-col gap-0 text-[11px] leading-tight tabular-nums">
           <span>{feeText}</span>
           <span className="truncate text-[10px] text-muted-foreground">{costText}</span>
         </div>
       )
     },
-    size: 86,
-    minSize: 86,
-    maxSize: 150,
+    size: 72,
+    minSize: 68,
+    maxSize: 110,
   },
 
   // 택배사 · 송장
   {
     id: 'shipping',
-    header: '택배 · 송장',
+    header: '송장',
     cell: ({ row }) => {
       const order = row.original
       const invoiceStatus = order.invoiceStatus
       const trackingNumber = order.trackingNumber
       if (!invoiceStatus && !trackingNumber) {
-        return <span className="text-xs text-muted-foreground">미등록</span>
+        return <span className="text-[11px] text-muted-foreground">미등록</span>
       }
       return (
-        <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight">
+        <div className="flex min-w-0 flex-col gap-0 text-[11px] leading-tight">
           {order.carrierName && (
             <span className="truncate text-[11px] font-medium" title={order.carrierName}>{order.carrierName}</span>
           )}
@@ -952,8 +956,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         </div>
       )
     },
-    size: 100,
-    minSize: 92,
-    maxSize: 220,
+    size: 98,
+    minSize: 90,
+    maxSize: 180,
   },
 ]

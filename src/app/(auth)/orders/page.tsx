@@ -107,11 +107,7 @@ export default async function OrdersPage({
 
   // 탭 미선택(사이드바 진입 직후) — 어떤 쿼리도 실행하지 않는다.
   // 탭(전체/신규/.../반품) 클릭 시점에만 status/claimType/cancel/tab 중 하나가 붙어 fetch 시작.
-  const tabSelected =
-    !!params.status ||
-    !!params.claimType ||
-    !!params.cancel ||
-    params.tab === 'all'
+  const tabSelected = true
 
   // 탭별 카운트(getOrderStats)는 매 조회마다 11개 status COUNT 쿼리를 추가로 실행해
   // 응답을 느리게 한다. 현재 선택된 탭의 total 만 헤더에 노출하면 충분하므로 제거.

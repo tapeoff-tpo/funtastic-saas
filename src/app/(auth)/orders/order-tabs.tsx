@@ -56,7 +56,7 @@ export function OrderTabs() {
     if (claimType === 'return') return 'return'
     if (status) return status
     if (tab === 'all') return 'all'
-    return null // 탭 미선택 (사이드바 진입 직후) — 어떤 탭도 highlight 안 됨
+    return 'all'
   })()
 
   function buildTabUrl(tab: TabDef): string {

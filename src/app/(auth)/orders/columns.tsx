@@ -294,7 +294,7 @@ export interface OrderRow {
  * 상품 셀 — 신규 탭(status=new)에서만 수집상품명을 보조로 같이 표시.
  * 그 외 탭은 확정상품명만 표시(매핑 없으면 fallback으로 productName 자체 노출).
  */
-function ProductInfoCell({ order }: { order: OrderRow }) {
+function ProductNameCell({ order }: { order: OrderRow }) {
   const searchParams = useSearchParams()
   const isNewTab = searchParams.get('status') === 'new'
 
@@ -308,9 +308,8 @@ function ProductInfoCell({ order }: { order: OrderRow }) {
         const primaryName = item.displayName ?? item.productName
         const showOriginal =
           isNewTab && item.displayName != null && item.displayName !== item.productName
-        const option = item.optionText ? ` / ${item.optionText}` : ''
         const collected = showOriginal ? ` (${item.productName})` : ''
-        const line = `${primaryName}${option}${collected}`
+        const line = `${primaryName}${collected}`
         return (
           <div
             key={item.id}
@@ -335,6 +334,35 @@ function ProductInfoCell({ order }: { order: OrderRow }) {
           {order.logisticsMessage}
         </span>
       )}
+    </div>
+  )
+}
+
+function OptionInfoCell({ order }: { order: OrderRow }) {
+  const items = order.items
+  if (!items || items.length === 0) {
+    return <span className="text-muted-foreground">-</span>
+  }
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-tight">
+      {items.map((item, index) => {
+        const option = item.optionText?.trim()
+        return (
+          <div
+            key={item.id}
+            className={`min-w-0 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
+          >
+            {option ? (
+              <span className="block truncate" title={option}>
+                {option}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">-</span>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -700,10 +728,19 @@ export const columns: ColumnDef<OrderRow>[] = [
   {
     id: 'productInfo',
     header: '상품',
-    cell: ({ row }) => <ProductInfoCell order={row.original} />,
-    size: 280,
-    minSize: 180,
-    maxSize: 720,
+    cell: ({ row }) => <ProductNameCell order={row.original} />,
+    size: 240,
+    minSize: 170,
+    maxSize: 600,
+  },
+
+  {
+    id: 'optionInfo',
+    header: '옵션명',
+    cell: ({ row }) => <OptionInfoCell order={row.original} />,
+    size: 160,
+    minSize: 96,
+    maxSize: 420,
   },
 
   // 수량 — 메인: 주문 수량, 보조(괄호): 잔여 재고 (SKU 매칭 안되면 - 표시)

@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 type ProductMatch = 'all' | 'matched' | 'unmatched'
 type OptionMatch = 'all' | 'matched' | 'unmatched' | 'sku'
@@ -67,6 +68,7 @@ export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const sp = req.nextUrl.searchParams
 
@@ -88,7 +90,7 @@ export async function GET(req: NextRequest) {
   // ---------- 동적 WHERE 절 (parametrized) ----------
   // o.user_id = user.id 는 항상.
   const whereParts: ReturnType<typeof sql>[] = [
-    sql`o.user_id = ${user.id}`,
+    sql`o.user_id = ${workspaceUserId}`,
     sql`oi.marketplace_item_id IS NOT NULL`,
     sql`oi.marketplace_item_id <> ''`,
   ]

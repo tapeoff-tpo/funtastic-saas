@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { readCredential, storeCredential } from '@/lib/supabase/admin'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 const REDIRECT_URI = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://funtastic-saas-production.up.railway.app'}/api/cafe24/callback`
 
@@ -28,6 +29,8 @@ export async function GET(req: NextRequest) {
     return html(`<h2 style="color:red">로그인 필요</h2><p>먼저 로그인해주세요.</p>`)
   }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
   // Read client_id, client_secret, mall_id from vault
   let clientId: string | null = null
   let clientSecret: string | null = null
@@ -35,9 +38,9 @@ export async function GET(req: NextRequest) {
 
   try {
     ;[clientId, clientSecret, mallId] = await Promise.all([
-      readCredential('cafe24', user.id, 'client_id'),
-      readCredential('cafe24', user.id, 'client_secret'),
-      readCredential('cafe24', user.id, 'mall_id'),
+      readCredential('cafe24', workspaceUserId, 'client_id'),
+      readCredential('cafe24', workspaceUserId, 'client_secret'),
+      readCredential('cafe24', workspaceUserId, 'mall_id'),
     ])
   } catch (err) {
     return html(`<h2 style="color:red">Vault 읽기 실패</h2><p>${err instanceof Error ? err.message : '알 수 없는 오류'}</p>`)
@@ -82,9 +85,9 @@ export async function GET(req: NextRequest) {
   // Save access_token and refresh_token to vault
   try {
     await Promise.all([
-      storeCredential('cafe24', user.id, 'access_token', tokenData.access_token),
+      storeCredential('cafe24', workspaceUserId, 'access_token', tokenData.access_token),
       tokenData.refresh_token
-        ? storeCredential('cafe24', user.id, 'refresh_token', tokenData.refresh_token)
+        ? storeCredential('cafe24', workspaceUserId, 'refresh_token', tokenData.refresh_token)
         : Promise.resolve(),
     ])
   } catch (err) {

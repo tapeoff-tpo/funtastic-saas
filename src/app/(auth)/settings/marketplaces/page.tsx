@@ -6,6 +6,7 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import '@/lib/marketplace/adapters/configs'
 import { CredentialForm } from '@/components/marketplace/credential-form'
 import { ConnectionRow } from './edit-button'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
 
 export default async function MarketplaceSettingsPage() {
@@ -18,11 +19,12 @@ export default async function MarketplaceSettingsPage() {
     return null
   }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
   const configs = marketplaceRegistry.listConfigs()
   const connections = await db
     .select()
     .from(marketplaceConnections)
-    .where(eq(marketplaceConnections.userId, user.id))
+    .where(eq(marketplaceConnections.userId, workspaceUserId))
 
   const connectedIds = new Set(connections.map((c) => c.marketplaceId))
 

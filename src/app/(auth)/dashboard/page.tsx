@@ -12,6 +12,7 @@ import {
   type DailyPoint,
   type MonthlyPoint,
 } from './charts'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -27,6 +28,7 @@ export default async function DashboardPage() {
   if (!user) {
     return null
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const now = new Date()
   // 당일 시작/종료 (서버 로컬 기준 — 가능하면 KST 환경)
@@ -55,25 +57,25 @@ export default async function DashboardPage() {
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(orders)
-      .where(and(eq(orders.userId, user.id), eq(orders.status, 'new'))),
+      .where(and(eq(orders.userId, workspaceUserId), eq(orders.status, 'new'))),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(orders)
-      .where(and(eq(orders.userId, user.id), gte(orders.orderedAt, monthStart))),
+      .where(and(eq(orders.userId, workspaceUserId), gte(orders.orderedAt, monthStart))),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(products)
-      .where(eq(products.userId, user.id)),
+      .where(eq(products.userId, workspaceUserId)),
     db
       .select({ count: sql<number>`count(*)::int` })
       .from(orders)
-      .where(and(eq(orders.userId, user.id), eq(orders.isHeld, true))),
+      .where(and(eq(orders.userId, workspaceUserId), eq(orders.isHeld, true))),
     db
       .select({ sum: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text` })
       .from(orders)
       .where(
         and(
-          eq(orders.userId, user.id),
+          eq(orders.userId, workspaceUserId),
           gte(orders.orderedAt, dayStart),
           lt(orders.orderedAt, dayEnd),
         ),
@@ -81,7 +83,7 @@ export default async function DashboardPage() {
     db
       .select({ sum: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text` })
       .from(orders)
-      .where(and(eq(orders.userId, user.id), gte(orders.orderedAt, monthStart))),
+      .where(and(eq(orders.userId, workspaceUserId), gte(orders.orderedAt, monthStart))),
     db
       .select({
         d: sql<string>`to_char(${orders.orderedAt} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`,
@@ -89,7 +91,7 @@ export default async function DashboardPage() {
         amount: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text`,
       })
       .from(orders)
-      .where(and(eq(orders.userId, user.id), gte(orders.orderedAt, sevenDaysAgo)))
+      .where(and(eq(orders.userId, workspaceUserId), gte(orders.orderedAt, sevenDaysAgo)))
       .groupBy(sql`to_char(${orders.orderedAt} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD')`),
     db
       .select({
@@ -98,7 +100,7 @@ export default async function DashboardPage() {
         amount: sql<string>`coalesce(sum(${orders.totalAmount}), 0)::text`,
       })
       .from(orders)
-      .where(and(eq(orders.userId, user.id), gte(orders.orderedAt, twelveMonthsAgo)))
+      .where(and(eq(orders.userId, workspaceUserId), gte(orders.orderedAt, twelveMonthsAgo)))
       .groupBy(sql`to_char(${orders.orderedAt} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`),
   ])
 

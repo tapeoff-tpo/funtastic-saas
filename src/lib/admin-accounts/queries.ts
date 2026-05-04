@@ -5,8 +5,8 @@
  */
 import { cache } from 'react'
 import { db } from '@/lib/db'
-import { userProfiles, auditLogs, type UserProfile } from '@/lib/db/schema'
-import { eq, desc } from 'drizzle-orm'
+import { marketplaceConnections, orders, userProfiles, auditLogs, type UserProfile } from '@/lib/db/schema'
+import { and, asc, desc, eq, isNull } from 'drizzle-orm'
 
 export async function listAdmins(): Promise<UserProfile[]> {
   return db
@@ -27,6 +27,41 @@ export const getProfile = cache(async (userId: string): Promise<UserProfile | nu
     .where(eq(userProfiles.id, userId))
     .limit(1)
   return row ?? null
+})
+
+/**
+ * Operational data is shared by staff accounts in this single-company workspace.
+ * Super admins own the marketplace connections/orders; regular admin accounts read/write
+ * through that owner id so staff see the same synced orders after logging in.
+ */
+export const getWorkspaceUserId = cache(async (userId: string): Promise<string> => {
+  const profile = await getProfile(userId)
+  if (profile?.createdBy) return profile.createdBy
+
+  const [connectionOwner] = await db
+    .select({ id: marketplaceConnections.userId })
+    .from(marketplaceConnections)
+    .orderBy(asc(marketplaceConnections.createdAt))
+    .limit(1)
+  if (connectionOwner?.id) return connectionOwner.id
+
+  const [orderOwner] = await db
+    .select({ id: orders.userId })
+    .from(orders)
+    .orderBy(asc(orders.createdAt))
+    .limit(1)
+  if (orderOwner?.id) return orderOwner.id
+
+  if (profile?.role === 'super_admin') return userId
+
+  const [owner] = await db
+    .select({ id: userProfiles.id })
+    .from(userProfiles)
+    .where(and(eq(userProfiles.role, 'super_admin'), isNull(userProfiles.deactivatedAt)))
+    .orderBy(asc(userProfiles.createdAt))
+    .limit(1)
+
+  return owner?.id ?? userId
 })
 
 export async function getProfileByEmail(email: string): Promise<UserProfile | null> {

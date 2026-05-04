@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, sql } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface SourceInput {
   marketplaceId: string
@@ -37,6 +38,7 @@ export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const rows = await db
     .select({
@@ -108,7 +110,7 @@ export async function GET() {
       ), '[]'::jsonb)`,
     })
     .from(mappingCodes)
-    .where(eq(mappingCodes.userId, user.id))
+    .where(eq(mappingCodes.userId, workspaceUserId))
     .orderBy(sql`${mappingCodes.updatedAt} DESC`)
 
   return NextResponse.json({ codes: rows })
@@ -118,6 +120,7 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: CreateBody
   try {
@@ -143,7 +146,7 @@ export async function POST(req: NextRequest) {
       const [created] = await tx
         .insert(mappingCodes)
         .values({
-          userId: user.id,
+          userId: workspaceUserId,
           code,
           name,
           note: body.note?.trim() || null,
@@ -154,7 +157,7 @@ export async function POST(req: NextRequest) {
       if (body.sources.length > 0) {
         await tx.insert(mappingSources).values(
           body.sources.map((s) => ({
-            userId: user.id,
+            userId: workspaceUserId,
             mappingCodeId: created.id,
             marketplaceId: s.marketplaceId,
             marketplaceProductId: s.marketplaceProductId,
@@ -167,7 +170,7 @@ export async function POST(req: NextRequest) {
 
       await tx.insert(mappingComponents).values(
         body.components.map((c) => ({
-          userId: user.id,
+          userId: workspaceUserId,
           mappingCodeId: created.id,
           sku: c.sku,
           quantity: c.quantity,

@@ -11,6 +11,7 @@ import { getInventoryList } from '@/lib/inventory/queries'
 import { InventoryTable } from './inventory-table'
 import type { InventoryFilters } from '@/lib/inventory/types'
 import type { Metadata } from 'next'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export const metadata: Metadata = {
   title: '재고관리',
@@ -45,6 +46,7 @@ export default async function InventoryPage({
   if (!user) {
     return null
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const filters: InventoryFilters = {
     page: params.page,
@@ -62,7 +64,7 @@ export default async function InventoryPage({
   const searched = !!params.searched
   const [{ items, total }, warehouseZoneRows] = await Promise.all([
     searched
-      ? getInventoryList(user.id, filters)
+      ? getInventoryList(workspaceUserId, filters)
       : Promise.resolve({
           items: [] as Awaited<ReturnType<typeof getInventoryList>>['items'],
           total: 0,
@@ -70,7 +72,7 @@ export default async function InventoryPage({
     db
       .selectDistinct({ warehouseZone: inventory.warehouseZone })
       .from(inventory)
-      .where(and(eq(inventory.userId, user.id), isNotNull(inventory.warehouseZone))),
+      .where(and(eq(inventory.userId, workspaceUserId), isNotNull(inventory.warehouseZone))),
   ])
 
   const warehouseZones = warehouseZoneRows

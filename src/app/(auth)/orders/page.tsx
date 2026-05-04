@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { OrderTabs } from './order-tabs'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { OrderRow } from './columns'
 import type { OrderFilters as OrderFiltersParams } from '@/lib/orders/types'
 import type { ClaimType } from '@/lib/orders/types'
@@ -85,6 +86,7 @@ export default async function OrdersPage({
   if (!user) redirect('/login')
 
   const params = await searchParamsCache.parse(searchParams)
+  const workspaceUserId = await getWorkspaceUserId(user.id)
   const connectionsPromise = db
     .select({
       marketplaceId: marketplaceConnections.marketplaceId,
@@ -92,7 +94,7 @@ export default async function OrdersPage({
       isManual: marketplaceConnections.isManual,
     })
     .from(marketplaceConnections)
-    .where(eq(marketplaceConnections.userId, user.id))
+    .where(eq(marketplaceConnections.userId, workspaceUserId))
 
   const isNewTab = params.status === 'new'
   const mappingFilter = isNewTab
@@ -117,7 +119,7 @@ export default async function OrdersPage({
     ? getOrders({
         page: params.page,
         pageSize: params.pageSize,
-        userId: user.id,
+        userId: workspaceUserId,
         status: (params.status ?? undefined) as OrderFiltersParams['status'],
         marketplace: params.marketplace ?? undefined,
         search: params.search ?? undefined,

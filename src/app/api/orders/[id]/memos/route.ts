@@ -10,6 +10,7 @@ import { and, desc, eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orderMemos, orders } from '@/lib/db/schema'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface MemoAttachment {
   name: string
@@ -54,8 +55,9 @@ export async function GET(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  if (!(await verifyOrderOwnership(id, user.id))) {
+  if (!(await verifyOrderOwnership(id, workspaceUserId))) {
     return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 })
   }
 
@@ -76,8 +78,9 @@ export async function POST(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  if (!(await verifyOrderOwnership(id, user.id))) {
+  if (!(await verifyOrderOwnership(id, workspaceUserId))) {
     return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 })
   }
 

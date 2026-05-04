@@ -14,6 +14,7 @@ export const MARKETPLACE_LABELS: Record<string, string> = {
   'hyundai-hmall': '현대홈쇼핑', 'gs-shop': 'GS샵', esm: 'ESM',
   always: '올웨이즈', zigzag: '지그재그', 'toss-shopping': '토스쇼핑',
   ownerclan: '오너클랜', onchannel: '온채널', '10x10': '텐바이텐',
+  funtastic: '펀타스틱',
 }
 export const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
 const EXACT_OPTION_ID = '__exact__'

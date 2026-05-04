@@ -18,6 +18,7 @@ import { reverseCollectProducts, type ReverseCollectResult } from './reverse-col
 import { getCategoryMappings, getInternalCategories } from './categories'
 import { saveCategoryMapping, deleteCategoryMapping } from './category-actions'
 import type { ProductFilters, ProductFormData, ProductListItem, ProductDetail, CategoryMapping } from './types'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 type ActionResult<T = void> = { success: true; data: T } | { success: false; error: string }
 
@@ -25,7 +26,7 @@ async function requireUser(): Promise<string> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) throw new Error('Not authenticated')
-  return user.id
+  return getWorkspaceUserId(user.id)
 }
 
 /**

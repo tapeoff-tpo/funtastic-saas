@@ -15,12 +15,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { products, inventory } from '@/lib/db/schema'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq, and, or, ilike, ne, sql } from 'drizzle-orm'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const q = req.nextUrl.searchParams.get('q')?.trim()
   const mode = req.nextUrl.searchParams.get('mode') === 'product' ? 'product' : 'option'
@@ -46,7 +48,7 @@ export async function GET(req: NextRequest) {
       FROM products p
       LEFT JOIN inventory i
         ON i.sku = p.internal_sku AND i.user_id = p.user_id
-      WHERE p.user_id = ${user.id}
+      WHERE p.user_id = ${workspaceUserId}
         AND p.status <> 'deleted'
         AND (p.internal_sku ILIKE ${pattern} OR p.name ILIKE ${pattern})
       GROUP BY split_part(p.internal_sku, '-', 1)
@@ -97,7 +99,7 @@ export async function GET(req: NextRequest) {
     )
     .where(
       and(
-        eq(products.userId, user.id),
+        eq(products.userId, workspaceUserId),
         ne(products.status, 'deleted'),
         or(
           ilike(products.internalSku, pattern),

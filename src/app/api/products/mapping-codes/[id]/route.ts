@@ -10,6 +10,7 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq, and, sql } from 'drizzle-orm'
 
 interface SourceInput {
@@ -39,11 +40,12 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const [code] = await db
     .select()
     .from(mappingCodes)
-    .where(and(eq(mappingCodes.id, id), eq(mappingCodes.userId, user.id)))
+    .where(and(eq(mappingCodes.id, id), eq(mappingCodes.userId, workspaceUserId)))
     .limit(1)
 
   if (!code) return NextResponse.json({ error: 'not found' }, { status: 404 })
@@ -86,6 +88,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: UpdateBody
   try {
@@ -98,7 +101,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const [existing] = await db
     .select({ id: mappingCodes.id })
     .from(mappingCodes)
-    .where(and(eq(mappingCodes.id, id), eq(mappingCodes.userId, user.id)))
+    .where(and(eq(mappingCodes.id, id), eq(mappingCodes.userId, workspaceUserId)))
     .limit(1)
   if (!existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
@@ -121,7 +124,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         if (body.sources.length > 0) {
           await tx.insert(mappingSources).values(
             body.sources.map((s) => ({
-              userId: user.id,
+              userId: workspaceUserId,
               mappingCodeId: id,
               marketplaceId: s.marketplaceId,
               marketplaceProductId: s.marketplaceProductId,
@@ -141,7 +144,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         await tx.delete(mappingComponents).where(eq(mappingComponents.mappingCodeId, id))
         await tx.insert(mappingComponents).values(
           body.components.map((c) => ({
-            userId: user.id,
+            userId: workspaceUserId,
             mappingCodeId: id,
             sku: c.sku,
             quantity: c.quantity,
@@ -172,10 +175,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const result = await db
     .delete(mappingCodes)
-    .where(and(eq(mappingCodes.id, id), eq(mappingCodes.userId, user.id)))
+    .where(and(eq(mappingCodes.id, id), eq(mappingCodes.userId, workspaceUserId)))
     .returning({ id: mappingCodes.id })
 
   if (result.length === 0) return NextResponse.json({ error: 'not found' }, { status: 404 })

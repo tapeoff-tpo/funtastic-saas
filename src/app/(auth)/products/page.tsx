@@ -1,4 +1,5 @@
 import { Suspense } from 'react'
+import Link from 'next/link'
 import {
   createSearchParamsCache,
   parseAsString,
@@ -12,6 +13,7 @@ import { CarrierBulkActions } from './carrier-bulk-actions'
 import type { ProductRow } from './columns'
 import type { ProductFilters as ProductFiltersParams } from '@/lib/products/types'
 import type { Metadata } from 'next'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export const metadata: Metadata = {
   title: '상품 관리',
@@ -44,6 +46,7 @@ export default async function ProductsPage({
   if (!user) {
     return null
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const filters: ProductFiltersParams = {
     page: params.page,
@@ -58,7 +61,7 @@ export default async function ProductsPage({
   // 검색 버튼 누르기 전엔 fetch 하지 않음. searched sentinel 이 켜졌을 때만 조회.
   const searched = !!params.searched
   const { items, total } = searched
-    ? await getProducts(user.id, filters)
+    ? await getProducts(workspaceUserId, filters)
     : { items: [] as Awaited<ReturnType<typeof getProducts>>['items'], total: 0 }
 
   const data: ProductRow[] = items.map((item) => ({
@@ -100,12 +103,12 @@ export default async function ProductsPage({
           >
             엑셀 내보내기
           </a>
-          <a
+          <Link
             href="/products/new"
             className="rounded-md bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
           >
             상품등록
-          </a>
+          </Link>
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import { eq, and } from 'drizzle-orm'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import { findDefaultOrderImportTemplate } from '@/lib/orders/default-import-templates'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 /**
  * POST /api/orders/import
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const formData = await request.formData()
   const file = formData.get('file') as File | null
@@ -63,7 +65,7 @@ export async function POST(request: NextRequest) {
       const [template] = await db
         .select({ mappings: excelImportTemplates.mappings })
         .from(excelImportTemplates)
-        .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, user.id)))
+        .where(and(eq(excelImportTemplates.id, templateId), eq(excelImportTemplates.userId, workspaceUserId)))
         .limit(1)
 
       if (!template) {
@@ -145,7 +147,7 @@ export async function POST(request: NextRequest) {
             .insert(orders)
             .values({
               internalNo: generateInternalNo(),
-              userId: user.id,
+              userId: workspaceUserId,
               connectionId: null,
               marketplaceId,
               marketplaceOrderId: orderNumber,

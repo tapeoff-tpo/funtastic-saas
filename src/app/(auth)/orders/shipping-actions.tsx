@@ -105,6 +105,7 @@ export function ShippingActions({
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false)
   const [giftRulesOpen, setGiftRulesOpen] = useState(false)
   const [applyingMappings, setApplyingMappings] = useState(false)
+  const [unapplyingMappings, setUnapplyingMappings] = useState(false)
   const [splittingSets, setSplittingSets] = useState(false)
   const [applyingGifts, setApplyingGifts] = useState(false)
   const [confirmingMapped, setConfirmingMapped] = useState(false)
@@ -163,6 +164,9 @@ export function ShippingActions({
   const existingMappedOrders = useMemo(() => {
     return ordersForMapping.filter((order) => order.mappingStatus === 'mapped')
   }, [ordersForMapping])
+  const selectedMappableOrders = useMemo(() => {
+    return selectedOrders.filter((order) => order.mappingStatus !== 'unmapped')
+  }, [selectedOrders])
 
   const mappingTargets = useMemo<MappingTarget[]>(() => {
     return ordersForMapping
@@ -265,6 +269,42 @@ export function ShippingActions({
       router.refresh()
     } finally {
       setApplyingMappings(false)
+    }
+  }
+
+  const handleUnapplyMappings = async () => {
+    if (selectedOrderIds.length === 0) {
+      toast.info('매핑해제할 주문을 선택하세요.')
+      return
+    }
+    if (selectedMappableOrders.length === 0) {
+      toast.info('선택한 주문 중 매핑된 주문이 없습니다.')
+      return
+    }
+    if (!window.confirm(`선택한 ${selectedMappableOrders.length}건의 매핑을 해제할까요?\n\n동일 마켓 상품에 연결된 매핑 규칙도 함께 해제될 수 있습니다.`)) {
+      return
+    }
+
+    setUnapplyingMappings(true)
+    try {
+      const orderIds = Array.from(new Set(selectedMappableOrders.map((order) => order.id)))
+      const res = await fetch('/api/orders/unapply-mappings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ orderIds }),
+      })
+      const data = await res.json().catch(() => ({})) as {
+        unmappedOrders?: number
+        error?: string
+      }
+      if (!res.ok) {
+        toast.error(data.error ?? '매핑해제 실패')
+        return
+      }
+      toast.success(`매핑해제 완료: ${data.unmappedOrders ?? 0}건`)
+      router.refresh()
+    } finally {
+      setUnapplyingMappings(false)
     }
   }
 
@@ -402,6 +442,17 @@ export function ShippingActions({
             >
               매핑관리
             </Link>
+            <button
+              type="button"
+              onClick={() => void handleUnapplyMappings()}
+              disabled={unapplyingMappings || selectedMappableOrders.length === 0}
+              className="rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+              title="선택한 주문의 매핑을 해제"
+            >
+              {unapplyingMappings
+                ? '매핑해제 중...'
+                : `매핑해제${selectedMappableOrders.length > 0 ? ` (${selectedMappableOrders.length})` : ''}`}
+            </button>
             <button
               type="button"
               onClick={() => void handleSplitSetOrders()}
@@ -660,6 +711,7 @@ function InventoryMappingDialog({
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchInputRef = useRef<HTMLInputElement>(null)
   const activeTargets = useMemo(
     () => targets.filter((target) => !completedSourceKeys.has(getMappingTargetSourceKey(target))),
     [completedSourceKeys, targets],
@@ -709,6 +761,23 @@ function InventoryMappingDialog({
     setQuery(value)
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(() => void searchProducts(value), 250)
+  }
+
+  function selectTarget(target: MappingTarget) {
+    setSelectedKey(getMappingTargetKey(target))
+    setComponents([])
+  }
+
+  function searchByTargetProduct(target: MappingTarget) {
+    const nextQuery = target.productName.trim()
+    selectTarget(target)
+    setQuery(nextQuery)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    void searchProducts(nextQuery)
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus()
+      searchInputRef.current?.select()
+    })
   }
 
   function addComponent(product: ProductSearchResult) {
@@ -826,10 +895,8 @@ function InventoryMappingDialog({
                   <button
                     key={key}
                     type="button"
-                    onClick={() => {
-                      setSelectedKey(key)
-                      setComponents([])
-                    }}
+                    onClick={() => selectTarget(target)}
+                    onDoubleClick={() => searchByTargetProduct(target)}
                     className={`block w-full border-b px-3 py-2 text-left text-xs hover:bg-muted/50 ${active ? 'bg-orange-50' : ''}`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -863,6 +930,7 @@ function InventoryMappingDialog({
             >
               <div className="flex items-center gap-2">
                 <input
+                  ref={searchInputRef}
                   value={query}
                   onChange={(event) => handleQueryChange(event.target.value)}
                   placeholder="재고관리코드 또는 상품명 검색"

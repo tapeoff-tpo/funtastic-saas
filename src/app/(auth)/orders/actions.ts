@@ -14,6 +14,7 @@ import {
   bulkQueueInvoiceUpload,
 } from '@/lib/shipping/actions'
 import type { OrderStatus } from '@/lib/orders/types'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 /**
  * Server action: change a single order's status.
@@ -85,7 +86,7 @@ export async function forceBulkChangeStatusAction(
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { updated: 0, errors: [{ orderId: '', error: 'Unauthorized' }] }
 
-  const result = await forceBulkUpdateStatus(user.id, orderIds, newStatus)
+  const result = await forceBulkUpdateStatus(await getWorkspaceUserId(user.id), orderIds, newStatus)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result
@@ -103,7 +104,7 @@ export async function uploadInvoiceAction(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
-  const result = await queueInvoiceUpload(orderId, trackingNumber, carrierId, user.id)
+  const result = await queueInvoiceUpload(orderId, trackingNumber, carrierId, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result
@@ -118,7 +119,7 @@ export async function bulkUploadInvoiceAction(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { queued: 0, errors: [] }
-  const result = await bulkQueueInvoiceUpload(orders, user.id)
+  const result = await bulkQueueInvoiceUpload(orders, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result
@@ -144,7 +145,7 @@ export async function copyOrderAction(
   if (!user) return { success: false, error: 'Unauthorized' }
 
   const { copyOrder } = await import('@/lib/orders/copy-order')
-  const result = await copyOrder(orderId, user.id)
+  const result = await copyOrder(orderId, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result
@@ -165,7 +166,7 @@ export async function bulkDeleteOrdersAction(
   }
 
   const { deleteOrdersForUser } = await import('@/lib/orders/delete-orders')
-  const result = await deleteOrdersForUser(orderIds, user.id)
+  const result = await deleteOrdersForUser(orderIds, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result

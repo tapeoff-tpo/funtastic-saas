@@ -5,6 +5,7 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 /**
  * POST /api/marketplace/credentials
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   // Parse and validate body
   let body: { marketplaceId: string; credentials: Record<string, string> }
@@ -68,8 +70,8 @@ export async function POST(request: NextRequest) {
   try {
     for (const [key, secret] of Object.entries(credentials)) {
       if (config.requiredCredentials.includes(key)) {
-        await storeCredential(marketplaceId, user.id, key, secret)
-        vaultSecretNames.push(`mkt_${user.id}_${marketplaceId}_${key}`)
+        await storeCredential(marketplaceId, workspaceUserId, key, secret)
+        vaultSecretNames.push(`mkt_${workspaceUserId}_${marketplaceId}_${key}`)
       }
     }
   } catch (err) {
@@ -86,7 +88,7 @@ export async function POST(request: NextRequest) {
     const [connection] = await db
       .insert(marketplaceConnections)
       .values({
-        userId: user.id,
+        userId: workspaceUserId,
         marketplaceId,
         displayName: config.name,
         authType: config.authType,
@@ -135,6 +137,7 @@ export async function DELETE(request: NextRequest) {
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const marketplaceId = request.nextUrl.searchParams.get('marketplaceId')
   if (!marketplaceId) {
@@ -150,7 +153,7 @@ export async function DELETE(request: NextRequest) {
     .from(marketplaceConnections)
     .where(
       and(
-        eq(marketplaceConnections.userId, user.id),
+        eq(marketplaceConnections.userId, workspaceUserId),
         eq(marketplaceConnections.marketplaceId, marketplaceId)
       )
     )
@@ -170,7 +173,7 @@ export async function DELETE(request: NextRequest) {
       // Extract credential key from name pattern: mkt_{userId}_{marketplaceId}_{key}
       const parts = secretName.split('_')
       const credentialKey = parts.slice(3).join('_')
-      await deleteCredential(marketplaceId, user.id, credentialKey)
+      await deleteCredential(marketplaceId, workspaceUserId, credentialKey)
     }
   } catch (err) {
     return NextResponse.json(

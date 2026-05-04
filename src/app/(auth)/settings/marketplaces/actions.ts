@@ -12,6 +12,7 @@ import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/ad
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface ActionResult {
   success?: boolean
@@ -42,6 +43,7 @@ export async function getMarketplaceCredentials(
     error: authError,
   } = await supabase.auth.getUser()
   if (authError || !user) return { error: '인증이 필요합니다.' }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   if (!connectionId) return { error: '연결 ID가 필요합니다.' }
 
@@ -50,7 +52,7 @@ export async function getMarketplaceCredentials(
     .from(marketplaceConnections)
     .where(
       and(
-        eq(marketplaceConnections.userId, user.id),
+        eq(marketplaceConnections.userId, workspaceUserId),
         eq(marketplaceConnections.id, connectionId),
       ),
     )
@@ -70,7 +72,7 @@ export async function getMarketplaceCredentials(
   try {
     for (const credKey of config.requiredCredentials) {
       const vaultKey = `${credKey}${aliasTag}`
-      const secret = await readCredential(connection.marketplaceId, user.id, vaultKey)
+      const secret = await readCredential(connection.marketplaceId, workspaceUserId, vaultKey)
       values[credKey] = secret ?? ''
     }
   } catch (err) {
@@ -161,6 +163,7 @@ export async function registerMarketplaceCredentials(
   if (authError || !user) {
     return { error: '인증이 필요합니다.' }
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const marketplaceId = formData.get('marketplace_id') as string
   if (!marketplaceId || !marketplaceRegistry.has(marketplaceId)) {
@@ -185,8 +188,8 @@ export async function registerMarketplaceCredentials(
     for (const credKey of config.requiredCredentials) {
       const value = formData.get(credKey) as string
       const vaultKey = `${credKey}${aliasTag}`
-      const name = `mkt_${user.id}_${marketplaceId}_${vaultKey}`
-      await storeCredential(marketplaceId, user.id, vaultKey, value.trim())
+      const name = `mkt_${workspaceUserId}_${marketplaceId}_${vaultKey}`
+      await storeCredential(marketplaceId, workspaceUserId, vaultKey, value.trim())
       vaultNames.push(name)
     }
   } catch (err) {
@@ -206,7 +209,7 @@ export async function registerMarketplaceCredentials(
       .from(marketplaceConnections)
       .where(
         and(
-          eq(marketplaceConnections.userId, user.id),
+          eq(marketplaceConnections.userId, workspaceUserId),
           eq(marketplaceConnections.marketplaceId, marketplaceId),
           eq(marketplaceConnections.storeAlias, storeAlias)
         )
@@ -225,7 +228,7 @@ export async function registerMarketplaceCredentials(
         .where(eq(marketplaceConnections.id, existing[0].id))
     } else {
       await db.insert(marketplaceConnections).values({
-        userId: user.id,
+        userId: workspaceUserId,
         marketplaceId,
         storeAlias,
         displayName,
@@ -258,6 +261,7 @@ export async function deleteMarketplaceConnection(
   if (authError || !user) {
     return { error: '인증이 필요합니다.' }
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const connectionId = formData.get('connection_id') as string
   if (!connectionId) {
@@ -269,7 +273,7 @@ export async function deleteMarketplaceConnection(
     .from(marketplaceConnections)
     .where(
       and(
-        eq(marketplaceConnections.userId, user.id),
+        eq(marketplaceConnections.userId, workspaceUserId),
         eq(marketplaceConnections.id, connectionId)
       )
     )
@@ -286,7 +290,7 @@ export async function deleteMarketplaceConnection(
     for (const secretName of connection.vaultSecretNames) {
       const parts = secretName.split('_')
       const credKey = parts.slice(3).join('_')
-      await deleteCredential(connection.marketplaceId, user.id, credKey)
+      await deleteCredential(connection.marketplaceId, workspaceUserId, credKey)
     }
   } catch (err) {
     return {

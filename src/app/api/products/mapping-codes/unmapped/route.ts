@@ -9,11 +9,13 @@ import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
   const exactOptionId = '__exact__'
 
   // 최근 90일 내 주문에 등장한 마켓상품 중 매핑되지 않은 항목.
@@ -32,7 +34,7 @@ export async function GET() {
       MAX(o.ordered_at) AS "lastSeenAt"
     FROM order_items oi
     INNER JOIN orders o ON o.id = oi.order_id
-    WHERE o.user_id = ${user.id}
+    WHERE o.user_id = ${workspaceUserId}
       AND oi.marketplace_item_id IS NOT NULL
       AND oi.marketplace_item_id <> ''
       AND o.ordered_at > NOW() - INTERVAL '90 days'

@@ -9,7 +9,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, orderItems } from '@/lib/db/schema'
-import { and, eq, or } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { and, eq } from 'drizzle-orm'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -17,6 +18,7 @@ export async function GET(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const q = req.nextUrl.searchParams.get('q')?.trim()
   if (!q) return NextResponse.json({ error: 'q 파라미터 필요' }, { status: 400 })
@@ -24,8 +26,8 @@ export async function GET(req: NextRequest) {
   // UUID 형태면 id로, 아니면 marketplaceOrderId로
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(q)
   const whereClause = isUuid
-    ? and(eq(orders.userId, user.id), eq(orders.id, q))
-    : and(eq(orders.userId, user.id), eq(orders.marketplaceOrderId, q))
+    ? and(eq(orders.userId, workspaceUserId), eq(orders.id, q))
+    : and(eq(orders.userId, workspaceUserId), eq(orders.marketplaceOrderId, q))
 
   const [order] = await db
     .select({

@@ -7,6 +7,7 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { nanoid } from 'nanoid'
 import { and, eq } from 'drizzle-orm'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface ActionResult {
   success?: boolean
@@ -28,7 +29,7 @@ async function getCurrentUserId(): Promise<string | null> {
   } = await supabase.auth.getUser()
 
   if (authError || !user) return null
-  return user.id
+  return getWorkspaceUserId(user.id)
 }
 
 function normalizeMappings(raw: string): OrderImportMapping[] {
@@ -92,7 +93,7 @@ export async function addManualChannel(
 
   try {
     await db.insert(marketplaceConnections).values({
-      userId: user.id,
+      userId: await getWorkspaceUserId(user.id),
       marketplaceId,
       storeAlias: 'default',
       displayName,

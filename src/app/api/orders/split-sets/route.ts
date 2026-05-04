@@ -14,6 +14,7 @@ import { db } from '@/lib/db'
 import { orderItems, orders } from '@/lib/db/schema'
 import { expandOrderItemsWithMapping, type ExpandedRow } from '@/lib/orders/mapping-expand'
 import { generateInternalNo } from '@/lib/orders/internal-no'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface SplitSetsBody {
   orderIds?: string[]
@@ -62,6 +63,7 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: SplitSetsBody
   try {
@@ -81,7 +83,7 @@ export async function POST(req: NextRequest) {
   const targetOrders = await db
     .select()
     .from(orders)
-    .where(and(eq(orders.userId, user.id), inArray(orders.id, orderIds)))
+    .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, orderIds)))
 
   if (targetOrders.length === 0) {
     return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 })
@@ -94,7 +96,7 @@ export async function POST(req: NextRequest) {
     .where(inArray(orderItems.orderId, targetOrderIds))
 
   const expandedRows = await expandOrderItemsWithMapping(
-    user.id,
+    workspaceUserId,
     targetOrders.map((order) => ({ id: order.id, marketplaceId: order.marketplaceId })),
     sourceItems,
   )

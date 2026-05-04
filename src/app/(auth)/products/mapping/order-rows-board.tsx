@@ -171,6 +171,12 @@ export function OrderRowsBoard() {
     () => (filters.mkt ?? '').split(',').map((s) => s.trim()).filter(Boolean),
     [filters.mkt],
   )
+  const marketplaceFilterOptions = useMemo(
+    () => Object.entries(MARKETPLACE_LABELS)
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'ko-KR')),
+    [],
+  )
 
   const [rows, setRows] = useState<OrderRow[]>([])
   const [total, setTotal] = useState(0)
@@ -236,13 +242,6 @@ export function OrderRowsBoard() {
         from = shiftDays(today, -29); to = today; break
     }
     void setFilters({ from, to, page: 1 })
-  }
-
-  const toggleMarket = (id: string) => {
-    const next = new Set(selectedMarkets)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    void setFilters({ mkt: next.size > 0 ? Array.from(next).join(',') : null, page: 1 })
   }
 
   const submitSearch = () => {
@@ -468,21 +467,18 @@ export function OrderRowsBoard() {
         {/* Row 2 — 쇼핑몰 칩 */}
         <div className="flex flex-wrap items-center gap-1.5 border-b py-1.5">
           <span className="w-16 shrink-0 text-muted-foreground">쇼핑몰</span>
-          {Object.entries(MARKETPLACE_LABELS).map(([id, label]) => {
-            const on = selectedMarkets.includes(id)
-            return (
-              <button
-                type="button"
-                key={id}
-                onClick={() => toggleMarket(id)}
-                className={`rounded border px-1.5 py-0.5 ${
-                  on ? 'border-blue-500 bg-blue-50 text-blue-700' : 'hover:bg-muted'
-                }`}
-              >
-                {label}
-              </button>
-            )
-          })}
+          <select
+            value={selectedMarkets[0] ?? ''}
+            onChange={(e) => setFilters({ mkt: e.target.value || null, page: 1 })}
+            className="min-w-[180px] rounded border bg-background px-2 py-0.5 text-xs"
+          >
+            <option value="">전체 쇼핑몰</option>
+            {marketplaceFilterOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           {selectedMarkets.length > 0 && (
             <button
               type="button"

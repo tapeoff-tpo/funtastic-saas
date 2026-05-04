@@ -6,6 +6,7 @@ import { eq, and, inArray } from 'drizzle-orm'
 import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import '@/lib/marketplace/adapters/configs'
 
 /**
@@ -26,6 +27,7 @@ export async function POST(request: NextRequest) {
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: { orderIds: string[] }
   try {
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
     .from(orders)
     .where(
       and(
-        eq(orders.userId, user.id),
+        eq(orders.userId, workspaceUserId),
         inArray(orders.id, body.orderIds)
       )
     )
@@ -132,7 +134,7 @@ export async function POST(request: NextRequest) {
     let credError = false
     for (const credKey of adapterConfig.config.requiredCredentials) {
       const vaultKey = `${credKey}${aliasTag}`
-      const value = await readCredential(marketplaceId, user.id, vaultKey)
+      const value = await readCredential(marketplaceId, workspaceUserId, vaultKey)
       if (!value) {
         credError = true
         for (const order of groupOrders) {

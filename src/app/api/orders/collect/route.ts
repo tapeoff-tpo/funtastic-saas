@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { collectOrdersForConnection } from '@/lib/jobs/workers/order-collector'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 /**
  * POST /api/orders/collect
@@ -24,6 +25,7 @@ export async function POST(request: NextRequest) {
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: { connectionIds: string[] }
   try {
@@ -45,7 +47,7 @@ export async function POST(request: NextRequest) {
     .from(marketplaceConnections)
     .where(
       and(
-        eq(marketplaceConnections.userId, user.id),
+        eq(marketplaceConnections.userId, workspaceUserId),
         inArray(marketplaceConnections.id, body.connectionIds)
       )
     )
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest) {
     collectOrdersForConnection({
       marketplaceId: conn.marketplaceId,
       connectionId: conn.id,
-      userId: user.id,
+      userId: workspaceUserId,
       jobType: 'manual-order-collection',
       jobLogId: logRow.id,
     }).catch((err) => {

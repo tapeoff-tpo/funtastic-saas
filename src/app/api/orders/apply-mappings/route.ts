@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray } from 'drizzle-orm'
 
 export async function POST(req: NextRequest) {
@@ -24,6 +25,7 @@ export async function POST(req: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: { orderIds?: string[] }
   try {
@@ -47,7 +49,7 @@ export async function POST(req: NextRequest) {
       mappedByUserId: user.id,
       updatedAt: new Date(),
     })
-    .where(and(eq(orders.userId, user.id), inArray(orders.id, orderIds)))
+    .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, orderIds)))
     .returning({ id: orders.id })
 
   return NextResponse.json({ applied: result.length })

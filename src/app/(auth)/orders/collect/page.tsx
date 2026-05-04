@@ -5,6 +5,7 @@ import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
 import { AUTO_MARKETPLACE_OPTIONS } from '@/lib/marketplace/collect-options'
 import { DEFAULT_ORDER_IMPORT_TEMPLATES } from '@/lib/orders/default-import-templates'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -21,10 +22,12 @@ export default async function OrdersCollectPage() {
     return null
   }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
   const connections = await db
     .select()
     .from(marketplaceConnections)
-    .where(eq(marketplaceConnections.userId, user.id))
+    .where(eq(marketplaceConnections.userId, workspaceUserId))
 
   const userImportTemplates = await db
     .select({
@@ -34,7 +37,7 @@ export default async function OrdersCollectPage() {
       isDefault: excelImportTemplates.isDefault,
     })
     .from(excelImportTemplates)
-    .where(eq(excelImportTemplates.userId, user.id))
+    .where(eq(excelImportTemplates.userId, workspaceUserId))
 
   const userTemplateNames = new Set(userImportTemplates.map((template) => template.name))
   const importTemplates = [

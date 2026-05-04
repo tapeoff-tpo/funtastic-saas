@@ -8,6 +8,7 @@ import { products } from '@/lib/db/schema'
 import { setStock, adjustStock } from '@/lib/inventory/actions'
 import { getInventoryHistory } from '@/lib/inventory/queries'
 import type { AdjustmentReason } from '@/lib/inventory/types'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface ActionResult {
   success: boolean
@@ -53,7 +54,7 @@ export async function setStockAction(
   const warehouseZone = (formData.get('warehouseZone') as string | null)?.trim() || undefined
   const sectorCode = (formData.get('sectorCode') as string | null)?.trim() || undefined
 
-  const result = await setStock(user.id, sku.trim(), productName.trim(), totalStock, {
+  const result = await setStock(await getWorkspaceUserId(user.id), sku.trim(), productName.trim(), totalStock, {
     warehouseZone,
     sectorCode,
   })
@@ -94,7 +95,7 @@ export async function adjustStockAction(
   }
 
   const delta = Number(deltaStr)
-  const result = await adjustStock(user.id, sku.trim(), delta, reason, { note })
+  const result = await adjustStock(await getWorkspaceUserId(user.id), sku.trim(), delta, reason, { note })
   revalidatePath('/inventory')
   return result
 }
@@ -129,7 +130,7 @@ export async function updateShippingCost(
       shippingCost: value === null ? null : String(value),
       updatedAt: new Date(),
     })
-    .where(and(eq(products.id, productId), eq(products.userId, user.id)))
+    .where(and(eq(products.id, productId), eq(products.userId, await getWorkspaceUserId(user.id))))
 
   revalidatePath('/inventory')
   return { ok: true }

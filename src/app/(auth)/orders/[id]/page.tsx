@@ -7,6 +7,7 @@ import { getOrderById, getStockDeductionPreview } from '@/lib/orders/queries'
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
 import { getUserDisplayNames } from '@/lib/supabase/admin'
 import { ClaimList } from './client'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export const metadata: Metadata = {
   title: '주문 상세',
@@ -70,11 +71,12 @@ export default async function OrderDetailPage({
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  const order = await getOrderById(id, user.id)
+  const order = await getOrderById(id, workspaceUserId)
   if (!order) notFound()
 
-  const stockPreview = await getStockDeductionPreview(id, user.id)
+  const stockPreview = await getStockDeductionPreview(id, workspaceUserId)
   const alreadyShipped = order.status === 'shipped' || order.status === 'delivering' || order.status === 'delivered'
 
   const shippingAddr = order.shippingAddress as

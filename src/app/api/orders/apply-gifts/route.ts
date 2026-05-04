@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { giftRules, inventory, orderItems, orders } from '@/lib/db/schema'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { ensureGiftRulesTable, type GiftRuleCondition } from '@/lib/orders/gift-rules'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface ApplyGiftsBody {
   orderIds?: string[]
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: ApplyGiftsBody
   try {
@@ -55,11 +57,11 @@ export async function POST(req: NextRequest) {
     db
       .select()
       .from(orders)
-      .where(and(eq(orders.userId, user.id), eq(orders.status, 'new'), inArray(orders.id, orderIds))),
+      .where(and(eq(orders.userId, workspaceUserId), eq(orders.status, 'new'), inArray(orders.id, orderIds))),
     db
       .select()
       .from(giftRules)
-      .where(and(eq(giftRules.userId, user.id), eq(giftRules.isActive, true))),
+      .where(and(eq(giftRules.userId, workspaceUserId), eq(giftRules.isActive, true))),
   ])
 
   if (targetOrders.length === 0) return NextResponse.json({ applied: 0, skipped: orderIds.length })
@@ -82,7 +84,7 @@ export async function POST(req: NextRequest) {
   }
 
   const expandedRows = await expandOrderItemsWithMapping(
-    user.id,
+    workspaceUserId,
     targetOrders.map((order) => ({ id: order.id, marketplaceId: order.marketplaceId })),
     sourceItems,
   )
@@ -105,7 +107,7 @@ export async function POST(req: NextRequest) {
           optionName: sql<string | null>`MAX(${inventory.optionName})`,
         })
         .from(inventory)
-        .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, giftSkus)))
+        .where(and(eq(inventory.userId, workspaceUserId), inArray(inventory.sku, giftSkus)))
         .groupBy(inventory.sku)
     : []
   const giftInventory = new Map(giftInventoryRows.map((row) => [row.sku, row]))

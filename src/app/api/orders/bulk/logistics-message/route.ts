@@ -11,11 +11,13 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const body = (await req.json()) as { orderIds?: string[]; message?: string | null }
 
@@ -29,7 +31,7 @@ export async function POST(req: NextRequest) {
     .update(orders)
     .set({ logisticsMessage: cleaned, updatedAt: new Date() })
     .where(
-      and(eq(orders.userId, user.id), inArray(orders.id, body.orderIds)),
+      and(eq(orders.userId, workspaceUserId), inArray(orders.id, body.orderIds)),
     )
     .returning({ id: orders.id })
 

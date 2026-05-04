@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useMemo, useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { ORDER_STATUS_LABELS, type OrderSearchField, type OrderStatus } from '@/lib/orders/types'
 
@@ -50,6 +51,7 @@ export function OrderFilters({
 }: {
   marketplaceOptions?: Array<{ value: string; label: string }>
 }) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const mergedMarketplaceOptions = useMemo(() => {
     const options = new Map<string, string>()
@@ -81,10 +83,10 @@ export function OrderFilters({
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
       startTransition(() => {
-        void setFilters({ ...updates, page: 1 })
+        void setFilters({ ...updates, page: 1 }).then(() => router.refresh())
       })
     },
-    [setFilters],
+    [router, setFilters],
   )
 
   const submitSearch = useCallback(() => {
@@ -94,18 +96,20 @@ export function OrderFilters({
 
   const handleReset = useCallback(() => {
     setSearchInput('')
-    void setFilters({
-      status: null,
-      mapping: null,
-      marketplace: null,
-      search: null,
-      searchField: null,
-      dateFrom: null,
-      dateTo: null,
-      page: 1,
-      pageSize: filters.pageSize,
+    startTransition(() => {
+      void setFilters({
+        status: null,
+        mapping: null,
+        marketplace: null,
+        search: null,
+        searchField: null,
+        dateFrom: null,
+        dateTo: null,
+        page: 1,
+        pageSize: filters.pageSize,
+      }).then(() => router.refresh())
     })
-  }, [setFilters, filters.pageSize])
+  }, [filters.pageSize, router, setFilters])
 
   return (
     <div className="flex flex-wrap items-end gap-3">

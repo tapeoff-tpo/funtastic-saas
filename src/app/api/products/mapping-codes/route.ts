@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
+import { createHash } from 'crypto'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
@@ -32,6 +33,13 @@ interface CreateBody {
   isActive?: boolean
   sources: SourceInput[]
   components: ComponentInput[]
+}
+
+function normalizeMappingCode(rawCode: string): string {
+  const sanitized = rawCode.trim().replace(/[^a-zA-Z0-9_-]/g, '-')
+  if (sanitized.length <= 40) return sanitized
+  const hash = createHash('sha1').update(sanitized).digest('hex').slice(0, 8)
+  return `${sanitized.slice(0, 31)}-${hash}`
 }
 
 export async function GET() {
@@ -129,7 +137,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'invalid JSON' }, { status: 400 })
   }
 
-  const code = body.code?.trim()
+  const code = body.code ? normalizeMappingCode(body.code) : ''
   const name = body.name?.trim()
   if (!code || !name) {
     return NextResponse.json({ error: 'code 와 name 은 필수입니다' }, { status: 400 })

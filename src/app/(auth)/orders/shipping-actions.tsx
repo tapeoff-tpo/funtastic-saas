@@ -692,6 +692,13 @@ function getMappingTargetSourceKey(target: MappingTarget): string {
   return `${target.marketplaceId}:${source.product}:${source.option}`
 }
 
+function createManualMappingCode(source: { product: string; option: string }): string {
+  const suffix = Math.random().toString(36).slice(2, 8).toUpperCase()
+  const product = source.product.replace(/[^a-zA-Z0-9]/g, '').slice(-10) || 'P'
+  const option = source.option.replace(/[^a-zA-Z0-9]/g, '').slice(-8) || 'O'
+  return `M-${product}-${option}-${suffix}`.slice(0, 40)
+}
+
 function InventoryMappingDialog({
   open,
   onOpenChange,
@@ -820,8 +827,7 @@ function InventoryMappingDialog({
     }
 
     const source = getMappingTargetSource(selectedTarget)
-    const sourceKey = `${selectedTarget.marketplaceId}-${source.product}-${source.option}`
-    const code = `${validComponents[0].sku}-${sourceKey}`.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 100)
+    const code = createManualMappingCode(source)
     const selectedSourceKey = getMappingTargetSourceKey(selectedTarget)
 
     setSaving(true)

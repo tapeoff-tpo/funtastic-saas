@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { getCompanySettings } from './actions'
 import { CompanySettingsForm } from './company-settings-form'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export default async function CompanySettingsPage() {
   const supabase = await createClient()
@@ -13,7 +14,7 @@ export default async function CompanySettingsPage() {
     redirect('/login')
   }
 
-  const settings = await getCompanySettings(user.id)
+  const settings = await getCompanySettings(await getWorkspaceUserId(user.id))
 
   return (
     <div className="space-y-8">

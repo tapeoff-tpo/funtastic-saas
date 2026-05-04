@@ -19,6 +19,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { TemplateClient } from './client'
 import { createClient } from '@/lib/supabase/server'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export const metadata: Metadata = {
   title: '엑셀 양식 관리',
@@ -33,7 +34,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect('/login')
 
-  const userId = user.id
+  const userId = await getWorkspaceUserId(user.id)
   const { edit: editId } = await searchParams
   const templates = await getCarrierTemplates(userId)
   const editing = editId ? await getCarrierTemplateById(editId) : null
@@ -52,6 +53,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
+    const workspaceUserId = await getWorkspaceUserId(user.id)
     const name = formData.get('name') as string
     const columnsJson = formData.get('columns') as string
 
@@ -59,7 +61,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
 
     const columns = JSON.parse(columnsJson) as CarrierTemplateColumn[]
     await createCarrierTemplate({
-      userId: user.id,
+      userId: workspaceUserId,
       carrierId: null,
       name,
       columns,

@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { companySettings } from '@/lib/db/schema'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq } from 'drizzle-orm'
 
 export async function getCompanySettings(userId: string) {
@@ -24,6 +25,7 @@ export async function saveCompanySettings(
   } = await supabase.auth.getUser()
   if (!user) return { error: '로그인이 필요합니다.' }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
   const companyName = (formData.get('companyName') as string) ?? ''
   const phone = (formData.get('phone') as string) ?? ''
   const address = (formData.get('address') as string) ?? ''
@@ -33,7 +35,7 @@ export async function saveCompanySettings(
     await db
       .insert(companySettings)
       .values({
-        userId: user.id,
+        userId: workspaceUserId,
         companyName,
         phone,
         address,

@@ -15,10 +15,15 @@ import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const searchParams = request.nextUrl.searchParams
   const orderIdsParam = searchParams.get('orderIds')
@@ -44,7 +49,7 @@ export async function GET(request: NextRequest) {
   try {
     // Fetch orders with items and shipment data
     const [orderRows, itemRows, shipmentRows] = await Promise.all([
-      db.select().from(orders).where(inArray(orders.id, orderIds)),
+      db.select().from(orders).where(and(inArray(orders.id, orderIds), eq(orders.userId, workspaceUserId))),
       db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
       db.select().from(shipments).where(inArray(shipments.orderId, orderIds)),
     ])
@@ -61,13 +66,11 @@ export async function GET(request: NextRequest) {
 
     // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
     // 매핑 없으면 orderItems.sku 를 그대로 사용 (fallback).
-    const expanded = user
-      ? await expandOrderItemsWithMapping(
-          user.id,
-          orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
-          itemRows,
-        )
-      : []
+    const expanded = await expandOrderItemsWithMapping(
+      workspaceUserId,
+      orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
+      itemRows,
+    )
     const expandedByOrder = new Map<string, typeof expanded>()
     for (const row of expanded) {
       const list = expandedByOrder.get(row.orderId) ?? []
@@ -83,12 +86,12 @@ export async function GET(request: NextRequest) {
         ...expanded.map((r) => r.sku).filter(Boolean),
       ]),
     ]
-    const [productRows, inventoryRows] = user && skuSet.length > 0
+    const [productRows, inventoryRows] = skuSet.length > 0
       ? await Promise.all([
           db
             .select({ sku: products.internalSku, location: products.warehouseLocation, costPrice: products.costPrice })
             .from(products)
-            .where(and(eq(products.userId, user.id), inArray(products.internalSku, skuSet))),
+            .where(and(eq(products.userId, workspaceUserId), inArray(products.internalSku, skuSet))),
           db
             .select({
               sku: inventory.sku,
@@ -98,7 +101,7 @@ export async function GET(request: NextRequest) {
               optionName: sql<string | null>`MAX(${inventory.optionName})`,
             })
             .from(inventory)
-            .where(and(eq(inventory.userId, user.id), inArray(inventory.sku, skuSet)))
+            .where(and(eq(inventory.userId, workspaceUserId), inArray(inventory.sku, skuSet)))
             .groupBy(inventory.sku),
         ])
       : [[], []]
@@ -214,7 +217,7 @@ export async function GET(request: NextRequest) {
         template = await getCarrierTemplateById(templateId)
       } else {
         // Use first default template for this user
-        const templates = user ? await getCarrierTemplates(user.id) : []
+        const templates = await getCarrierTemplates(workspaceUserId)
         template = templates[0] ?? null
       }
 

@@ -13,11 +13,13 @@ import { orders, orderItems, companySettings } from '@/lib/db/schema'
 import { inArray, and, eq } from 'drizzle-orm'
 import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const orderIdsParam = req.nextUrl.searchParams.get('orderIds') ?? ''
   const orderIds = orderIdsParam.split(',').filter(Boolean)
@@ -29,12 +31,12 @@ export async function GET(req: NextRequest) {
   const [senderSettings] = await db
     .select()
     .from(companySettings)
-    .where(eq(companySettings.userId, user.id))
+    .where(eq(companySettings.userId, workspaceUserId))
     .limit(1)
 
   const [orderRows, itemRows] = await Promise.all([
     db.select().from(orders).where(
-      and(inArray(orders.id, orderIds), eq(orders.userId, user.id))
+      and(inArray(orders.id, orderIds), eq(orders.userId, workspaceUserId))
     ),
     db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
   ])
@@ -42,7 +44,7 @@ export async function GET(req: NextRequest) {
   // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
   // 매핑 없으면 원본 1 행 유지.
   const expanded = await expandOrderItemsWithMapping(
-    user.id,
+    workspaceUserId,
     orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
     itemRows,
   )

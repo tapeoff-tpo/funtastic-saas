@@ -113,6 +113,14 @@ export interface OrderFilters {
    * true → 클레임 레코드가 있거나 마켓 원상태가 취소/반품/교환인 주문 제외.
    */
   excludeClaimLikeOrders?: boolean
+  /**
+   * Expensive enrichment for inline mapping display. Keep false for fast tab switches.
+   */
+  includeMappingDetails?: boolean
+  /**
+   * Expensive per-item stock lookup. Keep false for fast order list tab switches.
+   */
+  includeStock?: boolean
 }
 
 /**

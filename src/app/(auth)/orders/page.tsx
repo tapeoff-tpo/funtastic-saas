@@ -6,7 +6,6 @@ import {
   parseAsInteger,
   parseAsBoolean,
 } from 'nuqs/server'
-import { createClient } from '@/lib/supabase/server'
 import { getOrders } from '@/lib/orders/queries'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
@@ -16,6 +15,7 @@ import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { OrderTabs } from './order-tabs'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import type { OrderRow } from './columns'
 import type { OrderFilters as OrderFiltersParams } from '@/lib/orders/types'
 import type { ClaimType } from '@/lib/orders/types'
@@ -81,12 +81,12 @@ export default async function OrdersPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) redirect('/login')
 
   const params = await searchParamsCache.parse(searchParams)
   const workspaceUserId = await getWorkspaceUserId(user.id)
+  const hasDateFilter = Boolean(params.dateFrom || params.dateTo)
   const connectionsPromise = db
     .select({
       marketplaceId: marketplaceConnections.marketplaceId,
@@ -111,7 +111,7 @@ export default async function OrdersPage({
 
   // 탭별 카운트(getOrderStats)는 매 조회마다 11개 status COUNT 쿼리를 추가로 실행해
   // 응답을 느리게 한다. 현재 선택된 탭의 total 만 헤더에 노출하면 충분하므로 제거.
-  const ordersPromise = tabSelected
+  const ordersPromise = tabSelected && hasDateFilter
     ? getOrders({
         page: params.page,
         pageSize: params.pageSize,
@@ -190,7 +190,7 @@ export default async function OrdersPage({
       {/* Compact header — title + count (Excel import entry-point removed in Phase 8) */}
       <div className="flex flex-wrap items-baseline gap-3">
         <h1 className="text-xl font-bold">주문 관리</h1>
-        {tabSelected && (
+        {tabSelected && hasDateFilter && (
           <span className="text-sm text-muted-foreground">
             {total.toLocaleString('ko-KR')}건
           </span>
@@ -208,7 +208,7 @@ export default async function OrdersPage({
       </Suspense>
 
       {/* Data Table — 탭 미선택 시 안내 문구로 대체 (쿼리 0번) */}
-      {tabSelected ? (
+      {tabSelected && hasDateFilter ? (
         <DataTable
           data={data}
           total={total}

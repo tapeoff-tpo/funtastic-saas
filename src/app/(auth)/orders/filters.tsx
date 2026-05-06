@@ -79,6 +79,12 @@ export function OrderFilters({
   // Local state for search input — only pushed to URL on explicit submit
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
   const isNewTab = filters.status === 'new'
+  const formatDateInput = useCallback((date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }, [])
 
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
@@ -110,6 +116,21 @@ export function OrderFilters({
       }).then(() => router.refresh())
     })
   }, [filters.pageSize, router, setFilters])
+
+  const setToday = useCallback(() => {
+    const today = formatDateInput(new Date())
+    updateFilter({ dateFrom: today, dateTo: today })
+  }, [formatDateInput, updateFilter])
+
+  const setRecent7Days = useCallback(() => {
+    const end = new Date()
+    const start = new Date()
+    start.setDate(start.getDate() - 6)
+    updateFilter({
+      dateFrom: formatDateInput(start),
+      dateTo: formatDateInput(end),
+    })
+  }, [formatDateInput, updateFilter])
 
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -204,6 +225,23 @@ export function OrderFilters({
       </div>
 
       {/* Search — manual submit via Enter or button */}
+      <div className="flex items-end gap-1">
+        <button
+          type="button"
+          onClick={setToday}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          오늘
+        </button>
+        <button
+          type="button"
+          onClick={setRecent7Days}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          최근 7일
+        </button>
+      </div>
+
       <div className="flex flex-col gap-1">
         <label htmlFor="filter-search" className="text-xs font-medium text-muted-foreground">
           검색

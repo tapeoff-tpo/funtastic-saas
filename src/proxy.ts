@@ -1,61 +1,27 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
+  const { pathname } = request.nextUrl
+  const supabaseResponse = NextResponse.next({
     request,
   })
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({
-            request,
-          })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
+  // Public endpoints do not need a remote auth lookup.
+  if (pathname === '/api/health' || pathname.startsWith('/api/debug/') || pathname.startsWith('/auth/callback')) {
+    return supabaseResponse
+  }
+
+  const hasAuthCookie = request.cookies
+    .getAll()
+    .some((cookie) => cookie.name.startsWith('sb-') && cookie.name.includes('-auth-token'))
+
+  if (!hasAuthCookie) {
+    if (pathname === '/login') {
+      return supabaseResponse
     }
-  )
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  const { pathname } = request.nextUrl
-
-  // Allow health check (Railway healthcheck)
-  if (pathname === '/api/health') {
-    return supabaseResponse
-  }
-
-  // Allow debug endpoints (no sensitive data exposure)
-  if (pathname.startsWith('/api/debug/')) {
-    return supabaseResponse
-  }
-
-  // Redirect unauthenticated users to login (except /login and /auth/callback)
-  if (!user && pathname !== '/login' && !pathname.startsWith('/auth/callback')) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
-    return NextResponse.redirect(url)
-  }
-
-  // Redirect authenticated users away from login
-  if (user && pathname === '/login') {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 

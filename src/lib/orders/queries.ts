@@ -8,7 +8,7 @@
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs, mappingSources, mappingComponents } from '@/lib/db/schema'
-import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, exists } from 'drizzle-orm'
+import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, isNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
 // re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
@@ -22,35 +22,71 @@ import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mappi
  * 매핑은 신규탭에서 바로 수정되는 작업 데이터라 서버 캐시를 타면 방금 고친 매핑이
  * 주문 목록에 남아 보일 수 있다. 주문 화면은 항상 최신 mapping_sources/components 를 읽는다.
  */
-async function getMappingLookups(userId: string) {
-  const [productSkus, variantSkus, sources, componentRows] = await Promise.all([
-    db
-      .select({ sku: products.internalSku })
-      .from(products)
-      .where(eq(products.userId, userId)),
-    db
-      .select({ sku: productVariants.sku })
-      .from(productVariants)
-      .innerJoin(products, eq(productVariants.productId, products.id))
-      .where(eq(products.userId, userId)),
-    db
-      .select({
-        mappingCodeId: mappingSources.mappingCodeId,
-        marketplaceId: mappingSources.marketplaceId,
-        marketplaceProductId: mappingSources.marketplaceProductId,
-        marketplaceOptionId: mappingSources.marketplaceOptionId,
-      })
-      .from(mappingSources)
-      .where(eq(mappingSources.userId, userId)),
-    db
-      .select({
-        mappingCodeId: mappingComponents.mappingCodeId,
-        sku: mappingComponents.sku,
-        quantity: mappingComponents.quantity,
-      })
-      .from(mappingComponents)
-      .where(eq(mappingComponents.userId, userId)),
+async function getMappingLookups(
+  userId: string,
+  candidates: {
+    skus: string[]
+    marketplaceProductIds: string[]
+  },
+) {
+  const skus = Array.from(new Set(candidates.skus.map((sku) => sku.trim()).filter(Boolean)))
+  const marketplaceProductIds = Array.from(
+    new Set(candidates.marketplaceProductIds.map((id) => id.trim()).filter(Boolean)),
+  )
+
+  const [productSkus, variantSkus, sources] = await Promise.all([
+    skus.length > 0
+      ? db
+          .select({ sku: products.internalSku })
+          .from(products)
+          .where(and(eq(products.userId, userId), inArray(products.internalSku, skus)))
+      : Promise.resolve([] as Array<{ sku: string }>),
+    skus.length > 0
+      ? db
+          .select({ sku: productVariants.sku })
+          .from(productVariants)
+          .innerJoin(products, eq(productVariants.productId, products.id))
+          .where(and(eq(products.userId, userId), inArray(productVariants.sku, skus)))
+      : Promise.resolve([] as Array<{ sku: string }>),
+    marketplaceProductIds.length > 0
+      ? db
+          .select({
+            mappingCodeId: mappingSources.mappingCodeId,
+            marketplaceId: mappingSources.marketplaceId,
+            marketplaceProductId: mappingSources.marketplaceProductId,
+            marketplaceOptionId: mappingSources.marketplaceOptionId,
+          })
+          .from(mappingSources)
+          .where(
+            and(
+              eq(mappingSources.userId, userId),
+              inArray(mappingSources.marketplaceProductId, marketplaceProductIds),
+            ),
+          )
+      : Promise.resolve([] as Array<{
+          mappingCodeId: string
+          marketplaceId: string
+          marketplaceProductId: string
+          marketplaceOptionId: string
+        }>),
   ])
+
+  const mappingCodeIds = Array.from(new Set(sources.map((source) => source.mappingCodeId)))
+  const componentRows = mappingCodeIds.length > 0
+    ? await db
+        .select({
+          mappingCodeId: mappingComponents.mappingCodeId,
+          sku: mappingComponents.sku,
+          quantity: mappingComponents.quantity,
+        })
+        .from(mappingComponents)
+        .where(
+          and(
+            eq(mappingComponents.userId, userId),
+            inArray(mappingComponents.mappingCodeId, mappingCodeIds),
+          ),
+        )
+    : []
 
   const componentSkus = Array.from(new Set(componentRows.map((component) => component.sku)))
   const inventoryRows = componentSkus.length > 0
@@ -207,6 +243,12 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
 
   if (filters.marketplace) {
     conditions.push(eq(orders.marketplaceId, filters.marketplace))
+  }
+
+  if (filters.mapping === 'mapped') {
+    conditions.push(isNotNull(orders.mappedAt))
+  } else if (filters.mapping === 'unmapped') {
+    conditions.push(isNull(orders.mappedAt))
   }
 
   if (filters.dateFrom) {
@@ -389,36 +431,27 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const sortColumn = getSortColumn(filters.sort)
   const sortDir = filters.order === 'asc' ? asc(sortColumn) : desc(sortColumn)
-  const needsComputedPagination = !!filters.mapping || !!filters.stage
+  const needsComputedPagination = !!filters.stage
   const queryLimit = needsComputedPagination ? 10000 : pageSize
   const queryOffset = needsComputedPagination ? 0 : offset
+  const includeMappingDetails = filters.includeMappingDetails ?? false
+  const includeStock = filters.includeStock ?? false
 
   // perf: orderRows / count / mapping-lookups 는 서로 의존성이 없으므로
   // 한 wave 에서 병렬 실행한다 (이전엔 4 wave 직렬 → 2 wave 로 압축).
   const userId = filters.userId
+  const canUseCachedStatsTotal = !!userId
+    && !filters.marketplace
+    && !filters.search
+    && !filters.dateFrom
+    && !filters.dateTo
+    && !filters.mapping
+    && !filters.stage
+    && !filters.isHeld
+    && !filters.cancelTab
+    && !filters.claimType
 
   // userId-scoped mapping 인벤토리 (mappingStatus/displayName 계산용)
-  const userScopedPromise = userId
-    ? getMappingLookups(userId)
-    : Promise.resolve({
-        productSkus: [] as Array<{ sku: string }>,
-        variantSkus: [] as Array<{ sku: string }>,
-        sources: [] as Array<{
-          mappingCodeId: string
-          marketplaceId: string
-          marketplaceProductId: string
-          marketplaceOptionId: string
-        }>,
-        components: [] as Array<{
-          mappingCodeId: string
-          sku: string
-          quantity: number
-          productName: string | null
-          optionName: string | null
-          availableStock: number | null
-        }>,
-      })
-
   // orderRows + total count — claimType 분기 안에서도 두 쿼리는 같은 IDs 를 공유하므로
   // 같은 IIFE 안에서 처리하되, 외부에서는 userScopedPromise 와 병렬 실행한다.
   const ordersAndCountPromise: Promise<{
@@ -447,7 +480,14 @@ export async function getOrders(filters: OrderFilters = {}) {
       ])
       return { orderRows: rows, total: countRows[0]?.value ?? 0 }
     }
-    const [rows, countRows] = await Promise.all([
+    const totalPromise = canUseCachedStatsTotal && userId
+      ? getOrderStats(userId).then((stats) => {
+          if (filters.status) return stats[filters.status] ?? 0
+          return stats.total ?? 0
+        })
+      : db.select({ value: count() }).from(orders).where(whereClause).then((countRows) => countRows[0]?.value ?? 0)
+
+    const [rows, total] = await Promise.all([
       db
         .select()
         .from(orders)
@@ -455,15 +495,12 @@ export async function getOrders(filters: OrderFilters = {}) {
         .orderBy(sortDir)
         .limit(queryLimit)
         .offset(queryOffset),
-      db.select({ value: count() }).from(orders).where(whereClause),
+      totalPromise,
     ])
-    return { orderRows: rows, total: countRows[0]?.value ?? 0 }
+    return { orderRows: rows, total }
   })()
 
-  const [
-    { orderRows, total: orderTotal },
-    { productSkus, variantSkus, sources: mappingSourceRows, components: mappingComponentRows },
-  ] = await Promise.all([ordersAndCountPromise, userScopedPromise])
+  const { orderRows, total: orderTotal } = await ordersAndCountPromise
 
   // Fetch items/claims/shipments/shipmentGroups in parallel.
   // Phase A 매핑 재설계: productNameMappings LEFT JOIN 제거. 확정상품명은
@@ -493,12 +530,14 @@ export async function getOrders(filters: OrderFilters = {}) {
             )`,
             shippingCost: products.shippingCost,
             // 잔여 재고 — 창고별 inventory 행을 SKU 단위로 합산
-            availableStock: sql<number | null>`(
-              SELECT COALESCE(SUM(${inventory.availableStock}), 0)::int
-              FROM ${inventory}
-              WHERE ${inventory.userId} = ${orders.userId}
-                AND ${inventory.sku} = ${orderItems.sku}
-            )`,
+            availableStock: includeStock
+              ? sql<number | null>`(
+                  SELECT COALESCE(SUM(${inventory.availableStock}), 0)::int
+                  FROM ${inventory}
+                  WHERE ${inventory.userId} = ${orders.userId}
+                    AND ${inventory.sku} = ${orderItems.sku}
+                )`
+              : sql<number | null>`NULL`,
             orderMarketplaceId: orders.marketplaceId,
             orderUserId: orders.userId,
           })
@@ -551,6 +590,55 @@ export async function getOrders(filters: OrderFilters = {}) {
       ]
 
   // Phase 8 — base orderItems shape. displayName is enriched below after mapping index is built.
+  const mappingCandidates = includeMappingDetails
+    ? itemRows.reduce(
+        (acc, item) => {
+          if (item.sku) acc.skus.add(item.sku)
+          if (item.marketplaceItemId) {
+            const marketplaceItemId = item.marketplaceItemId.trim()
+            if (marketplaceItemId) {
+              acc.marketplaceProductIds.add(marketplaceItemId)
+              const sepIdx = marketplaceItemId.indexOf('-')
+              if (sepIdx > 0) acc.marketplaceProductIds.add(marketplaceItemId.slice(0, sepIdx))
+            }
+          }
+          return acc
+        },
+        {
+          skus: new Set<string>(),
+          marketplaceProductIds: new Set<string>(),
+        },
+      )
+    : {
+        skus: new Set<string>(),
+        marketplaceProductIds: new Set<string>(),
+      }
+
+  const { productSkus, variantSkus, sources: mappingSourceRows, components: mappingComponentRows } =
+    userId && includeMappingDetails
+      ? await getMappingLookups(userId, {
+          skus: Array.from(mappingCandidates.skus),
+          marketplaceProductIds: Array.from(mappingCandidates.marketplaceProductIds),
+        })
+      : {
+          productSkus: [] as Array<{ sku: string }>,
+          variantSkus: [] as Array<{ sku: string }>,
+          sources: [] as Array<{
+            mappingCodeId: string
+            marketplaceId: string
+            marketplaceProductId: string
+            marketplaceOptionId: string
+          }>,
+          components: [] as Array<{
+            mappingCodeId: string
+            sku: string
+            quantity: number
+            productName: string | null
+            optionName: string | null
+            availableStock: number | null
+          }>,
+        }
+
   const baseItems = itemRows.map((r) => ({
     id: r.id,
     orderId: r.orderId,
@@ -669,18 +757,20 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  const items = baseItems.map((item) => {
-    const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.optionText, item.quantity)
-    if (!mapped) return item
-    return {
-      ...item,
-      displayName: mapped.displayName,
-      displayOptionName: mapped.displayOptionName,
-      quantity: mapped.quantity,
-      sku: mapped.sku ?? item.sku,
-      availableStock: mapped.availableStock ?? item.availableStock,
-    }
-  })
+  const items = includeMappingDetails
+    ? baseItems.map((item) => {
+        const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.optionText, item.quantity)
+        if (!mapped) return item
+        return {
+          ...item,
+          displayName: mapped.displayName,
+          displayOptionName: mapped.displayOptionName,
+          quantity: mapped.quantity,
+          sku: mapped.sku ?? item.sku,
+          availableStock: mapped.availableStock ?? item.availableStock,
+        }
+      })
+    : baseItems
 
   const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
     if (orderItems.length === 0) return 'unmapped'
@@ -726,18 +816,13 @@ export async function getOrders(filters: OrderFilters = {}) {
       // Phase 8 — inquiry indicator source for orders UI (SC-03)
       hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,
-      mappingStatus: getMappingStatus(order.marketplaceId, orderItemsData),
+      mappingStatus: includeMappingDetails
+        ? getMappingStatus(order.marketplaceId, orderItemsData)
+        : (order.mappedAt ? 'mapped' : 'unmapped'),
       marketplaceDisplayName: getOrderMarketplaceDisplayName(order),
       historicalClaimStatuses: getOrderHistoricalClaimStatuses(order),
     }
   })
-
-  // Apply mapping filter (post-fetch since it requires computed status)
-  if (filters.mapping === 'mapped') {
-    ordersWithItems = ordersWithItems.filter((o) => o.mappingStatus === 'mapped')
-  } else if (filters.mapping === 'unmapped') {
-    ordersWithItems = ordersWithItems.filter((o) => o.mappingStatus !== 'mapped')
-  }
 
   // Apply workflow stage filter (post-fetch, computed)
   if (filters.stage) {

@@ -89,6 +89,11 @@ export interface OrderFilters {
   marketplace?: string
   search?: string
   searchField?: OrderSearchField
+  /**
+   * Internal query helper: SKU candidates resolved from confirmed product names.
+   * Includes exact internal SKUs and base SKU prefixes for imported marketplace rows.
+   */
+  confirmedProductSearchSkus?: string[]
   dateFrom?: string
   dateTo?: string
   sort?: string

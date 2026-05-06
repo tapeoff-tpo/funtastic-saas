@@ -125,6 +125,43 @@ export function matchStage(
 
 const DEFAULT_PAGE_SIZE = 50
 
+function expandSkuSearchTerms(skus: string[]): string[] {
+  const terms = new Set<string>()
+  for (const rawSku of skus) {
+    const sku = rawSku.trim()
+    if (!sku) continue
+    terms.add(sku)
+    const baseSku = sku.replace(/-\d+$/, '')
+    if (baseSku && baseSku !== sku) terms.add(baseSku)
+  }
+  return [...terms]
+}
+
+async function getConfirmedProductSearchSkus(userId: string, search: string): Promise<string[]> {
+  const trimmed = search.trim()
+  if (!trimmed) return []
+  const searchPattern = `%${trimmed}%`
+
+  const [productRows, inventoryRows] = await Promise.all([
+    db
+      .select({ sku: products.internalSku })
+      .from(products)
+      .where(and(eq(products.userId, userId), ilike(products.name, searchPattern)))
+      .limit(500),
+    db
+      .select({ sku: inventory.sku })
+      .from(inventory)
+      .where(and(eq(inventory.userId, userId), ilike(inventory.productName, searchPattern)))
+      .groupBy(inventory.sku)
+      .limit(500),
+  ])
+
+  return expandSkuSearchTerms([
+    ...productRows.map((row) => row.sku),
+    ...inventoryRows.map((row) => row.sku),
+  ])
+}
+
 function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): string | null {
   const rawData = order.rawData
   if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return null
@@ -190,24 +227,9 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
         .from(orderItems)
         .where(and(eq(orderItems.orderId, orders.id), condition)),
     )
-    const confirmedProductExists = exists(
-      db
-        .select({ x: sql`1` })
-        .from(orderItems)
-        .innerJoin(
-          products,
-          and(
-            eq(products.userId, orders.userId),
-            eq(products.internalSku, orderItems.sku),
-          ),
-        )
-        .where(
-          and(
-            eq(orderItems.orderId, orders.id),
-            ilike(products.name, searchPattern),
-          ),
-        ),
-    )
+    const confirmedProductExists = filters.confirmedProductSearchSkus?.length
+      ? itemExists(inArray(orderItems.sku, filters.confirmedProductSearchSkus))
+      : sql`false`
     const trackingExists = exists(
       db
         .select({ x: sql`1` })
@@ -351,7 +373,18 @@ export async function getOrders(filters: OrderFilters = {}) {
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
   const offset = (page - 1) * pageSize
 
-  const conditions = buildOrderWhereClause(filters)
+  const shouldResolveConfirmedProductSearch =
+    filters.searchField == null ||
+    filters.searchField === 'all' ||
+    filters.searchField === 'confirmedProductName'
+  const confirmedProductSearchSkus = filters.userId && filters.search && shouldResolveConfirmedProductSearch
+    ? await getConfirmedProductSearchSkus(filters.userId, filters.search)
+    : undefined
+
+  const conditions = buildOrderWhereClause({
+    ...filters,
+    confirmedProductSearchSkus,
+  })
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined
 
   const sortColumn = getSortColumn(filters.sort)

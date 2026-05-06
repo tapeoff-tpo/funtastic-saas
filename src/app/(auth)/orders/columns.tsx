@@ -280,6 +280,8 @@ export interface OrderRow {
     productName: string
     /** Phase 8 — product_name_mappings.display_name (null → fallback to productName) */
     displayName?: string | null
+    /** 확정 내부 옵션명. 매핑 완료 건은 수집 옵션명 대신 이 값을 표시한다. */
+    displayOptionName?: string | null
     optionText: string | null
     quantity: number
     sku?: string | null
@@ -348,7 +350,8 @@ function OptionInfoCell({ order }: { order: OrderRow }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-tight">
       {items.map((item, index) => {
-        const option = item.optionText
+        const rawOption = item.displayOptionName ?? item.optionText
+        const option = rawOption
           ?.replace(/^\s*(선택|옵션)\s*[:：]?\s*/i, '')
           .trim()
         return (

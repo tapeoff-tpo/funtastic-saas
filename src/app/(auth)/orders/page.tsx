@@ -176,6 +176,7 @@ export default async function OrdersPage({
       marketplaceItemId: item.marketplaceItemId,
       productName: item.productName,
       displayName: (item as { displayName?: string | null }).displayName ?? null,
+      displayOptionName: (item as { displayOptionName?: string | null }).displayOptionName ?? null,
       optionText: item.optionText,
       quantity: item.quantity,
       sku: item.sku ?? null,

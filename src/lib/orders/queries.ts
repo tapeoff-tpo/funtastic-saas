@@ -485,6 +485,12 @@ export async function getOrders(filters: OrderFilters = {}) {
             fulfillmentCode: orderItems.fulfillmentCode,
             // 확정상품명 — SKU가 products에 직접 매칭된 경우만 해석
             productInternalName: products.name,
+            productInternalOptionName: sql<string | null>`(
+              SELECT MAX(${inventory.optionName})
+              FROM ${inventory}
+              WHERE ${inventory.userId} = ${orders.userId}
+                AND ${inventory.sku} = ${orderItems.sku}
+            )`,
             shippingCost: products.shippingCost,
             // 잔여 재고 — 창고별 inventory 행을 SKU 단위로 합산
             availableStock: sql<number | null>`(
@@ -532,6 +538,7 @@ export async function getOrders(filters: OrderFilters = {}) {
           skuMultiplier: number
           fulfillmentCode: string | null
           productInternalName: string | null
+          productInternalOptionName: string | null
           shippingCost: string | null
           availableStock: number | null
           orderMarketplaceId: string
@@ -558,6 +565,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     orderMarketplaceId: r.orderMarketplaceId,
     // 직접 SKU 매칭 표시명. 매핑 규칙 표시명은 mappingIndex 생성 후 아래에서 채운다.
     displayName: r.productInternalName ?? null,
+    displayOptionName: r.productInternalOptionName ?? null,
     shippingCost: r.shippingCost,
     availableStock: r.availableStock,
   }))
@@ -629,6 +637,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     orderQuantity: number,
   ): {
     displayName: string
+    displayOptionName: string | null
     quantity: number
     sku: string | null
     availableStock: number | null
@@ -643,12 +652,17 @@ export async function getOrders(filters: OrderFilters = {}) {
         return component.productName ?? component.sku
       })
       .join(' + ')
+    const displayOptionName = components
+      .map((component) => component.optionName)
+      .filter((optionName): optionName is string => !!optionName)
+      .join(' + ') || null
     const mappedQuantity = components.reduce(
       (sum, component) => sum + (component.quantity * orderQuantity),
       0,
     )
     return {
       displayName,
+      displayOptionName,
       quantity: mappedQuantity > 0 ? mappedQuantity : orderQuantity,
       sku: components.length === 1 ? components[0].sku : null,
       availableStock: components.length === 1 ? components[0].availableStock : null,
@@ -661,6 +675,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     return {
       ...item,
       displayName: mapped.displayName,
+      displayOptionName: mapped.displayOptionName,
       quantity: mapped.quantity,
       sku: mapped.sku ?? item.sku,
       availableStock: mapped.availableStock ?? item.availableStock,

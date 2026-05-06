@@ -240,8 +240,11 @@ export class TenByTenAdapter implements MarketplaceAdapter {
       })
       if (creds.shop_id) search.set('brandId', String(creds.shop_id))
 
+      // Do not call `orders` here. 10x10's new-order endpoint confirms
+      // orders as a side effect, so a credential test must use the read-only
+      // history endpoint.
       const env = await this.client(creds)
-        .get(`orders?${search.toString()}`)
+        .get(`orders/orderhistory?${search.toString()}`)
         .json<TenByTenEnvelope<OrdersListResponse>>()
 
       if (env.hasError) return { success: false, error: env.message || 'API returned error' }
@@ -258,28 +261,48 @@ export class TenByTenAdapter implements MarketplaceAdapter {
   }
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
-    const [newOrdersResult, confirmedUnshippedOrdersResult] = await Promise.allSettled([
-      this.fetchOrderList('orders', since),
-      this.fetchOrderList('orders/orderhistory', since),
-    ])
+    const confirmedBeforeResult = await Promise.resolve()
+      .then(() => this.fetchOrderList('orders/orderhistory', since))
+      .then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (reason) => ({ status: 'rejected' as const, reason }),
+      )
 
-    const failures = [newOrdersResult, confirmedUnshippedOrdersResult].filter(
+    // 10x10 `orders` is not a pure read: their docs note that new-order
+    // inquiry simultaneously confirms the order. Fetch history again after
+    // this call so orders moved by the side effect can still be saved locally.
+    const newOrdersResult = await Promise.resolve()
+      .then(() => this.fetchOrderList('orders', since))
+      .then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (reason) => ({ status: 'rejected' as const, reason }),
+      )
+
+    const confirmedAfterResult = await Promise.resolve()
+      .then(() => this.fetchOrderList('orders/orderhistory', since))
+      .then(
+        (value) => ({ status: 'fulfilled' as const, value }),
+        (reason) => ({ status: 'rejected' as const, reason }),
+      )
+
+    const failures = [confirmedBeforeResult, newOrdersResult, confirmedAfterResult].filter(
       (result): result is PromiseRejectedResult => result.status === 'rejected',
     )
-    if (failures.length === 2) {
+    if (failures.length === 3) {
       const message = failures
         .map((failure) => failure.reason instanceof Error ? failure.reason.message : String(failure.reason))
         .join('; ')
       throw new MarketplaceApiError('10x10', 500, message || 'getOrders failed')
     }
 
+    const confirmedBefore = confirmedBeforeResult.status === 'fulfilled' ? confirmedBeforeResult.value : []
     const newOrders = newOrdersResult.status === 'fulfilled' ? newOrdersResult.value : []
-    const confirmedUnshippedOrders = confirmedUnshippedOrdersResult.status === 'fulfilled'
-      ? confirmedUnshippedOrdersResult.value
+    const confirmedAfter = confirmedAfterResult.status === 'fulfilled'
+      ? confirmedAfterResult.value
       : []
 
     const byOrderSerial = new Map<string, OrderMaster>()
-    for (const order of [...confirmedUnshippedOrders, ...newOrders]) {
+    for (const order of [...confirmedBefore, ...newOrders, ...confirmedAfter]) {
       if (order.OrderSerial) {
         byOrderSerial.set(order.OrderSerial, order)
       }

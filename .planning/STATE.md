@@ -16,6 +16,26 @@ progress:
 
 # Project State
 
+## Current Operational Notes
+
+Last updated: 2026-05-06
+
+### Admin Account Policy
+
+- Operational data is shared across all admin accounts.
+- `admin123` is the canonical workspace owner and the source of truth for shared business data.
+- Other admin accounts exist only for login identity, permissions, and audit tracking.
+- Switching accounts must not change visible orders, products, inventory, mapping codes, marketplace connections, carrier templates, company settings, or shipping/export behavior.
+- New operational queries and writes should use `getWorkspaceUserId(user.id)` before accessing user-scoped tables.
+
+### Recent Production Fixes
+
+- Order-management table layout was tightened for dense order viewing.
+- Product and option display was separated and long product names can wrap to two lines.
+- New-order mapping search and pagination behavior was corrected.
+- Generated manual mapping codes were shortened to avoid database length errors.
+- Admin account workspace sharing was updated so shipping templates, company settings, and carrier exports resolve through the shared `admin123` workspace.
+
 ## Project Reference
 
 See: .planning/PROJECT.md (updated 2026-04-03)

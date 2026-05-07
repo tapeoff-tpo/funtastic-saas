@@ -56,15 +56,14 @@ export class SsgmallAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      const now = new Date()
-      const response = await this.client.get('orders', {
+      // Keep credential checks away from order endpoints. Some marketplaces
+      // mutate order state during "new order" reads.
+      const response = await this.client.get('products', {
         searchParams: {
           vendorId: this.vendorId,
-          dateFrom: formatDate(now),
-          dateTo: formatDate(now),
           pageSize: '1',
         },
-      }).json<SsgmallApiResponse<SsgmallOrder[]>>()
+      }).json<SsgmallApiResponse<SsgmallProduct[]>>()
 
       if (response.success) {
         return { success: true }

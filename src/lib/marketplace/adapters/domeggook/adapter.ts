@@ -57,15 +57,14 @@ export class DomeggookAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      const now = new Date()
-      const response = await this.client.get('orders', {
+      // Keep credential checks away from order endpoints. Some marketplaces
+      // mutate order state during "new order" reads.
+      const response = await this.client.get('products', {
         searchParams: {
           sellerId: this.sellerId,
-          dateFrom: formatDate(now),
-          dateTo: formatDate(now),
           pageSize: '1',
         },
-      }).json<DomeggookApiResponse<DomeggookOrder[]>>()
+      }).json<DomeggookApiResponse<DomeggookProduct[]>>()
 
       if (response.result === 'success') {
         return { success: true }

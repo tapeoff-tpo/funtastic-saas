@@ -102,10 +102,12 @@ export class ElevenstAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      // Make a lightweight call to verify the API key is valid
-      const now = new Date()
+      // Keep credential checks away from order endpoints. Some marketplaces
+      // mutate order state during "new order" reads.
       const response = await readElevenstXml(
-        await this.client.get(`rest/ordservices/complete/${formatDateCompact(now)}/${formatDateCompact(now)}`)
+        await this.client.get('openapi/v3/products', {
+          searchParams: { pageSize: 1 },
+        })
       )
 
       // If we get an XML response (even empty), the key is valid

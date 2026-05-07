@@ -67,15 +67,11 @@ export class EsmAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      // Lightweight call to verify API key
-      await this.client.post('shipping/v1/Order/RequestOrders', {
-        json: {
+      // Keep credential checks away from order endpoints. Some marketplaces
+      // mutate order state during "new order" reads.
+      await this.client.get('api/v1/products', {
+        searchParams: {
           siteType: this.siteType === 'A' ? 1 : 2,
-          orderStatus: 1,
-          requestDateType: 2,
-          requestDateFrom: formatDate(new Date()),
-          requestDateTo: formatDate(new Date(Date.now() + 24 * 60 * 60 * 1000)),
-          pageIndex: 1,
           pageSize: 1,
         },
       }).json()

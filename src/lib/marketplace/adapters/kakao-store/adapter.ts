@@ -69,12 +69,10 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
       await this.registerSeller()
-      await this.client.get('v2/shopping/orders', {
-        searchParams: {
-          size: 1,
-          orderModifiedAtStart: formatKakaoDateTime(new Date(Date.now() - 60 * 60 * 1000)),
-          orderModifiedAtEnd: formatKakaoDateTime(new Date()),
-        },
+      // Keep credential checks away from order endpoints. Some marketplaces
+      // mutate order state during "new order" reads.
+      await this.client.get('v2/store/products', {
+        searchParams: { limit: 1 },
       }).json()
       return { success: true }
     } catch (error) {

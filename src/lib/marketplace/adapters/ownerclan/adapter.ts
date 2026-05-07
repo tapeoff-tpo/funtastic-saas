@@ -164,13 +164,9 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
+      // Authentication is enough for a credential check; avoid order queries
+      // because some marketplaces mutate state during "new order" reads.
       await this.client.authenticate()
-      await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
-        first: 1,
-        after: null,
-        dateFrom: toUnixSeconds(new Date(Date.now() - OWNERCLAN_MIN_WINDOW_MS)),
-        dateTo: toUnixSeconds(new Date()),
-      })
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }

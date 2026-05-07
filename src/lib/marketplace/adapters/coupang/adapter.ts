@@ -73,20 +73,14 @@ export class CoupangAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      // Make a lightweight call with a 1-minute window to verify credentials
-      const now = new Date()
-      const oneMinAgo = new Date(now.getTime() - 60_000)
-      const fmt = (d: Date) => {
-        const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
-        const yyyy = kst.getUTCFullYear()
-        const MM = String(kst.getUTCMonth() + 1).padStart(2, '0')
-        const dd = String(kst.getUTCDate()).padStart(2, '0')
-        return `${yyyy}-${MM}-${dd}+09:00`
-      }
-      const qs = `createdAtFrom=${encodeURIComponent(fmt(oneMinAgo))}&createdAtTo=${encodeURIComponent(fmt(now))}&status=ACCEPT&maxPerPage=1`
-      const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
-
-      await this.client.get(path).json()
+      // Keep credential checks away from order endpoints. Some marketplaces
+      // mutate order state during "new order" reads.
+      await this.client.get('v2/providers/seller_api/apis/api/v1/marketplace/seller-products', {
+        searchParams: {
+          vendorId: this.vendorId,
+          maxPerPage: 1,
+        },
+      }).json()
 
       return { success: true }
     } catch (error) {

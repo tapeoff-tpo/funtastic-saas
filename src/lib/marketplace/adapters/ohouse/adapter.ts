@@ -56,14 +56,11 @@ export class OhouseAdapter implements MarketplaceAdapter {
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      const now = new Date()
-      const response = await this.client.get('api/v1/orders', {
-        searchParams: {
-          dateFrom: formatDate(now),
-          dateTo: formatDate(now),
-          pageSize: '1',
-        },
-      }).json<OhouseApiResponse<OhouseOrder[]>>()
+      // Keep credential checks away from order endpoints. Some marketplaces
+      // mutate order state during "new order" reads.
+      const response = await this.client.get('api/v1/products', {
+        searchParams: { pageSize: '1' },
+      }).json<OhouseApiResponse<OhouseProduct[]>>()
 
       if (response.success) {
         return { success: true }

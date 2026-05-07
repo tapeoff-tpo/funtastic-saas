@@ -72,6 +72,7 @@ export function OrderFilters({
     searchField: parseAsString,
     dateFrom: parseAsString,
     dateTo: parseAsString,
+    datePreset: parseAsString,
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(25),
   }, { shallow: false })
@@ -111,6 +112,7 @@ export function OrderFilters({
         searchField: null,
         dateFrom: null,
         dateTo: null,
+        datePreset: null,
         page: 1,
         pageSize: filters.pageSize,
       }).then(() => router.refresh())
@@ -119,7 +121,7 @@ export function OrderFilters({
 
   const setToday = useCallback(() => {
     const today = formatDateInput(new Date())
-    updateFilter({ dateFrom: today, dateTo: today })
+    updateFilter({ dateFrom: today, dateTo: today, datePreset: null })
   }, [formatDateInput, updateFilter])
 
   const setRecent7Days = useCallback(() => {
@@ -129,6 +131,43 @@ export function OrderFilters({
     updateFilter({
       dateFrom: formatDateInput(start),
       dateTo: formatDateInput(end),
+      datePreset: null,
+    })
+  }, [formatDateInput, updateFilter])
+
+  const setAllDates = useCallback(() => {
+    updateFilter({ dateFrom: null, dateTo: null, datePreset: 'all' })
+  }, [updateFilter])
+
+  const setRecent30Days = useCallback(() => {
+    const end = new Date()
+    const start = new Date()
+    start.setDate(start.getDate() - 29)
+    updateFilter({
+      dateFrom: formatDateInput(start),
+      dateTo: formatDateInput(end),
+      datePreset: null,
+    })
+  }, [formatDateInput, updateFilter])
+
+  const setCurrentMonth = useCallback(() => {
+    const end = new Date()
+    const start = new Date(end.getFullYear(), end.getMonth(), 1)
+    updateFilter({
+      dateFrom: formatDateInput(start),
+      dateTo: formatDateInput(end),
+      datePreset: null,
+    })
+  }, [formatDateInput, updateFilter])
+
+  const setRecent2Months = useCallback(() => {
+    const end = new Date()
+    const start = new Date()
+    start.setMonth(start.getMonth() - 2)
+    updateFilter({
+      dateFrom: formatDateInput(start),
+      dateTo: formatDateInput(end),
+      datePreset: null,
     })
   }, [formatDateInput, updateFilter])
 
@@ -207,7 +246,7 @@ export function OrderFilters({
           id="filter-date-from"
           type="date"
           value={filters.dateFrom ?? ''}
-          onChange={(e) => updateFilter({ dateFrom: e.target.value || null })}
+          onChange={(e) => updateFilter({ dateFrom: e.target.value || null, datePreset: null })}
           className="rounded-md border px-3 py-1.5 text-sm"
         />
       </div>
@@ -219,13 +258,20 @@ export function OrderFilters({
           id="filter-date-to"
           type="date"
           value={filters.dateTo ?? ''}
-          onChange={(e) => updateFilter({ dateTo: e.target.value || null })}
+          onChange={(e) => updateFilter({ dateTo: e.target.value || null, datePreset: null })}
           className="rounded-md border px-3 py-1.5 text-sm"
         />
       </div>
 
       {/* Search — manual submit via Enter or button */}
       <div className="flex items-end gap-1">
+        <button
+          type="button"
+          onClick={setAllDates}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          전체
+        </button>
         <button
           type="button"
           onClick={setToday}
@@ -239,6 +285,27 @@ export function OrderFilters({
           className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
         >
           최근 7일
+        </button>
+        <button
+          type="button"
+          onClick={setRecent30Days}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          30일
+        </button>
+        <button
+          type="button"
+          onClick={setCurrentMonth}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          당월
+        </button>
+        <button
+          type="button"
+          onClick={setRecent2Months}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          2개월
         </button>
       </div>
 

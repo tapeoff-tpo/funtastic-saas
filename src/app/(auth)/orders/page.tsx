@@ -34,6 +34,7 @@ const searchParamsCache = createSearchParamsCache({
   searchField: parseAsString,
   dateFrom: parseAsString,
   dateTo: parseAsString,
+  datePreset: parseAsString,
   sort: parseAsString,
   order: parseAsString,
   claimType: parseAsString,
@@ -89,7 +90,7 @@ export default async function OrdersPage({
     getWorkspaceUserId(user.id),
     getProfile(user.id),
   ])
-  const hasDateFilter = Boolean(params.dateFrom || params.dateTo)
+  const hasDateFilter = Boolean(params.dateFrom || params.dateTo || params.datePreset === 'all')
   const connectionsPromise = db
     .select({
       marketplaceId: marketplaceConnections.marketplaceId,

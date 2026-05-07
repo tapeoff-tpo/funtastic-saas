@@ -203,6 +203,10 @@ export interface OrderListItem {
     productName: string
     /** Phase 8 — product_name_mappings.display_name (매핑 없을 때 null → fallback to productName) */
     displayName: string | null
+    /** 출고 잠금/매핑 기준 확정 내부 옵션명 */
+    displayOptionName?: string | null
+    /** 출고완료 스냅샷 잠금 시각 */
+    lockedAt?: Date | string | null
     optionText: string | null
     quantity: number
     sku: string | null

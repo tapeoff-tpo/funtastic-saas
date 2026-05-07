@@ -171,3 +171,24 @@ export async function bulkDeleteOrdersAction(
   revalidateTag('orders', 'max')
   return result
 }
+
+/**
+ * Server action: super_admin 전용 출고 스냅샷 잠금 해제.
+ * 잠금 해제 후에는 매핑/상품/재고 현재값이 다시 표시될 수 있다.
+ */
+export async function unlockOrderSnapshotsAction(
+  orderIds: string[],
+): Promise<{ unlocked: number; error?: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { unlocked: 0, error: 'Unauthorized' }
+  if (!Array.isArray(orderIds) || orderIds.length === 0) {
+    return { unlocked: 0, error: '선택된 주문이 없습니다.' }
+  }
+
+  const { unlockOrderItemsForOrders } = await import('@/lib/orders/locking')
+  const result = await unlockOrderItemsForOrders(await getWorkspaceUserId(user.id), user.id, orderIds)
+  revalidatePath('/orders')
+  revalidateTag('orders', 'max')
+  return result
+}

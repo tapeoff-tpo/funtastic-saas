@@ -167,6 +167,14 @@ export const orderItems = pgTable('order_items', {
   /** 매핑에서 가져온 멀티플라이어. 예: "A 2개입" 마켓 상품 매핑 시 2 */
   skuMultiplier: integer('sku_multiplier').notNull().default(1),
   fulfillmentCode: varchar('fulfillment_code', { length: 50 }).default('normal'),
+  lockedSku: varchar('locked_sku', { length: 100 }),
+  lockedProductName: text('locked_product_name'),
+  lockedOptionName: text('locked_option_name'),
+  lockedQuantity: integer('locked_quantity'),
+  lockedMappingCodeId: uuid('locked_mapping_code_id'),
+  lockedMappingCode: varchar('locked_mapping_code', { length: 100 }),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  lockedByUserId: uuid('locked_by_user_id'),
 })
 
 export const orderMemos = pgTable(

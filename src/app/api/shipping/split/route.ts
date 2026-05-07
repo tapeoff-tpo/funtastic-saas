@@ -21,6 +21,8 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, shipments, shipmentItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { lockOrderItemsForOrders } from '@/lib/orders/locking'
 
 interface SplitEntry {
   trackingNumber: string
@@ -40,6 +42,7 @@ export async function POST(req: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: SplitBody
   try {
@@ -65,11 +68,11 @@ export async function POST(req: NextRequest) {
   const [order] = await db
     .select({ id: orders.id })
     .from(orders)
-    .where(and(eq(orders.id, body.orderId), eq(orders.userId, user.id)))
+    .where(and(eq(orders.id, body.orderId), eq(orders.userId, workspaceUserId)))
     .limit(1)
   if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 })
 
-  // 트랜잭션: 송장 N개 + 각각의 items
+  // 트랜잭션: 송장 N개 + 각각의 items + 출고 스냅샷 잠금
   const createdIds = await db.transaction(async (tx) => {
     const ids: string[] = []
     for (const entry of body.shipments) {
@@ -77,7 +80,7 @@ export async function POST(req: NextRequest) {
         .insert(shipments)
         .values({
           orderId: body.orderId,
-          userId: user.id,
+          userId: workspaceUserId,
           trackingNumber: entry.trackingNumber.trim(),
           carrierId: entry.carrierId,
           carrierName: entry.carrierName,
@@ -98,14 +101,13 @@ export async function POST(req: NextRequest) {
         )
       }
     }
+    await tx
+      .update(orders)
+      .set({ status: 'shipped', updatedAt: new Date() })
+      .where(eq(orders.id, body.orderId))
+    await lockOrderItemsForOrders(tx, workspaceUserId, [body.orderId], user.id)
     return ids
   })
-
-  // 주문 status를 shipped로 업데이트 (모든 분할 송장 등록 완료)
-  await db
-    .update(orders)
-    .set({ status: 'shipped' })
-    .where(eq(orders.id, body.orderId))
 
   return NextResponse.json({ created: createdIds.length, shipmentIds: createdIds })
 }

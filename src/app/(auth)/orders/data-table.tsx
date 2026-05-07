@@ -26,10 +26,19 @@ interface DataTableProps {
   page: number
   stage?: OrderStage
   showMappingAction?: boolean
+  canUnlockOrderSnapshots?: boolean
 }
 
 
-export function DataTable({ data, total, pageSize, page, stage, showMappingAction = false }: DataTableProps) {
+export function DataTable({
+  data,
+  total,
+  pageSize,
+  page,
+  stage,
+  showMappingAction = false,
+  canUnlockOrderSnapshots = false,
+}: DataTableProps) {
   const showMappingColumn = stage === 'mapping' || showMappingAction
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
     // 매핑 컬럼은 매핑 필요 스테이지에서만 노출
@@ -184,6 +193,7 @@ export function DataTable({ data, total, pageSize, page, stage, showMappingActio
         </div>
         <ManualStatusChangeButton
           selectedIds={selectedIds}
+          canUnlockOrderSnapshots={canUnlockOrderSnapshots}
           onChanged={() => {
             setRowSelection({})
             router.refresh()

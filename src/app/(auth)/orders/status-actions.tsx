@@ -6,7 +6,12 @@ import {
   ORDER_STATUS_LABELS,
   type OrderStatus,
 } from '@/lib/orders/types'
-import { changeStatusAction, bulkChangeStatusAction, forceBulkChangeStatusAction } from './actions'
+import {
+  changeStatusAction,
+  bulkChangeStatusAction,
+  forceBulkChangeStatusAction,
+  unlockOrderSnapshotsAction,
+} from './actions'
 import { toast } from 'sonner'
 
 interface StatusDropdownProps {
@@ -75,12 +80,17 @@ interface BulkActionBarProps {
 
 interface ManualStatusChangeButtonProps {
   selectedIds: string[]
+  canUnlockOrderSnapshots?: boolean
   onChanged?: () => void
 }
 
 const ALL_ORDER_STATUSES = Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]
 
-export function ManualStatusChangeButton({ selectedIds, onChanged }: ManualStatusChangeButtonProps) {
+export function ManualStatusChangeButton({
+  selectedIds,
+  canUnlockOrderSnapshots = false,
+  onChanged,
+}: ManualStatusChangeButtonProps) {
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const selectedCount = selectedIds.length
@@ -114,6 +124,32 @@ export function ManualStatusChangeButton({ selectedIds, onChanged }: ManualStatu
     })
   }
 
+  const handleUnlockSnapshots = () => {
+    if (selectedCount === 0) {
+      toast.info('잠금 해제할 주문을 선택하세요.')
+      return
+    }
+    setOpen(false)
+    if (
+      !window.confirm(
+        `선택한 ${selectedCount}건의 출고 스냅샷 잠금을 해제할까요?\n\n` +
+          '잠금 해제 후에는 현재 상품/재고/매핑 기준으로 다시 표시될 수 있습니다.',
+      )
+    ) {
+      return
+    }
+
+    startTransition(async () => {
+      const result = await unlockOrderSnapshotsAction(selectedIds)
+      if (result.error) {
+        toast.error(result.error, { duration: 7000 })
+      } else {
+        toast.success(`${result.unlocked}개 주문상품 잠금이 해제되었습니다.`)
+      }
+      onChanged?.()
+    })
+  }
+
   return (
     <div className="relative">
       <button
@@ -137,6 +173,18 @@ export function ManualStatusChangeButton({ selectedIds, onChanged }: ManualStatu
               {ORDER_STATUS_LABELS[status]}
             </button>
           ))}
+          {canUnlockOrderSnapshots && (
+            <>
+              <div className="my-1 border-t" />
+              <button
+                type="button"
+                onClick={handleUnlockSnapshots}
+                className="block w-full px-3 py-1.5 text-left text-sm text-red-700 hover:bg-red-50"
+              >
+                출고잠금 해제
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

@@ -11,6 +11,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import type { OrderStatus } from './types'
 import { isValidTransition } from './types'
 import { deductForOrder, restoreForOrder } from '@/lib/inventory/actions'
+import { lockOrderItemsForOrders } from './locking'
 
 type ActionResult = { success: boolean; error?: string }
 
@@ -64,6 +65,7 @@ export async function updateOrderStatus(
 
     // Inventory hooks: auto-deduct on ship, auto-restore on cancel from shipped/delivering
     if (newStatus === 'shipped') {
+      await lockOrderItemsForOrders(tx, order.userId, [orderId])
       await deductForOrder(tx, order.userId, orderId)
     } else if (
       newStatus === 'cancelled' &&
@@ -208,16 +210,25 @@ export async function forceBulkUpdateStatus(
 
   if (ownedOrders.length === 0) return { updated: 0, errors }
 
-  const result = await db
-    .update(orders)
-    .set({
-      status: newStatus,
-      previousStatus: null,
-      preparingAt: newStatus === 'preparing' ? new Date() : null,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(orders.userId, userId), inArray(orders.id, ownedOrders.map((order) => order.id))))
-    .returning({ id: orders.id })
+  const orderIdsToUpdate = ownedOrders.map((order) => order.id)
+  const result = await db.transaction(async (tx) => {
+    const updatedOrders = await tx
+      .update(orders)
+      .set({
+        status: newStatus,
+        previousStatus: null,
+        preparingAt: newStatus === 'preparing' ? new Date() : null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(orders.userId, userId), inArray(orders.id, orderIdsToUpdate)))
+      .returning({ id: orders.id })
+
+    if (newStatus === 'shipped') {
+      await lockOrderItemsForOrders(tx, userId, updatedOrders.map((order) => order.id))
+    }
+
+    return updatedOrders
+  })
 
   return { updated: result.length, errors }
 }

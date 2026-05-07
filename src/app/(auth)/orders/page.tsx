@@ -14,7 +14,7 @@ import { eq } from 'drizzle-orm'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { OrderTabs } from './order-tabs'
-import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getProfile, getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import type { OrderRow } from './columns'
 import type { OrderFilters as OrderFiltersParams } from '@/lib/orders/types'
@@ -85,7 +85,10 @@ export default async function OrdersPage({
   if (!user) redirect('/login')
 
   const params = await searchParamsCache.parse(searchParams)
-  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const [workspaceUserId, profile] = await Promise.all([
+    getWorkspaceUserId(user.id),
+    getProfile(user.id),
+  ])
   const hasDateFilter = Boolean(params.dateFrom || params.dateTo)
   const connectionsPromise = db
     .select({
@@ -177,6 +180,7 @@ export default async function OrdersPage({
       productName: item.productName,
       displayName: (item as { displayName?: string | null }).displayName ?? null,
       displayOptionName: (item as { displayOptionName?: string | null }).displayOptionName ?? null,
+      lockedAt: (item as { lockedAt?: Date | string | null }).lockedAt ?? null,
       optionText: item.optionText,
       quantity: item.quantity,
       sku: item.sku ?? null,
@@ -215,6 +219,7 @@ export default async function OrdersPage({
           page={params.page}
           pageSize={params.pageSize}
           showMappingAction={isNewTab}
+          canUnlockOrderSnapshots={profile?.role === 'super_admin'}
         />
       ) : (
         <div className="rounded border bg-muted/30 px-6 py-12 text-center text-sm text-muted-foreground">

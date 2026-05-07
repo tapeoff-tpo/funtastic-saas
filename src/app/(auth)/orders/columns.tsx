@@ -3,6 +3,7 @@
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import { Copy, ExternalLink, MessageSquare, RotateCcw } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
@@ -281,6 +282,8 @@ export interface OrderRow {
     displayName?: string | null
     /** 확정 내부 옵션명. 매핑 완료 건은 수집 옵션명 대신 이 값을 표시한다. */
     displayOptionName?: string | null
+    /** 출고완료 시점에 확정 스냅샷으로 잠긴 시각 */
+    lockedAt?: Date | string | null
     optionText: string | null
     quantity: number
     sku?: string | null
@@ -292,10 +295,13 @@ export interface OrderRow {
 }
 
 /**
- * 상품 셀 — 매핑 완료 건은 모든 탭에서 내부 확정상품명만 표시한다.
- * 매핑이 없으면 수집상품명을 fallback으로 노출한다.
+ * 상품 셀 — 신규 탭(status=new)에서만 수집상품명을 보조로 같이 표시.
+ * 그 외 탭은 확정상품명만 표시(매핑 없으면 fallback으로 productName 자체 노출).
  */
 function ProductNameCell({ order }: { order: OrderRow }) {
+  const searchParams = useSearchParams()
+  const isNewTab = searchParams.get('status') === 'new'
+
   const items = order.items
   if (!items || items.length === 0)
     return <span className="text-muted-foreground">-</span>
@@ -303,7 +309,11 @@ function ProductNameCell({ order }: { order: OrderRow }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-tight">
       {items.map((item, index) => {
-        const line = item.displayName ?? item.productName
+        const primaryName = item.displayName ?? item.productName
+        const showOriginal =
+          isNewTab && item.displayName != null && item.displayName !== item.productName
+        const collected = showOriginal ? ` (${item.productName})` : ''
+        const line = `${primaryName}${collected}`
         return (
           <div
             key={item.id}
@@ -726,7 +736,7 @@ export const columns: ColumnDef<OrderRow>[] = [
   },
 
   // 상품 (SKU + 확정상품명 + 옵션 + 물류메세지) — Phase 8 SC-04
-  // 매핑 완료 건은 모든 탭에서 내부 확정상품명/옵션명만 표시
+  // 신규 탭에서만 원본(수집상품명) 보조 표시, 그 외 탭은 확정상품명만 표시
   {
     id: 'productInfo',
     header: '상품명',

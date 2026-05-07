@@ -520,6 +520,13 @@ export async function getOrders(filters: OrderFilters = {}) {
             sku: orderItems.sku,
             skuMultiplier: orderItems.skuMultiplier,
             fulfillmentCode: orderItems.fulfillmentCode,
+            lockedSku: orderItems.lockedSku,
+            lockedProductName: orderItems.lockedProductName,
+            lockedOptionName: orderItems.lockedOptionName,
+            lockedQuantity: orderItems.lockedQuantity,
+            lockedMappingCodeId: orderItems.lockedMappingCodeId,
+            lockedMappingCode: orderItems.lockedMappingCode,
+            lockedAt: orderItems.lockedAt,
             // 확정상품명 — SKU가 products에 직접 매칭된 경우만 해석
             productInternalName: products.name,
             productInternalOptionName: sql<string | null>`(
@@ -576,6 +583,13 @@ export async function getOrders(filters: OrderFilters = {}) {
           sku: string | null
           skuMultiplier: number
           fulfillmentCode: string | null
+          lockedSku: string | null
+          lockedProductName: string | null
+          lockedOptionName: string | null
+          lockedQuantity: number | null
+          lockedMappingCodeId: string | null
+          lockedMappingCode: string | null
+          lockedAt: Date | null
           productInternalName: string | null
           productInternalOptionName: string | null
           shippingCost: string | null
@@ -650,6 +664,13 @@ export async function getOrders(filters: OrderFilters = {}) {
     sku: r.sku,
     skuMultiplier: r.skuMultiplier,
     fulfillmentCode: r.fulfillmentCode,
+    lockedSku: r.lockedSku,
+    lockedProductName: r.lockedProductName,
+    lockedOptionName: r.lockedOptionName,
+    lockedQuantity: r.lockedQuantity,
+    lockedMappingCodeId: r.lockedMappingCodeId,
+    lockedMappingCode: r.lockedMappingCode,
+    lockedAt: r.lockedAt,
     orderMarketplaceId: r.orderMarketplaceId,
     // 직접 SKU 매칭 표시명. 매핑 규칙 표시명은 mappingIndex 생성 후 아래에서 채운다.
     displayName: r.productInternalName ?? null,
@@ -757,25 +778,37 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   }
 
-  const items = includeMappingDetails
-    ? baseItems.map((item) => {
-        const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.optionText, item.quantity)
-        if (!mapped) return item
-        return {
-          ...item,
-          displayName: mapped.displayName,
-          displayOptionName: mapped.displayOptionName,
-          quantity: mapped.quantity,
-          sku: mapped.sku ?? item.sku,
-          availableStock: mapped.availableStock ?? item.availableStock,
-        }
-      })
-    : baseItems
+  const items = baseItems.map((item) => {
+    if (item.lockedAt) {
+      return {
+        ...item,
+        displayName: item.lockedProductName ?? item.displayName,
+        displayOptionName: item.lockedOptionName ?? item.displayOptionName,
+        quantity: item.lockedQuantity ?? item.quantity,
+        sku: item.lockedSku ?? item.sku,
+      }
+    }
+    if (!includeMappingDetails) return item
+    const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.optionText, item.quantity)
+    if (!mapped) return item
+    return {
+      ...item,
+      displayName: mapped.displayName,
+      displayOptionName: mapped.displayOptionName,
+      quantity: mapped.quantity,
+      sku: mapped.sku ?? item.sku,
+      availableStock: mapped.availableStock ?? item.availableStock,
+    }
+  })
 
   const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
     if (orderItems.length === 0) return 'unmapped'
     let mappedCount = 0
     for (const item of orderItems) {
+      if (item.lockedAt) {
+        mappedCount++
+        continue
+      }
       const hasSourceMatch = item.marketplaceItemId
         ? lookupMappingRef(mappingIndex, orderMarketplaceId, item.marketplaceItemId, item.optionText) !== null
         : false
@@ -881,7 +914,18 @@ export async function getOrderById(id: string, userId?: string) {
         sku: orderItems.sku,
         skuMultiplier: orderItems.skuMultiplier,
         fulfillmentCode: orderItems.fulfillmentCode,
+        lockedSku: orderItems.lockedSku,
+        lockedProductName: orderItems.lockedProductName,
+        lockedOptionName: orderItems.lockedOptionName,
+        lockedQuantity: orderItems.lockedQuantity,
+        lockedAt: orderItems.lockedAt,
         productInternalName: products.name,
+        productInternalOptionName: sql<string | null>`(
+          SELECT MAX(${inventory.optionName})
+          FROM ${inventory}
+          WHERE ${inventory.userId} = ${orders.userId}
+            AND ${inventory.sku} = ${orderItems.sku}
+        )`,
       })
       .from(orderItems)
       .innerJoin(orders, eq(orders.id, orderItems.orderId))
@@ -916,19 +960,24 @@ export async function getOrderById(id: string, userId?: string) {
       : null
 
   // 확정상품명 fallback chain
-  const items = orderItemRows.map((r) => ({
-    id: r.id,
-    orderId: r.orderId,
-    marketplaceItemId: r.marketplaceItemId,
-    productName: r.productName,
-    optionText: r.optionText,
-    quantity: r.quantity,
-    unitPrice: r.unitPrice,
-    sku: r.sku,
-    skuMultiplier: r.skuMultiplier,
-    fulfillmentCode: r.fulfillmentCode,
-    displayName: r.productInternalName ?? null,
-  }))
+  const items = orderItemRows.map((r) => {
+    const locked = !!r.lockedAt
+    return {
+      id: r.id,
+      orderId: r.orderId,
+      marketplaceItemId: r.marketplaceItemId,
+      productName: r.productName,
+      optionText: r.optionText,
+      quantity: locked ? r.lockedQuantity ?? r.quantity : r.quantity,
+      unitPrice: r.unitPrice,
+      sku: locked ? r.lockedSku ?? r.sku : r.sku,
+      skuMultiplier: r.skuMultiplier,
+      fulfillmentCode: r.fulfillmentCode,
+      displayName: locked ? r.lockedProductName ?? r.productInternalName ?? null : r.productInternalName ?? null,
+      displayOptionName: locked ? r.lockedOptionName ?? r.productInternalOptionName ?? null : r.productInternalOptionName ?? null,
+      lockedAt: r.lockedAt,
+    }
+  })
 
   return {
     ...order,

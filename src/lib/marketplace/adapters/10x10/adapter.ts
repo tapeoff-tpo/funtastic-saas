@@ -46,6 +46,8 @@ interface OrdersListResponse {
   datas: OrderMaster[]
 }
 
+type OrdersListPayload = OrdersListResponse | OrderMaster[]
+
 interface OrderMaster {
   OrderSerial: string
   OrderDivision?: string
@@ -152,6 +154,13 @@ function parseTenByTenDate(s: string | null | undefined): Date {
   return isNaN(d.getTime()) ? new Date() : d
 }
 
+function extractOrderMasters(payload: OrdersListPayload | null | undefined): OrderMaster[] {
+  if (!payload) return []
+  if (Array.isArray(payload)) return payload
+  if (Array.isArray(payload.datas)) return payload.datas
+  return []
+}
+
 async function toTenByTenApiError(action: string, error: unknown): Promise<MarketplaceApiError> {
   if (error instanceof Error && 'response' in error) {
     const response = (error as { response: Response }).response
@@ -245,7 +254,7 @@ export class TenByTenAdapter implements MarketplaceAdapter {
       // history endpoint.
       const env = await this.client(creds)
         .get(`orders/orderhistory?${search.toString()}`)
-        .json<TenByTenEnvelope<OrdersListResponse>>()
+        .json<TenByTenEnvelope<OrdersListPayload>>()
 
       if (env.hasError) return { success: false, error: env.message || 'API returned error' }
       return { success: true }
@@ -335,7 +344,7 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     try {
       env = await this.client(creds)
         .get(`${path}?${search.toString()}`)
-        .json<TenByTenEnvelope<OrdersListResponse>>()
+        .json<TenByTenEnvelope<OrdersListPayload>>()
     } catch (error) {
       throw await toTenByTenApiError(path, error)
     }
@@ -344,7 +353,7 @@ export class TenByTenAdapter implements MarketplaceAdapter {
       throw new MarketplaceApiError('10x10', 500, env.message || `${path} failed`)
     }
 
-    return env.outPutValue?.datas ?? []
+    return extractOrderMasters(env.outPutValue)
   }
 
   private toNormalizedOrder(o: OrderMaster): NormalizedOrder {

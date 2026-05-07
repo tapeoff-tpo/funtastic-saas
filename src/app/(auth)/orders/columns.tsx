@@ -298,6 +298,15 @@ export interface OrderRow {
  * 상품 셀 — 신규 탭(status=new)에서만 수집상품명을 보조로 같이 표시.
  * 그 외 탭은 확정상품명만 표시(매핑 없으면 fallback으로 productName 자체 노출).
  */
+function stripTrailingOptionName(productName: string, optionName: string | null | undefined): string {
+  const option = optionName?.trim()
+  if (!option) return productName
+
+  const escapedOption = option.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const trailingOptionPattern = new RegExp(`\\s*[\\(（]\\s*${escapedOption}\\s*[\\)）]\\s*$`)
+  return productName.replace(trailingOptionPattern, '').trim()
+}
+
 function ProductNameCell({ order }: { order: OrderRow }) {
   const searchParams = useSearchParams()
   const isNewTab = searchParams.get('status') === 'new'
@@ -309,10 +318,12 @@ function ProductNameCell({ order }: { order: OrderRow }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-tight">
       {items.map((item, index) => {
-        const primaryName = item.displayName ?? item.productName
+        const displayOption = item.displayOptionName ?? item.optionText
+        const primaryName = stripTrailingOptionName(item.displayName ?? item.productName, displayOption)
         const showOriginal =
           isNewTab && item.displayName != null && item.displayName !== item.productName
-        const collected = showOriginal ? ` (${item.productName})` : ''
+        const collectedName = stripTrailingOptionName(item.productName, item.optionText)
+        const collected = showOriginal ? ` (${collectedName})` : ''
         const line = `${primaryName}${collected}`
         return (
           <div

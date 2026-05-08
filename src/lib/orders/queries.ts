@@ -226,6 +226,16 @@ function getOrderHistoricalClaimStatuses(order: typeof orders.$inferSelect): str
   return [...statuses].sort((a, b) => a.localeCompare(b, 'ko'))
 }
 
+function parseKstDateBoundary(value: string, boundary: 'start' | 'end'): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value)
+  const time = boundary === 'start' ? '00:00:00.000' : '23:59:59.999'
+  return new Date(`${value}T${time}+09:00`)
+}
+
+function getDateFilterColumn(filters: OrderFilters) {
+  return filters.dateField === 'collectedAt' ? orders.collectedAt : orders.orderedAt
+}
+
 /**
  * Build WHERE clause conditions from filters.
  * Exported for testability.
@@ -251,12 +261,14 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(isNull(orders.mappedAt))
   }
 
+  const dateColumn = getDateFilterColumn(filters)
+
   if (filters.dateFrom) {
-    conditions.push(gte(orders.orderedAt, new Date(filters.dateFrom)))
+    conditions.push(gte(dateColumn, parseKstDateBoundary(filters.dateFrom, 'start')))
   }
 
   if (filters.dateTo) {
-    conditions.push(lte(orders.orderedAt, new Date(filters.dateTo)))
+    conditions.push(lte(dateColumn, parseKstDateBoundary(filters.dateTo, 'end')))
   }
 
   if (filters.search) {

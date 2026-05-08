@@ -70,6 +70,8 @@ export type OrderSearchField =
   | 'trackingNumber'
   | 'logisticsMessage'
 
+export type OrderDateField = 'orderedAt' | 'collectedAt'
+
 /** 주문 처리 단계 (워크플로우) */
 export type OrderStage =
   | 'prep'        // 출고 준비 (매핑 필요 ∪ 확정 대기) — 매핑 먼저, 그 다음 몰 통보
@@ -94,6 +96,7 @@ export interface OrderFilters {
    * Includes exact internal SKUs and base SKU prefixes for imported marketplace rows.
    */
   confirmedProductSearchSkus?: string[]
+  dateField?: OrderDateField
   dateFrom?: string
   dateTo?: string
   sort?: string

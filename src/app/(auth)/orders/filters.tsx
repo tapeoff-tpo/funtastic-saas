@@ -70,6 +70,7 @@ export function OrderFilters({
     marketplace: parseAsString,
     search: parseAsString,
     searchField: parseAsString,
+    dateField: parseAsString,
     dateFrom: parseAsString,
     dateTo: parseAsString,
     datePreset: parseAsString,
@@ -110,6 +111,7 @@ export function OrderFilters({
         marketplace: null,
         search: null,
         searchField: null,
+        dateField: null,
         dateFrom: null,
         dateTo: null,
         datePreset: null,
@@ -238,6 +240,20 @@ export function OrderFilters({
       )}
 
       {/* Date range */}
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-date-field" className="text-xs font-medium text-muted-foreground">
+          기준일
+        </label>
+        <select
+          id="filter-date-field"
+          value={filters.dateField ?? 'orderedAt'}
+          onChange={(e) => updateFilter({ dateField: e.target.value === 'orderedAt' ? null : e.target.value })}
+          className="rounded-md border px-3 py-1.5 text-sm"
+        >
+          <option value="orderedAt">주문일자</option>
+          <option value="collectedAt">수집일자</option>
+        </select>
+      </div>
       <div className="flex flex-col gap-1">
         <label htmlFor="filter-date-from" className="text-xs font-medium text-muted-foreground">
           시작일

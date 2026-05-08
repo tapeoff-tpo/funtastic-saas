@@ -105,6 +105,15 @@ function shouldAutoConfirmOrders(): boolean {
   return process.env.MARKETPLACE_AUTO_CONFIRM_ON_COLLECT === '1'
 }
 
+function shouldConfirmOnCollect(marketplaceId: string): boolean {
+  return marketplaceId === 'toss-shopping' || shouldAutoConfirmOrders()
+}
+
+function confirmedMarketplaceStatus(marketplaceId: string): string {
+  if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
+  return 'CONFIRMED'
+}
+
 async function refreshCafe24AccessToken(params: {
   userId: string
   credentials: Record<string, string>
@@ -330,7 +339,7 @@ export async function collectOrdersForConnection(params: {
     if (
       newOrderIds.length > 0 &&
       typeof adapter.confirmOrder === 'function' &&
-      shouldAutoConfirmOrders() &&
+      shouldConfirmOnCollect(marketplaceId) &&
       marketplaceId !== '10x10'
     ) {
       await setProgress(`신규 주문 확인 중 (0/${newOrderIds.length})`)
@@ -342,7 +351,7 @@ export async function collectOrdersForConnection(params: {
           if (result.success) {
             await db
               .update(orders)
-              .set({ status: 'confirmed', marketplaceStatus: 'CONFIRMED', updatedAt: new Date() })
+              .set({ status: 'confirmed', marketplaceStatus: confirmedMarketplaceStatus(marketplaceId), updatedAt: new Date() })
               .where(eq(orders.id, o.id))
           }
         } catch (err) {

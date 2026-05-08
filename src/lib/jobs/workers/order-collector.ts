@@ -204,7 +204,10 @@ export async function collectOrdersForConnection(params: {
 
     // 2. Look up connection to get storeAlias
     const [connection] = await db
-      .select({ storeAlias: marketplaceConnections.storeAlias })
+      .select({
+        storeAlias: marketplaceConnections.storeAlias,
+        lastSuccessAt: marketplaceConnections.lastSuccessAt,
+      })
       .from(marketplaceConnections)
       .where(eq(marketplaceConnections.id, connectionId))
       .limit(1)
@@ -253,9 +256,21 @@ export async function collectOrdersForConnection(params: {
         ? 1 * 24 * 60 * 60 * 1000
         : 7 * 24 * 60 * 60 * 1000
     const since = new Date(now - lookbackMs)
+    const tenByTenRecentMs = 24 * 60 * 60 * 1000
+    const tenByTenLastSuccessAt = connection?.lastSuccessAt?.getTime()
+    const tenByTenSinceMs = tenByTenLastSuccessAt
+      ? Math.max(tenByTenLastSuccessAt - 5 * 60 * 1000, now - tenByTenRecentMs)
+      : now - tenByTenRecentMs
+    const effectiveSince = marketplaceId === '10x10' ? new Date(tenByTenSinceMs) : since
+    const effectiveLookbackLabel = marketplaceId === '10x10'
+      ? (tenByTenLastSuccessAt ? 'last success' : '1 day')
+      : lookbackLabel
 
     await setProgress(`변경된 주문 조회 중... (최근 ${lookbackLabel})`)
-    const fetchedOrders = await adapter.getOrders(since)
+    if (marketplaceId === '10x10') {
+      await setProgress(`10x10 order lookup (${effectiveLookbackLabel})`)
+    }
+    const fetchedOrders = await adapter.getOrders(effectiveSince)
     const normalizedOrders = mergeNormalizedOrdersByOrderId(fetchedOrders)
     const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
     const ordersToSave = normalizedOrders.filter((order) => {

@@ -49,6 +49,11 @@ function ymdKst(date: Date): string {
   return `${yyyy}-${MM}-${dd}`
 }
 
+function parseTossDate(value: string): Date {
+  if (/[zZ]|[+-]\d{2}:\d{2}$/.test(value)) return new Date(value)
+  return new Date(`${value}+09:00`)
+}
+
 function tossErrorMessage(error?: { errorCode?: string; reason?: string } | null): string {
   if (!error) return 'Unknown Toss Shopping API error'
   return [error.errorCode, error.reason].filter(Boolean).join(': ') || 'Unknown Toss Shopping API error'
@@ -250,7 +255,7 @@ export class TossShoppingAdapter implements MarketplaceAdapter {
         address2: first.detailAddress || undefined,
       },
       items,
-      orderedAt: new Date(first.orderedAt),
+      orderedAt: parseTossDate(first.orderedAt),
       totalAmount,
       shippingFee: group.reduce((sum, item) => sum + (item.deliveryFee ?? 0), 0),
       deliveryMessage: first.shippingNote || undefined,

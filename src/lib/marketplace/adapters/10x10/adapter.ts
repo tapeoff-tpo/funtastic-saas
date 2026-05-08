@@ -310,8 +310,13 @@ export class TenByTenAdapter implements MarketplaceAdapter {
       ? confirmedAfterResult.value
       : []
 
+    const beforeSerials = new Set(confirmedBefore.map((order) => order.OrderSerial).filter(Boolean))
+    const movedByNewOrderInquiry = confirmedAfter.filter((order) =>
+      order.OrderSerial && !beforeSerials.has(order.OrderSerial),
+    )
+
     const byOrderSerial = new Map<string, OrderMaster>()
-    for (const order of [...confirmedBefore, ...newOrders, ...confirmedAfter]) {
+    for (const order of [...newOrders, ...movedByNewOrderInquiry]) {
       if (order.OrderSerial) {
         byOrderSerial.set(order.OrderSerial, order)
       }

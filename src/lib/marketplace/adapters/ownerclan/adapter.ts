@@ -22,7 +22,7 @@ const OWNERCLAN_CONFIG: MarketplaceConfig = {
   name: '오너클랜',
   authType: 'api_key',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['username', 'password'],
+  requiredCredentials: ['username', 'password', 'vendor_id', 'vendor_password'],
 }
 
 const ORDER_FIELDS = `
@@ -152,21 +152,32 @@ function buildOptionText(product: OwnerclanOrderProduct): string | undefined {
 export class OwnerclanAdapter implements MarketplaceAdapter {
   readonly config = OWNERCLAN_CONFIG
 
-  private readonly client: ReturnType<typeof createOwnerclanClient>
+  private readonly authClient: ReturnType<typeof createOwnerclanClient>
+  private readonly orderClient: ReturnType<typeof createOwnerclanClient>
 
   constructor(credentials: { username?: string; password?: string; api_key?: string; seller_id?: string; vendor_id?: string; vendor_password?: string }) {
-    this.client = createOwnerclanClient({
-      username: credentials.username || credentials.seller_id || credentials.vendor_id || '',
-      password: credentials.password || credentials.api_key || credentials.vendor_password || '',
+    const sellerUsername = credentials.username || credentials.seller_id || ''
+    const sellerPassword = credentials.password || credentials.api_key || ''
+    const vendorUsername = credentials.vendor_id || ''
+    const vendorPassword = credentials.vendor_password || ''
+
+    this.authClient = createOwnerclanClient({
+      username: sellerUsername,
+      password: sellerPassword,
       userType: 'seller',
+    })
+
+    this.orderClient = createOwnerclanClient({
+      username: vendorUsername || sellerUsername,
+      password: vendorPassword || sellerPassword,
+      userType: vendorUsername && vendorPassword ? 'vendor' : 'seller',
     })
   }
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      // Authentication is enough for a credential check; avoid order queries
-      // because some marketplaces mutate state during "new order" reads.
-      await this.client.authenticate()
+      await this.authClient.authenticate()
+      await this.orderClient.authenticate()
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -175,7 +186,8 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
   async authenticate(): Promise<{ success: boolean; expiresAt?: Date }> {
     try {
-      await this.client.authenticate()
+      await this.authClient.authenticate()
+      await this.orderClient.authenticate()
       return { success: true }
     } catch (error) {
       throw new MarketplaceAuthError('ownerclan', error instanceof Error ? error.message : 'Authentication failed')
@@ -234,7 +246,7 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     let after: string | null = null
 
     for (let page = 0; page < OWNERCLAN_MAX_PAGES_PER_WINDOW; page++) {
-      const response: OwnerclanAllOrdersResponse = await this.client.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
+      const response: OwnerclanAllOrdersResponse = await this.orderClient.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
         first: OWNERCLAN_PAGE_SIZE,
         after,
         dateFrom: toUnixSeconds(dateFrom),
@@ -262,7 +274,7 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
   async confirmOrder(marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await this.client.query<OwnerclanOrderResponse>(ORDER_QUERY, { key: marketplaceOrderId })
+      const response = await this.orderClient.query<OwnerclanOrderResponse>(ORDER_QUERY, { key: marketplaceOrderId })
       if (!response.order) return { success: false, error: '오너클랜 주문을 찾을 수 없습니다.' }
       return { success: true }
     } catch (error) {

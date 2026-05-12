@@ -133,6 +133,8 @@ export async function testMarketplaceCredentials(
         result = await new OwnerclanAdapter({
           username: credentials.username?.trim() ?? credentials.vendor_id?.trim() ?? credentials.seller_id?.trim() ?? '',
           password: credentials.password?.trim() ?? credentials.vendor_password?.trim() ?? credentials.api_key?.trim() ?? '',
+          vendor_id: credentials.vendor_id?.trim() ?? '',
+          vendor_password: credentials.vendor_password?.trim() ?? '',
         }).testConnection()
         break
       default:

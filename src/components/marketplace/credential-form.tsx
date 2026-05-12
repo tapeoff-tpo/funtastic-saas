@@ -28,7 +28,7 @@ interface CredentialFormProps {
 const credentialLabels: Record<string, string> = {
   access_key: '액세스 키',
   secret_key: '시크릿 키',
-  vendor_id: '벤더 ID',
+  vendor_id: '오너클랜 공급사 ID',
   client_id: '클라이언트 ID',
   client_secret: '클라이언트 시크릿',
   master_id: 'ESM+ 마스터 ID',
@@ -41,8 +41,7 @@ const credentialLabels: Record<string, string> = {
   seller_app_key: '판매자 API 인증키',
   username: '오너클랜 판매회원 ID',
   password: '오너클랜 판매회원 PW',
-  vendor_id: '공급사 ID',
-  vendor_password: '공급사 PW',
+  vendor_password: '오너클랜 공급사 PW',
 }
 
 export function CredentialForm({ marketplaces }: CredentialFormProps) {

@@ -213,10 +213,6 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
         windowStart = windowEnd
       }
 
-      if (collected.length === 0) {
-        await this.collectRecentOrdersWithoutFilters(collected, seenOrderIds)
-      }
-
       return collected
     } catch (error) {
       if (error instanceof MarketplaceApiError || error instanceof MarketplaceAuthError) throw error
@@ -258,9 +254,6 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     for (const status of OWNERCLAN_NEW_ORDER_STATUSES) {
       await this.fetchOrdersWindowByStatus(dateFrom, dateTo, status, collected, seenOrderIds)
     }
-    if (collected.length === beforeCount) {
-      await this.fetchOrdersWindowByStatus(dateFrom, dateTo, null, collected, seenOrderIds)
-    }
   }
 
   private async fetchOrdersWindowByStatus(
@@ -290,39 +283,6 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
       if (!response.allOrders.pageInfo.hasNextPage || !response.allOrders.pageInfo.endCursor) break
       after = response.allOrders.pageInfo.endCursor
-    }
-  }
-
-  private async collectRecentOrdersWithoutFilters(
-    collected: NormalizedOrder[],
-    seenOrderIds: Set<string>,
-  ): Promise<void> {
-    const response: OwnerclanAllOrdersResponse = await this.orderClient.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
-      first: OWNERCLAN_PAGE_SIZE,
-      after: null,
-    })
-
-    const edges = response.allOrders.edges ?? []
-    if (edges.length === 0) {
-      throw new Error('오너클랜 allOrders가 날짜/상태 필터 없이도 원본 주문 0건을 반환했습니다. API 계정이 웹 vendor 주문 화면과 다른 주문 목록을 보고 있을 가능성이 큽니다.')
-    }
-
-    const statusCounts = new Map<string, number>()
-    for (const edge of edges) {
-      const status = edge.node.status ?? 'unknown'
-      statusCounts.set(status, (statusCounts.get(status) ?? 0) + 1)
-
-      if (!isNewOwnerclanStatus(edge.node.status)) continue
-      if (seenOrderIds.has(edge.node.key)) continue
-      seenOrderIds.add(edge.node.key)
-      collected.push(this.normalizeOrder(edge.node))
-    }
-
-    if (collected.length === 0) {
-      const statuses = Array.from(statusCounts.entries())
-        .map(([status, count]) => `${status}:${count}`)
-        .join(', ')
-      throw new Error(`오너클랜 allOrders 원본 주문은 ${edges.length}건 반환됐지만 신규 상태(paid/placed)가 없습니다. 반환 상태: ${statuses}`)
     }
   }
 

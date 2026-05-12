@@ -110,7 +110,8 @@ function toUnixSeconds(date: Date): number {
 }
 
 function fromUnixSeconds(value?: number | null): Date {
-  return value ? new Date(value * 1000) : new Date()
+  if (!value) return new Date()
+  return new Date(value > 10_000_000_000 ? value : value * 1000)
 }
 
 function asNumber(value: unknown): number {

@@ -4,6 +4,7 @@ const OWNERCLAN_GRAPHQL_URL = 'https://api.ownerclan.com/v1/graphql'
 const OWNERCLAN_AUTH_URL = 'https://auth.ownerclan.com/auth'
 const OWNERCLAN_GRAPHQL_INTERVAL_MS = 2_500
 const OWNERCLAN_RATE_LIMIT_BACKOFF_MS = 15_000
+const OWNERCLAN_CLOUDFLARE_BACKOFF_MS = 60_000
 
 interface OwnerclanAuthResponse {
   token?: string
@@ -82,6 +83,10 @@ export class OwnerclanClient {
         await sleep(OWNERCLAN_RATE_LIMIT_BACKOFF_MS)
         return this.graphqlRequest<T>(query, variables, attempt + 1)
       }
+      if (attempt === 0 && isRetryableCloudflareError(enrichedError)) {
+        await sleep(getRetryAfterMs(enrichedError) ?? OWNERCLAN_CLOUDFLARE_BACKOFF_MS)
+        return this.graphqlRequest<T>(query, variables, attempt + 1)
+      }
       throw enrichedError
     }
 
@@ -116,6 +121,18 @@ function sleep(ms: number): Promise<void> {
 function isRateLimitError(error: Error): boolean {
   const message = error.message.toLowerCase()
   return message.includes('too many requests') || message.includes('429')
+}
+
+function isRetryableCloudflareError(error: Error): boolean {
+  const message = error.message.toLowerCase()
+  return message.includes('cloudflare_error') || message.includes('bad gateway') || message.includes('502')
+}
+
+function getRetryAfterMs(error: Error): number | undefined {
+  const match = error.message.match(/"retry_after"\s*:\s*(\d+)/)
+  if (!match) return undefined
+  const seconds = Number(match[1])
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined
 }
 
 async function enrichHttpError(error: unknown): Promise<Error> {

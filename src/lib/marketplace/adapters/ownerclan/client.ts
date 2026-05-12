@@ -5,6 +5,7 @@ const OWNERCLAN_AUTH_URL = 'https://auth.ownerclan.com/auth'
 const OWNERCLAN_GRAPHQL_INTERVAL_MS = 2_500
 const OWNERCLAN_RATE_LIMIT_BACKOFF_MS = 15_000
 const OWNERCLAN_CLOUDFLARE_BACKOFF_MS = 60_000
+const OWNERCLAN_HTTP_TIMEOUT_MS = 60_000
 
 interface OwnerclanAuthResponse {
   token?: string
@@ -25,7 +26,7 @@ export class OwnerclanClient {
   constructor(
     private readonly credentials: { username: string; password: string; userType?: 'seller' | 'vendor' },
     private readonly http: KyInstance = ky.create({
-      timeout: 30_000,
+      timeout: OWNERCLAN_HTTP_TIMEOUT_MS,
       retry: {
         limit: 2,
         statusCodes: [408, 500, 502, 503, 504],

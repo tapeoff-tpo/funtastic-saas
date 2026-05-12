@@ -123,6 +123,11 @@ function isTimeoutError(error: unknown): boolean {
   return message.includes('timed out') || message.includes('timeout')
 }
 
+function isNewOwnerclanStatus(status?: string | null): boolean {
+  if (!status) return false
+  return OWNERCLAN_NEW_ORDER_STATUSES.includes(status)
+}
+
 function buildOptionText(product: OwnerclanOrderProduct): string | undefined {
   const optionParts = product.itemOptionInfo?.optionAttributes
     ?.map((attr) => {
@@ -244,15 +249,19 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     collected: NormalizedOrder[],
     seenOrderIds: Set<string>,
   ): Promise<void> {
+    const beforeCount = collected.length
     for (const status of OWNERCLAN_NEW_ORDER_STATUSES) {
       await this.fetchOrdersWindowByStatus(dateFrom, dateTo, status, collected, seenOrderIds)
+    }
+    if (collected.length === beforeCount) {
+      await this.fetchOrdersWindowByStatus(dateFrom, dateTo, null, collected, seenOrderIds)
     }
   }
 
   private async fetchOrdersWindowByStatus(
     dateFrom: Date,
     dateTo: Date,
-    status: string,
+    status: string | null,
     collected: NormalizedOrder[],
     seenOrderIds: Set<string>,
   ): Promise<void> {
@@ -264,10 +273,11 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
         after,
         dateFrom: toUnixSeconds(dateFrom),
         dateTo: toUnixSeconds(dateTo),
-        status,
+        ...(status ? { status } : {}),
       })
 
       for (const edge of response.allOrders.edges ?? []) {
+        if (!status && !isNewOwnerclanStatus(edge.node.status)) continue
         if (seenOrderIds.has(edge.node.key)) continue
         seenOrderIds.add(edge.node.key)
         collected.push(this.normalizeOrder(edge.node))

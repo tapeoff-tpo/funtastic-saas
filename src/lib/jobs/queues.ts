@@ -11,6 +11,7 @@ export interface OrderCollectionJobData {
   marketplaceId: string
   connectionId: string
   userId: string
+  manualLookbackDays?: number
   /** Pre-created job_logs row ID (for manual collection via API route) */
   jobLogId?: string
   jobType?: string

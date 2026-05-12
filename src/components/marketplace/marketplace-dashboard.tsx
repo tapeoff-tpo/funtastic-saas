@@ -120,6 +120,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     if (typeof window === 'undefined') return null
     return window.localStorage.getItem(IMPORT_TEMPLATE_KEY)
   })
+  const [ownerclanLookbackDays, setOwnerclanLookbackDays] = useState(3)
   const [filter, setFilter] = useState<FilterKey>('all')
   const [search, setSearch] = useState('')
   const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
@@ -216,16 +217,16 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
       connectedMarkets.some((c) => c.id === id)
     )
     if (ids.length === 0) return
-    startCollect(ids)
+    startCollect(ids, { manualLookbackDays: ownerclanLookbackDays })
   }
 
   const handleCollectAll = () => {
     if (connectedMarkets.length === 0) return
-    startCollect(connectedMarkets.map((c) => c.id))
+    startCollect(connectedMarkets.map((c) => c.id), { manualLookbackDays: ownerclanLookbackDays })
   }
 
   const handleCollectOne = (connectionId: string) => {
-    startCollect([connectionId])
+    startCollect([connectionId], { manualLookbackDays: ownerclanLookbackDays })
   }
 
   const nameMap = Object.fromEntries(
@@ -344,6 +345,23 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
           className="ml-2 w-[180px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
         />
         <div className="ml-auto flex items-center gap-1">
+          {connectedMarkets.some((c) => c.marketplaceId === 'ownerclan') && (
+            <label className="flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs">
+              <span className="whitespace-nowrap">오너클랜</span>
+              <select
+                value={ownerclanLookbackDays}
+                onChange={(e) => setOwnerclanLookbackDays(Number(e.target.value))}
+                className="bg-transparent text-xs outline-none"
+                title="오너클랜 주문수집 기간"
+              >
+                <option value={1}>1일</option>
+                <option value={3}>3일</option>
+                <option value={6}>6일</option>
+                <option value={9}>9일</option>
+                <option value={14}>14일</option>
+              </select>
+            </label>
+          )}
           {selected.size > 0 && (
             <>
               <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">

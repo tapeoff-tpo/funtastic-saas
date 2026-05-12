@@ -16,7 +16,7 @@ interface UseCollectPollReturn {
   collecting: boolean
   logs: JobLogResult[] | null
   jobLogIds: string[]
-  startCollect: (connectionIds: string[]) => Promise<void>
+  startCollect: (connectionIds: string[], options?: { manualLookbackDays?: number }) => Promise<void>
   cancelCollect: () => Promise<void>
   clearResults: () => void
 }
@@ -73,7 +73,7 @@ export function useCollectPoll(): UseCollectPollReturn {
   )
 
   const startCollect = useCallback(
-    async (connectionIds: string[]) => {
+    async (connectionIds: string[], options?: { manualLookbackDays?: number }) => {
       setCollecting(true)
       setLogs(null)
       setJobLogIds([])
@@ -83,7 +83,7 @@ export function useCollectPoll(): UseCollectPollReturn {
         const res = await fetch('/api/orders/collect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ connectionIds }),
+          body: JSON.stringify({ connectionIds, manualLookbackDays: options?.manualLookbackDays }),
         })
         const data = await res.json()
 

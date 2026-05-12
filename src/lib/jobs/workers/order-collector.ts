@@ -172,10 +172,11 @@ export async function collectOrdersForConnection(params: {
   connectionId: string
   userId: string
   jobType?: string
+  manualLookbackDays?: number
   /** Pre-created job_logs row ID (from API route). If provided, updates it instead of creating new. */
   jobLogId?: string
 }): Promise<{ ordersCollected: number; claimsCollected: number }> {
-  const { marketplaceId, connectionId, userId, jobType = 'order-collection', jobLogId } = params
+  const { marketplaceId, connectionId, userId, jobType = 'order-collection', jobLogId, manualLookbackDays } = params
 
   // 1. Create or reuse job log entry
   let logId: string
@@ -257,12 +258,19 @@ export async function collectOrdersForConnection(params: {
     const now = Date.now()
     const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver'])
     const sixDayManualMarketplaces = new Set(['10x10', 'cafe24'])
-    const lookbackLabel = jobType === 'manual-order-collection' && sixDayManualMarketplaces.has(marketplaceId)
+    const ownerclanManualDays = jobType === 'manual-order-collection' && marketplaceId === 'ownerclan'
+      ? Math.min(Math.max(Math.floor(manualLookbackDays ?? 3), 1), 14)
+      : null
+    const lookbackLabel = ownerclanManualDays
+      ? `${ownerclanManualDays}일`
+      : jobType === 'manual-order-collection' && sixDayManualMarketplaces.has(marketplaceId)
       ? '6일'
       : jobType === 'manual-order-collection' && !extendedManualMarketplaces.has(marketplaceId)
       ? '1일'
       : '7일'
-    const lookbackMs = sixDayManualMarketplaces.has(marketplaceId)
+    const lookbackMs = ownerclanManualDays
+      ? ownerclanManualDays * 24 * 60 * 60 * 1000
+      : sixDayManualMarketplaces.has(marketplaceId)
       ? 6 * 24 * 60 * 60 * 1000
       : lookbackLabel === '1일'
         ? 1 * 24 * 60 * 60 * 1000

@@ -12,7 +12,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
  * Manually trigger order collection for selected marketplaces.
  * Runs collection directly in the background (no BullMQ worker needed).
  *
- * Body: { connectionIds: string[] }
+ * Body: { connectionIds: string[], manualLookbackDays?: number }
  * Response: { jobLogIds: string[] }
  */
 export async function POST(request: NextRequest) {
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  let body: { connectionIds: string[] }
+  let body: { connectionIds: string[]; manualLookbackDays?: number }
   try {
     body = await request.json()
   } catch {
@@ -40,6 +40,12 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     )
   }
+
+  const manualLookbackDays = Number(body.manualLookbackDays)
+  const safeManualLookbackDays =
+    Number.isFinite(manualLookbackDays) && manualLookbackDays >= 1 && manualLookbackDays <= 14
+      ? Math.floor(manualLookbackDays)
+      : undefined
 
   // Find connections for this user
   const connections = await db
@@ -82,6 +88,7 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       jobType: 'manual-order-collection',
       jobLogId: logRow.id,
+      manualLookbackDays: conn.marketplaceId === 'ownerclan' ? safeManualLookbackDays : undefined,
     }).catch((err) => {
       console.error('[collect] Background collection failed:', err)
     })

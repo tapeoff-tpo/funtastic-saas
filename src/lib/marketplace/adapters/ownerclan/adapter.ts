@@ -105,8 +105,8 @@ const CHECK_ORDER_MUTATION = `
   }
 `
 
-function toUnixSeconds(date: Date): number {
-  return Math.floor(date.getTime() / 1000)
+function toOwnerclanTimestamp(date: Date): number {
+  return date.getTime()
 }
 
 function fromUnixSeconds(value?: number | null): Date {
@@ -269,8 +269,8 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
       const response: OwnerclanAllOrdersResponse = await this.orderClient.query<OwnerclanAllOrdersResponse>(ALL_ORDERS_QUERY, {
         first: OWNERCLAN_PAGE_SIZE,
         after,
-        dateFrom: toUnixSeconds(dateFrom),
-        dateTo: toUnixSeconds(dateTo),
+        dateFrom: toOwnerclanTimestamp(dateFrom),
+        dateTo: toOwnerclanTimestamp(dateTo),
         ...(status ? { status } : {}),
       })
 

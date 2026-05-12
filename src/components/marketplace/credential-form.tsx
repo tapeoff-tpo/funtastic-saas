@@ -39,8 +39,8 @@ const credentialLabels: Record<string, string> = {
   seller_id: '판매자 ID',
   admin_app_key: '연동대행사 Admin 키',
   seller_app_key: '판매자 API 인증키',
-  username: '오너클랜 ID',
-  password: '오너클랜 PW',
+  username: '오너클랜 판매회원 ID',
+  password: '오너클랜 판매회원 PW',
   vendor_id: '공급사 ID',
   vendor_password: '공급사 PW',
 }

@@ -108,11 +108,12 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'toss-shopping' || shouldAutoConfirmOrders()
+  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || shouldAutoConfirmOrders()
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
   if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
+  if (marketplaceId === 'ownerclan') return 'preparing'
   return 'CONFIRMED'
 }
 
@@ -254,8 +255,8 @@ export async function collectOrdersForConnection(params: {
     // 10x10 rejects requests outside "within 7 days" and appears to count
     // calendar dates inclusively, so keep its manual range safely inside.
     const now = Date.now()
-    const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver', 'ownerclan'])
-    const sixDayManualMarketplaces = new Set(['10x10', 'cafe24', 'ownerclan'])
+    const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver'])
+    const sixDayManualMarketplaces = new Set(['10x10', 'cafe24'])
     const lookbackLabel = jobType === 'manual-order-collection' && sixDayManualMarketplaces.has(marketplaceId)
       ? '6일'
       : jobType === 'manual-order-collection' && !extendedManualMarketplaces.has(marketplaceId)

@@ -14,7 +14,6 @@ import type {
   OwnerclanAllOrdersResponse,
   OwnerclanOrder,
   OwnerclanOrderProduct,
-  OwnerclanOrderResponse,
 } from './types'
 
 const OWNERCLAN_CONFIG: MarketplaceConfig = {
@@ -75,8 +74,8 @@ const ORDER_FIELDS = `
 `
 
 const ALL_ORDERS_QUERY = `
-  query OwnerclanAllOrders($first: Int!, $after: String, $dateFrom: Timestamp, $dateTo: Timestamp) {
-    allOrders(first: $first, after: $after, dateFrom: $dateFrom, dateTo: $dateTo) {
+  query OwnerclanAllOrders($first: Int!, $after: String, $dateFrom: Timestamp, $dateTo: Timestamp, $status: OrderStatus) {
+    allOrders(first: $first, after: $after, dateFrom: $dateFrom, dateTo: $dateTo, status: $status) {
       pageInfo {
         hasNextPage
         endCursor
@@ -96,10 +95,11 @@ const OWNERCLAN_MAX_PAGES_PER_WINDOW = 10
 const OWNERCLAN_WINDOW_MS = 6 * 60 * 60 * 1000
 const OWNERCLAN_MIN_WINDOW_MS = 60 * 60 * 1000
 
-const ORDER_QUERY = `
-  query OwnerclanOrder($key: String!) {
-    order(key: $key) {
-      ${ORDER_FIELDS}
+const CHECK_ORDER_MUTATION = `
+  mutation OwnerclanCheckOrder($key: String!) {
+    checkOrder(key: $key) {
+      key
+      status
     }
   }
 `
@@ -251,6 +251,7 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
         after,
         dateFrom: toUnixSeconds(dateFrom),
         dateTo: toUnixSeconds(dateTo),
+        status: 'paid',
       })
 
       for (const edge of response.allOrders.edges ?? []) {
@@ -274,8 +275,11 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
 
   async confirmOrder(marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await this.orderClient.query<OwnerclanOrderResponse>(ORDER_QUERY, { key: marketplaceOrderId })
-      if (!response.order) return { success: false, error: '오너클랜 주문을 찾을 수 없습니다.' }
+      const response = await this.orderClient.mutate<{ checkOrder: { key?: string | null; status?: string | null } | null }>(
+        CHECK_ORDER_MUTATION,
+        { key: marketplaceOrderId },
+      )
+      if (!response.checkOrder) return { success: false, error: '오너클랜 주문을 배송준비중으로 변경하지 못했습니다.' }
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }

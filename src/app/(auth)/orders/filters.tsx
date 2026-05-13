@@ -47,6 +47,40 @@ const SEARCH_FIELD_OPTIONS: Array<{ value: OrderSearchField; label: string }> = 
   { value: 'logisticsMessage', label: '물류메세지' },
 ]
 
+const HANGUL_INITIALS = [
+  'ㄱ',
+  'ㄲ',
+  'ㄴ',
+  'ㄷ',
+  'ㄸ',
+  'ㄹ',
+  'ㅁ',
+  'ㅂ',
+  'ㅃ',
+  'ㅅ',
+  'ㅆ',
+  'ㅇ',
+  'ㅈ',
+  'ㅉ',
+  'ㅊ',
+  'ㅋ',
+  'ㅌ',
+  'ㅍ',
+  'ㅎ',
+] as const
+
+function toSearchText(value: string): string {
+  return value.trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function toHangulInitials(value: string): string {
+  return Array.from(value).map((char) => {
+    const code = char.charCodeAt(0) - 0xac00
+    if (code < 0 || code > 11171) return char
+    return HANGUL_INITIALS[Math.floor(code / 588)]
+  }).join('')
+}
+
 function MarketplaceSearchSelect({
   options,
   value,
@@ -63,10 +97,12 @@ function MarketplaceSearchSelect({
 
   const selected = options.find((option) => option.value === value) ?? options[0]
   const filteredOptions = useMemo(() => {
-    const keyword = query.trim().toLowerCase()
+    const keyword = toSearchText(query)
     if (!keyword) return options
     return options.filter((option) => (
-      option.label.toLowerCase().includes(keyword) || option.value.toLowerCase().includes(keyword)
+      toSearchText(option.label).includes(keyword)
+      || toSearchText(option.value).includes(keyword)
+      || toSearchText(toHangulInitials(option.label)).includes(keyword)
     ))
   }, [options, query])
 

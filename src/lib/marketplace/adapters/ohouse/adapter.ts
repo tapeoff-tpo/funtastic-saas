@@ -78,14 +78,12 @@ export class OhouseAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
-    const now = new Date()
-
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
       const response = await this.client.get('api/v1/orders', {
         searchParams: {
           dateFrom: formatDate(since),
-          dateTo: formatDate(now),
+          dateTo: formatDate(until),
           pageSize: '50',
         },
       }).json<OhouseApiResponse<OhouseOrder[]>>()

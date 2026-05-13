@@ -105,7 +105,7 @@ export class TossShoppingAdapter implements MarketplaceAdapter {
     }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     const orderProducts: TossShoppingOrderProduct[] = []
     let nextCursor: string | undefined
 
@@ -113,7 +113,7 @@ export class TossShoppingAdapter implements MarketplaceAdapter {
       do {
         const searchParams: Record<string, string | number> = {
           startDate: ymdKst(since),
-          endDate: ymdKst(new Date()),
+          endDate: ymdKst(until),
           limit: 50,
           partnerName: PARTNER_NAME,
         }

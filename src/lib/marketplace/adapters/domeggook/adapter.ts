@@ -108,7 +108,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, _until?: Date): Promise<NormalizedOrder[]> {
     this.assertPrivateApiCredentials()
 
     try {

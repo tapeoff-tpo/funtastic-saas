@@ -95,8 +95,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
-    const now = new Date()
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
 
     // Coupang API requires KST date: yyyy-MM-dd+09:00 (date only, no time)
     const fmt = (d: Date) => {
@@ -107,7 +106,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
       return `${yyyy}-${MM}-${dd}+09:00`
     }
 
-    const qs = `createdAtFrom=${encodeURIComponent(fmt(since))}&createdAtTo=${encodeURIComponent(fmt(now))}&status=ACCEPT&maxPerPage=50`
+    const qs = `createdAtFrom=${encodeURIComponent(fmt(since))}&createdAtTo=${encodeURIComponent(fmt(until))}&status=ACCEPT&maxPerPage=50`
     const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
 
     try {

@@ -201,14 +201,13 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     const collected: NormalizedOrder[] = []
     const seenOrderIds = new Set<string>()
-    const now = new Date()
 
     try {
-      for (let windowStart = new Date(since); windowStart < now;) {
-        const windowEnd = new Date(Math.min(windowStart.getTime() + OWNERCLAN_WINDOW_MS, now.getTime()))
+      for (let windowStart = new Date(since); windowStart < until;) {
+        const windowEnd = new Date(Math.min(windowStart.getTime() + OWNERCLAN_WINDOW_MS, until.getTime()))
         await this.collectOrdersWindow(windowStart, windowEnd, collected, seenOrderIds)
         windowStart = windowEnd
       }

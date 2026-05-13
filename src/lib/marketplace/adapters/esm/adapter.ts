@@ -88,9 +88,7 @@ export class EsmAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
-    const now = new Date()
-
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
       const response = await this.client.post('shipping/v1/Order/RequestOrders', {
         json: {
@@ -98,7 +96,7 @@ export class EsmAdapter implements MarketplaceAdapter {
           orderStatus: 1,
           requestDateType: 2,
           requestDateFrom: formatDate(since),
-          requestDateTo: formatDate(now),
+          requestDateTo: formatDate(until),
           pageIndex: 1,
           pageSize: 100,
         },

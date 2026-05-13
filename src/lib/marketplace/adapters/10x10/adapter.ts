@@ -269,9 +269,9 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     return { success: r.success }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     const confirmedBeforeResult = await Promise.resolve()
-      .then(() => this.fetchOrderList('orders/orderhistory', since))
+      .then(() => this.fetchOrderList('orders/orderhistory', since, until))
       .then(
         (value) => ({ status: 'fulfilled' as const, value }),
         (reason) => ({ status: 'rejected' as const, reason }),
@@ -281,14 +281,14 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     // inquiry simultaneously confirms the order. Fetch history again after
     // this call so orders moved by the side effect can still be saved locally.
     const newOrdersResult = await Promise.resolve()
-      .then(() => this.fetchOrderList('orders', since))
+      .then(() => this.fetchOrderList('orders', since, until))
       .then(
         (value) => ({ status: 'fulfilled' as const, value }),
         (reason) => ({ status: 'rejected' as const, reason }),
       )
 
     const confirmedAfterResult = await Promise.resolve()
-      .then(() => this.fetchOrderList('orders/orderhistory', since))
+      .then(() => this.fetchOrderList('orders/orderhistory', since, until))
       .then(
         (value) => ({ status: 'fulfilled' as const, value }),
         (reason) => ({ status: 'rejected' as const, reason }),
@@ -316,7 +316,7 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     )
 
     const byOrderSerial = new Map<string, OrderMaster>()
-    for (const order of [...newOrders, ...movedByNewOrderInquiry]) {
+    for (const order of [...confirmedBefore, ...newOrders, ...movedByNewOrderInquiry]) {
       if (order.OrderSerial) {
         byOrderSerial.set(order.OrderSerial, order)
       }
@@ -325,23 +325,24 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     return Array.from(byOrderSerial.values()).map((o) => this.toNormalizedOrder(o))
   }
 
-  private async fetchOrderList(path: 'orders' | 'orders/orderhistory', since: Date): Promise<OrderMaster[]> {
+  private async fetchOrderList(path: 'orders' | 'orders/orderhistory', since: Date, until: Date): Promise<OrderMaster[]> {
     const creds = this.getCreds()
-    const withBrandId = await this.fetchOrderListWithBrandOption(path, since, true)
+    const withBrandId = await this.fetchOrderListWithBrandOption(path, since, until, true)
     if (withBrandId.length > 0 || !creds.shop_id) return withBrandId
 
-    return this.fetchOrderListWithBrandOption(path, since, false)
+    return this.fetchOrderListWithBrandOption(path, since, until, false)
   }
 
   private async fetchOrderListWithBrandOption(
     path: 'orders' | 'orders/orderhistory',
     since: Date,
+    until: Date,
     includeBrandId: boolean,
   ): Promise<OrderMaster[]> {
     const creds = this.getCreds()
     const search = new URLSearchParams({
       startdate: fmtDate(since),
-      enddate: fmtDate(new Date()),
+      enddate: fmtDate(until),
     })
     if (includeBrandId && creds.shop_id) search.set('brandId', String(creds.shop_id))
 

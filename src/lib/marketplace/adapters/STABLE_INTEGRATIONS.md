@@ -20,3 +20,12 @@ Ownerclan current collection window:
 - The API clamps Ownerclan manual collection to 1 through 14 days.
 - Scheduled/background collection uses the worker default 7-day lookback.
 - Ownerclan still queries that selected lookback in smaller API windows internally to avoid timeouts.
+
+Order collection range workflow:
+
+- The shared order collector splits long collection periods into 1-day ranges.
+- Range-aware adapters receive both `since` and `until`.
+- Range-aware adapters are collected with capped parallelism, currently 2 ranges at a time.
+- Adapters that cannot safely pass `until` to the marketplace API must not be added to `RANGE_AWARE_ORDER_MARKETPLACES`, because repeated `since -> now` calls would create duplicated work and extra rate-limit pressure.
+- Current range-aware order adapters: Ownerclan, 10x10, Coupang, Cafe24, Naver, Toss Shopping, 11st, ESM, Ably, Ohouse, Onchannel, SSG Mall, CJ OnStyle, Kakao Gift, Kakao Store.
+- Domeggook is not listed here because its current private API implementation already slices by relative day internally, not by an exact `since`/`until` pair.

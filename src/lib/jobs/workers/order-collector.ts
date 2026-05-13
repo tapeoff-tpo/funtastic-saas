@@ -125,6 +125,99 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
   return 'CONFIRMED'
 }
 
+const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
+  'ownerclan',
+  '10x10',
+  'coupang',
+  'cafe24',
+  'naver',
+  'toss-shopping',
+  'elevenst',
+  'esm',
+  'ably',
+  'ohouse',
+  'onchannel',
+  'ssgmall',
+  'cjonestyle',
+  'kakao-gift',
+  'kakao-store',
+])
+const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
+  ownerclan: 2,
+  '10x10': 2,
+  coupang: 2,
+  cafe24: 2,
+  naver: 2,
+  'toss-shopping': 2,
+  elevenst: 2,
+  esm: 2,
+  ably: 2,
+  ohouse: 2,
+  onchannel: 2,
+  ssgmall: 2,
+  cjonestyle: 2,
+  'kakao-gift': 2,
+  'kakao-store': 2,
+}
+const ORDER_RANGE_MS = 24 * 60 * 60 * 1000
+
+function splitOrderRanges(since: Date, until: Date): Array<{ since: Date; until: Date }> {
+  if (since >= until) return [{ since, until }]
+  const ranges: Array<{ since: Date; until: Date }> = []
+  for (let start = since.getTime(); start < until.getTime();) {
+    const end = Math.min(start + ORDER_RANGE_MS, until.getTime())
+    ranges.push({ since: new Date(start), until: new Date(end) })
+    start = end
+  }
+  return ranges
+}
+
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  mapper: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(values.length)
+  let next = 0
+  const workerCount = Math.max(1, Math.min(concurrency, values.length))
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const index = next++
+      if (index >= values.length) return
+      results[index] = await mapper(values[index], index)
+    }
+  }))
+
+  return results
+}
+
+async function fetchOrdersForRange(
+  adapter: Pick<MarketplaceAdapter, 'getOrders'>,
+  marketplaceId: string,
+  since: Date,
+  until: Date,
+  setProgress: (message: string) => Promise<void>,
+): Promise<NormalizedOrder[]> {
+  if (!RANGE_AWARE_ORDER_MARKETPLACES.has(marketplaceId)) {
+    return adapter.getOrders(since, until)
+  }
+
+  const ranges = splitOrderRanges(since, until)
+  if (ranges.length <= 1) {
+    return adapter.getOrders(since, until)
+  }
+
+  const concurrency = ORDER_RANGE_CONCURRENCY[marketplaceId] ?? 2
+  await setProgress(`날짜별 주문 조회 중... (${ranges.length}개 구간, 동시 ${concurrency})`)
+  const batches = await mapWithConcurrency(ranges, concurrency, async (range, index) => {
+    await setProgress(`날짜별 주문 조회 중... (${index + 1}/${ranges.length})`)
+    return adapter.getOrders(range.since, range.until)
+  })
+
+  return batches.flat()
+}
+
 async function refreshCafe24AccessToken(params: {
   userId: string
   credentials: Record<string, string>
@@ -293,12 +386,13 @@ export async function collectOrdersForConnection(params: {
     const effectiveLookbackLabel = marketplaceId === '10x10'
       ? (tenByTenLastSuccessAt ? 'last success' : '1 day')
       : lookbackLabel
+    const effectiveUntil = new Date(now)
 
     await setProgress(`변경된 주문 조회 중... (최근 ${lookbackLabel})`)
     if (marketplaceId === '10x10') {
       await setProgress(`10x10 order lookup (${effectiveLookbackLabel})`)
     }
-    const fetchedOrders = await adapter.getOrders(effectiveSince)
+    const fetchedOrders = await fetchOrdersForRange(adapter, marketplaceId, effectiveSince, effectiveUntil, setProgress)
     const normalizedOrders = mergeNormalizedOrdersByOrderId(fetchedOrders)
     const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
     const ordersToSave = normalizedOrders.filter((order) => {

@@ -83,10 +83,10 @@ export class NaverAdapter implements MarketplaceAdapter {
     }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
       // Step 1: Get changed product order IDs
-      const changedIds = await this.fetchChangedIds(since, ORDER_CHANGED_TYPES)
+      const changedIds = await this.fetchChangedIds(since, ORDER_CHANGED_TYPES, until)
       if (changedIds.length === 0) return []
 
       // Step 2: Fetch full product order details
@@ -391,16 +391,14 @@ export class NaverAdapter implements MarketplaceAdapter {
   /**
    * Fetch changed product order IDs from the lastChangedStatuses endpoint.
    */
-  private async fetchChangedIds(since: Date, lastChangedTypes: string[]): Promise<string[]> {
-    const now = new Date()
-
+  private async fetchChangedIds(since: Date, lastChangedTypes: string[], until: Date = new Date()): Promise<string[]> {
     // Naver API max window is 1 hour — split into 1-hour chunks
     const HOUR_MS = 60 * 60 * 1000
     const allIds: string[] = []
     let chunkStart = since
 
-    while (chunkStart < now) {
-      const chunkEnd = new Date(Math.min(chunkStart.getTime() + HOUR_MS, now.getTime()))
+    while (chunkStart < until) {
+      const chunkEnd = new Date(Math.min(chunkStart.getTime() + HOUR_MS, until.getTime()))
 
       const params = new URLSearchParams({
         lastChangedFrom: chunkStart.toISOString(),

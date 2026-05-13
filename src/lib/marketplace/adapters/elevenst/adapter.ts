@@ -125,12 +125,10 @@ export class ElevenstAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
-    const now = new Date()
-
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
       const response = await readElevenstXml(
-        await this.client.get(`rest/ordservices/complete/${formatDateCompact(since)}/${formatDateCompact(now)}`)
+        await this.client.get(`rest/ordservices/complete/${formatDateCompact(since)}/${formatDateCompact(until)}`)
       )
 
       const parsed = parseXmlResponse<ElevenstOrderResponse>(response)

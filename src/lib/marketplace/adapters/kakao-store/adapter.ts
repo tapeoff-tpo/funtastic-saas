@@ -86,10 +86,10 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
       await this.registerSeller()
-      const changed = await this.getChangedOrders(since)
+      const changed = await this.getChangedOrders(since, until)
       const orderIds = Array.from(new Set(changed.map((order) => order.orderId).filter(Boolean)))
       if (orderIds.length === 0) return []
 
@@ -228,9 +228,9 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
     }
   }
 
-  private async getChangedOrders(since: Date): Promise<NonNullable<KakaoStoreChangedOrdersResponse['contents']>> {
+  private async getChangedOrders(since: Date, until: Date = new Date()): Promise<NonNullable<KakaoStoreChangedOrdersResponse['contents']>> {
     const orders: NonNullable<KakaoStoreChangedOrdersResponse['contents']> = []
-    const finalEnd = new Date()
+    const finalEnd = until
     let windowStart = since
 
     while (windowStart < finalEnd) {

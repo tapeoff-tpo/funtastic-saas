@@ -24,6 +24,7 @@ Important implementation details:
 
 - 10x10 expects KST wall-clock date strings as `YYYY-MM-DD HH:mm:ss`.
 - 10x10 rejects order lookup outside the allowed recent window, so collection uses the existing capped lookback logic in `order-collector.ts`.
+- The shared collector may call 10x10 with 1-day `since`/`until` ranges in parallel, capped at 2 concurrent ranges.
 - Do not call a separate confirm flow after collection. The 10x10 new-order lookup confirms orders as part of the API behavior.
 - `confirmOrder` intentionally returns success for 10x10 because the confirmation is handled by `getOrders`.
 - Invoice upload requires `detailIdx` per line, resolved from stored raw order data.

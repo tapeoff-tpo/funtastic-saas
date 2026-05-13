@@ -80,13 +80,13 @@ export class Cafe24Adapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
       const response = await this.client.get('admin/orders', {
         searchParams: {
           shop_no: 1,
           start_date: formatDate(since),
-          end_date: formatDate(new Date()),
+          end_date: formatDate(until),
           order_status: 'N10',
           limit: 100,
         },

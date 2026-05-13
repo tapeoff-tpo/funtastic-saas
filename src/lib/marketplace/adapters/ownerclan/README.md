@@ -22,6 +22,7 @@ Important implementation details:
 - `checkOrder` GraphQL variable type must be `ID!`, not `String!`.
 - Ownerclan order date filters use millisecond timestamps.
 - Ownerclan collection is intentionally windowed to avoid API timeout and Cloudflare 502 responses.
+- The shared collector may call Ownerclan with 1-day `since`/`until` ranges in parallel, capped at 2 concurrent ranges.
 - `ownerclan` is included in `shouldConfirmOnCollect`, and confirmed local orders use marketplace status `preparing`.
 - Credentials currently use both seller and vendor values:
   - `username`

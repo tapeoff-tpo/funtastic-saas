@@ -188,7 +188,7 @@ export interface MarketplaceAdapter {
 
   // Phase 2+ methods
   authenticate(): Promise<{ success: boolean; expiresAt?: Date }>
-  getOrders(since: Date): Promise<NormalizedOrder[]>
+  getOrders(since: Date, until?: Date): Promise<NormalizedOrder[]>
   getClaimsOrders(since: Date): Promise<NormalizedClaim[]>
   uploadInvoice(
     orderId: string,

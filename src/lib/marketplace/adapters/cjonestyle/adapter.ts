@@ -63,12 +63,12 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
       const response = await this.client.get('orders', {
         searchParams: {
           start_date: formatDate(since),
-          end_date: formatDate(new Date()),
+          end_date: formatDate(until),
           limit: 100,
         },
       }).json<CjOnestyleOrderResponse>()

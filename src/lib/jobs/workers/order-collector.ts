@@ -304,7 +304,8 @@ export async function collectOrdersForConnection(params: {
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)
     // Track newly inserted 'new' status orders for auto-confirm
-    const newOrderIds: Array<{ id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }> = []
+    type ConfirmTarget = { id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
+    const newOrderIds: ConfirmTarget[] = []
 
     const totalOrders = ordersToSave.length
     let idx = 0
@@ -345,17 +346,54 @@ export async function collectOrdersForConnection(params: {
       }
     }
 
+    let confirmTargets = newOrderIds
+    if (marketplaceId === 'ownerclan' && normalizedOrders.length > 0) {
+      const existingNewOrders = await db
+        .select({
+          id: orders.id,
+          marketplaceOrderId: orders.marketplaceOrderId,
+          rawData: orders.rawData,
+        })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.userId, userId),
+            eq(orders.marketplaceId, marketplaceId),
+            eq(orders.status, 'new'),
+            inArray(
+              orders.marketplaceOrderId,
+              normalizedOrders.map((order) => order.marketplaceOrderId)
+            )
+          )
+        )
+
+      if (existingNewOrders.length > 0) {
+        const targetsByOrderId = new Map(confirmTargets.map((target) => [target.marketplaceOrderId, target]))
+        for (const order of existingNewOrders) {
+          if (!targetsByOrderId.has(order.marketplaceOrderId)) {
+            targetsByOrderId.set(order.marketplaceOrderId, {
+              id: order.id,
+              marketplaceOrderId: order.marketplaceOrderId,
+              rawData: order.rawData ?? null,
+            })
+          }
+        }
+        confirmTargets = Array.from(targetsByOrderId.values())
+      }
+    }
+
     // 4.5 Auto-confirm is opt-in only. Default workflow:
     // 수집 → 신규(status='new') → 매핑 → 사용자가 [확정] 클릭 → 확인(status='confirmed').
     if (
-      newOrderIds.length > 0 &&
+      confirmTargets.length > 0 &&
       typeof adapter.confirmOrder === 'function' &&
       shouldConfirmOnCollect(marketplaceId) &&
       marketplaceId !== '10x10'
     ) {
-      await setProgress(`신규 주문 확인 중 (0/${newOrderIds.length})`)
+      await setProgress(`신규 주문 확인 중 (0/${confirmTargets.length})`)
       let confirmIdx = 0
-      for (const o of newOrderIds) {
+      const confirmFailures: string[] = []
+      for (const o of confirmTargets) {
         confirmIdx++
         try {
           const result = await adapter.confirmOrder(o.marketplaceOrderId, o.rawData ?? undefined)
@@ -364,14 +402,21 @@ export async function collectOrdersForConnection(params: {
               .update(orders)
               .set({ status: 'confirmed', marketplaceStatus: confirmedMarketplaceStatus(marketplaceId), updatedAt: new Date() })
               .where(eq(orders.id, o.id))
+          } else {
+            confirmFailures.push(`${o.marketplaceOrderId}: ${result.error ?? 'unknown error'}`)
           }
         } catch (err) {
-          console.warn(`[OrderCollector] Auto-confirm failed for ${marketplaceId} order ${o.marketplaceOrderId}:`, err instanceof Error ? err.message : err)
+          const message = err instanceof Error ? err.message : String(err)
+          confirmFailures.push(`${o.marketplaceOrderId}: ${message}`)
+          console.warn(`[OrderCollector] Auto-confirm failed for ${marketplaceId} order ${o.marketplaceOrderId}:`, message)
           // 실패 시 status는 'new' 유지 — 사용자가 확정 대기 탭에서 수동으로 재시도
         }
-        if (confirmIdx === newOrderIds.length || confirmIdx % 5 === 0) {
-          await setProgress(`신규 주문 확인 중 (${confirmIdx}/${newOrderIds.length})`)
+        if (confirmIdx === confirmTargets.length || confirmIdx % 5 === 0) {
+          await setProgress(`신규 주문 확인 중 (${confirmIdx}/${confirmTargets.length})`)
         }
+      }
+      if (marketplaceId === 'ownerclan' && confirmFailures.length > 0) {
+        throw new Error(`오너클랜 주문확인 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)
       }
     } else if (newOrderIds.length > 0 && !shouldAutoConfirmOrders()) {
       await setProgress(`${newOrderIds.length}건 신규 주문 저장 완료`)

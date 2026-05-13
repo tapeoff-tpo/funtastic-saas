@@ -53,6 +53,17 @@ export interface DomeggookLoginResponse extends DomeggookApiErrorResponse {
   }
 }
 
+export interface DomeggookOrderConfirmResponse extends DomeggookApiErrorResponse {
+  domeggook?: {
+    result?: boolean | string
+    success?: { no?: string | number } | Array<{ no?: string | number }> | string | number
+    fail?: { no?: string | number; msg?: string } | Array<{ no?: string | number; msg?: string }> | string | number
+  }
+  result?: boolean | string
+  success?: { no?: string | number } | Array<{ no?: string | number }> | string | number
+  fail?: { no?: string | number; msg?: string } | Array<{ no?: string | number; msg?: string }> | string | number
+}
+
 export interface DomeggookXmlResponse<T> {
   response: {
     result: string

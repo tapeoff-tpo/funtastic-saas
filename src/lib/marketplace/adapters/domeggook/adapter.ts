@@ -9,7 +9,7 @@ import type {
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createDomeggookClient, postDomeggookFormJson, readDomeggookJson } from './client'
-import type { DomeggookListResponse, DomeggookLoginResponse, DomeggookOrder } from './types'
+import type { DomeggookListResponse, DomeggookLoginResponse, DomeggookOrder, DomeggookOrderConfirmResponse } from './types'
 
 const DOMEGGOOK_CONFIG: MarketplaceConfig = {
   id: 'domeggook',
@@ -77,6 +77,10 @@ function orderKey(order: DomeggookOrder): string {
   return asString(order.orderNo) || order.orderUid || asString(order.itemNo)
 }
 
+function toDomeggookOrderNo(marketplaceOrderId: string): string {
+  return marketplaceOrderId.replace(/^OR/i, '')
+}
+
 export class DomeggookAdapter implements MarketplaceAdapter {
   readonly config = DOMEGGOOK_CONFIG
 
@@ -141,8 +145,37 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     return { success: false, error: '도매꾹 송장 등록은 아직 연결되지 않았습니다.' }
   }
 
-  async confirmOrder(_marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '도매꾹 발주확인은 아직 연결되지 않았습니다.' }
+  async confirmOrder(marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const orderNo = toDomeggookOrderNo(marketplaceOrderId)
+      const response = await postDomeggookFormJson<DomeggookOrderConfirmResponse>(this.client, {
+        ver: '1.0',
+        mode: 'setOrdChk',
+        aid: this.apiKey,
+        id: this.sellerId,
+        sId: await this.getSessionId(),
+        no: orderNo,
+        oe: 'utf-8',
+        om: 'json',
+      })
+
+      const { errorCode, errorMessage } = this.getApiError(response)
+      if (errorMessage || (errorCode != null && String(errorCode) !== '0')) {
+        return { success: false, error: `${errorCode ? `[${errorCode}] ` : ''}${errorMessage ?? '도매꾹 발주확인 API 오류'}` }
+      }
+
+      const result = response.domeggook?.result ?? response.result
+      const success = response.domeggook?.success ?? response.success
+      const fail = response.domeggook?.fail ?? response.fail
+
+      if (result === true || result === 'true' || result === 'SUCCESS' || this.containsOrderNo(success, orderNo)) {
+        return { success: true }
+      }
+
+      return { success: false, error: `도매꾹 발주확인 실패${fail ? `: ${JSON.stringify(fail)}` : ''}` }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
@@ -251,11 +284,18 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     throw new MarketplaceAuthError('domeggook', '도매꾹 로그인 API에서 sId를 받지 못했습니다.')
   }
 
-  private getApiError(response: DomeggookLoginResponse | DomeggookListResponse<DomeggookOrder>): { errorCode?: string | number; errorMessage?: string } {
+  private getApiError(response: DomeggookLoginResponse | DomeggookListResponse<DomeggookOrder> | DomeggookOrderConfirmResponse): { errorCode?: string | number; errorMessage?: string } {
     return {
       errorCode: response.errors?.code ?? response.code ?? response.dcode,
       errorMessage: response.errors?.message ?? response.errors?.dmessage ?? response.message ?? response.dmessage,
     }
+  }
+
+  private containsOrderNo(value: DomeggookOrderConfirmResponse['success'], orderNo: string): boolean {
+    if (value == null || value === '') return false
+    if (typeof value === 'string' || typeof value === 'number') return String(value).replace(/^OR/i, '') === orderNo
+    if (Array.isArray(value)) return value.some((item) => this.containsOrderNo(item, orderNo))
+    return String(value.no ?? '').replace(/^OR/i, '') === orderNo
   }
 
   private async getLoginIp(): Promise<string> {

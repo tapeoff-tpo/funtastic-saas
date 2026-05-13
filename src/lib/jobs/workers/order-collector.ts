@@ -116,12 +116,13 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || shouldAutoConfirmOrders()
+  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || shouldAutoConfirmOrders()
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
   if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
   if (marketplaceId === 'ownerclan') return 'preparing'
+  if (marketplaceId === 'domeggook') return '배송준비중'
   return 'CONFIRMED'
 }
 
@@ -446,7 +447,7 @@ export async function collectOrdersForConnection(params: {
     }
 
     let confirmTargets = newOrderIds
-    if (marketplaceId === 'ownerclan' && normalizedOrders.length > 0) {
+    if ((marketplaceId === 'ownerclan' || marketplaceId === 'domeggook') && normalizedOrders.length > 0) {
       const existingNewOrders = await db
         .select({
           id: orders.id,
@@ -514,8 +515,8 @@ export async function collectOrdersForConnection(params: {
           await setProgress(`신규 주문 확인 중 (${confirmIdx}/${confirmTargets.length})`)
         }
       }
-      if (marketplaceId === 'ownerclan' && confirmFailures.length > 0) {
-        throw new Error(`오너클랜 주문확인 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)
+      if ((marketplaceId === 'ownerclan' || marketplaceId === 'domeggook') && confirmFailures.length > 0) {
+        throw new Error(`${marketplaceId} 주문확인 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)
       }
     } else if (newOrderIds.length > 0 && !shouldAutoConfirmOrders()) {
       await setProgress(`${newOrderIds.length}건 신규 주문 저장 완료`)

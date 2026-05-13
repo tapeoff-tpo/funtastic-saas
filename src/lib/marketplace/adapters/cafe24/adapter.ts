@@ -87,7 +87,6 @@ export class Cafe24Adapter implements MarketplaceAdapter {
           shop_no: 1,
           start_date: formatDate(since),
           end_date: formatDate(until),
-          order_status: 'N10',
           limit: 100,
         },
       }).json<Cafe24OrderResponse>()

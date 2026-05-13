@@ -25,7 +25,6 @@ const TOSS_SHOPPING_CONFIG: MarketplaceConfig = {
 }
 
 const PARTNER_NAME = 'funtastic-saas'
-const COLLECTABLE_ORDER_PRODUCT_STATUS = 'PAID'
 
 const TOSS_DELIVERY_COMPANY_MAP: Record<string, string> = {
   CJGLS: 'CJ대한통운',
@@ -123,11 +122,7 @@ export class TossShoppingAdapter implements MarketplaceAdapter {
           .get('api/v3/shopping-fep/orders/v2', { searchParams })
           .json<TossShoppingApiResponse<TossShoppingOrdersResponse>>()
         const success = ensureSuccess(response, 'getOrders')
-        orderProducts.push(
-          ...(success.results ?? []).filter(
-            (product) => product.orderProductStatus === COLLECTABLE_ORDER_PRODUCT_STATUS,
-          ),
-        )
+        orderProducts.push(...(success.results ?? []))
         nextCursor = success.nextCursor ?? undefined
       } while (nextCursor)
 

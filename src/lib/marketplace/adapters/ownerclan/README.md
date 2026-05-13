@@ -5,6 +5,7 @@ Stable baseline: `9d8f6f8 fix(ownerclan): use ID for checkOrder mutation`
 This integration is confirmed working for the current production workflow:
 
 - Collect new Ownerclan vendor orders.
+- Backfill and refresh recently changed Ownerclan vendor orders during collection.
 - Save collected orders as SaaS orders.
 - Auto-confirm collected `new` orders by calling Ownerclan `checkOrder`.
 - Retry confirmation for Ownerclan orders that were already saved locally as `new`.
@@ -23,6 +24,7 @@ Important implementation details:
 - Ownerclan order date filters use millisecond timestamps.
 - Ownerclan collection is intentionally windowed to avoid API timeout and Cloudflare 502 responses.
 - The shared collector may call Ownerclan with 1-day `since`/`until` ranges in parallel, capped at 2 concurrent ranges.
+- Ownerclan collection should not be restricted to only `paid`/`placed`; it queries the selected date range and upserts returned orders so missed or changed orders are reconciled.
 - `ownerclan` is included in `shouldConfirmOnCollect`, and confirmed local orders use marketplace status `preparing`.
 - Credentials currently use both seller and vendor values:
   - `username`

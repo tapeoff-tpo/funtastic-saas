@@ -29,6 +29,8 @@ import type {
   CoupangSellerProductsResponse,
 } from './types'
 
+const COUPANG_ORDER_STATUSES = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY']
+
 const COUPANG_CONFIG: MarketplaceConfig = {
   id: 'coupang',
   name: '쿠팡',
@@ -106,18 +108,21 @@ export class CoupangAdapter implements MarketplaceAdapter {
       return `${yyyy}-${MM}-${dd}+09:00`
     }
 
-    const qs = `createdAtFrom=${encodeURIComponent(fmt(since))}&createdAtTo=${encodeURIComponent(fmt(until))}&status=ACCEPT&maxPerPage=50`
-    const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
-
     try {
-      const response = await this.client.get(path).json<CoupangOrderSheetsResponse>()
+      const orders: CoupangOrderSheet[] = []
+      for (const status of COUPANG_ORDER_STATUSES) {
+        const qs = `createdAtFrom=${encodeURIComponent(fmt(since))}&createdAtTo=${encodeURIComponent(fmt(until))}&status=${status}&maxPerPage=50`
+        const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
+        const response = await this.client.get(path).json<CoupangOrderSheetsResponse>()
 
-      const codeStr = String(response.code)
-      if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
-        throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
+        const codeStr = String(response.code)
+        if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
+          throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
+        }
+        orders.push(...(response.data || []))
       }
 
-      return (response.data || []).map((sheet) => this.normalizeOrder(sheet))
+      return orders.map((sheet) => this.normalizeOrder(sheet))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       // Extract actual API response for debugging

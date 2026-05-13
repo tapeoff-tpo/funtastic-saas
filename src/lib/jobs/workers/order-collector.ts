@@ -395,13 +395,10 @@ export async function collectOrdersForConnection(params: {
     const fetchedOrders = await fetchOrdersForRange(adapter, marketplaceId, effectiveSince, effectiveUntil, setProgress)
     const normalizedOrders = mergeNormalizedOrdersByOrderId(fetchedOrders)
     const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
-    const ordersToSave = normalizedOrders.filter((order) => {
-      const key = `${order.marketplaceId}:${order.marketplaceOrderId}`
-      return !existingOrderKeys.has(key)
-    })
-    const skippedExistingCount = normalizedOrders.length - ordersToSave.length
+    const ordersToSave = normalizedOrders
+    const skippedExistingCount = existingOrderKeys.size
     await setProgress(
-      `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` — 신규 ${ordersToSave.length}건 저장, 기존 ${skippedExistingCount}건 건너뜀` : ''}`,
+      `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` - 저장/갱신 ${ordersToSave.length}건, 기존 ${skippedExistingCount}건 포함` : ''}`,
     )
 
     // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)

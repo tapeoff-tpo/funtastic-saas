@@ -94,7 +94,6 @@ const OWNERCLAN_PAGE_SIZE = 10
 const OWNERCLAN_MAX_PAGES_PER_WINDOW = 10
 const OWNERCLAN_WINDOW_MS = 24 * 60 * 60 * 1000
 const OWNERCLAN_MIN_WINDOW_MS = 60 * 60 * 1000
-const OWNERCLAN_NEW_ORDER_STATUSES = ['paid', 'placed']
 
 const CHECK_ORDER_MUTATION = `
   mutation OwnerclanCheckOrder($key: ID!) {
@@ -122,11 +121,6 @@ function asNumber(value: unknown): number {
 function isTimeoutError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase()
   return message.includes('timed out') || message.includes('timeout')
-}
-
-function isNewOwnerclanStatus(status?: string | null): boolean {
-  if (!status) return false
-  return OWNERCLAN_NEW_ORDER_STATUSES.includes(status)
 }
 
 function buildOptionText(product: OwnerclanOrderProduct): string | undefined {
@@ -249,10 +243,7 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     collected: NormalizedOrder[],
     seenOrderIds: Set<string>,
   ): Promise<void> {
-    const beforeCount = collected.length
-    for (const status of OWNERCLAN_NEW_ORDER_STATUSES) {
-      await this.fetchOrdersWindowByStatus(dateFrom, dateTo, status, collected, seenOrderIds)
-    }
+    await this.fetchOrdersWindowByStatus(dateFrom, dateTo, null, collected, seenOrderIds)
   }
 
   private async fetchOrdersWindowByStatus(
@@ -274,7 +265,6 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
       })
 
       for (const edge of response.allOrders.edges ?? []) {
-        if (!status && !isNewOwnerclanStatus(edge.node.status)) continue
         if (seenOrderIds.has(edge.node.key)) continue
         seenOrderIds.add(edge.node.key)
         collected.push(this.normalizeOrder(edge.node))

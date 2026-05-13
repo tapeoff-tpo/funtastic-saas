@@ -1,18 +1,21 @@
-/**
- * Domeggook (도매꾹) API response types.
- *
- * Domeggook has an OpenAPI supporting both XML and JSON endpoints.
- * These types represent the expected response structure (best-effort per D-03).
- */
-
-/** Generic Domeggook API response wrapper (JSON) */
-export interface DomeggookApiResponse<T> {
-  result: 'success' | 'fail'
+export interface DomeggookApiErrorResponse {
+  code?: string | number
   message?: string
-  data: T
+  dcode?: string | number
+  dmessage?: string
+  date?: string
 }
 
-/** XML-parsed response wrapper (from fast-xml-parser) */
+export interface DomeggookListResponse<T> extends DomeggookApiErrorResponse {
+  header?: {
+    numberOfItems?: number
+    currentPage?: number
+    itemsPerPage?: number
+    numberOfPages?: number
+  }
+  items?: T[] | { item?: T | T[] }
+}
+
 export interface DomeggookXmlResponse<T> {
   response: {
     result: string
@@ -21,26 +24,61 @@ export interface DomeggookXmlResponse<T> {
   }
 }
 
-/** A single order from Domeggook orders API */
 export interface DomeggookOrder {
-  orderId: string
-  productName: string
-  quantity: number
-  buyerName: string
-  buyerPhone: string
-  receiverName: string
-  receiverPhone: string
-  receiverZipcode: string
-  receiverAddress: string
-  receiverAddressDetail?: string
-  orderDate: string
-  orderStatus: string
-  paymentAmount: number
-  options?: string
-  sellerItemCode?: string
+  orderNo?: string | number
+  orderUid?: string
+  status?: string
+  statusMode?: string
+  itemNo?: string | number
+  itemTitle?: string
+  item?: {
+    no?: string | number
+    title?: string
+    itemCustomCode?: string
+  }
+  orderQty?: string | number
+  orderAmt?: string | number
+  orderAmtPay?: string | number
+  orderAmount?: string | number
+  pay?: {
+    payAmount?: string | number
+    datePay?: string
+  }
+  buyerInfo?: {
+    buyerName?: string
+    buyerPhone?: string
+    buyerMobile?: string
+    buyerZipcode?: string
+    buyerAddress?: string
+  }
+  consumer?: {
+    name?: string
+    phone?: string
+    mobile?: string
+    zipcode?: string
+    address?: string
+    deliReq?: string
+  }
+  delivery?: {
+    fee?: string | number
+    who?: string
+    method?: string
+  }
+  selectOpt?: {
+    opt?: DomeggookOrderOption | DomeggookOrderOption[]
+  }
+  date?: string
 }
 
-/** A single claim from Domeggook claims API */
+export interface DomeggookOrderOption {
+  name?: string
+  add?: string | number
+  price?: string | number
+  amt?: string | number
+  qty?: string | number
+  code?: string
+}
+
 export interface DomeggookClaim {
   claimId: string
   orderId: string
@@ -50,10 +88,9 @@ export interface DomeggookClaim {
   createdAt: string
 }
 
-/** A single product from Domeggook products API */
 export interface DomeggookProduct {
-  productId: string
-  name: string
-  price: number
-  status: string
+  productId?: string
+  name?: string
+  price?: number
+  status?: string
 }

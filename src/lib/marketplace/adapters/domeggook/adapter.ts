@@ -1,289 +1,235 @@
-/**
- * Domeggook (도매꾹) marketplace adapter implementing MarketplaceAdapter.
- *
- * Uses API key authentication with OpenAPI supporting both XML and JSON.
- * XML responses are parsed with fast-xml-parser (per D-05).
- *
- * NOTE: API details are best-effort (per D-03). Endpoints will be updated
- * when real API docs become available.
- */
-
 import type {
+  InvoiceData,
   MarketplaceAdapter,
   MarketplaceConfig,
   MarketplaceCredentials,
-  NormalizedOrder,
   NormalizedClaim,
+  NormalizedOrder,
   NormalizedProduct,
-  InvoiceData,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
-import { createDomeggookClient } from './client'
-import { mapDomeggookStatus, mapDomeggookClaimType, mapDomeggookClaimStatus } from './status-map'
-import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
-import type {
-  DomeggookApiResponse,
-  DomeggookOrder,
-  DomeggookClaim,
-  DomeggookProduct,
-} from './types'
+import { createDomeggookClient, readDomeggookJson } from './client'
+import type { DomeggookListResponse, DomeggookOrder } from './types'
 
 const DOMEGGOOK_CONFIG: MarketplaceConfig = {
   id: 'domeggook',
   name: '도매꾹',
-  authType: 'api_key',
+  authType: 'session',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  requiredCredentials: ['api_key', 'seller_id', 'session_id'],
 }
 
-/** Format a Date as ISO date string (yyyy-MM-dd) for API date params */
-function formatDate(date: Date): string {
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
+function daysSince(since: Date): number {
+  const diffMs = Date.now() - since.getTime()
+  const days = Math.ceil(diffMs / 86_400_000)
+  return Math.min(365, Math.max(1, days))
+}
+
+function asString(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (typeof value === 'number') return String(value)
+  return ''
+}
+
+function asNumber(value: unknown): number {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const parsed = Number(value.replaceAll(',', ''))
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+}
+
+function ensureArray<T>(value: T | T[] | { item?: T | T[] } | undefined): T[] {
+  if (!value) return []
+  if (Array.isArray(value)) return value
+  if (typeof value === 'object' && 'item' in value) {
+    const item = value.item
+    if (!item) return []
+    return Array.isArray(item) ? item : [item]
+  }
+  return [value]
+}
+
+function parseDomeggookDate(value: unknown): Date {
+  const raw = asString(value)
+  if (!raw) return new Date()
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) {
+    return new Date(`${raw.replace(' ', 'T')}+09:00`)
+  }
+  const parsed = new Date(raw)
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed
+}
+
+function mapStatus(status: string): NormalizedOrder['status'] {
+  if (status === '결제완료' || status === 'WAITCHK') return 'new'
+  if (status === '배송준비중' || status === 'WAITDELI') return 'confirmed'
+  if (status === '배송중' || status === 'WAITOK') return 'shipped'
+  if (status === '배송완료' || status === 'WAITRCPT') return 'delivered'
+  if (status.includes('취소') || status === 'DENYBUY' || status === 'DENYSELL') return 'cancelled'
+  return 'new'
 }
 
 export class DomeggookAdapter implements MarketplaceAdapter {
   readonly config = DOMEGGOOK_CONFIG
 
   private readonly client: ReturnType<typeof createDomeggookClient>
+  private readonly apiKey: string
   private readonly sellerId: string
+  private readonly sessionId: string
 
-  constructor(credentials: { api_key: string; seller_id: string }) {
-    this.client = createDomeggookClient(credentials.api_key)
+  constructor(credentials: { api_key: string; seller_id: string; session_id?: string }) {
+    this.apiKey = credentials.api_key
     this.sellerId = credentials.seller_id
+    this.sessionId = credentials.session_id ?? ''
+    this.client = createDomeggookClient(credentials.api_key)
   }
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      // Keep credential checks away from order endpoints. Some marketplaces
-      // mutate order state during "new order" reads.
-      const response = await this.client.get('products', {
-        searchParams: {
-          sellerId: this.sellerId,
-          pageSize: '1',
-        },
-      }).json<DomeggookApiResponse<DomeggookProduct[]>>()
-
-      if (response.result === 'success') {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Unknown error' }
+      this.assertPrivateApiCredentials()
+      await this.fetchOrderPage({ since: new Date(Date.now() - 86_400_000), page: 1, pageSize: 1 })
+      return { success: true }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      return { success: false, error: message }
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   }
 
   async authenticate(): Promise<{ success: boolean; expiresAt?: Date }> {
-    // API key auth has no separate authentication flow.
+    this.assertPrivateApiCredentials()
     return { success: true }
   }
 
   async getOrders(since: Date): Promise<NormalizedOrder[]> {
-    const now = new Date()
+    this.assertPrivateApiCredentials()
 
     try {
-      const response = await this.client.get('orders', {
-        searchParams: {
-          sellerId: this.sellerId,
-          dateFrom: formatDate(since),
-          dateTo: formatDate(now),
-          pageSize: '50',
-        },
-      }).json<DomeggookApiResponse<DomeggookOrder[]>>()
+      const orders: DomeggookOrder[] = []
+      let page = 1
+      let totalPages = 1
 
-      if (response.result !== 'success') {
-        throw new MarketplaceApiError('domeggook', 400, response.message || 'Failed to fetch orders')
-      }
+      do {
+        const response = await this.fetchOrderPage({ since, page, pageSize: 50 })
+        const pageOrders = ensureArray(response.items)
+        orders.push(...pageOrders)
+        totalPages = Math.max(1, asNumber(response.header?.numberOfPages) || 1)
+        page += 1
+      } while (page <= totalPages)
 
-      const orders = response.data || []
       return orders.map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('domeggook', 'API key authentication failed')
+      if (error instanceof Error && (error.message.includes('NO_LOGIN') || error.message.includes('sId'))) {
+        throw new MarketplaceAuthError('domeggook', error.message)
       }
       throw new MarketplaceApiError('domeggook', 500, error instanceof Error ? error.message : 'Unknown error')
     }
   }
 
-  async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
-    const now = new Date()
-
-    try {
-      const response = await this.client.get('claims', {
-        searchParams: {
-          sellerId: this.sellerId,
-          dateFrom: formatDate(since),
-          dateTo: formatDate(now),
-          pageSize: '50',
-        },
-      }).json<DomeggookApiResponse<DomeggookClaim[]>>()
-
-      if (response.result !== 'success') {
-        throw new MarketplaceApiError('domeggook', 400, response.message || 'Failed to fetch claims')
-      }
-
-      const claims = response.data || []
-      return claims.map((claim) => this.normalizeClaim(claim))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('domeggook', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('domeggook', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
+    return []
   }
 
-  async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
-    try {
-      const carrierCode = mapCarrierCode('domeggook', invoice.carrierId)
-
-      const response = await this.client.post(`orders/${orderId}/invoice`, {
-        json: {
-          sellerId: this.sellerId,
-          carrierCode,
-          trackingNumber: invoice.trackingNumber,
-        },
-      }).json<DomeggookApiResponse<null>>()
-
-      if (response.result === 'success') {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Invoice upload failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    }
+  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '도매꾹 송장 등록은 아직 연결되지 않았습니다.' }
   }
 
-  async confirmOrder(
-    _marketplaceOrderId: string,
-  ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+  async confirmOrder(_marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '도매꾹 발주확인은 아직 연결되지 않았습니다.' }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    try {
-      const response = await this.client.get('products', {
-        searchParams: {
-          sellerId: this.sellerId,
-          pageSize: '50',
-        },
-      }).json<DomeggookApiResponse<DomeggookProduct[]>>()
-
-      if (response.result !== 'success') {
-        throw new MarketplaceApiError('domeggook', 400, response.message || 'Failed to fetch products')
-      }
-
-      const products = response.data || []
-      return products.map((product) => this.normalizeProduct(product))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('domeggook', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('domeggook', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+    return []
   }
 
-  async registerProduct(product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
-    try {
-      const response = await this.client.post('products', {
-        json: {
-          sellerId: this.sellerId,
-          name: product.name,
-          price: product.price,
-          sku: product.sku,
-          description: product.description,
-        },
-      }).json<DomeggookApiResponse<{ productId: string }>>()
-
-      if (response.result === 'success') {
-        return {
-          success: true,
-          marketplaceProductId: response.data.productId,
-        }
-      }
-      return { success: false, error: response.message || 'Product registration failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    }
+  async registerProduct(_product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
+    return { success: false, error: '도매꾹 상품 등록은 아직 연결되지 않았습니다.' }
   }
 
-  async updateProduct(marketplaceProductId: string, product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
-    try {
-      const response = await this.client.put(`products/${marketplaceProductId}`, {
-        json: {
-          sellerId: this.sellerId,
-          ...(product.name != null && { name: product.name }),
-          ...(product.price != null && { price: product.price }),
-          ...(product.description != null && { description: product.description }),
-        },
-      }).json<DomeggookApiResponse<null>>()
+  async updateProduct(_marketplaceProductId: string, _product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
+    return { success: false, error: '도매꾹 상품 수정은 아직 연결되지 않았습니다.' }
+  }
 
-      if (response.result === 'success') {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Product update failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  private async fetchOrderPage(params: { since: Date; page: number; pageSize: number }): Promise<DomeggookListResponse<DomeggookOrder>> {
+    const response = await readDomeggookJson<DomeggookListResponse<DomeggookOrder>>(this.client, {
+      ver: '4.0',
+      mode: 'getOrderList',
+      aid: this.apiKey,
+      id: this.sellerId,
+      sId: this.sessionId,
+      day: daysSince(params.since),
+      for: 'sell',
+      st: '결제완료',
+      pg: params.page,
+      ic: params.pageSize,
+      oe: 'utf-8',
+      om: 'json',
+    })
+
+    const errorMessage = response.message ?? response.dmessage
+    const errorCode = response.code ?? response.dcode
+    if (errorMessage || (errorCode != null && String(errorCode) !== '0')) {
+      throw new MarketplaceApiError('domeggook', 400, `${errorCode ? `[${errorCode}] ` : ''}${errorMessage ?? '도매꾹 API 오류'}`)
+    }
+
+    return response
+  }
+
+  private assertPrivateApiCredentials() {
+    if (!this.apiKey || !this.sellerId || !this.sessionId) {
+      throw new MarketplaceAuthError('domeggook', '도매꾹 Private API는 api_key, seller_id, session_id(sId)가 모두 필요합니다.')
     }
   }
 
   private normalizeOrder(order: DomeggookOrder): NormalizedOrder {
+    const orderId = asString(order.orderNo) || order.orderUid || asString(order.itemNo)
+    const marketplaceStatus = order.statusMode || order.status || '결제완료'
+    const productName = order.itemTitle || order.item?.title || `도매꾹 주문 ${orderId}`
+    const quantity = asNumber(order.orderQty) || 1
+    const totalAmount = asNumber(order.pay?.payAmount) || asNumber(order.orderAmtPay) || asNumber(order.orderAmt) || asNumber(order.orderAmount)
+    const buyerName = order.buyerInfo?.buyerName || order.consumer?.name || '-'
+    const recipientName = order.consumer?.name || buyerName
+    const buyerPhone = order.buyerInfo?.buyerMobile || order.buyerInfo?.buyerPhone
+    const recipientPhone = order.consumer?.mobile || order.consumer?.phone || buyerPhone
+
     return {
-      marketplaceOrderId: order.orderId,
+      marketplaceOrderId: orderId,
       marketplaceId: 'domeggook',
-      marketplaceStatus: order.orderStatus,
-      status: mapDomeggookStatus(order.orderStatus),
-      buyerName: order.buyerName,
-      buyerPhone: order.buyerPhone || undefined,
-      recipientName: order.receiverName,
-      recipientPhone: order.receiverPhone || undefined,
+      marketplaceStatus,
+      status: mapStatus(marketplaceStatus),
+      buyerName,
+      buyerPhone: buyerPhone || undefined,
+      recipientName,
+      recipientPhone: recipientPhone || undefined,
       shippingAddress: {
-        zipCode: order.receiverZipcode,
-        address1: order.receiverAddress,
-        address2: order.receiverAddressDetail || undefined,
+        zipCode: order.consumer?.zipcode || order.buyerInfo?.buyerZipcode || '',
+        address1: order.consumer?.address || order.buyerInfo?.buyerAddress || '',
       },
       items: [
         {
-          marketplaceItemId: order.orderId,
-          productName: order.productName,
-          optionText: order.options || undefined,
-          quantity: order.quantity,
-          unitPrice: order.paymentAmount / (order.quantity || 1),
-          sku: order.sellerItemCode,
+          marketplaceItemId: order.orderUid || orderId,
+          productName,
+          optionText: this.formatOptions(order),
+          quantity,
+          unitPrice: quantity > 0 ? totalAmount / quantity : totalAmount,
+          sku: order.item?.itemCustomCode,
         },
       ],
-      orderedAt: new Date(order.orderDate),
-      totalAmount: order.paymentAmount,
+      orderedAt: parseDomeggookDate(order.date || order.pay?.datePay),
+      totalAmount,
+      shippingType: order.delivery?.who || null,
+      shippingFee: order.delivery?.fee != null ? asNumber(order.delivery.fee) : null,
+      deliveryMessage: order.consumer?.deliReq || null,
       rawData: order as unknown as Record<string, unknown>,
     }
   }
 
-  private normalizeClaim(claim: DomeggookClaim): NormalizedClaim {
-    return {
-      marketplaceClaimId: claim.claimId,
-      marketplaceId: 'domeggook',
-      marketplaceOrderId: claim.orderId,
-      claimType: mapDomeggookClaimType(claim.claimType),
-      claimStatus: mapDomeggookClaimStatus(claim.claimStatus),
-      reason: claim.reason || undefined,
-      requestedAt: new Date(claim.createdAt),
-      rawData: claim as unknown as Record<string, unknown>,
-    }
-  }
-
-  private normalizeProduct(product: DomeggookProduct): NormalizedProduct {
-    return {
-      productId: product.productId,
-      marketplaceId: 'domeggook',
-      name: product.name,
-      price: product.price,
-      sku: product.productId,
-      status: product.status,
-    }
+  private formatOptions(order: DomeggookOrder): string | undefined {
+    const options = ensureArray(order.selectOpt?.opt)
+    const text = options
+      .map((option) => option.name)
+      .filter(Boolean)
+      .join(' / ')
+    return text || undefined
   }
 }

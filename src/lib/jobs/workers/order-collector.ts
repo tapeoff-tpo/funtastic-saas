@@ -103,6 +103,7 @@ export function createAdapter(
       return new DomeggookAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
         seller_id: credentials.seller_id ?? credentials.sellerId ?? '',
+        session_id: credentials.session_id ?? credentials.sessionId ?? credentials.sId ?? credentials.sid ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

@@ -331,9 +331,9 @@ const kakaoStoreAdapter = createStubAdapter({
 const domeggookAdapter = createStubAdapter({
   id: 'domeggook',
   name: '도매꾹',
-  authType: 'api_key',
+  authType: 'session',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  requiredCredentials: ['api_key', 'seller_id', 'session_id'],
 })
 
 const onchannelAdapter = createStubAdapter({

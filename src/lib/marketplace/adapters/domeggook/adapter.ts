@@ -8,7 +8,7 @@ import type {
   NormalizedProduct,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
-import { createDomeggookClient, readDomeggookJson } from './client'
+import { createDomeggookClient, postDomeggookFormJson, readDomeggookJson } from './client'
 import type { DomeggookListResponse, DomeggookLoginResponse, DomeggookOrder } from './types'
 
 const DOMEGGOOK_CONFIG: MarketplaceConfig = {
@@ -85,6 +85,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
   private readonly sellerId: string
   private readonly sessionSecret: string
   private resolvedSessionId?: string
+  private resolvedLoginIp?: string
 
   constructor(credentials: { api_key: string; seller_id: string; session_id?: string; password?: string }) {
     this.apiKey = credentials.api_key
@@ -196,8 +197,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
       om: 'json',
     })
 
-    const errorMessage = response.message ?? response.dmessage
-    const errorCode = response.code ?? response.dcode
+    const { errorCode, errorMessage } = this.getApiError(response)
     if (errorMessage || (errorCode != null && String(errorCode) !== '0')) {
       throw new MarketplaceApiError('domeggook', 400, `${errorCode ? `[${errorCode}] ` : ''}${errorMessage ?? '도매꾹 API 오류'}`)
     }
@@ -214,20 +214,30 @@ export class DomeggookAdapter implements MarketplaceAdapter {
   private async getSessionId(): Promise<string> {
     if (this.resolvedSessionId) return this.resolvedSessionId
 
-    const response = await readDomeggookJson<DomeggookLoginResponse>(this.client, {
-      ver: '4.0',
+    const response = await postDomeggookFormJson<DomeggookLoginResponse>(this.client, {
+      ver: '4.1',
       mode: 'setLogin',
       aid: this.apiKey,
       id: this.sellerId,
       pw: this.sessionSecret,
       loginKeep: 'on',
+      userAgent: 'FuntasticSaaS/1.0',
+      ip: await this.getLoginIp(),
+      device: 'Third Party',
       oe: 'utf-8',
       om: 'json',
     })
 
-    const errorMessage = response.message ?? response.dmessage
-    const errorCode = response.code ?? response.dcode
-    const sessionId = response.sId ?? response.sid ?? response.sessionId ?? response.data?.sId ?? response.data?.sid ?? response.data?.sessionId
+    const { errorCode, errorMessage } = this.getApiError(response)
+    const sessionId = response.domeggook?.sId
+      ?? response.domeggook?.sid
+      ?? response.domeggook?.sessionId
+      ?? response.sId
+      ?? response.sid
+      ?? response.sessionId
+      ?? response.data?.sId
+      ?? response.data?.sid
+      ?? response.data?.sessionId
 
     if (sessionId) {
       this.resolvedSessionId = sessionId
@@ -239,6 +249,29 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     }
 
     throw new MarketplaceAuthError('domeggook', '도매꾹 로그인 API에서 sId를 받지 못했습니다.')
+  }
+
+  private getApiError(response: DomeggookLoginResponse | DomeggookListResponse<DomeggookOrder>): { errorCode?: string | number; errorMessage?: string } {
+    return {
+      errorCode: response.errors?.code ?? response.code ?? response.dcode,
+      errorMessage: response.errors?.message ?? response.errors?.dmessage ?? response.message ?? response.dmessage,
+    }
+  }
+
+  private async getLoginIp(): Promise<string> {
+    if (this.resolvedLoginIp) return this.resolvedLoginIp
+    try {
+      const response = await fetch('https://api.ipify.org?format=json')
+      const data = await response.json() as { ip?: string }
+      if (data.ip) {
+        this.resolvedLoginIp = data.ip
+        return data.ip
+      }
+    } catch {
+      // Domeggook requires this field. Fall back only if public IP lookup fails.
+    }
+    this.resolvedLoginIp = '127.0.0.1'
+    return this.resolvedLoginIp
   }
 
   private normalizeOrder(order: DomeggookOrder): NormalizedOrder {

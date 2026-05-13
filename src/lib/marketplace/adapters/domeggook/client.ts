@@ -49,3 +49,30 @@ export async function readDomeggookJson<T>(
 
   return JSON.parse(trimmed) as T
 }
+
+export async function postDomeggookFormJson<T>(
+  client: KyInstance,
+  formParams: Record<string, string | number | undefined>,
+): Promise<T> {
+  const body = new URLSearchParams()
+  for (const [key, value] of Object.entries(formParams)) {
+    if (value !== undefined && value !== '') {
+      body.set(key, String(value))
+    }
+  }
+
+  const response = await client.post('ssl/api/', {
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  })
+  const text = await response.text()
+  const trimmed = text.trim()
+
+  if (trimmed.startsWith('<')) {
+    throw new Error('Domeggook returned HTML instead of JSON. Check the API URL, Private API permission, and session credentials.')
+  }
+
+  return JSON.parse(trimmed) as T
+}

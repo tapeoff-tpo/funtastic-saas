@@ -4,6 +4,13 @@ export interface DomeggookApiErrorResponse {
   dcode?: string | number
   dmessage?: string
   date?: string
+  errors?: {
+    code?: string | number
+    message?: string
+    dcode?: string | number
+    dmessage?: string
+    date?: string
+  }
 }
 
 export interface DomeggookListResponse<T> extends DomeggookApiErrorResponse {
@@ -20,6 +27,16 @@ export interface DomeggookLoginResponse extends DomeggookApiErrorResponse {
   sId?: string
   sid?: string
   sessionId?: string
+  domeggook?: {
+    result?: string
+    sId?: string
+    sid?: string
+    sessionId?: string
+    cId?: string
+    id?: string
+    loginKeepTime?: string | number
+    sIdRenewDate?: string | number
+  }
   data?: {
     sId?: string
     sid?: string

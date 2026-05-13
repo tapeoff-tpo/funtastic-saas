@@ -19,10 +19,13 @@ const DOMEGGOOK_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['api_key', 'seller_id', 'session_id'],
 }
 
+const DOMEGGOOK_MAX_LOOKBACK_DAYS = 6
+const DAY_MS = 86_400_000
+
 function daysSince(since: Date): number {
   const diffMs = Date.now() - since.getTime()
-  const days = Math.ceil(diffMs / 86_400_000)
-  return Math.min(365, Math.max(1, days))
+  const days = Math.ceil(diffMs / DAY_MS)
+  return Math.min(DOMEGGOOK_MAX_LOOKBACK_DAYS, Math.max(1, days))
 }
 
 function asString(value: unknown): string {
@@ -70,6 +73,10 @@ function mapStatus(status: string): NormalizedOrder['status'] {
   return 'new'
 }
 
+function orderKey(order: DomeggookOrder): string {
+  return asString(order.orderNo) || order.orderUid || asString(order.itemNo)
+}
+
 export class DomeggookAdapter implements MarketplaceAdapter {
   readonly config = DOMEGGOOK_CONFIG
 
@@ -89,7 +96,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
       this.assertPrivateApiCredentials()
-      await this.fetchOrderPage({ since: new Date(Date.now() - 86_400_000), page: 1, pageSize: 1 })
+      await this.fetchOrderPage({ day: 1, page: 1, pageSize: 1 })
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -105,19 +112,17 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     this.assertPrivateApiCredentials()
 
     try {
-      const orders: DomeggookOrder[] = []
-      let page = 1
-      let totalPages = 1
+      const lookbackDays = daysSince(since)
+      const slices = Array.from({ length: lookbackDays }, (_, index) => index + 1)
+      const sliceOrders = await Promise.all(slices.map((day) => this.fetchOrdersForDaySlice(day)))
+      const uniqueOrders = new Map<string, DomeggookOrder>()
 
-      do {
-        const response = await this.fetchOrderPage({ since, page, pageSize: 50 })
-        const pageOrders = ensureArray(response.items)
-        orders.push(...pageOrders)
-        totalPages = Math.max(1, asNumber(response.header?.numberOfPages) || 1)
-        page += 1
-      } while (page <= totalPages)
+      for (const order of sliceOrders.flat()) {
+        const key = orderKey(order)
+        if (key) uniqueOrders.set(key, order)
+      }
 
-      return orders.map((order) => this.normalizeOrder(order))
+      return Array.from(uniqueOrders.values()).map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('NO_LOGIN') || error.message.includes('sId'))) {
@@ -151,14 +156,38 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     return { success: false, error: '도매꾹 상품 수정은 아직 연결되지 않았습니다.' }
   }
 
-  private async fetchOrderPage(params: { since: Date; page: number; pageSize: number }): Promise<DomeggookListResponse<DomeggookOrder>> {
+  private async fetchOrdersForDaySlice(day: number): Promise<DomeggookOrder[]> {
+    const orders: DomeggookOrder[] = []
+    let page = 1
+    let totalPages = 1
+
+    do {
+      const response = await this.fetchOrderPage({ day, page, pageSize: 50 })
+      orders.push(...ensureArray(response.items).filter((order) => this.isOrderInDaySlice(order, day)))
+      totalPages = Math.max(1, asNumber(response.header?.numberOfPages) || 1)
+      page += 1
+    } while (page <= totalPages)
+
+    return orders
+  }
+
+  private isOrderInDaySlice(order: DomeggookOrder, day: number): boolean {
+    const orderedAt = parseDomeggookDate(order.date || order.pay?.datePay)
+    const now = Date.now()
+    const endMs = day === 1 ? now : now - (day - 1) * DAY_MS
+    const startMs = now - day * DAY_MS
+    const orderedMs = orderedAt.getTime()
+    return orderedMs >= startMs && orderedMs <= endMs
+  }
+
+  private async fetchOrderPage(params: { day: number; page: number; pageSize: number }): Promise<DomeggookListResponse<DomeggookOrder>> {
     const response = await readDomeggookJson<DomeggookListResponse<DomeggookOrder>>(this.client, {
       ver: '4.0',
       mode: 'getOrderList',
       aid: this.apiKey,
       id: this.sellerId,
       sId: await this.getSessionId(),
-      day: daysSince(params.since),
+      day: params.day,
       for: 'sell',
       st: '결제완료',
       pg: params.page,

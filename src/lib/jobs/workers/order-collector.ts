@@ -265,7 +265,7 @@ export async function collectOrdersForConnection(params: {
     // calendar dates inclusively, so keep its manual range safely inside.
     const now = Date.now()
     const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver'])
-    const sixDayManualMarketplaces = new Set(['10x10', 'cafe24'])
+    const sixDayManualMarketplaces = new Set(['10x10', 'cafe24', 'domeggook'])
     const ownerclanManualDays = jobType === 'manual-order-collection' && marketplaceId === 'ownerclan'
       ? Math.min(Math.max(Math.floor(manualLookbackDays ?? 3), 1), 14)
       : null

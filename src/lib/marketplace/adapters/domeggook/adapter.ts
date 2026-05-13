@@ -164,8 +164,8 @@ export class DomeggookAdapter implements MarketplaceAdapter {
 
     do {
       const response = await this.fetchOrderPage({ day, page, pageSize: 50 })
-      orders.push(...ensureArray(response.items).filter((order) => this.isOrderInDaySlice(order, day)))
-      totalPages = Math.max(1, asNumber(response.header?.numberOfPages) || 1)
+      orders.push(...ensureArray(response.domeggook?.items ?? response.items).filter((order) => this.isOrderInDaySlice(order, day)))
+      totalPages = Math.max(1, asNumber(response.domeggook?.header?.numberOfPages ?? response.header?.numberOfPages) || 1)
       page += 1
     } while (page <= totalPages)
 

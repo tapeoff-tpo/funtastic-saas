@@ -14,11 +14,20 @@ export interface DomeggookApiErrorResponse {
 }
 
 export interface DomeggookListResponse<T> extends DomeggookApiErrorResponse {
+  domeggook?: {
+    header?: {
+      numberOfItems?: number | string
+      currentPage?: number | string
+      itemsPerPage?: number | string
+      numberOfPages?: number | string
+    }
+    items?: T[] | { item?: T | T[] }
+  }
   header?: {
-    numberOfItems?: number
-    currentPage?: number
-    itemsPerPage?: number
-    numberOfPages?: number
+    numberOfItems?: number | string
+    currentPage?: number | string
+    itemsPerPage?: number | string
+    numberOfPages?: number | string
   }
   items?: T[] | { item?: T | T[] }
 }

@@ -1,8 +1,9 @@
 'use client'
 
-import { useCallback, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
+import { Check, ChevronDown, Search } from 'lucide-react'
 import { ORDER_STATUS_LABELS, type OrderSearchField, type OrderStatus } from '@/lib/orders/types'
 
 const MARKETPLACE_OPTIONS = [
@@ -45,6 +46,101 @@ const SEARCH_FIELD_OPTIONS: Array<{ value: OrderSearchField; label: string }> = 
   { value: 'trackingNumber', label: '송장번호' },
   { value: 'logisticsMessage', label: '물류메세지' },
 ]
+
+function MarketplaceSearchSelect({
+  options,
+  value,
+  onChange,
+}: {
+  options: Array<{ value: string; label: string }>
+  value: string
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const rootRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const selected = options.find((option) => option.value === value) ?? options[0]
+  const filteredOptions = useMemo(() => {
+    const keyword = query.trim().toLowerCase()
+    if (!keyword) return options
+    return options.filter((option) => (
+      option.label.toLowerCase().includes(keyword) || option.value.toLowerCase().includes(keyword)
+    ))
+  }, [options, query])
+
+  useEffect(() => {
+    if (!open) return
+    inputRef.current?.focus()
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [open])
+
+  const selectOption = useCallback((nextValue: string) => {
+    onChange(nextValue)
+    setQuery('')
+    setOpen(false)
+  }, [onChange])
+
+  return (
+    <div ref={rootRef} className="relative w-[178px]">
+      <button
+        id="filter-marketplace"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-9 w-full items-center justify-between rounded-md border bg-background px-3 text-left text-sm hover:bg-muted/40"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="truncate">{selected?.label ?? '전체 마켓'}</span>
+        <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-[260px] rounded-md border bg-background shadow-lg">
+          <div className="flex items-center gap-2 border-b px-2 py-2">
+            <Search className="size-4 text-muted-foreground" aria-hidden="true" />
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setOpen(false)
+              }}
+              placeholder="마켓 검색"
+              className="h-7 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto py-1" role="listbox" aria-labelledby="filter-marketplace">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option) => (
+                <button
+                  key={option.value || 'all'}
+                  type="button"
+                  onClick={() => selectOption(option.value)}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                  role="option"
+                  aria-selected={option.value === value}
+                >
+                  <span className="truncate">{option.label}</span>
+                  {option.value === value && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
+                </button>
+              ))
+            ) : (
+              <div className="px-3 py-4 text-sm text-muted-foreground">검색 결과 없음</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function OrderFilters({
   marketplaceOptions = [],
@@ -180,18 +276,11 @@ export function OrderFilters({
         <label htmlFor="filter-marketplace" className="text-xs font-medium text-muted-foreground">
           마켓플레이스
         </label>
-        <select
-          id="filter-marketplace"
+        <MarketplaceSearchSelect
+          options={mergedMarketplaceOptions}
           value={filters.marketplace ?? ''}
-          onChange={(e) => updateFilter({ marketplace: e.target.value || null })}
-          className="rounded-md border px-3 py-1.5 text-sm"
-        >
-          {mergedMarketplaceOptions.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+          onChange={(nextValue) => updateFilter({ marketplace: nextValue || null })}
+        />
       </div>
 
       {/* Status */}

@@ -19,6 +19,7 @@ import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
+import { DomeggookAdapter } from '@/lib/marketplace/adapters/domeggook/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -97,6 +98,11 @@ export function createAdapter(
         password: credentials.password ?? credentials.vendor_password ?? credentials.api_key ?? '',
         vendor_id: credentials.vendor_id ?? '',
         vendor_password: credentials.vendor_password ?? '',
+      })
+    case 'domeggook':
+      return new DomeggookAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        seller_id: credentials.seller_id ?? credentials.sellerId ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

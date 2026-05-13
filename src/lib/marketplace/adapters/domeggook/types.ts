@@ -16,6 +16,17 @@ export interface DomeggookListResponse<T> extends DomeggookApiErrorResponse {
   items?: T[] | { item?: T | T[] }
 }
 
+export interface DomeggookLoginResponse extends DomeggookApiErrorResponse {
+  sId?: string
+  sid?: string
+  sessionId?: string
+  data?: {
+    sId?: string
+    sid?: string
+    sessionId?: string
+  }
+}
+
 export interface DomeggookXmlResponse<T> {
   response: {
     result: string

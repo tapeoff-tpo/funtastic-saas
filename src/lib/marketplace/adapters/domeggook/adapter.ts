@@ -9,7 +9,7 @@ import type {
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createDomeggookClient, readDomeggookJson } from './client'
-import type { DomeggookListResponse, DomeggookOrder } from './types'
+import type { DomeggookListResponse, DomeggookLoginResponse, DomeggookOrder } from './types'
 
 const DOMEGGOOK_CONFIG: MarketplaceConfig = {
   id: 'domeggook',
@@ -76,12 +76,13 @@ export class DomeggookAdapter implements MarketplaceAdapter {
   private readonly client: ReturnType<typeof createDomeggookClient>
   private readonly apiKey: string
   private readonly sellerId: string
-  private readonly sessionId: string
+  private readonly sessionSecret: string
+  private resolvedSessionId?: string
 
-  constructor(credentials: { api_key: string; seller_id: string; session_id?: string }) {
+  constructor(credentials: { api_key: string; seller_id: string; session_id?: string; password?: string }) {
     this.apiKey = credentials.api_key
     this.sellerId = credentials.seller_id
-    this.sessionId = credentials.session_id ?? ''
+    this.sessionSecret = credentials.password || credentials.session_id || ''
     this.client = createDomeggookClient(credentials.api_key)
   }
 
@@ -156,7 +157,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
       mode: 'getOrderList',
       aid: this.apiKey,
       id: this.sellerId,
-      sId: this.sessionId,
+      sId: await this.getSessionId(),
       day: daysSince(params.since),
       for: 'sell',
       st: '결제완료',
@@ -176,9 +177,39 @@ export class DomeggookAdapter implements MarketplaceAdapter {
   }
 
   private assertPrivateApiCredentials() {
-    if (!this.apiKey || !this.sellerId || !this.sessionId) {
-      throw new MarketplaceAuthError('domeggook', '도매꾹 Private API는 api_key, seller_id, session_id(sId)가 모두 필요합니다.')
+    if (!this.apiKey || !this.sellerId || !this.sessionSecret) {
+      throw new MarketplaceAuthError('domeggook', '도매꾹 Private API는 api_key, seller_id, session_id 칸에 저장한 비밀번호가 필요합니다.')
     }
+  }
+
+  private async getSessionId(): Promise<string> {
+    if (this.resolvedSessionId) return this.resolvedSessionId
+
+    const response = await readDomeggookJson<DomeggookLoginResponse>(this.client, {
+      ver: '4.0',
+      mode: 'setLogin',
+      aid: this.apiKey,
+      id: this.sellerId,
+      pw: this.sessionSecret,
+      loginKeep: 'on',
+      oe: 'utf-8',
+      om: 'json',
+    })
+
+    const errorMessage = response.message ?? response.dmessage
+    const errorCode = response.code ?? response.dcode
+    const sessionId = response.sId ?? response.sid ?? response.sessionId ?? response.data?.sId ?? response.data?.sid ?? response.data?.sessionId
+
+    if (sessionId) {
+      this.resolvedSessionId = sessionId
+      return sessionId
+    }
+
+    if (errorMessage || errorCode != null) {
+      throw new MarketplaceAuthError('domeggook', `${errorCode ? `[${errorCode}] ` : ''}${errorMessage ?? '도매꾹 로그인 API에서 sId를 받지 못했습니다.'}`)
+    }
+
+    throw new MarketplaceAuthError('domeggook', '도매꾹 로그인 API에서 sId를 받지 못했습니다.')
   }
 
   private normalizeOrder(order: DomeggookOrder): NormalizedOrder {

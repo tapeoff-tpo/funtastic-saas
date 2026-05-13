@@ -97,7 +97,7 @@ const OWNERCLAN_MIN_WINDOW_MS = 60 * 60 * 1000
 const OWNERCLAN_NEW_ORDER_STATUSES = ['paid', 'placed']
 
 const CHECK_ORDER_MUTATION = `
-  mutation OwnerclanCheckOrder($key: String!) {
+  mutation OwnerclanCheckOrder($key: ID!) {
     checkOrder(key: $key) {
       key
       status

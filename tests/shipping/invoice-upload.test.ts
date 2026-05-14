@@ -123,8 +123,8 @@ describe('Naver uploadInvoice', () => {
     })
   })
 
-  it('calls place-order confirmation first when requiresConfirmation is true', async () => {
-    // First call: place-order confirmation
+  it('calls order confirmation first when requiresConfirmation is true', async () => {
+    // First call: order confirmation
     mockJsonResponse.mockResolvedValueOnce({
       data: { successProductOrderIds: ['order-123'], failProductOrderIds: [] },
     })
@@ -142,7 +142,7 @@ describe('Naver uploadInvoice', () => {
     expect(mockPost).toHaveBeenCalledTimes(2)
 
     const [firstPath] = mockPost.mock.calls[0]
-    expect(firstPath).toContain('place-order')
+    expect(firstPath).toContain('confirm')
 
     const [secondPath, secondOptions] = mockPost.mock.calls[1]
     expect(secondPath).toContain('dispatch')

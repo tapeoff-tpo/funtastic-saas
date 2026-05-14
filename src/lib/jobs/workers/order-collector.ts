@@ -423,10 +423,10 @@ export async function collectOrdersForConnection(params: {
             orderId: upsertedOrder.id,
             marketplaceItemId: item.marketplaceItemId,
             productName: item.productName,
-            optionText: item.optionText,
+            optionText: item.optionText ?? null,
             quantity: item.quantity,
             unitPrice: String(item.unitPrice),
-            sku: item.sku,
+            sku: item.sku ?? null,
           }))
         )
       }

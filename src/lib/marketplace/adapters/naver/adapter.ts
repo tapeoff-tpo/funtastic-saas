@@ -134,12 +134,12 @@ export class NaverAdapter implements MarketplaceAdapter {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const productOrderIds = this.extractProductOrderIds(rawData) ?? [marketplaceOrderId]
-      const response = await this.naverClient.client.post(
-        'external/v1/pay-order/seller/product-orders/place-order',
-        { json: { productOrderIds } },
-      ).json<{
+      const response = await this.naverPost<{
         data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
-      }>()
+      }>(
+        'external/v1/pay-order/seller/product-orders/confirm',
+        { productOrderIds },
+      )
 
       const failed = response.data.failProductOrderIds?.filter((id) => productOrderIds.includes(id)) ?? []
       if (failed.length > 0) {
@@ -159,7 +159,7 @@ export class NaverAdapter implements MarketplaceAdapter {
         this.extractProductOrderIds(invoice as Record<string, unknown>) ??
         [orderId]
 
-      // Step 1: Place-order confirmation if not already confirmed
+      // Step 1: Order confirmation if not already confirmed
       if (invoice.requiresConfirmation) {
         const confirmResult = await this.confirmOrder(orderId, { productOrderIds })
         if (!confirmResult.success) {
@@ -168,22 +168,20 @@ export class NaverAdapter implements MarketplaceAdapter {
       }
 
       // Step 2: Dispatch with tracking info
-      const dispatchResponse = await this.naverClient.client.post(
+      const dispatchResponse = await this.naverPost<{
+        data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
+      }>(
         'external/v1/pay-order/seller/product-orders/dispatch',
         {
-          json: {
-            dispatchProductOrders: productOrderIds.map((productOrderId) => ({
-              productOrderId,
-              deliveryMethod: 'DELIVERY',
-              deliveryCompanyCode: mapCarrierCode('naver', invoice.carrierId),
-              trackingNumber: invoice.trackingNumber,
-              dispatchDate: new Date().toISOString(),
-            })),
-          },
+          dispatchProductOrders: productOrderIds.map((productOrderId) => ({
+            productOrderId,
+            deliveryMethod: 'DELIVERY',
+            deliveryCompanyCode: mapCarrierCode('naver', invoice.carrierId),
+            trackingNumber: invoice.trackingNumber,
+            dispatchDate: new Date().toISOString(),
+          })),
         },
-      ).json<{
-        data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
-      }>()
+      )
 
       const failed = dispatchResponse.data.failProductOrderIds?.filter((id) => productOrderIds.includes(id)) ?? []
       if (failed.length > 0) {

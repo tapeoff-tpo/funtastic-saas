@@ -23,10 +23,19 @@ const mockDelete = vi.fn().mockReturnValue({
   where: vi.fn().mockResolvedValue(undefined),
 })
 
-const mockSelectFrom = vi.fn().mockReturnValue({
-  where: vi.fn().mockReturnValue({
-    limit: vi.fn().mockResolvedValue([{ storeAlias: 'default' }]),
-  }),
+const mockSelectFrom = vi.fn().mockImplementation((table: { storeAlias?: unknown } | unknown) => {
+  if (table && typeof table === 'object' && 'storeAlias' in table) {
+    return {
+      where: vi.fn().mockReturnValue({
+        limit: vi.fn().mockResolvedValue([{ storeAlias: 'default' }]),
+      }),
+    }
+  }
+
+  return {
+    innerJoin: vi.fn().mockReturnThis(),
+    where: vi.fn().mockResolvedValue([]),
+  }
 })
 
 const mockUpdate = vi.fn().mockReturnValue({
@@ -49,9 +58,11 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/db/schema', () => ({
   orders: {
     id: 'id',
+    userId: 'user_id',
     status: 'status',
     marketplaceId: 'marketplace_id',
     marketplaceOrderId: 'marketplace_order_id',
+    isCopy: 'is_copy',
   },
   orderItems: { orderId: 'order_id' },
   claims: {

@@ -12,6 +12,8 @@ export interface OrderCollectionJobData {
   connectionId: string
   userId: string
   manualLookbackDays?: number
+  manualDateFrom?: string
+  manualDateTo?: string
   /** Pre-created job_logs row ID (for manual collection via API route) */
   jobLogId?: string
   jobType?: string

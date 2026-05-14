@@ -12,7 +12,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
  * Manually trigger order collection for selected marketplaces.
  * Runs collection directly in the background (no BullMQ worker needed).
  *
- * Body: { connectionIds: string[], manualLookbackDays?: number }
+ * Body: { connectionIds: string[], manualLookbackDays?: number, manualDateFrom?: string, manualDateTo?: string }
  * Response: { jobLogIds: string[] }
  */
 export async function POST(request: NextRequest) {
@@ -27,7 +27,12 @@ export async function POST(request: NextRequest) {
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  let body: { connectionIds: string[]; manualLookbackDays?: number }
+  let body: {
+    connectionIds: string[]
+    manualLookbackDays?: number
+    manualDateFrom?: string
+    manualDateTo?: string
+  }
   try {
     body = await request.json()
   } catch {
@@ -46,6 +51,27 @@ export async function POST(request: NextRequest) {
     Number.isFinite(manualLookbackDays) && manualLookbackDays >= 1 && manualLookbackDays <= 14
       ? Math.floor(manualLookbackDays)
       : undefined
+  const manualDateFrom = sanitizeDateInput(body.manualDateFrom)
+  const manualDateTo = sanitizeDateInput(body.manualDateTo)
+
+  if ((body.manualDateFrom || body.manualDateTo) && (!manualDateFrom || !manualDateTo)) {
+    return NextResponse.json(
+      { error: 'manualDateFrom and manualDateTo must both be YYYY-MM-DD' },
+      { status: 400 }
+    )
+  }
+
+  if (manualDateFrom && manualDateTo) {
+    const from = new Date(`${manualDateFrom}T00:00:00+09:00`)
+    const to = new Date(`${manualDateTo}T23:59:59.999+09:00`)
+    const maxRangeMs = 14 * 24 * 60 * 60 * 1000
+    if (from > to) {
+      return NextResponse.json({ error: 'manualDateFrom must be before manualDateTo' }, { status: 400 })
+    }
+    if (to.getTime() - from.getTime() > maxRangeMs) {
+      return NextResponse.json({ error: 'Manual collection range must be 14 days or less' }, { status: 400 })
+    }
+  }
 
   // Find connections for this user
   const connections = await db
@@ -88,11 +114,19 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       jobType: 'manual-order-collection',
       jobLogId: logRow.id,
-      manualLookbackDays: conn.marketplaceId === 'ownerclan' ? safeManualLookbackDays : undefined,
+      manualLookbackDays: safeManualLookbackDays,
+      manualDateFrom: manualDateFrom ?? undefined,
+      manualDateTo: manualDateTo ?? undefined,
     }).catch((err) => {
       console.error('[collect] Background collection failed:', err)
     })
   }
 
   return NextResponse.json({ jobLogIds })
+}
+
+function sanitizeDateInput(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : null
 }

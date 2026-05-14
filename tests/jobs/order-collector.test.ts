@@ -213,6 +213,28 @@ describe('processOrderCollection', () => {
     expect(mockGetOrders).toHaveBeenCalled()
   })
 
+  it('uses a manually selected date range for manual collection', async () => {
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const job = createMockJob({
+      marketplaceId: 'coupang',
+      connectionId: 'conn-1',
+      userId: 'user-1',
+      jobType: 'manual-order-collection',
+      manualDateFrom: '2024-01-01',
+      manualDateTo: '2024-01-01',
+    })
+
+    await processOrderCollection(job)
+
+    expect(mockGetOrders).toHaveBeenCalledWith(
+      new Date('2024-01-01T00:00:00+09:00'),
+      new Date('2024-01-01T23:59:59.999+09:00'),
+    )
+  })
+
   it('should log job execution to job_logs on success', async () => {
     const { processOrderCollection } = await import(
       '@/lib/jobs/workers/order-collector'

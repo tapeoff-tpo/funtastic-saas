@@ -161,6 +161,7 @@ const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
   'kakao-store': 2,
 }
 const ORDER_RANGE_MS = 24 * 60 * 60 * 1000
+const MANUAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
 function splitOrderRanges(since: Date, until: Date): Array<{ since: Date; until: Date }> {
   if (since >= until) return [{ since, until }]
@@ -171,6 +172,18 @@ function splitOrderRanges(since: Date, until: Date): Array<{ since: Date; until:
     start = end
   }
   return ranges
+}
+
+function manualDateRange(dateFrom?: string, dateTo?: string, now = new Date()): { since: Date; until: Date; label: string } | null {
+  if (!dateFrom || !dateTo) return null
+  if (!MANUAL_DATE_RE.test(dateFrom) || !MANUAL_DATE_RE.test(dateTo)) return null
+
+  const since = new Date(`${dateFrom}T00:00:00+09:00`)
+  const requestedUntil = new Date(`${dateTo}T23:59:59.999+09:00`)
+  const until = requestedUntil > now ? now : requestedUntil
+
+  if (Number.isNaN(since.getTime()) || Number.isNaN(until.getTime()) || since > until) return null
+  return { since, until, label: `${dateFrom}~${dateTo}` }
 }
 
 async function mapWithConcurrency<T, R>(
@@ -275,10 +288,21 @@ export async function collectOrdersForConnection(params: {
   userId: string
   jobType?: string
   manualLookbackDays?: number
+  manualDateFrom?: string
+  manualDateTo?: string
   /** Pre-created job_logs row ID (from API route). If provided, updates it instead of creating new. */
   jobLogId?: string
 }): Promise<{ ordersCollected: number; claimsCollected: number }> {
-  const { marketplaceId, connectionId, userId, jobType = 'order-collection', jobLogId, manualLookbackDays } = params
+  const {
+    marketplaceId,
+    connectionId,
+    userId,
+    jobType = 'order-collection',
+    jobLogId,
+    manualLookbackDays,
+    manualDateFrom,
+    manualDateTo,
+  } = params
 
   // 1. Create or reuse job log entry
   let logId: string
@@ -354,42 +378,50 @@ export async function collectOrdersForConnection(params: {
     // 3. Create adapter with credentials
     const adapter = createAdapter(marketplaceId, credentials)
 
-    // 4. Fetch orders — manual: 1 day, scheduled: 7 days.
+    // 4. Fetch orders — manual: selected range/preset, scheduled: 7 days.
     // 10x10 rejects requests outside "within 7 days" and appears to count
     // calendar dates inclusively, so keep its manual range safely inside.
-    const now = Date.now()
+    const nowDate = new Date()
+    const now = nowDate.getTime()
+    const selectedManualRange = jobType === 'manual-order-collection'
+      ? manualDateRange(manualDateFrom, manualDateTo, nowDate)
+      : null
     const extendedManualMarketplaces = new Set(['10x10', 'cafe24', 'naver'])
     const sixDayManualMarketplaces = new Set(['10x10', 'cafe24', 'domeggook'])
-    const ownerclanManualDays = jobType === 'manual-order-collection' && marketplaceId === 'ownerclan'
+    const manualPresetDays = jobType === 'manual-order-collection' && !selectedManualRange
       ? Math.min(Math.max(Math.floor(manualLookbackDays ?? 3), 1), 14)
       : null
-    const lookbackLabel = ownerclanManualDays
-      ? `${ownerclanManualDays}일`
+    const lookbackLabel = manualPresetDays
+      ? `${manualPresetDays}일`
       : jobType === 'manual-order-collection' && sixDayManualMarketplaces.has(marketplaceId)
       ? '6일'
       : jobType === 'manual-order-collection' && !extendedManualMarketplaces.has(marketplaceId)
       ? '1일'
       : '7일'
-    const lookbackMs = ownerclanManualDays
-      ? ownerclanManualDays * 24 * 60 * 60 * 1000
+    const lookbackMs = manualPresetDays
+      ? manualPresetDays * 24 * 60 * 60 * 1000
       : sixDayManualMarketplaces.has(marketplaceId)
       ? 6 * 24 * 60 * 60 * 1000
       : lookbackLabel === '1일'
         ? 1 * 24 * 60 * 60 * 1000
         : 7 * 24 * 60 * 60 * 1000
-    const since = new Date(now - lookbackMs)
+    const since = selectedManualRange?.since ?? new Date(now - lookbackMs)
     const tenByTenRecentMs = 24 * 60 * 60 * 1000
     const tenByTenLastSuccessAt = connection?.lastSuccessAt?.getTime()
     const tenByTenSinceMs = tenByTenLastSuccessAt
       ? Math.max(tenByTenLastSuccessAt - 5 * 60 * 1000, now - tenByTenRecentMs)
       : now - tenByTenRecentMs
-    const effectiveSince = marketplaceId === '10x10' ? new Date(tenByTenSinceMs) : since
-    const effectiveLookbackLabel = marketplaceId === '10x10'
+    const effectiveSince = selectedManualRange
+      ? selectedManualRange.since
+      : marketplaceId === '10x10' ? new Date(tenByTenSinceMs) : since
+    const effectiveLookbackLabel = selectedManualRange
+      ? selectedManualRange.label
+      : marketplaceId === '10x10'
       ? (tenByTenLastSuccessAt ? 'last success' : '1 day')
       : lookbackLabel
-    const effectiveUntil = new Date(now)
+    const effectiveUntil = selectedManualRange?.until ?? new Date(now)
 
-    await setProgress(`변경된 주문 조회 중... (최근 ${lookbackLabel})`)
+    await setProgress(`변경된 주문 조회 중... (${effectiveLookbackLabel})`)
     if (marketplaceId === '10x10') {
       await setProgress(`10x10 order lookup (${effectiveLookbackLabel})`)
     }

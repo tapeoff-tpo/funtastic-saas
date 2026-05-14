@@ -68,6 +68,20 @@ function riskScore(c: Connection): number {
 }
 
 type FilterKey = 'all' | 'connected' | 'error' | 'expiring' | 'disconnected' | 'manual'
+type CollectionRangeMode = 'preset' | 'custom'
+
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function daysAgoInputValue(daysAgo: number): string {
+  const date = new Date()
+  date.setDate(date.getDate() - daysAgo)
+  return toDateInputValue(date)
+}
 
 const DEFAULT_IMPORT_MAPPINGS: OrderImportMapping[] = ORDER_IMPORT_FIELDS.map((field) => ({
   field: field.field,
@@ -120,7 +134,10 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     if (typeof window === 'undefined') return null
     return window.localStorage.getItem(IMPORT_TEMPLATE_KEY)
   })
-  const [ownerclanLookbackDays, setOwnerclanLookbackDays] = useState(3)
+  const [collectionRangeMode, setCollectionRangeMode] = useState<CollectionRangeMode>('preset')
+  const [manualLookbackDays, setManualLookbackDays] = useState(3)
+  const [manualDateFrom, setManualDateFrom] = useState(() => daysAgoInputValue(2))
+  const [manualDateTo, setManualDateTo] = useState(() => toDateInputValue(new Date()))
   const [filter, setFilter] = useState<FilterKey>('all')
   const [search, setSearch] = useState('')
   const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
@@ -217,17 +234,21 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
       connectedMarkets.some((c) => c.id === id)
     )
     if (ids.length === 0) return
-    startCollect(ids, { manualLookbackDays: ownerclanLookbackDays })
+    startCollect(ids, getCollectionOptions())
   }
 
   const handleCollectAll = () => {
     if (connectedMarkets.length === 0) return
-    startCollect(connectedMarkets.map((c) => c.id), { manualLookbackDays: ownerclanLookbackDays })
+    startCollect(connectedMarkets.map((c) => c.id), getCollectionOptions())
   }
 
   const handleCollectOne = (connectionId: string) => {
-    startCollect([connectionId], { manualLookbackDays: ownerclanLookbackDays })
+    startCollect([connectionId], getCollectionOptions())
   }
+
+  const getCollectionOptions = () => collectionRangeMode === 'custom'
+    ? { manualDateFrom, manualDateTo }
+    : { manualLookbackDays }
 
   const nameMap = Object.fromEntries(
     connections.map((c) => [c.id, c.displayName])
@@ -345,22 +366,50 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
           className="ml-2 w-[180px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
         />
         <div className="ml-auto flex items-center gap-1">
-          {connectedMarkets.some((c) => c.marketplaceId === 'ownerclan') && (
-            <label className="flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs">
-              <span className="whitespace-nowrap">오너클랜</span>
-              <select
-                value={ownerclanLookbackDays}
-                onChange={(e) => setOwnerclanLookbackDays(Number(e.target.value))}
-                className="bg-transparent text-xs outline-none"
-                title="오너클랜 주문수집 기간"
-              >
-                <option value={1}>1일</option>
-                <option value={3}>3일</option>
-                <option value={6}>6일</option>
-                <option value={9}>9일</option>
-                <option value={14}>14일</option>
-              </select>
-            </label>
+          <label className="flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs">
+            <span className="whitespace-nowrap">수집기간</span>
+            <select
+              value={collectionRangeMode === 'custom' ? 'custom' : manualLookbackDays}
+              onChange={(e) => {
+                if (e.target.value === 'custom') {
+                  setCollectionRangeMode('custom')
+                } else {
+                  setCollectionRangeMode('preset')
+                  setManualLookbackDays(Number(e.target.value))
+                }
+              }}
+              className="bg-transparent text-xs outline-none"
+              title="주문수집 기간"
+            >
+              <option value={1}>1일</option>
+              <option value={3}>3일</option>
+              <option value={6}>6일</option>
+              <option value={9}>9일</option>
+              <option value={14}>14일</option>
+              <option value="custom">직접</option>
+            </select>
+          </label>
+          {collectionRangeMode === 'custom' && (
+            <div className="flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs">
+              <input
+                type="date"
+                value={manualDateFrom}
+                max={manualDateTo}
+                onChange={(e) => setManualDateFrom(e.target.value)}
+                className="w-[116px] bg-transparent text-xs outline-none"
+                title="수집 시작일"
+              />
+              <span className="text-muted-foreground">~</span>
+              <input
+                type="date"
+                value={manualDateTo}
+                min={manualDateFrom}
+                max={toDateInputValue(new Date())}
+                onChange={(e) => setManualDateTo(e.target.value)}
+                className="w-[116px] bg-transparent text-xs outline-none"
+                title="수집 종료일"
+              />
+            </div>
           )}
           {selected.size > 0 && (
             <>

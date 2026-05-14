@@ -13,11 +13,12 @@ When a stable integration needs more work:
 4. After the fix is verified in production, update the marketplace `README.md` with the new stable baseline commit and any new gotchas.
 5. Commit and push the updated implementation plus the refreshed stable note.
 
-Ownerclan current collection window:
+Manual collection window:
 
 - Manual collection defaults to 3 days.
-- The UI can send 1, 3, 6, 9, or 14 days for Ownerclan manual collection.
-- The API clamps Ownerclan manual collection to 1 through 14 days.
+- The UI can send 1, 3, 6, 9, or 14 days for manual collection.
+- The UI can also send a custom `manualDateFrom`/`manualDateTo` date range.
+- The API clamps preset manual collection to 1 through 14 days and rejects custom date ranges longer than 14 days.
 - Scheduled/background collection uses the worker default 7-day lookback.
 - Ownerclan still queries that selected lookback in smaller API windows internally to avoid timeouts.
 

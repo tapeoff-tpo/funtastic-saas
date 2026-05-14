@@ -31,6 +31,7 @@ export type MarketplaceId =
   | 'nsmall'
   | 'domesin'
   | 'domechango'
+  | 'specialoffer'
   | 'banana-b2b'
   | 'funtastic-b2b'
   | 'always'

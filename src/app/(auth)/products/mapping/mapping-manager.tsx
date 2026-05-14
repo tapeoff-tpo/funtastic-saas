@@ -10,7 +10,7 @@ export const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡', naver: '네이버', gmarket: 'G마켓', auction: '옥션',
   elevenst: '11번가', '11st': '11번가', cafe24: 'Cafe24', ohouse: '오늘의집', kakao: '카카오',
   ably: '에이블리', ssgmall: 'SSG', domeggook: '도매꾹', tobizon: '투비즈온',
-  domesin: '도매의신', 'banana-b2b': '바나나B2B', cjonestyle: 'CJ온스타일',
+  domesin: '도매의신', specialoffer: '스페셜오퍼', 'banana-b2b': '바나나B2B', cjonestyle: 'CJ온스타일',
   'hyundai-hmall': '현대홈쇼핑', 'gs-shop': 'GS샵', esm: 'ESM',
   always: '올웨이즈', zigzag: '지그재그', 'toss-shopping': '토스쇼핑',
   ownerclan: '오너클랜', onchannel: '온채널', '10x10': '텐바이텐',

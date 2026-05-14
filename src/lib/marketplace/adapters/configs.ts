@@ -410,6 +410,14 @@ const domesinAdapter = createStubAdapter({
   requiredCredentials: ['api_key', 'seller_id'],
 })
 
+const specialofferAdapter = createStubAdapter({
+  id: 'specialoffer',
+  name: '스페셜오퍼',
+  authType: 'api_key',
+  rateLimitPerSecond: 10,
+  requiredCredentials: ['api_key'],
+})
+
 const domechangoAdapter = createStubAdapter({
   id: 'domechango',
   name: '도매창고',
@@ -539,6 +547,9 @@ export function registerDefaultAdapters() {
   }
   if (!marketplaceRegistry.has('domesin')) {
     marketplaceRegistry.register(domesinAdapter)
+  }
+  if (!marketplaceRegistry.has('specialoffer')) {
+    marketplaceRegistry.register(specialofferAdapter)
   }
   if (!marketplaceRegistry.has('domechango')) {
     marketplaceRegistry.register(domechangoAdapter)

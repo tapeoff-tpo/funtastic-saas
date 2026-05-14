@@ -22,6 +22,7 @@ import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { DomeggookAdapter } from '@/lib/marketplace/adapters/domeggook/adapter'
 import { FuntasticB2bAdapter } from '@/lib/marketplace/adapters/funtastic-b2b/adapter'
 import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
+import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -117,6 +118,10 @@ export function createAdapter(
       return new DomesinAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
         seller_id: credentials.seller_id ?? credentials.sellerId ?? credentials.m_id ?? '',
+      })
+    case 'specialoffer':
+      return new SpecialofferAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

@@ -421,6 +421,7 @@ const MARKETPLACE_LABELS: Record<string, string> = {
   domeggook: '도매꾹',
   tobizon: '투비즈온',
   domesin: '도매의신',
+  specialoffer: '스페셜오퍼',
   'banana-b2b': '바나나B2B',
   ohouse: '오늘의집',
   ssgmall: 'SSG',

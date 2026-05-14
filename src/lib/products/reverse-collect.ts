@@ -21,6 +21,7 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
+import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
 import { setStock } from '@/lib/inventory/actions'
 import type { MarketplaceAdapter, NormalizedProduct } from '@/lib/marketplace/types'
 
@@ -66,6 +67,10 @@ async function createAdapterWithCredentials(
         access_token: credentials.access_token ?? '',
         mall_id: credentials.mall_id ?? '',
       })
+    case 'specialoffer':
+      return new SpecialofferAdapter({
+        api_key: credentials.api_key ?? '',
+      })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}`)
   }
@@ -82,6 +87,7 @@ function skuPrefix(marketplaceId: string): string {
     gmarket: 'GMK',
     auction: 'AUC',
     cafe24: 'C24',
+    specialoffer: 'SOF',
   }
   return prefixes[marketplaceId] ?? marketplaceId.toUpperCase().slice(0, 3)
 }

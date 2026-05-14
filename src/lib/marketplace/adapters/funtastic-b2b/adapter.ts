@@ -87,7 +87,7 @@ function listFromResponse<T>(response: FuntasticB2bListResponse<T>, key: 'orders
 
 function mapOrderStatus(status: string): NormalizedOrder['status'] {
   const normalized = status.toUpperCase()
-  if (normalized === 'ORDER_CONFIRMED') return 'new'
+  if (['CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized)) return 'new'
   if (status === '주문확인') return 'new'
   if (['PREPARING', 'PREPARING_PRODUCT', 'READY_TO_SHIP'].includes(normalized)) return 'confirmed'
   if (status === '상품준비중') return 'confirmed'
@@ -107,9 +107,9 @@ function isCollectableOrderStatus(status?: string, shipmentStatus?: string): boo
   const normalizedShipmentStatus = rawShipmentStatus.toUpperCase()
 
   return (
-    normalized === 'ORDER_CONFIRMED' ||
+    ['CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized) ||
     rawStatus === '주문확인' ||
-    normalizedShipmentStatus === 'ORDER_CONFIRMED' ||
+    ['CONFIRMED', 'ORDER_CONFIRMED'].includes(normalizedShipmentStatus) ||
     rawShipmentStatus === '주문확인'
   )
 }

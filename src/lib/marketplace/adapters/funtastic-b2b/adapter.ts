@@ -87,14 +87,29 @@ function listFromResponse<T>(response: FuntasticB2bListResponse<T>, key: 'orders
 
 function mapOrderStatus(status: string): NormalizedOrder['status'] {
   const normalized = status.toUpperCase()
-  if (['PAID', 'PAYMENT_COMPLETED', 'ORDERED', 'NEW'].includes(normalized)) return 'new'
+  if (['PAID', 'PAYMENT_COMPLETED', 'PAYMENT_CONFIRMED', 'CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized)) return 'new'
+  if (['결제완료', '결제확인', '주문확인'].includes(status)) return 'new'
   if (['PREPARING', 'PREPARING_PRODUCT', 'READY_TO_SHIP'].includes(normalized)) return 'confirmed'
   if (['READY', 'PACKED'].includes(normalized)) return 'ready'
   if (['SHIPPED'].includes(normalized)) return 'shipped'
   if (['DELIVERING', 'IN_DELIVERY'].includes(normalized)) return 'delivering'
   if (['DELIVERED', 'COMPLETED'].includes(normalized)) return 'delivered'
   if (['CANCELLED', 'CANCELED'].includes(normalized)) return 'cancelled'
-  return 'new'
+  return 'cancelled'
+}
+
+function isCollectableOrderStatus(status?: string, shipmentStatus?: string): boolean {
+  const rawStatus = (status ?? '').trim()
+  const rawShipmentStatus = (shipmentStatus ?? '').trim()
+  const normalized = rawStatus.toUpperCase()
+  const normalizedShipmentStatus = rawShipmentStatus.toUpperCase()
+
+  return (
+    ['PAID', 'PAYMENT_COMPLETED', 'PAYMENT_CONFIRMED', 'CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized) ||
+    ['결제완료', '결제확인', '주문확인'].includes(rawStatus) ||
+    ['PAID', 'PAYMENT_COMPLETED', 'PAYMENT_CONFIRMED', 'CONFIRMED', 'ORDER_CONFIRMED'].includes(normalizedShipmentStatus) ||
+    ['결제완료', '결제확인', '주문확인'].includes(rawShipmentStatus)
+  )
 }
 
 function mapClaimType(type: string): 'cancel' | 'return' | 'exchange' {
@@ -154,7 +169,9 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
         throw new MarketplaceApiError('funtastic-b2b', 400, response.message || response.error || 'Failed to fetch orders')
       }
 
-      return listFromResponse(response, 'orders').map((order) => this.normalizeOrder(order))
+      return listFromResponse(response, 'orders')
+        .filter((order) => isCollectableOrderStatus(order.status, order.shipmentStatus))
+        .map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {

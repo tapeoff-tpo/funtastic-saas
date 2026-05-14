@@ -51,10 +51,48 @@ async function formatKakaoError(error: unknown): Promise<string> {
     const response = (error as { response?: Response }).response
     if (response) {
       const body = await response.text().catch(() => '')
-      return `${response.status} ${response.statusText}${body ? `: ${body}` : ''}`
+      const hint = kakaoSetupHint(body)
+      return `${response.status} ${response.statusText}${body ? `: ${body}` : ''}${hint ? `\n${hint}` : ''}`
     }
   }
   return error instanceof Error ? error.message : 'Unknown error'
+}
+
+function kakaoSetupHint(body: string): string | null {
+  if (!body) return null
+
+  try {
+    const parsed = JSON.parse(body) as {
+      code?: number
+      msg?: string
+      extras?: {
+        error_code?: number
+        error_message?: string
+      }
+    }
+    const code = parsed.extras?.error_code ?? parsed.code
+    const message = parsed.extras?.error_message ?? parsed.msg ?? ''
+
+    if (code === -100004 || message.includes('등록되지 않은 대행사')) {
+      return '카카오톡스토어 판매자센터에서 이 연동대행사 앱이 판매자와 연결되어야 합니다. Admin 키는 연동대행사 앱의 Admin 키, 판매자 API 인증키는 판매채널 정보의 API 인증키인지 확인해 주세요.'
+    }
+  } catch {
+    if (body.includes('등록되지 않은 대행사')) {
+      return '카카오톡스토어 판매자센터에서 이 연동대행사 앱이 판매자와 연결되어야 합니다. Admin 키와 판매자 API 인증키를 다시 확인해 주세요.'
+    }
+  }
+
+  return null
+}
+
+function isKakaoAuthOrSetupError(message: string): boolean {
+  return (
+    message.includes('401') ||
+    message.includes('403') ||
+    message.includes('-401') ||
+    message.includes('-100004') ||
+    message.includes('등록되지 않은 대행사')
+  )
 }
 
 export class KakaoStoreAdapter implements MarketplaceAdapter {
@@ -106,7 +144,7 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       const message = await formatKakaoError(error)
-      if (message.includes('401') || message.includes('403') || message.includes('-401')) {
+      if (isKakaoAuthOrSetupError(message)) {
         throw new MarketplaceAuthError('kakao-store', `API authentication failed: ${message}`)
       }
       throw new MarketplaceApiError('kakao-store', 500, message)
@@ -138,7 +176,7 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       const message = await formatKakaoError(error)
-      if (message.includes('401') || message.includes('403') || message.includes('-401')) {
+      if (isKakaoAuthOrSetupError(message)) {
         throw new MarketplaceAuthError('kakao-store', `API authentication failed: ${message}`)
       }
       throw new MarketplaceApiError('kakao-store', 500, message)
@@ -186,7 +224,7 @@ export class KakaoStoreAdapter implements MarketplaceAdapter {
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       const message = await formatKakaoError(error)
-      if (message.includes('401') || message.includes('403') || message.includes('-401')) {
+      if (isKakaoAuthOrSetupError(message)) {
         throw new MarketplaceAuthError('kakao-store', `API authentication failed: ${message}`)
       }
       throw new MarketplaceApiError('kakao-store', 500, message)

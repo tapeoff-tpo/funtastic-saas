@@ -428,6 +428,14 @@ const bananaB2bAdapter = createStubAdapter({
 
 // --- Tier 3B: 올웨이즈, 텐바이텐, 토스쇼핑, 투비즈온 ---
 
+const funtasticB2bAdapter = createStubAdapter({
+  id: 'funtastic-b2b',
+  name: '펀타스틱B2B',
+  authType: 'api_key',
+  rateLimitPerSecond: 20,
+  requiredCredentials: ['api_key', 'base_url'],
+})
+
 const alwaysAdapter = createStubAdapter({
   id: 'always',
   name: '올웨이즈',
@@ -537,6 +545,9 @@ export function registerDefaultAdapters() {
   }
   if (!marketplaceRegistry.has('banana-b2b')) {
     marketplaceRegistry.register(bananaB2bAdapter)
+  }
+  if (!marketplaceRegistry.has('funtastic-b2b')) {
+    marketplaceRegistry.register(funtasticB2bAdapter)
   }
   // Tier 3B
   if (!marketplaceRegistry.has('always')) {

@@ -145,6 +145,14 @@ export async function testMarketplaceCredentials(
           channel_ids: credentials.channel_ids?.trim() || '101',
         }).testConnection()
         break
+      case 'funtastic-b2b':
+        result = {
+          success: Boolean(credentials.api_key?.trim() && credentials.base_url?.trim()),
+          error: credentials.api_key?.trim() && credentials.base_url?.trim()
+            ? undefined
+            : 'api_key와 base_url을 입력해주세요.',
+        }
+        break
       default:
         return {
           success: false,

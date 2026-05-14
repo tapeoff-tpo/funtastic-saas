@@ -32,6 +32,7 @@ export type MarketplaceId =
   | 'domesin'
   | 'domechango'
   | 'banana-b2b'
+  | 'funtastic-b2b'
   | 'always'
   | 'zigzag'
   | '10x10'

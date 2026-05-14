@@ -37,6 +37,10 @@ const NAVER_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['client_id', 'client_secret'],
 }
 
+const NAVER_API_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 0 : 1_000
+const NAVER_RATE_LIMIT_BACKOFF_MS = 30_000
+const NAVER_MAX_RATE_LIMIT_RETRIES = 2
+
 /** Order-related lastChangedType values */
 const ORDER_CHANGED_TYPES = ['PAYED', 'DELIVERING', 'DELIVERED', 'PURCHASE_DECIDED']
 
@@ -47,6 +51,7 @@ export class NaverAdapter implements MarketplaceAdapter {
   readonly config = NAVER_CONFIG
 
   private readonly naverClient: ReturnType<typeof createNaverClient>
+  private nextApiRequestAt = 0
 
   constructor(credentials: { client_id: string; client_secret: string }) {
     this.naverClient = createNaverClient(credentials.client_id, credentials.client_secret)
@@ -409,9 +414,9 @@ export class NaverAdapter implements MarketplaceAdapter {
       }
 
       try {
-        const response = await this.naverClient.client.get(
+        const response = await this.naverGet<NaverLastChangedStatusesResponse>(
           `external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`
-        ).json<NaverLastChangedStatusesResponse>()
+        )
         const ids = (response.data?.lastChangeStatuses || []).map((s) => s.productOrderId)
         allIds.push(...ids)
       } catch (err: unknown) {
@@ -432,11 +437,47 @@ export class NaverAdapter implements MarketplaceAdapter {
    * Fetch full product order details by IDs in batch.
    */
   private async fetchProductOrderDetails(productOrderIds: string[]): Promise<NaverProductOrder[]> {
-    const response = await this.naverClient.client.post('external/v1/pay-order/seller/product-orders/query', {
-      json: { productOrderIds },
-    }).json<NaverProductOrderDetailResponse>()
+    const response = await this.naverPost<NaverProductOrderDetailResponse>(
+      'external/v1/pay-order/seller/product-orders/query',
+      { productOrderIds },
+    )
 
     return response.data || []
+  }
+
+  private async naverGet<T>(url: string, attempt = 0): Promise<T> {
+    try {
+      await this.waitForNaverSlot()
+      return await this.naverClient.client.get(url).json<T>()
+    } catch (error) {
+      const message = await naverErrorMessage(error)
+      if (attempt < NAVER_MAX_RATE_LIMIT_RETRIES && isNaverRateLimitError(message)) {
+        await sleep(NAVER_RATE_LIMIT_BACKOFF_MS)
+        return this.naverGet<T>(url, attempt + 1)
+      }
+      throw new Error(`Naver API error: ${message}`)
+    }
+  }
+
+  private async naverPost<T>(url: string, json: Record<string, unknown>, attempt = 0): Promise<T> {
+    try {
+      await this.waitForNaverSlot()
+      return await this.naverClient.client.post(url, { json }).json<T>()
+    } catch (error) {
+      const message = await naverErrorMessage(error)
+      if (attempt < NAVER_MAX_RATE_LIMIT_RETRIES && isNaverRateLimitError(message)) {
+        await sleep(NAVER_RATE_LIMIT_BACKOFF_MS)
+        return this.naverPost<T>(url, json, attempt + 1)
+      }
+      throw new Error(`Naver API error: ${message}`)
+    }
+  }
+
+  private async waitForNaverSlot(): Promise<void> {
+    const now = Date.now()
+    const waitMs = Math.max(0, this.nextApiRequestAt - now)
+    this.nextApiRequestAt = Math.max(now, this.nextApiRequestAt) + NAVER_API_INTERVAL_MS
+    if (waitMs > 0) await sleep(waitMs)
   }
 
   private normalizeOrderGroup(productOrders: NaverProductOrder[]): NormalizedOrder {
@@ -574,4 +615,22 @@ export class NaverAdapter implements MarketplaceAdapter {
 
     return null
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function naverErrorMessage(error: unknown): Promise<string> {
+  if (error && typeof error === 'object' && 'response' in error) {
+    const response = (error as { response: Response }).response
+    const body = await response.text().catch(() => '')
+    return body || `${response.status} ${response.statusText}`
+  }
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isNaverRateLimitError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return lower.includes('gw.rate_limit') || lower.includes('rate_limit') || lower.includes('요청이 많아')
 }

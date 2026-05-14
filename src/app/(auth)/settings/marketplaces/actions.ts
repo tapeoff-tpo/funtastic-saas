@@ -10,6 +10,7 @@ import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
+import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -137,6 +138,13 @@ export async function testMarketplaceCredentials(
           vendor_password: credentials.vendor_password?.trim() ?? '',
         }).testConnection()
         break
+      case 'kakao-store':
+        result = await new KakaoStoreAdapter({
+          admin_app_key: credentials.admin_app_key?.trim() ?? '',
+          seller_app_key: credentials.seller_app_key?.trim() ?? '',
+          channel_ids: credentials.channel_ids?.trim() || '101',
+        }).testConnection()
+        break
       default:
         return {
           success: false,
@@ -186,6 +194,20 @@ export async function registerMarketplaceCredentials(
 
   // Store each credential in Vault (include alias in key to avoid collisions)
   const aliasTag = storeAlias === 'default' ? '' : `_${storeAlias}`
+
+  if (marketplaceId === 'kakao-store') {
+    const result = await new KakaoStoreAdapter({
+      admin_app_key: ((formData.get('admin_app_key') as string) ?? '').trim(),
+      seller_app_key: ((formData.get('seller_app_key') as string) ?? '').trim(),
+      channel_ids: ((formData.get('channel_ids') as string) ?? '').trim() || '101',
+    }).testConnection()
+    if (!result.success) {
+      return {
+        error: `카카오톡스토어 연동 확인 실패: ${result.error ?? '알 수 없는 오류'}`,
+      }
+    }
+  }
+
   try {
     for (const credKey of config.requiredCredentials) {
       const value = formData.get(credKey) as string

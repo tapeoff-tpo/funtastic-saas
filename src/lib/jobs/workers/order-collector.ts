@@ -489,7 +489,13 @@ export async function collectOrdersForConnection(params: {
     }
 
     let confirmTargets = newOrderIds
-    if ((marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || marketplaceId === 'naver') && normalizedOrders.length > 0) {
+    if (
+      (marketplaceId === 'ownerclan' ||
+        marketplaceId === 'domeggook' ||
+        marketplaceId === 'naver' ||
+        marketplaceId === 'funtastic-b2b') &&
+      normalizedOrders.length > 0
+    ) {
       const existingNewOrders = await db
         .select({
           id: orders.id,
@@ -557,7 +563,13 @@ export async function collectOrdersForConnection(params: {
           await setProgress(`신규 주문 확인 중 (${confirmIdx}/${confirmTargets.length})`)
         }
       }
-      if ((marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || marketplaceId === 'naver') && confirmFailures.length > 0) {
+      if (
+        (marketplaceId === 'ownerclan' ||
+          marketplaceId === 'domeggook' ||
+          marketplaceId === 'naver' ||
+          marketplaceId === 'funtastic-b2b') &&
+        confirmFailures.length > 0
+      ) {
         throw new Error(`${marketplaceId} 주문확인 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)
       }
     } else if (newOrderIds.length > 0 && !shouldAutoConfirmOrders()) {

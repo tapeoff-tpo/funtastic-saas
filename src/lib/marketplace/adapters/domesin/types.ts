@@ -1,27 +1,30 @@
-/**
- * Domesin (도매의신) API response types.
- *
- * TODO: Update types when API documentation becomes available.
- * These are minimal placeholder types for the stub adapter.
- */
-
-/** Placeholder order type */
-export interface DomesinOrder {
-  id: string
-  status: string
-  rawData: Record<string, unknown>
+export interface DomesinBaseResponse {
+  code: string
+  message?: string
 }
 
-/** Placeholder claim type */
-export interface DomesinClaim {
-  id: string
-  status: string
-  rawData: Record<string, unknown>
+export interface DomesinCashResponse extends DomesinBaseResponse {
+  cash?: number | string
 }
 
-/** Placeholder product type */
+export interface DomesinProductListResponse extends DomesinBaseResponse {
+  total_count?: number
+  total_page?: number
+  current_page?: number
+  items?: DomesinProduct[]
+}
+
 export interface DomesinProduct {
-  id: string
-  status: string
-  rawData: Record<string, unknown>
+  icode: string
+  iname: string
+  price?: number | string
+  price_consumer?: number | string
+  delivery_type?: number | string
+  delivery_amount?: number | string
+  status?: number | string
+  img?: string[]
+  content?: string
+  brand?: string
+  model?: string
+  keyword?: string
 }

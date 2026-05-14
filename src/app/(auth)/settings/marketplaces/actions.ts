@@ -11,6 +11,7 @@ import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
+import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -152,6 +153,12 @@ export async function testMarketplaceCredentials(
             ? undefined
             : 'api_key와 base_url을 입력해주세요.',
         }
+        break
+      case 'domesin':
+        result = await new DomesinAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
+          seller_id: credentials.seller_id?.trim() ?? credentials.m_id?.trim() ?? '',
+        }).testConnection()
         break
       default:
         return {

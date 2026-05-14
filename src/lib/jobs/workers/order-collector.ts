@@ -129,7 +129,7 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
   if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
   if (marketplaceId === 'ownerclan') return 'preparing'
   if (marketplaceId === 'domeggook') return '배송준비중'
-  if (marketplaceId === 'funtastic-b2b') return 'PREPARING'
+  if (marketplaceId === 'funtastic-b2b') return '상품준비중'
   return 'CONFIRMED'
 }
 

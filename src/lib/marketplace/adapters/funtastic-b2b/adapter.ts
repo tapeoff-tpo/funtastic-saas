@@ -90,8 +90,10 @@ function mapOrderStatus(status: string): NormalizedOrder['status'] {
   if (normalized === 'ORDER_CONFIRMED') return 'new'
   if (status === '주문확인') return 'new'
   if (['PREPARING', 'PREPARING_PRODUCT', 'READY_TO_SHIP'].includes(normalized)) return 'confirmed'
+  if (status === '상품준비중') return 'confirmed'
   if (['READY', 'PACKED'].includes(normalized)) return 'ready'
   if (['SHIPPED'].includes(normalized)) return 'shipped'
+  if (status === '출고완료') return 'shipped'
   if (['DELIVERING', 'IN_DELIVERY'].includes(normalized)) return 'delivering'
   if (['DELIVERED', 'COMPLETED'].includes(normalized)) return 'delivered'
   if (['CANCELLED', 'CANCELED'].includes(normalized)) return 'cancelled'
@@ -208,8 +210,8 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
     try {
       const response = await this.client.patch(`api/saas/orders/${encodeURIComponent(orderId)}`, {
         json: {
-          status: 'SHIPPED',
-          shipmentStatus: 'SHIPPED',
+          status: '출고완료',
+          shipmentStatus: '출고완료',
           carrier: CARRIER_NAMES[invoice.carrierId] ?? invoice.carrierId,
           trackingNo: invoice.trackingNumber,
           referenceNo: asString(invoice.rawData && typeof invoice.rawData === 'object' ? (invoice.rawData as Record<string, unknown>).referenceNo : undefined) || undefined,
@@ -229,8 +231,8 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
     try {
       const response = await this.client.patch(`api/saas/orders/${encodeURIComponent(marketplaceOrderId)}`, {
         json: {
-          status: 'PREPARING',
-          shipmentStatus: 'PREPARING',
+          status: '상품준비중',
+          shipmentStatus: '상품준비중',
         },
       }).json<FuntasticB2bMutationResponse>()
 

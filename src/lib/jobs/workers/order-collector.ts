@@ -144,7 +144,7 @@ const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'kakao-store',
 ])
 const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
-  ownerclan: 2,
+  ownerclan: 1,
   '10x10': 2,
   coupang: 2,
   cafe24: 2,

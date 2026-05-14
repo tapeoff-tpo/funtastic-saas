@@ -26,6 +26,7 @@ Order collection range workflow:
 - The shared order collector splits long collection periods into 1-day ranges.
 - Range-aware adapters receive both `since` and `until`.
 - Range-aware adapters are collected with capped parallelism, currently 2 ranges at a time.
+- Ownerclan is an exception and is capped at 1 range at a time because its GraphQL API returns `Too many requests` under parallel load.
 - The shared collector upserts every fetched order, including orders already saved locally, so later collection can backfill missed orders and refresh marketplace status/raw data.
 - Adapters that cannot safely pass `until` to the marketplace API must not be added to `RANGE_AWARE_ORDER_MARKETPLACES`, because repeated `since -> now` calls would create duplicated work and extra rate-limit pressure.
 - Current range-aware order adapters: Ownerclan, 10x10, Coupang, Cafe24, Naver, Toss Shopping, 11st, ESM, Ably, Ohouse, Onchannel, SSG Mall, CJ OnStyle, Kakao Gift, Kakao Store.

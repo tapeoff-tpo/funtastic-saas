@@ -2,8 +2,8 @@ import ky, { HTTPError, type KyInstance } from 'ky'
 
 const OWNERCLAN_GRAPHQL_URL = 'https://api.ownerclan.com/v1/graphql'
 const OWNERCLAN_AUTH_URL = 'https://auth.ownerclan.com/auth'
-const OWNERCLAN_GRAPHQL_INTERVAL_MS = 2_500
-const OWNERCLAN_RATE_LIMIT_BACKOFF_MS = 15_000
+const OWNERCLAN_GRAPHQL_INTERVAL_MS = 5_000
+const OWNERCLAN_RATE_LIMIT_BACKOFF_MS = 30_000
 const OWNERCLAN_CLOUDFLARE_BACKOFF_MS = 60_000
 const OWNERCLAN_HTTP_TIMEOUT_MS = 60_000
 
@@ -80,11 +80,11 @@ export class OwnerclanClient {
       }).json<OwnerclanGraphqlResponse<T>>()
     } catch (error) {
       const enrichedError = await enrichHttpError(error)
-      if (attempt === 0 && isRateLimitError(enrichedError)) {
+      if (attempt < 2 && isRateLimitError(enrichedError)) {
         await sleep(OWNERCLAN_RATE_LIMIT_BACKOFF_MS)
         return this.graphqlRequest<T>(query, variables, attempt + 1)
       }
-      if (attempt === 0 && isRetryableCloudflareError(enrichedError)) {
+      if (attempt < 2 && isRetryableCloudflareError(enrichedError)) {
         await sleep(getRetryAfterMs(enrichedError) ?? OWNERCLAN_CLOUDFLARE_BACKOFF_MS)
         return this.graphqlRequest<T>(query, variables, attempt + 1)
       }
@@ -93,7 +93,7 @@ export class OwnerclanClient {
 
     if (response.errors && response.errors.length > 0) {
       const error = new Error(response.errors.map((error) => error.message ?? 'Unknown GraphQL error').join('; '))
-      if (attempt === 0 && isRateLimitError(error)) {
+      if (attempt < 2 && isRateLimitError(error)) {
         await sleep(OWNERCLAN_RATE_LIMIT_BACKOFF_MS)
         return this.graphqlRequest<T>(query, variables, attempt + 1)
       }

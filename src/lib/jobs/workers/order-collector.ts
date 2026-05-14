@@ -413,10 +413,11 @@ export async function collectOrdersForConnection(params: {
       idx++
       const items = dedupeNormalizedOrderItems(order.items)
       const orderForSave = { ...order, items }
+      const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
+      const isExistingOrder = existingOrderKeys.has(orderKey)
       const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
-      // Re-insert order items (delete existing first to handle updates)
-      await db.delete(orderItems).where(eq(orderItems.orderId, upsertedOrder.id))
-      if (items.length > 0) {
+
+      if (!isExistingOrder && items.length > 0) {
         await db.insert(orderItems).values(
           items.map((item) => ({
             orderId: upsertedOrder.id,

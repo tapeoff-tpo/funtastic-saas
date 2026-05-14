@@ -20,6 +20,7 @@ import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapte
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { DomeggookAdapter } from '@/lib/marketplace/adapters/domeggook/adapter'
+import { FuntasticB2bAdapter } from '@/lib/marketplace/adapters/funtastic-b2b/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -106,6 +107,11 @@ export function createAdapter(
         session_id: credentials.session_id ?? credentials.sessionId ?? credentials.sId ?? credentials.sid ?? '',
         password: credentials.password ?? credentials.pw ?? '',
       })
+    case 'funtastic-b2b':
+      return new FuntasticB2bAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        base_url: credentials.base_url ?? credentials.baseUrl ?? '',
+      })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)
   }
@@ -116,13 +122,14 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || marketplaceId === 'naver' || shouldAutoConfirmOrders()
+  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || marketplaceId === 'naver' || marketplaceId === 'funtastic-b2b' || shouldAutoConfirmOrders()
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
   if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
   if (marketplaceId === 'ownerclan') return 'preparing'
   if (marketplaceId === 'domeggook') return '배송준비중'
+  if (marketplaceId === 'funtastic-b2b') return 'PREPARING'
   return 'CONFIRMED'
 }
 
@@ -142,6 +149,7 @@ const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'cjonestyle',
   'kakao-gift',
   'kakao-store',
+  'funtastic-b2b',
 ])
 const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
   ownerclan: 1,
@@ -159,6 +167,7 @@ const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
   cjonestyle: 2,
   'kakao-gift': 2,
   'kakao-store': 2,
+  'funtastic-b2b': 2,
 }
 const ORDER_RANGE_MS = 24 * 60 * 60 * 1000
 const MANUAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/

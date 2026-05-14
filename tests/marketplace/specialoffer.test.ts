@@ -37,15 +37,76 @@ describe('SpecialofferAdapter', () => {
     })
   })
 
-  it('does not collect buyer-side purchase orders as sales orders', async () => {
-    const get = vi.fn()
+  it('collects supplier orders from the seller order endpoint', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ({
+        data: [
+          {
+            order_id: '571610',
+            order_no: '26051415470129',
+            order_state: 2,
+            goods_name: '휴대용 캠핑 취사용품 스텐 키친툴 조리도구 5종 세트',
+            sum_qty: 1,
+            goods_price: 8000,
+            shipping_fee: 3000,
+            total_price: 11000,
+            receiver_name: '홍길동',
+            receiver_telephone: '02-0000-0000',
+            receiver_cellphone: '010-0000-0000',
+            receiver_zip: '06000',
+            receiver_addr: '서울시 강남구',
+            receiver_addr2: '101호',
+            memo: '문 앞에 놓아주세요.',
+            order_date: '2026-05-14 15:47:01',
+            updated_at: '2026-05-14 15:47:01',
+          },
+        ],
+        meta: { current_page: 1, last_page: 1, total: 1 },
+      }),
+    }))
     vi.mocked(ky.create).mockReturnValue({ get } as never)
 
     const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
     const orders = await adapter.getOrders(new Date('2026-05-14T00:00:00+09:00'))
 
-    expect(orders).toEqual([])
-    expect(get).not.toHaveBeenCalled()
+    expect(get).toHaveBeenCalledWith('api/v2/seller/orders', {
+      searchParams: {
+        page: '1',
+        per_page: '100',
+      },
+    })
+    expect(orders).toHaveLength(1)
+    expect(orders[0]).toMatchObject({
+      marketplaceOrderId: '26051415470129',
+      marketplaceId: 'specialoffer',
+      marketplaceStatus: '2',
+      status: 'new',
+      buyerName: '홍길동',
+      buyerPhone: '02-0000-0000',
+      buyerPhone2: '010-0000-0000',
+      recipientName: '홍길동',
+      shippingAddress: {
+        zipCode: '06000',
+        address1: '서울시 강남구',
+        address2: '101호',
+      },
+      totalAmount: 11000,
+      shippingFee: 3000,
+      deliveryMessage: '문 앞에 놓아주세요.',
+    })
+    expect(orders[0].orderedAt.toISOString()).toBe('2026-05-14T06:47:01.000Z')
+    expect(orders[0].items).toEqual([
+      {
+        marketplaceItemId: '571610',
+        productName: '휴대용 캠핑 취사용품 스텐 키친툴 조리도구 5종 세트',
+        quantity: 1,
+        unitPrice: 8000,
+      },
+    ])
+    expect(orders[0].rawData.marketplaceOrderIdentity).toEqual({
+      orderId: '26051415470129',
+      itemIds: ['571610'],
+    })
   })
 
   it('normalizes Specialoffer goods into NormalizedProduct records', async () => {

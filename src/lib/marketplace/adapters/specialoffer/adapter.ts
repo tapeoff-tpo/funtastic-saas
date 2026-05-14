@@ -30,6 +30,8 @@ const SPECIALOFFER_CONFIG: MarketplaceConfig = {
 
 const PRODUCT_PAGE_SIZE = 100
 const MAX_PRODUCT_PAGES = 5
+const ORDER_PAGE_SIZE = 100
+const MAX_ORDER_PAGES = 20
 
 function asString(value: unknown): string {
   if (typeof value === 'string') return value
@@ -44,6 +46,31 @@ function asNumber(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0
   }
   return 0
+}
+
+function parseSpecialofferDate(value: unknown): Date | null {
+  if (typeof value !== 'string' || value.trim().length === 0) return null
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}+09:00`
+  const parsed = new Date(normalized)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function orderActivityDate(order: SpecialofferBuyerOrder): Date | null {
+  const updatedAt = parseSpecialofferDate(order.updated_at)
+  const orderedAt = parseSpecialofferDate(order.order_date)
+  if (updatedAt && orderedAt) return updatedAt > orderedAt ? updatedAt : orderedAt
+  return updatedAt ?? orderedAt
+}
+
+function mapOrderStatus(order: SpecialofferBuyerOrder): NormalizedOrder['status'] {
+  const state = asString(order.order_state).trim()
+  const stateText = state.toLowerCase()
+
+  if (stateText.includes('취소') || state === '0' || state === '9') return 'cancelled'
+  if (stateText.includes('완료') || state === '6' || state === '7') return 'delivered'
+  if (order.delivery_no || order.delivery_date || state === '5') return 'shipped'
+  if (stateText.includes('준비') || state === '3' || state === '4') return 'confirmed'
+  return 'new'
 }
 
 function imagesFromProduct(product: SpecialofferProduct): Array<{ url: string; sortOrder: number }> {
@@ -127,10 +154,43 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     return { success: true }
   }
 
-  async getOrders(_since: Date, _until: Date = new Date()): Promise<NormalizedOrder[]> {
-    // Specialoffer /api/v2/orders is the buyer-side purchase order history,
-    // not an inbound sales-channel order list. Keep it out of sales collection.
-    return []
+  async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
+    try {
+      const orders: NormalizedOrder[] = []
+
+      for (let page = 1; page <= MAX_ORDER_PAGES; page++) {
+        const response = await this.client.get('api/v2/seller/orders', {
+          searchParams: {
+            page: String(page),
+            per_page: String(ORDER_PAGE_SIZE),
+          },
+        }).json<SpecialofferListResponse<SpecialofferBuyerOrder>>()
+
+        if (response.error) {
+          throw new MarketplaceApiError('specialoffer', 400, response.error)
+        }
+
+        const data = response.data ?? []
+        for (const order of data) {
+          const activityDate = orderActivityDate(order)
+          if (activityDate && (activityDate < since || activityDate > until)) continue
+          orders.push(this.normalizeOrder(order))
+        }
+
+        const lastPage = response.meta?.last_page
+        const reachedEnd = !lastPage || page >= lastPage || data.length === 0
+        const canStopByDate = data.length > 0 && data.every((order) => {
+          const activityDate = orderActivityDate(order)
+          return activityDate ? activityDate < since : false
+        })
+        if (reachedEnd || canStopByDate) break
+      }
+
+      return orders
+    } catch (error) {
+      if (error instanceof MarketplaceApiError) throw error
+      throw new MarketplaceApiError('specialoffer', 500, await toApiMessage('Specialoffer order fetch', error))
+    }
   }
 
   async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
@@ -225,10 +285,70 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     }).json<SpecialofferListResponse<SpecialofferBuyerOrder>>()
   }
 
+  async getSellerOrders(page = 1, perPage = 15): Promise<SpecialofferListResponse<SpecialofferBuyerOrder>> {
+    return this.client.get('api/v2/seller/orders', {
+      searchParams: {
+        page: String(page),
+        per_page: String(perPage),
+      },
+    }).json<SpecialofferListResponse<SpecialofferBuyerOrder>>()
+  }
+
   async cancelBuyerOrder(orderId: string | number, reason: string): Promise<SpecialofferMutationResponse> {
     return this.client.post(`api/v2/orders/${encodeURIComponent(String(orderId))}/cancel`, {
       json: { reason },
     }).json<SpecialofferMutationResponse>()
+  }
+
+  private normalizeOrder(order: SpecialofferBuyerOrder): NormalizedOrder {
+    const orderId = asString(order.order_id || order.order_no)
+    const orderNo = asString(order.order_no || order.order_id)
+    const quantity = Math.max(1, asNumber(order.sum_qty))
+    const goodsPrice = asNumber(order.goods_price)
+    const totalAmount = asNumber(order.total_price || goodsPrice)
+    const orderedAt = parseSpecialofferDate(order.order_date) ?? parseSpecialofferDate(order.updated_at) ?? new Date()
+    const address2 = [order.receiver_addr2, order.receiver_addr3]
+      .map(asString)
+      .filter(Boolean)
+      .join(' ')
+
+    return {
+      marketplaceOrderId: orderNo,
+      marketplaceId: 'specialoffer',
+      marketplaceStatus: asString(order.order_state),
+      status: mapOrderStatus(order),
+      buyerName: order.receiver_name ?? '',
+      buyerPhone: order.receiver_telephone,
+      buyerPhone2: order.receiver_cellphone,
+      recipientName: order.receiver_name ?? '',
+      recipientPhone: order.receiver_telephone,
+      recipientPhone2: order.receiver_cellphone,
+      shippingAddress: {
+        zipCode: order.receiver_zip ?? '',
+        address1: order.receiver_addr ?? '',
+        address2: address2 || undefined,
+      },
+      items: [
+        {
+          marketplaceItemId: orderId,
+          productName: order.goods_name ?? '스페셜오퍼 상품',
+          quantity,
+          unitPrice: quantity > 0 ? Math.round(goodsPrice / quantity) : goodsPrice,
+        },
+      ],
+      orderedAt,
+      totalAmount,
+      shippingFee: asNumber(order.shipping_fee),
+      deliveryMessage: order.memo ?? null,
+      rawData: {
+        ...order,
+        orderNo,
+        marketplaceOrderIdentity: {
+          orderId: orderNo,
+          itemIds: [orderId],
+        },
+      },
+    }
   }
 
   private normalizeProduct(product: SpecialofferProduct): NormalizedProduct {

@@ -179,7 +179,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
 
         const lastPage = response.meta?.last_page
         const reachedEnd = !lastPage || page >= lastPage || data.length === 0
-        const canStopByDate = data.length > 0 && data.every((order) => {
+        const canStopByDate = data.some((order) => {
           const activityDate = orderActivityDate(order)
           return activityDate ? activityDate < since : false
         })

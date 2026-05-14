@@ -109,6 +109,47 @@ describe('SpecialofferAdapter', () => {
     })
   })
 
+  it('stops paging when a seller order page reaches older records', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ({
+        data: [
+          {
+            order_id: '571610',
+            order_no: '26051415470129',
+            order_state: 2,
+            goods_name: '신규 상품',
+            sum_qty: 1,
+            goods_price: 8000,
+            total_price: 8000,
+            order_date: '2026-05-14 15:47:01',
+            updated_at: '2026-05-14 15:47:01',
+          },
+          {
+            order_id: '565375',
+            order_no: '26041509321100',
+            order_state: 5,
+            goods_name: '오래된 상품',
+            sum_qty: 1,
+            goods_price: 5000,
+            total_price: 5000,
+            delivery_no: '1234567890',
+            order_date: '2026-04-15 09:32:11',
+            updated_at: '2026-04-24 00:00:00',
+          },
+        ],
+        meta: { current_page: 1, last_page: 94, total: 2801 },
+      }),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-13T00:00:00+09:00'))
+
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(orders).toHaveLength(1)
+    expect(orders[0].marketplaceOrderId).toBe('26051415470129')
+  })
+
   it('normalizes Specialoffer goods into NormalizedProduct records', async () => {
     const get = vi.fn(() => ({
       json: async () => ({

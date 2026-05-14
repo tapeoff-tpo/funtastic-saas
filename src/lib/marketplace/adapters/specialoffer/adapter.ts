@@ -30,8 +30,8 @@ const SPECIALOFFER_CONFIG: MarketplaceConfig = {
 
 const PRODUCT_PAGE_SIZE = 100
 const MAX_PRODUCT_PAGES = 5
-const ORDER_PAGE_SIZE = 100
-const MAX_ORDER_PAGES = 20
+const ORDER_PAGE_SIZE = 30
+const MAX_ORDER_PAGES = 100
 
 function asString(value: unknown): string {
   if (typeof value === 'string') return value

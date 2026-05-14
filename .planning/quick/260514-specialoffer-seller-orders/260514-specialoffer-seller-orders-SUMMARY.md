@@ -21,10 +21,12 @@ Specialoffer order collection now uses the supplier-side seller order endpoint.
 - Seller order rows are normalized to `NormalizedOrder`.
 - `order_no` is used as the marketplace order id and `order_id` is retained as the line/item id.
 - `order_state: 2` maps to SaaS `new`; shipped orders with delivery data map to `shipped`.
+- Seller order pagination uses `per_page=30` because Specialoffer returns HTTP 500 at `per_page=50` and `per_page=100`.
 - Added Vitest coverage for seller order collection.
 
 ## Verification
 
 - Live API smoke check confirmed `api/v2/seller/orders?per_page=10` returns supplier orders.
+- Live API smoke check confirmed `per_page=30` succeeds and `per_page>=50` fails with Specialoffer server 500.
 - `git diff --check` passed.
 - Full Vitest/build could not run locally because this checkout has no `node_modules` and no `npm` binary in PATH.

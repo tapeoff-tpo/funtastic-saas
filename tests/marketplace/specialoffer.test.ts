@@ -72,7 +72,7 @@ describe('SpecialofferAdapter', () => {
     expect(get).toHaveBeenCalledWith('api/v2/seller/orders', {
       searchParams: {
         page: '1',
-        per_page: '100',
+        per_page: '30',
       },
     })
     expect(orders).toHaveLength(1)

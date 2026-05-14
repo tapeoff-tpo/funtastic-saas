@@ -87,8 +87,8 @@ function listFromResponse<T>(response: FuntasticB2bListResponse<T>, key: 'orders
 
 function mapOrderStatus(status: string): NormalizedOrder['status'] {
   const normalized = status.toUpperCase()
-  if (['PAID', 'PAYMENT_COMPLETED', 'PAYMENT_CONFIRMED', 'CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized)) return 'new'
-  if (['결제완료', '결제확인', '주문확인'].includes(status)) return 'new'
+  if (normalized === 'ORDER_CONFIRMED') return 'new'
+  if (status === '주문확인') return 'new'
   if (['PREPARING', 'PREPARING_PRODUCT', 'READY_TO_SHIP'].includes(normalized)) return 'confirmed'
   if (['READY', 'PACKED'].includes(normalized)) return 'ready'
   if (['SHIPPED'].includes(normalized)) return 'shipped'
@@ -105,10 +105,10 @@ function isCollectableOrderStatus(status?: string, shipmentStatus?: string): boo
   const normalizedShipmentStatus = rawShipmentStatus.toUpperCase()
 
   return (
-    ['PAID', 'PAYMENT_COMPLETED', 'PAYMENT_CONFIRMED', 'CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized) ||
-    ['결제완료', '결제확인', '주문확인'].includes(rawStatus) ||
-    ['PAID', 'PAYMENT_COMPLETED', 'PAYMENT_CONFIRMED', 'CONFIRMED', 'ORDER_CONFIRMED'].includes(normalizedShipmentStatus) ||
-    ['결제완료', '결제확인', '주문확인'].includes(rawShipmentStatus)
+    normalized === 'ORDER_CONFIRMED' ||
+    rawStatus === '주문확인' ||
+    normalizedShipmentStatus === 'ORDER_CONFIRMED' ||
+    rawShipmentStatus === '주문확인'
   )
 }
 

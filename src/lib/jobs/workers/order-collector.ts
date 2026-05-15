@@ -144,6 +144,18 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
   return 'CONFIRMED'
 }
 
+function shouldConfirmCollectedOrder(
+  marketplaceId: string,
+  upsertedStatus: string,
+  rawData: Record<string, unknown> | null | undefined
+): boolean {
+  if (upsertedStatus === 'new') return true
+  if (marketplaceId !== 'funtastic-b2b') return false
+
+  const marketplaceStatus = typeof rawData?.status === 'string' ? rawData.status.trim().toUpperCase() : ''
+  return marketplaceStatus === 'CONFIRMED' || marketplaceStatus === 'ORDER_CONFIRMED'
+}
+
 const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'ownerclan',
   '10x10',
@@ -489,8 +501,10 @@ export async function collectOrdersForConnection(params: {
         await setProgress(`주문 저장 중 (${idx}/${totalOrders})`)
       }
 
-      // Collect newly-new orders for auto-confirm
-      if (upsertedOrder.status === 'new') {
+      // Collect orders that need marketplace-side confirmation.
+      // Funtastic B2B may already expose shipment.status=PREPARING while
+      // order.status remains CONFIRMED, so still send the confirmation PATCH.
+      if (shouldConfirmCollectedOrder(marketplaceId, upsertedOrder.status, orderForSave.rawData)) {
         newOrderIds.push({
           id: upsertedOrder.id,
           marketplaceOrderId: order.marketplaceOrderId,

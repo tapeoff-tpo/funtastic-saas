@@ -766,6 +766,7 @@ async function upsertOrder(
       shippingAddress: order.shippingAddress,
       orderedAt: order.orderedAt,
       totalAmount: String(order.totalAmount ?? 0),
+      shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
       deliveryMessage: order.deliveryMessage ?? null,
       rawData,
       collectedAt: new Date(),
@@ -777,6 +778,8 @@ async function upsertOrder(
       set: {
         status: order.status,
         marketplaceStatus: order.marketplaceStatus,
+        totalAmount: String(order.totalAmount ?? 0),
+        shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
         deliveryMessage: order.deliveryMessage ?? null,
         rawData,
         updatedAt: new Date(),
@@ -800,15 +803,9 @@ function mergeNormalizedOrdersByOrderId(ordersToMerge: NormalizedOrder[]): Norma
 
     const first = group[0]
     const items = dedupeNormalizedOrderItems(group.flatMap((order) => order.items))
-    const itemTotal = items.reduce(
-      (sum, item) => sum + (Number(item.unitPrice) || 0) * (Number(item.quantity) || 0),
-      0
-    )
-
     return {
       ...first,
       items,
-      totalAmount: itemTotal > 0 ? itemTotal : first.totalAmount,
       rawData: {
         ...(first.rawData ?? {}),
         mergedOrders: group.map((order) => order.rawData),

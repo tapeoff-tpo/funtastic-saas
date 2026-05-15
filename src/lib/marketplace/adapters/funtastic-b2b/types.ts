@@ -29,6 +29,11 @@ export interface FuntasticB2bOrder {
   id?: string | number
   status?: string
   shipmentStatus?: string
+  shipment?: {
+    status?: string
+    trackingNo?: string | null
+    carrier?: string | null
+  } | null
   orderedAt?: string
   orderDate?: string
   createdAt?: string

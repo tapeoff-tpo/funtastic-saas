@@ -88,30 +88,28 @@ function listFromResponse<T>(response: FuntasticB2bListResponse<T>, key: 'orders
 function mapOrderStatus(status: string): NormalizedOrder['status'] {
   const normalized = status.toUpperCase()
   if (['CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized)) return 'new'
-  if (status === '주문확인') return 'new'
   if (['PREPARING', 'PREPARING_PRODUCT', 'READY_TO_SHIP'].includes(normalized)) return 'confirmed'
-  if (status === '상품준비중') return 'confirmed'
   if (['READY', 'PACKED'].includes(normalized)) return 'ready'
   if (['SHIPPED'].includes(normalized)) return 'shipped'
-  if (status === '출고완료') return 'shipped'
   if (['DELIVERING', 'IN_DELIVERY'].includes(normalized)) return 'delivering'
   if (['DELIVERED', 'COMPLETED'].includes(normalized)) return 'delivered'
   if (['CANCELLED', 'CANCELED'].includes(normalized)) return 'cancelled'
   return 'cancelled'
 }
 
-function isCollectableOrderStatus(status?: string, shipmentStatus?: string): boolean {
-  const rawStatus = (status ?? '').trim()
-  const rawShipmentStatus = (shipmentStatus ?? '').trim()
-  const normalized = rawStatus.toUpperCase()
-  const normalizedShipmentStatus = rawShipmentStatus.toUpperCase()
+function getEffectiveShipmentStatus(order: FuntasticB2bOrder): string {
+  return (order.shipmentStatus ?? order.shipment?.status ?? '').trim()
+}
 
-  return (
-    ['CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized) ||
-    rawStatus === '주문확인' ||
-    ['CONFIRMED', 'ORDER_CONFIRMED'].includes(normalizedShipmentStatus) ||
-    rawShipmentStatus === '주문확인'
-  )
+function getEffectiveMarketplaceStatus(order: FuntasticB2bOrder): string {
+  return getEffectiveShipmentStatus(order) || (order.status ?? '').trim()
+}
+
+function isCollectableOrder(order: FuntasticB2bOrder): boolean {
+  const orderStatus = (order.status ?? '').trim().toUpperCase()
+  const shipmentStatus = getEffectiveShipmentStatus(order).toUpperCase()
+
+  return ['CONFIRMED', 'ORDER_CONFIRMED'].includes(orderStatus) && !shipmentStatus
 }
 
 function mapClaimType(type: string): 'cancel' | 'return' | 'exchange' {
@@ -172,7 +170,7 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
       }
 
       return listFromResponse(response, 'orders')
-        .filter((order) => isCollectableOrderStatus(order.status, order.shipmentStatus))
+        .filter((order) => isCollectableOrder(order))
         .map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
@@ -210,8 +208,8 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
     try {
       const response = await this.client.patch(`api/saas/orders/${encodeURIComponent(orderId)}`, {
         json: {
-          status: '출고완료',
-          shipmentStatus: '출고완료',
+          status: 'SHIPPED',
+          shipmentStatus: 'SHIPPED',
           carrier: CARRIER_NAMES[invoice.carrierId] ?? invoice.carrierId,
           trackingNo: invoice.trackingNumber,
           referenceNo: asString(invoice.rawData && typeof invoice.rawData === 'object' ? (invoice.rawData as Record<string, unknown>).referenceNo : undefined) || undefined,
@@ -231,8 +229,8 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
     try {
       const response = await this.client.patch(`api/saas/orders/${encodeURIComponent(marketplaceOrderId)}`, {
         json: {
-          status: '상품준비중',
-          shipmentStatus: '상품준비중',
+          status: 'PREPARING',
+          shipmentStatus: 'PREPARING',
         },
       }).json<FuntasticB2bMutationResponse>()
 
@@ -268,8 +266,8 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
     return {
       marketplaceOrderId: orderId,
       marketplaceId: 'funtastic-b2b',
-      marketplaceStatus: order.status ?? order.shipmentStatus ?? 'PAID',
-      status: mapOrderStatus(order.status ?? order.shipmentStatus ?? 'PAID'),
+      marketplaceStatus: getEffectiveMarketplaceStatus(order) || 'CONFIRMED',
+      status: mapOrderStatus(getEffectiveMarketplaceStatus(order) || 'CONFIRMED'),
       buyerName: order.buyerName || order.recipientName || order.receiverName || '-',
       buyerPhone: order.buyerPhone || undefined,
       buyerPhone2: order.buyerPhone2 || undefined,

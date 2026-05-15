@@ -166,6 +166,7 @@ None yet.
 | 260430-gbu | 매핑보드 dense UI 추가요구 반영 (searched sentinel + 선택사항 I~IV + 주문금액/확정여부 + 일괄주문확정/다운로드/선택삭제) | 2026-04-30 | 0ce3edd | [260430-gbu-dense-2](.planning/quick/260430-gbu-dense-2/) |
 | 260514-specialoffer-api | 스페셜오퍼 Open API v2 연동 (api_key 인증, 상품조회/등록 helper, 역수집 연결) | 2026-05-14 | pending | [260514-specialoffer-api](.planning/quick/260514-specialoffer-api/) |
 | 260514-specialoffer-seller-orders | 스페셜오퍼 공급사 주문목록 수집 수정 | 2026-05-14 | pending | [260514-specialoffer-seller-orders](.planning/quick/260514-specialoffer-seller-orders/) |
+| 260515-collect-result-label | 주문수집 결과 문구를 수집/갱신 의미로 수정 | 2026-05-15 | pending | [260515-collect-result-label](.planning/quick/260515-collect-result-label/) |
 
 ## Session Continuity
 

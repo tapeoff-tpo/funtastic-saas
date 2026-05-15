@@ -601,7 +601,7 @@ export async function collectOrdersForConnection(params: {
       await setProgress(`${newOrderIds.length}건 신규 주문 저장 완료`)
     }
 
-    // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 신규주문만 수집)
+    // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 주문 수집/갱신만 수행)
     //    스케줄 잡(7일치)은 그대로 클레임도 수집해 놓치는 건 없게 함.
     if (jobType !== 'manual-order-collection') {
       await setProgress('클레임(취소/교환/반품) 조회 중...')

@@ -107,7 +107,7 @@ export function CollectOrdersPanel({ connections }: CollectOrdersPanelProps) {
                   <p className="text-sm text-muted-foreground">
                     {successCount > 0 && (
                       <span>
-                        총 <span className="font-semibold text-foreground">{totalOrders}건</span> 수집
+                        총 <span className="font-semibold text-foreground">{totalOrders}건</span> 수집/갱신
                         {totalClaims > 0 && (
                           <> (클레임 <span className="font-semibold text-foreground">{totalClaims}건</span>)</>
                         )}
@@ -160,10 +160,10 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
         <p className="text-sm font-medium">{log.displayName}</p>
         {isCompleted && (
           <p className="text-sm text-muted-foreground">
-            신규주문 <span className="font-medium text-foreground">{log.ordersCollected ?? 0}건</span>
+            주문 <span className="font-medium text-foreground">{log.ordersCollected ?? 0}건</span>
             {(log.claimsCollected ?? 0) > 0 && (
               <>, 클레임 <span className="font-medium text-foreground">{log.claimsCollected}건</span></>
-            )}{' '}수집
+            )}{' '}수집/갱신
           </p>
         )}
         {isFailed && (

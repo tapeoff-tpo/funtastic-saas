@@ -14,7 +14,7 @@ import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
 import { ShippingActions } from './shipping-actions'
 import { OrderDetailDialog } from './order-detail-dialog'
-import { ManualStatusChangeButton } from './status-actions'
+import { ManualInvoiceButton, ManualStatusChangeButton } from './status-actions'
 import { Pagination, PageSizeSelector } from '@/components/ui/pagination'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import type { OrderStage } from '@/lib/orders/types'
@@ -194,6 +194,13 @@ export function DataTable({
         <ManualStatusChangeButton
           selectedIds={selectedIds}
           canUnlockOrderSnapshots={canUnlockOrderSnapshots}
+          onChanged={() => {
+            setRowSelection({})
+            router.refresh()
+          }}
+        />
+        <ManualInvoiceButton
+          selectedOrders={selectedOrders}
           onChanged={() => {
             setRowSelection({})
             router.refresh()

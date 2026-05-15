@@ -10,9 +10,12 @@ import {
   changeStatusAction,
   bulkChangeStatusAction,
   forceBulkChangeStatusAction,
+  bulkUploadInvoiceAction,
   unlockOrderSnapshotsAction,
 } from './actions'
 import { toast } from 'sonner'
+import { CARRIERS } from '@/lib/shipping/carrier-codes'
+import type { OrderRow } from './columns'
 
 interface StatusDropdownProps {
   orderId: string
@@ -84,7 +87,187 @@ interface ManualStatusChangeButtonProps {
   onChanged?: () => void
 }
 
+interface ManualInvoiceButtonProps {
+  selectedOrders: OrderRow[]
+  onChanged?: () => void
+}
+
 const ALL_ORDER_STATUSES = Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]
+
+const CARRIER_LABELS: Record<string, string> = {
+  CJGLS: 'CJ대한통운',
+  HANJIN: '한진택배',
+  HYUNDAI: '롯데택배',
+  EPOST: '우체국택배',
+  KGB: '로젠택배',
+  KDEXP: '경동택배',
+  CHUNIL: '천일택배',
+  DAESIN: '대신택배',
+  ILYANG: '일양로지스',
+  CVSNET: '편의점택배',
+  REGISTPOST: '등기우편',
+  HDEXP: '합동택배',
+  HONAM: '호남택배',
+  ETC: '기타택배',
+}
+
+export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoiceButtonProps) {
+  const [open, setOpen] = useState(false)
+  const [carrierId, setCarrierId] = useState(CARRIERS[0]?.code ?? 'CJGLS')
+  const [trackingByOrderId, setTrackingByOrderId] = useState<Record<string, string>>({})
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = selectedOrders.length
+
+  const handleOpen = () => {
+    if (selectedCount === 0) {
+      toast.info('송장을 등록할 주문을 선택하세요.')
+      return
+    }
+
+    setTrackingByOrderId((prev) => {
+      const next: Record<string, string> = {}
+      for (const order of selectedOrders) {
+        next[order.id] = prev[order.id] ?? order.trackingNumber ?? ''
+      }
+      return next
+    })
+    setOpen(true)
+  }
+
+  const handleSubmit = () => {
+    const payload = selectedOrders
+      .map((order) => ({
+        orderId: order.id,
+        trackingNumber: (trackingByOrderId[order.id] ?? '').trim(),
+        carrierId,
+      }))
+      .filter((entry) => entry.trackingNumber)
+
+    if (payload.length === 0) {
+      toast.error('송장번호를 입력하세요.')
+      return
+    }
+
+    if (payload.length !== selectedOrders.length) {
+      const ok = window.confirm(
+        `${selectedOrders.length}건 중 ${payload.length}건만 송장번호가 입력됐습니다. 입력된 주문만 등록할까요?`,
+      )
+      if (!ok) return
+    }
+
+    startTransition(async () => {
+      const result = await bulkUploadInvoiceAction(payload)
+      if (result.errors.length === 0) {
+        toast.success(`${result.queued}건 송장등록 요청 완료`)
+        setOpen(false)
+        setTrackingByOrderId({})
+        onChanged?.()
+      } else {
+        toast.warning(`${result.queued}건 성공, ${result.errors.length}건 실패`)
+        for (const failure of result.errors.slice(0, 5)) {
+          toast.error(failure.error, { duration: 7000 })
+        }
+      }
+    })
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={handleOpen}
+        disabled={selectedCount === 0 || isPending}
+        className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {isPending ? '등록 중...' : `송장 수기등록${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+          <div className="w-full max-w-2xl rounded-lg border bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b px-5 py-3">
+              <h2 className="text-base font-semibold">송장 수기등록</h2>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">택배사</span>
+                <select
+                  value={carrierId}
+                  onChange={(event) => setCarrierId(event.target.value)}
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                >
+                  {CARRIERS.map((carrier) => (
+                    <option key={carrier.code} value={carrier.code}>
+                      {CARRIER_LABELS[carrier.code] ?? carrier.englishName ?? carrier.code}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="max-h-[55vh] overflow-y-auto rounded-md border">
+                <div className="grid grid-cols-[1.2fr_1fr_1.4fr] gap-2 border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
+                  <span>마켓</span>
+                  <span>주문번호</span>
+                  <span>송장번호</span>
+                </div>
+                {selectedOrders.map((order) => (
+                  <div
+                    key={order.id}
+                    className="grid grid-cols-[1.2fr_1fr_1.4fr] items-center gap-2 border-b px-3 py-2 last:border-b-0"
+                  >
+                    <span className="truncate text-sm" title={order.marketplaceName ?? order.marketplaceId}>
+                      {order.marketplaceName ?? order.marketplaceId}
+                    </span>
+                    <span className="truncate font-mono text-xs" title={order.marketplaceOrderId}>
+                      {order.marketplaceOrderId}
+                    </span>
+                    <input
+                      value={trackingByOrderId[order.id] ?? ''}
+                      onChange={(event) =>
+                        setTrackingByOrderId((prev) => ({
+                          ...prev,
+                          [order.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="송장번호 입력"
+                      className="w-full rounded-md border px-2 py-1.5 text-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={isPending}
+                className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+              >
+                {isPending ? '등록 중...' : '송장 등록'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 export function ManualStatusChangeButton({
   selectedIds,

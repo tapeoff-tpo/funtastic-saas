@@ -167,6 +167,7 @@ None yet.
 | 260514-specialoffer-api | 스페셜오퍼 Open API v2 연동 (api_key 인증, 상품조회/등록 helper, 역수집 연결) | 2026-05-14 | pending | [260514-specialoffer-api](.planning/quick/260514-specialoffer-api/) |
 | 260514-specialoffer-seller-orders | 스페셜오퍼 공급사 주문목록 수집 수정 | 2026-05-14 | pending | [260514-specialoffer-seller-orders](.planning/quick/260514-specialoffer-seller-orders/) |
 | 260515-collect-result-label | 주문수집 결과 문구를 수집/갱신 의미로 수정 | 2026-05-15 | pending | [260515-collect-result-label](.planning/quick/260515-collect-result-label/) |
+| 260515-specialoffer-collectable-orders | 스페셜오퍼 수집 대상을 배송준비/미송장 주문으로 제한 | 2026-05-15 | pending | [260515-specialoffer-collectable-orders](.planning/quick/260515-specialoffer-collectable-orders/) |
 
 ## Session Continuity
 

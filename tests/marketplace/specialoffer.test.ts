@@ -44,7 +44,7 @@ describe('SpecialofferAdapter', () => {
           {
             order_id: '571610',
             order_no: '26051415470129',
-            order_state: 2,
+            order_state: 3,
             goods_name: '휴대용 캠핑 취사용품 스텐 키친툴 조리도구 5종 세트',
             sum_qty: 1,
             goods_price: 8000,
@@ -79,7 +79,7 @@ describe('SpecialofferAdapter', () => {
     expect(orders[0]).toMatchObject({
       marketplaceOrderId: '26051415470129',
       marketplaceId: 'specialoffer',
-      marketplaceStatus: '2',
+      marketplaceStatus: '3',
       status: 'new',
       buyerName: '홍길동',
       buyerPhone: '02-0000-0000',
@@ -107,6 +107,35 @@ describe('SpecialofferAdapter', () => {
       orderId: '26051415470129',
       itemIds: ['571610'],
     })
+  })
+
+  it('skips seller orders that already have delivery data', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ({
+        data: [
+          {
+            order_id: '570869',
+            order_no: '26051208262418',
+            order_state: 5,
+            goods_name: '이미 출고된 상품',
+            sum_qty: 1,
+            goods_price: 8000,
+            total_price: 8000,
+            delivery_no: '1234567890',
+            delivery_date: '2026-05-12 15:16:23',
+            order_date: '2026-05-12 08:26:24',
+            updated_at: '2026-05-15 00:00:00',
+          },
+        ],
+        meta: { current_page: 1, last_page: 1, total: 1 },
+      }),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-14T00:00:00+09:00'))
+
+    expect(orders).toEqual([])
   })
 
   it('stops paging when a seller order page reaches older records', async () => {

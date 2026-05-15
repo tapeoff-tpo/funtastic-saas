@@ -32,6 +32,7 @@ const PRODUCT_PAGE_SIZE = 100
 const MAX_PRODUCT_PAGES = 5
 const ORDER_PAGE_SIZE = 30
 const MAX_ORDER_PAGES = 100
+const COLLECTABLE_ORDER_STATES = new Set(['2', '3'])
 
 function asString(value: unknown): string {
   if (typeof value === 'string') return value
@@ -69,8 +70,14 @@ function mapOrderStatus(order: SpecialofferBuyerOrder): NormalizedOrder['status'
   if (stateText.includes('취소') || state === '0' || state === '9') return 'cancelled'
   if (stateText.includes('완료') || state === '6' || state === '7') return 'delivered'
   if (order.delivery_no || order.delivery_date || state === '5') return 'shipped'
-  if (stateText.includes('준비') || state === '3' || state === '4') return 'confirmed'
+  if (COLLECTABLE_ORDER_STATES.has(state)) return 'new'
+  if (stateText.includes('준비') || state === '4') return 'confirmed'
   return 'new'
+}
+
+function isCollectableSellerOrder(order: SpecialofferBuyerOrder): boolean {
+  const state = asString(order.order_state).trim()
+  return COLLECTABLE_ORDER_STATES.has(state) && !order.delivery_no && !order.delivery_date
 }
 
 function imagesFromProduct(product: SpecialofferProduct): Array<{ url: string; sortOrder: number }> {
@@ -172,6 +179,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
 
         const data = response.data ?? []
         for (const order of data) {
+          if (!isCollectableSellerOrder(order)) continue
           const activityDate = orderActivityDate(order)
           if (activityDate && (activityDate < since || activityDate > until)) continue
           orders.push(this.normalizeOrder(order))

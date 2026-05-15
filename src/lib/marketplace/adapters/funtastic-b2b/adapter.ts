@@ -107,9 +107,8 @@ function getEffectiveMarketplaceStatus(order: FuntasticB2bOrder): string {
 
 function isCollectableOrder(order: FuntasticB2bOrder): boolean {
   const orderStatus = (order.status ?? '').trim().toUpperCase()
-  const shipmentStatus = getEffectiveShipmentStatus(order).toUpperCase()
 
-  return ['CONFIRMED', 'ORDER_CONFIRMED'].includes(orderStatus) && !shipmentStatus
+  return ['CONFIRMED', 'ORDER_CONFIRMED'].includes(orderStatus)
 }
 
 function mapClaimType(type: string): 'cancel' | 'return' | 'exchange' {

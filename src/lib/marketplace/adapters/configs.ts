@@ -423,7 +423,7 @@ const domechangoAdapter = createStubAdapter({
   name: '도매창고',
   authType: 'api_key',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  requiredCredentials: ['api_key', 'secure_key'],
 })
 
 const bananaB2bAdapter = createStubAdapter({

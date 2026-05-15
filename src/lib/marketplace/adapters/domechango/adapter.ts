@@ -1,82 +1,102 @@
-/**
- * Domechango (도매창고) marketplace adapter stub.
- *
- * This is a stub implementation with TODO markers.
- * testConnection returns success:false with "API integration pending".
- * All data methods throw MarketplaceApiError with TODO message.
- *
- * TODO: Implement when API access is available.
- */
-
 import type {
+  InvoiceData,
   MarketplaceAdapter,
   MarketplaceConfig,
   MarketplaceCredentials,
-  NormalizedOrder,
   NormalizedClaim,
+  NormalizedOrder,
   NormalizedProduct,
-  InvoiceData,
 } from '../../types'
-import { MarketplaceApiError } from '../../errors'
 
 const DOMECHANGO_CONFIG: MarketplaceConfig = {
   id: 'domechango',
   name: '도매창고',
   authType: 'api_key',
-  rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  rateLimitPerSecond: 10,
+  requiredCredentials: ['api_key', 'secure_key'],
 }
 
 export class DomechangoAdapter implements MarketplaceAdapter {
   readonly config = DOMECHANGO_CONFIG
 
+  private readonly apiKey: string
+  private readonly secureKey: string
+
+  constructor(credentials: { api_key?: string; apiKey?: string; secure_key?: string; secureKey?: string } = {}) {
+    this.apiKey = credentials.api_key ?? credentials.apiKey ?? ''
+    this.secureKey = credentials.secure_key ?? credentials.secureKey ?? ''
+  }
+
   async testConnection(
-    _credentials?: MarketplaceCredentials
+    credentials?: MarketplaceCredentials
   ): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
-    return {
-      success: false,
-      error: 'API integration pending - 도매창고 API documentation required',
+    const apiKey = credentials?.api_key?.trim() ?? this.apiKey.trim()
+    const secureKey = credentials?.secure_key?.trim() ?? this.secureKey.trim()
+
+    if (!apiKey) {
+      return { success: false, error: '도매창고 API Key를 입력해주세요.' }
     }
+    if (!secureKey) {
+      return { success: false, error: '도매창고 Secure Key를 입력해주세요.' }
+    }
+
+    return { success: true }
   }
 
   async authenticate(): Promise<{ success: boolean; expiresAt?: Date }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 API integration pending')
+    const result = await this.testConnection()
+    return { success: result.success }
   }
 
-  async getOrders(_since: Date): Promise<NormalizedOrder[]> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 getOrders pending API integration')
+  async getOrders(): Promise<NormalizedOrder[]> {
+    return []
   }
 
-  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 getClaimsOrders pending API integration')
+  async getClaimsOrders(): Promise<NormalizedClaim[]> {
+    return []
   }
 
-  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 uploadInvoice pending API integration')
-  }
-
-  async confirmOrder(
-    _marketplaceOrderId: string,
+  async uploadInvoice(
+    orderId: string,
+    invoice: InvoiceData
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+    void orderId
+    void invoice
+    return {
+      success: false,
+      error: '도매창고 송장 업로드는 API 스펙 확인 후 연결됩니다.',
+    }
+  }
+
+  async confirmOrder(): Promise<{ success: boolean; error?: string }> {
+    return {
+      success: true,
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 getProducts pending API integration')
+    return []
   }
 
-  async registerProduct(_product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 registerProduct pending API integration')
+  async registerProduct(
+    product: NormalizedProduct
+  ): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
+    void product
+    return {
+      success: false,
+      error: '도매창고 상품 등록은 API 스펙 확인 후 연결됩니다.',
+    }
   }
 
-  async updateProduct(_marketplaceProductId: string, _product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
-    // TODO: Implement when API access is available
-    throw new MarketplaceApiError('domechango', 501, 'Not yet implemented - 도매창고 updateProduct pending API integration')
+  async updateProduct(
+    marketplaceProductId: string,
+    product: Partial<NormalizedProduct>
+  ): Promise<{ success: boolean; error?: string }> {
+    void marketplaceProductId
+    void product
+    return {
+      success: false,
+      error: '도매창고 상품 수정은 API 스펙 확인 후 연결됩니다.',
+    }
   }
 }

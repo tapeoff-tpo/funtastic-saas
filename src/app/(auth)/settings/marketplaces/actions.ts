@@ -13,6 +13,7 @@ import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
 import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
+import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -164,6 +165,12 @@ export async function testMarketplaceCredentials(
       case 'specialoffer':
         result = await new SpecialofferAdapter({
           api_key: credentials.api_key?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'domechango':
+        result = await new DomechangoAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
+          secure_key: credentials.secure_key?.trim() ?? '',
         }).testConnection()
         break
       default:

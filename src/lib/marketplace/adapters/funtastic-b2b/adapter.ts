@@ -284,7 +284,10 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
       items,
       orderedAt: parseDate(order.orderedAt ?? order.orderDate ?? order.createdAt),
       totalAmount,
-      shippingFee: order.shippingFee != null ? asNumber(order.shippingFee) : null,
+      // Funtastic B2B's totalAmount is the paid amount including shipping.
+      // Keep the original shippingFee in rawData, but do not expose it as a
+      // separate SaaS order fee to avoid treating it as an extra charge.
+      shippingFee: null,
       deliveryMessage: order.deliveryMessage ?? order.memo ?? order.shipping?.memo ?? null,
       rawData: order as unknown as Record<string, unknown>,
     }

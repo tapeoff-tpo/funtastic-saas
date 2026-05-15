@@ -111,6 +111,7 @@ export function ShippingActions({
   const [confirmingMapped, setConfirmingMapped] = useState(false)
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
+  const [uploadingToMarket, setUploadingToMarket] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [userTemplates, setUserTemplates] = useState<UserTemplate[] | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
@@ -144,6 +145,58 @@ export function ShippingActions({
   }, [exportMenuOpen])
 
   const hasSelection = selectedOrderIds.length > 0
+
+  const handleMarketplaceInvoiceUpload = async () => {
+    if (!hasSelection || uploadingToMarket) return
+
+    const selectedOrderMap = new Map(selectedOrders.map((order) => [order.id, order]))
+    const knownSelectedOrders = selectedOrderIds
+      .map((id) => selectedOrderMap.get(id))
+      .filter((order): order is OrderRow => !!order)
+
+    if (knownSelectedOrders.length > 0 && knownSelectedOrders.every((order) => !order.trackingNumber)) {
+      setInvoiceDialogOpen(true)
+      return
+    }
+
+    setUploadingToMarket(true)
+    try {
+      const res = await fetch('/api/shipping/upload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderIds: selectedOrderIds }),
+      })
+      const data = await res.json().catch(() => ({})) as {
+        uploaded?: number
+        failed?: number
+        message?: string
+        results?: Array<{ success: boolean; error?: string }>
+      }
+
+      if (!res.ok) {
+        toast.error(data.message ?? '송장 전송에 실패했습니다.')
+        return
+      }
+
+      const uploaded = data.uploaded ?? 0
+      const failed = data.failed ?? 0
+      if (uploaded > 0 && failed === 0) {
+        toast.success(`${uploaded}건 송장 전송 완료`)
+        router.refresh()
+      } else if (uploaded > 0) {
+        const firstError = data.results?.find((result) => !result.success)?.error
+        toast.warning(`${uploaded}건 성공, ${failed}건 실패${firstError ? `: ${firstError}` : ''}`)
+        router.refresh()
+      } else {
+        toast.error(data.message ?? '전송할 송장번호가 없습니다.')
+        setInvoiceDialogOpen(true)
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '송장 전송에 실패했습니다.')
+    } finally {
+      setUploadingToMarket(false)
+    }
+  }
 
   // 현재 선택된 양식 — localStorage 에 저장된 ID 가 목록에 없으면 첫 번째로 fallback
   const activeTemplate = useMemo<UserTemplate | null>(() => {
@@ -602,8 +655,8 @@ export function ShippingActions({
         {showShipping && (
           <button
             type="button"
-            onClick={() => setInvoiceDialogOpen(true)}
-            disabled={!hasSelection}
+            onClick={handleMarketplaceInvoiceUpload}
+            disabled={!hasSelection || uploadingToMarket}
             className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
           >
             몰에 송장 전송

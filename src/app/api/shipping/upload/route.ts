@@ -23,11 +23,27 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  let body: { shipmentIds?: string[] } = {}
+  let body: { shipmentIds?: string[]; orderIds?: string[] } = {}
   try { body = await req.json() } catch { /* empty body = upload all today's pending */ }
 
   // Fetch target shipments
   const todayStart = startOfDay(new Date())
+  const hasExplicitTargets = !!body.shipmentIds?.length || !!body.orderIds?.length
+  const targetConditions = [
+    eq(shipments.userId, user.id),
+    isNotNull(shipments.trackingNumber),
+    eq(orders.isHeld, false),
+  ]
+
+  if (body.shipmentIds?.length) {
+    targetConditions.push(inArray(shipments.id, body.shipmentIds))
+  } else if (body.orderIds?.length) {
+    targetConditions.push(inArray(shipments.orderId, body.orderIds))
+  } else {
+    targetConditions.push(isNotNull(shipments.shippedAt))
+    targetConditions.push(gte(shipments.shippedAt, todayStart))
+    targetConditions.push(eq(shipments.uploadStatus, 'pending'))
+  }
 
   const targetShipments = await db
     .select({
@@ -40,18 +56,7 @@ export async function POST(req: NextRequest) {
     })
     .from(shipments)
     .innerJoin(orders, eq(shipments.orderId, orders.id))
-    .where(
-      and(
-        eq(shipments.userId, user.id),
-        isNotNull(shipments.shippedAt),
-        gte(shipments.shippedAt, todayStart),
-        // 미발송(isHeld) 주문은 송장 업로드 제외
-        eq(orders.isHeld, false),
-        ...(body.shipmentIds?.length
-          ? [inArray(shipments.id, body.shipmentIds)]
-          : [eq(shipments.uploadStatus, 'pending')]),
-      ),
-    )
+    .where(and(...targetConditions))
 
   if (targetShipments.length === 0) {
     return NextResponse.json({ message: '전송할 건이 없습니다', uploaded: 0, failed: 0, results: [] })

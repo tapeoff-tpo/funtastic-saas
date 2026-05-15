@@ -15,6 +15,7 @@ import { eq, and, inArray, isNotNull, gte } from 'drizzle-orm'
 import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
 
@@ -22,6 +23,7 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: { shipmentIds?: string[]; orderIds?: string[] } = {}
   try { body = await req.json() } catch { /* empty body = upload all today's pending */ }
@@ -30,7 +32,7 @@ export async function POST(req: NextRequest) {
   const todayStart = startOfDay(new Date())
   const hasExplicitTargets = !!body.shipmentIds?.length || !!body.orderIds?.length
   const targetConditions = [
-    eq(shipments.userId, user.id),
+    eq(shipments.userId, workspaceUserId),
     isNotNull(shipments.trackingNumber),
     eq(orders.isHeld, false),
   ]
@@ -130,7 +132,7 @@ export async function POST(req: NextRequest) {
     const credentials: Record<string, string> = {}
     let credError = false
     for (const key of adapterConfig.config.requiredCredentials) {
-      const val = await readCredential(marketplaceId, user.id, `${key}${aliasTag}`)
+      const val = await readCredential(marketplaceId, workspaceUserId, `${key}${aliasTag}`)
       if (!val) { credError = true; break }
       credentials[key] = val
     }

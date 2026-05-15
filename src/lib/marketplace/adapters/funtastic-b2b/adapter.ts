@@ -261,28 +261,31 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
       ? rawItems.map((item) => this.normalizeItem(item, orderId))
       : [this.normalizeItem({}, orderId)]
     const totalAmount = asNumber(order.totalAmount ?? order.amount ?? order.paymentAmount)
+    const buyerName = order.buyerName || order.buyer?.companyName || order.buyer?.ownerName || order.buyer?.loginId || '-'
+    const recipientName = order.recipientName || order.receiverName || order.shipping?.name || buyerName
+    const recipientPhone = order.recipientPhone || order.receiverPhone || order.shipping?.phone || undefined
 
     return {
       marketplaceOrderId: orderId,
       marketplaceId: 'funtastic-b2b',
       marketplaceStatus: getEffectiveMarketplaceStatus(order) || 'CONFIRMED',
       status: mapOrderStatus(getEffectiveMarketplaceStatus(order) || 'CONFIRMED'),
-      buyerName: order.buyerName || order.recipientName || order.receiverName || '-',
-      buyerPhone: order.buyerPhone || undefined,
+      buyerName,
+      buyerPhone: order.buyerPhone || order.buyer?.phone || undefined,
       buyerPhone2: order.buyerPhone2 || undefined,
-      recipientName: order.recipientName || order.receiverName || order.buyerName || '-',
-      recipientPhone: order.recipientPhone || order.receiverPhone || undefined,
+      recipientName,
+      recipientPhone,
       recipientPhone2: order.recipientPhone2 || undefined,
       shippingAddress: {
-        zipCode: order.zipCode || order.zipcode || order.postalCode || '',
-        address1: order.address1 || order.address || '',
+        zipCode: order.zipCode || order.zipcode || order.postalCode || order.shipping?.zip || '',
+        address1: order.address1 || order.address || order.shipping?.address || '',
         address2: order.address2 || order.detailAddress || undefined,
       },
       items,
       orderedAt: parseDate(order.orderedAt ?? order.orderDate ?? order.createdAt),
       totalAmount,
       shippingFee: order.shippingFee != null ? asNumber(order.shippingFee) : null,
-      deliveryMessage: order.deliveryMessage ?? order.memo ?? null,
+      deliveryMessage: order.deliveryMessage ?? order.memo ?? order.shipping?.memo ?? null,
       rawData: order as unknown as Record<string, unknown>,
     }
   }

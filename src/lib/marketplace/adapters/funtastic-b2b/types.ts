@@ -34,6 +34,21 @@ export interface FuntasticB2bOrder {
     trackingNo?: string | null
     carrier?: string | null
   } | null
+  buyer?: {
+    loginId?: string
+    email?: string
+    companyName?: string
+    ownerName?: string
+    phone?: string
+    businessNo?: string
+  } | null
+  shipping?: {
+    name?: string
+    phone?: string
+    address?: string
+    zip?: string
+    memo?: string | null
+  } | null
   orderedAt?: string
   orderDate?: string
   createdAt?: string

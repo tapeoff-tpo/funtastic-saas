@@ -17,12 +17,16 @@ import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { nanoid } from 'nanoid'
 
 interface ActionResult {
   success?: boolean
   error?: string
   message?: string
 }
+
+const RPA_CREDENTIAL_KEYS = ['email', 'password'] as const
 
 /**
  * 저장된 마켓플레이스 인증정보를 Vault에서 읽어 복호화된 값으로 반환.
@@ -298,6 +302,183 @@ export async function registerMarketplaceCredentials(
   revalidatePath('/dashboard')
   revalidatePath('/settings/marketplaces')
   return { success: true, message: `${displayName} 인증정보가 저장되었습니다.` }
+}
+
+export async function registerRpaMarketplaceConnection(
+  _prevState: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    return { error: '인증이 필요합니다.' }
+  }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
+  const marketplaceId = String(formData.get('marketplace_id') ?? '').trim()
+  if (!marketplaceId || !marketplaceRegistry.has(marketplaceId)) {
+    return { error: '유효하지 않은 RPA 대상입니다.' }
+  }
+
+  const config = marketplaceRegistry.get(marketplaceId).config
+  if (getIntegrationMethod(marketplaceId, { authType: config.authType }) !== 'rpa') {
+    return { error: `${config.name}은(는) RPA 연동 대상이 아닙니다.` }
+  }
+
+  const storeAlias = String(formData.get('store_alias') ?? '').trim() || 'default'
+  const email = String(formData.get('email') ?? '').trim()
+  const password = String(formData.get('password') ?? '').trim()
+  if (!email || !password) {
+    return { error: '로그인 ID와 비밀번호를 입력해주세요.' }
+  }
+
+  const aliasTag = storeAlias === 'default' ? '' : `_${storeAlias}`
+  const vaultNames: string[] = []
+  try {
+    for (const key of RPA_CREDENTIAL_KEYS) {
+      const value = key === 'email' ? email : password
+      const vaultKey = `${key}${aliasTag}`
+      const name = `mkt_${workspaceUserId}_${marketplaceId}_${vaultKey}`
+      await storeCredential(marketplaceId, workspaceUserId, vaultKey, value)
+      vaultNames.push(name)
+    }
+  } catch (err) {
+    return {
+      error: `RPA 로그인 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+    }
+  }
+
+  const displayName = storeAlias === 'default' ? config.name : `${config.name} (${storeAlias})`
+
+  try {
+    const existing = await db
+      .select()
+      .from(marketplaceConnections)
+      .where(
+        and(
+          eq(marketplaceConnections.userId, workspaceUserId),
+          eq(marketplaceConnections.marketplaceId, marketplaceId),
+          eq(marketplaceConnections.storeAlias, storeAlias),
+        ),
+      )
+      .limit(1)
+
+    const values = {
+      displayName,
+      authType: 'session' as const,
+      status: 'connected' as const,
+      vaultSecretNames: vaultNames,
+      isManual: false,
+      metadata: { integrationMethod: 'rpa' },
+      updatedAt: new Date(),
+    }
+
+    if (existing.length > 0) {
+      await db
+        .update(marketplaceConnections)
+        .set(values)
+        .where(eq(marketplaceConnections.id, existing[0].id))
+    } else {
+      await db.insert(marketplaceConnections).values({
+        userId: workspaceUserId,
+        marketplaceId,
+        storeAlias,
+        ...values,
+      })
+    }
+  } catch (err) {
+    return {
+      error: `RPA 연결 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+    }
+  }
+
+  revalidatePath('/dashboard')
+  revalidatePath('/orders/collect')
+  revalidatePath('/settings/marketplaces')
+  return { success: true, message: `${displayName} RPA 연결이 등록되었습니다.` }
+}
+
+export async function registerExcelMarketplaceConnection(
+  _prevState: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    return { error: '인증이 필요합니다.' }
+  }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
+  const rawMarketplaceId = String(formData.get('marketplace_id') ?? '').trim()
+  const customName = String(formData.get('display_name') ?? '').trim()
+  const storeAlias = String(formData.get('store_alias') ?? '').trim() || 'excel'
+
+  let marketplaceId = rawMarketplaceId
+  let displayName = customName
+  if (marketplaceId && marketplaceRegistry.has(marketplaceId)) {
+    const config = marketplaceRegistry.get(marketplaceId).config
+    displayName = customName || config.name
+  } else {
+    marketplaceId = `manual-${nanoid(6)}`
+  }
+
+  if (!displayName) {
+    return { error: '엑셀 업로드몰 이름을 입력해주세요.' }
+  }
+
+  try {
+    const existing = await db
+      .select()
+      .from(marketplaceConnections)
+      .where(
+        and(
+          eq(marketplaceConnections.userId, workspaceUserId),
+          eq(marketplaceConnections.marketplaceId, marketplaceId),
+          eq(marketplaceConnections.storeAlias, storeAlias),
+        ),
+      )
+      .limit(1)
+
+    const values = {
+      displayName,
+      authType: 'api_key' as const,
+      status: 'connected' as const,
+      vaultSecretNames: [] as string[],
+      isManual: true,
+      metadata: { integrationMethod: 'excel' },
+      updatedAt: new Date(),
+    }
+
+    if (existing.length > 0) {
+      await db
+        .update(marketplaceConnections)
+        .set(values)
+        .where(eq(marketplaceConnections.id, existing[0].id))
+    } else {
+      await db.insert(marketplaceConnections).values({
+        userId: workspaceUserId,
+        marketplaceId,
+        storeAlias,
+        ...values,
+      })
+    }
+  } catch (err) {
+    return {
+      error: `엑셀 업로드몰 등록 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+    }
+  }
+
+  revalidatePath('/orders/collect')
+  revalidatePath('/settings/marketplaces')
+  return { success: true, message: `${displayName} 엑셀 업로드몰이 등록되었습니다.` }
 }
 
 export async function deleteMarketplaceConnection(

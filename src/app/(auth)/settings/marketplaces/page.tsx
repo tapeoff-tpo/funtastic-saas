@@ -6,9 +6,17 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getIntegrationInfo, getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import '@/lib/marketplace/adapters/configs'
 import { CredentialForm } from '@/components/marketplace/credential-form'
+import { IntegrationForms } from '@/components/marketplace/integration-forms'
 import { ConnectionRow } from './edit-button'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
+import type { IntegrationMethod } from '@/lib/marketplace/integration-methods'
+
+interface ConnectionListItem {
+  id: string
+  displayName: string
+  status: string
+}
 
 export default async function MarketplaceSettingsPage() {
   const supabase = await createClient()
@@ -28,6 +36,15 @@ export default async function MarketplaceSettingsPage() {
     .where(eq(marketplaceConnections.userId, workspaceUserId))
 
   const connectedIds = new Set(connections.map((c) => c.marketplaceId))
+  const connectedMethodIds = new Set(
+    connections.map((c) => {
+      const method = getIntegrationMethod(c.marketplaceId, {
+        isManual: c.isManual,
+        authType: c.authType,
+      })
+      return `${method}:${c.marketplaceId}`
+    }),
+  )
 
   const catalog = configs.map((config) => ({
     id: config.id,
@@ -45,8 +62,36 @@ export default async function MarketplaceSettingsPage() {
       isConnected: marketplace.isConnected,
     }))
   const rpaOptions = catalog.filter((marketplace) => marketplace.integrationMethod === 'rpa')
-  const rpaInfo = getIntegrationInfo('rpa')
-  const excelInfo = getIntegrationInfo('excel')
+  const rpaConnectionOptions = rpaOptions.map((marketplace) => ({
+    id: marketplace.id,
+    name: marketplace.name,
+    isConnected: connectedMethodIds.has(`rpa:${marketplace.id}`),
+  }))
+  const excelConnectionOptions = catalog.map((marketplace) => ({
+    id: marketplace.id,
+    name: marketplace.name,
+    isConnected: connectedMethodIds.has(`excel:${marketplace.id}`),
+  }))
+  const groupedConnections = {
+    api: connections.filter((connection) =>
+      getIntegrationMethod(connection.marketplaceId, {
+        isManual: connection.isManual,
+        authType: connection.authType,
+      }) === 'api'
+    ),
+    rpa: connections.filter((connection) =>
+      getIntegrationMethod(connection.marketplaceId, {
+        isManual: connection.isManual,
+        authType: connection.authType,
+      }) === 'rpa'
+    ),
+    excel: connections.filter((connection) =>
+      getIntegrationMethod(connection.marketplaceId, {
+        isManual: connection.isManual,
+        authType: connection.authType,
+      }) === 'excel'
+    ),
+  }
 
   return (
     <div className="space-y-8">
@@ -59,53 +104,66 @@ export default async function MarketplaceSettingsPage() {
 
       <CredentialForm marketplaces={marketplaceOptions} />
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <section className="rounded-lg border bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold">{rpaInfo.label} 자동화 후보</h2>
-              <p className="mt-1 text-sm text-muted-foreground">{rpaInfo.description}</p>
-            </div>
-            <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-medium text-violet-700">
-              {rpaOptions.length}개
-            </span>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {rpaOptions.map((marketplace) => (
-              <span
-                key={marketplace.id}
-                className="rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground"
-              >
-                {marketplace.name}
-              </span>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-lg border bg-white p-4">
-          <h2 className="text-base font-semibold">{excelInfo.label} 수동 업로드</h2>
-          <p className="mt-1 text-sm text-muted-foreground">{excelInfo.description}</p>
-          <p className="mt-3 text-xs text-muted-foreground">
-            온채널처럼 공식 API가 없거나 RPA가 불안정한 채널은 주문수집 화면에서 엑셀 양식을 선택해 업로드합니다.
-          </p>
-        </section>
-      </div>
+      <IntegrationForms
+        rpaMarketplaces={rpaConnectionOptions}
+        excelMarketplaces={excelConnectionOptions}
+      />
 
       {connections.length > 0 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold">연결된 마켓플레이스</h2>
-          <div className="divide-y rounded-lg border">
-            {connections.map((conn) => (
-              <ConnectionRow
-                key={conn.id}
-                connectionId={conn.id}
-                displayName={conn.displayName}
-                status={conn.status as ConnectionStatus}
-              />
-            ))}
+          <div className="grid gap-4 lg:grid-cols-3">
+            <ConnectionGroup title="API 연동" method="api" connections={groupedConnections.api} />
+            <ConnectionGroup title="RPA 연동" method="rpa" connections={groupedConnections.rpa} />
+            <ConnectionGroup title="엑셀 업로드" method="excel" connections={groupedConnections.excel} />
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+function ConnectionGroup({
+  title,
+  method,
+  connections,
+}: {
+  title: string
+  method: IntegrationMethod
+  connections: ConnectionListItem[]
+}) {
+  const info = getIntegrationInfo(method)
+
+  return (
+    <section className="overflow-hidden rounded-lg border bg-white">
+      <div className="border-b bg-muted/30 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">{title}</h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">{info.description}</p>
+          </div>
+          <span className="rounded-full bg-background px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {connections.length}개
+          </span>
+        </div>
+      </div>
+      {connections.length === 0 ? (
+        <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+          등록된 연결이 없습니다.
+        </div>
+      ) : (
+        <div className="divide-y">
+          {connections.map((conn) => (
+            <ConnectionRow
+              key={conn.id}
+              connectionId={conn.id}
+              displayName={conn.displayName}
+              status={conn.status as ConnectionStatus}
+              integrationMethod={method}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

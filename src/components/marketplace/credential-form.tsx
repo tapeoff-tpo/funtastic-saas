@@ -56,7 +56,7 @@ export function CredentialForm({ marketplaces }: CredentialFormProps) {
   useEffect(() => {
     if (state?.success && state.message) {
       toast.success(state.message)
-      setSelectedId('')
+      setTimeout(() => setSelectedId(''), 0)
     } else if (state?.error) {
       toast.error(state.error)
     }

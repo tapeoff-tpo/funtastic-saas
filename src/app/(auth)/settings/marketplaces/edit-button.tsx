@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
+import type { IntegrationMethod } from '@/lib/marketplace/integration-methods'
 
 const credentialLabels: Record<string, string> = {
   access_key: '액세스 키',
@@ -38,6 +39,7 @@ interface ConnectionRowProps {
   connectionId: string
   displayName: string
   status: ConnectionStatus
+  integrationMethod: IntegrationMethod
 }
 
 interface LoadedData {
@@ -51,6 +53,7 @@ export function ConnectionRow({
   connectionId,
   displayName,
   status,
+  integrationMethod,
 }: ConnectionRowProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -81,8 +84,10 @@ export function ConnectionRow({
   useEffect(() => {
     if (state?.success && state.message) {
       toast.success(state.message)
-      setOpen(false)
-      setReveal({})
+      setTimeout(() => {
+        setOpen(false)
+        setReveal({})
+      }, 0)
     } else if (state?.error) {
       toast.error(state.error)
     }
@@ -113,20 +118,22 @@ export function ConnectionRow({
           <StatusBadge status={status} />
         </div>
         <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleToggle}
-            disabled={loading}
-          >
-            {loading ? '불러오는 중...' : open ? '닫기' : '수정'}
-          </Button>
+          {integrationMethod === 'api' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleToggle}
+              disabled={loading}
+            >
+              {loading ? '불러오는 중...' : open ? '닫기' : '수정'}
+            </Button>
+          )}
           <DeleteConnectionButton connectionId={connectionId} />
         </div>
       </div>
 
-      {open && data && (
+      {open && data && integrationMethod === 'api' && (
         <form
           action={formAction}
           className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3"

@@ -16,8 +16,41 @@ import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { deductForOrder } from '@/lib/inventory/actions'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
+
+async function markShipmentUploadedAndOrderShipped(
+  shipmentId: string,
+  orderId: string,
+  uploadAttempts: number,
+) {
+  await db.transaction(async (tx) => {
+    const [order] = await tx
+      .select({ id: orders.id, status: orders.status, userId: orders.userId })
+      .from(orders)
+      .where(eq(orders.id, orderId))
+      .for('update')
+      .limit(1)
+
+    await tx.update(shipments).set({
+      uploadStatus: 'uploaded',
+      lastUploadAt: new Date(),
+      uploadAttempts,
+      marketplaceUploadError: null,
+      updatedAt: new Date(),
+    }).where(eq(shipments.id, shipmentId))
+
+    if (order?.status === 'ready') {
+      await tx.update(orders).set({
+        status: 'shipped',
+        previousStatus: 'ready',
+        updatedAt: new Date(),
+      }).where(eq(orders.id, orderId))
+      await deductForOrder(tx, order.userId, orderId)
+    }
+  })
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -30,7 +63,6 @@ export async function POST(req: NextRequest) {
 
   // Fetch target shipments
   const todayStart = startOfDay(new Date())
-  const hasExplicitTargets = !!body.shipmentIds?.length || !!body.orderIds?.length
   const targetConditions = [
     eq(shipments.userId, workspaceUserId),
     isNotNull(shipments.trackingNumber),
@@ -106,7 +138,7 @@ export async function POST(req: NextRequest) {
     // Skip if no connection (Excel import orders)
     if (!connectionId) {
       for (const s of groupShipments) {
-        await db.update(shipments).set({ uploadStatus: 'uploaded', lastUploadAt: new Date(), updatedAt: new Date() }).where(eq(shipments.id, s.id))
+        await markShipmentUploadedAndOrderShipped(s.id, s.orderId, s.uploadAttempts)
         results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: true, marketplaceId })
       }
       continue
@@ -157,13 +189,7 @@ export async function POST(req: NextRequest) {
         })
 
         if (result.success) {
-          await db.update(shipments).set({
-            uploadStatus: 'uploaded',
-            lastUploadAt: new Date(),
-            uploadAttempts: s.uploadAttempts + 1,
-            marketplaceUploadError: null,
-            updatedAt: new Date(),
-          }).where(eq(shipments.id, s.id))
+          await markShipmentUploadedAndOrderShipped(s.id, s.orderId, s.uploadAttempts + 1)
           results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: true, marketplaceId })
         } else {
           await db.update(shipments).set({

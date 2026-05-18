@@ -1,5 +1,6 @@
 export const AUTO_MARKETPLACE_OPTIONS = [
   { marketplaceId: 'domeggook', displayName: '도매꾹' },
+  { marketplaceId: 'onchannel', displayName: '온채널' },
   { marketplaceId: 'tobizon', displayName: '투비즈온' },
   { marketplaceId: 'domesin', displayName: '도매의신' },
   { marketplaceId: 'specialoffer', displayName: '스페셜오퍼' },

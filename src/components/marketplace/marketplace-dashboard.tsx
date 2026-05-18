@@ -6,6 +6,7 @@ import { useCollectPoll, type JobLogResult } from '@/lib/hooks/use-collect-poll'
 import { StatusBadge } from './status-badge'
 import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
+import { getIntegrationInfo, type IntegrationMethod } from '@/lib/marketplace/integration-methods'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
 import {
   addManualChannel,
@@ -29,6 +30,7 @@ interface Connection {
   lastErrorMessage: string | null
   expiresAt: Date | null
   isManual: boolean
+  integrationMethod: IntegrationMethod
 }
 
 interface MarketplaceDashboardProps {
@@ -67,7 +69,7 @@ function riskScore(c: Connection): number {
   return 3
 }
 
-type FilterKey = 'all' | 'connected' | 'error' | 'expiring' | 'disconnected' | 'manual'
+type FilterKey = 'all' | 'api' | 'rpa' | 'excel' | 'connected' | 'error' | 'expiring' | 'disconnected'
 type CollectionRangeMode = 'preset' | 'custom'
 
 function toDateInputValue(date: Date): string {
@@ -149,10 +151,10 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
 
   // 필터 카운트 — 칩에 표시
   const counts = useMemo(() => {
-    const c = { all: connections.length, connected: 0, error: 0, expiring: 0, disconnected: 0, manual: 0 }
+    const c = { all: connections.length, api: 0, rpa: 0, excel: 0, connected: 0, error: 0, expiring: 0, disconnected: 0 }
     for (const conn of connections) {
-      if (conn.isManual) c.manual++
-      else if (conn.status === 'error') c.error++
+      c[conn.integrationMethod]++
+      if (conn.status === 'error') c.error++
       else if (conn.status === 'disconnected') c.disconnected++
       else {
         c.connected++
@@ -167,11 +169,13 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     const q = search.trim().toLowerCase()
     return connections
       .filter((c) => {
+        if (filter === 'api') return c.integrationMethod === 'api'
+        if (filter === 'rpa') return c.integrationMethod === 'rpa'
+        if (filter === 'excel') return c.integrationMethod === 'excel'
         if (filter === 'connected') return !c.isManual && c.status !== 'disconnected' && c.status !== 'error'
         if (filter === 'error') return c.status === 'error'
         if (filter === 'expiring') return !c.isManual && !!c.expiresAt && isExpiringSoon(c.expiresAt)
         if (filter === 'disconnected') return c.status === 'disconnected'
-        if (filter === 'manual') return c.isManual
         return true
       })
       .filter((c) => (q ? c.displayName.toLowerCase().includes(q) : true))
@@ -192,11 +196,13 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     [visible]
   )
   const visibleSections = useMemo(() => {
-    const auto = visible.filter((c) => !c.isManual)
-    const manual = visible.filter((c) => c.isManual)
+    const api = visible.filter((c) => c.integrationMethod === 'api')
+    const rpa = visible.filter((c) => c.integrationMethod === 'rpa')
+    const excel = visible.filter((c) => c.integrationMethod === 'excel')
     return [
-      { key: 'auto', label: '자동몰', description: 'API 연동 주문수집', rows: auto },
-      { key: 'manual', label: '수동몰', description: '엑셀 업로드 주문수집', rows: manual },
+      { key: 'api', label: 'API 연동', description: '공식/제휴 API로 주문을 수집합니다', rows: api },
+      { key: 'rpa', label: 'RPA 자동화', description: '판매자센터 화면에서 엑셀 다운로드를 자동화합니다', rows: rpa },
+      { key: 'excel', label: '엑셀 수동', description: '주문 엑셀 업로드로 수집합니다', rows: excel },
     ].filter((section) => section.rows.length > 0)
   }, [visible])
   const activeImportTemplate = useMemo(() => {
@@ -313,11 +319,13 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
 
   const filterChips: { key: FilterKey; label: string; count: number; dot?: string }[] = [
     { key: 'all', label: '전체', count: counts.all },
+    { key: 'api', label: 'API', count: counts.api, dot: 'bg-emerald-500' },
+    { key: 'rpa', label: 'RPA', count: counts.rpa, dot: 'bg-violet-500' },
+    { key: 'excel', label: '엑셀', count: counts.excel, dot: 'bg-blue-500' },
     { key: 'connected', label: '연결됨', count: counts.connected, dot: 'bg-green-500' },
     { key: 'error', label: '오류', count: counts.error, dot: 'bg-red-500' },
     { key: 'expiring', label: '만료임박', count: counts.expiring, dot: 'bg-amber-500' },
     { key: 'disconnected', label: '미연결', count: counts.disconnected, dot: 'bg-gray-400' },
-    { key: 'manual', label: '엑셀', count: counts.manual, dot: 'bg-blue-500' },
   ]
 
   const pickImportTemplate = (templateId: string) => {
@@ -553,8 +561,14 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
 
       {/* Results modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border bg-background shadow-2xl">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={allDone ? clearResults : undefined}
+        >
+          <div
+            className="flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-xl border bg-background shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex shrink-0 items-center justify-between border-b px-5 py-4">
               <h2 className="text-base font-semibold">
                 {allDone ? '수집 결과' : '수집 진행 중...'}
@@ -568,18 +582,16 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
                     중지
                   </button>
                 )}
-                {allDone && (
-                  <button
-                    onClick={clearResults}
-                    className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    aria-label="닫기"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M18 6 6 18" />
-                      <path d="m6 6 12 12" />
-                    </svg>
-                  </button>
-                )}
+                <button
+                  onClick={clearResults}
+                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="닫기"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18" />
+                    <path d="m6 6 12 12" />
+                  </svg>
+                </button>
               </div>
             </div>
 
@@ -704,7 +716,8 @@ function ConnRow({
 }) {
   const isDisconnected = conn.status === 'disconnected'
   const isManual = conn.isManual
-  const eligibleForCollect = !isManual && !isDisconnected
+  const integrationInfo = getIntegrationInfo(conn.integrationMethod)
+  const eligibleForCollect = conn.integrationMethod === 'api' && !isDisconnected
   const expiringSoon = !!conn.expiresAt && isExpiringSoon(conn.expiresAt)
   const errorMsg = conn.status === 'error' ? conn.lastErrorMessage : null
 
@@ -730,10 +743,15 @@ function ConnRow({
       <td style={{ width: sizeOf('type') }} className="px-2 py-1.5 align-middle">
         <span
           className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
-            isManual ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+            conn.integrationMethod === 'excel'
+              ? 'bg-blue-100 text-blue-700'
+              : conn.integrationMethod === 'rpa'
+                ? 'bg-violet-100 text-violet-700'
+                : 'bg-emerald-100 text-emerald-700'
           }`}
+          title={integrationInfo.description}
         >
-          {isManual ? '엑셀' : 'API'}
+          {integrationInfo.label}
         </span>
       </td>
       {/* name */}
@@ -770,8 +788,10 @@ function ConnRow({
           </span>
         ) : expiringSoon ? (
           <span className="text-amber-600">인증 만료 임박</span>
-        ) : isManual ? (
+        ) : conn.integrationMethod === 'excel' ? (
           <span className="text-muted-foreground">엑셀 업로드 전용</span>
+        ) : conn.integrationMethod === 'rpa' ? (
+          <span className="text-muted-foreground">RPA 자동 다운로드 준비</span>
         ) : (
           <span className="text-muted-foreground">—</span>
         )}

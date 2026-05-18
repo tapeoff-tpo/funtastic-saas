@@ -81,6 +81,29 @@ export const DEFAULT_ORDER_IMPORT_TEMPLATES: DefaultOrderImportTemplate[] = [
       { field: 'shippingFee', excelColumn: '배송비' },
     ],
   },
+  {
+    id: 'default:onchannel',
+    name: '온채널 주문수집',
+    isDefault: true,
+    aliases: ['onchannel', '온채널'],
+    mappings: [
+      { field: 'orderNumber', excelColumn: '주문코드' },
+      { field: 'marketplaceItemId', excelColumn: '상품코드' },
+      { field: 'orderedAt', excelColumn: '일자' },
+      { field: 'buyerName', excelColumn: '고객명' },
+      { field: 'buyerPhone', excelColumn: '연락처', extraColumns: ['비상연락처'], joinSeparator: ' ' },
+      { field: 'recipientName', excelColumn: '고객명' },
+      { field: 'recipientPhone', excelColumn: '연락처', extraColumns: ['비상연락처'], joinSeparator: ' ' },
+      { field: 'zipCode', excelColumn: '우편번호' },
+      { field: 'recipientAddress', excelColumn: '배송지주소' },
+      { field: 'productName', excelColumn: '상품명' },
+      { field: 'optionText', excelColumn: '옵션' },
+      { field: 'quantity', excelColumn: '수량' },
+      { field: 'totalAmount', excelColumn: '가격' },
+      { field: 'sku', excelColumn: '자체코드' },
+      { field: 'deliveryMessage', excelColumn: '남김말' },
+    ],
+  },
 ]
 
 function normalizeImportTemplateKey(value: string): string {

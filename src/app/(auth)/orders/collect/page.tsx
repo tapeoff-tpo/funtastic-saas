@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
 import { AUTO_MARKETPLACE_OPTIONS } from '@/lib/marketplace/collect-options'
+import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { DEFAULT_ORDER_IMPORT_TEMPLATES } from '@/lib/orders/default-import-templates'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -54,6 +55,10 @@ export default async function OrdersCollectPage() {
     lastErrorMessage: c.lastErrorMessage,
     expiresAt: c.expiresAt,
     isManual: c.isManual,
+    integrationMethod: getIntegrationMethod(c.marketplaceId, {
+      isManual: c.isManual,
+      authType: c.authType,
+    }),
   }))
 
   const existingAutoMarketplaceIds = new Set(
@@ -73,6 +78,7 @@ export default async function OrdersCollectPage() {
         lastErrorMessage: null,
         expiresAt: null,
         isManual: false,
+        integrationMethod: getIntegrationMethod(marketplace.marketplaceId),
       })),
   ]
 

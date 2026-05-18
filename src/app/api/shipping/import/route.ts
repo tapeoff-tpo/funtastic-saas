@@ -33,6 +33,7 @@ export async function POST(request: NextRequest) {
     const carrierColValue = formData.get('carrierCol')
     const carrierCol = carrierColValue ? Number(carrierColValue) : undefined
     const fixedCarrierId = String(formData.get('fixedCarrierId') ?? '').trim() || undefined
+    const password = String(formData.get('password') ?? '').trim() || undefined
 
     // Read file buffer
     const arrayBuffer = await file.arrayBuffer()
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
       orderIdCol,
       trackingNumberCol,
       carrierCol,
+      password,
     })
 
     // Match to orders
@@ -59,7 +61,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Excel import error:', error)
     return NextResponse.json(
-      { error: 'Failed to parse Excel file' },
+      { error: error instanceof Error ? error.message : '엑셀 파일 처리에 실패했습니다' },
       { status: 500 },
     )
   }

@@ -63,6 +63,7 @@ export function ExcelImportDialog({
   const [orderIdCol, setOrderIdCol] = useState<number | null>(null)
   const [trackingCol, setTrackingCol] = useState<number | null>(null)
   const [carrierCol, setCarrierCol] = useState<number | null>(null)
+  const [password, setPassword] = useState('1')
   const [result, setResult] = useState<ParsedResult | null>(null)
   const [isParsing, startParsing] = useTransition()
   const [isApplying, startApplying] = useTransition()
@@ -93,6 +94,7 @@ export function ExcelImportDialog({
       formData.append('templateId', selectedTemplate.id)
       if (resolvedCarrierCol) formData.append('carrierCol', String(resolvedCarrierCol))
       if (selectedTemplate.fixedCarrierId) formData.append('fixedCarrierId', selectedTemplate.fixedCarrierId)
+      if (password.trim()) formData.append('password', password.trim())
 
       const res = await fetch('/api/shipping/import', {
         method: 'POST',
@@ -100,7 +102,8 @@ export function ExcelImportDialog({
       })
 
       if (!res.ok) {
-        toast.error('엑셀 파일 처리에 실패했습니다')
+        const data = await res.json().catch(() => ({})) as { error?: string }
+        toast.error(data.error ?? '엑셀 파일 처리에 실패했습니다')
         return
       }
 
@@ -149,6 +152,7 @@ export function ExcelImportDialog({
     setOrderIdCol(null)
     setTrackingCol(null)
     setCarrierCol(null)
+    setPassword('1')
   }
 
   return (
@@ -263,6 +267,23 @@ export function ExcelImportDialog({
             </div>
           </div>
 
+          <div>
+            <label htmlFor="excel-password" className="mb-1 block text-sm font-medium">
+              엑셀 비밀번호
+            </label>
+            <input
+              id="excel-password"
+              type="text"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="구형/암호화 엑셀 비밀번호"
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              CJ 구형 엑셀처럼 암호화된 파일은 기본값 1로 자동 해제합니다.
+            </p>
+          </div>
+
           {/* Parse button */}
           <button
             type="button"
@@ -272,6 +293,9 @@ export function ExcelImportDialog({
           >
             {isParsing ? '분석중...' : '파일 분석'}
           </button>
+          <p className="text-xs text-muted-foreground">
+            파일 분석은 엑셀의 주문번호와 송장번호를 먼저 읽어 매칭 여부를 확인하는 단계입니다. 매칭된 건이 있으면 아래 송장등록 버튼이 표시됩니다.
+          </p>
 
           {/* Results */}
           {result && (
@@ -337,7 +361,7 @@ export function ExcelImportDialog({
                 disabled={isApplying}
                 className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
               >
-                {isApplying ? '적용중...' : `${result.matched.length}건 적용`}
+                {isApplying ? '등록중...' : `${result.matched.length}건 송장등록`}
               </button>
             )}
           </div>

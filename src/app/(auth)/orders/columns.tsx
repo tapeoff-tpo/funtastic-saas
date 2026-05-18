@@ -3,7 +3,6 @@
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
 import { Copy, ExternalLink, MessageSquare, RotateCcw } from 'lucide-react'
-import { useSearchParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { ClaimStatusActions } from './claim-status-actions'
@@ -308,9 +307,6 @@ function stripTrailingOptionName(productName: string, optionName: string | null 
 }
 
 function ProductNameCell({ order }: { order: OrderRow }) {
-  const searchParams = useSearchParams()
-  const isNewTab = searchParams.get('status') === 'new'
-
   const items = order.items
   if (!items || items.length === 0)
     return <span className="text-muted-foreground">-</span>
@@ -320,11 +316,7 @@ function ProductNameCell({ order }: { order: OrderRow }) {
       {items.map((item, index) => {
         const displayOption = item.displayOptionName ?? item.optionText
         const primaryName = stripTrailingOptionName(item.displayName ?? item.productName, displayOption)
-        const showOriginal =
-          isNewTab && item.displayName != null && item.displayName !== item.productName
-        const collectedName = stripTrailingOptionName(item.productName, item.optionText)
-        const collected = showOriginal ? ` (${collectedName})` : ''
-        const line = `${primaryName}${collected}`
+        const line = primaryName
         return (
           <div
             key={item.id}

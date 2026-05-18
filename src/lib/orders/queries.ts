@@ -785,7 +785,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       displayName,
       displayOptionName,
       quantity: mappedQuantity > 0 ? mappedQuantity : orderQuantity,
-      sku: components.length === 1 ? components[0].sku : null,
+      sku: components.map((component) => component.sku).join(' + '),
       availableStock: components.length === 1 ? components[0].availableStock : null,
     }
   }
@@ -971,22 +971,78 @@ export async function getOrderById(id: string, userId?: string) {
         )
       : null
 
+  const detailMappingCandidates = orderItemRows.reduce(
+    (acc, item) => {
+      if (item.sku) acc.skus.add(item.sku)
+      if (item.marketplaceItemId) {
+        const marketplaceItemId = item.marketplaceItemId.trim()
+        if (marketplaceItemId) {
+          acc.marketplaceProductIds.add(marketplaceItemId)
+          const sepIdx = marketplaceItemId.indexOf('-')
+          if (sepIdx > 0) acc.marketplaceProductIds.add(marketplaceItemId.slice(0, sepIdx))
+        }
+      }
+      return acc
+    },
+    {
+      skus: new Set<string>(),
+      marketplaceProductIds: new Set<string>(),
+    },
+  )
+  const detailLookups = await getMappingLookups(order.userId, {
+    skus: Array.from(detailMappingCandidates.skus),
+    marketplaceProductIds: Array.from(detailMappingCandidates.marketplaceProductIds),
+  })
+  const detailMappingIndex = buildMappingIndex(
+    detailLookups.sources.map<MappingSource>((source) => ({
+      marketplaceId: source.marketplaceId,
+      marketplaceProductId: source.marketplaceProductId,
+      marketplaceOptionId: source.marketplaceOptionId,
+      ref: source.mappingCodeId,
+    })),
+  )
+  const detailComponentsByCode = new Map<string, typeof detailLookups.components>()
+  for (const component of detailLookups.components) {
+    const list = detailComponentsByCode.get(component.mappingCodeId) ?? []
+    list.push(component)
+    detailComponentsByCode.set(component.mappingCodeId, list)
+  }
+
   // 확정상품명 fallback chain
   const items = orderItemRows.map((r) => {
     const locked = !!r.lockedAt
+    const mappingCodeId = !locked && r.marketplaceItemId
+      ? lookupMappingRef(detailMappingIndex, order.marketplaceId, r.marketplaceItemId, r.optionText)
+      : null
+    const components = mappingCodeId ? detailComponentsByCode.get(mappingCodeId) ?? [] : []
+    const mappedDisplayName = components.length > 0
+      ? components.map((component) => component.productName ?? component.sku).join(' + ')
+      : null
+    const mappedOptionName = components.length > 0
+      ? components
+          .map((component) => component.optionName)
+          .filter((optionName): optionName is string => !!optionName)
+          .join(' + ') || null
+      : null
+    const mappedSku = components.length > 0
+      ? components.map((component) => component.sku).join(' + ')
+      : null
+    const mappedQuantity = components.length > 0
+      ? components.reduce((sum, component) => sum + component.quantity * r.quantity * (r.skuMultiplier ?? 1), 0)
+      : null
     return {
       id: r.id,
       orderId: r.orderId,
       marketplaceItemId: r.marketplaceItemId,
       productName: r.productName,
       optionText: r.optionText,
-      quantity: locked ? r.lockedQuantity ?? r.quantity : r.quantity,
+      quantity: locked ? r.lockedQuantity ?? r.quantity : mappedQuantity ?? r.quantity,
       unitPrice: r.unitPrice,
-      sku: locked ? r.lockedSku ?? r.sku : r.sku,
+      sku: locked ? r.lockedSku ?? r.sku : mappedSku ?? r.sku,
       skuMultiplier: r.skuMultiplier,
       fulfillmentCode: r.fulfillmentCode,
-      displayName: locked ? r.lockedProductName ?? r.productInternalName ?? null : r.productInternalName ?? null,
-      displayOptionName: locked ? r.lockedOptionName ?? r.productInternalOptionName ?? null : r.productInternalOptionName ?? null,
+      displayName: locked ? r.lockedProductName ?? r.productInternalName ?? null : mappedDisplayName ?? r.productInternalName ?? null,
+      displayOptionName: locked ? r.lockedOptionName ?? r.productInternalOptionName ?? null : mappedOptionName ?? r.productInternalOptionName ?? null,
       lockedAt: r.lockedAt,
     }
   })

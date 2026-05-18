@@ -135,6 +135,8 @@ export default async function OrdersPage({
         isHeld: params.held ?? undefined,
         cancelTab: params.cancel ?? undefined,
         excludeClaimLikeOrders: isNewTab,
+        includeMappingDetails: true,
+        includeStock: true,
       })
     : { orders: [] as Awaited<ReturnType<typeof getOrders>>['orders'], total: 0 }
   const [connections, { orders: orderList, total }] = await Promise.all([

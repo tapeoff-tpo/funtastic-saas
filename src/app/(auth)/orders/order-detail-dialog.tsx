@@ -68,6 +68,7 @@ interface OrderDetail {
     id: string
     productName: string
     displayName: string | null
+    displayOptionName?: string | null
     optionText: string | null
     quantity: number
     unitPrice: string
@@ -352,9 +353,9 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                             ) : (
                               <span className="text-sm italic text-muted-foreground">미매핑</span>
                             )}
-                            {item.optionText && (
+                            {(item.displayOptionName ?? item.optionText) && (
                               <span className="text-xs text-muted-foreground">
-                                · 옵션: {item.optionText}
+                                · 옵션: {item.displayOptionName ?? item.optionText}
                               </span>
                             )}
                           </div>

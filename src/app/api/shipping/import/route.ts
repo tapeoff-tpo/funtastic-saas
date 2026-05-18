@@ -10,6 +10,8 @@ import { parseInvoiceExcel, matchInvoicesToOrders } from '@/lib/shipping/excel/i
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
+export const runtime = 'nodejs'
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()

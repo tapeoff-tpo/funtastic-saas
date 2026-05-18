@@ -127,6 +127,9 @@ function decryptOfficeFile(buffer: Buffer | ArrayBuffer | Uint8Array, password?:
     input: Buffer.from(buffer),
     maxBuffer: 100 * 1024 * 1024,
   })
+  if (result.error) {
+    throw new Error(`암호화된 엑셀 복호화 실행 실패: ${result.error.message}`)
+  }
   if (result.status !== 0 || !result.stdout || result.stdout.length === 0) {
     const message = result.stderr?.toString().trim()
     throw new Error(

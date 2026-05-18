@@ -102,8 +102,15 @@ export function ExcelImportDialog({
       })
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({})) as { error?: string }
-        toast.error(data.error ?? '엑셀 파일 처리에 실패했습니다')
+        const raw = await res.text().catch(() => '')
+        let message = raw.trim()
+        try {
+          const data = raw ? JSON.parse(raw) as { error?: string } : {}
+          message = data.error ?? message
+        } catch {
+          // Non-JSON framework errors still carry useful text in the body.
+        }
+        toast.error(message || `엑셀 파일 처리에 실패했습니다. (HTTP ${res.status})`)
         return
       }
 

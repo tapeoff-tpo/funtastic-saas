@@ -11,7 +11,7 @@ import * as XLSX from 'xlsx'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
-import { eq, and, inArray, or } from 'drizzle-orm'
+import { eq, and, inArray, or, sql } from 'drizzle-orm'
 
 /** A parsed row from the invoice Excel file */
 export interface ParsedInvoiceRow {
@@ -66,6 +66,8 @@ const invoiceRowSchema = z.object({
   carrierId: z.string().optional(),
 })
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 function isZipXlsx(buffer: Buffer | ArrayBuffer | Uint8Array): boolean {
   const bytes = Buffer.from(buffer)
   return bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b
@@ -104,6 +106,10 @@ function scalarToString(value: unknown): string {
   if (value == null) return ''
   if (value instanceof Date) return value.toISOString()
   return String(value).trim()
+}
+
+function normalizeTrackingNumber(value: string): string {
+  return value.replace(/[\s-]/g, '')
 }
 
 function decryptOfficeFile(buffer: Buffer | ArrayBuffer | Uint8Array, password?: string): Buffer {
@@ -159,7 +165,7 @@ function parseRowsFromArrays(rows: unknown[][], mapping: ColumnMapping): ParseRe
 
     const result = invoiceRowSchema.safeParse({
       orderIdentifier: rawOrderId,
-      trackingNumber: rawTracking,
+      trackingNumber: normalizeTrackingNumber(rawTracking),
       carrierId: rawCarrier || undefined,
     })
 
@@ -270,7 +276,7 @@ export async function parseInvoiceExcel(
 
     const rawRow = {
       orderIdentifier: rawOrderId,
-      trackingNumber: rawTracking,
+      trackingNumber: normalizeTrackingNumber(rawTracking),
       carrierId: rawCarrier || undefined,
     }
 
@@ -303,6 +309,14 @@ export async function matchInvoicesToOrders(
   }
 
   const orderIdentifiers = parsedRows.map((r) => r.orderIdentifier)
+  const fullUuidIdentifiers = orderIdentifiers.filter((id) => UUID_PATTERN.test(id))
+  const shortUuidPrefixes = orderIdentifiers.filter((id) => /^[0-9a-f]{8}$/i.test(id))
+  const idPrefixCondition = shortUuidPrefixes.length > 0
+    ? inArray(sql<string>`left(${orders.id}::text, 8)`, shortUuidPrefixes)
+    : undefined
+  const uuidCondition = fullUuidIdentifiers.length > 0
+    ? inArray(orders.id, fullUuidIdentifiers)
+    : undefined
 
   // Query orders matching the marketplace order IDs
   const matchingOrders = await db
@@ -314,7 +328,8 @@ export async function matchInvoicesToOrders(
         or(
           inArray(orders.marketplaceOrderId, orderIdentifiers),
           inArray(orders.internalNo, orderIdentifiers),
-          inArray(orders.id, orderIdentifiers),
+          uuidCondition,
+          idPrefixCondition,
         )!,
       ),
     )
@@ -325,6 +340,7 @@ export async function matchInvoicesToOrders(
     orderMap.set(order.marketplaceOrderId, order)
     orderMap.set(order.internalNo, order)
     orderMap.set(order.id, order)
+    orderMap.set(order.id.slice(0, 8), order)
   }
 
   const matched: MatchedInvoice[] = []

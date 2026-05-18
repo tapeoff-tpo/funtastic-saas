@@ -136,7 +136,7 @@ export function ExcelImportDialog({
       const uploadResult = await bulkUploadInvoiceAction(orders)
 
       if (uploadResult.errors.length === 0) {
-        toast.success(`${uploadResult.queued}건의 송장이 대기열에 추가되었습니다`)
+        toast.success(`${uploadResult.queued}건 송장등록 완료`)
         onOpenChange(false)
         setFile(null)
         setResult(null)
@@ -147,6 +147,9 @@ export function ExcelImportDialog({
         toast.warning(
           `${uploadResult.queued}건 성공, ${uploadResult.errors.length}건 실패`,
         )
+        for (const failure of uploadResult.errors.slice(0, 5)) {
+          toast.error(failure.error, { duration: 7000 })
+        }
       }
     })
   }

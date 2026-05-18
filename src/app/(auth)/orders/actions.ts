@@ -10,8 +10,8 @@ import {
   forceBulkUpdateStatus,
 } from '@/lib/orders/actions'
 import {
-  queueInvoiceUpload,
-  bulkQueueInvoiceUpload,
+  registerInvoice,
+  bulkRegisterInvoice,
 } from '@/lib/shipping/actions'
 import type { OrderStatus } from '@/lib/orders/types'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -93,8 +93,8 @@ export async function forceBulkChangeStatusAction(
 }
 
 /**
- * Server action: upload invoice for a single order.
- * Queues invoice upload via BullMQ worker.
+ * Server action: register invoice for a single order.
+ * Stores the tracking number locally. Marketplace upload is handled separately.
  */
 export async function uploadInvoiceAction(
   orderId: string,
@@ -104,14 +104,14 @@ export async function uploadInvoiceAction(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { success: false, error: 'Unauthorized' }
-  const result = await queueInvoiceUpload(orderId, trackingNumber, carrierId, await getWorkspaceUserId(user.id))
+  const result = await registerInvoice(orderId, trackingNumber, carrierId, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result
 }
 
 /**
- * Server action: bulk upload invoices for multiple orders.
+ * Server action: bulk register invoices for multiple orders.
  */
 export async function bulkUploadInvoiceAction(
   orders: Array<{ orderId: string; trackingNumber: string; carrierId: string }>,
@@ -119,7 +119,7 @@ export async function bulkUploadInvoiceAction(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { queued: 0, errors: [] }
-  const result = await bulkQueueInvoiceUpload(orders, await getWorkspaceUserId(user.id))
+  const result = await bulkRegisterInvoice(orders, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result

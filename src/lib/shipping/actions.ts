@@ -92,6 +92,78 @@ export async function queueInvoiceUpload(
 }
 
 /**
+ * Register a tracking number locally without sending it to the marketplace.
+ *
+ * The separate "몰에 송장 전송" flow reads these shipment rows and performs
+ * the actual marketplace upload later.
+ */
+export async function registerInvoice(
+  orderId: string,
+  trackingNumber: string,
+  carrierId: string,
+  userId: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const [order] = await db
+      .select({
+        id: orders.id,
+        status: orders.status,
+        userId: orders.userId,
+      })
+      .from(orders)
+      .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
+      .limit(1)
+
+    if (!order) {
+      return { success: false, error: `Order not found: ${orderId}` }
+    }
+
+    const [existing] = await db
+      .select({ id: shipments.id })
+      .from(shipments)
+      .where(and(eq(shipments.orderId, orderId), eq(shipments.userId, userId)))
+      .limit(1)
+
+    if (existing) {
+      await db.update(shipments).set({
+        trackingNumber,
+        carrierId,
+        carrierName: getCarrierName(carrierId),
+        uploadStatus: 'pending',
+        marketplaceUploadError: null,
+        updatedAt: new Date(),
+      }).where(eq(shipments.id, existing.id))
+    } else {
+      await createShipment({
+        orderId,
+        userId,
+        trackingNumber,
+        carrierId,
+        carrierName: getCarrierName(carrierId),
+      })
+    }
+
+    if (order.status === 'confirmed') {
+      await db
+        .update(orders)
+        .set({
+          status: 'preparing',
+          preparingAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
+    }
+
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
+/**
  * Queue invoice uploads for multiple orders.
  *
  * Processes each order individually, collecting errors without
@@ -106,6 +178,31 @@ export async function bulkQueueInvoiceUpload(
 
   for (const item of uploadOrders) {
     const result = await queueInvoiceUpload(
+      item.orderId,
+      item.trackingNumber,
+      item.carrierId,
+      userId,
+    )
+
+    if (result.success) {
+      queued++
+    } else {
+      errors.push({ orderId: item.orderId, error: result.error || 'Unknown error' })
+    }
+  }
+
+  return { queued, errors }
+}
+
+export async function bulkRegisterInvoice(
+  uploadOrders: Array<{ orderId: string; trackingNumber: string; carrierId: string }>,
+  userId: string,
+): Promise<{ queued: number; errors: Array<{ orderId: string; error: string }> }> {
+  let queued = 0
+  const errors: Array<{ orderId: string; error: string }> = []
+
+  for (const item of uploadOrders) {
+    const result = await registerInvoice(
       item.orderId,
       item.trackingNumber,
       item.carrierId,

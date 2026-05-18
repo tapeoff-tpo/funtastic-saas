@@ -44,11 +44,11 @@ export function InvoiceUploadDialog({
           carrierId,
         )
         if (result.success) {
-          toast.success('송장 업로드가 대기열에 추가되었습니다')
+          toast.success('송장등록 완료')
           onOpenChange(false)
           setTrackingNumber('')
         } else {
-          toast.error(result.error ?? '송장 업로드에 실패했습니다')
+          toast.error(result.error ?? '송장등록에 실패했습니다')
         }
       } else {
         const orders = selectedOrderIds.map((id) => ({
@@ -58,7 +58,7 @@ export function InvoiceUploadDialog({
         }))
         const result = await bulkUploadInvoiceAction(orders)
         if (result.errors.length === 0) {
-          toast.success(`${result.queued}건의 송장이 대기열에 추가되었습니다`)
+          toast.success(`${result.queued}건 송장등록 완료`)
           onOpenChange(false)
           setTrackingNumber('')
         } else {

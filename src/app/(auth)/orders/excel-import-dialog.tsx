@@ -1,30 +1,40 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { bulkUploadInvoiceAction } from './actions'
 
-interface ImportTemplate {
+interface InvoiceImportTemplate {
   id: string
   name: string
-  carrierId: string | null
-  columns: Array<{
-    header: string
-    field: string
-  }>
+  orderIdCol: number
+  trackingNumberCol: number
+  carrierCol?: number | null
+  fixedCarrierId?: string
+  description: string
 }
+
+const INVOICE_IMPORT_TEMPLATES: InvoiceImportTemplate[] = [
+  {
+    id: 'cj-invoice-registration',
+    name: 'CJ송장등록 양식',
+    orderIdCol: 19,
+    trackingNumberCol: 8,
+    carrierCol: null,
+    fixedCarrierId: 'CJGLS',
+    description: '고객주문번호 19열, 운송장번호 8열, 택배사 CJ대한통운 고정',
+  },
+]
 
 interface ExcelImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  templates?: ImportTemplate[]
-  selectedTemplateId?: string | null
-  onTemplateSelect?: (templateId: string | null) => void
 }
 
 interface ParsedResult {
   matched: Array<{
     orderId: string
+    orderIdentifier: string
     marketplaceOrderId: string
     trackingNumber: string
     carrierId?: string
@@ -47,11 +57,9 @@ interface ParsedResult {
 export function ExcelImportDialog({
   open,
   onOpenChange,
-  templates = [],
-  selectedTemplateId = null,
-  onTemplateSelect,
 }: ExcelImportDialogProps) {
   const [file, setFile] = useState<File | null>(null)
+  const [templateId, setTemplateId] = useState(INVOICE_IMPORT_TEMPLATES[0].id)
   const [orderIdCol, setOrderIdCol] = useState<number | null>(null)
   const [trackingCol, setTrackingCol] = useState<number | null>(null)
   const [carrierCol, setCarrierCol] = useState<number | null>(null)
@@ -59,26 +67,12 @@ export function ExcelImportDialog({
   const [isParsing, startParsing] = useTransition()
   const [isApplying, startApplying] = useTransition()
 
-  const selectedTemplate = useMemo(
-    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
-    [selectedTemplateId, templates],
-  )
-
-  const templateColumns = useMemo(() => {
-    const findColumnIndex = (fields: string[]) => {
-      const index = selectedTemplate?.columns.findIndex((column) => fields.includes(column.field)) ?? -1
-      return index >= 0 ? index + 1 : null
-    }
-    return {
-      orderIdCol: findColumnIndex(['internalNo', 'marketplaceOrderId', 'orderId']) ?? 1,
-      trackingCol: findColumnIndex(['trackingNumber']) ?? 2,
-      carrierCol: findColumnIndex(['carrierName', 'carrierId']) ?? 3,
-    }
-  }, [selectedTemplate])
-
-  const resolvedOrderIdCol = orderIdCol ?? templateColumns.orderIdCol
-  const resolvedTrackingCol = trackingCol ?? templateColumns.trackingCol
-  const resolvedCarrierCol = carrierCol ?? templateColumns.carrierCol
+  const selectedTemplate = INVOICE_IMPORT_TEMPLATES.find((template) => template.id === templateId)
+    ?? INVOICE_IMPORT_TEMPLATES[0]
+  const resolvedOrderIdCol = orderIdCol ?? selectedTemplate.orderIdCol
+  const resolvedTrackingCol = trackingCol ?? selectedTemplate.trackingNumberCol
+  const resolvedCarrierCol = carrierCol ?? selectedTemplate.carrierCol ?? null
+  const carrierIsFixed = !!selectedTemplate.fixedCarrierId && !resolvedCarrierCol
 
   if (!open) return null
 
@@ -96,8 +90,9 @@ export function ExcelImportDialog({
       formData.append('file', file)
       formData.append('orderIdCol', String(resolvedOrderIdCol))
       formData.append('trackingNumberCol', String(resolvedTrackingCol))
-      formData.append('carrierCol', String(resolvedCarrierCol))
-      if (selectedTemplate) formData.append('templateId', selectedTemplate.id)
+      formData.append('templateId', selectedTemplate.id)
+      if (resolvedCarrierCol) formData.append('carrierCol', String(resolvedCarrierCol))
+      if (selectedTemplate.fixedCarrierId) formData.append('fixedCarrierId', selectedTemplate.fixedCarrierId)
 
       const res = await fetch('/api/shipping/import', {
         method: 'POST',
@@ -135,6 +130,9 @@ export function ExcelImportDialog({
         onOpenChange(false)
         setFile(null)
         setResult(null)
+        setOrderIdCol(null)
+        setTrackingCol(null)
+        setCarrierCol(null)
       } else {
         toast.warning(
           `${uploadResult.queued}건 성공, ${uploadResult.errors.length}건 실패`,
@@ -147,6 +145,7 @@ export function ExcelImportDialog({
     onOpenChange(false)
     setFile(null)
     setResult(null)
+    setTemplateId(INVOICE_IMPORT_TEMPLATES[0].id)
     setOrderIdCol(null)
     setTrackingCol(null)
     setCarrierCol(null)
@@ -164,28 +163,24 @@ export function ExcelImportDialog({
             </label>
             <select
               id="invoice-template"
-              value={selectedTemplateId ?? ''}
+              value={templateId}
               onChange={(e) => {
-                const nextTemplateId = e.target.value
+                setTemplateId(e.target.value)
                 setOrderIdCol(null)
                 setTrackingCol(null)
                 setCarrierCol(null)
-                onTemplateSelect?.(nextTemplateId || null)
               }}
               className="w-full rounded-md border px-3 py-2 text-sm"
             >
-              {templates.length === 0 && <option value="">등록된 양식 없음</option>}
-              {templates.map((template) => (
+              {INVOICE_IMPORT_TEMPLATES.map((template) => (
                 <option key={template.id} value={template.id}>
                   {template.name}
                 </option>
               ))}
             </select>
-            {selectedTemplate && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                다운로드 양식의 컬럼 순서로 마켓/내부 주문번호, 송장번호, 택배사 열을 자동 선택합니다.
-              </p>
-            )}
+            <p className="mt-1 text-xs text-muted-foreground">
+              {selectedTemplate.description}
+            </p>
           </div>
 
           {/* File input */}
@@ -206,7 +201,7 @@ export function ExcelImportDialog({
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label htmlFor="order-col" className="mb-1 block text-sm font-medium">
-                마켓 주문번호 열
+                내부 주문번호 열
               </label>
               <select
                 id="order-col"
@@ -214,7 +209,7 @@ export function ExcelImportDialog({
                 onChange={(e) => setOrderIdCol(Number(e.target.value))}
                 className="w-full rounded-md border px-3 py-2 text-sm"
               >
-                {Array.from({ length: 20 }, (_, i) => (
+                {Array.from({ length: 40 }, (_, i) => (
                   <option key={i + 1} value={i + 1}>
                     {i + 1}열
                   </option>
@@ -231,7 +226,7 @@ export function ExcelImportDialog({
                 onChange={(e) => setTrackingCol(Number(e.target.value))}
                 className="w-full rounded-md border px-3 py-2 text-sm"
               >
-                {Array.from({ length: 20 }, (_, i) => (
+                {Array.from({ length: 40 }, (_, i) => (
                   <option key={i + 1} value={i + 1}>
                     {i + 1}열
                   </option>
@@ -239,21 +234,32 @@ export function ExcelImportDialog({
               </select>
             </div>
             <div>
-              <label htmlFor="carrier-col" className="mb-1 block text-sm font-medium">
-                택배사 열
-              </label>
-              <select
-                id="carrier-col"
-                value={resolvedCarrierCol}
-                onChange={(e) => setCarrierCol(Number(e.target.value))}
-                className="w-full rounded-md border px-3 py-2 text-sm"
-              >
-                {Array.from({ length: 20 }, (_, i) => (
-                  <option key={i + 1} value={i + 1}>
-                    {i + 1}열
-                  </option>
-                ))}
-              </select>
+              {carrierIsFixed ? (
+                <>
+                  <span className="mb-1 block text-sm font-medium">택배사</span>
+                  <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                    CJ대한통운 고정
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label htmlFor="carrier-col" className="mb-1 block text-sm font-medium">
+                    택배사 열
+                  </label>
+                  <select
+                    id="carrier-col"
+                    value={resolvedCarrierCol ?? 3}
+                    onChange={(e) => setCarrierCol(Number(e.target.value))}
+                    className="w-full rounded-md border px-3 py-2 text-sm"
+                  >
+                    {Array.from({ length: 40 }, (_, i) => (
+                      <option key={i + 1} value={i + 1}>
+                        {i + 1}열
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
             </div>
           </div>
 
@@ -288,7 +294,7 @@ export function ExcelImportDialog({
                   <table className="w-full text-sm">
                     <thead className="bg-muted/50">
                       <tr>
-                        <th className="px-3 py-1.5 text-left font-medium">마켓 주문번호</th>
+                        <th className="px-3 py-1.5 text-left font-medium">내부/주문번호</th>
                         <th className="px-3 py-1.5 text-left font-medium">송장번호</th>
                         <th className="px-3 py-1.5 text-left font-medium">택배사</th>
                       </tr>
@@ -296,7 +302,7 @@ export function ExcelImportDialog({
                     <tbody>
                       {result.matched.slice(0, 5).map((m) => (
                         <tr key={m.orderId} className="border-t">
-                          <td className="px-3 py-1.5 font-mono">{m.marketplaceOrderId}</td>
+                          <td className="px-3 py-1.5 font-mono">{m.orderIdentifier || m.marketplaceOrderId}</td>
                           <td className="px-3 py-1.5">{m.trackingNumber}</td>
                           <td className="px-3 py-1.5">{m.carrierId ?? '-'}</td>
                         </tr>

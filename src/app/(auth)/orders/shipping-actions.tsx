@@ -18,15 +18,6 @@ interface UserTemplate {
   id: string
   name: string
   carrierId: string | null
-  columns: Array<{
-    header: string
-    field: string
-    width: number
-    required: boolean
-    fixedValue?: string
-    extraFields?: string[]
-    joinSeparator?: string
-  }>
 }
 
 interface ProductSearchResult {
@@ -713,9 +704,6 @@ export function ShippingActions({
       <ExcelImportDialog
         open={excelImportOpen}
         onOpenChange={setExcelImportOpen}
-        templates={userTemplates ?? []}
-        selectedTemplateId={activeTemplate?.id ?? null}
-        onTemplateSelect={pickTemplate}
       />
 
       <LogisticsMessageDialog

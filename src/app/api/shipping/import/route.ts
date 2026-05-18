@@ -30,7 +30,9 @@ export async function POST(request: NextRequest) {
     // Parse column mapping from form data
     const orderIdCol = Number(formData.get('orderIdCol') ?? 1)
     const trackingNumberCol = Number(formData.get('trackingNumberCol') ?? 2)
-    const carrierCol = Number(formData.get('carrierCol') ?? 3)
+    const carrierColValue = formData.get('carrierCol')
+    const carrierCol = carrierColValue ? Number(carrierColValue) : undefined
+    const fixedCarrierId = String(formData.get('fixedCarrierId') ?? '').trim() || undefined
 
     // Read file buffer
     const arrayBuffer = await file.arrayBuffer()
@@ -44,7 +46,10 @@ export async function POST(request: NextRequest) {
     })
 
     // Match to orders
-    const matchResult = await matchInvoicesToOrders(parseResult.valid, workspaceUserId)
+    const validRows = fixedCarrierId
+      ? parseResult.valid.map((row) => ({ ...row, carrierId: row.carrierId ?? fixedCarrierId }))
+      : parseResult.valid
+    const matchResult = await matchInvoicesToOrders(validRows, workspaceUserId)
 
     return NextResponse.json({
       matched: matchResult.matched,

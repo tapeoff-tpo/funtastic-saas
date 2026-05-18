@@ -33,6 +33,7 @@ export interface ParseResult {
 /** A matched invoice ready for shipment creation */
 export interface MatchedInvoice {
   orderId: string
+  orderIdentifier: string
   marketplaceOrderId: string
   trackingNumber: string
   carrierId?: string
@@ -163,6 +164,7 @@ export async function matchInvoicesToOrders(
     if (order) {
       matched.push({
         orderId: order.id,
+        orderIdentifier: row.orderIdentifier,
         marketplaceOrderId: order.marketplaceOrderId,
         trackingNumber: row.trackingNumber,
         carrierId: row.carrierId,

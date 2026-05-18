@@ -22,6 +22,7 @@ import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
 import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
+import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
 import { setStock } from '@/lib/inventory/actions'
 import type { MarketplaceAdapter, NormalizedProduct } from '@/lib/marketplace/types'
 
@@ -70,6 +71,12 @@ async function createAdapterWithCredentials(
     case 'specialoffer':
       return new SpecialofferAdapter({
         api_key: credentials.api_key ?? '',
+      })
+    case 'tobizon':
+      return new TobizonAdapter({
+        api_key: credentials.api_key ?? '',
+        secure_key: credentials.secure_key ?? '',
+        client_server_ip: credentials.client_server_ip ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}`)

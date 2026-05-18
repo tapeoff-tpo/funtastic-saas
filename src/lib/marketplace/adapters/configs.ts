@@ -481,7 +481,7 @@ const tobizonAdapter = createStubAdapter({
   name: '투비즈온',
   authType: 'api_key',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'partner_id'],
+  requiredCredentials: ['api_key', 'secure_key', 'client_server_ip'],
 })
 
 export function registerDefaultAdapters() {

@@ -33,6 +33,8 @@ const credentialLabels: Record<string, string> = {
   client_secret: '클라이언트 시크릿',
   master_id: 'ESM+ 마스터 ID',
   api_key: 'API 키',
+  secure_key: 'SECURE 키',
+  client_server_ip: 'API 서버 IP',
   shop_id: '브랜드 ID (brandId)',
   mall_id: '몰 ID (예: mymall)',
   access_token: '액세스 토큰',

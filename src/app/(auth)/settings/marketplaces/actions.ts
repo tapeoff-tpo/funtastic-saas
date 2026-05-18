@@ -14,6 +14,7 @@ import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapte
 import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
 import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
 import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter'
+import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -175,6 +176,13 @@ export async function testMarketplaceCredentials(
         result = await new DomechangoAdapter({
           api_key: credentials.api_key?.trim() ?? '',
           secure_key: credentials.secure_key?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'tobizon':
+        result = await new TobizonAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
+          secure_key: credentials.secure_key?.trim() ?? '',
+          client_server_ip: credentials.client_server_ip?.trim() ?? '',
         }).testConnection()
         break
       default:

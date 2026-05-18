@@ -16,6 +16,7 @@ export interface CjOrderRow {
   productName: string       // 내부 상품명 (매핑 후)
   optionText?: string
   quantity: number
+  internalSku?: string
   marketplaceItemId?: string
   deliveryMessage?: string
   senderName: string
@@ -118,7 +119,7 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
       row.senderName,
       row.senderPhone,
       row.senderAddress,
-      '',
+      row.internalSku ?? '',
       row.marketplaceItemId ?? '',
       row.marketplaceOrderId,
       '',

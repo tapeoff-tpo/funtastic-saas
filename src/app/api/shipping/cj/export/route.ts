@@ -79,6 +79,7 @@ export async function GET(req: NextRequest) {
         productName: row.productName,
         optionText: row.optionText || undefined,
         quantity: row.quantity,
+        internalSku: row.fromMapping ? row.sku : undefined,
         marketplaceItemId,
         senderName: senderSettings?.companyName ?? '',
         senderPhone: senderSettings?.phone ?? '',

@@ -15,6 +15,16 @@ import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
+function resolveMarketplaceProductCode(
+  marketplaceId: string,
+  source: { marketplaceItemId: string | null; sku: string | null },
+): string | undefined {
+  if (marketplaceId === 'funtastic-b2b') {
+    return source.sku ?? source.marketplaceItemId ?? undefined
+  }
+  return source.marketplaceItemId ?? undefined
+}
+
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -67,7 +77,7 @@ export async function GET(req: NextRequest) {
     if (rows.length === 0) continue
 
     for (const row of rows) {
-      const marketplaceItemId = row.source.marketplaceItemId ?? undefined
+      const marketplaceProductCode = resolveMarketplaceProductCode(order.marketplaceId, row.source)
 
       cjRows.push({
         orderId: order.id,
@@ -80,7 +90,7 @@ export async function GET(req: NextRequest) {
         optionText: row.optionText || undefined,
         quantity: row.quantity,
         internalSku: row.fromMapping ? row.sku : undefined,
-        marketplaceItemId,
+        marketplaceItemId: marketplaceProductCode,
         senderName: senderSettings?.companyName ?? '',
         senderPhone: senderSettings?.phone ?? '',
         senderAddress: senderSettings?.address ?? '',

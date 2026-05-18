@@ -17,6 +17,7 @@ export interface CjOrderRow {
   optionText?: string
   quantity: number
   internalSku?: string
+  /** CJ 양식의 '쇼핑몰 상품코드' 칸에 들어가는 마켓상품코드 */
   marketplaceItemId?: string
   deliveryMessage?: string
   senderName: string

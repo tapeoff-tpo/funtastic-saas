@@ -14,7 +14,7 @@ import type {
 } from '../types'
 
 const ORDER_PAGE_URL = 'https://onch3.co.kr/supplier/orders.php?state=preparing'
-const LOGIN_URL = 'https://onch3.co.kr/login.php'
+const LOGIN_URL = 'https://ch2.onch3.co.kr/login/login_web.php'
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -59,7 +59,7 @@ export class OnchannelScraper implements MarketplaceScraper {
       await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' })
 
       const idInput = page
-        .locator('input[name="userid"], input[name="user_id"], input[name="id"], input[type="text"]')
+        .locator('input[name="username"], input[name="userid"], input[name="user_id"], input[name="id"], input[type="text"]')
         .first()
       const passwordInput = page.locator('input[name="password"], input[name="passwd"], input[type="password"]').first()
 

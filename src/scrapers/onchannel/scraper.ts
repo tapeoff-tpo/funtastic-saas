@@ -13,8 +13,7 @@ import type {
   ScraperLoginResult,
 } from '../types'
 
-const ORDER_PAGE_URL = 'https://onch3.co.kr/supplier/orders.php?state=preparing'
-const LOGIN_URL = 'https://ch2.onch3.co.kr/login/login_web.php'
+const ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=preparing'
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -48,6 +47,13 @@ function parseKstDate(value: string): Date {
   return Number.isNaN(date.getTime()) ? new Date(value) : date
 }
 
+async function summarizePage(page: Page): Promise<string> {
+  const title = await page.title().catch(() => '')
+  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 240)
+  return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
+}
+
 export class OnchannelScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'onchannel'
   readonly displayName = '온채널'
@@ -56,7 +62,14 @@ export class OnchannelScraper implements MarketplaceScraper {
     const { context, page, close } = await openContext()
 
     try {
-      await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' })
+      await page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
+      if (await this.isLoggedIn(page)) {
+        return {
+          success: true,
+          storageState: await dumpStorageState(context),
+          expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 12),
+        }
+      }
 
       const idInput = page
         .locator('input[name="username"], input[name="userid"], input[name="user_id"], input[name="id"], input[type="text"]')
@@ -70,14 +83,18 @@ export class OnchannelScraper implements MarketplaceScraper {
         .getByRole('button', { name: /로그인|login/i })
         .or(page.locator('input[type="submit"], button[type="submit"]').first())
       await Promise.all([
-        page.waitForLoadState('domcontentloaded').catch(() => undefined),
+        page.waitForURL((url) => !url.pathname.includes('/login/'), { timeout: 15000 }).catch(() => undefined),
         loginButton.click(),
       ])
+      await page.waitForLoadState('domcontentloaded').catch(() => undefined)
 
       await page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
       const ok = await this.isLoggedIn(page)
       if (!ok) {
-        return { success: false, error: '온채널 로그인 후 주문정보 페이지에 접근하지 못했습니다.' }
+        return {
+          success: false,
+          error: `온채널 로그인 후 주문정보 페이지에 접근하지 못했습니다. (${await summarizePage(page)})`,
+        }
       }
 
       return {

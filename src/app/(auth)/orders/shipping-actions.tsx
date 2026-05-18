@@ -18,6 +18,15 @@ interface UserTemplate {
   id: string
   name: string
   carrierId: string | null
+  columns: Array<{
+    header: string
+    field: string
+    width: number
+    required: boolean
+    fixedValue?: string
+    extraFields?: string[]
+    joinSeparator?: string
+  }>
 }
 
 interface ProductSearchResult {
@@ -204,9 +213,14 @@ export function ShippingActions({
     return userTemplates.find((t) => t.id === selectedTemplateId) ?? userTemplates[0]
   }, [userTemplates, selectedTemplateId])
 
-  const pickTemplate = (id: string) => {
+  const pickTemplate = (id: string | null) => {
     setSelectedTemplateId(id)
-    if (typeof window !== 'undefined') window.localStorage.setItem(SELECTED_TEMPLATE_KEY, id)
+    if (typeof window === 'undefined') return
+    if (id) {
+      window.localStorage.setItem(SELECTED_TEMPLATE_KEY, id)
+    } else {
+      window.localStorage.removeItem(SELECTED_TEMPLATE_KEY)
+    }
   }
 
   // For 일괄 매핑: 선택된 주문이 있으면 그 중 미매핑만, 없으면 전체 미매핑 카운트
@@ -699,6 +713,9 @@ export function ShippingActions({
       <ExcelImportDialog
         open={excelImportOpen}
         onOpenChange={setExcelImportOpen}
+        templates={userTemplates ?? []}
+        selectedTemplateId={activeTemplate?.id ?? null}
+        onTemplateSelect={pickTemplate}
       />
 
       <LogisticsMessageDialog

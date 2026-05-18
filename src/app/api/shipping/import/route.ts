@@ -8,12 +8,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { parseInvoiceExcel, matchInvoicesToOrders } from '@/lib/shipping/excel/import'
 import { createClient } from '@/lib/supabase/server'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    const workspaceUserId = await getWorkspaceUserId(user.id)
 
     const formData = await request.formData()
     const file = formData.get('file') as File | null
@@ -42,7 +44,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Match to orders
-    const matchResult = await matchInvoicesToOrders(parseResult.valid, user.id)
+    const matchResult = await matchInvoicesToOrders(parseResult.valid, workspaceUserId)
 
     return NextResponse.json({
       matched: matchResult.matched,

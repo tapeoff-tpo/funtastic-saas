@@ -23,6 +23,7 @@ export async function GET() {
       id: t.id,
       name: t.name,
       carrierId: t.carrierId,
+      columns: t.columns,
     })),
   })
 }

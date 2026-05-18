@@ -1,12 +1,25 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { bulkUploadInvoiceAction } from './actions'
+
+interface ImportTemplate {
+  id: string
+  name: string
+  carrierId: string | null
+  columns: Array<{
+    header: string
+    field: string
+  }>
+}
 
 interface ExcelImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  templates?: ImportTemplate[]
+  selectedTemplateId?: string | null
+  onTemplateSelect?: (templateId: string | null) => void
 }
 
 interface ParsedResult {
@@ -34,14 +47,38 @@ interface ParsedResult {
 export function ExcelImportDialog({
   open,
   onOpenChange,
+  templates = [],
+  selectedTemplateId = null,
+  onTemplateSelect,
 }: ExcelImportDialogProps) {
   const [file, setFile] = useState<File | null>(null)
-  const [orderIdCol, setOrderIdCol] = useState(1)
-  const [trackingCol, setTrackingCol] = useState(2)
-  const [carrierCol, setCarrierCol] = useState(3)
+  const [orderIdCol, setOrderIdCol] = useState<number | null>(null)
+  const [trackingCol, setTrackingCol] = useState<number | null>(null)
+  const [carrierCol, setCarrierCol] = useState<number | null>(null)
   const [result, setResult] = useState<ParsedResult | null>(null)
   const [isParsing, startParsing] = useTransition()
   const [isApplying, startApplying] = useTransition()
+
+  const selectedTemplate = useMemo(
+    () => templates.find((template) => template.id === selectedTemplateId) ?? null,
+    [selectedTemplateId, templates],
+  )
+
+  const templateColumns = useMemo(() => {
+    const findColumnIndex = (fields: string[]) => {
+      const index = selectedTemplate?.columns.findIndex((column) => fields.includes(column.field)) ?? -1
+      return index >= 0 ? index + 1 : null
+    }
+    return {
+      orderIdCol: findColumnIndex(['internalNo', 'marketplaceOrderId', 'orderId']) ?? 1,
+      trackingCol: findColumnIndex(['trackingNumber']) ?? 2,
+      carrierCol: findColumnIndex(['carrierName', 'carrierId']) ?? 3,
+    }
+  }, [selectedTemplate])
+
+  const resolvedOrderIdCol = orderIdCol ?? templateColumns.orderIdCol
+  const resolvedTrackingCol = trackingCol ?? templateColumns.trackingCol
+  const resolvedCarrierCol = carrierCol ?? templateColumns.carrierCol
 
   if (!open) return null
 
@@ -57,9 +94,10 @@ export function ExcelImportDialog({
     startParsing(async () => {
       const formData = new FormData()
       formData.append('file', file)
-      formData.append('orderIdCol', String(orderIdCol))
-      formData.append('trackingNumberCol', String(trackingCol))
-      formData.append('carrierCol', String(carrierCol))
+      formData.append('orderIdCol', String(resolvedOrderIdCol))
+      formData.append('trackingNumberCol', String(resolvedTrackingCol))
+      formData.append('carrierCol', String(resolvedCarrierCol))
+      if (selectedTemplate) formData.append('templateId', selectedTemplate.id)
 
       const res = await fetch('/api/shipping/import', {
         method: 'POST',
@@ -109,6 +147,9 @@ export function ExcelImportDialog({
     onOpenChange(false)
     setFile(null)
     setResult(null)
+    setOrderIdCol(null)
+    setTrackingCol(null)
+    setCarrierCol(null)
   }
 
   return (
@@ -117,6 +158,36 @@ export function ExcelImportDialog({
         <h2 className="mb-4 text-lg font-semibold">엑셀 송장등록</h2>
 
         <div className="space-y-4">
+          <div>
+            <label htmlFor="invoice-template" className="mb-1 block text-sm font-medium">
+              송장등록 양식
+            </label>
+            <select
+              id="invoice-template"
+              value={selectedTemplateId ?? ''}
+              onChange={(e) => {
+                const nextTemplateId = e.target.value
+                setOrderIdCol(null)
+                setTrackingCol(null)
+                setCarrierCol(null)
+                onTemplateSelect?.(nextTemplateId || null)
+              }}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            >
+              {templates.length === 0 && <option value="">등록된 양식 없음</option>}
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+            {selectedTemplate && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                다운로드 양식의 컬럼 순서로 마켓/내부 주문번호, 송장번호, 택배사 열을 자동 선택합니다.
+              </p>
+            )}
+          </div>
+
           {/* File input */}
           <div>
             <label htmlFor="excel-file" className="mb-1 block text-sm font-medium">
@@ -139,7 +210,7 @@ export function ExcelImportDialog({
               </label>
               <select
                 id="order-col"
-                value={orderIdCol}
+                value={resolvedOrderIdCol}
                 onChange={(e) => setOrderIdCol(Number(e.target.value))}
                 className="w-full rounded-md border px-3 py-2 text-sm"
               >
@@ -156,7 +227,7 @@ export function ExcelImportDialog({
               </label>
               <select
                 id="tracking-col"
-                value={trackingCol}
+                value={resolvedTrackingCol}
                 onChange={(e) => setTrackingCol(Number(e.target.value))}
                 className="w-full rounded-md border px-3 py-2 text-sm"
               >
@@ -173,7 +244,7 @@ export function ExcelImportDialog({
               </label>
               <select
                 id="carrier-col"
-                value={carrierCol}
+                value={resolvedCarrierCol}
                 onChange={(e) => setCarrierCol(Number(e.target.value))}
                 className="w-full rounded-md border px-3 py-2 text-sm"
               >

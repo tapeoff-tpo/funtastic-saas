@@ -9,7 +9,7 @@ import ExcelJS from 'exceljs'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
-import { eq, and, inArray } from 'drizzle-orm'
+import { eq, and, inArray, or } from 'drizzle-orm'
 
 /** A parsed row from the invoice Excel file */
 export interface ParsedInvoiceRow {
@@ -118,7 +118,7 @@ export async function parseInvoiceExcel(
 }
 
 /**
- * Match parsed invoice rows to existing orders by marketplaceOrderId.
+ * Match parsed invoice rows to existing orders by marketplaceOrderId, internalNo, or DB id.
  *
  * Returns matched rows (with internal orderId) and unmatched rows separately.
  */
@@ -139,14 +139,21 @@ export async function matchInvoicesToOrders(
     .where(
       and(
         eq(orders.userId, userId),
-        inArray(orders.marketplaceOrderId, orderIdentifiers),
+        or(
+          inArray(orders.marketplaceOrderId, orderIdentifiers),
+          inArray(orders.internalNo, orderIdentifiers),
+          inArray(orders.id, orderIdentifiers),
+        )!,
       ),
     )
 
   // Build lookup map
-  const orderMap = new Map(
-    matchingOrders.map((o) => [o.marketplaceOrderId, o]),
-  )
+  const orderMap = new Map<string, typeof matchingOrders[number]>()
+  for (const order of matchingOrders) {
+    orderMap.set(order.marketplaceOrderId, order)
+    orderMap.set(order.internalNo, order)
+    orderMap.set(order.id, order)
+  }
 
   const matched: MatchedInvoice[] = []
   const unmatched: ParsedInvoiceRow[] = []

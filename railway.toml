@@ -1,8 +1,9 @@
-# Railway configuration for funtastic-saas web service.
+# Shared Railway build configuration for services deployed from this repo.
 #
 # Two services are deployed from this repo:
-#   web    — Next.js app (this file)
-#   worker — BullMQ worker (start command: npm run worker:start, set in Railway dashboard)
+#   web           — Next.js app (healthcheck set in Railway service config)
+#   scrape-worker — marketplace RPA worker (no HTTP healthcheck)
+#   worker        — BullMQ worker
 #
 # Redis plugin is added via Railway dashboard and REDIS_URL is auto-injected.
 
@@ -13,6 +14,5 @@ builder = "nixpacks"
 nixPkgs = ["nodejs_22"]
 
 [deploy]
-healthcheckPath = "/api/health"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3

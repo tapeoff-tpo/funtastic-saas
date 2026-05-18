@@ -119,3 +119,11 @@ export async function deleteCredential(
   })
   if (error) throw new Error(`Vault delete failed: ${error.message}`)
 }
+
+export async function deleteCredentialByName(name: string): Promise<void> {
+  const admin = createAdminClient()
+  const { error } = await admin.rpc('delete_marketplace_credential', {
+    p_name: name,
+  })
+  if (error) throw new Error(`Vault delete failed: ${error.message}`)
+}

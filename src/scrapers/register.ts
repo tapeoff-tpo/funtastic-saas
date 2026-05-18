@@ -9,11 +9,11 @@
  * The scraper-worker imports this file once at boot to populate the registry.
  */
 
-// import { registerScraper } from './registry'
+import { registerScraper } from './registry'
+import { OnchannelScraper } from './onchannel/scraper'
 // import { AblyScraper } from './ably/scraper'
 // import { OhouseScraper } from './ohouse/scraper'
 
+registerScraper(new OnchannelScraper())
 // registerScraper(new AblyScraper())
 // registerScraper(new OhouseScraper())
-
-// Empty for now — scrapers added in subsequent plans.

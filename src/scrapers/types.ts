@@ -82,6 +82,8 @@ export interface ScrapeJobData {
   connectionId: string
   userId: string
   jobType: 'scrape-orders' | 'scrape-claims' | 'upload-invoice'
+  /** Pre-created job_logs row ID for UI polling */
+  jobLogId?: string
   /** For 'scrape-orders' / 'scrape-claims': ISO timestamp to fetch since */
   since?: string
   /** For 'upload-invoice': specific order + tracking */

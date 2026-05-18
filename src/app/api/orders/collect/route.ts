@@ -4,6 +4,8 @@ import { db } from '@/lib/db'
 import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { collectOrdersForConnection } from '@/lib/jobs/workers/order-collector'
+import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
+import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 /**
@@ -95,10 +97,14 @@ export async function POST(request: NextRequest) {
   const jobLogIds: string[] = []
 
   for (const conn of connections) {
+    const integrationMethod = getIntegrationMethod(conn.marketplaceId, {
+      isManual: conn.isManual,
+      authType: conn.authType,
+    })
     const [logRow] = await db
       .insert(jobLogs)
       .values({
-        jobType: 'manual-order-collection',
+        jobType: integrationMethod === 'rpa' ? 'scrape-orders' : 'manual-order-collection',
         marketplaceId: conn.marketplaceId,
         connectionId: conn.id,
         status: 'queued',
@@ -106,6 +112,28 @@ export async function POST(request: NextRequest) {
       .returning({ id: jobLogs.id })
 
     jobLogIds.push(logRow.id)
+
+    if (integrationMethod === 'rpa') {
+      const since = manualDateFrom
+        ? new Date(`${manualDateFrom}T00:00:00+09:00`)
+        : new Date(Date.now() - (safeManualLookbackDays ?? 3) * 24 * 60 * 60 * 1000)
+      await getMarketplaceScrapeQueue().add(
+        `manual-scrape-${conn.marketplaceId}-${Date.now()}`,
+        {
+          marketplaceId: conn.marketplaceId,
+          connectionId: conn.id,
+          userId: workspaceUserId,
+          jobType: 'scrape-orders',
+          jobLogId: logRow.id,
+          since: since.toISOString(),
+        },
+        {
+          removeOnComplete: { count: 100 },
+          removeOnFail: { count: 50 },
+        },
+      )
+      continue
+    }
 
     // Run in background — do not await
     collectOrdersForConnection({

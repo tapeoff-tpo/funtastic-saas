@@ -720,6 +720,54 @@ export async function processOrderCollection(
   })
 }
 
+export async function saveNormalizedOrdersForConnection(params: {
+  marketplaceId: string
+  connectionId: string
+  userId: string
+  normalizedOrders: NormalizedOrder[]
+}): Promise<{ ordersCollected: number }> {
+  const { marketplaceId, connectionId, userId } = params
+  const normalizedOrders = mergeNormalizedOrdersByOrderId(params.normalizedOrders)
+  const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
+  let ordersCollected = 0
+
+  for (const order of normalizedOrders) {
+    const items = dedupeNormalizedOrderItems(order.items)
+    const orderForSave = { ...order, items }
+    const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
+    const isExistingOrder = existingOrderKeys.has(orderKey)
+    const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
+
+    if (!isExistingOrder && items.length > 0) {
+      await db.insert(orderItems).values(
+        items.map((item) => ({
+          orderId: upsertedOrder.id,
+          marketplaceItemId: item.marketplaceItemId,
+          productName: item.productName,
+          optionText: item.optionText ?? null,
+          quantity: item.quantity,
+          unitPrice: String(item.unitPrice),
+          sku: item.sku ?? null,
+        }))
+      )
+    }
+    ordersCollected++
+  }
+
+  await db
+    .update(marketplaceConnections)
+    .set({
+      status: 'connected',
+      lastCheckedAt: new Date(),
+      lastSuccessAt: new Date(),
+      lastErrorMessage: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(marketplaceConnections.id, connectionId))
+
+  return { ordersCollected }
+}
+
 async function findExistingOrderKeys(
   userId: string,
   marketplaceId: string,

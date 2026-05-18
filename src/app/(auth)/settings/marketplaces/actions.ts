@@ -1,7 +1,7 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
-import { storeCredential, deleteCredential, readCredential } from '@/lib/supabase/admin'
+import { storeCredential, deleteCredential, deleteCredentialByName, readCredential } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
@@ -20,14 +20,13 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { nanoid } from 'nanoid'
+import { storeScrapeCredentials } from '@/scrapers/credentials'
 
 interface ActionResult {
   success?: boolean
   error?: string
   message?: string
 }
-
-const RPA_CREDENTIAL_KEYS = ['email', 'password'] as const
 
 /**
  * 저장된 마켓플레이스 인증정보를 Vault에서 읽어 복호화된 값으로 반환.
@@ -344,23 +343,8 @@ export async function registerRpaMarketplaceConnection(
     return { error: '로그인 ID와 비밀번호를 입력해주세요.' }
   }
 
-  const aliasTag = storeAlias === 'default' ? '' : `_${storeAlias}`
-  const vaultNames: string[] = []
-  try {
-    for (const key of RPA_CREDENTIAL_KEYS) {
-      const value = key === 'email' ? email : password
-      const vaultKey = `${key}${aliasTag}`
-      const name = `mkt_${workspaceUserId}_${marketplaceId}_${vaultKey}`
-      await storeCredential(marketplaceId, workspaceUserId, vaultKey, value)
-      vaultNames.push(name)
-    }
-  } catch (err) {
-    return {
-      error: `RPA 로그인 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
-    }
-  }
-
   const displayName = storeAlias === 'default' ? config.name : `${config.name} (${storeAlias})`
+  let connectionId: string
 
   try {
     const existing = await db
@@ -379,7 +363,7 @@ export async function registerRpaMarketplaceConnection(
       displayName,
       authType: 'session' as const,
       status: 'connected' as const,
-      vaultSecretNames: vaultNames,
+      vaultSecretNames: [] as string[],
       isManual: false,
       metadata: { integrationMethod: 'rpa' },
       updatedAt: new Date(),
@@ -390,17 +374,40 @@ export async function registerRpaMarketplaceConnection(
         .update(marketplaceConnections)
         .set(values)
         .where(eq(marketplaceConnections.id, existing[0].id))
+      connectionId = existing[0].id
     } else {
-      await db.insert(marketplaceConnections).values({
-        userId: workspaceUserId,
-        marketplaceId,
-        storeAlias,
-        ...values,
-      })
+      const [created] = await db
+        .insert(marketplaceConnections)
+        .values({
+          userId: workspaceUserId,
+          marketplaceId,
+          storeAlias,
+          ...values,
+        })
+        .returning({ id: marketplaceConnections.id })
+      connectionId = created.id
     }
   } catch (err) {
     return {
       error: `RPA 연결 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+    }
+  }
+
+  try {
+    await storeScrapeCredentials(workspaceUserId, marketplaceId, connectionId, { email, password })
+    await db
+      .update(marketplaceConnections)
+      .set({
+        vaultSecretNames: [
+          `scrape_${workspaceUserId}_${marketplaceId}_${connectionId}_email`,
+          `scrape_${workspaceUserId}_${marketplaceId}_${connectionId}_password`,
+        ],
+        updatedAt: new Date(),
+      })
+      .where(eq(marketplaceConnections.id, connectionId))
+  } catch (err) {
+    return {
+      error: `RPA 로그인 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
     }
   }
 
@@ -529,9 +536,13 @@ export async function deleteMarketplaceConnection(
   // Delete vault secrets using stored names
   try {
     for (const secretName of connection.vaultSecretNames) {
-      const parts = secretName.split('_')
-      const credKey = parts.slice(3).join('_')
-      await deleteCredential(connection.marketplaceId, workspaceUserId, credKey)
+      if (secretName.startsWith('scrape_')) {
+        await deleteCredentialByName(secretName)
+      } else {
+        const parts = secretName.split('_')
+        const credKey = parts.slice(3).join('_')
+        await deleteCredential(connection.marketplaceId, workspaceUserId, credKey)
+      }
     }
   } catch (err) {
     return {

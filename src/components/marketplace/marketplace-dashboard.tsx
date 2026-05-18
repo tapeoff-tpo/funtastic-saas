@@ -717,7 +717,7 @@ function ConnRow({
   const isDisconnected = conn.status === 'disconnected'
   const isManual = conn.isManual
   const integrationInfo = getIntegrationInfo(conn.integrationMethod)
-  const eligibleForCollect = conn.integrationMethod === 'api' && !isDisconnected
+  const eligibleForCollect = conn.integrationMethod !== 'excel' && !isDisconnected
   const expiringSoon = !!conn.expiresAt && isExpiringSoon(conn.expiresAt)
   const errorMsg = conn.status === 'error' ? conn.lastErrorMessage : null
 

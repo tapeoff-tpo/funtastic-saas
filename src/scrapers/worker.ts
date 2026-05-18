@@ -22,12 +22,13 @@ import { jobLogs } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import type { ScrapeJobData } from './types'
 import type { MarketplaceId } from '@/lib/marketplace/types'
+import { saveNormalizedOrdersForConnection } from '@/lib/jobs/workers/order-collector'
 
 // Side-effect import — registers all scraper instances on the registry
 import './register'
 
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
-  const { marketplaceId, connectionId, userId, jobType, since, orderId, invoice } = job.data
+  const { marketplaceId, connectionId, userId, jobType, jobLogId, since, orderId, invoice } = job.data
 
   if (!hasScraper(marketplaceId as MarketplaceId)) {
     throw new Error(`No scraper registered for ${marketplaceId}`)
@@ -41,14 +42,20 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   if (!credentials) throw new Error(`No credentials for ${marketplaceId}/${connectionId}`)
 
   // Log job start
+  const logValues = {
+    ...(jobLogId ? { id: jobLogId } : {}),
+    jobType: `scrape-${jobType}`,
+    marketplaceId,
+    connectionId,
+    status: 'running',
+    startedAt: new Date(),
+  } as const
   const [logRow] = await db
     .insert(jobLogs)
-    .values({
-      jobType: `scrape-${jobType}`,
-      marketplaceId,
-      connectionId,
-      status: 'running',
-      startedAt: new Date(),
+    .values(logValues)
+    .onConflictDoUpdate({
+      target: [jobLogs.id],
+      set: { status: 'running', startedAt: new Date() },
     })
     .returning({ id: jobLogs.id })
 
@@ -56,11 +63,16 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
     if (jobType === 'scrape-orders') {
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000)
       const orders = await scraper.getOrders(credentials, sinceDate)
-      // TODO: persist orders into orders table (re-use existing collectOrdersForConnection upsert path)
+      const result = await saveNormalizedOrdersForConnection({
+        marketplaceId,
+        connectionId,
+        userId,
+        normalizedOrders: orders,
+      })
       console.log(`[scrape-worker] ${marketplaceId}: ${orders.length} orders fetched`)
       await db
         .update(jobLogs)
-        .set({ status: 'completed', completedAt: new Date(), ordersCollected: orders.length })
+        .set({ status: 'completed', completedAt: new Date(), ordersCollected: result.ordersCollected })
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'scrape-claims') {
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)

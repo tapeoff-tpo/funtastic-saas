@@ -619,7 +619,10 @@ export async function getOrders(filters: OrderFilters = {}) {
   const mappingCandidates = includeMappingDetails
     ? itemRows.reduce(
         (acc, item) => {
-          if (item.sku) acc.skus.add(item.sku)
+          if (item.sku) {
+            acc.skus.add(item.sku)
+            acc.marketplaceProductIds.add(item.sku)
+          }
           if (item.marketplaceItemId) {
             const marketplaceItemId = item.marketplaceItemId.trim()
             if (marketplaceItemId) {
@@ -689,6 +692,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     displayOptionName: r.productInternalOptionName ?? null,
     shippingCost: r.shippingCost,
     availableStock: r.availableStock,
+    resolvedMappingCodeId: null as string | null,
   }))
 
   // Phase 8 — Set of orderIds with at least one inquiry
@@ -754,6 +758,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   const getMappedItemInfo = (
     marketplaceId: string,
     marketplaceItemId: string | null,
+    rawSku: string | null,
     optionText: string | null,
     orderQuantity: number,
   ): {
@@ -762,9 +767,12 @@ export async function getOrders(filters: OrderFilters = {}) {
     quantity: number
     sku: string | null
     availableStock: number | null
+    mappingCodeId: string
   } | null => {
-    if (!marketplaceItemId) return null
-    const mappingCodeId = lookupMappingRef(mappingIndex, marketplaceId, marketplaceItemId, optionText)
+    const candidateIds = Array.from(new Set([marketplaceItemId, rawSku].map((id) => id?.trim()).filter(Boolean)))
+    const mappingCodeId = candidateIds
+      .map((candidateId) => lookupMappingRef(mappingIndex, marketplaceId, candidateId, optionText))
+      .find((ref): ref is string => !!ref)
     if (!mappingCodeId) return null
     const components = componentsByCode.get(mappingCodeId) ?? []
     if (components.length === 0) return null
@@ -787,22 +795,30 @@ export async function getOrders(filters: OrderFilters = {}) {
       quantity: mappedQuantity > 0 ? mappedQuantity : orderQuantity,
       sku: components.map((component) => component.sku).join(' + '),
       availableStock: components.length === 1 ? components[0].availableStock : null,
+      mappingCodeId,
     }
   }
 
   const items = baseItems.map((item) => {
+    const directInternalSku = item.sku && skuSet.has(item.sku.trim()) ? item.sku : null
     if (item.lockedAt) {
       return {
         ...item,
         displayName: item.lockedProductName ?? item.displayName,
         displayOptionName: item.lockedOptionName ?? item.displayOptionName,
         quantity: item.lockedQuantity ?? item.quantity,
-        sku: item.lockedSku ?? item.sku,
+        sku: item.lockedSku ?? directInternalSku,
       }
     }
-    if (!includeMappingDetails) return item
-    const mapped = getMappedItemInfo(item.orderMarketplaceId, item.marketplaceItemId, item.optionText, item.quantity)
-    if (!mapped) return item
+    if (!includeMappingDetails) return { ...item, sku: directInternalSku }
+    const mapped = getMappedItemInfo(
+      item.orderMarketplaceId,
+      item.marketplaceItemId,
+      item.sku,
+      item.optionText,
+      item.quantity,
+    )
+    if (!mapped) return { ...item, sku: directInternalSku }
     return {
       ...item,
       displayName: mapped.displayName,
@@ -810,6 +826,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       quantity: mapped.quantity,
       sku: mapped.sku ?? item.sku,
       availableStock: mapped.availableStock ?? item.availableStock,
+      resolvedMappingCodeId: mapped.mappingCodeId,
     }
   })
 
@@ -818,6 +835,10 @@ export async function getOrders(filters: OrderFilters = {}) {
     let mappedCount = 0
     for (const item of orderItems) {
       if (item.lockedAt) {
+        mappedCount++
+        continue
+      }
+      if (item.resolvedMappingCodeId) {
         mappedCount++
         continue
       }
@@ -973,7 +994,10 @@ export async function getOrderById(id: string, userId?: string) {
 
   const detailMappingCandidates = orderItemRows.reduce(
     (acc, item) => {
-      if (item.sku) acc.skus.add(item.sku)
+      if (item.sku) {
+        acc.skus.add(item.sku)
+        acc.marketplaceProductIds.add(item.sku)
+      }
       if (item.marketplaceItemId) {
         const marketplaceItemId = item.marketplaceItemId.trim()
         if (marketplaceItemId) {
@@ -1007,12 +1031,18 @@ export async function getOrderById(id: string, userId?: string) {
     list.push(component)
     detailComponentsByCode.set(component.mappingCodeId, list)
   }
+  const detailSkuSet = new Set<string>()
+  for (const productSku of detailLookups.productSkus) detailSkuSet.add(productSku.sku)
+  for (const variantSku of detailLookups.variantSkus) detailSkuSet.add(variantSku.sku)
 
   // 확정상품명 fallback chain
   const items = orderItemRows.map((r) => {
     const locked = !!r.lockedAt
-    const mappingCodeId = !locked && r.marketplaceItemId
-      ? lookupMappingRef(detailMappingIndex, order.marketplaceId, r.marketplaceItemId, r.optionText)
+    const candidateIds = Array.from(new Set([r.marketplaceItemId, r.sku].map((id) => id?.trim()).filter(Boolean)))
+    const mappingCodeId = !locked
+      ? candidateIds
+          .map((candidateId) => lookupMappingRef(detailMappingIndex, order.marketplaceId, candidateId, r.optionText))
+          .find((ref): ref is string => !!ref) ?? null
       : null
     const components = mappingCodeId ? detailComponentsByCode.get(mappingCodeId) ?? [] : []
     const mappedDisplayName = components.length > 0
@@ -1030,6 +1060,7 @@ export async function getOrderById(id: string, userId?: string) {
     const mappedQuantity = components.length > 0
       ? components.reduce((sum, component) => sum + component.quantity * r.quantity * (r.skuMultiplier ?? 1), 0)
       : null
+    const directInternalSku = r.sku && detailSkuSet.has(r.sku.trim()) ? r.sku : null
     return {
       id: r.id,
       orderId: r.orderId,
@@ -1038,7 +1069,7 @@ export async function getOrderById(id: string, userId?: string) {
       optionText: r.optionText,
       quantity: locked ? r.lockedQuantity ?? r.quantity : mappedQuantity ?? r.quantity,
       unitPrice: r.unitPrice,
-      sku: locked ? r.lockedSku ?? r.sku : mappedSku ?? r.sku,
+      sku: locked ? r.lockedSku ?? directInternalSku : mappedSku ?? directInternalSku,
       skuMultiplier: r.skuMultiplier,
       fulfillmentCode: r.fulfillmentCode,
       displayName: locked ? r.lockedProductName ?? r.productInternalName ?? null : mappedDisplayName ?? r.productInternalName ?? null,

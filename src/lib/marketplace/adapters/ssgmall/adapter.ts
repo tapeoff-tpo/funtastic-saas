@@ -202,6 +202,10 @@ function summarizeCollectionResponse(
   return `${label}:${count}:${summarizeResponseShape(response)}`
 }
 
+function removeUndefinedValues<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T
+}
+
 function getSsgShippingIdentity(rawData?: Record<string, unknown>): { shppNo: string; shppSeq: string } | null {
   const shppNo = rawData?.shppNo
   const shppSeq = rawData?.shppSeq
@@ -244,6 +248,10 @@ export class SsgmallAdapter implements MarketplaceAdapter {
       const warehousePeriodTypes: SsgmallWarehouseOutRequest['requestWarehouseOut']['perdType'][] = ['01', '02', '03', '04']
       const responses = await Promise.all([
         {
+          label: 'order-inquiry-all',
+          response: await this.listOrderInquiries(since, until),
+        },
+        {
           label: 'order-inquiry-120',
           response: await this.listOrderInquiries(since, until, '120'),
         },
@@ -284,7 +292,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
         throw new MarketplaceApiError(
           'ssgmall',
           404,
-          `SSG 조회 0건 - ${diagnostics.join(' / ')}`,
+          `SSG 조회 0건 (${formatCompactDate(since)}~${formatCompactDate(until)}) - ${diagnostics.join(' / ')}`,
         )
       }
 
@@ -399,17 +407,17 @@ export class SsgmallAdapter implements MarketplaceAdapter {
   private async listOrderInquiries(
     since: Date,
     until: Date,
-    ordStatCd: '120' | '140',
+    ordStatCd?: '120' | '140',
   ): Promise<SsgmallApiResponse> {
     return this.client
       .post('ms/lnkg/listOrderInquiry.ssg', {
         json: {
           travelClaimInfo: {
-            travelSearchCondition: {
+            travelSearchCondition: removeUndefinedValues({
               ordRcpStrtDt: formatCompactDate(since),
               ordRcpEndDt: formatCompactDate(until),
               ordStatCd,
-            },
+            }),
           },
         },
       })

@@ -153,6 +153,39 @@ function responseMessage(response: SsgmallApiResponse, fallback: string): string
     || fallback
 }
 
+function responseResultCode(response: SsgmallApiResponse): string {
+  return String(
+    response.result?.resultCode
+    ?? response.data?.result?.resultCode
+    ?? response.data?.resultCode
+    ?? response.response?.result?.resultCode
+    ?? response.response?.resultCode
+    ?? response.body?.result?.resultCode
+    ?? response.body?.resultCode
+    ?? response.resultCode
+    ?? 'none',
+  ).trim()
+}
+
+function summarizeResponseShape(response: SsgmallApiResponse): string {
+  const nestedKeys = ['data', 'response', 'body']
+    .map((key) => {
+      const value = response[key as keyof SsgmallApiResponse]
+      return value && typeof value === 'object' ? `${key}[${Object.keys(value).join(',')}]` : null
+    })
+    .filter(Boolean)
+    .join(' ')
+  return `code=${responseResultCode(response)} keys=[${Object.keys(response).join(',')}]${nestedKeys ? ` ${nestedKeys}` : ''}`
+}
+
+function summarizeCollectionResponse(
+  label: string,
+  response: SsgmallApiResponse,
+  count: number,
+): string {
+  return `${label}:${count}:${summarizeResponseShape(response)}`
+}
+
 function getSsgShippingIdentity(rawData?: Record<string, unknown>): { shppNo: string; shppSeq: string } | null {
   const shppNo = rawData?.shppNo
   const shppSeq = rawData?.shppSeq
@@ -194,12 +227,19 @@ export class SsgmallAdapter implements MarketplaceAdapter {
       const directionPeriodTypes: SsgmallDirectionRequest['requestShppDirection']['perdType'][] = ['01', '02', '03']
       const warehousePeriodTypes: SsgmallWarehouseOutRequest['requestWarehouseOut']['perdType'][] = ['01', '02', '03', '04']
       const responses = await Promise.all([
-        ...directionPeriodTypes.map((perdType) => this.listShippingDirections(since, until, perdType)),
-        ...warehousePeriodTypes.map((perdType) => this.listWarehouseOuts(since, until, perdType)),
+        ...directionPeriodTypes.map(async (perdType) => ({
+          label: `direction-${perdType}`,
+          response: await this.listShippingDirections(since, until, perdType),
+        })),
+        ...warehousePeriodTypes.map(async (perdType) => ({
+          label: `warehouse-${perdType}`,
+          response: await this.listWarehouseOuts(since, until, perdType),
+        })),
       ])
 
       const orders: SsgmallDirectionOrder[] = []
-      for (const response of responses) {
+      const diagnostics: string[] = []
+      for (const { label, response } of responses) {
         if (!isSuccessResponse(response)) {
           throw new MarketplaceApiError(
             'ssgmall',
@@ -207,7 +247,17 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             responseMessage(response, 'Failed to fetch SSG orders'),
           )
         }
-        orders.push(...getDirections(response), ...getWarehouseOuts(response))
+        const responseOrders = [...getDirections(response), ...getWarehouseOuts(response)]
+        diagnostics.push(summarizeCollectionResponse(label, response, responseOrders.length))
+        orders.push(...responseOrders)
+      }
+
+      if (orders.length === 0) {
+        throw new MarketplaceApiError(
+          'ssgmall',
+          404,
+          `SSG 조회 0건 - ${diagnostics.join(' / ')}`,
+        )
       }
 
       return this.dedupeOrders(orders).map((order) => this.normalizeOrder(order))

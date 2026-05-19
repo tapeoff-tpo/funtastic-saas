@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
         inArray(jobLogs.id, ids),
         inArray(jobLogs.status, ['queued', 'running']),
         like(jobLogs.jobType, 'scrape-%'),
-        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '3 minutes'`,
+        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '150 seconds'`,
       ),
     )
 

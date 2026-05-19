@@ -191,8 +191,9 @@ export function ShippingActions({
         toast.warning(`${uploaded}건 성공, ${failed}건 실패${firstError ? `: ${firstError}` : ''}`)
         router.refresh()
       } else {
-        toast.error(data.message ?? '전송할 송장번호가 없습니다.')
-        setInvoiceDialogOpen(true)
+        const firstError = data.results?.find((result) => !result.success)?.error
+        toast.error(firstError ?? data.message ?? '전송할 송장번호가 없습니다.')
+        if (!firstError) setInvoiceDialogOpen(true)
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '송장 전송에 실패했습니다.')

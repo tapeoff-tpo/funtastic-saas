@@ -239,7 +239,10 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     try {
       const specialofferOrderId = specialofferOrderIdFromInvoice(orderId, invoice)
-      const response = await this.client.patch(`api/v2/seller/orders/${encodeURIComponent(specialofferOrderId)}`, {
+      const response = await this.client.post(`api/v2/seller/orders/${encodeURIComponent(specialofferOrderId)}`, {
+        searchParams: {
+          _method: 'PATCH',
+        },
         json: {
           delivery_company: getCarrierName(invoice.carrierId),
           delivery_no: invoice.trackingNumber,

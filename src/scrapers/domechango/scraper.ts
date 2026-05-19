@@ -14,7 +14,9 @@ import type {
   ScraperLoginResult,
 } from '../types'
 
-const ORDER_PAGE_URL = 'https://wholesaledepot.co.kr/wms/order'
+const WMS_BASE_URL = 'https://www.wholesaledepot.co.kr/wms'
+const LOGIN_PAGE_URL = `${WMS_BASE_URL}/login`
+const ORDER_PAGE_URL = `${WMS_BASE_URL}/order`
 const DOWNLOAD_TIMEOUT_MS = 60_000
 
 function formatDateInput(date: Date): string {
@@ -240,7 +242,7 @@ export class DomechangoScraper implements MarketplaceScraper {
     const { context, page, close } = await openContext()
 
     try {
-      await gotoDomechango(page)
+      await gotoDomechango(page, LOGIN_PAGE_URL)
       if (await this.isLoggedIn(page)) {
         return {
           success: true,
@@ -250,7 +252,7 @@ export class DomechangoScraper implements MarketplaceScraper {
       }
 
       const idInput = page
-        .locator('input[name="id"], input[name="user_id"], input[name="userid"], input[name="login_id"], input[name="email"], input[type="text"], input[type="email"]')
+        .locator('input[name="m_id"], input#m_id, input[name="id"], input[name="user_id"], input[name="userid"], input[name="login_id"], input[name="email"], input[type="text"], input[type="email"]')
         .first()
       const passwordInput = page.locator('input[name="password"], input[name="passwd"], input[name="pw"], input[type="password"]').first()
 
@@ -446,7 +448,8 @@ export class DomechangoScraper implements MarketplaceScraper {
   private async isLoggedIn(page: Page): Promise<boolean> {
     if (/login|signin/i.test(page.url())) return false
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+    if (/Error\s*\(\d+\)\s*->/i.test(bodyText)) return false
     if (/로그인/.test(bodyText) && !/주문\s*리스트|선택주문|택배송장\s*업로드/.test(bodyText)) return false
-    return /주문\s*리스트|선택주문|택배송장\s*업로드|WD\s*WMS/.test(bodyText)
+    return /주문\s*리스트|선택주문|택배송장\s*업로드/.test(bodyText)
   }
 }

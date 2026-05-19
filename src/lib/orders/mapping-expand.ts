@@ -173,7 +173,8 @@ export async function expandOrderItemsWithMapping(
         })
       }
     } else {
-      // 매핑 없음 → 원본 1 행 유지
+      // 매핑 없음 → 원본 1 행 유지.
+      // 단, 주문 SKU가 재고관리코드와 직접 맞으면 발주서의 "확정상품명"은 내부 재고명을 쓴다.
       const fallbackSku = it.sku ?? ''
       const inv = fallbackSku ? invMap.get(fallbackSku) : undefined
       result.push({
@@ -182,7 +183,7 @@ export async function expandOrderItemsWithMapping(
         sku: fallbackSku,
         quantity: orderQty,
         optionText: inv?.optionName ?? it.optionText ?? '',
-        productName: it.productName ?? '',
+        productName: inv?.productName ?? it.productName ?? '',
         source: {
           productName: it.productName,
           optionText: it.optionText,

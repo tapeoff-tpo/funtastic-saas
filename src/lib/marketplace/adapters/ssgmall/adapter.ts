@@ -289,11 +289,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
       }
 
       if (orders.length === 0) {
-        throw new MarketplaceApiError(
-          'ssgmall',
-          404,
-          `SSG 조회 0건 (${formatCompactDate(since)}~${formatCompactDate(until)}) - ${diagnostics.join(' / ')}`,
-        )
+        return []
       }
 
       return this.dedupeOrders(orders).map((order) => this.normalizeOrder(order))

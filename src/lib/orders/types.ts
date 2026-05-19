@@ -91,6 +91,7 @@ export interface OrderFilters {
   /** Scope to a specific user — REQUIRED for production queries (security + perf). */
   userId?: string
   status?: OrderStatus
+  statuses?: OrderStatus[]
   marketplace?: string
   search?: string
   searchField?: OrderSearchField

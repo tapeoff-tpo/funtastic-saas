@@ -17,8 +17,8 @@ import { OrderTabs } from './order-tabs'
 import { getProfile, getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import type { OrderRow } from './columns'
-import type { OrderFilters as OrderFiltersParams } from '@/lib/orders/types'
-import type { ClaimType } from '@/lib/orders/types'
+import type { OrderFilters as OrderFiltersParams, OrderStatus } from '@/lib/orders/types'
+import { ORDER_STATUS_LABELS, type ClaimType } from '@/lib/orders/types'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
@@ -52,6 +52,15 @@ const searchParamsCache = createSearchParamsCache({
 type MarketplaceFilterOption = {
   value: string
   label: string
+}
+
+function parseStatusFilter(value: string | null): OrderStatus[] {
+  if (!value) return []
+  const validStatuses = new Set(Object.keys(ORDER_STATUS_LABELS))
+  return value
+    .split(',')
+    .map((status) => status.trim())
+    .filter((status): status is OrderStatus => validStatuses.has(status))
 }
 
 function buildMarketplaceFilterOptions(
@@ -94,6 +103,9 @@ export default async function OrdersPage({
     getProfile(user.id),
   ])
   const hasDateFilter = Boolean(params.dateFrom || params.dateTo || params.datePreset === 'all')
+  const selectedStatuses = parseStatusFilter(params.status)
+  const singleStatus = selectedStatuses.length === 1 ? selectedStatuses[0] : undefined
+  const multipleStatuses = selectedStatuses.length > 1 ? selectedStatuses : undefined
   const connectionsPromise = db
     .select({
       marketplaceId: marketplaceConnections.marketplaceId,
@@ -103,8 +115,8 @@ export default async function OrdersPage({
     .from(marketplaceConnections)
     .where(eq(marketplaceConnections.userId, workspaceUserId))
 
-  const isNewTab = params.status === 'new'
-  const isScanFilterTab = params.status === 'preparing' || params.status === 'ready'
+  const isNewTab = singleStatus === 'new'
+  const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
   const shouldExcludeHeld = !params.held && Boolean(params.status || params.claimType || params.cancel)
   const mappingFilter = isNewTab
     ? (params.mapping === 'all'
@@ -125,7 +137,8 @@ export default async function OrdersPage({
         page: params.page,
         pageSize: params.pageSize,
         userId: workspaceUserId,
-        status: (params.status ?? undefined) as OrderFiltersParams['status'],
+        status: singleStatus,
+        statuses: multipleStatuses as OrderFiltersParams['statuses'],
         marketplace: params.marketplace ?? undefined,
         search: params.search ?? undefined,
         searchField: (params.searchField ?? undefined) as OrderFiltersParams['searchField'],

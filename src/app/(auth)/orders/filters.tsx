@@ -22,6 +22,9 @@ const STATUS_OPTIONS: { value: '' | OrderStatus; label: string }[] = [
     label,
   })),
 ]
+const ORDER_STATUS_VALUES = STATUS_OPTIONS
+  .map((option) => option.value)
+  .filter((value): value is OrderStatus => value !== '')
 
 const MAPPING_OPTIONS = [
   { value: 'all', label: '매핑 전체' },
@@ -191,6 +194,98 @@ function MarketplaceSearchSelect({
   )
 }
 
+function parseSelectedStatuses(value: string | null | undefined): OrderStatus[] {
+  if (!value) return []
+  const validStatuses = new Set<OrderStatus>(ORDER_STATUS_VALUES)
+  return value
+    .split(',')
+    .map((status) => status.trim())
+    .filter((status): status is OrderStatus => validStatuses.has(status as OrderStatus))
+}
+
+function StatusMultiSelect({
+  value,
+  onChange,
+}: {
+  value: string | null | undefined
+  onChange: (value: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const selectedStatuses = parseSelectedStatuses(value)
+  const selectedSet = new Set<OrderStatus>(selectedStatuses)
+  const label = selectedStatuses.length === 0
+    ? '전체 상태'
+    : selectedStatuses.length === 1
+      ? ORDER_STATUS_LABELS[selectedStatuses[0]]
+      : `${selectedStatuses.map((status) => ORDER_STATUS_LABELS[status]).join(', ')}`
+
+  useEffect(() => {
+    if (!open) return
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+    return () => document.removeEventListener('pointerdown', handlePointerDown)
+  }, [open])
+
+  const commitStatuses = (statuses: OrderStatus[]) => {
+    onChange(statuses.length > 0 ? statuses.join(',') : null)
+  }
+
+  const toggleStatus = (status: OrderStatus) => {
+    const next = selectedSet.has(status)
+      ? selectedStatuses.filter((selected) => selected !== status)
+      : [...selectedStatuses, status]
+    commitStatuses(next)
+  }
+
+  return (
+    <div ref={rootRef} className="relative w-[190px]">
+      <button
+        id="filter-status"
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-9 w-full items-center justify-between rounded-md border bg-background px-3 text-left text-sm hover:bg-muted/40"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="truncate">{label}</span>
+        <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-[calc(100%+4px)] z-50 w-[220px] rounded-md border bg-background py-1 shadow-lg">
+          <button
+            type="button"
+            onClick={() => commitStatuses([])}
+            className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+          >
+            <span>전체 상태</span>
+            {selectedStatuses.length === 0 && <Check className="size-4 text-primary" aria-hidden="true" />}
+          </button>
+          <div className="my-1 border-t" />
+          {ORDER_STATUS_VALUES.map((status) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => toggleStatus(status)}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+              role="option"
+              aria-selected={selectedSet.has(status)}
+            >
+              <span>{ORDER_STATUS_LABELS[status]}</span>
+              {selectedSet.has(status) && <Check className="size-4 text-primary" aria-hidden="true" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function OrderFilters({
   marketplaceOptions = [],
 }: {
@@ -227,8 +322,9 @@ export function OrderFilters({
 
   // Local state for search input — only pushed to URL on explicit submit
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
-  const isNewTab = filters.status === 'new'
-  const showScanFilter = filters.status === 'preparing' || filters.status === 'ready'
+  const selectedStatuses = useMemo(() => parseSelectedStatuses(filters.status), [filters.status])
+  const isNewTab = selectedStatuses.length === 1 && selectedStatuses[0] === 'new'
+  const showScanFilter = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
   const formatDateInput = useCallback((date: Date) => {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -342,26 +438,18 @@ export function OrderFilters({
         <label htmlFor="filter-status" className="text-xs font-medium text-muted-foreground">
           주문 상태
         </label>
-        <select
-          id="filter-status"
-          value={filters.status ?? ''}
-          onChange={(e) => {
-            const nextStatus = e.target.value || null
+        <StatusMultiSelect
+          value={filters.status}
+          onChange={(nextStatus) => {
+            const nextStatuses = parseSelectedStatuses(nextStatus)
             updateFilter({
               status: nextStatus,
-              mapping: nextStatus === 'new' ? filters.mapping : null,
-              scan: nextStatus === 'preparing' || nextStatus === 'ready' ? filters.scan : null,
-              scanResult: nextStatus === 'preparing' || nextStatus === 'ready' ? filters.scanResult : null,
+              mapping: nextStatuses.length === 1 && nextStatuses[0] === 'new' ? filters.mapping : null,
+              scan: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? filters.scan : null,
+              scanResult: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? filters.scanResult : null,
             })
           }}
-          className="rounded-md border px-3 py-1.5 text-sm"
-        >
-          {STATUS_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
+        />
       </div>
 
       {isNewTab && (

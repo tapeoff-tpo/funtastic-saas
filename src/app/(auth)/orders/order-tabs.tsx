@@ -58,7 +58,7 @@ export function OrderTabs() {
     if (cancel === 'true' || cancel === '1') return 'cancel'
     if (claimType === 'exchange') return 'exchange'
     if (claimType === 'return') return 'return'
-    if (status) return status
+    if (status) return status.includes(',') ? null : status
     if (tab === 'all') return 'all'
     return 'all'
   })()

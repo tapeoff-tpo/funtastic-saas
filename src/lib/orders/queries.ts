@@ -275,6 +275,8 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
 
   if (filters.status) {
     conditions.push(eq(orders.status, filters.status))
+  } else if (filters.statuses?.length) {
+    conditions.push(inArray(orders.status, filters.statuses))
   }
 
   if (filters.marketplace) {
@@ -518,6 +520,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     && !filters.isHeld
     && !filters.cancelTab
     && !filters.claimType
+    && !filters.statuses?.length
 
   // userId-scoped mapping 인벤토리 (mappingStatus/displayName 계산용)
   // orderRows + total count — claimType 분기 안에서도 두 쿼리는 같은 IDs 를 공유하므로

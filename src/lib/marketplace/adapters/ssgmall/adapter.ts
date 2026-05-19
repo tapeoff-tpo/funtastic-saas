@@ -461,7 +461,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
   private normalizeOrder(order: SsgmallDirectionOrder): NormalizedOrder {
     const orderId = String(order.ordNo ?? order.orordNo ?? order.shppNo ?? '')
     const itemId = compactJoin([orderId, order.ordItemSeq, order.shppNo, order.shppSeq])
-    const marketplaceOrderId = itemId || orderId
+    const marketplaceOrderId = orderId || itemId
     const quantity = asNumber(order.ordQty ?? order.rlordQty ?? order.dircQty ?? order.dircItemQty, 1)
     const unitPrice = asNumber(order.rlordAmt ?? order.sellprc ?? order.splprc ?? order.splPrc, 0)
     const progressCode = order.ordItemStatCd || order.ordStatCd || order.shppProgStatDtlCd || order.lastShppProgStatDtlCd || order.shppTabProgStatCd

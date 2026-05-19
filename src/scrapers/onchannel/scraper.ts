@@ -54,6 +54,18 @@ async function summarizePage(page: Page): Promise<string> {
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
 }
 
+async function submitLoginForm(page: Page): Promise<void> {
+  const form = page.locator('form.form-signin, form[action*="/login/login_web.php"]').first()
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => undefined),
+    form.evaluate((formEl) => {
+      if (!(formEl instanceof HTMLFormElement)) return
+      HTMLFormElement.prototype.submit.call(formEl)
+    }),
+  ])
+  await page.waitForLoadState('domcontentloaded').catch(() => undefined)
+}
+
 export class OnchannelScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'onchannel'
   readonly displayName = '온채널'
@@ -79,14 +91,7 @@ export class OnchannelScraper implements MarketplaceScraper {
       await idInput.fill(credentials.email)
       await passwordInput.fill(credentials.password)
 
-      const loginButton = page
-        .getByRole('button', { name: /로그인|login/i })
-        .or(page.locator('input[type="submit"], button[type="submit"]').first())
-      await Promise.all([
-        page.waitForURL((url) => !url.pathname.includes('/login/'), { timeout: 15000 }).catch(() => undefined),
-        loginButton.click(),
-      ])
-      await page.waitForLoadState('domcontentloaded').catch(() => undefined)
+      await submitLoginForm(page)
 
       await page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
       const ok = await this.isLoggedIn(page)

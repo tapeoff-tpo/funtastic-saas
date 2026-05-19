@@ -82,6 +82,7 @@ export const claimStatusEnum = pgEnum('claim_status', [
   'processing',
   'completed',
   'rejected',
+  'withdrawn',
 ])
 
 export const orders = pgTable(

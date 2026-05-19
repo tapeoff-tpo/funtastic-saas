@@ -398,6 +398,7 @@ const CLAIM_STATUS_LABELS: Record<ClaimStatus, string> = {
   processing: '처리중',
   completed: '완료',
   rejected: '거절',
+  withdrawn: '철회',
 }
 
 const CLAIM_PILL_STYLES: Record<ClaimType, string> = {

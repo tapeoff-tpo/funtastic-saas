@@ -17,7 +17,7 @@ export type OrderStatus =
 
 export type ClaimType = 'cancel' | 'return' | 'exchange'
 
-export type ClaimStatus = 'requested' | 'processing' | 'completed' | 'rejected'
+export type ClaimStatus = 'requested' | 'processing' | 'completed' | 'rejected' | 'withdrawn'
 
 /** Korean labels for order statuses (per D-07) */
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {

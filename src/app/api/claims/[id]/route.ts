@@ -11,7 +11,7 @@ import { claims } from '@/lib/db/schema'
 import { completeReturnClaim, getReturnableItemsForClaim } from '@/lib/inventory/actions'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
-const VALID_STATUSES = ['requested', 'processing', 'completed', 'rejected'] as const
+const VALID_STATUSES = ['requested', 'processing', 'completed', 'rejected', 'withdrawn'] as const
 type ClaimStatus = (typeof VALID_STATUSES)[number]
 
 export async function GET(

@@ -30,6 +30,7 @@ const STATUS_LABELS: Record<ClaimStatus, string> = {
   processing: '처리중',
   completed: '완료',
   rejected: '거절',
+  withdrawn: '철회',
 }
 
 const STATUS_STYLES: Record<ClaimStatus, string> = {
@@ -37,6 +38,7 @@ const STATUS_STYLES: Record<ClaimStatus, string> = {
   processing: 'bg-blue-100 text-blue-800',
   completed: 'bg-green-100 text-green-800',
   rejected: 'bg-gray-200 text-gray-600',
+  withdrawn: 'bg-purple-100 text-purple-800',
 }
 
 const NEXT_STATES: Record<ClaimStatus, ClaimStatus[]> = {
@@ -44,6 +46,7 @@ const NEXT_STATES: Record<ClaimStatus, ClaimStatus[]> = {
   processing: ['completed', 'rejected'],
   completed: [],
   rejected: [],
+  withdrawn: [],
 }
 
 export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: Props) {
@@ -56,6 +59,7 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
   const [, startTransition] = useTransition()
 
   const nextStates = NEXT_STATES[claimStatus]
+  const canWithdraw = claimStatus === 'requested' || claimStatus === 'processing'
 
   function changeStatus(next: ClaimStatus) {
     setPendingStatus(next)
@@ -152,7 +156,7 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
           {reason}
         </span>
       )}
-      {nextStates.length > 0 && (
+      {(nextStates.length > 0 || canWithdraw) && (
         <div className="flex gap-1">
           {nextStates.map((next) => (
             <button
@@ -177,6 +181,16 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
               className="rounded border border-green-300 px-1.5 py-0.5 text-[10px] font-medium text-green-700 transition-colors hover:bg-green-50 disabled:opacity-50"
             >
               반품완료
+            </button>
+          )}
+          {canWithdraw && (
+            <button
+              type="button"
+              onClick={() => changeStatus('withdrawn')}
+              disabled={pendingStatus !== null}
+              className="rounded border border-purple-300 px-1.5 py-0.5 text-[10px] font-medium text-purple-700 transition-colors hover:bg-purple-50 disabled:opacity-50"
+            >
+              철회
             </button>
           )}
         </div>

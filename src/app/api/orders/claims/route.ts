@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
@@ -72,15 +72,16 @@ export async function POST(req: NextRequest) {
   const reasonLabel = REASON_LABELS[body.reasonCode]
   const detail = body.reasonDetail?.trim()
   const reason = detail ? `${reasonLabel} - ${detail}` : reasonLabel
-  const marketplaceClaimId = `manual-${body.claimType}-${order.id}`
+  const marketplaceClaimId = `manual-${body.claimType}-${order.id}-${Date.now()}`
 
   const [existingClaim] = await db
-    .select({ id: claims.id })
+    .select({ id: claims.id, claimStatus: claims.claimStatus })
     .from(claims)
     .where(and(
-      eq(claims.marketplaceId, order.marketplaceId),
-      eq(claims.marketplaceClaimId, marketplaceClaimId),
+      eq(claims.orderId, order.id),
+      eq(claims.claimType, body.claimType),
       eq(claims.userId, workspaceUserId),
+      inArray(claims.claimStatus, ['requested', 'processing', 'completed']),
     ))
     .limit(1)
   if (existingClaim) {

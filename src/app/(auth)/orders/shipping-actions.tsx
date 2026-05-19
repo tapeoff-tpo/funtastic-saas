@@ -164,26 +164,40 @@ export function ShippingActions({
   }, [])
 
   const hasSelection = selectedOrderIds.length > 0
-
-  const handleMarketplaceInvoiceUpload = async () => {
-    if (!hasSelection || uploadingToMarket) return
-
-    const selectedOrderMap = new Map(selectedOrders.map((order) => [order.id, order]))
-    const knownSelectedOrders = selectedOrderIds
+  const selectedOrderMap = useMemo(() => new Map(selectedOrders.map((order) => [order.id, order])), [selectedOrders])
+  const knownSelectedOrders = useMemo(() => {
+    return selectedOrderIds
       .map((id) => selectedOrderMap.get(id))
       .filter((order): order is OrderRow => !!order)
+  }, [selectedOrderIds, selectedOrderMap])
+  const selectedRpaOrders = useMemo(() => {
+    return knownSelectedOrders.filter((order) =>
+      order.connectionId && getIntegrationMethod(order.marketplaceId) === 'rpa',
+    )
+  }, [knownSelectedOrders])
+  const selectedApiOrders = useMemo(() => {
+    return knownSelectedOrders.filter((order) =>
+      !order.connectionId || getIntegrationMethod(order.marketplaceId) !== 'rpa',
+    )
+  }, [knownSelectedOrders])
 
-    if (knownSelectedOrders.length > 0 && knownSelectedOrders.every((order) => !order.trackingNumber)) {
+  const handleMarketplaceInvoiceUpload = async () => {
+    if (selectedApiOrders.length === 0 || uploadingToMarket) return
+
+    if (selectedApiOrders.every((order) => !order.trackingNumber)) {
       setInvoiceDialogOpen(true)
       return
     }
 
     setUploadingToMarket(true)
     try {
+      if (selectedRpaOrders.length > 0) {
+        toast.info(`RPA 주문 ${selectedRpaOrders.length}건은 [RPA 송장 전송] 버튼에서 별도로 전송해주세요.`)
+      }
       const res = await fetch('/api/shipping/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIds: selectedOrderIds }),
+        body: JSON.stringify({ orderIds: selectedApiOrders.map((order) => order.id) }),
       })
       const data = await res.json().catch(() => ({})) as {
         uploaded?: number
@@ -217,12 +231,6 @@ export function ShippingActions({
       setUploadingToMarket(false)
     }
   }
-
-  const selectedRpaOrders = useMemo(() => {
-    return selectedOrders.filter((order) =>
-      order.connectionId && getIntegrationMethod(order.marketplaceId) === 'rpa',
-    )
-  }, [selectedOrders])
 
   const handleRpaInvoiceUpload = async () => {
     if (selectedRpaOrders.length === 0 || uploadingRpaInvoice) return
@@ -801,11 +809,11 @@ export function ShippingActions({
             <button
               type="button"
               onClick={handleMarketplaceInvoiceUpload}
-              disabled={!hasSelection || uploadingToMarket}
+              disabled={selectedApiOrders.length === 0 || uploadingToMarket}
               className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               title="API 연동 마켓 송장 전송"
             >
-              몰에 송장 전송
+              {uploadingToMarket ? 'API 전송 중...' : `몰에 송장 전송 (${selectedApiOrders.length})`}
             </button>
             {selectedRpaOrders.length > 0 && (
               <button

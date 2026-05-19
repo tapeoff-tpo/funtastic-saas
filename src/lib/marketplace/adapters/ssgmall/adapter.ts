@@ -34,9 +34,6 @@ const SSGMALL_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['api_key'],
 }
 
-const SSGMALL_ORDER_COMPLETED_STATUS = '120'
-const SSGMALL_RELEASE_TYPES = '11,15'
-
 function formatDate(date: Date): string {
   const kst = new Date(date.getTime() + (9 * 60 * 60 * 1000))
   const yyyy = kst.getUTCFullYear()
@@ -81,12 +78,14 @@ function asArray<T>(value: T[] | T | undefined): T[] {
 
 function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
   const orders: SsgmallDirectionOrder[] = []
+  orders.push(...asArray(response.result?.shppDirection))
   orders.push(...asArray(response.shppDirection))
   orders.push(...asArray(response.data?.shppDirection))
   orders.push(...asArray(response.response?.shppDirection))
   orders.push(...asArray(response.body?.shppDirection))
 
   for (const directions of [
+    response.result?.shppDirections,
     response.shppDirections,
     response.data?.shppDirections,
     response.response?.shppDirections,
@@ -104,12 +103,14 @@ function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
 
 function getWarehouseOuts(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
   const orders: SsgmallDirectionOrder[] = []
+  orders.push(...asArray(response.result?.warehouseOut))
   orders.push(...asArray(response.warehouseOut))
   orders.push(...asArray(response.data?.warehouseOut))
   orders.push(...asArray(response.response?.warehouseOut))
   orders.push(...asArray(response.body?.warehouseOut))
 
   for (const warehouseOuts of [
+    response.result?.warehouseOuts,
     response.warehouseOuts,
     response.data?.warehouseOuts,
     response.response?.warehouseOuts,
@@ -388,12 +389,10 @@ export class SsgmallAdapter implements MarketplaceAdapter {
         json: {
           requestShppDirection: {
             perdType,
-            perdStrDts: formatDate(since),
-            perdEndDts: formatDate(until),
+            perdStrDts: formatCompactDate(since),
+            perdEndDts: formatCompactDate(until),
             commType: '02',
             commValue: '',
-            shppDivDtlCd: SSGMALL_RELEASE_TYPES,
-            ordStatCd: SSGMALL_ORDER_COMPLETED_STATUS,
           },
         } satisfies SsgmallDirectionRequest,
       })
@@ -430,11 +429,10 @@ export class SsgmallAdapter implements MarketplaceAdapter {
         json: {
           requestWarehouseOut: {
             perdType,
-            perdStrDts: formatDate(since),
-            perdEndDts: formatDate(until),
+            perdStrDts: formatCompactDate(since),
+            perdEndDts: formatCompactDate(until),
             commType: '02',
             commValue: '',
-            shppDivDtlCd: SSGMALL_RELEASE_TYPES,
           },
         } satisfies SsgmallWarehouseOutRequest,
       })

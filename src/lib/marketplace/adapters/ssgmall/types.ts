@@ -2,7 +2,7 @@ export interface SsgmallApiResponse {
   resultCode?: string
   resultMessage?: string
   resultDesc?: string
-  result?: {
+  result?: SsgmallApiResponse & {
     resultCode?: string
     resultMessage?: string
     resultDesc?: string

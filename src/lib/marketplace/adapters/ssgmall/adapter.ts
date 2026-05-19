@@ -12,6 +12,15 @@ import { createSsgmallClient } from './client'
 import { mapSsgmallStatus } from './status-map'
 import type { SsgmallApiResponse, SsgmallDirectionOrder, SsgmallDirectionRequest } from './types'
 
+const SSGMALL_CARRIER_CODES: Record<string, string> = {
+  CJGLS: '0000033011',
+  HANJIN: '0000033071',
+  KDEXP: '0000033027',
+  DAESIN: '0000033030',
+  CHUNIL: '0000033062',
+  ILYANG: '0000033057',
+}
+
 const SSGMALL_CONFIG: MarketplaceConfig = {
   id: 'ssgmall',
   name: 'SSG',
@@ -61,8 +70,27 @@ function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
 }
 
 function isSuccessResponse(response: SsgmallApiResponse): boolean {
-  const code = String(response.resultCode ?? '').trim()
+  const code = String(response.result?.resultCode ?? response.resultCode ?? '').trim()
   return code === '' || code === '00' || code === '0000' || code === '200' || code.toUpperCase() === 'SUCCESS'
+}
+
+function responseMessage(response: SsgmallApiResponse, fallback: string): string {
+  return response.result?.resultDesc
+    || response.resultDesc
+    || response.result?.resultMessage
+    || response.resultMessage
+    || fallback
+}
+
+function getSsgShippingIdentity(rawData?: Record<string, unknown>): { shppNo: string; shppSeq: string } | null {
+  const shppNo = rawData?.shppNo
+  const shppSeq = rawData?.shppSeq
+  if (shppNo == null || shppSeq == null) return null
+  return { shppNo: String(shppNo), shppSeq: String(shppSeq) }
+}
+
+function mapCarrierId(carrierId: string): string {
+  return SSGMALL_CARRIER_CODES[carrierId] ?? carrierId
 }
 
 export class SsgmallAdapter implements MarketplaceAdapter {
@@ -80,7 +108,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
       const today = new Date()
       const response = await this.listShippingDirections(today, today, '02')
       if (isSuccessResponse(response)) return { success: true }
-      return { success: false, error: response.resultDesc || response.resultMessage || 'SSG API 인증 확인 실패' }
+      return { success: false, error: responseMessage(response, 'SSG API 인증 확인 실패') }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
@@ -97,7 +125,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
         throw new MarketplaceApiError(
           'ssgmall',
           400,
-          response.resultDesc || response.resultMessage || 'Failed to fetch SSG shipping directions',
+          responseMessage(response, 'Failed to fetch SSG shipping directions'),
         )
       }
 
@@ -116,15 +144,60 @@ export class SsgmallAdapter implements MarketplaceAdapter {
     return []
   }
 
-  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+  async uploadInvoice(_orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     void _orderId
-    void _invoice
-    return { success: false, error: 'SSG 송장등록 API 문서 확인 후 연결됩니다.' }
+    const identity = getSsgShippingIdentity(invoice.rawData as Record<string, unknown> | undefined)
+    if (!identity) {
+      return { success: false, error: 'SSG 송장등록에 필요한 배송번호/배송순번이 주문 원본 데이터에 없습니다.' }
+    }
+
+    try {
+      const response = await this.client
+        .post('api/pd/1/saveWblNo.ssg', {
+          json: {
+            requestWhOutCompleteProcess: {
+              shppNo: identity.shppNo,
+              shppSeq: identity.shppSeq,
+              wblNo: invoice.trackingNumber,
+              delicoVenId: mapCarrierId(invoice.carrierId),
+              shppTypeCd: '20',
+              shppTypeDtlCd: '22',
+            },
+          },
+        })
+        .json<SsgmallApiResponse>()
+
+      if (isSuccessResponse(response)) return { success: true }
+      return { success: false, error: responseMessage(response, 'SSG 송장등록 실패') }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
   }
 
-  async confirmOrder(_marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
+  async confirmOrder(_marketplaceOrderId: string, rawData?: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
     void _marketplaceOrderId
-    return { success: false, error: 'SSG 주문확인 API 문서 확인 후 연결됩니다.' }
+    const identity = getSsgShippingIdentity(rawData)
+    if (!identity) {
+      return { success: false, error: 'SSG 주문확인에 필요한 배송번호/배송순번이 주문 원본 데이터에 없습니다.' }
+    }
+
+    try {
+      const response = await this.client
+        .post('api/pd/1/updateOrderSubjectManage.ssg', {
+          json: {
+            requestOrderSubjectManage: {
+              shppNo: identity.shppNo,
+              shppSeq: identity.shppSeq,
+            },
+          },
+        })
+        .json<SsgmallApiResponse>()
+
+      if (isSuccessResponse(response)) return { success: true }
+      return { success: false, error: responseMessage(response, 'SSG 주문확인 실패') }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
@@ -164,13 +237,14 @@ export class SsgmallAdapter implements MarketplaceAdapter {
   private normalizeOrder(order: SsgmallDirectionOrder): NormalizedOrder {
     const orderId = String(order.ordNo ?? order.orordNo ?? order.shppNo ?? '')
     const itemId = compactJoin([orderId, order.ordItemSeq, order.shppNo, order.shppSeq])
+    const marketplaceOrderId = itemId || orderId
     const quantity = asNumber(order.ordQty ?? order.dircItemQty, 1)
     const unitPrice = asNumber(order.rlordAmt ?? order.sellprc ?? order.splprc, 0)
     const address1 = order.shpplocBascAddr || order.ordpeRoadAddr || order.shpplocAddr || ''
     const address2 = order.shpplocDtlAddr || undefined
 
     return {
-      marketplaceOrderId: orderId || itemId,
+      marketplaceOrderId,
       marketplaceId: 'ssgmall',
       marketplaceStatus: compactJoin([order.shppProgStatDtlCd, order.shppStatCd, order.shppStatNm], ':'),
       status: mapSsgmallStatus(order.shppProgStatDtlCd, order.shppStatCd),

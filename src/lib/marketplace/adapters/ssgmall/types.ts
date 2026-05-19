@@ -2,6 +2,11 @@ export interface SsgmallApiResponse {
   resultCode?: string
   resultMessage?: string
   resultDesc?: string
+  result?: {
+    resultCode?: string
+    resultMessage?: string
+    resultDesc?: string
+  }
   shppDirections?: SsgmallDirectionOrder[] | { shppDirection?: SsgmallDirectionOrder[] | SsgmallDirectionOrder }
 }
 

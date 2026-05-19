@@ -18,7 +18,22 @@ export interface SsgmallDirectionRequest {
     perdType: '01' | '02' | '03'
     perdStrDts: string
     perdEndDts: string
+    commType?: '01' | '02'
+    commValue?: string
+    shppDivDtlCd?: string
+    ordStatCd?: string
     shppStatCd?: '10' | '30'
+    rsvtItemYn?: string
+    frgShppYn?: string
+    reOrderYns?: string
+    itemNm?: string
+    itemDiv?: string
+    itemId?: string
+    splVenItemId?: string
+    rcptpeNm?: string
+    ordpeNm?: string
+    mbrId?: string
+    mallTypeCd?: string
   }
 }
 
@@ -27,8 +42,21 @@ export interface SsgmallWarehouseOutRequest {
     perdType: '01' | '02' | '03' | '04'
     perdStrDts: string
     perdEndDts: string
+    commType?: '01' | '02'
+    commValue?: string
+    shppDivDtlCd?: string
     shppStatCd?: '10' | '30'
     shppProgStatDtl?: '22' | '42'
+    frgShppYn?: string
+    reOrderYns?: string
+    itemNm?: string
+    itemDiv?: string
+    itemId?: string
+    splVenItemId?: string
+    rcptpeNm?: string
+    ordpeNm?: string
+    mbrId?: string
+    mallTypeCd?: string
   }
 }
 

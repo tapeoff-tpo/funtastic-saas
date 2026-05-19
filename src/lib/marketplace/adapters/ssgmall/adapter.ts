@@ -34,6 +34,9 @@ const SSGMALL_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['api_key'],
 }
 
+const SSGMALL_DEFAULT_RELEASE_TYPES = '11,15'
+const SSGMALL_ORDER_COMPLETED_STATUS = '120'
+
 function formatDate(date: Date): string {
   const kst = new Date(date.getTime() + (9 * 60 * 60 * 1000))
   const yyyy = kst.getUTCFullYear()
@@ -268,6 +271,11 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             perdType,
             perdStrDts: formatDate(since),
             perdEndDts: formatDate(until),
+            commType: '02',
+            commValue: '',
+            shppDivDtlCd: SSGMALL_DEFAULT_RELEASE_TYPES,
+            ordStatCd: SSGMALL_ORDER_COMPLETED_STATUS,
+            shppStatCd: '10',
           },
         } satisfies SsgmallDirectionRequest,
       })
@@ -286,6 +294,10 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             perdType,
             perdStrDts: formatDate(since),
             perdEndDts: formatDate(until),
+            commType: '02',
+            commValue: '',
+            shppDivDtlCd: SSGMALL_DEFAULT_RELEASE_TYPES,
+            shppStatCd: '10',
           },
         } satisfies SsgmallWarehouseOutRequest,
       })

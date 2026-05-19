@@ -536,7 +536,8 @@ export async function collectOrdersForConnection(params: {
       (marketplaceId === 'ownerclan' ||
         marketplaceId === 'domeggook' ||
         marketplaceId === 'naver' ||
-        marketplaceId === 'funtastic-b2b') &&
+        marketplaceId === 'funtastic-b2b' ||
+        marketplaceId === 'ssgmall') &&
       normalizedOrders.length > 0
     ) {
       const existingNewOrders = await db
@@ -610,7 +611,8 @@ export async function collectOrdersForConnection(params: {
         (marketplaceId === 'ownerclan' ||
           marketplaceId === 'domeggook' ||
           marketplaceId === 'naver' ||
-          marketplaceId === 'funtastic-b2b') &&
+          marketplaceId === 'funtastic-b2b' ||
+          marketplaceId === 'ssgmall') &&
         confirmFailures.length > 0
       ) {
         throw new Error(`${marketplaceId} 주문확인 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)

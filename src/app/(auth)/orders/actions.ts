@@ -128,26 +128,39 @@ export async function forceBulkClaimStatusAction(
 
   if (ownedOrders.length === 0) return { updated: 0, errors }
 
-  const inserted = await db
-    .insert(claims)
-    .values(ownedOrders.map((order) => ({
-      orderId: order.id,
-      userId: workspaceUserId,
-      marketplaceId: order.marketplaceId,
-      marketplaceClaimId: `manual-status-${claimType}-${order.id}`,
-      claimType,
-      claimStatus: 'requested' as const,
-      reason: '주문상태변경',
-      rawData: {
-        source: 'manual-status-change',
-        marketplaceOrderId: order.marketplaceOrderId,
-        internalNo: order.internalNo,
-      },
-      requestedAt: new Date(),
-      updatedAt: new Date(),
-    })))
-    .onConflictDoNothing()
-    .returning({ id: claims.id })
+  const inserted = await db.transaction(async (tx) => {
+    await tx
+      .update(orders)
+      .set({
+        isHeld: false,
+        holdReason: null,
+        heldAt: null,
+        previousStatus: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, ownedOrders.map((order) => order.id))))
+
+    return tx
+      .insert(claims)
+      .values(ownedOrders.map((order) => ({
+        orderId: order.id,
+        userId: workspaceUserId,
+        marketplaceId: order.marketplaceId,
+        marketplaceClaimId: `manual-status-${claimType}-${order.id}`,
+        claimType,
+        claimStatus: 'requested' as const,
+        reason: '주문상태변경',
+        rawData: {
+          source: 'manual-status-change',
+          marketplaceOrderId: order.marketplaceOrderId,
+          internalNo: order.internalNo,
+        },
+        requestedAt: new Date(),
+        updatedAt: new Date(),
+      })))
+      .onConflictDoNothing()
+      .returning({ id: claims.id })
+  })
 
   revalidatePath('/orders')
   revalidateTag('orders', 'max')

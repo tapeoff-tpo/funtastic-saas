@@ -376,6 +376,8 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
 
   if (filters.isHeld) {
     conditions.push(eq(orders.isHeld, true))
+  } else if (filters.excludeHeld) {
+    conditions.push(eq(orders.isHeld, false))
   }
 
   if (filters.scan) {

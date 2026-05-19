@@ -406,6 +406,8 @@ const CLAIM_PILL_STYLES: Record<ClaimType, string> = {
   return: 'border-orange-200 bg-orange-50 text-orange-800',
 }
 
+const HELD_PILL_STYLE = 'border-purple-200 bg-purple-50 text-purple-700'
+
 const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡',
   naver: '네이버',
@@ -599,8 +601,10 @@ export const columns: ColumnDef<OrderRow>[] = [
       const order = row.original
       const openDetail = getOpenDetail(table)
       const claimLabel = claimSummaryLabel(order)
-      const primaryLabel = claimLabel ?? ORDER_STATUS_LABELS[order.status]
-      const primaryStyle = order.claimType
+      const primaryLabel = order.isHeld ? '미발송' : claimLabel ?? ORDER_STATUS_LABELS[order.status]
+      const primaryStyle = order.isHeld
+        ? HELD_PILL_STYLE
+        : order.claimType
         ? CLAIM_PILL_STYLES[order.claimType]
         : STATUS_PILL_STYLES[order.status]
       const historicalClaimStatuses = (order.historicalClaimStatuses ?? [])
@@ -612,7 +616,7 @@ export const columns: ColumnDef<OrderRow>[] = [
           <div className="flex min-w-0 items-center gap-1">
             <span
               className={`inline-flex h-6 min-w-0 max-w-full items-center justify-center truncate rounded border px-1.5 text-[11px] font-semibold ${primaryStyle}`}
-              title={order.claimReason ?? ORDER_STATUS_LABELS[order.status]}
+              title={order.isHeld ? (order.holdReason ?? '미발송') : (order.claimReason ?? ORDER_STATUS_LABELS[order.status])}
             >
               {primaryLabel}
             </span>
@@ -628,14 +632,6 @@ export const columns: ColumnDef<OrderRow>[] = [
             {order.hasInquiries && (
               <span className="inline-flex h-6 shrink-0 items-center rounded border border-blue-200 bg-blue-50 px-1 text-[10px] font-medium text-blue-700" title="문의">
                 문의
-              </span>
-            )}
-            {order.isHeld && (
-              <span
-                title={order.holdReason ?? '미발송'}
-                className="inline-flex h-6 shrink-0 items-center rounded border border-purple-200 bg-purple-50 px-1 text-[10px] font-medium text-purple-700"
-              >
-                미발
               </span>
             )}
             {order.isHeld && order.holdReason && (

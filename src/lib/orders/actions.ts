@@ -217,6 +217,9 @@ export async function forceBulkUpdateStatus(
       .set({
         status: newStatus,
         previousStatus: null,
+        isHeld: false,
+        holdReason: null,
+        heldAt: null,
         preparingAt: newStatus === 'preparing' ? new Date() : null,
         updatedAt: new Date(),
       })

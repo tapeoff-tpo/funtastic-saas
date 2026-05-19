@@ -111,6 +111,8 @@ export interface OrderFilters {
   stage?: OrderStage
   /** Filter to only held (미발송) orders */
   isHeld?: boolean
+  /** Exclude held (미발송) orders from status/claim tabs so one order appears in one status bucket. */
+  excludeHeld?: boolean
   /**
    * Phase 8 — 취소 탭 통합 필터.
    * true → orders.status='cancelled' OR claims.claimType='cancel' (distinct)

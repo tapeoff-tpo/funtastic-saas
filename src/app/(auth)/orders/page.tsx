@@ -105,6 +105,7 @@ export default async function OrdersPage({
 
   const isNewTab = params.status === 'new'
   const isScanFilterTab = params.status === 'preparing' || params.status === 'ready'
+  const shouldExcludeHeld = !params.held && Boolean(params.status || params.claimType || params.cancel)
   const mappingFilter = isNewTab
     ? (params.mapping === 'all'
         ? undefined
@@ -138,6 +139,7 @@ export default async function OrdersPage({
         scan: isScanFilterTab ? (params.scan ?? undefined) as OrderFiltersParams['scan'] : undefined,
         scanResult: isScanFilterTab ? (params.scanResult ?? undefined) as OrderFiltersParams['scanResult'] : undefined,
         isHeld: params.held ?? undefined,
+        excludeHeld: shouldExcludeHeld,
         cancelTab: params.cancel ?? undefined,
         excludeClaimLikeOrders: isNewTab,
         includeMappingDetails: true,

@@ -24,7 +24,6 @@ const RPA_MARKETPLACES = new Set([
   'ohouse',
   'hyundai-hmall',
   'gs-shop',
-  'cjonestyle',
 ])
 
 export function getIntegrationMethod(

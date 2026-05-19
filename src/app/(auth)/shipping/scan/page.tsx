@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 
 type ScanStatus = 'idle' | 'ok' | 'duplicate' | 'not_found'
+type QueueStatus = 'queued' | 'processing' | ScanStatus
 
 interface ScanResult {
   status: ScanStatus
@@ -13,6 +14,14 @@ interface ScanResult {
   order?: { recipientName: string; marketplaceId: string; marketplaceOrderId: string } | null
   items?: { productName: string; quantity: number }[]
   todayCount?: number
+}
+
+interface ScanQueueItem {
+  id: number
+  trackingNumber: string
+  status: QueueStatus
+  message?: string
+  recipientName?: string
 }
 
 const STATUS_STYLE: Record<ScanStatus, string> = {
@@ -40,13 +49,23 @@ function speak(text: string) {
 
 export default function ScanPage() {
   const inputRef = useRef<HTMLInputElement>(null)
+  const queueRef = useRef<ScanQueueItem[]>([])
+  const processingRef = useRef(false)
+  const pausedRef = useRef(false)
+  const nextIdRef = useRef(1)
   const [inputValue, setInputValue] = useState('')
   const [result, setResult] = useState<ScanResult | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [queue, setQueue] = useState<ScanQueueItem[]>([])
+  const [processing, setProcessing] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [todayCount, setTodayCount] = useState(0)
-  const [history, setHistory] = useState<{ trackingNumber: string; status: ScanStatus; recipientName?: string }[]>([])
   const [uploading, setUploading] = useState(false)
   const [uploadResult, setUploadResult] = useState<{ uploaded: number; failed: number; total: number } | null>(null)
+
+  const syncQueue = useCallback((next: ScanQueueItem[]) => {
+    queueRef.current = next
+    setQueue(next)
+  }, [])
 
   // Always keep input focused
   const refocus = useCallback(() => {
@@ -85,45 +104,117 @@ export default function ScanPage() {
     }
   }, [uploading, refocus])
 
-  const handleScan = useCallback(async (trackingNumber: string) => {
-    if (!trackingNumber.trim() || loading) return
-    setLoading(true)
+  const processNext = useCallback(async () => {
+    if (processingRef.current || pausedRef.current) return
+
+    const next = queueRef.current.find((item) => item.status === 'queued')
+    if (!next) return
+
+    processingRef.current = true
+    setProcessing(true)
+    syncQueue(queueRef.current.map((item) => (
+      item.id === next.id ? { ...item, status: 'processing' } : item
+    )))
 
     try {
       const res = await fetch('/api/shipping/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackingNumber: trackingNumber.trim() }),
+        body: JSON.stringify({ trackingNumber: next.trackingNumber, includeTodayCount: false }),
       })
       const data: ScanResult = await res.json()
-      data.trackingNumber = trackingNumber.trim()
+      data.trackingNumber = next.trackingNumber
 
       setResult(data)
       speak(data.tts ?? data.message)
 
       if (data.status === 'ok') {
-        setTodayCount(data.todayCount ?? 0)
+        setTodayCount((count) => data.todayCount ?? count + 1)
       }
 
-      setHistory((prev) => [
-        { trackingNumber: trackingNumber.trim(), status: data.status, recipientName: data.order?.recipientName },
-        ...prev.slice(0, 29),
-      ])
+      const completed: ScanQueueItem = {
+        ...next,
+        status: data.status,
+        message: data.message,
+        recipientName: data.order?.recipientName,
+      }
+      const withoutCurrent = queueRef.current.filter((item) => item.id !== next.id)
+      const ordered = data.status === 'not_found'
+        ? [completed, ...withoutCurrent]
+        : [completed, ...withoutCurrent].slice(0, 80)
+      syncQueue(ordered)
+
+      if (data.status === 'not_found') {
+        pausedRef.current = true
+        setPaused(true)
+      }
     } catch {
-      setResult({ status: 'not_found', message: '네트워크 오류', tts: '비정상입니다' } as ScanResult)
+      const errorResult = {
+        status: 'not_found',
+        message: '네트워크 오류',
+        tts: '비정상입니다',
+        trackingNumber: next.trackingNumber,
+      } as ScanResult
+      setResult(errorResult)
       speak('비정상입니다')
+      syncQueue([
+        { ...next, status: 'not_found', message: '네트워크 오류' },
+        ...queueRef.current.filter((item) => item.id !== next.id),
+      ])
+      pausedRef.current = true
+      setPaused(true)
     } finally {
-      setLoading(false)
-      setInputValue('')
+      processingRef.current = false
+      setProcessing(false)
       refocus()
+      setTimeout(() => processNext(), 0)
     }
-  }, [loading, refocus])
+  }, [refocus, syncQueue])
+
+  const enqueueScan = useCallback((trackingNumber: string) => {
+    const normalized = trackingNumber.trim()
+    if (!normalized || pausedRef.current) return
+
+    const nextItem: ScanQueueItem = {
+      id: nextIdRef.current,
+      trackingNumber: normalized,
+      status: 'queued',
+    }
+    nextIdRef.current += 1
+    syncQueue([...queueRef.current, nextItem])
+    setInputValue('')
+    setTimeout(() => processNext(), 0)
+  }, [processNext, syncQueue])
+
+  const handleContinue = useCallback(() => {
+    pausedRef.current = false
+    setPaused(false)
+    refocus()
+    setTimeout(() => processNext(), 0)
+  }, [processNext, refocus])
+
+  const handleClearCompleted = useCallback(() => {
+    const active = queueRef.current.filter((item) => item.status === 'queued' || item.status === 'processing' || item.status === 'not_found')
+    syncQueue(active)
+    refocus()
+  }, [refocus, syncQueue])
+
+  useEffect(() => {
+    if (!processing && !paused) {
+      processNext()
+    }
+  }, [processing, paused, processNext])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
-      handleScan(inputValue)
+      e.preventDefault()
+      enqueueScan(inputValue)
     }
   }
+
+  const pendingCount = queue.filter((item) => item.status === 'queued').length
+  const abnormalCount = queue.filter((item) => item.status === 'not_found').length
+  const completedCount = queue.filter((item) => item.status === 'ok').length
 
   return (
     <div
@@ -139,7 +230,7 @@ export default function ScanPage() {
           <div className="flex flex-col items-end gap-1">
             <button
               onClick={handleUpload}
-              disabled={uploading || loading}
+              disabled={uploading || processing || paused}
               className="rounded-lg bg-white/20 px-4 py-2 text-sm font-medium text-white hover:bg-white/30 disabled:opacity-50 transition-colors"
             >
               {uploading ? '전송 중...' : '오늘 출고분 전송'}
@@ -157,6 +248,25 @@ export default function ScanPage() {
         </div>
       </div>
 
+      {paused && (
+        <div className="mx-8 mt-5 rounded-lg border-2 border-red-300 bg-red-600 px-6 py-4 text-white shadow-lg">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-2xl font-bold">비정상 송장 발견</div>
+              <div className="mt-1 font-mono text-xl">{result?.trackingNumber}</div>
+              <div className="mt-1 text-sm text-white/80">확인 후 계속 버튼을 눌러야 다음 스캔 처리가 이어집니다.</div>
+            </div>
+            <button
+              type="button"
+              onClick={handleContinue}
+              className="shrink-0 rounded-lg bg-white px-5 py-3 text-base font-bold text-red-700 hover:bg-red-50"
+            >
+              확인 후 계속
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Scan input */}
       <div className="flex flex-col items-center justify-center flex-1 gap-6 px-8 py-8">
         <div className="w-full max-w-xl">
@@ -169,13 +279,19 @@ export default function ScanPage() {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={loading}
-            placeholder="바코드를 스캔하거나 직접 입력 후 Enter"
+            disabled={paused}
+            placeholder={paused ? '비정상 송장 확인 후 계속 버튼을 눌러주세요' : '바코드를 스캔하거나 직접 입력 후 Enter'}
             className="w-full rounded-xl border-2 border-white/30 bg-white/10 px-6 py-5 text-center text-2xl font-mono tracking-widest text-white placeholder:text-white/30 focus:border-white focus:outline-none disabled:opacity-50"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
           />
+          <div className="mt-3 grid grid-cols-4 gap-2 text-center text-sm text-white">
+            <div className="rounded bg-white/10 px-2 py-2">대기 <strong>{pendingCount}</strong></div>
+            <div className="rounded bg-white/10 px-2 py-2">처리중 <strong>{processing ? 1 : 0}</strong></div>
+            <div className="rounded bg-green-600/40 px-2 py-2">정상 <strong>{completedCount}</strong></div>
+            <div className="rounded bg-red-600/60 px-2 py-2">비정상 <strong>{abnormalCount}</strong></div>
+          </div>
         </div>
 
         {/* Result display */}
@@ -216,26 +332,44 @@ export default function ScanPage() {
           </div>
         )}
 
-        {loading && (
+        {processing && (
           <div className="text-white/70 text-lg animate-pulse">처리 중...</div>
         )}
       </div>
 
       {/* History */}
-      {history.length > 0 && (
+      {queue.length > 0 && (
         <div className="px-8 pb-6">
-          <div className="text-sm text-white/50 mb-2">최근 스캔</div>
-          <div className="flex flex-wrap gap-2">
-            {history.slice(0, 10).map((h, i) => (
-              <span
-                key={i}
-                className={`rounded-full px-3 py-1 text-xs font-mono text-white ${
+          <div className="mb-2 flex items-center justify-between">
+            <div className="text-sm text-white/50">최근 스캔</div>
+            <button
+              type="button"
+              onClick={handleClearCompleted}
+              className="rounded bg-white/10 px-3 py-1 text-xs font-medium text-white hover:bg-white/20"
+            >
+              완료목록 정리
+            </button>
+          </div>
+          <div className="grid max-h-48 grid-cols-1 gap-2 overflow-y-auto md:grid-cols-2 xl:grid-cols-3">
+            {queue.slice(0, 30).map((h) => (
+              <div
+                key={h.id}
+                className={`rounded-lg px-3 py-2 text-sm text-white ${
                   h.status === 'ok' ? 'bg-green-600/50' :
-                  h.status === 'duplicate' ? 'bg-amber-600/50' : 'bg-red-600/50'
+                  h.status === 'duplicate' ? 'bg-amber-600/50' :
+                  h.status === 'not_found' ? 'border border-red-200 bg-red-600 text-lg font-bold' :
+                  h.status === 'processing' ? 'bg-blue-600/50' : 'bg-white/10'
                 }`}
               >
-                {h.trackingNumber.slice(-6)} {h.recipientName ? `· ${h.recipientName}` : ''}
-              </span>
+                <span className="font-mono">{h.trackingNumber}</span>
+                <span className="ml-2">
+                  {h.status === 'queued' ? '대기' :
+                   h.status === 'processing' ? '처리중' :
+                   h.status === 'ok' ? '정상' :
+                   h.status === 'duplicate' ? '중복' : '비정상'}
+                </span>
+                {h.recipientName && <span className="ml-2 text-white/80">{h.recipientName}</span>}
+              </div>
             ))}
           </div>
         </div>

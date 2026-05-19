@@ -300,6 +300,7 @@ export const shipments = pgTable(
   (table) => [
     index('shipments_order_id').on(table.orderId),
     index('shipments_upload_status').on(table.uploadStatus),
+    index('shipments_user_tracking_number_idx').on(table.userId, table.trackingNumber),
   ],
 )
 

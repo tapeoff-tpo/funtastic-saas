@@ -15,13 +15,14 @@ import { db } from '@/lib/db'
 import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
 import { eq, and, gte, count } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  let body: { trackingNumber: string }
+  let body: { trackingNumber: string; includeTodayCount?: boolean }
   try {
     body = await req.json()
   } catch {
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
   if (!trackingNumber) {
     return NextResponse.json({ error: '운송장번호 없음' }, { status: 400 })
   }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   // Look up shipment
   const [shipment] = await db
@@ -44,7 +46,7 @@ export async function POST(req: NextRequest) {
       uploadStatus: shipments.uploadStatus,
     })
     .from(shipments)
-    .where(eq(shipments.trackingNumber, trackingNumber))
+    .where(and(eq(shipments.userId, workspaceUserId), eq(shipments.trackingNumber, trackingNumber)))
     .limit(1)
 
   // 비정상: 시스템에 없는 운송장
@@ -129,15 +131,17 @@ export async function POST(req: NextRequest) {
     : []
 
   // Today's scan count (after this scan)
-  const [{ value: todayCount }] = await db
-    .select({ value: count() })
-    .from(shipments)
-    .where(
-      and(
-        eq(shipments.userId, user.id),
-        gte(shipments.shippedAt, todayStart),
-      ),
-    )
+  const todayCount = body.includeTodayCount === false
+    ? null
+    : await db
+      .select({ value: count() })
+      .from(shipments)
+      .where(
+        and(
+          eq(shipments.userId, workspaceUserId),
+          gte(shipments.shippedAt, todayStart),
+        ),
+      )
 
   return NextResponse.json({
     status: 'ok',
@@ -148,6 +152,6 @@ export async function POST(req: NextRequest) {
     carrierName: shipment.carrierName,
     order: order ?? null,
     items,
-    todayCount: Number(todayCount),
+    todayCount: todayCount ? Number(todayCount[0]?.value ?? 0) : undefined,
   })
 }

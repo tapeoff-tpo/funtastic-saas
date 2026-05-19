@@ -12,6 +12,7 @@ import type { OrderStatus } from './types'
 import { isValidTransition } from './types'
 import { deductForOrder, restoreForOrder } from '@/lib/inventory/actions'
 import { lockOrderItemsForOrders } from './locking'
+import { logOrderChange, logOrderChanges } from './change-log'
 
 type ActionResult = { success: boolean; error?: string }
 
@@ -62,6 +63,15 @@ export async function updateOrderStatus(
         updatedAt: new Date(),
       })
       .where(eq(orders.id, orderId))
+    await logOrderChange({
+      orderId,
+      userId: order.userId,
+      action: 'status.changed',
+      title: '주문상태변경',
+      description: `${order.status} → ${newStatus}`,
+      before: { status: order.status },
+      after: { status: newStatus },
+    }, tx)
 
     // Inventory hooks: auto-deduct on ship, auto-restore on cancel from shipped/delivering
     if (newStatus === 'shipped') {
@@ -225,6 +235,17 @@ export async function forceBulkUpdateStatus(
       })
       .where(and(eq(orders.userId, userId), inArray(orders.id, orderIdsToUpdate)))
       .returning({ id: orders.id })
+
+    await logOrderChanges(ownedOrders.map((order) => ({
+      orderId: order.id,
+      userId,
+      action: 'status.changed',
+      title: '주문상태변경',
+      description: `${order.status} → ${newStatus}`,
+      before: { status: order.status },
+      after: { status: newStatus },
+      metadata: { source: 'manual-bulk' },
+    })), tx)
 
     if (newStatus === 'shipped') {
       await lockOrderItemsForOrders(tx, userId, updatedOrders.map((order) => order.id))

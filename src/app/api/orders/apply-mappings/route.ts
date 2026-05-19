@@ -18,6 +18,7 @@ import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray } from 'drizzle-orm'
+import { logOrderChanges } from '@/lib/orders/change-log'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -50,7 +51,17 @@ export async function POST(req: NextRequest) {
       updatedAt: new Date(),
     })
     .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, orderIds)))
-    .returning({ id: orders.id })
+    .returning({ id: orders.id, mappedAt: orders.mappedAt })
+
+  await logOrderChanges(result.map((order) => ({
+    orderId: order.id,
+    userId: workspaceUserId,
+    actorId: user.id,
+    action: 'mapping.applied',
+    title: '매핑완료',
+    description: '주문 매핑이 완료 처리되었습니다.',
+    after: { mappedAt: order.mappedAt },
+  })))
 
   return NextResponse.json({ applied: result.length })
 }

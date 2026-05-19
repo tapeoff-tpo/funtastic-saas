@@ -6,6 +6,7 @@ import { claims, orders } from '@/lib/db/schema'
 import type { ClaimType } from '@/lib/orders/types'
 import { copyOrder } from '@/lib/orders/copy-order'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { logOrderChange } from '@/lib/orders/change-log'
 
 const VALID_TYPES = ['return', 'exchange'] as const
 const REASON_LABELS = {
@@ -108,6 +109,17 @@ export async function POST(req: NextRequest) {
       requestedAt: new Date(),
     })
     .returning({ id: claims.id })
+
+  await logOrderChange({
+    orderId: order.id,
+    userId: workspaceUserId,
+    actorId: user.id,
+    action: 'claim.created',
+    title: `${body.claimType === 'return' ? '반품' : '교환'} 접수`,
+    description: reason,
+    after: { claimType: body.claimType, claimStatus: 'requested' },
+    metadata: { claimId: created.id, quantities: claimQuantities },
+  })
 
   const copies: Array<{ id: string; kind: 'return-pickup' | 'exchange-pickup' | 'exchange-reship' }> = []
   if (body.claimType === 'return') {

@@ -8,6 +8,7 @@ import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import '@/lib/marketplace/adapters/configs'
+import { logOrderChange } from '@/lib/orders/change-log'
 
 /**
  * POST /api/orders/confirm
@@ -114,6 +115,16 @@ export async function POST(request: NextRequest) {
           .update(orders)
           .set({ status: 'confirmed', updatedAt: new Date() })
           .where(eq(orders.id, order.id))
+        await logOrderChange({
+          orderId: order.id,
+          userId: workspaceUserId,
+          actorId: user.id,
+          action: 'status.confirmed',
+          title: '확정',
+          description: '매핑완료 신규 주문이 확인 상태로 이동했습니다.',
+          before: { status: order.status },
+          after: { status: 'confirmed' },
+        })
         results.push({
           orderId: order.id,
           marketplaceOrderId: order.marketplaceOrderId,
@@ -227,6 +238,16 @@ export async function POST(request: NextRequest) {
             updatedAt: new Date(),
           })
           .where(eq(orders.id, order.id))
+        await logOrderChange({
+          orderId: order.id,
+          userId: workspaceUserId,
+          actorId: user.id,
+          action: 'status.confirmed',
+          title: '확정',
+          description: '매핑완료 신규 주문이 확인 상태로 이동했습니다.',
+          before: { status: order.status },
+          after: { status: 'confirmed', marketplaceStatus: 'CONFIRMED' },
+        })
 
         results.push({
           orderId: order.id,

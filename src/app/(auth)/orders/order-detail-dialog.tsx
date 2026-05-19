@@ -26,6 +26,18 @@ const SCAN_STATUS_LABELS: Record<string, string> = {
   not_found: '비정상',
 }
 
+const CHANGE_ACTION_LABELS: Record<string, string> = {
+  'status.changed': '주문상태변경',
+  'status.confirmed': '확정',
+  'status.shipped': '출고완료',
+  'mapping.applied': '매핑완료',
+  'mapping.removed': '매핑해제',
+  'invoice.registered': '송장번호등록',
+  'invoice.send_requested': '송장 송신시작',
+  'invoice.sent': '송장 송신',
+  'claim.created': '클레임접수',
+}
+
 interface OrderDetail {
   id: string
   marketplaceOrderId: string
@@ -115,6 +127,17 @@ interface OrderDetail {
     status: string
     scannedAt: string
   }>
+  changeLogs?: Array<{
+    id: string
+    action: string
+    title: string
+    description: string | null
+    before?: Record<string, unknown> | null
+    after?: Record<string, unknown> | null
+    metadata?: Record<string, unknown> | null
+    actorId?: string | null
+    createdAt: string
+  }>
 }
 
 interface Props {
@@ -146,11 +169,13 @@ function getSabangnetRawData(order: OrderDetail | null) {
 export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [loading, setLoading] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
     if (!open || !orderId) return
     Promise.resolve().then(() => setLoading(true))
+    Promise.resolve().then(() => setHistoryOpen(false))
     fetch(`/api/orders/${orderId}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -172,6 +197,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
     : [])
   const scanLogList = order?.scanLogs ?? []
   const claimList = order?.claims ?? []
+  const changeLogList = order?.changeLogs ?? []
   const sabangnetRaw = getSabangnetRawData(order)
 
   // 클레임 접수 가장 이른 / 완료 가장 최근
@@ -549,6 +575,62 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                   <MemoPanel orderId={order.id} initialMemos={order.memos} />
                 </section>
               </div>
+
+              <section className="rounded-md border lg:col-span-3">
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen((current) => !current)}
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-semibold text-muted-foreground hover:bg-muted/40"
+                >
+                  <span>변경 이력 ({changeLogList.length}건)</span>
+                  <span className="text-sm">{historyOpen ? '⌃' : '⌄'}</span>
+                </button>
+                {historyOpen && (
+                  <div className="border-t p-3">
+                    {changeLogList.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">변경 이력이 없습니다.</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {changeLogList.map((log) => (
+                          <li key={log.id} className="rounded border bg-gray-50 px-3 py-2 text-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="rounded bg-white px-1.5 py-0.5 font-semibold text-foreground">
+                                  {CHANGE_ACTION_LABELS[log.action] ?? log.title}
+                                </span>
+                                <span className="font-medium">{log.title}</span>
+                              </div>
+                              <span className="font-mono text-[10px] text-muted-foreground">
+                                {fmtDateTime(log.createdAt)}
+                                {log.actorId && (
+                                  <span className="ml-2 font-sans">처리자 {log.actorId.slice(0, 8)}</span>
+                                )}
+                              </span>
+                            </div>
+                            {log.description && (
+                              <p className="mt-1 text-muted-foreground">{log.description}</p>
+                            )}
+                            {(log.before || log.after) && (
+                              <div className="mt-1 grid gap-1 text-[10px] text-muted-foreground sm:grid-cols-2">
+                                {log.before && (
+                                  <div className="truncate rounded bg-white px-2 py-1">
+                                    이전: {JSON.stringify(log.before)}
+                                  </div>
+                                )}
+                                {log.after && (
+                                  <div className="truncate rounded bg-white px-2 py-1">
+                                    이후: {JSON.stringify(log.after)}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+              </section>
             </div>
           )}
         </div>

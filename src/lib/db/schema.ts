@@ -203,6 +203,32 @@ export const orderMemos = pgTable(
   ],
 )
 
+export const orderChangeLogs = pgTable(
+  'order_change_logs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+    actorId: uuid('actor_id'),
+    action: varchar('action', { length: 80 }).notNull(),
+    title: varchar('title', { length: 200 }).notNull(),
+    description: text('description'),
+    before: jsonb('before').$type<Record<string, unknown>>(),
+    after: jsonb('after').$type<Record<string, unknown>>(),
+    metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('order_change_logs_order_created').on(table.orderId, table.createdAt),
+    index('order_change_logs_user_created').on(table.userId, table.createdAt),
+    index('order_change_logs_action_created').on(table.action, table.createdAt),
+  ],
+)
+
 export const giftRules = pgTable(
   'gift_rules',
   {

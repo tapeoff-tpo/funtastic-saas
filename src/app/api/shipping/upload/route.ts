@@ -18,6 +18,7 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { markShipmentUploadedAndOrderShipped } from '@/lib/shipping/upload-status'
+import { logOrderChange } from '@/lib/orders/change-log'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
 
@@ -168,6 +169,16 @@ export async function POST(req: NextRequest) {
       const ord = orderMap.get(s.orderId)!
       try {
         await db.update(shipments).set({ uploadStatus: 'uploading', updatedAt: new Date() }).where(eq(shipments.id, s.id))
+        await logOrderChange({
+          orderId: s.orderId,
+          userId: workspaceUserId,
+          actorId: user.id,
+          action: 'invoice.send_requested',
+          title: 'API 송장 송신시작',
+          description: s.trackingNumber,
+          after: { uploadStatus: 'uploading', trackingNumber: s.trackingNumber },
+          metadata: { shipmentId: s.id, marketplaceId },
+        })
 
         const result = await adapter.uploadInvoice(ord.marketplaceOrderId, {
           trackingNumber: s.trackingNumber,

@@ -18,6 +18,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createShipment } from './queries'
 import { getCarrierName } from './carrier-codes'
 import { queueInvoiceUploadJob } from '@/lib/jobs/queues'
+import { logOrderChange } from '@/lib/orders/change-log'
 
 /**
  * Queue a single invoice upload.
@@ -87,6 +88,15 @@ export async function queueInvoiceUpload(
           updatedAt: new Date(),
         })
         .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
+      await logOrderChange({
+        orderId,
+        userId,
+        action: 'invoice.registered',
+        title: '송장번호등록',
+        description: `${getCarrierName(carrierId)} ${trackingNumber}`,
+        before: { status: order.status },
+        after: { status: 'preparing', trackingNumber, carrierId },
+      })
     }
 
     return { success: true }
@@ -166,6 +176,15 @@ export async function registerInvoice(
           updatedAt: new Date(),
         })
         .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
+      await logOrderChange({
+        orderId,
+        userId,
+        action: 'invoice.registered',
+        title: '송장번호등록',
+        description: `${getCarrierName(carrierId)} ${trackingNumber}`,
+        before: { status: order.status },
+        after: { status: 'preparing', trackingNumber, carrierId },
+      })
     }
 
     return { success: true }

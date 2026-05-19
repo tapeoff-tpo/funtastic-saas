@@ -6,6 +6,7 @@ import { mappingSources, orderItems, orders } from '@/lib/db/schema'
 import { buildMappingIndex, lookupMappingRef, EXACT_OPTION_ID } from '@/lib/orders/mapping-match'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray } from 'drizzle-orm'
+import { logOrderChanges } from '@/lib/orders/change-log'
 
 type MappingSourceRow = {
   id: string
@@ -162,6 +163,17 @@ export async function POST(req: NextRequest) {
       })
       .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, orderIds)))
       .returning({ id: orders.id })
+
+    await logOrderChanges(unmappedOrders.map((order) => ({
+      orderId: order.id,
+      userId: workspaceUserId,
+      actorId: user.id,
+      action: 'mapping.removed',
+      title: '매핑해제',
+      description: '주문 매핑이 해제되었습니다.',
+      after: { mappedAt: null },
+      metadata: { clearedItems: clearedItems.length, removedSources },
+    })), tx)
 
     return {
       clearedItems: clearedItems.length,

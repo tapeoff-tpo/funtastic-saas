@@ -15,6 +15,7 @@ import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './type
 export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
+import { getOrderChangeLogs } from './change-log'
 
 /**
  * mappingStatus/displayName 계산용 매핑 조회.
@@ -1019,7 +1020,7 @@ export async function getOrderById(id: string, userId?: string) {
 
   if (!order) return null
 
-  const [orderItemRows, claimRows, memoRows, shipmentRows, scanLogRows] = await Promise.all([
+  const [orderItemRows, claimRows, memoRows, shipmentRows, scanLogRows, changeLogRows] = await Promise.all([
     // 수집상품명(productName) + 확정상품명 동시 반환
     // Phase A 매핑 재설계: 확정상품명은 SKU ↔ products.internalSku 직접 매칭(products.name) 만 사용.
     db
@@ -1070,6 +1071,7 @@ export async function getOrderById(id: string, userId?: string) {
       .from(scanLogs)
       .where(eq(scanLogs.orderId, id))
       .orderBy(desc(scanLogs.scannedAt)),
+    getOrderChangeLogs(id),
   ])
 
   const latestShipment =
@@ -1175,6 +1177,8 @@ export async function getOrderById(id: string, userId?: string) {
     shipments: shipmentRows,
     /** 바코드 스캔 이력 — 최신순 */
     scanLogs: scanLogRows,
+    /** 주문 변경 이력 — 최신순 */
+    changeLogs: changeLogRows,
   }
 }
 

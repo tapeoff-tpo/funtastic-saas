@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { jobLogs, marketplaceConnections, orders, shipments } from '@/lib/db/schema'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { logOrderChange } from '@/lib/orders/change-log'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -94,6 +95,16 @@ export async function POST(req: NextRequest) {
       marketplaceUploadError: null,
       updatedAt: new Date(),
     }).where(eq(shipments.id, row.shipmentId))
+    await logOrderChange({
+      orderId: row.orderId,
+      userId: workspaceUserId,
+      actorId: user.id,
+      action: 'invoice.send_requested',
+      title: 'RPA 송장 송신시작',
+      description: row.trackingNumber,
+      after: { uploadStatus: 'uploading', trackingNumber: row.trackingNumber },
+      metadata: { shipmentId: row.shipmentId, marketplaceId: row.marketplaceId },
+    })
 
     await queue.add(
       `manual-scrape-invoice-${row.marketplaceId}-${Date.now()}`,

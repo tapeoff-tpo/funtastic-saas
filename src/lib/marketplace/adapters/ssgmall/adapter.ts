@@ -1,41 +1,25 @@
-/**
- * Ssgmall (신세계몰) marketplace adapter implementing MarketplaceAdapter.
- *
- * Uses API key authentication with JSON responses.
- *
- * NOTE: API details are best-effort (per D-03). Endpoints will be updated
- * when real API docs become available.
- */
-
 import type {
+  InvoiceData,
   MarketplaceAdapter,
   MarketplaceConfig,
   MarketplaceCredentials,
-  NormalizedOrder,
   NormalizedClaim,
+  NormalizedOrder,
   NormalizedProduct,
-  InvoiceData,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createSsgmallClient } from './client'
-import { mapSsgmallStatus, mapSsgmallClaimType, mapSsgmallClaimStatus } from './status-map'
-import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
-import type {
-  SsgmallApiResponse,
-  SsgmallOrder,
-  SsgmallClaim,
-  SsgmallProduct,
-} from './types'
+import { mapSsgmallStatus } from './status-map'
+import type { SsgmallApiResponse, SsgmallDirectionOrder, SsgmallDirectionRequest } from './types'
 
 const SSGMALL_CONFIG: MarketplaceConfig = {
   id: 'ssgmall',
-  name: '신세계몰',
+  name: 'SSG',
   authType: 'api_key',
-  rateLimitPerSecond: 30,
-  requiredCredentials: ['api_key', 'vendor_id'],
+  rateLimitPerSecond: 5,
+  requiredCredentials: ['api_key'],
 }
 
-/** Format a Date as ISO date string (yyyy-MM-dd) for API date params */
 function formatDate(date: Date): string {
   const yyyy = date.getFullYear()
   const mm = String(date.getMonth() + 1).padStart(2, '0')
@@ -43,35 +27,62 @@ function formatDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function asNumber(value: unknown, fallback = 0): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/,/g, ''))
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return fallback
+}
+
+function compactJoin(parts: Array<string | number | undefined | null>, separator = '-'): string {
+  return parts
+    .map((part) => (part == null ? '' : String(part).trim()))
+    .filter(Boolean)
+    .join(separator)
+}
+
+function parseDate(value?: string): Date {
+  if (!value) return new Date()
+  const normalized = value.length === 8
+    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+    : value.replace(' ', 'T')
+  const parsed = new Date(normalized)
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed
+}
+
+function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
+  const directions = response.shppDirections
+  if (Array.isArray(directions)) return directions
+  const nested = directions?.shppDirection
+  if (Array.isArray(nested)) return nested
+  return nested ? [nested] : []
+}
+
+function isSuccessResponse(response: SsgmallApiResponse): boolean {
+  const code = String(response.resultCode ?? '').trim()
+  return code === '' || code === '00' || code === '0000' || code === '200' || code.toUpperCase() === 'SUCCESS'
+}
+
 export class SsgmallAdapter implements MarketplaceAdapter {
   readonly config = SSGMALL_CONFIG
 
   private readonly client: ReturnType<typeof createSsgmallClient>
-  private readonly vendorId: string
 
-  constructor(credentials: { api_key: string; vendor_id: string }) {
+  constructor(credentials: { api_key: string }) {
     this.client = createSsgmallClient(credentials.api_key)
-    this.vendorId = credentials.vendor_id
   }
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
+    void _credentials
     try {
-      // Keep credential checks away from order endpoints. Some marketplaces
-      // mutate order state during "new order" reads.
-      const response = await this.client.get('products', {
-        searchParams: {
-          vendorId: this.vendorId,
-          pageSize: '1',
-        },
-      }).json<SsgmallApiResponse<SsgmallProduct[]>>()
-
-      if (response.success) {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Unknown error' }
+      const today = new Date()
+      const response = await this.listShippingDirections(today, today, '02')
+      if (isSuccessResponse(response)) return { success: true }
+      return { success: false, error: response.resultDesc || response.resultMessage || 'SSG API 인증 확인 실패' }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
-      return { success: false, error: message }
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   }
 
@@ -81,205 +92,120 @@ export class SsgmallAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
-      const response = await this.client.get('orders', {
-        searchParams: {
-          vendorId: this.vendorId,
-          dateFrom: formatDate(since),
-          dateTo: formatDate(until),
-          pageSize: '50',
-        },
-      }).json<SsgmallApiResponse<SsgmallOrder[]>>()
-
-      if (!response.success) {
-        throw new MarketplaceApiError('ssgmall', 400, response.message || 'Failed to fetch orders')
+      const response = await this.listShippingDirections(since, until, '02')
+      if (!isSuccessResponse(response)) {
+        throw new MarketplaceApiError(
+          'ssgmall',
+          400,
+          response.resultDesc || response.resultMessage || 'Failed to fetch SSG shipping directions',
+        )
       }
 
-      const orders = response.data || []
-      return orders.map((order) => this.normalizeOrder(order))
+      return getDirections(response).map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('ssgmall', 'API key authentication failed')
+        throw new MarketplaceAuthError('ssgmall', 'SSG API key authentication failed')
       }
       throw new MarketplaceApiError('ssgmall', 500, error instanceof Error ? error.message : 'Unknown error')
     }
   }
 
-  async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
-    const now = new Date()
-
-    try {
-      const response = await this.client.get('claims', {
-        searchParams: {
-          vendorId: this.vendorId,
-          dateFrom: formatDate(since),
-          dateTo: formatDate(now),
-          pageSize: '50',
-        },
-      }).json<SsgmallApiResponse<SsgmallClaim[]>>()
-
-      if (!response.success) {
-        throw new MarketplaceApiError('ssgmall', 400, response.message || 'Failed to fetch claims')
-      }
-
-      const claims = response.data || []
-      return claims.map((claim) => this.normalizeClaim(claim))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('ssgmall', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('ssgmall', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
+    void _since
+    return []
   }
 
-  async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
-    try {
-      const carrierCode = mapCarrierCode('ssgmall', invoice.carrierId)
-
-      const response = await this.client.post(`orders/${orderId}/invoice`, {
-        json: {
-          vendorId: this.vendorId,
-          carrierCode,
-          trackingNumber: invoice.trackingNumber,
-        },
-      }).json<SsgmallApiResponse<null>>()
-
-      if (response.success) {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Invoice upload failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    }
+  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+    void _orderId
+    void _invoice
+    return { success: false, error: 'SSG 송장등록 API 문서 확인 후 연결됩니다.' }
   }
 
-  async confirmOrder(
-    _marketplaceOrderId: string,
-  ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+  async confirmOrder(_marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
+    void _marketplaceOrderId
+    return { success: false, error: 'SSG 주문확인 API 문서 확인 후 연결됩니다.' }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    try {
-      const response = await this.client.get('products', {
-        searchParams: {
-          vendorId: this.vendorId,
-          pageSize: '50',
-        },
-      }).json<SsgmallApiResponse<SsgmallProduct[]>>()
-
-      if (!response.success) {
-        throw new MarketplaceApiError('ssgmall', 400, response.message || 'Failed to fetch products')
-      }
-
-      const products = response.data || []
-      return products.map((product) => this.normalizeProduct(product))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('ssgmall', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('ssgmall', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+    return []
   }
 
-  async registerProduct(product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
-    try {
-      const response = await this.client.post('products', {
+  async registerProduct(_product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
+    void _product
+    return { success: false, error: 'SSG 상품등록 API 문서 확인 후 연결됩니다.' }
+  }
+
+  async updateProduct(_marketplaceProductId: string, _product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
+    void _marketplaceProductId
+    void _product
+    return { success: false, error: 'SSG 상품수정 API 문서 확인 후 연결됩니다.' }
+  }
+
+  private async listShippingDirections(
+    since: Date,
+    until: Date,
+    perdType: SsgmallDirectionRequest['requestShppDirection']['perdType'],
+  ): Promise<SsgmallApiResponse> {
+    return this.client
+      .post('api/pd/1/listShppDirection.ssg', {
         json: {
-          vendorId: this.vendorId,
-          name: product.name,
-          price: product.price,
-          sku: product.sku,
-          description: product.description,
-        },
-      }).json<SsgmallApiResponse<{ productId: string }>>()
-
-      if (response.success) {
-        return {
-          success: true,
-          marketplaceProductId: response.data.productId,
-        }
-      }
-      return { success: false, error: response.message || 'Product registration failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    }
+          requestShppDirection: {
+            perdType,
+            perdStrDts: formatDate(since),
+            perdEndDts: formatDate(until),
+            shppStatCd: '10',
+          },
+        } satisfies SsgmallDirectionRequest,
+      })
+      .json<SsgmallApiResponse>()
   }
 
-  async updateProduct(marketplaceProductId: string, product: Partial<NormalizedProduct>): Promise<{ success: boolean; error?: string }> {
-    try {
-      const response = await this.client.put(`products/${marketplaceProductId}`, {
-        json: {
-          vendorId: this.vendorId,
-          ...(product.name != null && { name: product.name }),
-          ...(product.price != null && { price: product.price }),
-          ...(product.description != null && { description: product.description }),
-        },
-      }).json<SsgmallApiResponse<null>>()
+  private normalizeOrder(order: SsgmallDirectionOrder): NormalizedOrder {
+    const orderId = String(order.ordNo ?? order.orordNo ?? order.shppNo ?? '')
+    const itemId = compactJoin([orderId, order.ordItemSeq, order.shppNo, order.shppSeq])
+    const quantity = asNumber(order.ordQty ?? order.dircItemQty, 1)
+    const unitPrice = asNumber(order.rlordAmt ?? order.sellprc ?? order.splprc, 0)
+    const address1 = order.shpplocBascAddr || order.ordpeRoadAddr || order.shpplocAddr || ''
+    const address2 = order.shpplocDtlAddr || undefined
 
-      if (response.success) {
-        return { success: true }
-      }
-      return { success: false, error: response.message || 'Product update failed' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-    }
-  }
-
-  private normalizeOrder(order: SsgmallOrder): NormalizedOrder {
     return {
-      marketplaceOrderId: order.orderId,
+      marketplaceOrderId: orderId || itemId,
       marketplaceId: 'ssgmall',
-      marketplaceStatus: order.orderStatus,
-      status: mapSsgmallStatus(order.orderStatus),
-      buyerName: order.buyerName,
-      buyerPhone: order.buyerPhone || undefined,
-      recipientName: order.receiverName,
-      recipientPhone: order.receiverPhone || undefined,
+      marketplaceStatus: compactJoin([order.shppProgStatDtlCd, order.shppStatCd, order.shppStatNm], ':'),
+      status: mapSsgmallStatus(order.shppProgStatDtlCd, order.shppStatCd),
+      buyerName: order.ordpeNm || order.rcptpeNm || '',
+      buyerPhone2: order.ordpeHpno || undefined,
+      recipientName: order.rcptpeNm || order.ordpeNm || '',
+      recipientPhone: order.rcptpeTelno || undefined,
+      recipientPhone2: order.rcptpeHpno || undefined,
       shippingAddress: {
-        zipCode: order.receiverZipcode,
-        address1: order.receiverAddress,
-        address2: order.receiverAddressDetail || undefined,
+        zipCode: order.shpplocZipcd || order.shpplocOldZipcd || '',
+        address1,
+        address2,
       },
       items: [
         {
-          marketplaceItemId: order.orderId,
-          productName: order.productName,
-          optionText: order.options || undefined,
-          quantity: order.quantity,
-          unitPrice: order.paymentAmount / (order.quantity || 1),
-          sku: order.sellerItemCode,
+          marketplaceItemId: itemId || orderId,
+          productName: order.itemNm || '',
+          optionText: order.uitemNm || order.mdlNm || undefined,
+          quantity,
+          unitPrice,
+          sku: order.uSplVenItemId || order.splVenItemId || order.uitemId || order.itemId || undefined,
         },
       ],
-      orderedAt: new Date(order.orderDate),
-      totalAmount: order.paymentAmount,
-      rawData: order as unknown as Record<string, unknown>,
-    }
-  }
-
-  private normalizeClaim(claim: SsgmallClaim): NormalizedClaim {
-    return {
-      marketplaceClaimId: claim.claimId,
-      marketplaceId: 'ssgmall',
-      marketplaceOrderId: claim.orderId,
-      claimType: mapSsgmallClaimType(claim.claimType),
-      claimStatus: mapSsgmallClaimStatus(claim.claimStatus),
-      reason: claim.reason || undefined,
-      requestedAt: new Date(claim.createdAt),
-      rawData: claim as unknown as Record<string, unknown>,
-    }
-  }
-
-  private normalizeProduct(product: SsgmallProduct): NormalizedProduct {
-    return {
-      productId: product.productId,
-      marketplaceId: 'ssgmall',
-      name: product.name,
-      price: product.price,
-      sku: product.productId,
-      status: product.status,
+      orderedAt: parseDate(order.ordCmplDts || order.ordRcpDts),
+      totalAmount: unitPrice * quantity,
+      shippingType: order.shppcstCodYn === 'Y' ? 'cod' : 'prepaid',
+      shippingFee: asNumber(order.shppcst, 0),
+      deliveryMessage: order.ordMemoCntt || undefined,
+      rawData: {
+        ...order,
+        orderIdentity: {
+          orderId: orderId || itemId,
+          itemIds: [itemId || orderId],
+        },
+      },
     }
   }
 }

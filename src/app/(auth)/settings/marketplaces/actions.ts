@@ -15,6 +15,7 @@ import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
 import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
 import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter'
 import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
+import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -182,6 +183,11 @@ export async function testMarketplaceCredentials(
           api_key: credentials.api_key?.trim() ?? '',
           secure_key: credentials.secure_key?.trim() ?? '',
           client_server_ip: credentials.client_server_ip?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'ssgmall':
+        result = await new SsgmallAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
         }).testConnection()
         break
       default:

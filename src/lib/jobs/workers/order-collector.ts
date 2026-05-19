@@ -25,6 +25,7 @@ import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
 import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
 import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter'
 import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
+import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -135,6 +136,10 @@ export function createAdapter(
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
         secure_key: credentials.secure_key ?? credentials.secureKey ?? '',
         client_server_ip: credentials.client_server_ip ?? credentials.clientServerIp ?? '',
+      })
+    case 'ssgmall':
+      return new SsgmallAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)

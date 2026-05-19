@@ -1,49 +1,70 @@
-/**
- * Ssgmall (신세계몰) API response types.
- *
- * Ssgmall uses JSON API responses. Types are best-effort (per D-03).
- */
-
-/** Generic Ssgmall API response wrapper */
-export interface SsgmallApiResponse<T> {
-  success: boolean
-  message?: string
-  data: T
+export interface SsgmallApiResponse {
+  resultCode?: string
+  resultMessage?: string
+  resultDesc?: string
+  shppDirections?: SsgmallDirectionOrder[] | { shppDirection?: SsgmallDirectionOrder[] | SsgmallDirectionOrder }
 }
 
-/** A single order from Ssgmall orders API */
-export interface SsgmallOrder {
-  orderId: string
-  productName: string
-  quantity: number
-  buyerName: string
-  buyerPhone: string
-  receiverName: string
-  receiverPhone: string
-  receiverZipcode: string
-  receiverAddress: string
-  receiverAddressDetail?: string
-  orderDate: string
-  orderStatus: string
-  paymentAmount: number
-  options?: string
-  sellerItemCode?: string
+export interface SsgmallDirectionRequest {
+  requestShppDirection: {
+    perdType: '01' | '02' | '03'
+    perdStrDts: string
+    perdEndDts: string
+    shppStatCd?: '10' | '30'
+  }
 }
 
-/** A single claim from Ssgmall claims API */
-export interface SsgmallClaim {
-  claimId: string
-  orderId: string
-  claimType: string
-  claimStatus: string
-  reason: string
-  createdAt: string
-}
-
-/** A single product from Ssgmall products API */
-export interface SsgmallProduct {
-  productId: string
-  name: string
-  price: number
-  status: string
+export interface SsgmallDirectionOrder {
+  ordNo?: string
+  ordItemSeq?: number | string
+  orordNo?: string
+  orordItemSeq?: number | string
+  shppNo?: string
+  shppSeq?: number | string
+  ordStatCd?: string
+  shppStatCd?: string
+  shppStatNm?: string
+  shppDivDtlCd?: string
+  shppDivDtlNm?: string
+  shppProgStatDtlCd?: string
+  shppRsvtDt?: string
+  ordRcpDts?: string
+  ordCmplDts?: string
+  siteNo?: string
+  shppVenId?: string
+  shppVenNm?: string
+  itemNm?: string
+  itemId?: string
+  uitemId?: string
+  uitemNm?: string
+  splVenItemId?: string
+  uSplVenItemId?: string
+  mdlNm?: string
+  dircItemQty?: number | string
+  cnclItemQty?: number | string
+  ordQty?: number | string
+  splprc?: number | string
+  sellprc?: number | string
+  rlordAmt?: number | string
+  dcAmt?: number | string
+  ordpeNm?: string
+  ordpeHpno?: string
+  rcptpeNm?: string
+  rcptpeHpno?: string
+  rcptpeTelno?: string
+  shpplocZipcd?: string
+  shpplocOldZipcd?: string
+  shpplocAddr?: string
+  ordpeRoadAddr?: string
+  shpplocBascAddr?: string
+  shpplocDtlAddr?: string
+  shppcst?: number | string
+  shppcstCodYn?: 'Y' | 'N'
+  ordMemoCntt?: string
+  memoCntt?: string
+  itemDiv?: string
+  ordItemDivNm?: string
+  mallTypeCd?: string
+  mbrLoginId?: string
+  [key: string]: unknown
 }

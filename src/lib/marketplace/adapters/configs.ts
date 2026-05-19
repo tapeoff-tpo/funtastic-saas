@@ -357,7 +357,7 @@ const ssgmallAdapter = createStubAdapter({
   name: '신세계몰',
   authType: 'api_key',
   rateLimitPerSecond: 30,
-  requiredCredentials: ['api_key', 'vendor_id'],
+  requiredCredentials: ['api_key'],
 })
 
 const ablyAdapter = createStubAdapter({

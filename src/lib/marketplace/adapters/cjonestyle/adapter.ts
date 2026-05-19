@@ -13,17 +13,16 @@ import type {
   NormalizedClaim,
   NormalizedProduct,
   InvoiceData,
+  NormalizedOrderItem,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createCjOnestyleClient } from './client'
-import { mapCjOnestyleStatus, mapCjOnestyleClaimStatus, mapCjOnestyleClaimType } from './status-map'
+import { mapCjOnestyleStatus } from './status-map'
 import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import type {
-  CjOnestyleOrder,
-  CjOnestyleOrderResponse,
-  CjOnestyleClaimResponse,
-  CjOnestyleProduct,
-  CjOnestyleProductResponse,
+  CjOnestyleDeliveryOrder,
+  CjOnestyleDeliveryListResponse,
+  CjOnestyleStandardResponse,
 } from './types'
 
 const CJONESTYLE_CONFIG: MarketplaceConfig = {
@@ -45,12 +44,23 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
   private readonly client: ReturnType<typeof createCjOnestyleClient>
 
   constructor(credentials: { api_key: string; seller_code: string }) {
-    this.client = createCjOnestyleClient(credentials.api_key)
+    this.client = createCjOnestyleClient({
+      apiKey: credentials.api_key,
+      vendorCode: credentials.seller_code,
+    })
   }
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
-      await this.client.get('seller/info').json()
+      const today = formatDate(new Date())
+      await this.client.post('delivery/getDeliveryList', {
+        json: {
+          dateType: '2',
+          startDate: today,
+          endDate: today,
+          deliveryStatus: '2',
+        },
+      }).json<CjOnestyleDeliveryListResponse>()
       return { success: true }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error'
@@ -65,63 +75,53 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
-      const response = await this.client.get('orders', {
-        searchParams: {
-          start_date: formatDate(since),
-          end_date: formatDate(until),
-          limit: 100,
+      const response = await this.client.post('delivery/getDeliveryList', {
+        json: {
+          dateType: '2',
+          startDate: formatDate(since),
+          endDate: formatDate(until),
+          deliveryStatus: '2',
         },
-      }).json<CjOnestyleOrderResponse>()
+      }).json<CjOnestyleDeliveryListResponse>()
 
-      return (response.orders ?? []).map((order) => this.normalizeOrder(order))
+      if (response.error || (response.returnCode && !['OK', '0000'].includes(response.returnCode))) {
+        throw new MarketplaceApiError('cjonestyle', response.returnStatus ?? 500, response.returnMessage ?? 'CJ온스타일 주문 조회 실패')
+      }
+
+      return this.groupDeliveryRows(response.data ?? [])
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('cjonestyle', 'API key authentication failed')
+        throw new MarketplaceAuthError('cjonestyle', 'CJ온스타일 인증키 또는 협력업체코드 인증 실패')
       }
       throw new MarketplaceApiError('cjonestyle', 500, error instanceof Error ? error.message : 'Unknown error')
     }
   }
 
-  async getClaimsOrders(since: Date): Promise<NormalizedClaim[]> {
-    try {
-      const response = await this.client.get('claims', {
-        searchParams: {
-          start_date: formatDate(since),
-          end_date: formatDate(new Date()),
-          limit: 100,
-        },
-      }).json<CjOnestyleClaimResponse>()
-
-      return (response.claims ?? []).map((claim) => ({
-        marketplaceClaimId: claim.claim_id,
-        marketplaceId: 'cjonestyle' as const,
-        marketplaceOrderId: claim.order_id,
-        claimType: mapCjOnestyleClaimType(claim.claim_type),
-        claimStatus: mapCjOnestyleClaimStatus(claim.claim_status),
-        reason: claim.claim_reason || undefined,
-        requestedAt: new Date(claim.claim_date),
-        rawData: claim as unknown as Record<string, unknown>,
-      }))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('cjonestyle', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('cjonestyle', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+  async getClaimsOrders(_since: Date): Promise<NormalizedClaim[]> {
+    return []
   }
 
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     try {
+      const rawData = invoice.rawData as Record<string, unknown> | undefined
       const carrierCode = mapCarrierCode('cjonestyle', invoice.carrierId)
-
-      await this.client.post(`orders/${orderId}/invoice`, {
+      const response = await this.client.post('delivery/setTakeOutReg', {
         json: {
-          tracking_number: invoice.trackingNumber,
-          carrier_code: carrierCode,
+          orderNo: orderId,
+          orderItemSequence: String(rawData?.orderItemSequence ?? ''),
+          orderDetailSequence: String(rawData?.orderDetailSequence ?? ''),
+          orderProcessingSequence: String(rawData?.orderProcessingSequence ?? ''),
+          courierCompany: carrierCode,
+          waybillNo: invoice.trackingNumber,
+          waybillIdentifierNo: String(rawData?.waybillIdentifierNo ?? ''),
+          deliveryLocation1: String(rawData?.deliveryLocation1 ?? ''),
         },
-      }).json()
+      }).json<CjOnestyleStandardResponse>()
+
+      if (response.error || (response.returnCode && !['OK', '0000'].includes(response.returnCode))) {
+        return { success: false, error: response.returnMessage ?? 'CJ온스타일 출고 등록 실패' }
+      }
 
       return { success: true }
     } catch (error) {
@@ -136,19 +136,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
-    try {
-      const response = await this.client.get('products', {
-        searchParams: { limit: 100 },
-      }).json<CjOnestyleProductResponse>()
-
-      return (response.products ?? []).map((product) => this.normalizeProduct(product))
-    } catch (error) {
-      if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('cjonestyle', 'API key authentication failed')
-      }
-      throw new MarketplaceApiError('cjonestyle', 500, error instanceof Error ? error.message : 'Unknown error')
-    }
+    return []
   }
 
   async registerProduct(product: NormalizedProduct): Promise<{ success: boolean; marketplaceProductId?: string; error?: string }> {
@@ -186,48 +174,57 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
     }
   }
 
-  private normalizeOrder(order: CjOnestyleOrder): NormalizedOrder {
-    const items = (order.items ?? []).map((item) => ({
-      marketplaceItemId: item.item_id,
-      productName: item.product_name,
-      optionText: item.option_name || undefined,
-      quantity: item.quantity,
-      unitPrice: item.price,
-      sku: item.sku || undefined,
-    }))
-
-    return {
-      marketplaceOrderId: order.order_id,
-      marketplaceId: 'cjonestyle',
-      marketplaceStatus: order.order_status,
-      status: mapCjOnestyleStatus(order.order_status),
-      buyerName: order.buyer_name,
-      buyerPhone: order.buyer_phone || undefined,
-      recipientName: order.receiver_name,
-      recipientPhone: order.receiver_phone || undefined,
-      shippingAddress: {
-        zipCode: order.receiver_zipcode,
-        address1: order.receiver_address,
-        address2: order.receiver_address_detail || undefined,
-      },
-      items,
-      orderedAt: new Date(order.order_date),
-      totalAmount: order.total_amount,
-      rawData: order as unknown as Record<string, unknown>,
+  private groupDeliveryRows(rows: CjOnestyleDeliveryOrder[]): NormalizedOrder[] {
+    const groups = new Map<string, CjOnestyleDeliveryOrder[]>()
+    for (const row of rows) {
+      const key = String(row.orderNo)
+      groups.set(key, [...(groups.get(key) ?? []), row])
     }
+
+    return [...groups.values()].map((group) => this.normalizeOrder(group))
   }
 
-  private normalizeProduct(product: CjOnestyleProduct): NormalizedProduct {
+  private normalizeOrder(rows: CjOnestyleDeliveryOrder[]): NormalizedOrder {
+    const first = rows[0]
+    const items: NormalizedOrderItem[] = rows.map((row) => {
+      const quantity = Number(row.count ?? 1) || 1
+      const unitPrice = Number(row.paymentPrice ?? row.salesPrice ?? row.supplyPrice ?? 0) || 0
+      const itemId = [
+        row.orderItemSequence,
+        row.orderDetailSequence,
+        row.orderProcessingSequence,
+      ].filter(Boolean).join('-') || String(row.itemCode ?? row.orderNo)
+
+      return {
+        marketplaceItemId: itemId,
+        productName: String(row.itemName ?? row.webItemName ?? row.waybillName ?? ''),
+        optionText: row.optionName || undefined,
+        quantity,
+        unitPrice,
+        sku: row.vendorItemCode || String(row.optionCode ?? row.itemCode ?? '') || undefined,
+      }
+    })
+    const totalAmount = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+
     return {
-      productId: product.product_id,
+      marketplaceOrderId: String(first.orderNo),
       marketplaceId: 'cjonestyle',
-      name: product.product_name,
-      price: product.price,
-      sku: product.product_code,
-      images: product.image_url
-        ? [{ url: product.image_url, sortOrder: 0 }]
-        : [],
-      status: product.status,
+      marketplaceStatus: String(first.deliveryStatus ?? ''),
+      status: mapCjOnestyleStatus(String(first.deliveryStatus ?? '')),
+      buyerName: String(first.ordererName ?? ''),
+      buyerPhone: first.ordererTelephoneNo || undefined,
+      recipientName: String(first.recipientName ?? first.recipient ?? ''),
+      recipientPhone: first.recipientMobilePhoneNo || first.recipientTelephoneNo || undefined,
+      shippingAddress: {
+        zipCode: String(first.postalCode ?? ''),
+        address1: String(first.address ?? ''),
+      },
+      items,
+      orderedAt: new Date(String(first.paymentDate ?? first.deliveryInstructionDate ?? new Date().toISOString())),
+      totalAmount,
+      shippingFee: Number(first.customerResponsibilityCost ?? 0) || null,
+      deliveryMessage: first.deliveryNote || null,
+      rawData: first as unknown as Record<string, unknown>,
     }
   }
 }

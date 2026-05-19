@@ -1,67 +1,56 @@
 /**
- * CJ온스타일 API response types.
- *
- * CJ온스타일 uses a JSON REST API with API key authentication.
- * These types represent the parsed response structures.
+ * CJ OnStyle standard API response types.
  */
 
-/** A single order from CJ온스타일 orders API */
-export interface CjOnestyleOrder {
-  order_id: string
-  order_date: string
-  order_status: string
-  buyer_name: string
-  buyer_phone: string
-  receiver_name: string
-  receiver_phone: string
-  receiver_zipcode: string
-  receiver_address: string
-  receiver_address_detail: string
-  items: CjOnestyleOrderItem[]
-  total_amount: number
+export interface CjOnestyleDeliveryOrder {
+  deliveryStatus?: string | null
+  deliveryMethodName?: string | null
+  deliveryInstructionDate?: string | null
+  deliveryInstructionCheck?: string | null
+  orderNo: string
+  orderItemSequence?: string | null
+  orderDetailSequence?: string | null
+  orderProcessingSequence?: string | null
+  courierCompany?: string | null
+  waybillNo?: string | null
+  itemName?: string | null
+  webItemName?: string | null
+  waybillName?: string | null
+  optionName?: string | null
+  count?: string | number | null
+  recipient?: string | null
+  expectedDeliveryDate?: string | null
+  paymentDate?: string | null
+  ordererTelephoneNo?: string | null
+  recipientTelephoneNo?: string | null
+  recipientMobilePhoneNo?: string | null
+  postalCode?: string | null
+  address?: string | null
+  recipientName?: string | null
+  ordererName?: string | null
+  waybillIdentifierNo?: string | null
+  itemCode?: string | number | null
+  optionCode?: string | number | null
+  supplyPrice?: string | number | null
+  salesPrice?: string | number | null
+  paymentPrice?: string | number | null
+  deliveryNote?: string | null
+  vendorItemCode?: string | null
+  customerResponsibilityCost?: string | number | null
 }
 
-/** An order item within a CJ온스타일 order */
-export interface CjOnestyleOrderItem {
-  item_id: string
-  product_name: string
-  option_name: string
-  quantity: number
-  price: number
-  sku?: string
+export interface CjOnestyleDeliveryListResponse {
+  returnStatus?: number
+  returnCode?: string
+  returnMessage?: string
+  error?: boolean
+  data?: CjOnestyleDeliveryOrder[]
 }
 
-/** Wrapper for CJ온스타일 order list response */
-export interface CjOnestyleOrderResponse {
-  orders: CjOnestyleOrder[]
-}
-
-/** A claim from CJ온스타일 API */
-export interface CjOnestyleClaim {
-  claim_id: string
-  order_id: string
-  claim_type: string
-  claim_status: string
-  claim_reason: string
-  claim_date: string
-}
-
-/** Wrapper for CJ온스타일 claims response */
-export interface CjOnestyleClaimResponse {
-  claims: CjOnestyleClaim[]
-}
-
-/** A single product from CJ온스타일 products API */
-export interface CjOnestyleProduct {
-  product_id: string
-  product_name: string
-  price: number
-  product_code: string
-  image_url: string
-  status: string
-}
-
-/** Wrapper for CJ온스타일 product list response */
-export interface CjOnestyleProductResponse {
-  products: CjOnestyleProduct[]
+export interface CjOnestyleStandardResponse {
+  returnStatus?: number
+  returnCode?: string
+  returnMessage?: string
+  error?: boolean
+  data?: unknown
 }

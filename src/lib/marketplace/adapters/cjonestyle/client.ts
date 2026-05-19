@@ -7,19 +7,20 @@
 
 import ky from 'ky'
 
-const CJONESTYLE_API_BASE = 'https://api.cjonestyle.com/v1'
+const CJONESTYLE_API_BASE = 'https://ingress-api.cjoshopping.com'
 
 /**
  * Create a ky HTTP client pre-configured for CJ온스타일 API calls.
  * Uses API key authentication via X-Api-Key header.
  */
-export function createCjOnestyleClient(apiKey: string) {
+export function createCjOnestyleClient(credentials: { apiKey: string; vendorCode: string }) {
   return ky.create({
     prefixUrl: CJONESTYLE_API_BASE,
     hooks: {
       beforeRequest: [
         (request: Request) => {
-          request.headers.set('X-Api-Key', apiKey)
+          request.headers.set('authenticationKey', credentials.apiKey)
+          request.headers.set('vendorCode', credentials.vendorCode)
           request.headers.set('Content-Type', 'application/json')
         },
       ],

@@ -10,10 +10,13 @@ import type { OrderStatus } from '@/lib/orders/types'
 /** CJ온스타일 order status -> internal OrderStatus mapping */
 export const CJONESTYLE_STATUS_MAP: Record<string, OrderStatus> = {
   PAID: 'new',          // 결제완료
+  배송지시: 'new',
   PREPARING: 'confirmed', // 상품준비중
   READY: 'preparing',   // 출고대기
   SHIPPED: 'shipped',   // 배송중
+  출고: 'shipped',
   DELIVERED: 'delivered', // 배송완료
+  배송완료: 'delivered',
 }
 
 /**

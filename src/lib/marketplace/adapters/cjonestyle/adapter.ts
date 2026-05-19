@@ -16,6 +16,7 @@ import type {
   NormalizedOrderItem,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
+import { HTTPError } from 'ky'
 import { createCjOnestyleClient } from './client'
 import { mapCjOnestyleStatus } from './status-map'
 import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
@@ -36,6 +37,26 @@ const CJONESTYLE_CONFIG: MarketplaceConfig = {
 /** Format a Date as ISO date string for CJ온스타일 API */
 function formatDate(date: Date): string {
   return date.toISOString().split('T')[0]
+}
+
+async function extractCjOnestyleError(error: unknown): Promise<string> {
+  if (error instanceof HTTPError) {
+    const body = await error.response.text().catch(() => '')
+    if (!body) return error.message
+
+    try {
+      const parsed = JSON.parse(body) as {
+        returnMessage?: string
+        message?: string
+        error?: string
+      }
+      return parsed.returnMessage ?? parsed.message ?? parsed.error ?? body
+    } catch {
+      return body
+    }
+  }
+
+  return error instanceof Error ? error.message : 'Unknown error'
 }
 
 export class CjOnestyleAdapter implements MarketplaceAdapter {
@@ -63,7 +84,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
       }).json<CjOnestyleDeliveryListResponse>()
       return { success: true }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error'
+      const message = await extractCjOnestyleError(error)
       return { success: false, error: message }
     }
   }
@@ -91,10 +112,11 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
       return this.groupDeliveryRows(response.data ?? [])
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
-      if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
-        throw new MarketplaceAuthError('cjonestyle', 'CJ온스타일 인증키 또는 협력업체코드 인증 실패')
+      const message = await extractCjOnestyleError(error)
+      if (error instanceof HTTPError && (error.response.status === 401 || error.response.status === 403)) {
+        throw new MarketplaceAuthError('cjonestyle', message)
       }
-      throw new MarketplaceApiError('cjonestyle', 500, error instanceof Error ? error.message : 'Unknown error')
+      throw new MarketplaceApiError('cjonestyle', 500, message)
     }
   }
 
@@ -125,7 +147,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
 
       return { success: true }
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+      return { success: false, error: await extractCjOnestyleError(error) }
     }
   }
 

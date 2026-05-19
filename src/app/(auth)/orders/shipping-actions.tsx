@@ -813,7 +813,7 @@ export function ShippingActions({
               className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               title="API 연동 마켓 송장 전송"
             >
-              {uploadingToMarket ? 'API 전송 중...' : `몰에 송장 전송 (${selectedApiOrders.length})`}
+              {uploadingToMarket ? 'API 전송 중...' : `API 송장 전송 (${selectedApiOrders.length})`}
             </button>
             {selectedRpaOrders.length > 0 && (
               <button

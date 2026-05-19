@@ -35,9 +35,10 @@ const SSGMALL_CONFIG: MarketplaceConfig = {
 }
 
 function formatDate(date: Date): string {
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
+  const kst = new Date(date.getTime() + (9 * 60 * 60 * 1000))
+  const yyyy = kst.getUTCFullYear()
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(kst.getUTCDate()).padStart(2, '0')
   return `${yyyy}-${mm}-${dd}`
 }
 
@@ -66,20 +67,37 @@ function parseDate(value?: string): Date {
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed
 }
 
+function asArray<T>(value: T[] | T | undefined): T[] {
+  if (Array.isArray(value)) return value
+  return value ? [value] : []
+}
+
 function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
+  const orders: SsgmallDirectionOrder[] = []
+  orders.push(...asArray(response.shppDirection))
+
   const directions = response.shppDirections
-  if (Array.isArray(directions)) return directions
-  const nested = directions?.shppDirection
-  if (Array.isArray(nested)) return nested
-  return nested ? [nested] : []
+  if (Array.isArray(directions)) {
+    orders.push(...directions)
+  } else {
+    orders.push(...asArray(directions?.shppDirection))
+  }
+
+  return orders
 }
 
 function getWarehouseOuts(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
+  const orders: SsgmallDirectionOrder[] = []
+  orders.push(...asArray(response.warehouseOut))
+
   const warehouseOuts = response.warehouseOuts
-  if (Array.isArray(warehouseOuts)) return warehouseOuts
-  const nested = warehouseOuts?.warehouseOut
-  if (Array.isArray(nested)) return nested
-  return nested ? [nested] : []
+  if (Array.isArray(warehouseOuts)) {
+    orders.push(...warehouseOuts)
+  } else {
+    orders.push(...asArray(warehouseOuts?.warehouseOut))
+  }
+
+  return orders
 }
 
 function isSuccessResponse(response: SsgmallApiResponse): boolean {
@@ -133,11 +151,11 @@ export class SsgmallAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
+      const directionPeriodTypes: SsgmallDirectionRequest['requestShppDirection']['perdType'][] = ['01', '02', '03']
+      const warehousePeriodTypes: SsgmallWarehouseOutRequest['requestWarehouseOut']['perdType'][] = ['01', '02', '03', '04']
       const responses = await Promise.all([
-        this.listShippingDirections(since, until, '02'),
-        this.listShippingDirections(since, until, '03'),
-        this.listWarehouseOuts(since, until, '03'),
-        this.listWarehouseOuts(since, until, '04'),
+        ...directionPeriodTypes.map((perdType) => this.listShippingDirections(since, until, perdType)),
+        ...warehousePeriodTypes.map((perdType) => this.listWarehouseOuts(since, until, perdType)),
       ])
 
       const orders: SsgmallDirectionOrder[] = []

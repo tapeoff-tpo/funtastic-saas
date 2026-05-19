@@ -8,7 +8,9 @@ export interface SsgmallApiResponse {
     resultDesc?: string
   }
   shppDirections?: SsgmallDirectionOrder[] | { shppDirection?: SsgmallDirectionOrder[] | SsgmallDirectionOrder }
+  shppDirection?: SsgmallDirectionOrder[] | SsgmallDirectionOrder
   warehouseOuts?: SsgmallDirectionOrder[] | { warehouseOut?: SsgmallDirectionOrder[] | SsgmallDirectionOrder }
+  warehouseOut?: SsgmallDirectionOrder[] | SsgmallDirectionOrder
 }
 
 export interface SsgmallDirectionRequest {

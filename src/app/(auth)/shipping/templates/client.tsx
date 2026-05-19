@@ -35,6 +35,8 @@ export function TemplateClient({
   onCancelAction,
 }: TemplateClientProps) {
   const isEditing = !!editing
+  const fieldLabelMap = new Map(availableFields.map((field) => [field.field, field.label]))
+  const getFieldLabel = (field: string) => fieldLabelMap.get(field) ?? field
   const [showForm, setShowForm] = useState(isEditing)
   const [name, setName] = useState(editing?.name ?? '')
   const [columns, setColumns] = useState<CarrierTemplateColumn[]>(editing?.columns ?? [])
@@ -158,7 +160,7 @@ export function TemplateClient({
             >
               {availableFields.map((f) => (
                 <option key={f.field} value={f.field}>
-                  {f.label} ({f.field})
+                  {f.label}
                 </option>
               ))}
             </select>
@@ -203,7 +205,7 @@ export function TemplateClient({
                     >
                       {availableFields.map((f) => (
                         <option key={f.field} value={f.field}>
-                          {f.label} ({f.field})
+                          {f.label}
                         </option>
                       ))}
                       {/* 현재 col.field 가 availableFields 에 없을 수 있으므로 fallback */}
@@ -216,12 +218,12 @@ export function TemplateClient({
                         key={extra}
                         className="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 font-mono text-[11px] text-emerald-700"
                       >
-                        + {extra}
+                        + {getFieldLabel(extra)}
                         <button
                           type="button"
                           onClick={() => removeExtraField(idx, extra)}
                           className="text-emerald-500 hover:text-emerald-800"
-                          aria-label={`${extra} 합치기 해제`}
+                          aria-label={`${getFieldLabel(extra)} 합치기 해제`}
                         >
                           ×
                         </button>
@@ -246,7 +248,7 @@ export function TemplateClient({
                         )
                         .map((f) => (
                           <option key={f.field} value={f.field}>
-                            {f.label} ({f.field})
+                            {f.label}
                           </option>
                         ))}
                     </select>

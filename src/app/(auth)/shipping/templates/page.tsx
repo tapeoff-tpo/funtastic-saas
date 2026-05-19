@@ -38,6 +38,8 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
   const { edit: editId } = await searchParams
   const templates = await getCarrierTemplates(userId)
   const editing = editId ? await getCarrierTemplateById(editId) : null
+  const fieldLabelMap = new Map(AVAILABLE_ORDER_FIELDS.map((field) => [field.field, field.label]))
+  const getFieldLabel = (field: string) => fieldLabelMap.get(field) ?? field
 
   async function handleDelete(formData: FormData) {
     'use server'
@@ -169,12 +171,12 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                     {template.columns.map((col, idx) => (
                       <tr key={idx} className="border-t">
                         <td className="px-3 py-1.5">{col.header}</td>
-                        <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
-                          {col.field}
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                          {getFieldLabel(col.field)}
                           {col.extraFields && col.extraFields.length > 0 && (
                             <>
                               <span className="ml-1 text-emerald-700">
-                                {col.extraFields.map((f) => ` + ${f}`).join('')}
+                                {col.extraFields.map((f) => ` + ${getFieldLabel(f)}`).join('')}
                               </span>
                               <span className="ml-1 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
                                 구분자: {col.joinSeparator === ' ' || !col.joinSeparator ? '공백' : col.joinSeparator}

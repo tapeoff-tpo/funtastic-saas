@@ -47,6 +47,10 @@ export async function getProducts(
     conditions.push(eq(products.categoryId, filters.categoryId))
   }
 
+  if (filters.manageInventory === true) {
+    conditions.push(eq(products.manageInventory, true))
+  }
+
   if (filters.search) {
     const searchPattern = `%${filters.search}%`
     conditions.push(
@@ -89,6 +93,7 @@ export async function getProducts(
         costPrice: products.costPrice,
         warehouseLocation: products.warehouseLocation,
         defaultCarrierId: products.defaultCarrierId,
+        manageInventory: products.manageInventory,
         categoryId: products.categoryId,
         status: products.status,
         images: products.images,

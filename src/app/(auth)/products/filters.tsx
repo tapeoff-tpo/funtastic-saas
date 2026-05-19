@@ -20,6 +20,7 @@ export function ProductFilters() {
   const [filters, setFilters] = useQueryStates({
     status: parseAsString,
     category: parseAsString,
+    inventory: parseAsString,
     search: parseAsString,
     page: parseAsInteger.withDefault(1),
     pageSize: parseAsInteger.withDefault(25),
@@ -28,7 +29,10 @@ export function ProductFilters() {
   }, { shallow: false })
 
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
-  useEffect(() => { setSearchInput(filters.search ?? '') }, [filters.search])
+  useEffect(() => {
+    const nextSearch = filters.search ?? ''
+    Promise.resolve().then(() => setSearchInput(nextSearch))
+  }, [filters.search])
 
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
@@ -50,6 +54,7 @@ export function ProductFilters() {
     void setFilters({
       status: null,
       category: null,
+      inventory: null,
       search: null,
       page: 1,
       pageSize: filters.pageSize,
@@ -57,7 +62,7 @@ export function ProductFilters() {
     })
   }, [setFilters, filters.pageSize])
 
-  const hasFilters = filters.status || filters.search
+  const hasFilters = filters.status || filters.inventory || filters.search
 
   return (
     <div className="space-y-3">
@@ -108,6 +113,16 @@ export function ProductFilters() {
               상태: {opt.label}
             </option>
           ))}
+        </select>
+
+        <select
+          id="filter-inventory"
+          value={filters.inventory ?? ''}
+          onChange={(e) => updateFilter({ inventory: e.target.value || null })}
+          className="rounded-lg border bg-white px-3 py-1.5 text-sm shadow-sm"
+        >
+          <option value="">재고관리: 전체</option>
+          <option value="managed">재고관리용만</option>
         </select>
 
         {hasFilters && (

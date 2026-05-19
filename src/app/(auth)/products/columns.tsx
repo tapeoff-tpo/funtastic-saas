@@ -15,6 +15,7 @@ export interface ProductRow {
   costPrice: string | null
   warehouseLocation: string | null
   defaultCarrierId: string | null
+  manageInventory: boolean
   status: ProductStatus
   variantCount: number
   updatedAt: Date | string

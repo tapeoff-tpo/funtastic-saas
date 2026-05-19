@@ -106,9 +106,9 @@ export interface ProductFilters {
   search?: string
   status?: ProductStatus
   categoryId?: string
+  manageInventory?: boolean
   sort?: string
   order?: 'asc' | 'desc'
-
 }
 
 /** Product with variant count for list views */

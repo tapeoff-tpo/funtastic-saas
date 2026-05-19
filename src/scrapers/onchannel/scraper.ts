@@ -60,6 +60,26 @@ async function gotoOnchannel(page: Page, url: string): Promise<void> {
   await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => undefined)
 }
 
+async function dismissOnchannelPopups(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const selectors = [
+      '.layer_popup',
+      '[id^="onch-popup"]',
+      '[id*="onch-popup"]',
+      '.feedback-top-center',
+    ]
+
+    for (const selector of selectors) {
+      document.querySelectorAll(selector).forEach((element) => {
+        if (!(element instanceof HTMLElement)) return
+        element.style.pointerEvents = 'none'
+        element.style.display = 'none'
+        element.setAttribute('aria-hidden', 'true')
+      })
+    }
+  }).catch(() => undefined)
+}
+
 async function submitLoginForm(page: Page): Promise<void> {
   const form = page.locator('form.form-signin, form[action*="/login/login_web.php"]').first()
   const submitButton = page.locator('button[type="submit"][name="login"], input[type="submit"][name="login"]').first()
@@ -219,6 +239,7 @@ export class OnchannelScraper implements MarketplaceScraper {
 
     try {
       await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
+      await dismissOnchannelPopups(ctx.page)
       if (!(await this.isLoggedIn(ctx.page))) {
         await ctx.close()
         const loginResult = await this.login(credentials)
@@ -228,11 +249,14 @@ export class OnchannelScraper implements MarketplaceScraper {
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
         await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
+        await dismissOnchannelPopups(ctx.page)
       }
 
+      await dismissOnchannelPopups(ctx.page)
       await ctx.page.getByRole('button', { name: /주문내역\s*다운로드/ }).click({ timeout: 15_000 })
       const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').first()
       await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
+      await dismissOnchannelPopups(ctx.page)
       const downloadRoot: Locator | Page = (await dialog.isVisible().catch(() => false)) ? dialog : ctx.page
 
       const inputSelector =
@@ -254,6 +278,7 @@ export class OnchannelScraper implements MarketplaceScraper {
       const checkbox = downloadRoot.locator('input[type="checkbox"]').first()
       await ensureCheckboxChecked(downloadRoot, checkbox)
 
+      await dismissOnchannelPopups(ctx.page)
       const [download] = await Promise.all([
         ctx.page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
         downloadRoot.getByRole('button', { name: /^다운로드$/ }).click({ timeout: 15_000 }),

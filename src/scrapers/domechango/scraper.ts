@@ -127,17 +127,62 @@ async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise
 }
 
 async function submitLoginForm(page: Page): Promise<void> {
-  const submit = page.locator('button[type="submit"], input[type="submit"], button, input[type="button"]').filter({
+  const submit = page.locator('#btn_login, button[type="submit"], input[type="submit"], button, input[type="button"]').filter({
     hasText: /로그인|login/i,
   }).first()
 
-  await Promise.all([
-    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 20_000 }).catch(() => undefined),
-    submit.click({ timeout: 5000 }).catch(async () => {
-      await page.keyboard.press('Enter')
-    }),
-  ])
+  await page
+    .waitForFunction(() => {
+      const appWindow = window as typeof window & {
+        axios?: unknown
+        $?: unknown
+        common?: unknown
+      }
+      return Boolean(appWindow.axios && appWindow.$ && appWindow.common)
+    }, undefined, { timeout: 10_000 })
+    .catch(() => undefined)
+
+  await submit.click({ timeout: 5000 }).catch(async () => {
+    await page.keyboard.press('Enter')
+  })
+  await page.waitForURL((url) => !/\/login(?:$|\?)/.test(url.pathname), { timeout: 20_000 }).catch(() => undefined)
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+}
+
+async function navigateToOrderList(page: Page): Promise<void> {
+  await gotoDomechango(page, WMS_BASE_URL)
+  if (await hasOrderList(page)) return
+
+  const orderMenu = page.getByText(/주문\s*리스트/).first()
+  if (await orderMenu.isVisible().catch(() => false)) {
+    await Promise.all([
+      page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined),
+      orderMenu.click({ timeout: 5000 }),
+    ])
+    await page.waitForTimeout(500)
+    if (await hasOrderList(page)) return
+  }
+
+  const clicked = await page.evaluate(() => {
+    const candidates = Array.from(document.querySelectorAll('a, button, li, div, span'))
+      .filter((element) => /주문\s*리스트/.test(element.textContent ?? ''))
+      .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))
+    const directLink = Array.from(document.querySelectorAll('a'))
+      .find((anchor) => /\/wms\/order(?:$|\?)/.test((anchor as HTMLAnchorElement).href))
+
+    const target = directLink ?? candidates[0]
+    if (!(target instanceof HTMLElement)) return false
+    target.click()
+    return true
+  }).catch(() => false)
+
+  if (clicked) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+    await page.waitForTimeout(500)
+    if (await hasOrderList(page)) return
+  }
+
+  await gotoDomechango(page, ORDER_PAGE_URL)
 }
 
 async function selectNewOrderStatus(page: Page): Promise<void> {
@@ -234,6 +279,13 @@ async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+async function hasOrderList(page: Page): Promise<boolean> {
+  if (/login|signin/i.test(page.url())) return false
+  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  if (/Error\s*\(\d+\)\s*->/i.test(bodyText)) return false
+  return /주문\s*리스트|선택주문|택배송장\s*업로드/.test(bodyText)
+}
+
 export class DomechangoScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'domechango'
   readonly displayName = '도매창고'
@@ -260,12 +312,12 @@ export class DomechangoScraper implements MarketplaceScraper {
       await passwordInput.fill(credentials.password)
       await submitLoginForm(page)
 
-      await gotoDomechango(page)
+      await navigateToOrderList(page)
       const ok = await this.isLoggedIn(page)
       if (!ok) {
         return {
           success: false,
-          error: `도매창고 로그인 후 주문 리스트에 접근하지 못했습니다. (${await summarizePage(page)})`,
+          error: `도매창고 로그인에 실패했거나 로그인 후 WMS 홈으로 이동하지 못했습니다. (${await summarizePage(page)})`,
         }
       }
 
@@ -287,7 +339,7 @@ export class DomechangoScraper implements MarketplaceScraper {
   async testSession(credentials: ScraperCredentials): Promise<{ ok: boolean; error?: string }> {
     const { page, close } = await openContext(credentials.storageState)
     try {
-      await gotoDomechango(page)
+      await navigateToOrderList(page)
       if (await this.isLoggedIn(page)) return { ok: true }
 
       const loginResult = await this.login(credentials)
@@ -334,7 +386,7 @@ export class DomechangoScraper implements MarketplaceScraper {
     let ctx = await openContext(sessionState)
 
     try {
-      await gotoDomechango(ctx.page)
+      await navigateToOrderList(ctx.page)
       if (!(await this.isLoggedIn(ctx.page))) {
         await ctx.close()
         const loginResult = await this.login(credentials)
@@ -343,7 +395,7 @@ export class DomechangoScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
-        await gotoDomechango(ctx.page)
+        await navigateToOrderList(ctx.page)
       }
 
       await setSearchDates(ctx.page, since, until)
@@ -446,10 +498,6 @@ export class DomechangoScraper implements MarketplaceScraper {
   }
 
   private async isLoggedIn(page: Page): Promise<boolean> {
-    if (/login|signin/i.test(page.url())) return false
-    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    if (/Error\s*\(\d+\)\s*->/i.test(bodyText)) return false
-    if (/로그인/.test(bodyText) && !/주문\s*리스트|선택주문|택배송장\s*업로드/.test(bodyText)) return false
-    return /주문\s*리스트|선택주문|택배송장\s*업로드/.test(bodyText)
+    return hasOrderList(page)
   }
 }

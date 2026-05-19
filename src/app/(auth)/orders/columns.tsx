@@ -232,6 +232,7 @@ const INVOICE_STATUS_VARIANT: Record<InvoiceUploadStatus, 'default' | 'secondary
 }
 
 type InvoiceUploadStatus = 'pending' | 'uploading' | 'uploaded' | 'failed' | 'confirmed'
+type ScanStatus = 'ok' | 'duplicate' | 'not_found'
 
 /** Row shape for the order table (matches getOrders return — Phase 8) */
 export interface OrderRow {
@@ -268,6 +269,9 @@ export interface OrderRow {
   invoiceStatus?: InvoiceUploadStatus | null
   trackingNumber?: string | null
   carrierName?: string | null
+  scanStatus?: ScanStatus | string | null
+  scannedAt?: Date | string | null
+  scanTrackingNumber?: string | null
   mappingStatus?: 'mapped' | 'partial' | 'unmapped'
   shipmentGroupId?: string | null
   shipmentGroupKey?: string | null
@@ -489,6 +493,36 @@ function claimSummaryLabel(order: OrderRow): string | null {
   return `${CLAIM_TYPE_LABELS[order.claimType]}${CLAIM_STATUS_LABELS[order.claimStatus]}`
 }
 
+const SCAN_STATUS_META: Record<ScanStatus, { label: string; className: string }> = {
+  ok: {
+    label: '스캔 정상',
+    className: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  },
+  duplicate: {
+    label: '스캔 중복',
+    className: 'border-amber-200 bg-amber-50 text-amber-800',
+  },
+  not_found: {
+    label: '스캔 비정상',
+    className: 'border-rose-200 bg-rose-50 text-rose-700',
+  },
+}
+
+function scanStatusMeta(status: string | null | undefined): { label: string; className: string } {
+  if (status === 'ok' || status === 'duplicate' || status === 'not_found') return SCAN_STATUS_META[status]
+  return {
+    label: '미스캔',
+    className: 'border-slate-200 bg-slate-50 text-slate-500',
+  }
+}
+
+function scanStatusTitle(order: OrderRow): string {
+  const parts = [scanStatusMeta(order.scanStatus).label]
+  if (order.scanTrackingNumber) parts.push(`송장 ${order.scanTrackingNumber}`)
+  if (order.scannedAt) parts.push(`스캔 ${format(new Date(order.scannedAt), 'yyyy-MM-dd HH:mm')}`)
+  return parts.join(' · ')
+}
+
 function ClaimActionDropdown({
   claimId,
   claimType,
@@ -571,6 +605,8 @@ export const columns: ColumnDef<OrderRow>[] = [
         : STATUS_PILL_STYLES[order.status]
       const historicalClaimStatuses = (order.historicalClaimStatuses ?? [])
         .filter((status) => status !== primaryLabel)
+      const showScanStatus = order.status === 'preparing' || order.status === 'ready'
+      const scanMeta = scanStatusMeta(order.scanStatus)
       return (
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex min-w-0 items-center gap-1">
@@ -608,6 +644,14 @@ export const columns: ColumnDef<OrderRow>[] = [
               </span>
             )}
           </div>
+          {showScanStatus && (
+            <span
+              className={`inline-flex h-5 w-fit max-w-full items-center truncate rounded border px-1.5 text-[10px] font-medium ${scanMeta.className}`}
+              title={scanStatusTitle(order)}
+            >
+              {scanMeta.label}
+            </span>
+          )}
           <div className="flex items-center gap-1">
             {order.claimId && order.claimType && order.claimStatus ? (
               <ClaimActionDropdown

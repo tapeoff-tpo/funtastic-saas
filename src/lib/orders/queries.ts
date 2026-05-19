@@ -354,6 +354,34 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(eq(orders.isHeld, true))
   }
 
+  if (filters.scan) {
+    const scanExists = exists(
+      db
+        .select({ x: sql`1` })
+        .from(scanLogs)
+        .where(and(eq(scanLogs.orderId, orders.id), isNotNull(scanLogs.orderId))),
+    )
+
+    if (filters.scan === 'scanned') {
+      conditions.push(scanExists)
+    } else if (filters.scan === 'unscanned') {
+      conditions.push(sql`NOT EXISTS (
+        SELECT 1
+        FROM ${scanLogs}
+        WHERE ${scanLogs.orderId} = ${orders.id}
+      )`)
+    } else {
+      conditions.push(
+        exists(
+          db
+            .select({ x: sql`1` })
+            .from(scanLogs)
+            .where(and(eq(scanLogs.orderId, orders.id), eq(scanLogs.status, filters.scan))),
+        ),
+      )
+    }
+  }
+
   // Phase 8 — 취소 탭 통합 필터: status='cancelled' OR claimType='cancel'
   if (filters.cancelTab) {
     conditions.push(
@@ -514,11 +542,11 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const { orderRows, total: orderTotal } = await ordersAndCountPromise
 
-  // Fetch items/claims/shipments/shipmentGroups in parallel.
+  // Fetch items/claims/shipments/shipmentGroups/scan summary in parallel.
   // Phase A 매핑 재설계: productNameMappings LEFT JOIN 제거. 확정상품명은
   // SKU ↔ products.internalSku 직접 매칭(products.name) 으로만 해석.
   const orderIds = orderRows.map((o) => o.id)
-  const [itemRows, claimRows, shipmentRows, groupRows, inquiryRows] = orderIds.length > 0
+  const [itemRows, claimRows, shipmentRows, groupRows, inquiryRows, scanRows] = orderIds.length > 0
     ? await Promise.all([
         db
           .select({
@@ -582,6 +610,16 @@ export async function getOrders(filters: OrderFilters = {}) {
           .innerJoin(shipmentGroups, eq(shipmentGroupOrders.shipmentGroupId, shipmentGroups.id))
           .where(inArray(shipmentGroupOrders.orderId, orderIds)),
         listInquiriesByOrderIds(orderIds),
+        db
+          .select({
+            orderId: scanLogs.orderId,
+            status: scanLogs.status,
+            trackingNumber: scanLogs.trackingNumber,
+            scannedAt: scanLogs.scannedAt,
+          })
+          .from(scanLogs)
+          .where(inArray(scanLogs.orderId, orderIds))
+          .orderBy(desc(scanLogs.scannedAt)),
       ])
     : [
         [] as Array<{
@@ -613,6 +651,12 @@ export async function getOrders(filters: OrderFilters = {}) {
         [] as (typeof shipments.$inferSelect)[],
         [] as { orderId: string; groupId: string; groupKey: string }[],
         [] as Awaited<ReturnType<typeof listInquiriesByOrderIds>>,
+        [] as Array<{
+          orderId: string | null
+          status: string
+          trackingNumber: string
+          scannedAt: Date
+        }>,
       ]
 
   // Phase 8 — base orderItems shape. displayName is enriched below after mapping index is built.
@@ -712,6 +756,14 @@ export async function getOrders(filters: OrderFilters = {}) {
     const existing = shipmentByOrderId.get(shipment.orderId)
     if (!existing || shipment.createdAt > existing.createdAt) {
       shipmentByOrderId.set(shipment.orderId, shipment)
+    }
+  }
+
+  const latestScanByOrderId = new Map<string, typeof scanRows[number]>()
+  for (const scan of scanRows) {
+    if (!scan.orderId) continue
+    if (!latestScanByOrderId.has(scan.orderId)) {
+      latestScanByOrderId.set(scan.orderId, scan)
     }
   }
 
@@ -868,6 +920,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     const orderItemsData = itemsByOrderId.get(order.id) ?? []
     const claim = claimByOrderId.get(order.id) ?? null
     const group = groupByOrderId.get(order.id) ?? null
+    const latestScan = latestScanByOrderId.get(order.id) ?? null
     return {
       ...order,
       claimType: claim?.claimType ?? null,
@@ -879,6 +932,9 @@ export async function getOrders(filters: OrderFilters = {}) {
       carrierName: shipment?.carrierName ?? null,
       shipmentGroupId: group?.groupId ?? null,
       shipmentGroupKey: group?.groupKey ?? null,
+      scanStatus: latestScan?.status ?? null,
+      scannedAt: latestScan?.scannedAt ?? null,
+      scanTrackingNumber: latestScan?.trackingNumber ?? null,
       // Phase 8 — inquiry indicator source for orders UI (SC-03)
       hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,

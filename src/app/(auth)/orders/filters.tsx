@@ -29,6 +29,15 @@ const MAPPING_OPTIONS = [
   { value: 'unmapped', label: '매핑안됨' },
 ]
 
+const SCAN_OPTIONS = [
+  { value: '', label: '스캔 전체' },
+  { value: 'scanned', label: '스캔함' },
+  { value: 'unscanned', label: '미스캔' },
+  { value: 'ok', label: '정상' },
+  { value: 'duplicate', label: '중복' },
+  { value: 'not_found', label: '비정상' },
+]
+
 const SEARCH_FIELD_OPTIONS: Array<{ value: OrderSearchField; label: string }> = [
   { value: 'all', label: '전체검색' },
   { value: 'buyerName', label: '주문자명' },
@@ -199,6 +208,7 @@ export function OrderFilters({
   const [filters, setFilters] = useQueryStates({
     status: parseAsString,
     mapping: parseAsString,
+    scan: parseAsString,
     marketplace: parseAsString,
     search: parseAsString,
     searchField: parseAsString,
@@ -213,6 +223,7 @@ export function OrderFilters({
   // Local state for search input — only pushed to URL on explicit submit
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
   const isNewTab = filters.status === 'new'
+  const showScanFilter = filters.status === 'preparing' || filters.status === 'ready'
   const formatDateInput = useCallback((date: Date) => {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -240,6 +251,7 @@ export function OrderFilters({
       void setFilters({
         status: null,
         mapping: null,
+        scan: null,
         marketplace: null,
         search: null,
         searchField: null,
@@ -332,6 +344,7 @@ export function OrderFilters({
             updateFilter({
               status: nextStatus,
               mapping: nextStatus === 'new' ? filters.mapping : null,
+              scan: nextStatus === 'preparing' || nextStatus === 'ready' ? filters.scan : null,
             })
           }}
           className="rounded-md border px-3 py-1.5 text-sm"
@@ -356,6 +369,26 @@ export function OrderFilters({
             className="rounded-md border px-3 py-1.5 text-sm"
           >
             {MAPPING_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {showScanFilter && (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="filter-scan" className="text-xs font-medium text-muted-foreground">
+            스캔 여부
+          </label>
+          <select
+            id="filter-scan"
+            value={filters.scan ?? ''}
+            onChange={(e) => updateFilter({ scan: e.target.value || null })}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            {SCAN_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

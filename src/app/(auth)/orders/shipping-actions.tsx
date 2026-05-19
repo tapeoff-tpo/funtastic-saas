@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 import { ChevronDown, Search, Settings, X } from 'lucide-react'
 import { InvoiceUploadDialog } from './invoice-upload-dialog'
@@ -99,6 +99,7 @@ export function ShippingActions({
   showMappingAction = false,
 }: ShippingActionsProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [invoiceDialogOpen, setInvoiceDialogOpen] = useState(false)
   const [excelImportOpen, setExcelImportOpen] = useState(false)
   const [logisticsMsgOpen, setLogisticsMsgOpen] = useState(false)
@@ -462,7 +463,9 @@ export function ShippingActions({
   const showMapping = showMappingAction || stage === 'mapping'
   const hideFulfillmentActions = showMappingAction
   const showInvoice = !stage || stage === 'invoice' || stage === 'confirm'
-  const showShipping = !hideFulfillmentActions && (!stage || stage === 'shipping' || stage === 'invoice')
+  const currentStatus = searchParams.get('status')
+  const showMarketplaceInvoiceUpload = currentStatus === 'preparing' || currentStatus === 'ready'
+  const showShipping = !hideFulfillmentActions && showMarketplaceInvoiceUpload
   const showPrint = !hideFulfillmentActions && (!stage || stage === 'shipping' || stage === 'done')
 
   return (

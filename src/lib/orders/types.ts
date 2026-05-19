@@ -72,6 +72,8 @@ export type OrderSearchField =
 
 export type OrderDateField = 'orderedAt' | 'collectedAt'
 
+export type ScanFilter = 'scanned' | 'unscanned' | 'ok' | 'duplicate' | 'not_found'
+
 /** 주문 처리 단계 (워크플로우) */
 export type OrderStage =
   | 'prep'        // 출고 준비 (매핑 필요 ∪ 확정 대기) — 매핑 먼저, 그 다음 몰 통보
@@ -97,6 +99,7 @@ export interface OrderFilters {
    */
   confirmedProductSearchSkus?: string[]
   dateField?: OrderDateField
+  scan?: ScanFilter
   dateFrom?: string
   dateTo?: string
   sort?: string

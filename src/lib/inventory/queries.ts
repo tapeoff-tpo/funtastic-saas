@@ -77,11 +77,11 @@ export async function getInventoryList(
       case 'reservedStock': return sql`COALESCE(${inventory.reservedStock}, 0)`
       case 'availableStock': return sql`COALESCE(${inventory.availableStock}, 0)`
       case 'updatedAt': return products.updatedAt
-      default: return products.createdAt
+      default: return products.internalSku
     }
   })()
 
-  const sortDirection = filters.order === 'asc' ? asc : desc
+  const sortDirection = filters.order === 'desc' ? desc : asc
 
   // ── Step 1: paginate products (no history join — fast) ──────────────────
   const [pageRows, [{ total }]] = await Promise.all([

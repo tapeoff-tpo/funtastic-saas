@@ -8,6 +8,7 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import '@/lib/marketplace/adapters/configs'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
+import { CjOnestyleAdapter } from '@/lib/marketplace/adapters/cjonestyle/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
@@ -136,6 +137,12 @@ export async function testMarketplaceCredentials(
         result = await new TossShoppingAdapter({
           access_key: credentials.access_key?.trim() ?? '',
           secret_key: credentials.secret_key?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'cjonestyle':
+        result = await new CjOnestyleAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
+          seller_code: credentials.seller_code?.trim() ?? '',
         }).testConnection()
         break
       case 'ownerclan':

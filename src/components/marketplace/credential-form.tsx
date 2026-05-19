@@ -35,6 +35,7 @@ const credentialLabels: Record<string, string> = {
   api_key: 'API 키',
   secure_key: 'SECURE 키',
   client_server_ip: 'API 서버 IP',
+  seller_code: '판매자/협력사 코드',
   shop_id: '브랜드 ID (brandId)',
   mall_id: '몰 ID (예: mymall)',
   access_token: '액세스 토큰',

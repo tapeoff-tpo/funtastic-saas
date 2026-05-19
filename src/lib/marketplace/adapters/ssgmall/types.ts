@@ -8,6 +8,7 @@ export interface SsgmallApiResponse {
     resultDesc?: string
   }
   shppDirections?: SsgmallDirectionOrder[] | { shppDirection?: SsgmallDirectionOrder[] | SsgmallDirectionOrder }
+  warehouseOuts?: SsgmallDirectionOrder[] | { warehouseOut?: SsgmallDirectionOrder[] | SsgmallDirectionOrder }
 }
 
 export interface SsgmallDirectionRequest {
@@ -16,6 +17,16 @@ export interface SsgmallDirectionRequest {
     perdStrDts: string
     perdEndDts: string
     shppStatCd?: '10' | '30'
+  }
+}
+
+export interface SsgmallWarehouseOutRequest {
+  requestWarehouseOut: {
+    perdType: '01' | '02' | '03' | '04'
+    perdStrDts: string
+    perdEndDts: string
+    shppStatCd?: '10' | '30'
+    shppProgStatDtl?: '22' | '42'
   }
 }
 
@@ -29,6 +40,9 @@ export interface SsgmallDirectionOrder {
   ordStatCd?: string
   shppStatCd?: string
   shppStatNm?: string
+  shppTabProgStatCd?: string
+  lastShppProgStatDtlCd?: string
+  lastShppProgStatDtlNm?: string
   shppDivDtlCd?: string
   shppDivDtlNm?: string
   shppProgStatDtlCd?: string
@@ -49,6 +63,7 @@ export interface SsgmallDirectionOrder {
   cnclItemQty?: number | string
   ordQty?: number | string
   splprc?: number | string
+  splPrc?: number | string
   sellprc?: number | string
   rlordAmt?: number | string
   dcAmt?: number | string
@@ -60,6 +75,7 @@ export interface SsgmallDirectionOrder {
   shpplocZipcd?: string
   shpplocOldZipcd?: string
   shpplocAddr?: string
+  shpplocRoadAddr?: string
   ordpeRoadAddr?: string
   shpplocBascAddr?: string
   shpplocDtlAddr?: string

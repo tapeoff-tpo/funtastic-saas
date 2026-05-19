@@ -10,7 +10,12 @@ import type {
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createSsgmallClient } from './client'
 import { mapSsgmallStatus } from './status-map'
-import type { SsgmallApiResponse, SsgmallDirectionOrder, SsgmallDirectionRequest } from './types'
+import type {
+  SsgmallApiResponse,
+  SsgmallDirectionOrder,
+  SsgmallDirectionRequest,
+  SsgmallWarehouseOutRequest,
+} from './types'
 
 const SSGMALL_CARRIER_CODES: Record<string, string> = {
   CJGLS: '0000033011',
@@ -69,6 +74,14 @@ function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
   return nested ? [nested] : []
 }
 
+function getWarehouseOuts(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
+  const warehouseOuts = response.warehouseOuts
+  if (Array.isArray(warehouseOuts)) return warehouseOuts
+  const nested = warehouseOuts?.warehouseOut
+  if (Array.isArray(nested)) return nested
+  return nested ? [nested] : []
+}
+
 function isSuccessResponse(response: SsgmallApiResponse): boolean {
   const code = String(response.result?.resultCode ?? response.resultCode ?? '').trim()
   return code === '' || code === '00' || code === '0000' || code === '200' || code.toUpperCase() === 'SUCCESS'
@@ -120,16 +133,26 @@ export class SsgmallAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
-      const response = await this.listShippingDirections(since, until, '02')
-      if (!isSuccessResponse(response)) {
-        throw new MarketplaceApiError(
-          'ssgmall',
-          400,
-          responseMessage(response, 'Failed to fetch SSG shipping directions'),
-        )
+      const responses = await Promise.all([
+        this.listShippingDirections(since, until, '02'),
+        this.listShippingDirections(since, until, '03'),
+        this.listWarehouseOuts(since, until, '03'),
+        this.listWarehouseOuts(since, until, '04'),
+      ])
+
+      const orders: SsgmallDirectionOrder[] = []
+      for (const response of responses) {
+        if (!isSuccessResponse(response)) {
+          throw new MarketplaceApiError(
+            'ssgmall',
+            400,
+            responseMessage(response, 'Failed to fetch SSG orders'),
+          )
+        }
+        orders.push(...getDirections(response), ...getWarehouseOuts(response))
       }
 
-      return getDirections(response).map((order) => this.normalizeOrder(order))
+      return this.dedupeOrders(orders).map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
@@ -227,11 +250,40 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             perdType,
             perdStrDts: formatDate(since),
             perdEndDts: formatDate(until),
-            shppStatCd: '10',
           },
         } satisfies SsgmallDirectionRequest,
       })
       .json<SsgmallApiResponse>()
+  }
+
+  private async listWarehouseOuts(
+    since: Date,
+    until: Date,
+    perdType: SsgmallWarehouseOutRequest['requestWarehouseOut']['perdType'],
+  ): Promise<SsgmallApiResponse> {
+    return this.client
+      .post('api/pd/1/listWarehouseOut.ssg', {
+        json: {
+          requestWarehouseOut: {
+            perdType,
+            perdStrDts: formatDate(since),
+            perdEndDts: formatDate(until),
+          },
+        } satisfies SsgmallWarehouseOutRequest,
+      })
+      .json<SsgmallApiResponse>()
+  }
+
+  private dedupeOrders(orders: SsgmallDirectionOrder[]): SsgmallDirectionOrder[] {
+    const seen = new Set<string>()
+    const deduped: SsgmallDirectionOrder[] = []
+    for (const order of orders) {
+      const key = compactJoin([order.shppNo, order.shppSeq, order.ordNo, order.ordItemSeq])
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      deduped.push(order)
+    }
+    return deduped
   }
 
   private normalizeOrder(order: SsgmallDirectionOrder): NormalizedOrder {
@@ -239,15 +291,17 @@ export class SsgmallAdapter implements MarketplaceAdapter {
     const itemId = compactJoin([orderId, order.ordItemSeq, order.shppNo, order.shppSeq])
     const marketplaceOrderId = itemId || orderId
     const quantity = asNumber(order.ordQty ?? order.dircItemQty, 1)
-    const unitPrice = asNumber(order.rlordAmt ?? order.sellprc ?? order.splprc, 0)
-    const address1 = order.shpplocBascAddr || order.ordpeRoadAddr || order.shpplocAddr || ''
+    const unitPrice = asNumber(order.rlordAmt ?? order.sellprc ?? order.splprc ?? order.splPrc, 0)
+    const progressCode = order.shppProgStatDtlCd || order.lastShppProgStatDtlCd || order.shppTabProgStatCd
+    const progressName = order.shppStatNm || order.lastShppProgStatDtlNm
+    const address1 = order.shpplocBascAddr || order.shpplocRoadAddr || order.ordpeRoadAddr || order.shpplocAddr || ''
     const address2 = order.shpplocDtlAddr || undefined
 
     return {
       marketplaceOrderId,
       marketplaceId: 'ssgmall',
-      marketplaceStatus: compactJoin([order.shppProgStatDtlCd, order.shppStatCd, order.shppStatNm], ':'),
-      status: mapSsgmallStatus(order.shppProgStatDtlCd, order.shppStatCd),
+      marketplaceStatus: compactJoin([progressCode, order.shppStatCd, progressName], ':'),
+      status: mapSsgmallStatus(progressCode, order.shppStatCd),
       buyerName: order.ordpeNm || order.rcptpeNm || '',
       buyerPhone2: order.ordpeHpno || undefined,
       recipientName: order.rcptpeNm || order.ordpeNm || '',

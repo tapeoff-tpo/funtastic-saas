@@ -41,6 +41,7 @@ const searchParamsCache = createSearchParamsCache({
   claimType: parseAsString,
   mapping: parseAsString,
   scan: parseAsString,
+  scanResult: parseAsString,
   held: parseAsBoolean,
   // Phase 8 — 취소 탭 통합 필터 (status='cancelled' OR claimType='cancel')
   cancel: parseAsBoolean,
@@ -103,6 +104,7 @@ export default async function OrdersPage({
     .where(eq(marketplaceConnections.userId, workspaceUserId))
 
   const isNewTab = params.status === 'new'
+  const isScanFilterTab = params.status === 'preparing' || params.status === 'ready'
   const mappingFilter = isNewTab
     ? (params.mapping === 'all'
         ? undefined
@@ -133,7 +135,8 @@ export default async function OrdersPage({
         order: (params.order as 'asc' | 'desc') ?? undefined,
         claimType: (params.claimType ?? undefined) as ClaimType | undefined,
         mapping: mappingFilter,
-        scan: (params.scan ?? undefined) as OrderFiltersParams['scan'],
+        scan: isScanFilterTab ? (params.scan ?? undefined) as OrderFiltersParams['scan'] : undefined,
+        scanResult: isScanFilterTab ? (params.scanResult ?? undefined) as OrderFiltersParams['scanResult'] : undefined,
         isHeld: params.held ?? undefined,
         cancelTab: params.cancel ?? undefined,
         excludeClaimLikeOrders: isNewTab,

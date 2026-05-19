@@ -68,6 +68,8 @@ export function OrderTabs() {
     params.delete('tab')
     params.delete('page')
     params.delete('mapping')
+    params.delete('scan')
+    params.delete('scanResult')
 
     if (tab.kind === 'status') {
       params.set('status', tab.id)

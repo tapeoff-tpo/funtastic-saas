@@ -72,7 +72,8 @@ export type OrderSearchField =
 
 export type OrderDateField = 'orderedAt' | 'collectedAt'
 
-export type ScanFilter = 'scanned' | 'unscanned' | 'ok' | 'duplicate' | 'not_found'
+export type ScanFilter = 'scanned' | 'unscanned'
+export type ScanResultFilter = 'ok' | 'duplicate' | 'not_found'
 
 /** 주문 처리 단계 (워크플로우) */
 export type OrderStage =
@@ -100,6 +101,7 @@ export interface OrderFilters {
   confirmedProductSearchSkus?: string[]
   dateField?: OrderDateField
   scan?: ScanFilter
+  scanResult?: ScanResultFilter
   dateFrom?: string
   dateTo?: string
   sort?: string

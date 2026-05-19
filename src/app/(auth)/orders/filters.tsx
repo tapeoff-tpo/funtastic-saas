@@ -30,12 +30,16 @@ const MAPPING_OPTIONS = [
 ]
 
 const SCAN_OPTIONS = [
-  { value: '', label: '스캔 전체' },
+  { value: '', label: '전체' },
   { value: 'scanned', label: '스캔함' },
   { value: 'unscanned', label: '미스캔' },
+]
+
+const SCAN_RESULT_OPTIONS = [
+  { value: '', label: '전체' },
   { value: 'ok', label: '정상' },
-  { value: 'duplicate', label: '중복' },
   { value: 'not_found', label: '비정상' },
+  { value: 'duplicate', label: '중복' },
 ]
 
 const SEARCH_FIELD_OPTIONS: Array<{ value: OrderSearchField; label: string }> = [
@@ -209,6 +213,7 @@ export function OrderFilters({
     status: parseAsString,
     mapping: parseAsString,
     scan: parseAsString,
+    scanResult: parseAsString,
     marketplace: parseAsString,
     search: parseAsString,
     searchField: parseAsString,
@@ -252,6 +257,7 @@ export function OrderFilters({
         status: null,
         mapping: null,
         scan: null,
+        scanResult: null,
         marketplace: null,
         search: null,
         searchField: null,
@@ -345,6 +351,7 @@ export function OrderFilters({
               status: nextStatus,
               mapping: nextStatus === 'new' ? filters.mapping : null,
               scan: nextStatus === 'preparing' || nextStatus === 'ready' ? filters.scan : null,
+              scanResult: nextStatus === 'preparing' || nextStatus === 'ready' ? filters.scanResult : null,
             })
           }}
           className="rounded-md border px-3 py-1.5 text-sm"
@@ -389,6 +396,26 @@ export function OrderFilters({
             className="rounded-md border px-3 py-1.5 text-sm"
           >
             {SCAN_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {showScanFilter && (
+        <div className="flex flex-col gap-1">
+          <label htmlFor="filter-scan-result" className="text-xs font-medium text-muted-foreground">
+            스캔 결과
+          </label>
+          <select
+            id="filter-scan-result"
+            value={filters.scanResult ?? ''}
+            onChange={(e) => updateFilter({ scanResult: e.target.value || null })}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            {SCAN_RESULT_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>

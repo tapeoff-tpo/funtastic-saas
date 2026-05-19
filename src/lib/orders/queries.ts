@@ -370,16 +370,18 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
         FROM ${scanLogs}
         WHERE ${scanLogs.orderId} = ${orders.id}
       )`)
-    } else {
-      conditions.push(
-        exists(
-          db
-            .select({ x: sql`1` })
-            .from(scanLogs)
-            .where(and(eq(scanLogs.orderId, orders.id), eq(scanLogs.status, filters.scan))),
-        ),
-      )
     }
+  }
+
+  if (filters.scanResult) {
+    conditions.push(
+      exists(
+        db
+          .select({ x: sql`1` })
+          .from(scanLogs)
+          .where(and(eq(scanLogs.orderId, orders.id), eq(scanLogs.status, filters.scanResult))),
+      ),
+    )
   }
 
   // Phase 8 — 취소 탭 통합 필터: status='cancelled' OR claimType='cancel'

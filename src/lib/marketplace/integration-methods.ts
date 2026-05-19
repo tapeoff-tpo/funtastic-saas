@@ -22,6 +22,7 @@ const RPA_MARKETPLACES = new Set([
   'always',
   'onchannel',
   'ohouse',
+  'domechango',
   'hyundai-hmall',
   'gs-shop',
 ])

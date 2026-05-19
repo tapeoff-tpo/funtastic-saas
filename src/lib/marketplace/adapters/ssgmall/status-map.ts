@@ -1,6 +1,12 @@
 import type { OrderStatus } from '@/lib/orders/types'
 
 const SSGMALL_SHIPPING_PROGRESS_MAP: Record<string, OrderStatus> = {
+  '120': 'new',
+  '130': 'new',
+  '140': 'preparing',
+  '160': 'shipped',
+  '170': 'delivered',
+  '180': 'cancelled',
   '11': 'new',
   '21': 'preparing',
   '22': 'preparing',

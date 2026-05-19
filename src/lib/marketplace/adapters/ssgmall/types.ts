@@ -11,6 +11,7 @@ export interface SsgmallApiResponse {
   shppDirection?: SsgmallDirectionOrder[] | SsgmallDirectionOrder
   warehouseOuts?: SsgmallDirectionOrder[] | { warehouseOut?: SsgmallDirectionOrder[] | SsgmallDirectionOrder }
   warehouseOut?: SsgmallDirectionOrder[] | SsgmallDirectionOrder
+  resultList?: SsgmallDirectionOrder[] | SsgmallDirectionOrder
   data?: SsgmallApiResponse
   response?: SsgmallApiResponse
   body?: SsgmallApiResponse
@@ -86,10 +87,14 @@ export interface SsgmallDirectionOrder {
   shppDivDtlCd?: string
   shppDivDtlNm?: string
   shppProgStatDtlCd?: string
+  ordItemStatCd?: string
   shppRsvtDt?: string
   ordRcpDts?: string
   ordCmplDts?: string
+  ordCmplDt?: string
+  paymtCmplDt?: string
   siteNo?: string
+  siteNm?: string
   shppVenId?: string
   shppVenNm?: string
   itemNm?: string
@@ -102,6 +107,9 @@ export interface SsgmallDirectionOrder {
   dircItemQty?: number | string
   cnclItemQty?: number | string
   ordQty?: number | string
+  rlordQty?: number | string
+  cnclQty?: number | string
+  dircQty?: number | string
   splprc?: number | string
   splPrc?: number | string
   sellprc?: number | string
@@ -127,5 +135,7 @@ export interface SsgmallDirectionOrder {
   ordItemDivNm?: string
   mallTypeCd?: string
   mbrLoginId?: string
+  mbrNm?: string
+  splVenNm?: string
   [key: string]: unknown
 }

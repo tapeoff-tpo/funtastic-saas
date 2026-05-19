@@ -45,6 +45,10 @@ function formatDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function formatCompactDate(date: Date): string {
+  return formatDate(date).replace(/-/g, '')
+}
+
 function asNumber(value: unknown, fallback = 0): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
@@ -119,6 +123,15 @@ function getWarehouseOuts(response: SsgmallApiResponse): SsgmallDirectionOrder[]
   }
 
   return orders
+}
+
+function getOrderInquiryResults(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
+  return [
+    ...asArray(response.resultList),
+    ...asArray(response.data?.resultList),
+    ...asArray(response.response?.resultList),
+    ...asArray(response.body?.resultList),
+  ]
 }
 
 function isSuccessResponse(response: SsgmallApiResponse): boolean {
@@ -230,6 +243,14 @@ export class SsgmallAdapter implements MarketplaceAdapter {
       const directionPeriodTypes: SsgmallDirectionRequest['requestShppDirection']['perdType'][] = ['01', '02', '03']
       const warehousePeriodTypes: SsgmallWarehouseOutRequest['requestWarehouseOut']['perdType'][] = ['01', '02', '03', '04']
       const responses = await Promise.all([
+        {
+          label: 'order-inquiry-120',
+          response: await this.listOrderInquiries(since, until, '120'),
+        },
+        {
+          label: 'order-inquiry-140',
+          response: await this.listOrderInquiries(since, until, '140'),
+        },
         ...directionPeriodTypes.map(async (perdType) => ({
           label: `direction-${perdType}`,
           response: await this.listShippingDirections(since, until, perdType),
@@ -250,7 +271,11 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             responseMessage(response, 'Failed to fetch SSG orders'),
           )
         }
-        const responseOrders = [...getDirections(response), ...getWarehouseOuts(response)]
+        const responseOrders = [
+          ...getOrderInquiryResults(response),
+          ...getDirections(response),
+          ...getWarehouseOuts(response),
+        ]
         diagnostics.push(summarizeCollectionResponse(label, response, responseOrders.length))
         orders.push(...responseOrders)
       }
@@ -371,6 +396,26 @@ export class SsgmallAdapter implements MarketplaceAdapter {
       .json<SsgmallApiResponse>()
   }
 
+  private async listOrderInquiries(
+    since: Date,
+    until: Date,
+    ordStatCd: '120' | '140',
+  ): Promise<SsgmallApiResponse> {
+    return this.client
+      .post('ms/lnkg/listOrderInquiry.ssg', {
+        json: {
+          travelClaimInfo: {
+            travelSearchCondition: {
+              ordRcpStrtDt: formatCompactDate(since),
+              ordRcpEndDt: formatCompactDate(until),
+              ordStatCd,
+            },
+          },
+        },
+      })
+      .json<SsgmallApiResponse>()
+  }
+
   private async listWarehouseOuts(
     since: Date,
     until: Date,
@@ -408,9 +453,9 @@ export class SsgmallAdapter implements MarketplaceAdapter {
     const orderId = String(order.ordNo ?? order.orordNo ?? order.shppNo ?? '')
     const itemId = compactJoin([orderId, order.ordItemSeq, order.shppNo, order.shppSeq])
     const marketplaceOrderId = itemId || orderId
-    const quantity = asNumber(order.ordQty ?? order.dircItemQty, 1)
+    const quantity = asNumber(order.ordQty ?? order.rlordQty ?? order.dircQty ?? order.dircItemQty, 1)
     const unitPrice = asNumber(order.rlordAmt ?? order.sellprc ?? order.splprc ?? order.splPrc, 0)
-    const progressCode = order.shppProgStatDtlCd || order.lastShppProgStatDtlCd || order.shppTabProgStatCd
+    const progressCode = order.ordItemStatCd || order.ordStatCd || order.shppProgStatDtlCd || order.lastShppProgStatDtlCd || order.shppTabProgStatCd
     const progressName = order.shppStatNm || order.lastShppProgStatDtlNm
     const address1 = order.shpplocBascAddr || order.shpplocRoadAddr || order.ordpeRoadAddr || order.shpplocAddr || ''
     const address2 = order.shpplocDtlAddr || undefined
@@ -440,7 +485,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
           sku: order.uSplVenItemId || order.splVenItemId || order.uitemId || order.itemId || undefined,
         },
       ],
-      orderedAt: parseDate(order.ordCmplDts || order.ordRcpDts),
+      orderedAt: parseDate(order.ordCmplDts || order.ordCmplDt || order.paymtCmplDt || order.ordRcpDts),
       totalAmount: unitPrice * quantity,
       shippingType: order.shppcstCodYn === 'Y' ? 'cod' : 'prepaid',
       shippingFee: asNumber(order.shppcst, 0),

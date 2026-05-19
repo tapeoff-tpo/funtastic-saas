@@ -88,5 +88,6 @@ export interface ScrapeJobData {
   since?: string
   /** For 'upload-invoice': specific order + tracking */
   orderId?: string
+  shipmentId?: string
   invoice?: InvoiceData
 }

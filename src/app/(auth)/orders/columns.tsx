@@ -241,6 +241,7 @@ export interface OrderRow {
   internalNo: string
   marketplaceId: string
   marketplaceName?: string | null
+  connectionId?: string | null
   marketplaceOrderId: string
   buyerName: string
   buyerPhone?: string | null

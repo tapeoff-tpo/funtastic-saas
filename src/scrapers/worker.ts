@@ -18,11 +18,12 @@ import { getScraper, hasScraper } from './registry'
 import { closeBrowser } from './browser'
 import { readScrapeCredentials } from './credentials'
 import { db } from '@/lib/db'
-import { jobLogs } from '@/lib/db/schema'
+import { jobLogs, shipments } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import type { ScrapeJobData } from './types'
 import type { MarketplaceId } from '@/lib/marketplace/types'
 import { saveNormalizedOrdersForConnection } from '@/lib/jobs/workers/order-collector'
+import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 
 // Side-effect import — registers all scraper instances on the registry
 import './register'
@@ -46,7 +47,7 @@ async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promis
 }
 
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
-  const { marketplaceId, connectionId, userId, jobType, jobLogId, since, orderId, invoice } = job.data
+  const { marketplaceId, connectionId, userId, jobType, jobLogId, since, orderId, shipmentId, invoice } = job.data
 
   if (!hasScraper(marketplaceId as MarketplaceId)) {
     throw new Error(`No scraper registered for ${marketplaceId}`)
@@ -101,12 +102,20 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         .set({ status: 'completed', completedAt: new Date(), claimsCollected: claims.length })
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'upload-invoice') {
-      if (!orderId || !invoice) throw new Error('orderId/invoice required for upload-invoice')
+      if (!orderId || !shipmentId || !invoice) throw new Error('orderId/shipmentId/invoice required for upload-invoice')
+      const [shipment] = await db
+        .select({ orderId: shipments.orderId, uploadAttempts: shipments.uploadAttempts })
+        .from(shipments)
+        .where(eq(shipments.id, shipmentId))
+        .limit(1)
+      if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+
       const result = await runWithTimeout(
         scraper.uploadInvoice(credentials, orderId, invoice),
         SCRAPE_JOB_TIMEOUT_MS,
       )
       if (!result.success) throw new Error(result.error || 'invoice upload failed')
+      await markShipmentUploadedAndOrderShipped(shipmentId, shipment.orderId, shipment.uploadAttempts + 1)
       await db
         .update(jobLogs)
         .set({ status: 'completed', completedAt: new Date() })
@@ -120,6 +129,15 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
       .set({ status: 'failed', completedAt: new Date(), errorMessage: msg })
       .where(eq(jobLogs.id, logRow.id))
       .catch(() => {})
+    if (jobType === 'upload-invoice' && shipmentId) {
+      const [shipment] = await db
+        .select({ uploadAttempts: shipments.uploadAttempts })
+        .from(shipments)
+        .where(eq(shipments.id, shipmentId))
+        .limit(1)
+        .catch(() => [])
+      await markShipmentUploadFailed(shipmentId, msg, (shipment?.uploadAttempts ?? 0) + 1).catch(() => {})
+    }
     await closeBrowser().catch(() => {})
     throw e
   }

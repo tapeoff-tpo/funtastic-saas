@@ -3,9 +3,11 @@ import type { Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   MarketplaceId,
+  InvoiceData,
   NormalizedClaim,
   NormalizedOrder,
 } from '@/lib/marketplace/types'
+import { getCarrierName, mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import { dumpStorageState, openContext } from '../browser'
 import type {
   MarketplaceScraper,
@@ -144,6 +146,69 @@ async function ensureCheckboxChecked(root: Locator | Page, checkbox: Locator): P
   })
 }
 
+async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise<void> {
+  const button = root.getByRole('button', { name: pattern }).first()
+  if (await button.isVisible().catch(() => false)) {
+    await button.click({ timeout: 15_000 })
+    return
+  }
+  const fallback = root.locator('button, input[type="button"], input[type="submit"], a.btn').filter({ hasText: pattern }).first()
+  await fallback.click({ timeout: 15_000 })
+}
+
+async function selectCarrier(root: Locator | Page, invoice: InvoiceData): Promise<void> {
+  const carrierName = getCarrierName(invoice.carrierId)
+  const carrierCode = mapCarrierCode('onchannel', invoice.carrierId)
+  const select = root.locator('select:visible').first()
+  if (!(await select.isVisible().catch(() => false))) return
+
+  for (const option of [
+    { label: carrierName },
+    { value: carrierCode },
+    { value: invoice.carrierId },
+  ]) {
+    const selected = await select.selectOption(option, { timeout: 2000 }).then(() => true).catch(() => false)
+    if (selected) return
+  }
+}
+
+async function fillTrackingNumber(root: Locator | Page, trackingNumber: string): Promise<void> {
+  const selectors = [
+    'input[name*="invoice" i]',
+    'input[name*="tracking" i]',
+    'input[name*="songjang" i]',
+    'input[id*="invoice" i]',
+    'input[id*="tracking" i]',
+    'input[id*="songjang" i]',
+    'input[placeholder*="송장"]',
+    'input[placeholder*="운송장"]',
+  ]
+
+  for (const selector of selectors) {
+    const input = root.locator(selector).first()
+    if (await input.isVisible().catch(() => false)) {
+      await setInputValue(input, trackingNumber)
+      return
+    }
+  }
+
+  const visibleInputs = await visibleLocators(
+    root,
+    'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])',
+  )
+  let candidate = visibleInputs[0]
+  for (const input of visibleInputs) {
+    if (await input.isEditable().catch(() => false)) {
+      candidate = input
+      break
+    }
+  }
+  if (!candidate) {
+    throw new MarketplaceApiError('onchannel', 500, '온채널 송장번호 입력칸을 찾지 못했습니다.')
+  }
+  await setInputValue(candidate, trackingNumber)
+}
+
 export class OnchannelScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'onchannel'
   readonly displayName = '온채널'
@@ -222,10 +287,66 @@ export class OnchannelScraper implements MarketplaceScraper {
     return []
   }
 
-  async uploadInvoice(): Promise<{ success: boolean; error?: string }> {
-    return {
-      success: false,
-      error: '온채널 송장 RPA 업로드는 아직 구현되지 않았습니다.',
+  async uploadInvoice(
+    credentials: ScraperCredentials,
+    orderId: string,
+    invoice: InvoiceData,
+  ): Promise<{ success: boolean; error?: string }> {
+    let sessionState = credentials.storageState
+    let ctx = await openContext(sessionState)
+
+    try {
+      await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
+      await dismissOnchannelPopups(ctx.page)
+      if (!(await this.isLoggedIn(ctx.page))) {
+        await ctx.close()
+        const loginResult = await this.login(credentials)
+        if (!loginResult.success || !loginResult.storageState) {
+          return { success: false, error: loginResult.error ?? '온채널 로그인 실패' }
+        }
+        sessionState = loginResult.storageState
+        ctx = await openContext(sessionState)
+        await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
+        await dismissOnchannelPopups(ctx.page)
+      }
+
+      const row = ctx.page.locator('tr, .order-row, .list-row').filter({ hasText: orderId }).first()
+      if (!(await row.isVisible().catch(() => false))) {
+        return { success: false, error: `온채널 주문 행을 찾지 못했습니다. (${orderId})` }
+      }
+
+      await dismissOnchannelPopups(ctx.page)
+      await clickButtonByText(row, /송장\s*입력|송장등록|송장\s*등록/)
+
+      const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').first()
+      await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
+      await dismissOnchannelPopups(ctx.page)
+      const uploadRoot: Locator | Page = (await dialog.isVisible().catch(() => false)) ? dialog : ctx.page
+
+      await selectCarrier(uploadRoot, invoice)
+      await fillTrackingNumber(uploadRoot, invoice.trackingNumber)
+
+      const dialogPromise = ctx.page.waitForEvent('dialog', { timeout: 5000 })
+        .then(async (dialogEvent) => {
+          await dialogEvent.accept().catch(() => undefined)
+          return dialogEvent.message()
+        })
+        .catch(() => null)
+
+      await dismissOnchannelPopups(ctx.page)
+      await clickButtonByText(uploadRoot, /저장|등록|확인|전송|송장\s*입력/)
+      const dialogMessage = await dialogPromise
+
+      await ctx.page.waitForTimeout(1000)
+      const pageText = await ctx.page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+      if (/실패|오류|error|잘못|확인해/.test(pageText) && !/완료|성공|등록/.test(pageText)) {
+        return { success: false, error: dialogMessage ?? '온채널 송장 입력 후 오류 메시지가 표시되었습니다.' }
+      }
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : '온채널 송장 RPA 업로드 실패' }
+    } finally {
+      await ctx.close()
     }
   }
 

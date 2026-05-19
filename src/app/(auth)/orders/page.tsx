@@ -157,6 +157,7 @@ export default async function OrdersPage({
     internalNo: (o as { internalNo: string }).internalNo,
     marketplaceId: o.marketplaceId,
     marketplaceName: (o as { marketplaceDisplayName?: string | null }).marketplaceDisplayName ?? null,
+    connectionId: o.connectionId,
     marketplaceOrderId: o.marketplaceOrderId,
     buyerName: o.buyerName,
     buyerPhone: o.buyerPhone,

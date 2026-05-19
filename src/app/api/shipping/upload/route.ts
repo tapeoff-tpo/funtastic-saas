@@ -16,41 +16,10 @@ import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { deductForOrder } from '@/lib/inventory/actions'
+import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { markShipmentUploadedAndOrderShipped } from '@/lib/shipping/upload-status'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
-
-async function markShipmentUploadedAndOrderShipped(
-  shipmentId: string,
-  orderId: string,
-  uploadAttempts: number,
-) {
-  await db.transaction(async (tx) => {
-    const [order] = await tx
-      .select({ id: orders.id, status: orders.status, userId: orders.userId })
-      .from(orders)
-      .where(eq(orders.id, orderId))
-      .for('update')
-      .limit(1)
-
-    await tx.update(shipments).set({
-      uploadStatus: 'uploaded',
-      lastUploadAt: new Date(),
-      uploadAttempts,
-      marketplaceUploadError: null,
-      updatedAt: new Date(),
-    }).where(eq(shipments.id, shipmentId))
-
-    if (order?.status === 'ready') {
-      await tx.update(orders).set({
-        status: 'shipped',
-        previousStatus: 'ready',
-        updatedAt: new Date(),
-      }).where(eq(orders.id, orderId))
-      await deductForOrder(tx, order.userId, orderId)
-    }
-  })
-}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -155,10 +124,28 @@ export async function POST(req: NextRequest) {
 
     // Get storeAlias for credential key suffix
     const [conn] = await db
-      .select({ storeAlias: marketplaceConnections.storeAlias })
+      .select({
+        storeAlias: marketplaceConnections.storeAlias,
+        authType: marketplaceConnections.authType,
+        isManual: marketplaceConnections.isManual,
+      })
       .from(marketplaceConnections)
       .where(eq(marketplaceConnections.id, connectionId))
       .limit(1)
+
+    if (getIntegrationMethod(marketplaceId, { authType: conn?.authType, isManual: conn?.isManual }) === 'rpa') {
+      for (const s of groupShipments) {
+        results.push({
+          shipmentId: s.id,
+          trackingNumber: s.trackingNumber,
+          success: false,
+          error: 'RPA 연동 주문은 [RPA 송장 전송] 버튼을 사용하세요.',
+          marketplaceId,
+        })
+      }
+      continue
+    }
+
     const aliasTag = (conn?.storeAlias && conn.storeAlias !== 'default') ? `_${conn.storeAlias}` : ''
 
     const credentials: Record<string, string> = {}

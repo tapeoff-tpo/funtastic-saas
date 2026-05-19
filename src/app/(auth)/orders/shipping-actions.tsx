@@ -13,6 +13,7 @@ import { bulkCombineByContactAction } from './combined-actions'
 import { forceBulkChangeStatusAction } from './actions'
 import type { OrderRow } from './columns'
 import type { OrderStage } from '@/lib/orders/types'
+import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 
 interface UserTemplate {
   id: string
@@ -113,6 +114,7 @@ export function ShippingActions({
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
   const [uploadingToMarket, setUploadingToMarket] = useState(false)
+  const [uploadingRpaInvoice, setUploadingRpaInvoice] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [userTemplates, setUserTemplates] = useState<UserTemplate[] | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
@@ -196,6 +198,60 @@ export function ShippingActions({
       toast.error(error instanceof Error ? error.message : '송장 전송에 실패했습니다.')
     } finally {
       setUploadingToMarket(false)
+    }
+  }
+
+  const selectedRpaOrders = useMemo(() => {
+    return selectedOrders.filter((order) =>
+      order.connectionId && getIntegrationMethod(order.marketplaceId) === 'rpa',
+    )
+  }, [selectedOrders])
+
+  const handleRpaInvoiceUpload = async () => {
+    if (selectedRpaOrders.length === 0 || uploadingRpaInvoice) return
+
+    const missingTracking = selectedRpaOrders.filter((order) => !order.trackingNumber)
+    if (missingTracking.length > 0) {
+      toast.error(`${missingTracking.length}건은 송장번호가 없습니다. 먼저 송장등록을 해주세요.`)
+      setInvoiceDialogOpen(true)
+      return
+    }
+
+    setUploadingRpaInvoice(true)
+    try {
+      const res = await fetch('/api/shipping/upload/rpa', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderIds: selectedRpaOrders.map((order) => order.id) }),
+      })
+      const data = await res.json().catch(() => ({})) as {
+        queued?: number
+        skipped?: number
+        message?: string
+        error?: string
+        results?: Array<{ queued: boolean; error?: string }>
+      }
+
+      if (!res.ok) {
+        toast.error(data.error ?? data.message ?? 'RPA 송장 전송 요청에 실패했습니다.')
+        return
+      }
+
+      const queued = data.queued ?? 0
+      const skipped = data.skipped ?? 0
+      if (queued > 0 && skipped === 0) {
+        toast.success(`${queued}건 RPA 송장 전송 시작`)
+      } else if (queued > 0) {
+        const firstError = data.results?.find((result) => !result.queued)?.error
+        toast.warning(`${queued}건 시작, ${skipped}건 제외${firstError ? `: ${firstError}` : ''}`)
+      } else {
+        toast.error(data.message ?? data.results?.find((result) => result.error)?.error ?? 'RPA 전송할 송장이 없습니다.')
+      }
+      router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'RPA 송장 전송 요청에 실패했습니다.')
+    } finally {
+      setUploadingRpaInvoice(false)
     }
   }
 
@@ -661,14 +717,28 @@ export function ShippingActions({
         )}
 
         {showShipping && (
-          <button
-            type="button"
-            onClick={handleMarketplaceInvoiceUpload}
-            disabled={!hasSelection || uploadingToMarket}
-            className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            몰에 송장 전송
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={handleMarketplaceInvoiceUpload}
+              disabled={!hasSelection || uploadingToMarket}
+              className="rounded-md border bg-white px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+              title="API 연동 마켓 송장 전송"
+            >
+              몰에 송장 전송
+            </button>
+            {selectedRpaOrders.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleRpaInvoiceUpload()}
+                disabled={uploadingRpaInvoice}
+                className="rounded-md border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm font-medium text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-50"
+                title="RPA 연동 마켓은 판매자센터 화면 자동화로 송장을 전송합니다"
+              >
+                {uploadingRpaInvoice ? 'RPA 전송 중...' : `RPA 송장 전송 (${selectedRpaOrders.length})`}
+              </button>
+            )}
+          </>
         )}
 
         {showPrint && (

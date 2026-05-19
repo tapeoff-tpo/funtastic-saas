@@ -24,6 +24,13 @@ interface ScanQueueItem {
   recipientName?: string
 }
 
+interface ScanCacheEntry {
+  trackingNumber: string
+  carrierName?: string
+  shippedToday: boolean
+  order?: { recipientName: string; marketplaceId: string; marketplaceOrderId: string } | null
+}
+
 const STATUS_STYLE: Record<ScanStatus, string> = {
   idle:      'bg-gray-900',
   ok:        'bg-green-700',
@@ -50,14 +57,17 @@ function speak(text: string) {
 export default function ScanPage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const queueRef = useRef<ScanQueueItem[]>([])
-  const processingRef = useRef(false)
   const pausedRef = useRef(false)
   const nextIdRef = useRef(1)
+  const cacheRef = useRef<Map<string, ScanCacheEntry>>(new Map())
+  const scannedRef = useRef<Set<string>>(new Set())
   const [inputValue, setInputValue] = useState('')
   const [result, setResult] = useState<ScanResult | null>(null)
   const [queue, setQueue] = useState<ScanQueueItem[]>([])
-  const [processing, setProcessing] = useState(false)
+  const [backgroundCount, setBackgroundCount] = useState(0)
   const [paused, setPaused] = useState(false)
+  const [cacheReady, setCacheReady] = useState(false)
+  const [cacheCount, setCacheCount] = useState(0)
   const [todayCount, setTodayCount] = useState(0)
   const [uploading, setUploading] = useState(false)
   const [uploadResult, setUploadResult] = useState<{ uploaded: number; failed: number; total: number } | null>(null)
@@ -75,6 +85,40 @@ export default function ScanPage() {
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadScanCache() {
+      try {
+        const res = await fetch('/api/shipping/scan', { method: 'GET', cache: 'no-store' })
+        const data: { shipments?: ScanCacheEntry[]; todayCount?: number } = await res.json()
+        if (cancelled) return
+
+        const next = new Map<string, ScanCacheEntry>()
+        scannedRef.current = new Set()
+        for (const shipment of data.shipments ?? []) {
+          next.set(shipment.trackingNumber, shipment)
+          if (shipment.shippedToday) scannedRef.current.add(shipment.trackingNumber)
+        }
+        cacheRef.current = next
+        setCacheCount(next.size)
+        setTodayCount(data.todayCount ?? 0)
+        setCacheReady(true)
+        refocus()
+      } catch {
+        if (!cancelled) {
+          setResult({ status: 'not_found', message: '송장 목록 로딩 실패', tts: '비정상입니다' })
+          speak('송장 목록 로딩 실패')
+        }
+      }
+    }
+
+    loadScanCache()
+    return () => {
+      cancelled = true
+    }
+  }, [refocus])
 
   const handleUpload = useCallback(async () => {
     if (uploading) return
@@ -104,106 +148,124 @@ export default function ScanPage() {
     }
   }, [uploading, refocus])
 
-  const processNext = useCallback(async () => {
-    if (processingRef.current || pausedRef.current) return
-
-    const next = queueRef.current.find((item) => item.status === 'queued')
-    if (!next) return
-
-    processingRef.current = true
-    setProcessing(true)
-    syncQueue(queueRef.current.map((item) => (
-      item.id === next.id ? { ...item, status: 'processing' } : item
-    )))
-
+  const persistScan = useCallback(async (trackingNumber: string, optimisticId: number) => {
+    setBackgroundCount((count) => count + 1)
     try {
       const res = await fetch('/api/shipping/scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trackingNumber: next.trackingNumber, includeTodayCount: false }),
+        body: JSON.stringify({ trackingNumber, includeTodayCount: false }),
       })
       const data: ScanResult = await res.json()
-      data.trackingNumber = next.trackingNumber
-
-      setResult(data)
-      speak(data.tts ?? data.message)
-
-      if (data.status === 'ok') {
-        setTodayCount((count) => data.todayCount ?? count + 1)
-      }
-
-      const completed: ScanQueueItem = {
-        ...next,
-        status: data.status,
-        message: data.message,
-        recipientName: data.order?.recipientName,
-      }
-      const withoutCurrent = queueRef.current.filter((item) => item.id !== next.id)
-      const ordered = data.status === 'not_found'
-        ? [completed, ...withoutCurrent]
-        : [completed, ...withoutCurrent].slice(0, 80)
-      syncQueue(ordered)
 
       if (data.status === 'not_found') {
+        const abnormal: ScanQueueItem = {
+          id: optimisticId,
+          trackingNumber,
+          status: 'not_found',
+          message: data.message,
+        }
+        setResult({ ...data, trackingNumber })
+        syncQueue([abnormal, ...queueRef.current.filter((item) => item.id !== optimisticId)])
+        speak(data.tts ?? '비정상입니다')
         pausedRef.current = true
         setPaused(true)
       }
     } catch {
-      const errorResult = {
+      const errorResult: ScanResult = {
         status: 'not_found',
         message: '네트워크 오류',
         tts: '비정상입니다',
-        trackingNumber: next.trackingNumber,
-      } as ScanResult
+        trackingNumber,
+      }
       setResult(errorResult)
       speak('비정상입니다')
       syncQueue([
-        { ...next, status: 'not_found', message: '네트워크 오류' },
-        ...queueRef.current.filter((item) => item.id !== next.id),
+        { id: optimisticId, trackingNumber, status: 'not_found', message: '네트워크 오류' },
+        ...queueRef.current.filter((item) => item.id !== optimisticId),
       ])
       pausedRef.current = true
       setPaused(true)
     } finally {
-      processingRef.current = false
-      setProcessing(false)
+      setBackgroundCount((count) => Math.max(0, count - 1))
       refocus()
-      setTimeout(() => processNext(), 0)
     }
   }, [refocus, syncQueue])
 
   const enqueueScan = useCallback((trackingNumber: string) => {
     const normalized = trackingNumber.trim()
-    if (!normalized || pausedRef.current) return
+    if (!normalized || pausedRef.current || !cacheReady) return
 
-    const nextItem: ScanQueueItem = {
-      id: nextIdRef.current,
-      trackingNumber: normalized,
-      status: 'queued',
-    }
+    const id = nextIdRef.current
     nextIdRef.current += 1
-    syncQueue([...queueRef.current, nextItem])
     setInputValue('')
-    setTimeout(() => processNext(), 0)
-  }, [processNext, syncQueue])
+
+    const cached = cacheRef.current.get(normalized)
+    if (!cached) {
+      const nextItem: ScanQueueItem = {
+        id,
+        trackingNumber: normalized,
+        status: 'not_found',
+        message: '비정상입니다',
+      }
+      const nextResult: ScanResult = {
+        status: 'not_found',
+        message: '비정상입니다',
+        tts: '비정상입니다',
+        trackingNumber: normalized,
+      }
+      setResult(nextResult)
+      speak('비정상입니다')
+      syncQueue([nextItem, ...queueRef.current])
+      pausedRef.current = true
+      setPaused(true)
+      void persistScan(normalized, id)
+      return
+    }
+
+    const isDuplicate = cached.shippedToday || scannedRef.current.has(normalized)
+    const status: ScanStatus = isDuplicate ? 'duplicate' : 'ok'
+    const nextItem: ScanQueueItem = {
+      id,
+      trackingNumber: normalized,
+      status,
+      message: isDuplicate ? '중복입니다' : '정상입니다',
+      recipientName: cached.order?.recipientName,
+    }
+    const nextResult: ScanResult = {
+      status,
+      message: isDuplicate ? '중복입니다' : '정상입니다',
+      tts: isDuplicate ? '중복입니다' : '정상입니다',
+      trackingNumber: normalized,
+      carrierName: cached.carrierName,
+      order: cached.order ?? null,
+      items: [],
+    }
+
+    setResult(nextResult)
+    speak(nextResult.tts ?? nextResult.message)
+
+    if (!isDuplicate) {
+      scannedRef.current.add(normalized)
+      cacheRef.current.set(normalized, { ...cached, shippedToday: true })
+      setTodayCount((count) => count + 1)
+    }
+
+    syncQueue([nextItem, ...queueRef.current].slice(0, 80))
+    void persistScan(normalized, id)
+  }, [cacheReady, persistScan, syncQueue])
 
   const handleContinue = useCallback(() => {
     pausedRef.current = false
     setPaused(false)
     refocus()
-    setTimeout(() => processNext(), 0)
-  }, [processNext, refocus])
+  }, [refocus])
 
   const handleClearCompleted = useCallback(() => {
-    const active = queueRef.current.filter((item) => item.status === 'queued' || item.status === 'processing' || item.status === 'not_found')
+    const active = queueRef.current.filter((item) => item.status === 'not_found')
     syncQueue(active)
     refocus()
   }, [refocus, syncQueue])
-
-  useEffect(() => {
-    if (!processing && !paused) {
-      processNext()
-    }
-  }, [processing, paused, processNext])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -212,7 +274,7 @@ export default function ScanPage() {
     }
   }
 
-  const pendingCount = queue.filter((item) => item.status === 'queued').length
+  const pendingCount = backgroundCount
   const abnormalCount = queue.filter((item) => item.status === 'not_found').length
   const completedCount = queue.filter((item) => item.status === 'ok').length
 
@@ -230,7 +292,7 @@ export default function ScanPage() {
           <div className="flex flex-col items-end gap-1">
             <button
               onClick={handleUpload}
-              disabled={uploading || processing || paused}
+              disabled={uploading || backgroundCount > 0 || paused}
               className="rounded-lg bg-white/20 px-4 py-2 text-sm font-medium text-white hover:bg-white/30 disabled:opacity-50 transition-colors"
             >
               {uploading ? '전송 중...' : '오늘 출고분 전송'}
@@ -279,16 +341,22 @@ export default function ScanPage() {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={paused}
-            placeholder={paused ? '비정상 송장 확인 후 계속 버튼을 눌러주세요' : '바코드를 스캔하거나 직접 입력 후 Enter'}
+            disabled={paused || !cacheReady}
+            placeholder={
+              !cacheReady
+                ? '송장 목록을 불러오는 중입니다'
+                : paused
+                  ? '비정상 송장 확인 후 계속 버튼을 눌러주세요'
+                  : '바코드를 스캔하거나 직접 입력 후 Enter'
+            }
             className="w-full rounded-xl border-2 border-white/30 bg-white/10 px-6 py-5 text-center text-2xl font-mono tracking-widest text-white placeholder:text-white/30 focus:border-white focus:outline-none disabled:opacity-50"
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
           />
           <div className="mt-3 grid grid-cols-4 gap-2 text-center text-sm text-white">
-            <div className="rounded bg-white/10 px-2 py-2">대기 <strong>{pendingCount}</strong></div>
-            <div className="rounded bg-white/10 px-2 py-2">처리중 <strong>{processing ? 1 : 0}</strong></div>
+            <div className="rounded bg-white/10 px-2 py-2">송장목록 <strong>{cacheCount}</strong></div>
+            <div className="rounded bg-white/10 px-2 py-2">저장중 <strong>{pendingCount}</strong></div>
             <div className="rounded bg-green-600/40 px-2 py-2">정상 <strong>{completedCount}</strong></div>
             <div className="rounded bg-red-600/60 px-2 py-2">비정상 <strong>{abnormalCount}</strong></div>
           </div>
@@ -332,8 +400,8 @@ export default function ScanPage() {
           </div>
         )}
 
-        {processing && (
-          <div className="text-white/70 text-lg animate-pulse">처리 중...</div>
+        {!cacheReady && (
+          <div className="text-white/70 text-lg animate-pulse">송장 목록 불러오는 중...</div>
         )}
       </div>
 

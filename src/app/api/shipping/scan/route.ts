@@ -13,9 +13,54 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
-import { eq, and, gte, count } from 'drizzle-orm'
+import { eq, and, gte, count, isNull, or } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+
+export async function GET() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const todayStart = startOfDay(new Date())
+
+  const [rows, todayCountRows] = await Promise.all([
+    db
+      .select({
+        trackingNumber: shipments.trackingNumber,
+        carrierName: shipments.carrierName,
+        shippedAt: shipments.shippedAt,
+        recipientName: orders.recipientName,
+        marketplaceId: orders.marketplaceId,
+        marketplaceOrderId: orders.marketplaceOrderId,
+      })
+      .from(shipments)
+      .leftJoin(orders, eq(orders.id, shipments.orderId))
+      .where(and(
+        eq(shipments.userId, workspaceUserId),
+        or(isNull(shipments.shippedAt), gte(shipments.shippedAt, todayStart)),
+      )),
+    db
+      .select({ value: count() })
+      .from(shipments)
+      .where(and(eq(shipments.userId, workspaceUserId), gte(shipments.shippedAt, todayStart))),
+  ])
+
+  return NextResponse.json({
+    shipments: rows.map((row) => ({
+      trackingNumber: row.trackingNumber,
+      carrierName: row.carrierName,
+      shippedToday: Boolean(row.shippedAt && new Date(row.shippedAt) >= todayStart),
+      order: row.recipientName ? {
+        recipientName: row.recipientName,
+        marketplaceId: row.marketplaceId ?? '',
+        marketplaceOrderId: row.marketplaceOrderId ?? '',
+      } : null,
+    })),
+    todayCount: Number(todayCountRows[0]?.value ?? 0),
+  })
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()

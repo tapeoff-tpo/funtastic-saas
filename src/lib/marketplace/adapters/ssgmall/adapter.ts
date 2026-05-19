@@ -34,7 +34,6 @@ const SSGMALL_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['api_key'],
 }
 
-const SSGMALL_SHINSEGAE_MALL_TYPE = '10'
 const SSGMALL_ORDER_COMPLETED_STATUS = '120'
 const SSGMALL_RELEASE_TYPES = '11,15'
 
@@ -366,7 +365,6 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             commValue: '',
             shppDivDtlCd: SSGMALL_RELEASE_TYPES,
             ordStatCd: SSGMALL_ORDER_COMPLETED_STATUS,
-            mallTypeCd: SSGMALL_SHINSEGAE_MALL_TYPE,
           },
         } satisfies SsgmallDirectionRequest,
       })
@@ -388,7 +386,6 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             commType: '02',
             commValue: '',
             shppDivDtlCd: SSGMALL_RELEASE_TYPES,
-            mallTypeCd: SSGMALL_SHINSEGAE_MALL_TYPE,
           },
         } satisfies SsgmallWarehouseOutRequest,
       })

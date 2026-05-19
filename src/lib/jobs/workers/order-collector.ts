@@ -473,7 +473,7 @@ export async function collectOrdersForConnection(params: {
       await setProgress(`10x10 order lookup (${effectiveLookbackLabel})`)
     }
     const fetchedOrders = await fetchOrdersForRange(adapter, marketplaceId, effectiveSince, effectiveUntil, setProgress)
-    const normalizedOrders = mergeNormalizedOrdersByOrderId(fetchedOrders)
+    const normalizedOrders = mergeNormalizedOrdersByOrderId(canonicalizeMarketplaceOrderIds(fetchedOrders))
     const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
     const ordersToSave = normalizedOrders
     const skippedExistingCount = existingOrderKeys.size
@@ -632,7 +632,7 @@ export async function saveNormalizedOrdersForConnection(params: {
   normalizedOrders: NormalizedOrder[]
 }): Promise<{ ordersCollected: number }> {
   const { marketplaceId, connectionId, userId } = params
-  const normalizedOrders = mergeNormalizedOrdersByOrderId(params.normalizedOrders)
+  const normalizedOrders = mergeNormalizedOrdersByOrderId(canonicalizeMarketplaceOrderIds(params.normalizedOrders))
   const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
   let ordersCollected = 0
 
@@ -806,6 +806,79 @@ function dedupeNormalizedOrderItems(items: NormalizedOrderItem[]): NormalizedOrd
   }
 
   return deduped
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function stringValue(value: unknown): string | null {
+  if (value == null) return null
+  const text = String(value).trim()
+  return text.length > 0 ? text : null
+}
+
+function readNestedOrderId(value: unknown): string | null {
+  const record = asPlainRecord(value)
+  if (!record) return null
+  return stringValue(record.orderId)
+}
+
+function readCommonMarketplaceOrderId(rawData: Record<string, unknown> | undefined): string | null {
+  if (!rawData) return null
+
+  const directKeys = [
+    'orderId',
+    'orderNo',
+    'ordNo',
+    'orordNo',
+    'OrderSerial',
+    'order_id',
+    'order_no',
+    'orderCode',
+    'order_code',
+  ]
+  for (const key of directKeys) {
+    const value = stringValue(rawData[key])
+    if (value) return value
+  }
+
+  const orderRecord = asPlainRecord(rawData.order)
+  if (orderRecord) {
+    for (const key of directKeys) {
+      const value = stringValue(orderRecord[key])
+      if (value) return value
+    }
+  }
+
+  return null
+}
+
+function getCanonicalMarketplaceOrderId(order: NormalizedOrder): string {
+  const rawData = asPlainRecord(order.rawData) ?? {}
+  return (
+    readNestedOrderId(rawData.marketplaceOrderIdentity)
+    ?? readNestedOrderId(rawData.orderIdentity)
+    ?? readCommonMarketplaceOrderId(rawData)
+    ?? order.marketplaceOrderId
+  )
+}
+
+function canonicalizeMarketplaceOrderIds(normalizedOrders: NormalizedOrder[]): NormalizedOrder[] {
+  return normalizedOrders.map((order) => {
+    const canonicalOrderId = getCanonicalMarketplaceOrderId(order)
+    if (!canonicalOrderId || canonicalOrderId === order.marketplaceOrderId) return order
+
+    return {
+      ...order,
+      marketplaceOrderId: canonicalOrderId,
+      rawData: {
+        ...(order.rawData ?? {}),
+        originalMarketplaceOrderId: order.marketplaceOrderId,
+      },
+    }
+  })
 }
 
 function enrichOrderRawData(order: NormalizedOrder): Record<string, unknown> {

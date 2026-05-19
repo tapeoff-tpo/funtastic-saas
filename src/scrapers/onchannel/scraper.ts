@@ -56,12 +56,17 @@ async function summarizePage(page: Page): Promise<string> {
 
 async function submitLoginForm(page: Page): Promise<void> {
   const form = page.locator('form.form-signin, form[action*="/login/login_web.php"]').first()
+  const submitButton = page.locator('button[type="submit"][name="login"], input[type="submit"][name="login"]').first()
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => undefined),
-    form.evaluate((formEl) => {
+    form.evaluate((formEl, buttonEl) => {
       if (!(formEl instanceof HTMLFormElement)) return
-      HTMLFormElement.prototype.submit.call(formEl)
-    }),
+      if (buttonEl instanceof HTMLElement && typeof formEl.requestSubmit === 'function') {
+        formEl.requestSubmit(buttonEl)
+        return
+      }
+      formEl.requestSubmit()
+    }, await submitButton.elementHandle().catch(() => null)),
   ])
   await page.waitForLoadState('domcontentloaded').catch(() => undefined)
 }

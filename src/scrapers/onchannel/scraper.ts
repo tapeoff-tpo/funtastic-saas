@@ -477,7 +477,7 @@ export class OnchannelScraper implements MarketplaceScraper {
         .catch(() => null)
 
       await dismissOnchannelPopups(ctx.page)
-      await clickButtonByText(uploadRoot, /저장|등록|확인|전송|송장\s*입력/)
+      await clickButtonByText(uploadRoot, /저장|등록|확인|전송|완료|송장\s*입력/)
       const dialogMessage = await dialogPromise
 
       await ctx.page.waitForTimeout(1000)

@@ -8,6 +8,7 @@ import type {
   NormalizedProduct,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
+import { getCarrierName } from '@/lib/shipping/carrier-codes'
 import { createSpecialofferClient } from './client'
 import type {
   SpecialofferBuyerOrder,
@@ -98,6 +99,36 @@ async function toApiMessage(action: string, error: unknown): Promise<string> {
 
 function mutationId(response: SpecialofferMutationResponse): string | undefined {
   return asString(response.goods_no ?? response.no ?? response.id ?? response.data?.goods_no ?? response.data?.no ?? response.data?.id) || undefined
+}
+
+function specialofferOrderIdFromInvoice(orderId: string, invoice: InvoiceData): string {
+  const rawData = invoice.rawData
+  if (rawData && typeof rawData === 'object') {
+    const raw = rawData as Record<string, unknown>
+    const candidates = [
+      raw.order_id,
+      raw.id,
+      raw.no,
+      raw.marketplaceOrderIdentity && typeof raw.marketplaceOrderIdentity === 'object'
+        ? (raw.marketplaceOrderIdentity as Record<string, unknown>).itemIds
+        : undefined,
+      raw.orderIdentity && typeof raw.orderIdentity === 'object'
+        ? (raw.orderIdentity as Record<string, unknown>).itemIds
+        : undefined,
+    ]
+
+    for (const candidate of candidates) {
+      if (Array.isArray(candidate)) {
+        const first = asString(candidate[0])
+        if (first) return first
+        continue
+      }
+      const value = asString(candidate)
+      if (value) return value
+    }
+  }
+
+  return orderId
 }
 
 function productPayloadFromNormalized(product: NormalizedProduct): SpecialofferProductPayload {
@@ -205,10 +236,22 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     return []
   }
 
-  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
-    return {
-      success: false,
-      error: '스페셜오퍼 배송정보 업데이트는 공급사 주문 API이며 현재 판매 주문 송장 업로드로는 사용하지 않습니다.',
+  async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+    try {
+      const specialofferOrderId = specialofferOrderIdFromInvoice(orderId, invoice)
+      const response = await this.client.patch(`api/v2/seller/orders/${encodeURIComponent(specialofferOrderId)}`, {
+        json: {
+          delivery_company: getCarrierName(invoice.carrierId),
+          delivery_no: invoice.trackingNumber,
+        },
+      }).json<SpecialofferMutationResponse>()
+
+      if (response.error || response.success === false || response.result === false) {
+        return { success: false, error: response.error ?? response.message ?? '스페셜오퍼 송장 전송 실패' }
+      }
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: await toApiMessage('Specialoffer invoice upload', error) }
     }
   }
 

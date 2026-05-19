@@ -35,7 +35,6 @@ const credentialLabels: Record<string, string> = {
   api_key: 'API 키',
   secure_key: 'SECURE 키',
   client_server_ip: 'API 서버 IP',
-  seller_code: '판매자/협력사 코드',
   shop_id: '브랜드 ID (brandId)',
   mall_id: '몰 ID (예: mymall)',
   access_token: '액세스 토큰',
@@ -45,6 +44,9 @@ const credentialLabels: Record<string, string> = {
   username: '오너클랜 판매회원 ID',
   password: '오너클랜 판매회원 PW',
   vendor_password: '오너클랜 공급사 PW',
+  base_url: 'API Base URL',
+  malls: 'EMP 쇼핑몰 필터',
+  states: 'EMP 주문상태',
 }
 
 export function CredentialForm({ marketplaces }: CredentialFormProps) {

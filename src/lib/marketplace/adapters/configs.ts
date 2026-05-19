@@ -484,6 +484,14 @@ const tobizonAdapter = createStubAdapter({
   requiredCredentials: ['api_key', 'secure_key', 'client_server_ip'],
 })
 
+const playautoEmpAdapter = createStubAdapter({
+  id: 'playauto-emp',
+  name: '플레이오토 EMP',
+  authType: 'api_key',
+  rateLimitPerSecond: 10,
+  requiredCredentials: ['api_key'],
+})
+
 export function registerDefaultAdapters() {
   if (!marketplaceRegistry.has('coupang')) {
     marketplaceRegistry.register(coupangAdapter)
@@ -575,6 +583,9 @@ export function registerDefaultAdapters() {
   }
   if (!marketplaceRegistry.has('tobizon')) {
     marketplaceRegistry.register(tobizonAdapter)
+  }
+  if (!marketplaceRegistry.has('playauto-emp')) {
+    marketplaceRegistry.register(playautoEmpAdapter)
   }
 }
 

@@ -39,6 +39,7 @@ export type MarketplaceId =
   | '10x10'
   | 'toss-shopping'
   | 'tobizon'
+  | 'playauto-emp'
   | (string & {})
 
 export type ConnectionStatus = 'connected' | 'error' | 'expired' | 'disconnected'

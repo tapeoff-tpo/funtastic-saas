@@ -14,7 +14,6 @@ import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
 import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
-import { CjOnestyleAdapter } from '@/lib/marketplace/adapters/cjonestyle/adapter'
 import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
 import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
@@ -27,6 +26,7 @@ import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/ada
 import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter'
 import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
 import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
+import { PlayautoEmpAdapter } from '@/lib/marketplace/adapters/playauto-emp/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -69,11 +69,6 @@ export function createAdapter(
       return new Cafe24Adapter({
         access_token: credentials.access_token ?? '',
         mall_id: credentials.mall_id ?? '',
-      })
-    case 'cjonestyle':
-      return new CjOnestyleAdapter({
-        api_key: credentials.api_key ?? credentials.apiKey ?? '',
-        seller_code: credentials.seller_code ?? credentials.sellerCode ?? '',
       })
     case 'elevenst':
       return new ElevenstAdapter({
@@ -147,6 +142,13 @@ export function createAdapter(
       return new SsgmallAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
       })
+    case 'playauto-emp':
+      return new PlayautoEmpAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        base_url: credentials.base_url ?? credentials.baseUrl ?? '',
+        malls: credentials.malls ?? '',
+        states: credentials.states ?? '',
+      })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)
   }
@@ -190,6 +192,7 @@ const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'kakao-gift',
   'kakao-store',
   'funtastic-b2b',
+  'playauto-emp',
 ])
 const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
   ownerclan: 1,
@@ -208,6 +211,7 @@ const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
   'kakao-gift': 2,
   'kakao-store': 2,
   'funtastic-b2b': 2,
+  'playauto-emp': 1,
 }
 const ORDER_RANGE_MS = 24 * 60 * 60 * 1000
 const MANUAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/

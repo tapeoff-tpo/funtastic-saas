@@ -8,7 +8,6 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import '@/lib/marketplace/adapters/configs'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
-import { CjOnestyleAdapter } from '@/lib/marketplace/adapters/cjonestyle/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
@@ -17,6 +16,7 @@ import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/ada
 import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter'
 import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
 import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
+import { PlayautoEmpAdapter } from '@/lib/marketplace/adapters/playauto-emp/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -139,12 +139,6 @@ export async function testMarketplaceCredentials(
           secret_key: credentials.secret_key?.trim() ?? '',
         }).testConnection()
         break
-      case 'cjonestyle':
-        result = await new CjOnestyleAdapter({
-          api_key: credentials.api_key?.trim() ?? '',
-          seller_code: credentials.seller_code?.trim() ?? '',
-        }).testConnection()
-        break
       case 'ownerclan':
         result = await new OwnerclanAdapter({
           username: credentials.username?.trim() ?? credentials.vendor_id?.trim() ?? credentials.seller_id?.trim() ?? '',
@@ -195,6 +189,14 @@ export async function testMarketplaceCredentials(
       case 'ssgmall':
         result = await new SsgmallAdapter({
           api_key: credentials.api_key?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'playauto-emp':
+        result = await new PlayautoEmpAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
+          base_url: credentials.base_url?.trim() ?? '',
+          malls: credentials.malls?.trim() ?? '',
+          states: credentials.states?.trim() ?? '',
         }).testConnection()
         break
       default:

@@ -17,6 +17,7 @@ export const AUTO_MARKETPLACE_OPTIONS = [
   { marketplaceId: 'elevenst', displayName: '11번가' },
   { marketplaceId: 'zigzag', displayName: '지그재그' },
   { marketplaceId: 'toss-shopping', displayName: '토스쇼핑' },
+  { marketplaceId: 'playauto-emp', displayName: '플레이오토 EMP' },
 ] as const
 
 export const MARKETPLACE_DISPLAY_NAMES: Record<string, string> = {
@@ -44,6 +45,7 @@ export const MARKETPLACE_DISPLAY_NAMES: Record<string, string> = {
   specialoffer: '스페셜오퍼',
   tobizon: '투비즈온',
   'toss-shopping': '토스쇼핑',
+  'playauto-emp': '플레이오토 EMP',
   zigzag: '지그재그',
 }
 

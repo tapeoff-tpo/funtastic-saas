@@ -17,7 +17,7 @@ import type {
 const WMS_BASE_URL = 'https://www.wholesaledepot.co.kr/wms'
 const LOGIN_PAGE_URL = `${WMS_BASE_URL}/login`
 const ORDER_PAGE_URL = `${WMS_BASE_URL}/order`
-const DOWNLOAD_TIMEOUT_MS = 60_000
+const DOWNLOAD_TIMEOUT_MS = 25_000
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -53,6 +53,10 @@ function parseKstDate(value: string): Date {
     .replace(/-(\d)(?=T|$)/g, '-0$1')
   const date = new Date(`${normalized}+09:00`)
   return Number.isNaN(date.getTime()) ? new Date(value) : date
+}
+
+function logStep(step: string): void {
+  console.log(`[domechango-rpa] ${step}`)
 }
 
 async function summarizePage(page: Page): Promise<string> {
@@ -215,7 +219,9 @@ async function setSearchDates(page: Page, since: Date, until: Date): Promise<voi
 
 async function selectAllVisibleOrders(page: Page): Promise<void> {
   const checkbox = page.locator('table input[type="checkbox"]:visible').first()
-  if (!(await checkbox.isVisible().catch(() => false))) return
+  if (!(await checkbox.isVisible().catch(() => false))) {
+    throw new MarketplaceApiError('domechango', 404, '도매창고 주문 목록에서 선택할 주문 체크박스를 찾지 못했습니다.')
+  }
   if (await checkbox.isChecked().catch(() => false)) return
 
   await checkbox.check({ force: true, timeout: 3000 }).catch(async () => {
@@ -230,38 +236,42 @@ async function selectAllVisibleOrders(page: Page): Promise<void> {
 }
 
 async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
-  const acceptDialog = page.on('dialog', async (dialog) => {
+  page.on('dialog', async (dialog) => {
     await dialog.accept().catch(() => undefined)
   })
-  void acceptDialog
 
-  const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-    page.evaluate(() => {
-      const selects = Array.from(document.querySelectorAll('select'))
-      const select = selects.find((item) => {
-        const text = Array.from(item.options).map((option) => option.textContent ?? '').join(' ')
-        return /선택주문|엑셀/.test(text)
-      })
-      if (select instanceof HTMLSelectElement) {
-        const option = Array.from(select.options).find((item) => /엑셀/.test(item.textContent ?? ''))
-        if (option) {
-          select.value = option.value
-          select.dispatchEvent(new Event('input', { bubbles: true }))
-          select.dispatchEvent(new Event('change', { bubbles: true }))
-          return true
-        }
-      }
-
-      const controls = Array.from(document.querySelectorAll('button, input[type="button"], a, .btn'))
-      const control = controls.find((item) => /엑셀/.test(item.textContent ?? (item as HTMLInputElement).value ?? ''))
-      if (control instanceof HTMLElement) {
-        control.click()
+  const downloadPromise = page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
+  const triggered = await page.evaluate(() => {
+    const selects = Array.from(document.querySelectorAll('select'))
+    const select = selects.find((item) => {
+      const text = Array.from(item.options).map((option) => option.textContent ?? '').join(' ')
+      return /선택주문|엑셀/.test(text)
+    })
+    if (select instanceof HTMLSelectElement) {
+      const option = Array.from(select.options).find((item) => /엑셀/.test(item.textContent ?? ''))
+      if (option) {
+        select.value = option.value
+        select.dispatchEvent(new Event('input', { bubbles: true }))
+        select.dispatchEvent(new Event('change', { bubbles: true }))
         return true
       }
-      return false
-    }),
-  ]).catch((error) => {
+    }
+
+    const controls = Array.from(document.querySelectorAll('button, input[type="button"], a, .btn'))
+    const control = controls.find((item) => /엑셀/.test(item.textContent ?? (item as HTMLInputElement).value ?? ''))
+    if (control instanceof HTMLElement) {
+      control.click()
+      return true
+    }
+    return false
+  })
+
+  if (!triggered) {
+    downloadPromise.catch(() => undefined)
+    throw new MarketplaceApiError('domechango', 404, '도매창고 선택주문 엑셀 다운로드 컨트롤을 찾지 못했습니다.')
+  }
+
+  const download = await downloadPromise.catch((error) => {
     throw new MarketplaceApiError(
       'domechango',
       504,
@@ -294,6 +304,7 @@ export class DomechangoScraper implements MarketplaceScraper {
     const { context, page, close } = await openContext()
 
     try {
+      logStep('login: open login page')
       await gotoDomechango(page, LOGIN_PAGE_URL)
       if (await this.isLoggedIn(page)) {
         return {
@@ -303,6 +314,7 @@ export class DomechangoScraper implements MarketplaceScraper {
         }
       }
 
+      logStep('login: fill credentials')
       const idInput = page
         .locator('input[name="m_id"], input#m_id, input[name="id"], input[name="user_id"], input[name="userid"], input[name="login_id"], input[name="email"], input[type="text"], input[type="email"]')
         .first()
@@ -310,8 +322,10 @@ export class DomechangoScraper implements MarketplaceScraper {
 
       await idInput.fill(credentials.email)
       await passwordInput.fill(credentials.password)
+      logStep('login: submit')
       await submitLoginForm(page)
 
+      logStep('login: navigate to order list')
       await navigateToOrderList(page)
       const ok = await this.isLoggedIn(page)
       if (!ok) {
@@ -386,8 +400,10 @@ export class DomechangoScraper implements MarketplaceScraper {
     let ctx = await openContext(sessionState)
 
     try {
+      logStep('orders: open order list')
       await navigateToOrderList(ctx.page)
       if (!(await this.isLoggedIn(ctx.page))) {
+        logStep('orders: session invalid, login')
         await ctx.close()
         const loginResult = await this.login(credentials)
         if (!loginResult.success || !loginResult.storageState) {
@@ -395,15 +411,24 @@ export class DomechangoScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
+        logStep('orders: reopen order list after login')
         await navigateToOrderList(ctx.page)
       }
 
+      if (!(await this.isLoggedIn(ctx.page))) {
+        throw new MarketplaceApiError('domechango', 401, `도매창고 주문 리스트에 접근하지 못했습니다. (${await summarizePage(ctx.page)})`)
+      }
+
+      logStep('orders: set search filters')
       await setSearchDates(ctx.page, since, until)
       await selectNewOrderStatus(ctx.page)
+      logStep('orders: search')
       await clickButtonByText(ctx.page, /주문검색|검색/)
       await ctx.page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
       await ctx.page.waitForTimeout(1000)
+      logStep('orders: select rows')
       await selectAllVisibleOrders(ctx.page)
+      logStep('orders: download excel')
       return triggerSelectedOrderExcelDownload(ctx.page)
     } finally {
       await ctx.close()

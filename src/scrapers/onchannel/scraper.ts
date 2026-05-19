@@ -54,6 +54,11 @@ async function summarizePage(page: Page): Promise<string> {
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
 }
 
+async function gotoOnchannel(page: Page, url: string): Promise<void> {
+  await page.goto(url, { waitUntil: 'commit', timeout: 60000 })
+  await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => undefined)
+}
+
 async function submitLoginForm(page: Page): Promise<void> {
   const form = page.locator('form.form-signin, form[action*="/login/login_web.php"]').first()
   const submitButton = page.locator('button[type="submit"][name="login"], input[type="submit"][name="login"]').first()
@@ -126,7 +131,7 @@ export class OnchannelScraper implements MarketplaceScraper {
     const { context, page, close } = await openContext()
 
     try {
-      await page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
+      await gotoOnchannel(page, ORDER_PAGE_URL)
       if (await this.isLoggedIn(page)) {
         return {
           success: true,
@@ -145,7 +150,7 @@ export class OnchannelScraper implements MarketplaceScraper {
 
       await submitLoginForm(page)
 
-      await page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
+      await gotoOnchannel(page, ORDER_PAGE_URL)
       const ok = await this.isLoggedIn(page)
       if (!ok) {
         return {
@@ -172,7 +177,7 @@ export class OnchannelScraper implements MarketplaceScraper {
   async testSession(credentials: ScraperCredentials): Promise<{ ok: boolean; error?: string }> {
     const { page, close } = await openContext(credentials.storageState)
     try {
-      await page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
+      await gotoOnchannel(page, ORDER_PAGE_URL)
       if (await this.isLoggedIn(page)) return { ok: true }
 
       const loginResult = await this.login(credentials)
@@ -212,7 +217,7 @@ export class OnchannelScraper implements MarketplaceScraper {
     let ctx = await openContext(sessionState)
 
     try {
-      await ctx.page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
+      await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
       if (!(await this.isLoggedIn(ctx.page))) {
         await ctx.close()
         const loginResult = await this.login(credentials)
@@ -221,7 +226,7 @@ export class OnchannelScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
-        await ctx.page.goto(ORDER_PAGE_URL, { waitUntil: 'domcontentloaded' })
+        await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
       }
 
       await ctx.page.getByRole('button', { name: /주문내역\s*다운로드/ }).click()

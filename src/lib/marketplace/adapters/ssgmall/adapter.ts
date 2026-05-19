@@ -76,6 +76,21 @@ function asArray<T>(value: T[] | T | undefined): T[] {
   return value ? [value] : []
 }
 
+function appendWrappedOrders(
+  orders: SsgmallDirectionOrder[],
+  value: unknown,
+  nestedKey: 'shppDirection' | 'warehouseOut',
+) {
+  for (const entry of asArray(value as SsgmallDirectionOrder | SsgmallDirectionOrder[] | undefined)) {
+    if (entry && typeof entry === 'object' && nestedKey in entry) {
+      const nested = (entry as Record<string, SsgmallDirectionOrder | SsgmallDirectionOrder[] | undefined>)[nestedKey]
+      orders.push(...asArray(nested))
+    } else {
+      orders.push(entry)
+    }
+  }
+}
+
 function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
   const orders: SsgmallDirectionOrder[] = []
   orders.push(...asArray(response.result?.shppDirection))
@@ -91,11 +106,7 @@ function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
     response.response?.shppDirections,
     response.body?.shppDirections,
   ]) {
-    if (Array.isArray(directions)) {
-      orders.push(...directions)
-    } else {
-      orders.push(...asArray(directions?.shppDirection))
-    }
+    appendWrappedOrders(orders, directions, 'shppDirection')
   }
 
   return orders
@@ -116,11 +127,7 @@ function getWarehouseOuts(response: SsgmallApiResponse): SsgmallDirectionOrder[]
     response.response?.warehouseOuts,
     response.body?.warehouseOuts,
   ]) {
-    if (Array.isArray(warehouseOuts)) {
-      orders.push(...warehouseOuts)
-    } else {
-      orders.push(...asArray(warehouseOuts?.warehouseOut))
-    }
+    appendWrappedOrders(orders, warehouseOuts, 'warehouseOut')
   }
 
   return orders

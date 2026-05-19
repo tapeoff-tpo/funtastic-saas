@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { Page } from 'playwright'
+import type { Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   MarketplaceId,
@@ -69,6 +69,29 @@ async function submitLoginForm(page: Page): Promise<void> {
     }, await submitButton.elementHandle().catch(() => null)),
   ])
   await page.waitForLoadState('domcontentloaded').catch(() => undefined)
+}
+
+async function visibleLocators(root: Locator | Page, selector: string): Promise<Locator[]> {
+  const locator = root.locator(selector)
+  const locators: Locator[] = []
+  const count = await locator.count()
+  for (let index = 0; index < count; index += 1) {
+    const item = locator.nth(index)
+    if (await item.isVisible().catch(() => false)) locators.push(item)
+  }
+  return locators
+}
+
+async function setInputValue(input: Locator, value: string): Promise<void> {
+  await input.fill(value, { timeout: 3000 }).catch(async () => {
+    await input.evaluate((element, nextValue) => {
+      if (!(element instanceof HTMLInputElement)) return
+      element.removeAttribute('readonly')
+      element.value = nextValue
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+      element.dispatchEvent(new Event('change', { bubbles: true }))
+    }, value)
+  })
 }
 
 export class OnchannelScraper implements MarketplaceScraper {
@@ -178,19 +201,33 @@ export class OnchannelScraper implements MarketplaceScraper {
       }
 
       await ctx.page.getByRole('button', { name: /주문내역\s*다운로드/ }).click()
-      const dialog = ctx.page.getByRole('dialog').or(ctx.page.locator('.modal, [role="dialog"]').first())
+      const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').first()
+      await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
+      const downloadRoot: Locator | Page = (await dialog.isVisible().catch(() => false)) ? dialog : ctx.page
 
-      const dateInputs = dialog.locator('input[type="date"], input[placeholder*="YYYY"], input[placeholder*="yyyy"]')
-      await dateInputs.nth(0).fill(formatDateInput(since))
-      await dateInputs.nth(1).fill(formatDateInput(until))
+      const inputSelector =
+        'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])'
+      const scopedInputs = await visibleLocators(downloadRoot, inputSelector)
+      const dateInputs = scopedInputs.length >= 2 ? scopedInputs : await visibleLocators(ctx.page, inputSelector)
 
-      const checkbox = dialog.locator('input[type="checkbox"]').first()
+      if (dateInputs.length < 2) {
+        throw new MarketplaceApiError(
+          'onchannel',
+          500,
+          `온채널 주문내역 다운로드 기간 입력칸을 찾지 못했습니다. (${await summarizePage(ctx.page)})`,
+        )
+      }
+
+      await setInputValue(dateInputs[0], formatDateInput(since))
+      await setInputValue(dateInputs[1], formatDateInput(until))
+
+      const checkbox = downloadRoot.locator('input[type="checkbox"]').first()
       if (!(await checkbox.isChecked().catch(() => false))) {
         await checkbox.check({ force: true })
       }
 
       const downloadPromise = ctx.page.waitForEvent('download')
-      await dialog.getByRole('button', { name: /^다운로드$/ }).click()
+      await downloadRoot.getByRole('button', { name: /^다운로드$/ }).click()
       const download = await downloadPromise
       const stream = await download.createReadStream()
       if (!stream) throw new MarketplaceApiError('onchannel', 500, '온채널 엑셀 다운로드 스트림을 열 수 없습니다.')

@@ -27,6 +27,24 @@ import { saveNormalizedOrdersForConnection } from '@/lib/jobs/workers/order-coll
 // Side-effect import — registers all scraper instances on the registry
 import './register'
 
+const SCRAPE_JOB_TIMEOUT_MS = 120_000
+
+async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`RPA 작업이 ${Math.round(timeoutMs / 1000)}초 안에 끝나지 않았습니다.`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   const { marketplaceId, connectionId, userId, jobType, jobLogId, since, orderId, invoice } = job.data
 
@@ -62,7 +80,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   try {
     if (jobType === 'scrape-orders') {
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const orders = await scraper.getOrders(credentials, sinceDate)
+      const orders = await runWithTimeout(scraper.getOrders(credentials, sinceDate), SCRAPE_JOB_TIMEOUT_MS)
       const result = await saveNormalizedOrdersForConnection({
         marketplaceId,
         connectionId,
@@ -76,7 +94,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'scrape-claims') {
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-      const claims = await scraper.getClaimsOrders(credentials, sinceDate)
+      const claims = await runWithTimeout(scraper.getClaimsOrders(credentials, sinceDate), SCRAPE_JOB_TIMEOUT_MS)
       console.log(`[scrape-worker] ${marketplaceId}: ${claims.length} claims fetched`)
       await db
         .update(jobLogs)
@@ -84,7 +102,10 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'upload-invoice') {
       if (!orderId || !invoice) throw new Error('orderId/invoice required for upload-invoice')
-      const result = await scraper.uploadInvoice(credentials, orderId, invoice)
+      const result = await runWithTimeout(
+        scraper.uploadInvoice(credentials, orderId, invoice),
+        SCRAPE_JOB_TIMEOUT_MS,
+      )
       if (!result.success) throw new Error(result.error || 'invoice upload failed')
       await db
         .update(jobLogs)
@@ -99,6 +120,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
       .set({ status: 'failed', completedAt: new Date(), errorMessage: msg })
       .where(eq(jobLogs.id, logRow.id))
       .catch(() => {})
+    await closeBrowser().catch(() => {})
     throw e
   }
 }

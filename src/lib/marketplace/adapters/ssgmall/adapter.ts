@@ -34,6 +34,10 @@ const SSGMALL_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['api_key'],
 }
 
+const SSGMALL_SHINSEGAE_MALL_TYPE = '10'
+const SSGMALL_ORDER_COMPLETED_STATUS = '120'
+const SSGMALL_RELEASE_TYPES = '11,15'
+
 function formatDate(date: Date): string {
   const kst = new Date(date.getTime() + (9 * 60 * 60 * 1000))
   const yyyy = kst.getUTCFullYear()
@@ -358,7 +362,22 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             perdType,
             perdStrDts: formatDate(since),
             perdEndDts: formatDate(until),
-            shppStatCd: '10',
+            commType: '02',
+            commValue: '',
+            infloSiteNo: '',
+            shppDivDtlCd: SSGMALL_RELEASE_TYPES,
+            ordStatCd: SSGMALL_ORDER_COMPLETED_STATUS,
+            rsvtItemYn: '',
+            frgShppYn: '',
+            reOrderYns: '',
+            itemNm: '',
+            itemDiv: '',
+            itemId: '',
+            splVenItemId: '',
+            rcptpeNm: '',
+            ordpeNm: '',
+            mbrId: '',
+            mallTypeCd: SSGMALL_SHINSEGAE_MALL_TYPE,
           },
         } satisfies SsgmallDirectionRequest,
       })
@@ -377,7 +396,25 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             perdType,
             perdStrDts: formatDate(since),
             perdEndDts: formatDate(until),
-            shppStatCd: '10',
+            commType: '02',
+            commValue: '',
+            infloSiteNo: '',
+            shppDivDtlCd: SSGMALL_RELEASE_TYPES,
+            frgShppYn: '',
+            reOrderYns: '',
+            shppItemDivCd: '',
+            itemNm: '',
+            wblNoRegYn: '',
+            weightInfoRegYn: '',
+            itemDiv: '',
+            itemId: '',
+            splVenItemId: '',
+            rcptpeNm: '',
+            ordpeNm: '',
+            mbrId: '',
+            mallTypeCd: SSGMALL_SHINSEGAE_MALL_TYPE,
+            shppExptDivCd: '',
+            shppRsvtTypeCd: '',
           },
         } satisfies SsgmallWarehouseOutRequest,
       })

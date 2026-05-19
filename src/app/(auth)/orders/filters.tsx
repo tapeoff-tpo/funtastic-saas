@@ -437,6 +437,7 @@ export function OrderFilters({
         >
           <option value="orderedAt">주문일자</option>
           <option value="collectedAt">수집일자</option>
+          <option value="shippedAt">출고일자</option>
         </select>
       </div>
       <div className="flex flex-col gap-1">

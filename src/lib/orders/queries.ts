@@ -232,8 +232,34 @@ function parseKstDateBoundary(value: string, boundary: 'start' | 'end'): Date {
   return new Date(`${value}T${time}+09:00`)
 }
 
-function getDateFilterColumn(filters: OrderFilters) {
-  return filters.dateField === 'collectedAt' ? orders.collectedAt : orders.orderedAt
+function getDateFilterCondition(
+  filters: OrderFilters,
+  value: string,
+  boundary: 'start' | 'end',
+): SQL {
+  const date = parseKstDateBoundary(value, boundary)
+  if (filters.dateField === 'shippedAt') {
+    const shippedAtExpr = sql<Date | null>`COALESCE(
+      (
+        SELECT MAX(${shipments.shippedAt})
+        FROM ${shipments}
+        WHERE ${shipments.orderId} = ${orders.id}
+      ),
+      CASE
+        WHEN ${orders.status} IN ('shipped', 'delivering', 'delivered')
+        THEN ${orders.updatedAt}
+        ELSE NULL
+      END
+    )`
+    return boundary === 'start'
+      ? sql`${shippedAtExpr} >= ${date}`
+      : sql`${shippedAtExpr} <= ${date}`
+  }
+
+  const dateColumn = filters.dateField === 'collectedAt' ? orders.collectedAt : orders.orderedAt
+  return boundary === 'start'
+    ? gte(dateColumn, date)
+    : lte(dateColumn, date)
 }
 
 /**
@@ -261,14 +287,12 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(isNull(orders.mappedAt))
   }
 
-  const dateColumn = getDateFilterColumn(filters)
-
   if (filters.dateFrom) {
-    conditions.push(gte(dateColumn, parseKstDateBoundary(filters.dateFrom, 'start')))
+    conditions.push(getDateFilterCondition(filters, filters.dateFrom, 'start'))
   }
 
   if (filters.dateTo) {
-    conditions.push(lte(dateColumn, parseKstDateBoundary(filters.dateTo, 'end')))
+    conditions.push(getDateFilterCondition(filters, filters.dateTo, 'end'))
   }
 
   if (filters.search) {

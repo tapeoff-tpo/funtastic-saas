@@ -10,6 +10,8 @@ import {
   changeStatusAction,
   bulkChangeStatusAction,
   forceBulkChangeStatusAction,
+  forceBulkClaimStatusAction,
+  forceBulkHoldOrdersAction,
   bulkUploadInvoiceAction,
   unlockOrderSnapshotsAction,
 } from './actions'
@@ -93,6 +95,12 @@ interface ManualInvoiceButtonProps {
 }
 
 const ALL_ORDER_STATUSES = Object.keys(ORDER_STATUS_LABELS) as OrderStatus[]
+
+const MANUAL_SPECIAL_STATUSES = [
+  { value: 'exchange', label: '교환' },
+  { value: 'return', label: '반품' },
+  { value: 'held', label: '미발송' },
+] as const
 
 const CARRIER_LABELS: Record<string, string> = {
   CJGLS: 'CJ대한통운',
@@ -307,6 +315,39 @@ export function ManualStatusChangeButton({
     })
   }
 
+  const handleSpecialChange = (specialStatus: (typeof MANUAL_SPECIAL_STATUSES)[number]['value']) => {
+    if (selectedCount === 0) {
+      toast.info('상태를 변경할 주문을 선택하세요.')
+      return
+    }
+
+    const label = MANUAL_SPECIAL_STATUSES.find((status) => status.value === specialStatus)?.label ?? specialStatus
+    setOpen(false)
+    if (
+      !window.confirm(
+        `선택한 ${selectedCount}건의 주문상태를 '${label}'(으)로 변경하시겠습니까?`,
+      )
+    ) {
+      return
+    }
+
+    startTransition(async () => {
+      const result = specialStatus === 'held'
+        ? await forceBulkHoldOrdersAction(selectedIds)
+        : await forceBulkClaimStatusAction(selectedIds, specialStatus)
+
+      if (result.errors.length === 0) {
+        toast.success(`${result.updated}건의 주문상태가 ${label}(으)로 변경되었습니다.`)
+      } else {
+        toast.warning(`${result.updated}건 변경, ${result.errors.length}건 실패`)
+        for (const failure of result.errors.slice(0, 3)) {
+          toast.error(failure.error, { duration: 7000 })
+        }
+      }
+      onChanged?.()
+    })
+  }
+
   const handleUnlockSnapshots = () => {
     if (selectedCount === 0) {
       toast.info('잠금 해제할 주문을 선택하세요.')
@@ -354,6 +395,17 @@ export function ManualStatusChangeButton({
               className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
             >
               {ORDER_STATUS_LABELS[status]}
+            </button>
+          ))}
+          <div className="my-1 border-t" />
+          {MANUAL_SPECIAL_STATUSES.map((status) => (
+            <button
+              key={status.value}
+              type="button"
+              onClick={() => handleSpecialChange(status.value)}
+              className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
+            >
+              {status.label}
             </button>
           ))}
           {canUnlockOrderSnapshots && (

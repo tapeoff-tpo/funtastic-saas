@@ -2,6 +2,8 @@
 
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { db } from '@/lib/db'
+import { claims, orders } from '@/lib/db/schema'
 import {
   updateOrderStatus,
   holdOrder,
@@ -15,6 +17,7 @@ import {
 } from '@/lib/shipping/actions'
 import type { OrderStatus } from '@/lib/orders/types'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { and, eq, inArray } from 'drizzle-orm'
 
 /**
  * Server action: change a single order's status.
@@ -90,6 +93,113 @@ export async function forceBulkChangeStatusAction(
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
   return result
+}
+
+/**
+ * Server action: selected orders manual claim classification.
+ * This only makes the orders visible in 교환/반품 tabs; it does not create pickup/reship copies.
+ */
+export async function forceBulkClaimStatusAction(
+  orderIds: string[],
+  claimType: 'return' | 'exchange',
+): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { updated: 0, errors: [{ orderId: '', error: 'Unauthorized' }] }
+
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const uniqueIds = Array.from(new Set(orderIds.filter(Boolean)))
+  if (uniqueIds.length === 0) return { updated: 0, errors: [] }
+
+  const ownedOrders = await db
+    .select({
+      id: orders.id,
+      marketplaceId: orders.marketplaceId,
+      marketplaceOrderId: orders.marketplaceOrderId,
+      internalNo: orders.internalNo,
+    })
+    .from(orders)
+    .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, uniqueIds)))
+
+  const ownedIds = new Set(ownedOrders.map((order) => order.id))
+  const errors = uniqueIds
+    .filter((id) => !ownedIds.has(id))
+    .map((orderId) => ({ orderId, error: 'Order not found' }))
+
+  if (ownedOrders.length === 0) return { updated: 0, errors }
+
+  const inserted = await db
+    .insert(claims)
+    .values(ownedOrders.map((order) => ({
+      orderId: order.id,
+      userId: workspaceUserId,
+      marketplaceId: order.marketplaceId,
+      marketplaceClaimId: `manual-status-${claimType}-${order.id}`,
+      claimType,
+      claimStatus: 'requested' as const,
+      reason: '주문상태변경',
+      rawData: {
+        source: 'manual-status-change',
+        marketplaceOrderId: order.marketplaceOrderId,
+        internalNo: order.internalNo,
+      },
+      requestedAt: new Date(),
+      updatedAt: new Date(),
+    })))
+    .onConflictDoNothing()
+    .returning({ id: claims.id })
+
+  revalidatePath('/orders')
+  revalidateTag('orders', 'max')
+  return { updated: inserted.length, errors }
+}
+
+/**
+ * Server action: selected orders manual hold classification (미발송).
+ */
+export async function forceBulkHoldOrdersAction(
+  orderIds: string[],
+): Promise<{ updated: number; errors: Array<{ orderId: string; error: string }> }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { updated: 0, errors: [{ orderId: '', error: 'Unauthorized' }] }
+
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const uniqueIds = Array.from(new Set(orderIds.filter(Boolean)))
+  if (uniqueIds.length === 0) return { updated: 0, errors: [] }
+
+  const ownedOrders = await db
+    .select({ id: orders.id, status: orders.status })
+    .from(orders)
+    .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, uniqueIds)))
+
+  const ownedIds = new Set(ownedOrders.map((order) => order.id))
+  const errors = uniqueIds
+    .filter((id) => !ownedIds.has(id))
+    .map((orderId) => ({ orderId, error: 'Order not found' }))
+
+  const updatedOrders = await db.transaction(async (tx) => {
+    const result: Array<{ id: string }> = []
+    for (const order of ownedOrders) {
+      const [updated] = await tx
+        .update(orders)
+        .set({
+          isHeld: true,
+          holdReason: '주문상태변경: 미발송',
+          heldAt: new Date(),
+          previousStatus: order.status,
+          updatedAt: new Date(),
+        })
+        .where(eq(orders.id, order.id))
+        .returning({ id: orders.id })
+      if (updated) result.push(updated)
+    }
+    return result
+  })
+
+  revalidatePath('/orders')
+  revalidateTag('orders', 'max')
+  return { updated: updatedOrders.length, errors }
 }
 
 /**

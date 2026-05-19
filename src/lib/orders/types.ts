@@ -70,7 +70,7 @@ export type OrderSearchField =
   | 'trackingNumber'
   | 'logisticsMessage'
 
-export type OrderDateField = 'orderedAt' | 'collectedAt'
+export type OrderDateField = 'orderedAt' | 'collectedAt' | 'shippedAt'
 
 export type ScanFilter = 'scanned' | 'unscanned'
 export type ScanResultFilter = 'ok' | 'duplicate' | 'not_found'

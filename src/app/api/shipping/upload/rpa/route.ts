@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
   const queue = getMarketplaceScrapeQueue()
   let queued = 0
   const results: Array<{ orderId: string; shipmentId: string; queued: boolean; error?: string }> = []
+  const jobLogIds: string[] = []
 
   for (const row of targetRows) {
     if (!row.connectionId) {
@@ -86,6 +87,7 @@ export async function POST(req: NextRequest) {
         status: 'queued',
       })
       .returning({ id: jobLogs.id })
+    jobLogIds.push(logRow.id)
 
     await db.update(shipments).set({
       uploadStatus: 'uploading',
@@ -119,5 +121,5 @@ export async function POST(req: NextRequest) {
     results.push({ orderId: row.orderId, shipmentId: row.shipmentId, queued: true })
   }
 
-  return NextResponse.json({ queued, skipped: results.length - queued, total: results.length, results })
+  return NextResponse.json({ queued, skipped: results.length - queued, total: results.length, results, jobLogIds })
 }

@@ -52,6 +52,8 @@ interface MappingTarget {
 
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
 const EXACT_OPTION_ID = '__exact__'
+const RPA_INVOICE_POLL_INTERVAL_MS = 1500
+const RPA_INVOICE_POLL_TIMEOUT_MS = 3 * 60 * 1000
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]
@@ -119,6 +121,16 @@ export function ShippingActions({
   const [userTemplates, setUserTemplates] = useState<UserTemplate[] | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const exportMenuRef = useRef<HTMLDivElement>(null)
+  const rpaInvoicePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const rpaInvoicePollStartedAtRef = useRef<number | null>(null)
+
+  const stopRpaInvoicePolling = () => {
+    if (rpaInvoicePollTimerRef.current) {
+      clearInterval(rpaInvoicePollTimerRef.current)
+      rpaInvoicePollTimerRef.current = null
+    }
+    rpaInvoicePollStartedAtRef.current = null
+  }
 
   // localStorage 에서 마지막 선택 양식 복원
   useEffect(() => {
@@ -146,6 +158,10 @@ export function ShippingActions({
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [exportMenuOpen])
+
+  useEffect(() => {
+    return () => stopRpaInvoicePolling()
+  }, [])
 
   const hasSelection = selectedOrderIds.length > 0
 
@@ -219,6 +235,7 @@ export function ShippingActions({
     }
 
     setUploadingRpaInvoice(true)
+    let keepUploadingUntilPollFinishes = false
     try {
       const res = await fetch('/api/shipping/upload/rpa', {
         method: 'POST',
@@ -230,6 +247,7 @@ export function ShippingActions({
         skipped?: number
         message?: string
         error?: string
+        jobLogIds?: string[]
         results?: Array<{ queued: boolean; error?: string }>
       }
 
@@ -248,12 +266,73 @@ export function ShippingActions({
       } else {
         toast.error(data.message ?? data.results?.find((result) => result.error)?.error ?? 'RPA 전송할 송장이 없습니다.')
       }
-      router.refresh()
+      if (queued > 0 && data.jobLogIds?.length) {
+        keepUploadingUntilPollFinishes = true
+        router.refresh()
+        pollRpaInvoiceUpload(data.jobLogIds)
+      } else {
+        router.refresh()
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'RPA 송장 전송 요청에 실패했습니다.')
     } finally {
-      setUploadingRpaInvoice(false)
+      if (!keepUploadingUntilPollFinishes) {
+        setUploadingRpaInvoice(false)
+      }
     }
+  }
+
+  const pollRpaInvoiceUpload = (jobLogIds: string[]) => {
+    stopRpaInvoicePolling()
+    rpaInvoicePollStartedAtRef.current = Date.now()
+    const idsParam = jobLogIds.join(',')
+
+    const finishPolling = () => {
+      stopRpaInvoicePolling()
+      setUploadingRpaInvoice(false)
+      router.refresh()
+    }
+
+    const poll = async () => {
+      if (
+        rpaInvoicePollStartedAtRef.current &&
+        Date.now() - rpaInvoicePollStartedAtRef.current > RPA_INVOICE_POLL_TIMEOUT_MS
+      ) {
+        finishPolling()
+        toast.error('RPA 송장 전송 완료 확인이 지연되고 있습니다. 잠시 후 새로고침해서 확인해주세요.')
+        return
+      }
+
+      try {
+        const res = await fetch(`/api/orders/collect/status?ids=${idsParam}`)
+        if (!res.ok) return
+
+        const data = await res.json() as {
+          allDone?: boolean
+          logs?: Array<{ status: string; errorMessage?: string | null }>
+        }
+        if (!data.allDone || !data.logs) return
+
+        const completed = data.logs.filter((log) => log.status === 'completed').length
+        const failedLogs = data.logs.filter((log) => log.status === 'failed' || log.status === 'cancelled')
+        const failed = failedLogs.length
+        const firstError = failedLogs.find((log) => log.errorMessage)?.errorMessage
+
+        finishPolling()
+        if (completed > 0 && failed === 0) {
+          toast.success(`${completed}건 RPA 송장 전송 완료`)
+        } else if (completed > 0) {
+          toast.warning(`${completed}건 완료, ${failed}건 실패${firstError ? `: ${firstError}` : ''}`)
+        } else {
+          toast.error(firstError ?? 'RPA 송장 전송에 실패했습니다.')
+        }
+      } catch {
+        // 네트워크 오류는 다음 폴링에서 다시 확인
+      }
+    }
+
+    void poll()
+    rpaInvoicePollTimerRef.current = setInterval(() => void poll(), RPA_INVOICE_POLL_INTERVAL_MS)
   }
 
   // 현재 선택된 양식 — localStorage 에 저장된 ID 가 목록에 없으면 첫 번째로 fallback

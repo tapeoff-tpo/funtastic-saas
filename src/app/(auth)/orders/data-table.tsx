@@ -193,6 +193,7 @@ export function DataTable({
         </div>
         <ManualStatusChangeButton
           selectedIds={selectedIds}
+          selectedOrders={selectedOrders}
           canUnlockOrderSnapshots={canUnlockOrderSnapshots}
           onChanged={() => {
             setRowSelection({})

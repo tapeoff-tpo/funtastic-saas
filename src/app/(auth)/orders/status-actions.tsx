@@ -10,7 +10,6 @@ import {
   changeStatusAction,
   bulkChangeStatusAction,
   forceBulkChangeStatusAction,
-  forceBulkClaimStatusAction,
   forceBulkHoldOrdersAction,
   bulkUploadInvoiceAction,
   unlockOrderSnapshotsAction,
@@ -85,6 +84,7 @@ interface BulkActionBarProps {
 
 interface ManualStatusChangeButtonProps {
   selectedIds: string[]
+  selectedOrders: OrderRow[]
   canUnlockOrderSnapshots?: boolean
   onChanged?: () => void
 }
@@ -101,6 +101,15 @@ const MANUAL_SPECIAL_STATUSES = [
   { value: 'return', label: '반품' },
   { value: 'held', label: '미발송' },
 ] as const
+
+const CLAIM_REASON_OPTIONS = [
+  { value: 'change_of_mind', label: '변심' },
+  { value: 'wrong_delivery', label: '오배송' },
+  { value: 'defective', label: '불량' },
+  { value: 'other', label: '기타사유' },
+] as const
+
+type ClaimReasonCode = (typeof CLAIM_REASON_OPTIONS)[number]['value']
 
 const CARRIER_LABELS: Record<string, string> = {
   CJGLS: 'CJ대한통운',
@@ -279,12 +288,31 @@ export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoice
 
 export function ManualStatusChangeButton({
   selectedIds,
+  selectedOrders,
   canUnlockOrderSnapshots = false,
   onChanged,
 }: ManualStatusChangeButtonProps) {
   const [open, setOpen] = useState(false)
+  const [claimModalType, setClaimModalType] = useState<'return' | 'exchange' | null>(null)
+  const [claimReasonCode, setClaimReasonCode] = useState<ClaimReasonCode>('change_of_mind')
+  const [claimReasonDetail, setClaimReasonDetail] = useState('')
+  const [claimQuantities, setClaimQuantities] = useState<Record<string, number>>({})
   const [isPending, startTransition] = useTransition()
   const selectedCount = selectedIds.length
+
+  function openClaimModal(claimType: 'return' | 'exchange') {
+    if (selectedOrders.length === 0) {
+      toast.info('상태를 변경할 주문을 선택하세요.')
+      return
+    }
+    setOpen(false)
+    setClaimModalType(claimType)
+    setClaimReasonCode('change_of_mind')
+    setClaimReasonDetail('')
+    setClaimQuantities(Object.fromEntries(
+      selectedOrders.flatMap((order) => order.items.map((item) => [item.id, item.quantity])),
+    ))
+  }
 
   const handleChange = (newStatus: OrderStatus) => {
     if (selectedCount === 0) {
@@ -321,6 +349,11 @@ export function ManualStatusChangeButton({
       return
     }
 
+    if (specialStatus === 'return' || specialStatus === 'exchange') {
+      openClaimModal(specialStatus)
+      return
+    }
+
     const label = MANUAL_SPECIAL_STATUSES.find((status) => status.value === specialStatus)?.label ?? specialStatus
     setOpen(false)
     if (
@@ -332,9 +365,7 @@ export function ManualStatusChangeButton({
     }
 
     startTransition(async () => {
-      const result = specialStatus === 'held'
-        ? await forceBulkHoldOrdersAction(selectedIds)
-        : await forceBulkClaimStatusAction(selectedIds, specialStatus)
+      const result = await forceBulkHoldOrdersAction(selectedIds)
 
       if (result.errors.length === 0) {
         toast.success(`${result.updated}건의 주문상태가 ${label}(으)로 변경되었습니다.`)
@@ -342,6 +373,65 @@ export function ManualStatusChangeButton({
         toast.warning(`${result.updated}건 변경, ${result.errors.length}건 실패`)
         for (const failure of result.errors.slice(0, 3)) {
           toast.error(failure.error, { duration: 7000 })
+        }
+      }
+      onChanged?.()
+    })
+  }
+
+  const submitClaimStatusChange = () => {
+    if (!claimModalType) return
+    const label = claimModalType === 'return' ? '반품' : '교환'
+    const payloadByOrder = selectedOrders.map((order) => ({
+      order,
+      quantities: order.items
+        .map((item) => ({
+          orderItemId: item.id,
+          quantity: Number(claimQuantities[item.id] ?? 0),
+        }))
+        .filter((item) => item.quantity > 0),
+    })).filter((entry) => entry.quantities.length > 0)
+
+    if (payloadByOrder.length === 0) {
+      toast.error('접수 수량을 1개 이상 입력해주세요.')
+      return
+    }
+
+    startTransition(async () => {
+      let success = 0
+      const errors: string[] = []
+
+      for (const entry of payloadByOrder) {
+        try {
+          const res = await fetch('/api/orders/claims', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              orderId: entry.order.id,
+              claimType: claimModalType,
+              reasonCode: claimReasonCode,
+              reasonDetail: claimReasonDetail,
+              quantities: entry.quantities,
+            }),
+          })
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({})) as { error?: string }
+            errors.push(`${entry.order.marketplaceOrderId}: ${data.error ?? `${label} 접수 실패`}`)
+            continue
+          }
+          success++
+        } catch (error) {
+          errors.push(`${entry.order.marketplaceOrderId}: ${error instanceof Error ? error.message : `${label} 접수 실패`}`)
+        }
+      }
+
+      if (errors.length === 0) {
+        toast.success(`${success}건 ${label} 접수 완료`)
+        setClaimModalType(null)
+      } else {
+        toast.warning(`${success}건 접수, ${errors.length}건 실패`)
+        for (const error of errors.slice(0, 3)) {
+          toast.error(error, { duration: 8000 })
         }
       }
       onChanged?.()
@@ -375,54 +465,132 @@ export function ManualStatusChangeButton({
   }
 
   return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        disabled={selectedCount === 0 || isPending}
-        className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-        title="선택한 주문의 상태만 변경합니다. 몰 통보와 재고 차감은 실행하지 않습니다."
-      >
-        {isPending ? '변경 중...' : `주문상태변경${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-md border bg-white py-1 shadow-lg">
-          {ALL_ORDER_STATUSES.map((status) => (
-            <button
-              key={status}
-              type="button"
-              onClick={() => handleChange(status)}
-              className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
-            >
-              {ORDER_STATUS_LABELS[status]}
-            </button>
-          ))}
-          <div className="my-1 border-t" />
-          {MANUAL_SPECIAL_STATUSES.map((status) => (
-            <button
-              key={status.value}
-              type="button"
-              onClick={() => handleSpecialChange(status.value)}
-              className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
-            >
-              {status.label}
-            </button>
-          ))}
-          {canUnlockOrderSnapshots && (
-            <>
-              <div className="my-1 border-t" />
+    <>
+      <div className="relative">
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          disabled={selectedCount === 0 || isPending}
+          className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+          title="선택한 주문의 상태만 변경합니다. 몰 통보와 재고 차감은 실행하지 않습니다."
+        >
+          {isPending ? '변경 중...' : `주문상태변경${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+        </button>
+        {open && (
+          <div className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-md border bg-white py-1 shadow-lg">
+            {ALL_ORDER_STATUSES.map((status) => (
+              <button
+                key={status}
+                type="button"
+                onClick={() => handleChange(status)}
+                className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
+              >
+                {ORDER_STATUS_LABELS[status]}
+              </button>
+            ))}
+            <div className="my-1 border-t" />
+            {MANUAL_SPECIAL_STATUSES.map((status) => (
+              <button
+                key={status.value}
+                type="button"
+                onClick={() => handleSpecialChange(status.value)}
+                className="block w-full px-3 py-1.5 text-left text-sm hover:bg-muted"
+              >
+                {status.label}
+              </button>
+            ))}
+            {canUnlockOrderSnapshots && (
+              <>
+                <div className="my-1 border-t" />
+                <button
+                  type="button"
+                  onClick={handleUnlockSnapshots}
+                  className="block w-full px-3 py-1.5 text-left text-sm text-red-700 hover:bg-red-50"
+                >
+                  출고잠금 해제
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {claimModalType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="grid max-h-[88vh] w-full max-w-3xl grid-rows-[auto_1fr_auto] overflow-hidden rounded-lg bg-white shadow-xl">
+            <div className="border-b px-5 py-3">
+              <h3 className="text-base font-semibold">{claimModalType === 'return' ? '반품 접수' : '교환 접수'}</h3>
+            </div>
+            <div className="min-h-0 space-y-4 overflow-auto p-5">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                {CLAIM_REASON_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setClaimReasonCode(option.value)}
+                    className={`rounded border px-3 py-2 text-sm ${claimReasonCode === option.value ? 'border-blue-500 bg-blue-50 text-blue-700' : ''}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={claimReasonDetail}
+                onChange={(event) => setClaimReasonDetail(event.target.value)}
+                placeholder="상세 사유"
+                className="h-20 w-full resize-none rounded border px-3 py-2 text-sm"
+              />
+              <div className="rounded border">
+                {selectedOrders.map((order) => (
+                  <div key={order.id} className="border-b last:border-b-0">
+                    <div className="flex items-center justify-between gap-2 bg-muted/40 px-3 py-2 text-xs">
+                      <span className="font-medium">{order.marketplaceName ?? order.marketplaceId}</span>
+                      <span className="font-mono text-muted-foreground">{order.marketplaceOrderId}</span>
+                    </div>
+                    {order.items.map((item) => (
+                      <div key={item.id} className="grid grid-cols-[1fr_88px] items-center gap-2 border-t px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="truncate text-xs font-medium" title={item.displayName ?? item.productName}>
+                            {item.displayName ?? item.productName}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            주문수량 {item.quantity}개
+                          </div>
+                        </div>
+                        <input
+                          type="number"
+                          min={0}
+                          max={item.quantity}
+                          value={claimQuantities[item.id] ?? 0}
+                          onChange={(event) => {
+                            const next = Math.min(item.quantity, Math.max(0, Number(event.target.value)))
+                            setClaimQuantities((prev) => ({ ...prev, [item.id]: next }))
+                          }}
+                          className="h-8 rounded border px-2 text-right text-sm"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 border-t px-5 py-3">
+              <button type="button" onClick={() => setClaimModalType(null)} className="rounded border px-3 py-1.5 text-sm">
+                취소
+              </button>
               <button
                 type="button"
-                onClick={handleUnlockSnapshots}
-                className="block w-full px-3 py-1.5 text-left text-sm text-red-700 hover:bg-red-50"
+                onClick={submitClaimStatusChange}
+                disabled={isPending}
+                className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
-                출고잠금 해제
+                {isPending ? '접수중' : '접수'}
               </button>
-            </>
-          )}
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 

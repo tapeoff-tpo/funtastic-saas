@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
 import type { ClaimType } from '@/lib/orders/types'
 import { copyOrder } from '@/lib/orders/copy-order'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 const VALID_TYPES = ['return', 'exchange'] as const
 const REASON_LABELS = {
@@ -27,6 +28,7 @@ export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let body: CreateClaimBody
   try {
@@ -62,7 +64,7 @@ export async function POST(req: NextRequest) {
       internalNo: orders.internalNo,
     })
     .from(orders)
-    .where(and(eq(orders.id, body.orderId), eq(orders.userId, user.id)))
+    .where(and(eq(orders.id, body.orderId), eq(orders.userId, workspaceUserId)))
     .limit(1)
 
   if (!order) return NextResponse.json({ error: '주문을 찾을 수 없습니다.' }, { status: 404 })
@@ -78,7 +80,7 @@ export async function POST(req: NextRequest) {
     .where(and(
       eq(claims.marketplaceId, order.marketplaceId),
       eq(claims.marketplaceClaimId, marketplaceClaimId),
-      eq(claims.userId, user.id),
+      eq(claims.userId, workspaceUserId),
     ))
     .limit(1)
   if (existingClaim) {
@@ -89,7 +91,7 @@ export async function POST(req: NextRequest) {
     .insert(claims)
     .values({
       orderId: order.id,
-      userId: user.id,
+      userId: workspaceUserId,
       marketplaceId: order.marketplaceId,
       marketplaceClaimId,
       claimType: body.claimType,
@@ -108,7 +110,7 @@ export async function POST(req: NextRequest) {
 
   const copies: Array<{ id: string; kind: 'return-pickup' | 'exchange-pickup' | 'exchange-reship' }> = []
   if (body.claimType === 'return') {
-    const pickup = await copyOrder(order.id, user.id, {
+    const pickup = await copyOrder(order.id, workspaceUserId, {
       status: 'confirmed',
       logisticsMessage: `반품회수준비 / ${reason} / 원주문 ${order.internalNo}`,
       itemQuantities: claimQuantities,
@@ -126,7 +128,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.claimType === 'exchange') {
-    const pickup = await copyOrder(order.id, user.id, {
+    const pickup = await copyOrder(order.id, workspaceUserId, {
       status: 'confirmed',
       logisticsMessage: `교환회수준비 / ${reason} / 원주문 ${order.internalNo}`,
       itemQuantities: claimQuantities,
@@ -142,7 +144,7 @@ export async function POST(req: NextRequest) {
     }
     copies.push({ id: pickup.newOrderId, kind: 'exchange-pickup' })
 
-    const reship = await copyOrder(order.id, user.id, {
+    const reship = await copyOrder(order.id, workspaceUserId, {
       status: 'confirmed',
       logisticsMessage: `교환발송준비 / ${reason} / 원주문 ${order.internalNo}`,
       itemQuantities: claimQuantities,

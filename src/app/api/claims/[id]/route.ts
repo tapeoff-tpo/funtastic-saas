@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { claims } from '@/lib/db/schema'
 import { completeReturnClaim, getReturnableItemsForClaim } from '@/lib/inventory/actions'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 const VALID_STATUSES = ['requested', 'processing', 'completed', 'rejected'] as const
 type ClaimStatus = (typeof VALID_STATUSES)[number]
@@ -21,8 +22,9 @@ export async function GET(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  const items = await getReturnableItemsForClaim(user.id, id)
+  const items = await getReturnableItemsForClaim(workspaceUserId, id)
   return NextResponse.json({ items })
 }
 
@@ -34,6 +36,7 @@ export async function PATCH(
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const body = (await req.json()) as {
     claimStatus?: ClaimStatus
@@ -56,7 +59,7 @@ export async function PATCH(
       return NextResponse.json({ error: '반품완료 처리 정보가 올바르지 않습니다.' }, { status: 400 })
     }
 
-    const result = await completeReturnClaim(user.id, id, disposition, quantities)
+    const result = await completeReturnClaim(workspaceUserId, id, disposition, quantities)
     if (!result.success) {
       return NextResponse.json({ error: result.error ?? '반품완료 처리 실패' }, { status: 400 })
     }
@@ -66,7 +69,7 @@ export async function PATCH(
   const updated = await db
     .update(claims)
     .set({ claimStatus: body.claimStatus, updatedAt: new Date() })
-    .where(and(eq(claims.id, id), eq(claims.userId, user.id)))
+    .where(and(eq(claims.id, id), eq(claims.userId, workspaceUserId)))
     .returning({ id: claims.id, claimStatus: claims.claimStatus })
 
   if (updated.length === 0) {

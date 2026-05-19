@@ -34,9 +34,6 @@ const SSGMALL_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['api_key'],
 }
 
-const SSGMALL_DEFAULT_RELEASE_TYPES = '11,15'
-const SSGMALL_ORDER_COMPLETED_STATUS = '120'
-
 function formatDate(date: Date): string {
   const kst = new Date(date.getTime() + (9 * 60 * 60 * 1000))
   const yyyy = kst.getUTCFullYear()
@@ -78,12 +75,21 @@ function asArray<T>(value: T[] | T | undefined): T[] {
 function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
   const orders: SsgmallDirectionOrder[] = []
   orders.push(...asArray(response.shppDirection))
+  orders.push(...asArray(response.data?.shppDirection))
+  orders.push(...asArray(response.response?.shppDirection))
+  orders.push(...asArray(response.body?.shppDirection))
 
-  const directions = response.shppDirections
-  if (Array.isArray(directions)) {
-    orders.push(...directions)
-  } else {
-    orders.push(...asArray(directions?.shppDirection))
+  for (const directions of [
+    response.shppDirections,
+    response.data?.shppDirections,
+    response.response?.shppDirections,
+    response.body?.shppDirections,
+  ]) {
+    if (Array.isArray(directions)) {
+      orders.push(...directions)
+    } else {
+      orders.push(...asArray(directions?.shppDirection))
+    }
   }
 
   return orders
@@ -92,26 +98,57 @@ function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
 function getWarehouseOuts(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
   const orders: SsgmallDirectionOrder[] = []
   orders.push(...asArray(response.warehouseOut))
+  orders.push(...asArray(response.data?.warehouseOut))
+  orders.push(...asArray(response.response?.warehouseOut))
+  orders.push(...asArray(response.body?.warehouseOut))
 
-  const warehouseOuts = response.warehouseOuts
-  if (Array.isArray(warehouseOuts)) {
-    orders.push(...warehouseOuts)
-  } else {
-    orders.push(...asArray(warehouseOuts?.warehouseOut))
+  for (const warehouseOuts of [
+    response.warehouseOuts,
+    response.data?.warehouseOuts,
+    response.response?.warehouseOuts,
+    response.body?.warehouseOuts,
+  ]) {
+    if (Array.isArray(warehouseOuts)) {
+      orders.push(...warehouseOuts)
+    } else {
+      orders.push(...asArray(warehouseOuts?.warehouseOut))
+    }
   }
 
   return orders
 }
 
 function isSuccessResponse(response: SsgmallApiResponse): boolean {
-  const code = String(response.result?.resultCode ?? response.resultCode ?? '').trim()
+  const code = String(
+    response.result?.resultCode
+    ?? response.data?.result?.resultCode
+    ?? response.data?.resultCode
+    ?? response.response?.result?.resultCode
+    ?? response.response?.resultCode
+    ?? response.body?.result?.resultCode
+    ?? response.body?.resultCode
+    ?? response.resultCode
+    ?? '',
+  ).trim()
   return code === '' || code === '00' || code === '0000' || code === '200' || code.toUpperCase() === 'SUCCESS'
 }
 
 function responseMessage(response: SsgmallApiResponse, fallback: string): string {
   return response.result?.resultDesc
+    || response.data?.result?.resultDesc
+    || response.data?.resultDesc
+    || response.response?.result?.resultDesc
+    || response.response?.resultDesc
+    || response.body?.result?.resultDesc
+    || response.body?.resultDesc
     || response.resultDesc
     || response.result?.resultMessage
+    || response.data?.result?.resultMessage
+    || response.data?.resultMessage
+    || response.response?.result?.resultMessage
+    || response.response?.resultMessage
+    || response.body?.result?.resultMessage
+    || response.body?.resultMessage
     || response.resultMessage
     || fallback
 }
@@ -271,10 +308,6 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             perdType,
             perdStrDts: formatDate(since),
             perdEndDts: formatDate(until),
-            commType: '02',
-            commValue: '',
-            shppDivDtlCd: SSGMALL_DEFAULT_RELEASE_TYPES,
-            ordStatCd: SSGMALL_ORDER_COMPLETED_STATUS,
             shppStatCd: '10',
           },
         } satisfies SsgmallDirectionRequest,
@@ -294,9 +327,6 @@ export class SsgmallAdapter implements MarketplaceAdapter {
             perdType,
             perdStrDts: formatDate(since),
             perdEndDts: formatDate(until),
-            commType: '02',
-            commValue: '',
-            shppDivDtlCd: SSGMALL_DEFAULT_RELEASE_TYPES,
             shppStatCd: '10',
           },
         } satisfies SsgmallWarehouseOutRequest,

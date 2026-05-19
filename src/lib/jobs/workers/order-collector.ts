@@ -155,23 +155,9 @@ export function createAdapter(
 }
 
 function shouldAutoConfirmOrders(): boolean {
-  return process.env.MARKETPLACE_AUTO_CONFIRM_ON_COLLECT === '1'
-}
-
-function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || marketplaceId === 'naver' || marketplaceId === 'ssgmall' || shouldAutoConfirmOrders()
-}
-
-function confirmedMarketplaceStatus(marketplaceId: string): string {
-  if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
-  if (marketplaceId === 'ownerclan') return 'preparing'
-  if (marketplaceId === 'domeggook') return '배송준비중'
-  if (marketplaceId === 'funtastic-b2b') return '상품준비중'
-  return 'CONFIRMED'
-}
-
-function shouldConfirmCollectedOrder(upsertedStatus: string): boolean {
-  if (upsertedStatus === 'new') return true
+  // Absolute workflow rule: collection never confirms orders automatically.
+  // 수집 → 신규 → 매핑 → 사용자가 [확정] 클릭 → 확인.
+  // Do not re-enable without an explicit product decision and regression check.
   return false
 }
 
@@ -495,11 +481,6 @@ export async function collectOrdersForConnection(params: {
       `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` - 저장/갱신 ${ordersToSave.length}건, 기존 ${skippedExistingCount}건 포함` : ''}`,
     )
 
-    // UPSERT each order with deduplication on (marketplace_id, marketplace_order_id)
-    // Track newly inserted 'new' status orders for auto-confirm
-    type ConfirmTarget = { id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
-    const newOrderIds: ConfirmTarget[] = []
-
     const totalOrders = ordersToSave.length
     let idx = 0
     for (const order of ordersToSave) {
@@ -530,104 +511,12 @@ export async function collectOrdersForConnection(params: {
         await setProgress(`주문 저장 중 (${idx}/${totalOrders})`)
       }
 
-      // Collect orders that need marketplace-side confirmation.
-      if (shouldConfirmCollectedOrder(upsertedOrder.status)) {
-        newOrderIds.push({
-          id: upsertedOrder.id,
-          marketplaceOrderId: order.marketplaceOrderId,
-          rawData: enrichOrderRawData(orderForSave),
-        })
-      }
     }
 
-    let confirmTargets = newOrderIds
-    if (
-      (marketplaceId === 'ownerclan' ||
-        marketplaceId === 'domeggook' ||
-        marketplaceId === 'naver' ||
-        marketplaceId === 'funtastic-b2b' ||
-        marketplaceId === 'ssgmall') &&
-      normalizedOrders.length > 0
-    ) {
-      const existingNewOrders = await db
-        .select({
-          id: orders.id,
-          marketplaceOrderId: orders.marketplaceOrderId,
-          rawData: orders.rawData,
-        })
-        .from(orders)
-        .where(
-          and(
-            eq(orders.userId, userId),
-            eq(orders.marketplaceId, marketplaceId),
-            eq(orders.status, 'new'),
-            inArray(
-              orders.marketplaceOrderId,
-              normalizedOrders.map((order) => order.marketplaceOrderId)
-            )
-          )
-        )
-
-      if (existingNewOrders.length > 0) {
-        const targetsByOrderId = new Map(confirmTargets.map((target) => [target.marketplaceOrderId, target]))
-        for (const order of existingNewOrders) {
-          if (!targetsByOrderId.has(order.marketplaceOrderId)) {
-            targetsByOrderId.set(order.marketplaceOrderId, {
-              id: order.id,
-              marketplaceOrderId: order.marketplaceOrderId,
-              rawData: order.rawData ?? null,
-            })
-          }
-        }
-        confirmTargets = Array.from(targetsByOrderId.values())
-      }
-    }
-
-    // 4.5 Auto-confirm is opt-in only. Default workflow:
+    // 4.5 Auto-confirm is permanently disabled. Default workflow:
     // 수집 → 신규(status='new') → 매핑 → 사용자가 [확정] 클릭 → 확인(status='confirmed').
-    if (
-      confirmTargets.length > 0 &&
-      typeof adapter.confirmOrder === 'function' &&
-      shouldConfirmOnCollect(marketplaceId) &&
-      marketplaceId !== '10x10'
-    ) {
-      await setProgress(`신규 주문 확인 중 (0/${confirmTargets.length})`)
-      let confirmIdx = 0
-      const confirmFailures: string[] = []
-      for (const o of confirmTargets) {
-        confirmIdx++
-        try {
-          const result = await adapter.confirmOrder(o.marketplaceOrderId, o.rawData ?? undefined)
-          if (result.success) {
-            await db
-              .update(orders)
-              .set({ status: 'confirmed', marketplaceStatus: confirmedMarketplaceStatus(marketplaceId), updatedAt: new Date() })
-              .where(eq(orders.id, o.id))
-          } else {
-            confirmFailures.push(`${o.marketplaceOrderId}: ${result.error ?? 'unknown error'}`)
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
-          confirmFailures.push(`${o.marketplaceOrderId}: ${message}`)
-          console.warn(`[OrderCollector] Auto-confirm failed for ${marketplaceId} order ${o.marketplaceOrderId}:`, message)
-          // 실패 시 status는 'new' 유지 — 사용자가 확정 대기 탭에서 수동으로 재시도
-        }
-        if (confirmIdx === confirmTargets.length || confirmIdx % 5 === 0) {
-          await setProgress(`신규 주문 확인 중 (${confirmIdx}/${confirmTargets.length})`)
-        }
-      }
-      if (
-        (marketplaceId === 'ownerclan' ||
-          marketplaceId === 'domeggook' ||
-          marketplaceId === 'naver' ||
-          marketplaceId === 'funtastic-b2b' ||
-          marketplaceId === 'ssgmall') &&
-        confirmFailures.length > 0
-      ) {
-        throw new Error(`${marketplaceId} 주문확인 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)
-      }
-    } else if (newOrderIds.length > 0 && !shouldAutoConfirmOrders()) {
-      await setProgress(`${newOrderIds.length}건 신규 주문 저장 완료`)
+    if (ordersCollected > 0 && !shouldAutoConfirmOrders()) {
+      await setProgress(`${ordersCollected}건 신규/기존 주문 저장 완료`)
     }
 
     // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 주문 수집/갱신만 수행)

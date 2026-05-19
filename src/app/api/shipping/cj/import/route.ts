@@ -13,11 +13,13 @@ import { db } from '@/lib/db'
 import { shipments, orders } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { parseCjInvoiceExcel } from '@/lib/shipping/excel/cj-import'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
   let buffer: Buffer
   try {
@@ -38,11 +40,15 @@ export async function POST(req: NextRequest) {
   // Verify orders belong to this user
   const orderIds = [...new Set(rows.map((r) => r.orderId).filter(Boolean))]
   const validOrders = orderIds.length > 0
-    ? await db.select({ id: orders.id }).from(orders).where(
-        and(inArray(orders.id, orderIds), eq(orders.userId, user.id))
+    ? await db.select({ id: orders.id, status: orders.status, mappedAt: orders.mappedAt }).from(orders).where(
+        and(inArray(orders.id, orderIds), eq(orders.userId, workspaceUserId))
       )
     : []
-  const validOrderIdSet = new Set(validOrders.map((o) => o.id))
+  const validOrderIdSet = new Set(
+    validOrders
+      .filter((order) => order.status === 'confirmed' && order.mappedAt)
+      .map((o) => o.id),
+  )
 
   let matched = 0
   let unmatched = 0
@@ -69,7 +75,7 @@ export async function POST(req: NextRequest) {
 
     await db.insert(shipments).values({
       orderId: row.orderId,
-      userId: user.id,
+      userId: workspaceUserId,
       trackingNumber: row.trackingNumber,
       carrierId: 'cj',
       carrierName: 'CJ대한통운',
@@ -82,7 +88,7 @@ export async function POST(req: NextRequest) {
         preparingAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(and(eq(orders.id, row.orderId), eq(orders.userId, user.id), eq(orders.status, 'confirmed')))
+      .where(and(eq(orders.id, row.orderId), eq(orders.userId, workspaceUserId), eq(orders.status, 'confirmed')))
     matched++
   }
 

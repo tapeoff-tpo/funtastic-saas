@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
       marketplaceOrderId: orders.marketplaceOrderId,
       connectionId: orders.connectionId,
       status: orders.status,
+      mappedAt: orders.mappedAt,
       rawData: orders.rawData,
     })
     .from(orders)
@@ -89,6 +90,26 @@ export async function POST(request: NextRequest) {
     if (!connectionId) {
       for (const order of groupOrders) {
         // Just update local status for manual imports
+        if (order.status !== 'new') {
+          results.push({
+            orderId: order.id,
+            marketplaceOrderId: order.marketplaceOrderId,
+            marketplaceId,
+            success: false,
+            error: `이미 ${order.status} 상태입니다`,
+          })
+          continue
+        }
+        if (!order.mappedAt) {
+          results.push({
+            orderId: order.id,
+            marketplaceOrderId: order.marketplaceOrderId,
+            marketplaceId,
+            success: false,
+            error: '매핑완료된 신규 주문만 확정할 수 있습니다.',
+          })
+          continue
+        }
         await db
           .update(orders)
           .set({ status: 'confirmed', updatedAt: new Date() })
@@ -163,6 +184,17 @@ export async function POST(request: NextRequest) {
           marketplaceId,
           success: false,
           error: `이미 ${order.status} 상태입니다`,
+        })
+        continue
+      }
+
+      if (!order.mappedAt) {
+        results.push({
+          orderId: order.id,
+          marketplaceOrderId: order.marketplaceOrderId,
+          marketplaceId,
+          success: false,
+          error: '매핑완료된 신규 주문만 확정할 수 있습니다.',
         })
         continue
       }

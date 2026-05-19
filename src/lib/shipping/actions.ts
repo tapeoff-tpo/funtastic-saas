@@ -38,6 +38,7 @@ export async function queueInvoiceUpload(
       .select({
         id: orders.id,
         status: orders.status,
+        mappedAt: orders.mappedAt,
         marketplaceId: orders.marketplaceId,
         marketplaceOrderId: orders.marketplaceOrderId,
         connectionId: orders.connectionId,
@@ -48,6 +49,12 @@ export async function queueInvoiceUpload(
 
     if (!order) {
       return { success: false, error: `Order not found: ${orderId}` }
+    }
+    if (order.status !== 'confirmed') {
+      return { success: false, error: '확인 상태 주문만 송장 등록할 수 있습니다.' }
+    }
+    if (!order.mappedAt) {
+      return { success: false, error: '매핑완료된 주문만 송장 등록할 수 있습니다.' }
     }
 
     // Create shipment record
@@ -108,6 +115,7 @@ export async function registerInvoice(
       .select({
         id: orders.id,
         status: orders.status,
+        mappedAt: orders.mappedAt,
         userId: orders.userId,
       })
       .from(orders)
@@ -116,6 +124,12 @@ export async function registerInvoice(
 
     if (!order) {
       return { success: false, error: `Order not found: ${orderId}` }
+    }
+    if (order.status !== 'confirmed') {
+      return { success: false, error: '확인 상태 주문만 송장 등록할 수 있습니다.' }
+    }
+    if (!order.mappedAt) {
+      return { success: false, error: '매핑완료된 주문만 송장 등록할 수 있습니다.' }
     }
 
     const [existing] = await db

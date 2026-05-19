@@ -94,6 +94,30 @@ async function setInputValue(input: Locator, value: string): Promise<void> {
   })
 }
 
+async function ensureCheckboxChecked(root: Locator | Page, checkbox: Locator): Promise<void> {
+  if (await checkbox.isChecked().catch(() => false)) return
+
+  await checkbox.check({ force: true, timeout: 3000 }).catch(async () => {
+    const id = await checkbox.getAttribute('id').catch(() => null)
+    if (id) {
+      const label = root.locator(`label[for="${id}"]`).first()
+      if (await label.isVisible().catch(() => false)) {
+        await label.click({ force: true }).catch(() => undefined)
+      }
+    }
+  })
+
+  if (await checkbox.isChecked().catch(() => false)) return
+
+  await checkbox.evaluate((element) => {
+    if (!(element instanceof HTMLInputElement)) return
+    element.checked = true
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+}
+
 export class OnchannelScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'onchannel'
   readonly displayName = '온채널'
@@ -222,9 +246,7 @@ export class OnchannelScraper implements MarketplaceScraper {
       await setInputValue(dateInputs[1], formatDateInput(until))
 
       const checkbox = downloadRoot.locator('input[type="checkbox"]').first()
-      if (!(await checkbox.isChecked().catch(() => false))) {
-        await checkbox.check({ force: true })
-      }
+      await ensureCheckboxChecked(downloadRoot, checkbox)
 
       const downloadPromise = ctx.page.waitForEvent('download')
       await downloadRoot.getByRole('button', { name: /^다운로드$/ }).click()

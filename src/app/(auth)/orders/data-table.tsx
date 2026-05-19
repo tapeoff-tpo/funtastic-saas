@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { bulkDeleteOrdersAction } from './actions'
 import {
   useReactTable,
@@ -49,6 +49,7 @@ export function DataTable({
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
   const [deletePending, startDelete] = useTransition()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   useEffect(() => {
     setColumnVisibility((prev) => ({ ...prev, mappingStatus: showMappingColumn }))
@@ -65,11 +66,18 @@ export function DataTable({
 
   const pageCount = Math.ceil(total / pageSize)
   const [columnSizing, setColumnSizing] = useColumnSizing('orders-table')
+  const dataKey = useMemo(() => data.map((order) => order.id).join('|'), [data])
+  const visibleOrdersById = useMemo(() => new Map(data.map((order) => [order.id, order])), [data])
+
+  useEffect(() => {
+    setRowSelection({})
+  }, [dataKey, searchParams])
 
   const table = useReactTable({
     data,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => row.id,
     manualPagination: true,
     manualSorting: true,
     manualFiltering: true,
@@ -91,27 +99,22 @@ export function DataTable({
     },
   })
 
-  const selectedCount = Object.keys(rowSelection).length
-  const tableWidth = Math.max(table.getTotalSize(), 1620)
-
   // Extract selected order IDs for bulk actions
   const selectedIds = useMemo(() => {
     return Object.keys(rowSelection)
       .filter((key) => rowSelection[key])
-      .map((key) => {
-        const row = table.getRow(key)
-        return row?.original?.id
-      })
-      .filter(Boolean) as string[]
-  }, [rowSelection, table])
+      .filter((key) => visibleOrdersById.has(key))
+  }, [rowSelection, visibleOrdersById])
+
+  const selectedCount = selectedIds.length
+  const tableWidth = Math.max(table.getTotalSize(), 1620)
 
   // Extract selected orders (full data including items) for bulk mapping
   const selectedOrders = useMemo(() => {
-    return Object.keys(rowSelection)
-      .filter((key) => rowSelection[key])
-      .map((key) => table.getRow(key)?.original)
+    return selectedIds
+      .map((id) => visibleOrdersById.get(id))
       .filter(Boolean) as OrderRow[]
-  }, [rowSelection, table])
+  }, [selectedIds, visibleOrdersById])
 
   return (
     <div className="space-y-2">

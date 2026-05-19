@@ -423,6 +423,14 @@ export async function collectOrdersForConnection(params: {
       credentials[credKey] = value
     }
 
+    if (marketplaceId === 'playauto-emp') {
+      for (const credKey of ['base_url', 'malls', 'states']) {
+        const vaultKey = `${credKey}${aliasTag}`
+        const value = await readCredential(marketplaceId, userId, vaultKey)
+        if (value) credentials[credKey] = value
+      }
+    }
+
     if (marketplaceId === 'cafe24') {
       await setProgress('Cafe24 토큰 갱신 중...')
       await refreshCafe24AccessToken({ userId, credentials, aliasTag })

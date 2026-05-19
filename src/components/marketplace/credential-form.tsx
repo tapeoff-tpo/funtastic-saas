@@ -49,6 +49,10 @@ const credentialLabels: Record<string, string> = {
   states: 'EMP 주문상태',
 }
 
+const optionalCredentialFields: Record<string, string[]> = {
+  'playauto-emp': ['base_url', 'malls', 'states'],
+}
+
 export function CredentialForm({ marketplaces }: CredentialFormProps) {
   const [selectedId, setSelectedId] = useState('')
   const [state, formAction, isPending] = useActionState(
@@ -57,6 +61,7 @@ export function CredentialForm({ marketplaces }: CredentialFormProps) {
   )
 
   const selectedMarketplace = marketplaces.find((m) => m.id === selectedId)
+  const optionalFields = selectedMarketplace ? optionalCredentialFields[selectedMarketplace.id] ?? [] : []
 
   useEffect(() => {
     if (state?.success && state.message) {
@@ -123,6 +128,31 @@ export function CredentialForm({ marketplaces }: CredentialFormProps) {
                     required
                     placeholder={`${credentialLabels[credKey] ?? credKey}을(를) 입력하세요`}
                   />
+                </div>
+              ))}
+
+              {optionalFields.map((credKey) => (
+                <div key={credKey} className="space-y-1">
+                  <Label htmlFor={credKey}>
+                    {credentialLabels[credKey] ?? credKey}
+                  </Label>
+                  <Input
+                    id={credKey}
+                    name={credKey}
+                    type="text"
+                    placeholder={
+                      credKey === 'malls'
+                        ? '예: 11번가;스마트스토어;쿠팡'
+                        : credKey === 'states'
+                          ? '예: 신규주문,주문확인'
+                          : `${credentialLabels[credKey] ?? credKey} 입력`
+                    }
+                  />
+                  {credKey === 'malls' && (
+                    <p className="text-xs text-muted-foreground">
+                      플레이오토에서 가져올 하위 쇼핑몰명을 세미콜론(;) 또는 줄바꿈으로 구분해 입력하세요. 비우면 EMP 전체 주문을 조회합니다.
+                    </p>
+                  )}
                 </div>
               ))}
 

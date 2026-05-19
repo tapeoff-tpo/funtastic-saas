@@ -13,6 +13,13 @@ export const metadata: Metadata = {
   title: '주문 수집',
 }
 
+function linkedMarketplacesFromMetadata(metadata: Record<string, unknown> | null | undefined): string[] {
+  const value = metadata?.linkedMarketplaces
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry).trim()).filter(Boolean)
+    : []
+}
+
 export default async function OrdersCollectPage() {
   const supabase = await createClient()
   const {
@@ -59,6 +66,7 @@ export default async function OrdersCollectPage() {
       isManual: c.isManual,
       authType: c.authType,
     }),
+    linkedMarketplaces: linkedMarketplacesFromMetadata(c.metadata),
   }))
 
   const existingAutoMarketplaceIds = new Set(
@@ -79,6 +87,7 @@ export default async function OrdersCollectPage() {
         expiresAt: null,
         isManual: false,
         integrationMethod: getIntegrationMethod(marketplace.marketplaceId),
+        linkedMarketplaces: [],
       })),
   ]
 

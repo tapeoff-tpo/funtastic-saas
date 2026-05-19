@@ -54,7 +54,7 @@ export default async function MarketplaceSettingsPage() {
     integrationMethod: getIntegrationMethod(config.id, { authType: config.authType }),
   }))
   const marketplaceOptions = catalog
-    .filter((marketplace) => marketplace.integrationMethod === 'api')
+    .filter((marketplace) => marketplace.integrationMethod === 'api' || marketplace.integrationMethod === 'hub')
     .map((marketplace) => ({
       id: marketplace.id,
       name: marketplace.name,
@@ -78,6 +78,12 @@ export default async function MarketplaceSettingsPage() {
         isManual: connection.isManual,
         authType: connection.authType,
       }) === 'api'
+    ),
+    hub: connections.filter((connection) =>
+      getIntegrationMethod(connection.marketplaceId, {
+        isManual: connection.isManual,
+        authType: connection.authType,
+      }) === 'hub'
     ),
     rpa: connections.filter((connection) =>
       getIntegrationMethod(connection.marketplaceId, {
@@ -114,6 +120,7 @@ export default async function MarketplaceSettingsPage() {
           <h2 className="text-lg font-semibold">연결된 마켓플레이스</h2>
           <div className="grid gap-4 lg:grid-cols-3">
             <ConnectionGroup title="API 연동" method="api" connections={groupedConnections.api} />
+            <ConnectionGroup title="허브 연동" method="hub" connections={groupedConnections.hub} />
             <ConnectionGroup title="RPA 연동" method="rpa" connections={groupedConnections.rpa} />
             <ConnectionGroup title="엑셀 업로드" method="excel" connections={groupedConnections.excel} />
           </div>

@@ -30,6 +30,17 @@ interface ActionResult {
   message?: string
 }
 
+const OPTIONAL_CREDENTIALS: Record<string, string[]> = {
+  'playauto-emp': ['base_url', 'malls', 'states'],
+}
+
+function splitLinkedMarketplaces(value: string | null | undefined): string[] {
+  return (value ?? '')
+    .split(/[;\n]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+}
+
 /**
  * 저장된 마켓플레이스 인증정보를 Vault에서 읽어 복호화된 값으로 반환.
  * 수정 화면 pre-fill 용도. 브라우저에 평문으로 노출되므로,
@@ -237,6 +248,7 @@ export async function registerMarketplaceCredentials(
   const storeAlias = (formData.get('store_alias') as string)?.trim() || 'default'
   const config = marketplaceRegistry.get(marketplaceId).config
   const vaultNames: string[] = []
+  const optionalCredentialKeys = OPTIONAL_CREDENTIALS[marketplaceId] ?? []
 
   // Validate all required credentials are provided
   for (const credKey of config.requiredCredentials) {
@@ -263,8 +275,9 @@ export async function registerMarketplaceCredentials(
   }
 
   try {
-    for (const credKey of config.requiredCredentials) {
+    for (const credKey of [...config.requiredCredentials, ...optionalCredentialKeys]) {
       const value = formData.get(credKey) as string
+      if (!value || value.trim() === '') continue
       const vaultKey = `${credKey}${aliasTag}`
       const name = `mkt_${workspaceUserId}_${marketplaceId}_${vaultKey}`
       await storeCredential(marketplaceId, workspaceUserId, vaultKey, value.trim())
@@ -280,6 +293,12 @@ export async function registerMarketplaceCredentials(
   const displayName = storeAlias === 'default'
     ? config.name
     : `${config.name} (${storeAlias})`
+  const metadata = marketplaceId === 'playauto-emp'
+    ? {
+        integrationMethod: 'hub',
+        linkedMarketplaces: splitLinkedMarketplaces((formData.get('malls') as string | null) ?? ''),
+      }
+    : undefined
 
   try {
     const existing = await db
@@ -300,6 +319,7 @@ export async function registerMarketplaceCredentials(
         .set({
           displayName,
           vaultSecretNames: vaultNames,
+          ...(metadata ? { metadata } : {}),
           status: 'connected',
           updatedAt: new Date(),
         })
@@ -313,6 +333,7 @@ export async function registerMarketplaceCredentials(
         authType: config.authType,
         status: 'connected',
         vaultSecretNames: vaultNames,
+        ...(metadata ? { metadata } : {}),
       })
     }
   } catch (err) {

@@ -31,6 +31,7 @@ interface Connection {
   expiresAt: Date | null
   isManual: boolean
   integrationMethod: IntegrationMethod
+  linkedMarketplaces?: string[]
 }
 
 interface MarketplaceDashboardProps {
@@ -69,7 +70,7 @@ function riskScore(c: Connection): number {
   return 3
 }
 
-type FilterKey = 'all' | 'api' | 'rpa' | 'excel' | 'connected' | 'error' | 'expiring' | 'disconnected'
+type FilterKey = 'all' | 'api' | 'hub' | 'rpa' | 'excel' | 'connected' | 'error' | 'expiring' | 'disconnected'
 type CollectionRangeMode = 'preset' | 'custom'
 
 function toDateInputValue(date: Date): string {
@@ -151,7 +152,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
 
   // 필터 카운트 — 칩에 표시
   const counts = useMemo(() => {
-    const c = { all: connections.length, api: 0, rpa: 0, excel: 0, connected: 0, error: 0, expiring: 0, disconnected: 0 }
+    const c = { all: connections.length, api: 0, hub: 0, rpa: 0, excel: 0, connected: 0, error: 0, expiring: 0, disconnected: 0 }
     for (const conn of connections) {
       c[conn.integrationMethod]++
       if (conn.status === 'error') c.error++
@@ -170,6 +171,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     return connections
       .filter((c) => {
         if (filter === 'api') return c.integrationMethod === 'api'
+        if (filter === 'hub') return c.integrationMethod === 'hub'
         if (filter === 'rpa') return c.integrationMethod === 'rpa'
         if (filter === 'excel') return c.integrationMethod === 'excel'
         if (filter === 'connected') return !c.isManual && c.status !== 'disconnected' && c.status !== 'error'
@@ -197,9 +199,11 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
   )
   const visibleSections = useMemo(() => {
     const api = visible.filter((c) => c.integrationMethod === 'api')
+    const hub = visible.filter((c) => c.integrationMethod === 'hub')
     const rpa = visible.filter((c) => c.integrationMethod === 'rpa')
     const excel = visible.filter((c) => c.integrationMethod === 'excel')
     return [
+      { key: 'hub', label: '허브 연동', description: '여러 쇼핑몰을 모아주는 중계 API로 주문을 수집합니다.', rows: hub },
       { key: 'api', label: 'API 연동', description: '공식/제휴 API로 주문을 수집합니다', rows: api },
       { key: 'rpa', label: 'RPA 자동화', description: '판매자센터 화면에서 엑셀 다운로드를 자동화합니다', rows: rpa },
       { key: 'excel', label: '엑셀 수동', description: '주문 엑셀 업로드로 수집합니다', rows: excel },
@@ -320,6 +324,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
   const filterChips: { key: FilterKey; label: string; count: number; dot?: string }[] = [
     { key: 'all', label: '전체', count: counts.all },
     { key: 'api', label: 'API', count: counts.api, dot: 'bg-emerald-500' },
+    { key: 'hub', label: '허브', count: counts.hub, dot: 'bg-cyan-500' },
     { key: 'rpa', label: 'RPA', count: counts.rpa, dot: 'bg-violet-500' },
     { key: 'excel', label: '엑셀', count: counts.excel, dot: 'bg-blue-500' },
     { key: 'connected', label: '연결됨', count: counts.connected, dot: 'bg-green-500' },
@@ -745,6 +750,8 @@ function ConnRow({
           className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${
             conn.integrationMethod === 'excel'
               ? 'bg-blue-100 text-blue-700'
+              : conn.integrationMethod === 'hub'
+                ? 'bg-cyan-100 text-cyan-700'
               : conn.integrationMethod === 'rpa'
                 ? 'bg-violet-100 text-violet-700'
                 : 'bg-emerald-100 text-emerald-700'
@@ -790,6 +797,12 @@ function ConnRow({
           <span className="text-amber-600">인증 만료 임박</span>
         ) : conn.integrationMethod === 'excel' ? (
           <span className="text-muted-foreground">엑셀 업로드 전용</span>
+        ) : conn.integrationMethod === 'hub' ? (
+          <span className="line-clamp-2 text-muted-foreground" title={conn.linkedMarketplaces?.join(', ')}>
+            {conn.linkedMarketplaces && conn.linkedMarketplaces.length > 0
+              ? `연동몰: ${conn.linkedMarketplaces.join(', ')}`
+              : '연동몰: EMP 설정 전체'}
+          </span>
         ) : conn.integrationMethod === 'rpa' ? (
           <span className="text-muted-foreground">RPA 자동 다운로드 준비</span>
         ) : (

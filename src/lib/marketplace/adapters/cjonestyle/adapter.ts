@@ -42,6 +42,9 @@ function formatDate(date: Date): string {
 async function extractCjOnestyleError(error: unknown): Promise<string> {
   if (error instanceof HTTPError) {
     const body = await error.response.text().catch(() => '')
+    if (error.response.status === 403 && body.includes('403 Forbidden')) {
+      return 'CJ온스타일 API 접근이 403으로 거절되었습니다. CJ온스타일에 등록된 운영서버 IP와 API 권한/승인 상태를 확인해주세요.'
+    }
     if (!body) return error.message
 
     try {

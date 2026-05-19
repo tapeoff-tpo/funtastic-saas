@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { jobLogs } from '@/lib/db/schema'
-import { inArray } from 'drizzle-orm'
+import { and, inArray, like, sql } from 'drizzle-orm'
 
 /**
  * GET /api/orders/collect/status?ids=id1,id2,id3
@@ -30,6 +30,22 @@ export async function GET(request: NextRequest) {
   if (ids.length === 0) {
     return NextResponse.json({ error: 'ids must not be empty' }, { status: 400 })
   }
+
+  await db
+    .update(jobLogs)
+    .set({
+      status: 'failed',
+      completedAt: new Date(),
+      errorMessage: 'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.',
+    })
+    .where(
+      and(
+        inArray(jobLogs.id, ids),
+        inArray(jobLogs.status, ['queued', 'running']),
+        like(jobLogs.jobType, 'scrape-%'),
+        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '3 minutes'`,
+      ),
+    )
 
   const logs = await db
     .select({

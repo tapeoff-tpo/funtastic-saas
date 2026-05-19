@@ -115,17 +115,20 @@ export async function cancelManualJobs(jobLogIds: string[]): Promise<{
   cancelled: string[]
   alreadyRunning: string[]
 }> {
-  const queue = getOrderCollectionQueue()
+  const queues = [getOrderCollectionQueue(), getMarketplaceScrapeQueue()]
   const cancelled: string[] = []
   const alreadyRunning: string[] = []
 
-  // Get waiting jobs and match by jobLogId in data
-  const waitingJobs = await queue.getJobs(['waiting', 'delayed'])
+  // Get waiting jobs and match by jobLogId in data. Running scraper jobs
+  // cannot be force-stopped safely here, but queued RPA jobs can be removed.
+  for (const queue of queues) {
+    const waitingJobs = await queue.getJobs(['waiting', 'delayed'])
 
-  for (const job of waitingJobs) {
-    if (job.data.jobLogId && jobLogIds.includes(job.data.jobLogId)) {
-      await job.remove()
-      cancelled.push(job.data.jobLogId)
+    for (const job of waitingJobs) {
+      if (job.data.jobLogId && jobLogIds.includes(job.data.jobLogId)) {
+        await job.remove()
+        cancelled.push(job.data.jobLogId)
+      }
     }
   }
 

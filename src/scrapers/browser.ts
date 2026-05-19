@@ -48,6 +48,8 @@ export async function openContext(
     storageState: storageState ? JSON.parse(storageState) : undefined,
   })
   const page = await context.newPage()
+  page.setDefaultTimeout(15_000)
+  page.setDefaultNavigationTimeout(60_000)
   return {
     context,
     page,

@@ -14,6 +14,7 @@ import type {
 } from '../types'
 
 const ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=preparing'
+const DOWNLOAD_TIMEOUT_MS = 60_000
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -229,7 +230,7 @@ export class OnchannelScraper implements MarketplaceScraper {
         await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
       }
 
-      await ctx.page.getByRole('button', { name: /주문내역\s*다운로드/ }).click()
+      await ctx.page.getByRole('button', { name: /주문내역\s*다운로드/ }).click({ timeout: 15_000 })
       const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').first()
       await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
       const downloadRoot: Locator | Page = (await dialog.isVisible().catch(() => false)) ? dialog : ctx.page
@@ -253,9 +254,15 @@ export class OnchannelScraper implements MarketplaceScraper {
       const checkbox = downloadRoot.locator('input[type="checkbox"]').first()
       await ensureCheckboxChecked(downloadRoot, checkbox)
 
-      const downloadPromise = ctx.page.waitForEvent('download')
-      await downloadRoot.getByRole('button', { name: /^다운로드$/ }).click()
-      const download = await downloadPromise
+      const downloadPromise = ctx.page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
+      await downloadRoot.getByRole('button', { name: /^다운로드$/ }).click({ timeout: 15_000 })
+      const download = await downloadPromise.catch((error) => {
+        throw new MarketplaceApiError(
+          'onchannel',
+          504,
+          `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
+        )
+      })
       const stream = await download.createReadStream()
       if (!stream) throw new MarketplaceApiError('onchannel', 500, '온채널 엑셀 다운로드 스트림을 열 수 없습니다.')
 

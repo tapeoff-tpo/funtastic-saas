@@ -16,6 +16,7 @@ import type {
 } from '../types'
 
 const ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=preparing'
+const ALL_ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=all&orderDate=all&orderBy=obd.id%7Cdesc'
 const DOWNLOAD_TIMEOUT_MS = 60_000
 
 function formatDateInput(date: Date): string {
@@ -153,7 +154,134 @@ async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise
     return
   }
   const fallback = root.locator('button, input[type="button"], input[type="submit"], a.btn').filter({ hasText: pattern }).first()
-  await fallback.click({ timeout: 15_000 })
+  if (await fallback.isVisible().catch(() => false)) {
+    await fallback.click({ timeout: 15_000 })
+    return
+  }
+
+  const clicked = await root.locator('body, :scope').first().evaluate((element, source) => {
+    const regexp = new RegExp(source)
+    const controls = Array.from(
+      element.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn'),
+    )
+
+    for (const control of controls) {
+      if (!(control instanceof HTMLElement)) continue
+      const text = `${control.innerText || ''} ${(control as HTMLInputElement).value || ''}`.trim()
+      if (!regexp.test(text)) continue
+      control.click()
+      return true
+    }
+    return false
+  }, pattern.source).catch(() => false)
+
+  if (!clicked) {
+    throw new MarketplaceApiError('onchannel', 500, `온채널 버튼을 찾지 못했습니다. (${pattern.source})`)
+  }
+}
+
+async function selectSearchTypeForOrderCode(page: Page): Promise<void> {
+  const selects = await visibleLocators(page, 'select')
+  for (const select of selects) {
+    const selected = await select.evaluate((element) => {
+      if (!(element instanceof HTMLSelectElement)) return false
+      const option = Array.from(element.options).find((item) => /주문/.test(item.textContent ?? ''))
+      if (!option) return false
+      element.value = option.value
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+      element.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    }).catch(() => false)
+    if (selected) return
+  }
+}
+
+async function searchOrderCode(page: Page, orderId: string): Promise<void> {
+  await gotoOnchannel(page, ALL_ORDER_PAGE_URL)
+  await dismissOnchannelPopups(page)
+
+  if (await page.getByText(orderId, { exact: false }).first().isVisible().catch(() => false)) return
+
+  await selectSearchTypeForOrderCode(page)
+
+  const searchInput = page.locator('input[name="searchText"], input[placeholder*="검색"]').first()
+  if (await searchInput.isVisible().catch(() => false)) {
+    await setInputValue(searchInput, orderId)
+  } else {
+    const inputs = await visibleLocators(
+      page,
+      'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])',
+    )
+    let candidate = inputs[0]
+    for (const input of inputs) {
+      const type = await input.getAttribute('type').catch(() => '')
+      if (type !== 'date') {
+        candidate = input
+        break
+      }
+    }
+    if (candidate) await setInputValue(candidate, orderId)
+  }
+
+  await dismissOnchannelPopups(page)
+  await clickButtonByText(page, /^검색$/)
+  await page.waitForLoadState('domcontentloaded', { timeout: 10000 }).catch(() => undefined)
+  await page.waitForTimeout(1000)
+  await dismissOnchannelPopups(page)
+}
+
+async function findOrderRow(page: Page, orderId: string): Promise<Locator | null> {
+  const selectors = [
+    'tr',
+    '.order-row',
+    '.list-row',
+    '.table-row',
+    '[class*="order"][class*="row"]',
+    '.row',
+  ]
+
+  for (const selector of selectors) {
+    const row = page.locator(selector).filter({ hasText: orderId }).first()
+    if (await row.isVisible().catch(() => false)) return row
+  }
+
+  return null
+}
+
+async function clickInvoiceInputForOrder(page: Page, orderId: string): Promise<void> {
+  const row = await findOrderRow(page, orderId)
+  if (row) {
+    await clickButtonByText(row, /송장\s*입력|송장등록|송장\s*등록/)
+    return
+  }
+
+  const clicked = await page.evaluate((targetOrderId) => {
+    const isVisible = (element: Element) => {
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+    }
+    const hasInvoiceText = (element: Element) => /송장\s*(입력|등록)/.test(element.textContent ?? '')
+    const candidateContainers = Array.from(document.querySelectorAll('tr, li, div, section, article'))
+      .filter((element) => isVisible(element) && (element.textContent ?? '').includes(targetOrderId))
+      .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))
+
+    for (const container of candidateContainers) {
+      const controls = Array.from(
+        container.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn, a'),
+      )
+      const control = controls.find((item) => item instanceof HTMLElement && isVisible(item) && hasInvoiceText(item))
+      if (control instanceof HTMLElement) {
+        control.click()
+        return true
+      }
+    }
+    return false
+  }, orderId).catch(() => false)
+
+  if (!clicked) {
+    throw new MarketplaceApiError('onchannel', 404, `온채널 주문 행을 찾지 못했습니다. (${orderId})`)
+  }
 }
 
 async function selectCarrier(root: Locator | Page, invoice: InvoiceData): Promise<void> {
@@ -164,11 +292,30 @@ async function selectCarrier(root: Locator | Page, invoice: InvoiceData): Promis
 
   for (const option of [
     { label: carrierName },
+    { label: carrierName.replace(/\s+/g, '') },
     { value: carrierCode },
     { value: invoice.carrierId },
   ]) {
     const selected = await select.selectOption(option, { timeout: 2000 }).then(() => true).catch(() => false)
     if (selected) return
+  }
+
+  const normalizedCarrierName = carrierName.replace(/\s+/g, '')
+  const selectedByText = await select.evaluate((element, targetName) => {
+    if (!(element instanceof HTMLSelectElement)) return false
+    const option = Array.from(element.options).find((item) => {
+      const label = (item.textContent ?? '').replace(/\s+/g, '')
+      return label.includes(targetName) || targetName.includes(label)
+    })
+    if (!option) return false
+    element.value = option.value
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }, normalizedCarrierName).catch(() => false)
+
+  if (!selectedByText) {
+    throw new MarketplaceApiError('onchannel', 500, `온채널 택배사를 선택하지 못했습니다. (${carrierName})`)
   }
 }
 
@@ -296,7 +443,7 @@ export class OnchannelScraper implements MarketplaceScraper {
     let ctx = await openContext(sessionState)
 
     try {
-      await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
+      await gotoOnchannel(ctx.page, ALL_ORDER_PAGE_URL)
       await dismissOnchannelPopups(ctx.page)
       if (!(await this.isLoggedIn(ctx.page))) {
         await ctx.close()
@@ -306,17 +453,13 @@ export class OnchannelScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
-        await gotoOnchannel(ctx.page, ORDER_PAGE_URL)
+        await gotoOnchannel(ctx.page, ALL_ORDER_PAGE_URL)
         await dismissOnchannelPopups(ctx.page)
       }
 
-      const row = ctx.page.locator('tr, .order-row, .list-row').filter({ hasText: orderId }).first()
-      if (!(await row.isVisible().catch(() => false))) {
-        return { success: false, error: `온채널 주문 행을 찾지 못했습니다. (${orderId})` }
-      }
-
+      await searchOrderCode(ctx.page, orderId)
       await dismissOnchannelPopups(ctx.page)
-      await clickButtonByText(row, /송장\s*입력|송장등록|송장\s*등록/)
+      await clickInvoiceInputForOrder(ctx.page, orderId)
 
       const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').first()
       await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)

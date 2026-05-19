@@ -14,6 +14,7 @@ import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TenByTenAdapter } from '@/lib/marketplace/adapters/10x10/adapter'
 import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
+import { CjOnestyleAdapter } from '@/lib/marketplace/adapters/cjonestyle/adapter'
 import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
 import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
@@ -69,6 +70,11 @@ export function createAdapter(
       return new Cafe24Adapter({
         access_token: credentials.access_token ?? '',
         mall_id: credentials.mall_id ?? '',
+      })
+    case 'cjonestyle':
+      return new CjOnestyleAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        seller_code: credentials.seller_code ?? credentials.sellerCode ?? '',
       })
     case 'elevenst':
       return new ElevenstAdapter({

@@ -87,8 +87,9 @@ function listFromResponse<T>(response: FuntasticB2bListResponse<T>, key: 'orders
 
 function mapOrderStatus(status: string): NormalizedOrder['status'] {
   const normalized = status.toUpperCase()
-  if (['CONFIRMED', 'ORDER_CONFIRMED'].includes(normalized)) return 'new'
-  if (['PREPARING', 'PREPARING_PRODUCT', 'READY_TO_SHIP'].includes(normalized)) return 'confirmed'
+  if (['CONFIRMED', 'ORDER_CONFIRMED', 'PREPARING', 'PREPARING_PRODUCT', 'READY_TO_SHIP'].includes(normalized)) {
+    return 'new'
+  }
   if (['READY', 'PACKED'].includes(normalized)) return 'ready'
   if (['SHIPPED'].includes(normalized)) return 'shipped'
   if (['DELIVERING', 'IN_DELIVERY'].includes(normalized)) return 'delivering'

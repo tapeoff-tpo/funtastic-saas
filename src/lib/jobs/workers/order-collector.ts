@@ -151,7 +151,7 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || marketplaceId === 'naver' || marketplaceId === 'funtastic-b2b' || marketplaceId === 'ssgmall' || shouldAutoConfirmOrders()
+  return marketplaceId === 'toss-shopping' || marketplaceId === 'ownerclan' || marketplaceId === 'domeggook' || marketplaceId === 'naver' || marketplaceId === 'ssgmall' || shouldAutoConfirmOrders()
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
@@ -162,16 +162,9 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
   return 'CONFIRMED'
 }
 
-function shouldConfirmCollectedOrder(
-  marketplaceId: string,
-  upsertedStatus: string,
-  rawData: Record<string, unknown> | null | undefined
-): boolean {
+function shouldConfirmCollectedOrder(upsertedStatus: string): boolean {
   if (upsertedStatus === 'new') return true
-  if (marketplaceId !== 'funtastic-b2b') return false
-
-  const marketplaceStatus = typeof rawData?.status === 'string' ? rawData.status.trim().toUpperCase() : ''
-  return marketplaceStatus === 'CONFIRMED' || marketplaceStatus === 'ORDER_CONFIRMED'
+  return false
 }
 
 const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
@@ -520,9 +513,7 @@ export async function collectOrdersForConnection(params: {
       }
 
       // Collect orders that need marketplace-side confirmation.
-      // Funtastic B2B may already expose shipment.status=PREPARING while
-      // order.status remains CONFIRMED, so still send the confirmation PATCH.
-      if (shouldConfirmCollectedOrder(marketplaceId, upsertedOrder.status, orderForSave.rawData)) {
+      if (shouldConfirmCollectedOrder(upsertedOrder.status)) {
         newOrderIds.push({
           id: upsertedOrder.id,
           marketplaceOrderId: order.marketplaceOrderId,

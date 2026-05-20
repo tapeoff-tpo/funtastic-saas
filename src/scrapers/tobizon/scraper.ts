@@ -15,6 +15,7 @@ import type {
 } from '../types'
 
 const TOBIZON_BASE_URL = 'https://tobizon.co.kr'
+const TOBIZON_LOGIN_URL = `${TOBIZON_BASE_URL}/mall/member/login.php?ltype=vender`
 const TOBIZON_ORDER_LIST_URL = `${TOBIZON_BASE_URL}/scm/order/order_list.php?type=s&otype=2`
 const DOWNLOAD_TIMEOUT_MS = 30_000
 
@@ -155,11 +156,11 @@ async function hasTobizonSession(page: Page): Promise<boolean> {
 }
 
 async function openLoginPage(page: Page): Promise<void> {
-  await gotoTobizon(page)
+  await gotoTobizon(page, TOBIZON_LOGIN_URL)
   if (await hasTobizonSession(page)) return
   if (await page.locator('input[type="password"]').first().isVisible({ timeout: 1500 }).catch(() => false)) return
 
-  await clickByText(page, /로그인/i).catch(() => false)
+  await gotoTobizon(page, TOBIZON_LOGIN_URL)
   await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
 
   if (!(await page.locator('input[type="password"]').first().isVisible({ timeout: 5000 }).catch(() => false))) {
@@ -168,10 +169,14 @@ async function openLoginPage(page: Page): Promise<void> {
 }
 
 async function submitLoginForm(page: Page): Promise<void> {
-  const submitted = await clickByText(page, /로그인/i, 15_000)
-  if (!submitted) {
-    await page.keyboard.press('Enter')
-  }
+  const form = page.locator('form#sfrm, form[name="sfrm"]').first()
+  const submitted = await form
+    .locator('button[onclick*="login"], button[type="submit"], input[type="submit"]')
+    .first()
+    .click({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!submitted) await page.keyboard.press('Enter')
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
   await page.waitForTimeout(1500)
 }
@@ -308,10 +313,14 @@ export class TobizonScraper implements MarketplaceScraper {
       }
 
       logStep('login: fill credentials')
-      const idInput = page
-        .locator('input[name="id"], input[name="user_id"], input[name="userid"], input[name="login_id"], input[name="email"], input[type="text"], input[type="email"]')
+      const form = page.locator('form#sfrm, form[name="sfrm"]').first()
+      await form.locator('input[name="ltype"], input#ltype').first().evaluate((element) => {
+        if (element instanceof HTMLInputElement) element.value = 'vender'
+      }).catch(() => undefined)
+      const idInput = form
+        .locator('input#mid, input[name="mid"], input[name="id"], input[name="user_id"], input[name="userid"], input[name="login_id"], input[name="email"], input[type="text"], input[type="email"]')
         .first()
-      const passwordInput = page.locator('input[name="password"], input[name="passwd"], input[name="pw"], input[type="password"]').first()
+      const passwordInput = form.locator('input#password, input[name="password"], input[name="passwd"], input[name="pw"], input[type="password"]').first()
 
       await setInputValue(idInput, credentials.email)
       await setInputValue(passwordInput, credentials.password)

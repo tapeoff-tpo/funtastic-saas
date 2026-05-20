@@ -53,8 +53,16 @@ export default async function MarketplaceSettingsPage() {
     isConnected: connectedIds.has(config.id),
     integrationMethod: getIntegrationMethod(config.id, { authType: config.authType }),
   }))
-  const marketplaceOptions = catalog
-    .filter((marketplace) => marketplace.integrationMethod === 'api' || marketplace.integrationMethod === 'hub')
+  const apiMarketplaceOptions = catalog
+    .filter((marketplace) => marketplace.integrationMethod === 'api')
+    .map((marketplace) => ({
+      id: marketplace.id,
+      name: marketplace.name,
+      requiredCredentials: marketplace.requiredCredentials,
+      isConnected: marketplace.isConnected,
+    }))
+  const hubMarketplaceOptions = catalog
+    .filter((marketplace) => marketplace.integrationMethod === 'hub')
     .map((marketplace) => ({
       id: marketplace.id,
       name: marketplace.name,
@@ -108,11 +116,25 @@ export default async function MarketplaceSettingsPage() {
         </p>
       </div>
 
-      <CredentialForm marketplaces={marketplaceOptions} />
+      <CredentialForm
+        title="API 연동"
+        description="공식 API로 직접 연결하는 마켓을 등록합니다."
+        selectLabel="API 마켓"
+        marketplaces={apiMarketplaceOptions}
+        pageSize={10}
+      />
 
       <IntegrationForms
         rpaMarketplaces={rpaConnectionOptions}
         excelMarketplaces={excelConnectionOptions}
+      />
+
+      <CredentialForm
+        title="허브연동"
+        description="여러 쇼핑몰 주문을 모아주는 허브 서비스를 등록합니다."
+        selectLabel="허브"
+        marketplaces={hubMarketplaceOptions}
+        pageSize={10}
       />
 
       {connections.length > 0 && (

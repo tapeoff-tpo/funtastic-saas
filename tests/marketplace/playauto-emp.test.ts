@@ -60,7 +60,7 @@ describe('PlayautoEmpAdapter', () => {
       new Date('2026-05-19T23:59:59+09:00'),
     )
 
-    expect(get).toHaveBeenCalledWith('orders', {
+    expect(get).toHaveBeenCalledWith('orders/', {
       searchParams: expect.any(URLSearchParams),
     })
     expect(orders).toHaveLength(1)

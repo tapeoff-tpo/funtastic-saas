@@ -195,7 +195,7 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
           })
           if (this.malls) appendMallParams(params, this.malls)
 
-          const response = await this.client.get('orders', { searchParams: params }).json<PlayautoEmpListResponse>()
+          const response = await this.client.get('orders/', { searchParams: params }).json<PlayautoEmpListResponse>()
           if (!Array.isArray(response) && response.success === false) {
             throw new MarketplaceApiError('playauto-emp', 400, response.message || response.msg || response.error || 'Failed to fetch EMP orders')
           }

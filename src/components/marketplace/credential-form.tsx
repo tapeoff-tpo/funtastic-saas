@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState, useEffect } from 'react'
+import { useActionState, useState, useEffect, useMemo } from 'react'
 import { toast } from 'sonner'
 import { registerMarketplaceCredentials } from '@/app/(auth)/settings/marketplaces/actions'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,10 @@ interface MarketplaceOption {
 
 interface CredentialFormProps {
   marketplaces: MarketplaceOption[]
+  title?: string
+  description?: string
+  selectLabel?: string
+  pageSize?: number
 }
 
 const credentialLabels: Record<string, string> = {
@@ -53,13 +57,26 @@ const optionalCredentialFields: Record<string, string[]> = {
   'playauto-emp': ['base_url', 'malls', 'states'],
 }
 
-export function CredentialForm({ marketplaces }: CredentialFormProps) {
+export function CredentialForm({
+  marketplaces,
+  title = '인증정보 등록',
+  description = '마켓플레이스를 선택하고 API 인증정보를 입력하세요.',
+  selectLabel = '마켓플레이스',
+  pageSize = 10,
+}: CredentialFormProps) {
   const [selectedId, setSelectedId] = useState('')
+  const [page, setPage] = useState(0)
   const [state, formAction, isPending] = useActionState(
     registerMarketplaceCredentials,
     null
   )
 
+  const totalPages = Math.max(1, Math.ceil(marketplaces.length / pageSize))
+  const currentPage = Math.min(page, totalPages - 1)
+  const visibleMarketplaces = useMemo(
+    () => marketplaces.slice(currentPage * pageSize, currentPage * pageSize + pageSize),
+    [marketplaces, currentPage, pageSize],
+  )
   const selectedMarketplace = marketplaces.find((m) => m.id === selectedId)
   const optionalFields = selectedMarketplace ? optionalCredentialFields[selectedMarketplace.id] ?? [] : []
 
@@ -75,9 +92,9 @@ export function CredentialForm({ marketplaces }: CredentialFormProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>인증정보 등록</CardTitle>
+        <CardTitle>{title}</CardTitle>
         <CardDescription>
-          마켓플레이스를 선택하고 API 인증정보를 입력하세요.
+          {description}
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -85,15 +102,50 @@ export function CredentialForm({ marketplaces }: CredentialFormProps) {
           <input type="hidden" name="marketplace_id" value={selectedId} />
 
           <div className="space-y-2">
-            <Label htmlFor="marketplace-select">마켓플레이스</Label>
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor={`marketplace-select-${title}`}>{selectLabel}</Label>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2"
+                    disabled={currentPage === 0}
+                    onClick={() => {
+                      setSelectedId('')
+                      setPage((value) => Math.max(0, value - 1))
+                    }}
+                  >
+                    ←
+                  </Button>
+                  <span className="min-w-12 text-center">
+                    {currentPage + 1}/{totalPages}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2"
+                    disabled={currentPage >= totalPages - 1}
+                    onClick={() => {
+                      setSelectedId('')
+                      setPage((value) => Math.min(totalPages - 1, value + 1))
+                    }}
+                  >
+                    →
+                  </Button>
+                </div>
+              )}
+            </div>
             <select
-              id="marketplace-select"
+              id={`marketplace-select-${title}`}
               value={selectedId}
               onChange={(e) => setSelectedId(e.target.value)}
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <option value="">선택하세요</option>
-              {marketplaces.map((m) => (
+              {visibleMarketplaces.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                   {m.isConnected ? ' (연결됨)' : ''}

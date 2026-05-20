@@ -251,6 +251,12 @@ async function selectOrderRows(page: Page): Promise<boolean> {
   return page.evaluate(() => {
     const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
       .filter((checkbox) => !checkbox.disabled && checkbox.offsetParent !== null)
+    const orderLikeRows = Array.from(document.querySelectorAll('tr, .list-row, [role="row"]'))
+      .filter((row) => {
+        const text = row.textContent?.replace(/\s+/g, ' ') ?? ''
+        if (/전체\s*선택|번호\s*상품|주문번호/.test(text)) return false
+        return /신규|주문접수|주문번호|\d{6,}/.test(text)
+      })
 
     let selected = 0
     for (const checkbox of checkboxes) {
@@ -264,6 +270,7 @@ async function selectOrderRows(page: Page): Promise<boolean> {
     }
 
     if (selected > 0) return true
+    if (orderLikeRows.length === 0) return false
 
     const all = checkboxes.find((checkbox) => /전체/.test(checkbox.closest('label, th, td, div')?.textContent ?? ''))
     if (all) {
@@ -277,7 +284,7 @@ async function selectOrderRows(page: Page): Promise<boolean> {
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  if (/검색된\s*자료가\s*없|조회된\s*자료가\s*없|주문\s*내역이\s*없|데이터가\s*없/.test(text)) {
+  if (/검색된\s*자료가\s*없|검색\s*결과가\s*없|조회된\s*자료가\s*없|조회\s*결과가\s*없|주문\s*내역이\s*없|내역이\s*없|데이터가\s*없|자료가\s*없|총\s*0\s*건/.test(text)) {
     return Buffer.alloc(0)
   }
 
@@ -591,7 +598,11 @@ export class DomesinScraper implements MarketplaceScraper {
 
       await runStep('orders: open order list', () => openOrderListPage(ctx.page))
       await runStep('orders: apply new-order search', () => applyNewOrderSearch(ctx.page, since))
-      await runStep('orders: select order rows', () => selectOrderRows(ctx.page))
+      const selected = await runStep('orders: select order rows', () => selectOrderRows(ctx.page))
+      if (!selected) {
+        logStep('orders: no selectable new orders')
+        return Buffer.alloc(0)
+      }
       const workbook = await runStep('orders: download order excel', () => downloadOrdersExcel(ctx.page))
       if (workbook.length > 0) {
         await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page))

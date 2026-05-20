@@ -300,6 +300,9 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
   private normalizeOrder(order: PlayautoEmpOrder): NormalizedOrder {
     const orderCode = asString(order.OrderCode) || asString(order.UniqueId) || asString(order.Number)
     const number = asString(order.Number)
+    const siteCode = asString(order.SiteCode)
+    const siteName = asString(order.SiteName)
+    const siteId = asString(order.SiteId)
     const itemId = number || asString(order.UniqueId) || asString(order.ProdCode) || orderCode
     const quantity = Math.max(1, asNumber(order.Count) || 1)
     const totalAmount = asNumber(order.Price) * quantity
@@ -340,11 +343,14 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
       deliveryMessage: asString(order.Msg) || null,
       rawData: {
         ...order,
+        mallName: siteName || undefined,
+        mallCode: siteCode || undefined,
+        mallAccount: siteId || undefined,
         empNumber: number,
-        empSiteCode: order.SiteCode,
-        empSiteName: order.SiteName,
-        empSiteId: order.SiteId,
-        originalMarketplaceId: `${asString(order.SiteCode)}:${asString(order.SiteId)}`,
+        empSiteCode: siteCode || undefined,
+        empSiteName: siteName || undefined,
+        empSiteId: siteId || undefined,
+        originalMarketplaceId: `${siteCode}:${siteId}`,
         marketplaceOrderIdentity: {
           orderId: orderCode,
           itemIds: [itemId],

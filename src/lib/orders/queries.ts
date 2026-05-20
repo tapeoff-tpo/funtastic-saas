@@ -212,10 +212,30 @@ async function getConfirmedProductSearchSkus(userId: string, search: string): Pr
 function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): string | null {
   const rawData = order.rawData
   if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return null
-  const mallName = (rawData as { mallName?: unknown }).mallName
-  if (typeof mallName !== 'string') return null
-  const trimmed = mallName.trim()
-  return trimmed.length > 0 ? trimmed : null
+  const data = rawData as {
+    mallName?: unknown
+    empSiteName?: unknown
+    SiteName?: unknown
+    siteName?: unknown
+    empSiteCode?: unknown
+    SiteCode?: unknown
+    empSiteId?: unknown
+    SiteId?: unknown
+  }
+  const candidates = [data.mallName, data.empSiteName, data.SiteName, data.siteName]
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue
+    const trimmed = candidate.trim()
+    if (trimmed.length > 0) return trimmed
+  }
+
+  const siteCode = typeof data.empSiteCode === 'string' ? data.empSiteCode : data.SiteCode
+  const siteId = typeof data.empSiteId === 'string' ? data.empSiteId : data.SiteId
+  const fallback = [siteCode, siteId]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim())
+    .join(' / ')
+  return fallback.length > 0 ? fallback : null
 }
 
 function getOrderHistoricalClaimStatuses(order: typeof orders.$inferSelect): string[] {

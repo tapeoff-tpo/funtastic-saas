@@ -10,7 +10,6 @@
 import type {
   MarketplaceAdapter,
   MarketplaceConfig,
-  MarketplaceCredentials,
   NormalizedOrder,
   NormalizedClaim,
   NormalizedProduct,
@@ -43,6 +42,13 @@ function formatDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function normalizeAblyOrderId(orderId: string): string {
+  const raw = orderId.trim()
+  if (!raw) return raw
+  const firstNumericGroup = raw.match(/\d+/)?.[0]
+  return firstNumericGroup || raw
+}
+
 export class AblyAdapter implements MarketplaceAdapter {
   readonly config = ABLY_CONFIG
 
@@ -54,7 +60,7 @@ export class AblyAdapter implements MarketplaceAdapter {
     this.shopId = credentials.shop_id
   }
 
-  async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
+  async testConnection(): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {
     try {
       // Keep credential checks away from order endpoints. Some marketplaces
       // mutate order state during "new order" reads.
@@ -154,9 +160,7 @@ export class AblyAdapter implements MarketplaceAdapter {
     }
   }
 
-  async confirmOrder(
-    _marketplaceOrderId: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  async confirmOrder(): Promise<{ success: boolean; error?: string }> {
     return { success: false, error: '발주확인 미구현' }
   }
 
@@ -229,8 +233,10 @@ export class AblyAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrder(order: AblyOrder): NormalizedOrder {
+    const orderId = normalizeAblyOrderId(order.orderId)
+
     return {
-      marketplaceOrderId: order.orderId,
+      marketplaceOrderId: orderId,
       marketplaceId: 'ably',
       marketplaceStatus: order.orderStatus,
       status: mapAblyStatus(order.orderStatus),
@@ -245,7 +251,7 @@ export class AblyAdapter implements MarketplaceAdapter {
       },
       items: [
         {
-          marketplaceItemId: order.orderId,
+          marketplaceItemId: orderId,
           productName: order.productName,
           optionText: order.options || undefined,
           quantity: order.quantity,
@@ -255,7 +261,11 @@ export class AblyAdapter implements MarketplaceAdapter {
       ],
       orderedAt: new Date(order.orderDate),
       totalAmount: order.paymentAmount,
-      rawData: order as unknown as Record<string, unknown>,
+      rawData: {
+        ...order,
+        originalOrderId: order.orderId,
+        normalizedOrderId: orderId,
+      } as unknown as Record<string, unknown>,
     }
   }
 
@@ -263,7 +273,7 @@ export class AblyAdapter implements MarketplaceAdapter {
     return {
       marketplaceClaimId: claim.claimId,
       marketplaceId: 'ably',
-      marketplaceOrderId: claim.orderId,
+      marketplaceOrderId: normalizeAblyOrderId(claim.orderId),
       claimType: mapAblyClaimType(claim.claimType),
       claimStatus: mapAblyClaimStatus(claim.claimStatus),
       reason: claim.reason || undefined,

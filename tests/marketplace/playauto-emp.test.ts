@@ -92,6 +92,9 @@ describe('PlayautoEmpAdapter', () => {
       },
     ])
     expect(orders[0].rawData).toMatchObject({
+      mallName: '11번가',
+      mallCode: 'A112',
+      mallAccount: 'playauto',
       empNumber: '1001',
       empSiteName: '11번가',
       originalMarketplaceId: 'A112:playauto',

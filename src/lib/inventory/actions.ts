@@ -11,7 +11,7 @@
 
 import { db } from '@/lib/db'
 import { claims, inventory, inventoryHistory, orderItems, orders, mappingSources, mappingComponents } from '@/lib/db/schema'
-import { eq, and, asc, desc, sql } from 'drizzle-orm'
+import { eq, and, asc, desc, sql, inArray } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
@@ -348,7 +348,7 @@ export async function getReturnableItemsForClaim(
     const [claim] = await tx
       .select({ orderId: claims.orderId })
       .from(claims)
-      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), eq(claims.claimType, 'return')))
+      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), inArray(claims.claimType, ['return', 'exchange'])))
       .limit(1)
 
     if (!claim) return []
@@ -367,15 +367,17 @@ export async function completeReturnClaim(
       .select({
         id: claims.id,
         orderId: claims.orderId,
+        claimType: claims.claimType,
         claimStatus: claims.claimStatus,
+        rawData: claims.rawData,
       })
       .from(claims)
-      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), eq(claims.claimType, 'return')))
+      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), inArray(claims.claimType, ['return', 'exchange'])))
       .for('update')
       .limit(1)
 
-    if (!claim) return { success: false, error: '반품 클레임을 찾을 수 없습니다.' }
-    if (claim.claimStatus === 'completed') return { success: false, error: '이미 반품완료 처리된 건입니다.' }
+    if (!claim) return { success: false, error: '반품/교환 클레임을 찾을 수 없습니다.' }
+    if (claim.claimStatus === 'completed') return { success: false, error: '이미 완료 처리된 건입니다.' }
 
     const maxItems = await expandOrderItemsForDeduction(tx, userId, claim.orderId)
     const maxBySku = new Map(maxItems.map((item) => [item.sku, item.quantity]))
@@ -443,9 +445,40 @@ export async function completeReturnClaim(
       .update(claims)
       .set({
         claimStatus: 'completed',
+        reason: claim.claimType === 'exchange' ? '교환회수완료' : '반품회수완료',
         updatedAt: new Date(),
       })
       .where(eq(claims.id, claim.id))
+
+    const originalOrderId = claim.rawData
+      && typeof claim.rawData === 'object'
+      && !Array.isArray(claim.rawData)
+      && typeof (claim.rawData as { originalOrderId?: unknown }).originalOrderId === 'string'
+      ? (claim.rawData as { originalOrderId: string }).originalOrderId
+      : null
+
+    if (originalOrderId) {
+      const completionReason = claim.claimType === 'exchange' ? '교환완료' : '반품완료'
+      await tx
+        .update(orders)
+        .set({
+          marketplaceStatus: completionReason,
+          isHeld: false,
+          holdReason: null,
+          heldAt: null,
+          logisticsMessage: null,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orders.id, originalOrderId), eq(orders.userId, userId)))
+      await tx
+        .update(claims)
+        .set({
+          claimStatus: 'completed',
+          reason: completionReason,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(claims.orderId, originalOrderId), eq(claims.userId, userId), eq(claims.claimType, claim.claimType)))
+    }
 
     return { success: true }
   })

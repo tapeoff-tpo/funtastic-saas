@@ -98,10 +98,11 @@ export async function POST(req: NextRequest) {
       marketplaceClaimId,
       claimType: body.claimType,
       claimStatus: 'requested',
-      reason,
+      reason: body.claimType === 'return' ? '반품접수' : '교환접수',
       rawData: {
         source: 'manual',
         marketplaceOrderId: order.marketplaceOrderId,
+        originalReason: reason,
         reasonCode: body.reasonCode,
         reasonDetail: detail ?? null,
         quantities: claimQuantities,
@@ -110,6 +111,18 @@ export async function POST(req: NextRequest) {
     })
     .returning({ id: claims.id })
 
+  await db
+    .update(orders)
+    .set({
+      marketplaceStatus: body.claimType === 'return' ? '반품접수' : '교환접수',
+      logisticsMessage: null,
+      isHeld: false,
+      holdReason: null,
+      heldAt: null,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(orders.id, order.id), eq(orders.userId, workspaceUserId)))
+
   await logOrderChange({
     orderId: order.id,
     userId: workspaceUserId,
@@ -117,7 +130,11 @@ export async function POST(req: NextRequest) {
     action: 'claim.created',
     title: `${body.claimType === 'return' ? '반품' : '교환'} 접수`,
     description: reason,
-    after: { claimType: body.claimType, claimStatus: 'requested' },
+    after: {
+      claimType: body.claimType,
+      claimStatus: 'requested',
+      marketplaceStatus: body.claimType === 'return' ? '반품접수' : '교환접수',
+    },
     metadata: { claimId: created.id, quantities: claimQuantities },
   })
 
@@ -125,52 +142,112 @@ export async function POST(req: NextRequest) {
   if (body.claimType === 'return') {
     const pickup = await copyOrder(order.id, workspaceUserId, {
       status: 'confirmed',
-      logisticsMessage: `반품회수준비 / ${reason} / 원주문 ${order.internalNo}`,
+      marketplaceStatus: '반품회수준비',
+      logisticsMessage: null,
       itemQuantities: claimQuantities,
       rawData: {
         source: 'manual-return-pickup',
         originalOrderId: order.id,
         claimId: created.id,
+        originalReason: reason,
         reasonCode: body.reasonCode,
       },
     })
     if (!pickup.success || !pickup.newOrderId) {
       return NextResponse.json({ error: pickup.error ?? '반품회수준비 주문 생성 실패' }, { status: 500 })
     }
+    await db.insert(claims).values({
+      orderId: pickup.newOrderId,
+      userId: workspaceUserId,
+      marketplaceId: order.marketplaceId,
+      marketplaceClaimId: `manual-return-pickup-${pickup.newOrderId}`,
+      claimType: 'return',
+      claimStatus: 'processing',
+      reason: '반품회수준비',
+      rawData: {
+        source: 'manual-return-pickup',
+        originalOrderId: order.id,
+        originalClaimId: created.id,
+        originalReason: reason,
+        reasonCode: body.reasonCode,
+        quantities: claimQuantities,
+      },
+      requestedAt: new Date(),
+    }).onConflictDoNothing()
     copies.push({ id: pickup.newOrderId, kind: 'return-pickup' })
   }
 
   if (body.claimType === 'exchange') {
     const pickup = await copyOrder(order.id, workspaceUserId, {
       status: 'confirmed',
-      logisticsMessage: `교환회수준비 / ${reason} / 원주문 ${order.internalNo}`,
+      marketplaceStatus: '교환회수준비',
+      logisticsMessage: null,
       itemQuantities: claimQuantities,
       rawData: {
         source: 'manual-exchange-pickup',
         originalOrderId: order.id,
         claimId: created.id,
+        originalReason: reason,
         reasonCode: body.reasonCode,
       },
     })
     if (!pickup.success || !pickup.newOrderId) {
       return NextResponse.json({ error: pickup.error ?? '교환회수준비 주문 생성 실패' }, { status: 500 })
     }
+    await db.insert(claims).values({
+      orderId: pickup.newOrderId,
+      userId: workspaceUserId,
+      marketplaceId: order.marketplaceId,
+      marketplaceClaimId: `manual-exchange-pickup-${pickup.newOrderId}`,
+      claimType: 'exchange',
+      claimStatus: 'processing',
+      reason: '교환회수준비',
+      rawData: {
+        source: 'manual-exchange-pickup',
+        originalOrderId: order.id,
+        originalClaimId: created.id,
+        originalReason: reason,
+        reasonCode: body.reasonCode,
+        quantities: claimQuantities,
+      },
+      requestedAt: new Date(),
+    }).onConflictDoNothing()
     copies.push({ id: pickup.newOrderId, kind: 'exchange-pickup' })
 
     const reship = await copyOrder(order.id, workspaceUserId, {
       status: 'confirmed',
-      logisticsMessage: `교환발송준비 / ${reason} / 원주문 ${order.internalNo}`,
+      marketplaceStatus: '교환발송준비',
+      logisticsMessage: null,
       itemQuantities: claimQuantities,
       rawData: {
         source: 'manual-exchange-reship',
         originalOrderId: order.id,
         claimId: created.id,
+        originalReason: reason,
         reasonCode: body.reasonCode,
       },
     })
     if (!reship.success || !reship.newOrderId) {
       return NextResponse.json({ error: reship.error ?? '교환발송준비 주문 생성 실패' }, { status: 500 })
     }
+    await db.insert(claims).values({
+      orderId: reship.newOrderId,
+      userId: workspaceUserId,
+      marketplaceId: order.marketplaceId,
+      marketplaceClaimId: `manual-exchange-reship-${reship.newOrderId}`,
+      claimType: 'exchange',
+      claimStatus: 'processing',
+      reason: '교환발송준비',
+      rawData: {
+        source: 'manual-exchange-reship',
+        originalOrderId: order.id,
+        originalClaimId: created.id,
+        originalReason: reason,
+        reasonCode: body.reasonCode,
+        quantities: claimQuantities,
+      },
+      requestedAt: new Date(),
+    }).onConflictDoNothing()
     copies.push({ id: reship.newOrderId, kind: 'exchange-reship' })
   }
 

@@ -91,7 +91,7 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
         const res = await fetch(`/api/claims/${claimId}`)
         if (!res.ok) {
           const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-          throw new Error(error ?? '반품 상품 조회 실패')
+          throw new Error(error ?? '회수 상품 조회 실패')
         }
         const data = await res.json() as { items?: Array<{ sku: string; quantity: number }> }
         const items = data.items ?? []
@@ -100,7 +100,7 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
         setReturnDisposition('available')
         setReturnModalOpen(true)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : '반품 상품 조회 실패')
+        toast.error(err instanceof Error ? err.message : '회수 상품 조회 실패')
       } finally {
         setPendingStatus(null)
       }
@@ -128,13 +128,13 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
         })
         if (!res.ok) {
           const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-          throw new Error(error ?? '반품완료 실패')
+          throw new Error(error ?? '회수완료 실패')
         }
-        toast.success('반품완료 처리됨')
+        toast.success(claimType === 'exchange' ? '교환회수완료 처리됨' : '반품회수완료 처리됨')
         setReturnModalOpen(false)
         router.refresh()
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : '반품완료 실패')
+        toast.error(err instanceof Error ? err.message : '회수완료 실패')
       } finally {
         setPendingStatus(null)
       }
@@ -173,14 +173,14 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
               → {STATUS_LABELS[next]}
             </button>
           ))}
-          {claimType === 'return' && claimStatus !== 'completed' && (
+          {(claimType === 'return' || (claimType === 'exchange' && reason?.includes('회수준비'))) && claimStatus !== 'completed' && (
             <button
               type="button"
               onClick={openReturnComplete}
               disabled={pendingStatus !== null}
               className="rounded border border-green-300 px-1.5 py-0.5 text-[10px] font-medium text-green-700 transition-colors hover:bg-green-50 disabled:opacity-50"
             >
-              반품완료
+              {claimType === 'exchange' ? '교환회수완료' : '반품회수완료'}
             </button>
           )}
           {canWithdraw && (
@@ -199,7 +199,7 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
             <div className="mb-3">
-              <h3 className="text-base font-semibold">반품완료 처리</h3>
+              <h3 className="text-base font-semibold">{claimType === 'exchange' ? '교환회수완료 처리' : '반품회수완료 처리'}</h3>
             </div>
             <div className="mb-3 flex gap-2">
               <button
@@ -219,7 +219,7 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
             </div>
             <div className="max-h-64 overflow-auto rounded border">
               {(returnItems ?? []).length === 0 ? (
-                <div className="p-3 text-sm text-muted-foreground">반품 처리할 매핑 상품이 없습니다.</div>
+                <div className="p-3 text-sm text-muted-foreground">회수 처리할 매핑 상품이 없습니다.</div>
               ) : (
                 (returnItems ?? []).map((item) => (
                   <div key={item.sku} className="grid grid-cols-[1fr_88px] items-center gap-2 border-b p-2 last:border-b-0">

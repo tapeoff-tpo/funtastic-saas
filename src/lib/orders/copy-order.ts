@@ -18,6 +18,7 @@ export interface CopyOrderResult {
 
 interface CopyOrderOptions {
   status?: OrderStatus
+  marketplaceStatus?: string | null
   logisticsMessage?: string | null
   rawData?: Record<string, unknown> | null
   itemQuantities?: Array<{ orderItemId: string; quantity: number }>
@@ -73,10 +74,10 @@ export async function copyOrder(
       isHeld: false,
       holdReason: null,
       heldAt: null,
-      logisticsMessage: options.logisticsMessage ?? src.logisticsMessage,
+      logisticsMessage: options.logisticsMessage ?? null,
       deliveryMessage: src.deliveryMessage,
       rawData: options.rawData ?? src.rawData,
-      marketplaceStatus: src.marketplaceStatus,
+      marketplaceStatus: options.marketplaceStatus ?? src.marketplaceStatus,
       collectedAt: src.collectedAt,
       shippingType: src.shippingType,
       shippingFee: src.shippingFee,

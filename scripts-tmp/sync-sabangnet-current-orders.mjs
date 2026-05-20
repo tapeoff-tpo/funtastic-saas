@@ -83,14 +83,13 @@ function classifyStatus(statusRaw, trackingNumber) {
   const status = statusRaw ?? ''
   const isCancelRequest = status.includes('취소접수')
   const isClaimRequest = status.includes('반품') || status.includes('교환')
-  const isActiveClaim = status.includes('접수') || status.includes('준비') || status.includes('회수')
 
   if (isCancelRequest) {
     return {
       status: trackingNumber ? 'preparing' : 'confirmed',
       isHeld: true,
-      holdReason: '사방넷 취소접수',
-      logisticsMessage: '사방넷 취소접수: 미발송 처리 필요',
+      holdReason: '취소접수',
+      logisticsMessage: null,
     }
   }
 
@@ -99,7 +98,7 @@ function classifyStatus(statusRaw, trackingNumber) {
       status: 'cancelled',
       isHeld: false,
       holdReason: null,
-      logisticsMessage: '사방넷 취소완료',
+      logisticsMessage: null,
     }
   }
 
@@ -108,16 +107,16 @@ function classifyStatus(statusRaw, trackingNumber) {
       status: 'delivered',
       isHeld: false,
       holdReason: null,
-      logisticsMessage: status ? `사방넷 ${status}` : null,
+      logisticsMessage: null,
     }
   }
 
   if (isClaimRequest) {
     return {
       status: status.includes('완료') ? 'cancelled' : (trackingNumber ? 'preparing' : 'confirmed'),
-      isHeld: isActiveClaim,
-      holdReason: isActiveClaim ? `사방넷 ${status}` : null,
-      logisticsMessage: `사방넷 ${status}`,
+      isHeld: false,
+      holdReason: null,
+      logisticsMessage: null,
     }
   }
 
@@ -125,7 +124,7 @@ function classifyStatus(statusRaw, trackingNumber) {
     status: trackingNumber ? 'preparing' : 'new',
     isHeld: false,
     holdReason: null,
-    logisticsMessage: status ? `사방넷 ${status}` : null,
+    logisticsMessage: null,
   }
 }
 

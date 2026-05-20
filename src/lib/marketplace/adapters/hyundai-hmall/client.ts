@@ -1,7 +1,7 @@
 import ky from 'ky'
 import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 
-const DEFAULT_HYUNDAI_HMALL_API_BASE = 'http://openapi.hmall.com/front'
+const DEFAULT_HYUNDAI_HMALL_API_BASE = 'https://openapi.hmall.com/front'
 
 export interface HyundaiHmallClientCredentials {
   oauser_id: string
@@ -25,6 +25,7 @@ function normalizeBaseUrl(baseUrl?: string): string {
   if (!trimmed || trimmed === 'https://api.hmall.com' || trimmed === 'http://api.hmall.com') {
     return DEFAULT_HYUNDAI_HMALL_API_BASE
   }
+  if (trimmed === 'http://openapi.hmall.com/front') return DEFAULT_HYUNDAI_HMALL_API_BASE
   return trimmed
 }
 

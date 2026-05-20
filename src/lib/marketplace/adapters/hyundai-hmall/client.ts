@@ -20,7 +20,7 @@ const builder = new XMLBuilder({
   suppressEmptyNode: false,
 })
 
-function normalizeBaseUrl(baseUrl?: string): string {
+export function normalizeHyundaiHmallBaseUrl(baseUrl?: string): string {
   const trimmed = baseUrl?.trim().replace(/\/+$/, '')
   if (!trimmed || trimmed === 'https://api.hmall.com' || trimmed === 'http://api.hmall.com') {
     return DEFAULT_HYUNDAI_HMALL_API_BASE
@@ -51,7 +51,7 @@ export function parseHmallXml<T = Record<string, unknown>>(xml: string): T {
  */
 export function createHyundaiHmallClient(credentials: HyundaiHmallClientCredentials) {
   return ky.create({
-    prefixUrl: normalizeBaseUrl(credentials.base_url),
+    prefixUrl: normalizeHyundaiHmallBaseUrl(credentials.base_url),
     headers: {
       oauserId: credentials.oauser_id,
       oauseKey: credentials.oause_key,

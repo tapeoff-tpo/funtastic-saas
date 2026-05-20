@@ -9,7 +9,7 @@ import type {
   InvoiceData,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
-import { buildHmallXml, createHyundaiHmallClient, parseHmallXml } from './client'
+import { buildHmallXml, createHyundaiHmallClient, normalizeHyundaiHmallBaseUrl, parseHmallXml } from './client'
 import { mapHyundaiHmallStatus } from './status-map'
 import type { HyundaiHmallOrderRow, HyundaiHmallXmlResponse } from './types'
 
@@ -220,11 +220,20 @@ export class HyundaiHmallAdapter implements MarketplaceAdapter {
 
   private async postXml(path: string, row: Record<string, unknown>): Promise<HyundaiHmallXmlResponse> {
     const body = buildHmallXml([row])
-    const textResponse = await this.client.post(path.replace(/^\//, ''), { body }).text()
-    const parsed = parseHmallXml<HyundaiHmallXmlResponse>(textResponse)
-    const error = responseError(parsed)
-    if (error) throw new MarketplaceApiError('hyundai-hmall', 400, error)
-    return parsed
+    const cleanPath = path.replace(/^\//, '')
+    const endpoint = `${normalizeHyundaiHmallBaseUrl(this.credentials.base_url)}/${cleanPath}`
+    try {
+      const textResponse = await this.client.post(cleanPath, { body }).text()
+      const parsed = parseHmallXml<HyundaiHmallXmlResponse>(textResponse)
+      const error = responseError(parsed)
+      if (error) throw new MarketplaceApiError('hyundai-hmall', 400, error)
+      return parsed
+    } catch (error) {
+      if (error instanceof MarketplaceApiError) throw error
+      const cause = error instanceof Error && error.cause instanceof Error ? ` (${error.cause.message})` : ''
+      const message = error instanceof Error ? error.message : String(error)
+      throw new MarketplaceApiError('hyundai-hmall', 500, `Hmall API request failed: ${endpoint}: ${message}${cause}`)
+    }
   }
 
   private async listOutboundOrders(since: Date, until: Date, prgrGb: string): Promise<HyundaiHmallOrderRow[]> {

@@ -67,6 +67,7 @@ interface ParsedResult {
     orderIdentifier: string
     trackingNumber: string
     carrierId?: string
+    reason?: string
   }>
   invalid: Array<{
     row: number
@@ -89,6 +90,7 @@ export function ExcelImportDialog({
   const [carrierCol, setCarrierCol] = useState<number | null>(null)
   const [password, setPassword] = useState('1')
   const [result, setResult] = useState<ParsedResult | null>(null)
+  const [detailView, setDetailView] = useState<'unmatched' | 'invalid' | null>(null)
   const [isParsing, startParsing] = useTransition()
   const [isApplying, startApplying] = useTransition()
 
@@ -105,6 +107,7 @@ export function ExcelImportDialog({
     const f = e.target.files?.[0] ?? null
     setFile(f)
     setResult(null)
+    setDetailView(null)
   }
 
   const handleParse = () => {
@@ -140,6 +143,7 @@ export function ExcelImportDialog({
 
       const data = await res.json() as ParsedResult
       setResult(data)
+      setDetailView(null)
 
       if (data.matched.length === 0 && data.unmatched.length === 0 && data.invalid.length === 0) {
         toast.warning('데이터를 찾을 수 없습니다')
@@ -164,6 +168,7 @@ export function ExcelImportDialog({
         onOpenChange(false)
         setFile(null)
         setResult(null)
+        setDetailView(null)
         setOrderIdCol(null)
         setTrackingCol(null)
         setCarrierCol(null)
@@ -182,6 +187,7 @@ export function ExcelImportDialog({
     onOpenChange(false)
     setFile(null)
     setResult(null)
+    setDetailView(null)
     setTemplateId(INVOICE_IMPORT_TEMPLATES[0].id)
     setOrderIdCol(null)
     setTrackingCol(null)
@@ -207,6 +213,8 @@ export function ExcelImportDialog({
                 setOrderIdCol(null)
                 setTrackingCol(null)
                 setCarrierCol(null)
+                setResult(null)
+                setDetailView(null)
               }}
               className="w-full rounded-md border px-3 py-2 text-sm"
             >
@@ -338,13 +346,71 @@ export function ExcelImportDialog({
                 <div className="rounded-md bg-green-50 p-2 text-center text-green-700">
                   매칭: {result.matched.length}건
                 </div>
-                <div className="rounded-md bg-yellow-50 p-2 text-center text-yellow-700">
+                <button
+                  type="button"
+                  onClick={() => setDetailView((current) => current === 'unmatched' ? null : 'unmatched')}
+                  disabled={result.unmatched.length === 0}
+                  className="rounded-md bg-yellow-50 p-2 text-center text-yellow-700 hover:bg-yellow-100 disabled:cursor-default disabled:opacity-70"
+                >
                   미매칭: {result.unmatched.length}건
-                </div>
-                <div className="rounded-md bg-red-50 p-2 text-center text-red-700">
+                  {result.unmatched.length > 0 && <span className="ml-1 text-xs underline">확인</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDetailView((current) => current === 'invalid' ? null : 'invalid')}
+                  disabled={result.invalid.length === 0}
+                  className="rounded-md bg-red-50 p-2 text-center text-red-700 hover:bg-red-100 disabled:cursor-default disabled:opacity-70"
+                >
                   오류: {result.invalid.length}건
-                </div>
+                  {result.invalid.length > 0 && <span className="ml-1 text-xs underline">확인</span>}
+                </button>
               </div>
+
+              {detailView === 'unmatched' && (
+                <div className="max-h-48 overflow-auto rounded-md border border-yellow-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-yellow-50">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left font-medium">내부/주문번호</th>
+                        <th className="px-3 py-1.5 text-left font-medium">송장번호</th>
+                        <th className="px-3 py-1.5 text-left font-medium">택배사</th>
+                        <th className="px-3 py-1.5 text-left font-medium">사유</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.unmatched.map((row, index) => (
+                        <tr key={`${row.orderIdentifier}-${row.trackingNumber}-${index}`} className="border-t">
+                          <td className="px-3 py-1.5 font-mono">{row.orderIdentifier || '-'}</td>
+                          <td className="px-3 py-1.5">{row.trackingNumber || '-'}</td>
+                          <td className="px-3 py-1.5">{row.carrierId ?? '-'}</td>
+                          <td className="px-3 py-1.5">{row.reason ?? '주문 매칭 안됨'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {detailView === 'invalid' && (
+                <div className="max-h-48 overflow-auto rounded-md border border-red-200">
+                  <table className="w-full text-sm">
+                    <thead className="bg-red-50">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left font-medium">행</th>
+                        <th className="px-3 py-1.5 text-left font-medium">오류 내용</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.invalid.map((row) => (
+                        <tr key={row.row} className="border-t">
+                          <td className="px-3 py-1.5 font-mono">{row.row}</td>
+                          <td className="px-3 py-1.5">{row.errors.join(', ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Preview matched rows (first 5) */}
               {result.matched.length > 0 && (

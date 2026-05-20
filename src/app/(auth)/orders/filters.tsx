@@ -358,6 +358,8 @@ export function OrderFilters({
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
   const selectedStatuses = useMemo(() => parseSelectedStatuses(filters.status), [filters.status])
   const isNewTab = selectedStatuses.length === 1 && selectedStatuses[0] === 'new'
+  const isConfirmedTab = selectedStatuses.length === 1 && selectedStatuses[0] === 'confirmed'
+  const showMappingFilter = isNewTab || isConfirmedTab
   const showScanFilter = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
   const formatDateInput = useCallback((date: Date) => {
     const year = date.getFullYear()
@@ -476,9 +478,10 @@ export function OrderFilters({
           value={filters.status}
           onChange={(nextStatus) => {
             const nextStatuses = parseSelectedStatuses(nextStatus)
+            const nextShowsMapping = nextStatuses.length === 1 && (nextStatuses[0] === 'new' || nextStatuses[0] === 'confirmed')
             updateFilter({
               status: nextStatus,
-              mapping: nextStatuses.length === 1 && nextStatuses[0] === 'new' ? filters.mapping : null,
+              mapping: nextShowsMapping ? filters.mapping : null,
               scan: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? filters.scan : null,
               scanResult: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? filters.scanResult : null,
             })
@@ -486,14 +489,14 @@ export function OrderFilters({
         />
       </div>
 
-      {isNewTab && (
+      {showMappingFilter && (
         <div className="flex flex-col gap-1">
           <label htmlFor="filter-mapping" className="text-xs font-medium text-muted-foreground">
             매핑 상태
           </label>
           <select
             id="filter-mapping"
-            value={filters.mapping ?? 'unmapped'}
+            value={filters.mapping ?? (isNewTab ? 'unmapped' : 'all')}
             onChange={(e) => updateFilter({ mapping: e.target.value })}
             className="rounded-md border px-3 py-1.5 text-sm"
           >

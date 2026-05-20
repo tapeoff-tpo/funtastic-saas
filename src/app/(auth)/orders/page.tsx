@@ -129,6 +129,7 @@ export default async function OrdersPage({
     .where(eq(marketplaceConnections.userId, workspaceUserId))
 
   const isNewTab = singleStatus === 'new'
+  const isConfirmedTab = singleStatus === 'confirmed'
   const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
   const shouldExcludeHeld = !params.held && Boolean(params.status || params.claimType || params.cancel)
   const mappingFilter = isNewTab
@@ -261,7 +262,7 @@ export default async function OrdersPage({
           total={total}
           page={params.page}
           pageSize={params.pageSize}
-          showMappingAction={isNewTab}
+          showMappingAction={isNewTab || isConfirmedTab}
           canUnlockOrderSnapshots={profile?.role === 'super_admin'}
         />
       ) : (

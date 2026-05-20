@@ -374,8 +374,8 @@ const hyundaiHmallAdapter = createStubAdapter({
   id: 'hyundai-hmall',
   name: '현대홈쇼핑',
   authType: 'api_key',
-  rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  rateLimitPerSecond: 2,
+  requiredCredentials: ['oauser_id', 'oause_key', 'ven_cd'],
 })
 
 const gsShopAdapter = createStubAdapter({

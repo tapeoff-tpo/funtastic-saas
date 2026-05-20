@@ -36,6 +36,13 @@ const credentialLabels: Record<string, string> = {
   base_url: 'API Base URL',
   malls: 'EMP 쇼핑몰 필터',
   states: 'EMP 주문상태',
+  oauser_id: 'oauserId',
+  oause_key: 'oauseKey',
+  ven_cd: '협력사코드',
+  ven2_cd: '2차협력사코드',
+  mda_gb: '매입처 코드',
+  dlv_form_gbcd: '배송형태구분코드',
+  rgst_ip: '등록 IP',
 }
 
 interface ConnectionRowProps {
@@ -210,6 +217,12 @@ export function ConnectionRow({
                 placeholder={
                   credKey === 'malls'
                     ? '예: 11번가;스마트스토어;쿠팡'
+                    : data.marketplaceId === 'hyundai-hmall' && credKey === 'ven2_cd'
+                      ? '예: 000000'
+                    : data.marketplaceId === 'hyundai-hmall' && credKey === 'mda_gb'
+                      ? '예: 20'
+                    : data.marketplaceId === 'hyundai-hmall' && credKey === 'dlv_form_gbcd'
+                      ? '예: 40'
                     : credKey === 'states'
                       ? '예: 신규주문,주문확인'
                       : `${credentialLabels[credKey] ?? credKey} 입력`

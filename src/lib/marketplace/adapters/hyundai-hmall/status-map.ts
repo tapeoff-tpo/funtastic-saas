@@ -1,16 +1,26 @@
-/**
- * Hyundai Hmall order status mapping to internal OrderStatus.
- *
- * TODO: Map real statuses when API documentation becomes available.
- */
-
 import type { OrderStatus } from '@/lib/orders/types'
 
-/**
- * Map a Hyundai Hmall order status code to internal OrderStatus.
- * Always returns 'new' as a placeholder until real status codes are known.
- */
-export function mapHyundaiHmallStatus(code: string): OrderStatus {
-  console.warn(`[hyundai-hmall] Placeholder status mapping for: ${code}, defaulting to 'new'`)
+export function mapHyundaiHmallStatus(params: {
+  progressCode?: string | null
+  confirmedAt?: string | null
+  invoiceNo?: string | null
+  cancelled?: string | null
+}): OrderStatus {
+  const progressCode = String(params.progressCode ?? '').trim().toUpperCase()
+  if (String(params.cancelled ?? '').trim().toUpperCase() === 'Y') return 'cancelled'
+  if (params.invoiceNo) return 'ready'
+  if (progressCode === 'P3') return 'delivered'
+  if (progressCode === 'P2') return 'shipped'
+  if (progressCode === 'P1' || params.confirmedAt) return 'confirmed'
+  if (progressCode === 'P0') return 'new'
+
+  const numeric = Number(progressCode)
+  if (Number.isFinite(numeric)) {
+    if (numeric >= 60) return 'delivered'
+    if (numeric >= 40) return 'shipped'
+    if (numeric >= 30) return 'ready'
+    if (numeric >= 25) return 'confirmed'
+  }
+
   return 'new'
 }

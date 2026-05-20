@@ -1,31 +1,57 @@
-/**
- * Hyundai Hmall (현대홈쇼핑) API client.
- *
- * TODO: Update base URL when API documentation becomes available.
- */
-
 import ky from 'ky'
+import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 
-// TODO: Update base URL when API documentation becomes available
-const HYUNDAI_HMALL_API_BASE = 'https://api.hmall.com'
+const DEFAULT_HYUNDAI_HMALL_API_BASE = 'https://api.hmall.com'
+
+export interface HyundaiHmallClientCredentials {
+  oauser_id: string
+  oause_key: string
+  base_url?: string
+}
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  trimValues: true,
+})
+
+const builder = new XMLBuilder({
+  ignoreAttributes: false,
+  format: false,
+  suppressEmptyNode: false,
+})
+
+export function buildHmallXml(rows: Array<Record<string, unknown>>): string {
+  return builder.build({
+    Root: {
+      Dataset: {
+        '@_id': 'dsInput',
+        rows: {
+          row: rows,
+        },
+      },
+    },
+  })
+}
+
+export function parseHmallXml<T = Record<string, unknown>>(xml: string): T {
+  return parser.parse(xml) as T
+}
 
 /**
  * Create a ky HTTP client pre-configured for Hyundai Hmall API calls.
  */
-export function createHyundaiHmallClient(apiKey: string) {
+export function createHyundaiHmallClient(credentials: HyundaiHmallClientCredentials) {
   return ky.create({
-    prefixUrl: HYUNDAI_HMALL_API_BASE,
-    hooks: {
-      beforeRequest: [
-        (request) => {
-          request.headers.set('X-Api-Key', apiKey)
-          request.headers.set('Content-Type', 'application/json;charset=UTF-8')
-        },
-      ],
+    prefixUrl: credentials.base_url?.trim() || DEFAULT_HYUNDAI_HMALL_API_BASE,
+    headers: {
+      oauserId: credentials.oauser_id,
+      oauseKey: credentials.oause_key,
+      Accept: 'application/xml',
+      'Content-Type': 'application/xml;charset=UTF-8',
     },
     timeout: 30_000,
     retry: {
-      limit: 2,
+      limit: 1,
       statusCodes: [408, 429, 500, 502, 503, 504],
     },
   })

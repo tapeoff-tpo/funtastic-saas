@@ -17,6 +17,7 @@ import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter
 import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
 import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
 import { PlayautoEmpAdapter } from '@/lib/marketplace/adapters/playauto-emp/adapter'
+import { HyundaiHmallAdapter } from '@/lib/marketplace/adapters/hyundai-hmall/adapter'
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -32,6 +33,7 @@ interface ActionResult {
 
 const OPTIONAL_CREDENTIALS: Record<string, string[]> = {
   'playauto-emp': ['base_url', 'malls', 'states'],
+  'hyundai-hmall': ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
 }
 
 function splitLinkedMarketplaces(value: string | null | undefined): string[] {
@@ -203,6 +205,18 @@ export async function testMarketplaceCredentials(
       case 'ssgmall':
         result = await new SsgmallAdapter({
           api_key: credentials.api_key?.trim() ?? '',
+        }).testConnection()
+        break
+      case 'hyundai-hmall':
+        result = await new HyundaiHmallAdapter({
+          oauser_id: credentials.oauser_id?.trim() ?? '',
+          oause_key: credentials.oause_key?.trim() ?? '',
+          ven_cd: credentials.ven_cd?.trim() ?? '',
+          ven2_cd: credentials.ven2_cd?.trim() ?? '',
+          mda_gb: credentials.mda_gb?.trim() ?? '',
+          dlv_form_gbcd: credentials.dlv_form_gbcd?.trim() ?? '',
+          base_url: credentials.base_url?.trim() ?? '',
+          rgst_ip: credentials.rgst_ip?.trim() ?? '',
         }).testConnection()
         break
       case 'playauto-emp':

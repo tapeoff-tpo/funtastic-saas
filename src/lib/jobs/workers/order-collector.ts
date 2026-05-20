@@ -28,6 +28,7 @@ import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter
 import { TobizonAdapter } from '@/lib/marketplace/adapters/tobizon/adapter'
 import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
 import { PlayautoEmpAdapter } from '@/lib/marketplace/adapters/playauto-emp/adapter'
+import { HyundaiHmallAdapter } from '@/lib/marketplace/adapters/hyundai-hmall/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
@@ -148,6 +149,17 @@ export function createAdapter(
       return new SsgmallAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
       })
+    case 'hyundai-hmall':
+      return new HyundaiHmallAdapter({
+        oauser_id: credentials.oauser_id ?? credentials.oauserId ?? '',
+        oause_key: credentials.oause_key ?? credentials.oauseKey ?? '',
+        ven_cd: credentials.ven_cd ?? credentials.venCd ?? '',
+        ven2_cd: credentials.ven2_cd ?? credentials.ven2Cd ?? '',
+        mda_gb: credentials.mda_gb ?? credentials.mdaGb ?? '',
+        dlv_form_gbcd: credentials.dlv_form_gbcd ?? credentials.dlvFormGbcd ?? '',
+        base_url: credentials.base_url ?? credentials.baseUrl ?? '',
+        rgst_ip: credentials.rgst_ip ?? credentials.rgstIp ?? '',
+      })
     case 'playauto-emp':
       return new PlayautoEmpAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
@@ -189,6 +201,7 @@ const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'ohouse',
   'onchannel',
   'ssgmall',
+  'hyundai-hmall',
   'cjonestyle',
   'kakao-gift',
   'kakao-store',
@@ -208,6 +221,7 @@ const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
   ohouse: 2,
   onchannel: 2,
   ssgmall: 2,
+  'hyundai-hmall': 1,
   cjonestyle: 2,
   'kakao-gift': 2,
   'kakao-store': 2,
@@ -424,8 +438,11 @@ export async function collectOrdersForConnection(params: {
       credentials[credKey] = value
     }
 
-    if (marketplaceId === 'playauto-emp') {
-      for (const credKey of ['base_url', 'malls', 'states']) {
+    if (marketplaceId === 'playauto-emp' || marketplaceId === 'hyundai-hmall') {
+      const optionalKeys = marketplaceId === 'playauto-emp'
+        ? ['base_url', 'malls', 'states']
+        : ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip']
+      for (const credKey of optionalKeys) {
         const vaultKey = `${credKey}${aliasTag}`
         const value = await readCredential(marketplaceId, userId, vaultKey)
         if (value) credentials[credKey] = value

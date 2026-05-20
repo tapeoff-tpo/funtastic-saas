@@ -85,11 +85,11 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
 
   await setProgress('RPA 세션 확인 중...')
   const session = credentials.storageState
-    ? await scraper.testSession(credentials)
+    ? await runWithTimeout(scraper.testSession(credentials), 60_000)
     : { ok: false }
   if (!session.ok) {
     await setProgress('RPA 로그인 중...')
-    const login = await scraper.login(credentials)
+    const login = await runWithTimeout(scraper.login(credentials), 90_000)
     if (!login.success) throw new Error(login.error ?? `${marketplaceId} login failed`)
     if (login.storageState) {
       await setProgress('RPA 세션 저장 중...')

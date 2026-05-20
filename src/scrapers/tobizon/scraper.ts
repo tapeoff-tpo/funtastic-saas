@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { Locator, Page } from 'playwright'
+import type { Dialog, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   InvoiceData,
@@ -39,6 +39,29 @@ function readCellText(value: ExcelJS.CellValue): string {
 
 function normalizeHeader(value: string): string {
   return value.replace(/\s+/g, '').replace(/[()[\]{}]/g, '').trim()
+}
+
+function decodeWorkbookText(buffer: Buffer): string {
+  const utf8 = new TextDecoder('utf-8').decode(buffer)
+  if (!utf8.includes('\uFFFD')) return utf8
+  return new TextDecoder('euc-kr').decode(buffer)
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+}
+
+function stripHtml(value: string): string {
+  return decodeHtmlEntities(value.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function parseNumber(value: string): number {
@@ -196,19 +219,72 @@ async function applyOrderSearch(page: Page, since: Date): Promise<void> {
   await page.waitForTimeout(1500)
 }
 
+async function hasNoOrders(page: Page): Promise<boolean> {
+  const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  return /검색된\s*자료가\s*없|검색\s*결과가\s*없|조회된\s*자료가\s*없|조회\s*결과가\s*없|주문\s*내역이\s*없|내역이\s*없|데이터가\s*없|자료가\s*없|총\s*0\s*건|0\s*건의\s*주문/.test(text)
+}
+
+async function selectOrderRows(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const orderRows = Array.from(document.querySelectorAll('tr, .list-row, [role="row"]'))
+      .filter((row) => {
+        const text = row.textContent?.replace(/\s+/g, ' ') ?? ''
+        if (/전체\s*선택|주문번호|상품명|수취인|받는사람/.test(text)) return false
+        return /주문|결제|배송|신규|\d{6,}/.test(text)
+      })
+
+    const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      .filter((checkbox) => !checkbox.disabled && checkbox.offsetParent !== null)
+
+    let selected = 0
+    for (const checkbox of checkboxes) {
+      const row = checkbox.closest('tr, .list-row, [role="row"]')
+      const text = row?.textContent?.replace(/\s+/g, ' ') ?? ''
+      if (!row || /전체\s*선택|주문번호|상품명|수취인|받는사람/.test(text)) continue
+      if (!/주문|결제|배송|신규|\d{6,}/.test(text)) continue
+      if (!checkbox.checked) checkbox.click()
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+      selected += 1
+    }
+
+    if (selected > 0) return true
+    if (orderRows.length === 0) return false
+
+    const selectAll = checkboxes.find((checkbox) => /전체/.test(checkbox.closest('label, th, td, div')?.textContent ?? ''))
+    if (selectAll) {
+      if (!selectAll.checked) selectAll.click()
+      selectAll.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    }
+    return true
+  }).catch(() => false)
+}
+
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
-  const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-    clickByText(page, /주문서?\s*엑셀|엑셀\s*다운|다운로드/i, 15_000).then((clicked) => {
-      if (!clicked) throw new Error('주문 엑셀 다운로드 버튼을 찾지 못했습니다.')
-    }),
-  ]).catch((error) => {
+  if (await hasNoOrders(page)) return Buffer.alloc(0)
+
+  const dialogHandler = (dialog: Dialog) => {
+    void dialog.accept().catch(() => undefined)
+  }
+  page.on('dialog', dialogHandler)
+
+  let download
+  try {
+    [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
+      clickByText(page, /주문서?\s*엑셀|선택.*엑셀|엑셀\s*다운|다운로드/i, 15_000).then((clicked) => {
+        if (!clicked) throw new Error('주문 엑셀 다운로드 버튼을 찾지 못했습니다.')
+      }),
+    ])
+  } catch (error) {
     throw new MarketplaceApiError(
       'tobizon',
       504,
       `투비즈온 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
     )
-  })
+  } finally {
+    page.off('dialog', dialogHandler)
+  }
 
   const stream = await download.createReadStream()
   if (!stream) throw new MarketplaceApiError('tobizon', 500, '투비즈온 엑셀 다운로드 스트림을 열 수 없습니다.')
@@ -291,6 +367,7 @@ export class TobizonScraper implements MarketplaceScraper {
 
   async getOrders(credentials: ScraperCredentials, since: Date): Promise<NormalizedOrder[]> {
     const buffer = await this.downloadOrdersExcel(credentials, since)
+    if (buffer.length === 0) return []
     return this.parseOrdersExcel(buffer)
   }
 
@@ -349,6 +426,11 @@ export class TobizonScraper implements MarketplaceScraper {
 
       await runStep('orders: open order management', () => openOrderManagementPage(ctx.page))
       await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since))
+      const selected = await runStep('orders: select order rows', () => selectOrderRows(ctx.page))
+      if (!selected) {
+        logStep('orders: no selectable orders')
+        return Buffer.alloc(0)
+      }
       return await runStep('orders: download order excel', () => downloadOrdersExcel(ctx.page))
     } finally {
       await ctx.close()
@@ -357,7 +439,13 @@ export class TobizonScraper implements MarketplaceScraper {
 
   private async parseOrdersExcel(buffer: Buffer): Promise<NormalizedOrder[]> {
     const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    try {
+      await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+    } catch (error) {
+      const htmlOrders = this.parseHtmlOrders(buffer)
+      if (htmlOrders.length > 0) return htmlOrders
+      throw error
+    }
     const worksheet = workbook.worksheets[0]
     if (!worksheet) return []
 
@@ -447,6 +535,90 @@ export class TobizonScraper implements MarketplaceScraper {
         ],
       })
     })
+
+    return orders
+  }
+
+  private parseHtmlOrders(buffer: Buffer): NormalizedOrder[] {
+    const html = decodeWorkbookText(buffer)
+    const tableRows = Array.from(html.matchAll(/<tr[\s\S]*?<\/tr>/gi)).map((rowMatch, index) => ({
+      rowNumber: index + 1,
+      cells: Array.from(rowMatch[0].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)).map((cell) => stripHtml(cell[1] ?? '')),
+    })).filter((row) => row.cells.length > 0)
+
+    const header = tableRows.find((row) => {
+      const text = row.cells.map(normalizeHeader).join(' ')
+      return /주문번호|주문일|상품명|수취인|받는사람/.test(text)
+    })
+    if (!header) return []
+
+    const columns = header.cells.map(normalizeHeader)
+    const get = (row: { cells: string[] }, ...headers: string[]) => {
+      for (const headerName of headers) {
+        const normalized = normalizeHeader(headerName)
+        const index = columns.findIndex((column) => column === normalized || column.includes(normalized) || normalized.includes(column))
+        if (index >= 0) return row.cells[index] ?? ''
+      }
+      return ''
+    }
+
+    const orders: NormalizedOrder[] = []
+    for (const row of tableRows) {
+      if (row.rowNumber <= header.rowNumber) continue
+      const orderNo = get(row, '주문번호', '주문코드').replace(/^_/, '')
+      const productName = get(row, '상품명', '품명')
+      if (!orderNo || !productName) continue
+
+      const quantity = Math.max(parseNumber(get(row, '수량', '구매수량', '주문수량')), 1)
+      const itemTotal = parseNumber(get(row, '상품금액', '상품합계', '결제금액', '총금액'))
+      const supplyPrice = parseNumber(get(row, '공급가', '단가'))
+      const shippingFee = parseNumber(get(row, '배송비', '배송료'))
+      const recipientName = get(row, '수취인', '수취인명', '받는사람', '수령인')
+      const recipientPhone = get(row, '수취인전화번호', '수취인연락처', '핸드폰', '휴대폰', '전화번호')
+      const buyerName = get(row, '주문자', '주문자명', '구매자') || recipientName
+      const buyerPhone = get(row, '주문자전화번호', '주문자연락처') || recipientPhone
+      const productCode = get(row, '상품코드', '상품번호')
+      const sku = get(row, '자체상품코드', '판매자상품코드', '업체상품코드') || productCode
+      const optionText = get(row, '옵션', '옵션명', '선택옵션')
+
+      orders.push({
+        marketplaceId: 'tobizon',
+        marketplaceOrderId: orderNo,
+        marketplaceStatus: get(row, '주문상태', '상태') || '주문',
+        status: 'new',
+        buyerName,
+        buyerPhone,
+        recipientName,
+        recipientPhone,
+        shippingAddress: {
+          zipCode: get(row, '우편번호', '우편'),
+          address1: get(row, '주소', '배송주소', '수취인주소'),
+          address2: get(row, '상세주소', '나머지주소') || undefined,
+        },
+        orderedAt: parseKstDate(get(row, '주문일자', '주문일', '등록일')),
+        totalAmount: itemTotal || supplyPrice * quantity,
+        shippingType: get(row, '배송구분', '배송비구분') || null,
+        shippingFee,
+        deliveryMessage: get(row, '배송메세지', '배송메시지', '요청사항', '배송시요청사항') || null,
+        rawData: {
+          source: 'rpa-html-excel',
+          rowNumber: row.rowNumber,
+          productCode,
+          carrierName: get(row, '택배사', '배송사') || null,
+          trackingNumber: get(row, '송장번호') || null,
+        },
+        items: [
+          {
+            marketplaceItemId: get(row, '주문상품번호', '상품주문번호') || productCode || orderNo,
+            productName,
+            optionText: optionText || undefined,
+            quantity,
+            unitPrice: supplyPrice || (quantity > 0 ? itemTotal / quantity : itemTotal),
+            sku: sku || undefined,
+          },
+        ],
+      })
+    }
 
     return orders
   }

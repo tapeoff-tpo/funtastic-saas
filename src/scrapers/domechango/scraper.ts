@@ -58,7 +58,7 @@ function parseKstDate(value: string): Date {
 }
 
 function logStep(step: string): void {
-  console.log(`[domechango-rpa] ${step}`)
+  console.log(`[도매창고-rpa] ${step}`)
 }
 
 async function summarizePage(page: Page): Promise<string> {
@@ -245,6 +245,34 @@ async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+async function confirmSelectedOrders(page: Page): Promise<void> {
+  const statusSelect = page.locator('#act_status').first()
+  await statusSelect.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
+
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (res) => res.url().includes('/wms/order/list/status/2') && res.request().method() === 'PATCH',
+      { timeout: 15_000 },
+    ),
+    statusSelect.selectOption('2', { timeout: 10_000 }),
+  ]).catch((error) => {
+    throw new MarketplaceApiError(
+      'domechango',
+      500,
+      `도매창고 주문확인 처리 요청을 완료하지 못했습니다. (${error instanceof Error ? error.message : 'unknown error'})`,
+    )
+  })
+
+  const payload = await response.json().catch(() => null) as { statusCode?: number; data?: unknown; message?: string } | null
+  if (!response.ok() || payload?.statusCode !== 200) {
+    throw new MarketplaceApiError(
+      'domechango',
+      response.status() || 500,
+      `도매창고 주문확인 처리에 실패했습니다. (${String(payload?.data ?? payload?.message ?? response.statusText())})`,
+    )
+  }
+}
+
 export class DomechangoScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'domechango'
   readonly displayName = '도매창고'
@@ -383,7 +411,9 @@ export class DomechangoScraper implements MarketplaceScraper {
       await runStep('orders: open order list page', () => openOrderListPage(ctx.page))
       await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since, until))
       await runStep('orders: select first order', () => selectFirstOrderForExcel(ctx.page))
-      return await runStep('orders: download selected order excel', () => triggerSelectedOrderExcelDownload(ctx.page))
+      const workbook = await runStep('orders: download selected order excel', () => triggerSelectedOrderExcelDownload(ctx.page))
+      await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page))
+      return workbook
     } finally {
       await ctx.close()
     }

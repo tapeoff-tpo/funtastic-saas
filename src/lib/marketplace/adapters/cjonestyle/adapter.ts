@@ -39,6 +39,17 @@ function formatDate(date: Date): string {
   return date.toISOString().split('T')[0]
 }
 
+function cjOrderLineId(row: CjOnestyleDeliveryOrder): string {
+  const parts = [
+    row.orderNo,
+    row.orderItemSequence,
+    row.orderDetailSequence,
+    row.orderProcessingSequence,
+  ].map((value) => String(value ?? '').trim()).filter(Boolean)
+
+  return parts.join('-')
+}
+
 async function extractCjOnestyleError(error: unknown): Promise<string> {
   if (error instanceof HTTPError) {
     const body = await error.response.text().catch(() => '')
@@ -133,7 +144,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
       const carrierCode = mapCarrierCode('cjonestyle', invoice.carrierId)
       const response = await this.client.post('delivery/setTakeOutReg', {
         json: {
-          orderNo: orderId,
+          orderNo: String(rawData?.orderNo ?? orderId).split('-')[0],
           orderItemSequence: String(rawData?.orderItemSequence ?? ''),
           orderDetailSequence: String(rawData?.orderDetailSequence ?? ''),
           orderProcessingSequence: String(rawData?.orderProcessingSequence ?? ''),
@@ -202,7 +213,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
   private groupDeliveryRows(rows: CjOnestyleDeliveryOrder[]): NormalizedOrder[] {
     const groups = new Map<string, CjOnestyleDeliveryOrder[]>()
     for (const row of rows) {
-      const key = String(row.orderNo)
+      const key = cjOrderLineId(row)
       groups.set(key, [...(groups.get(key) ?? []), row])
     }
 
@@ -211,6 +222,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
 
   private normalizeOrder(rows: CjOnestyleDeliveryOrder[]): NormalizedOrder {
     const first = rows[0]
+    const marketplaceOrderId = cjOrderLineId(first)
     const items: NormalizedOrderItem[] = rows.map((row) => {
       const quantity = Number(row.count ?? 1) || 1
       const unitPrice = Number(row.paymentPrice ?? row.salesPrice ?? row.supplyPrice ?? 0) || 0
@@ -232,7 +244,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
     const totalAmount = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
 
     return {
-      marketplaceOrderId: String(first.orderNo),
+      marketplaceOrderId,
       marketplaceId: 'cjonestyle',
       marketplaceStatus: String(first.deliveryStatus ?? ''),
       status: mapCjOnestyleStatus(String(first.deliveryStatus ?? '')),
@@ -249,7 +261,12 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
       totalAmount,
       shippingFee: Number(first.customerResponsibilityCost ?? 0) || null,
       deliveryMessage: first.deliveryNote || null,
-      rawData: first as unknown as Record<string, unknown>,
+      rawData: {
+        ...(first as unknown as Record<string, unknown>),
+        marketplaceOrderIdentity: {
+          orderId: marketplaceOrderId,
+        },
+      },
     }
   }
 }

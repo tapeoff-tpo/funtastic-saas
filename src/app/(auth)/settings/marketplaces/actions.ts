@@ -55,6 +55,7 @@ export async function getMarketplaceCredentials(
     marketplaceId: string
     storeAlias: string
     requiredCredentials: string[]
+    optionalCredentials?: string[]
     values: Record<string, string>
   }
 }> {
@@ -88,10 +89,11 @@ export async function getMarketplaceCredentials(
 
   const config = marketplaceRegistry.get(connection.marketplaceId).config
   const aliasTag = connection.storeAlias === 'default' ? '' : `_${connection.storeAlias}`
+  const optionalCredentials = OPTIONAL_CREDENTIALS[connection.marketplaceId] ?? []
 
   const values: Record<string, string> = {}
   try {
-    for (const credKey of config.requiredCredentials) {
+    for (const credKey of [...config.requiredCredentials, ...optionalCredentials]) {
       const vaultKey = `${credKey}${aliasTag}`
       const secret = await readCredential(connection.marketplaceId, workspaceUserId, vaultKey)
       values[credKey] = secret ?? ''
@@ -108,6 +110,7 @@ export async function getMarketplaceCredentials(
       marketplaceId: connection.marketplaceId,
       storeAlias: connection.storeAlias,
       requiredCredentials: [...config.requiredCredentials],
+      optionalCredentials,
       values,
     },
   }

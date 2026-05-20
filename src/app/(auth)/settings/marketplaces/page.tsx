@@ -16,6 +16,7 @@ interface ConnectionListItem {
   id: string
   displayName: string
   status: string
+  metadata: Record<string, unknown> | null
 }
 
 export default async function MarketplaceSettingsPage() {
@@ -189,10 +190,18 @@ function ConnectionGroup({
               displayName={conn.displayName}
               status={conn.status as ConnectionStatus}
               integrationMethod={method}
+              linkedMarketplaces={linkedMarketplacesFromMetadata(conn.metadata)}
             />
           ))}
         </div>
       )}
     </section>
   )
+}
+
+function linkedMarketplacesFromMetadata(metadata: Record<string, unknown> | null | undefined): string[] {
+  const value = metadata?.linkedMarketplaces
+  return Array.isArray(value)
+    ? value.map((entry) => String(entry).trim()).filter(Boolean)
+    : []
 }

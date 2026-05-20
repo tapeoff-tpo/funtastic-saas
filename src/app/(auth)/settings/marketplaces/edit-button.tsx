@@ -33,6 +33,9 @@ const credentialLabels: Record<string, string> = {
   admin_app_key: '연동대행사 Admin 키',
   seller_app_key: '판매자 API 인증키',
   vendor_password: '오너클랜 공급사 PW',
+  base_url: 'API Base URL',
+  malls: 'EMP 쇼핑몰 필터',
+  states: 'EMP 주문상태',
 }
 
 interface ConnectionRowProps {
@@ -40,12 +43,14 @@ interface ConnectionRowProps {
   displayName: string
   status: ConnectionStatus
   integrationMethod: IntegrationMethod
+  linkedMarketplaces?: string[]
 }
 
 interface LoadedData {
   marketplaceId: string
   storeAlias: string
   requiredCredentials: string[]
+  optionalCredentials?: string[]
   values: Record<string, string>
 }
 
@@ -54,6 +59,7 @@ export function ConnectionRow({
   displayName,
   status,
   integrationMethod,
+  linkedMarketplaces = [],
 }: ConnectionRowProps) {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -98,7 +104,7 @@ export function ConnectionRow({
     setTesting(true)
     const fd = new FormData(form)
     const credentials: Record<string, string> = {}
-    for (const credKey of data.requiredCredentials) {
+    for (const credKey of [...data.requiredCredentials, ...(data.optionalCredentials ?? [])]) {
       credentials[credKey] = (fd.get(credKey) as string) ?? ''
     }
     const result = await testMarketplaceCredentials(data.marketplaceId, credentials)
@@ -116,9 +122,19 @@ export function ConnectionRow({
         <div className="flex items-center gap-3">
           <span className="font-medium">{displayName}</span>
           <StatusBadge status={status} />
+          {integrationMethod === 'hub' && (
+            <span
+              className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-700"
+              title={linkedMarketplaces.length > 0 ? linkedMarketplaces.join(', ') : 'EMP 설정 전체'}
+            >
+              {linkedMarketplaces.length > 0
+                ? `연동몰 ${linkedMarketplaces.length}개`
+                : 'EMP 전체'}
+            </span>
+          )}
         </div>
         <div className="flex gap-2">
-          {integrationMethod === 'api' && (
+          {(integrationMethod === 'api' || integrationMethod === 'hub') && (
             <Button
               type="button"
               variant="outline"
@@ -132,8 +148,13 @@ export function ConnectionRow({
           <DeleteConnectionButton connectionId={connectionId} />
         </div>
       </div>
+      {integrationMethod === 'hub' && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          연동몰: {linkedMarketplaces.length > 0 ? linkedMarketplaces.join(', ') : 'EMP 설정 전체'}
+        </p>
+      )}
 
-      {open && data && integrationMethod === 'api' && (
+      {open && data && (integrationMethod === 'api' || integrationMethod === 'hub') && (
         <form
           action={formAction}
           className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3"
@@ -175,6 +196,33 @@ export function ConnectionRow({
               </div>
             )
           })}
+
+          {(data.optionalCredentials ?? []).map((credKey) => (
+            <div key={credKey} className="space-y-1">
+              <Label htmlFor={`edit-${connectionId}-${credKey}`}>
+                {credentialLabels[credKey] ?? credKey}
+              </Label>
+              <Input
+                id={`edit-${connectionId}-${credKey}`}
+                name={credKey}
+                type="text"
+                defaultValue={data.values[credKey] ?? ''}
+                placeholder={
+                  credKey === 'malls'
+                    ? '예: 11번가;스마트스토어;쿠팡'
+                    : credKey === 'states'
+                      ? '예: 신규주문,주문확인'
+                      : `${credentialLabels[credKey] ?? credKey} 입력`
+                }
+                autoComplete="off"
+              />
+              {credKey === 'malls' && (
+                <p className="text-xs text-muted-foreground">
+                  하위 쇼핑몰명을 세미콜론(;) 또는 줄바꿈으로 구분해 입력하세요. 비우면 EMP 전체 주문을 조회합니다.
+                </p>
+              )}
+            </div>
+          ))}
 
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={isPending || testing}>

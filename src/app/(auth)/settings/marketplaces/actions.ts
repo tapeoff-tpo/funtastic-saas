@@ -32,7 +32,7 @@ interface ActionResult {
 }
 
 const OPTIONAL_CREDENTIALS: Record<string, string[]> = {
-  'hyundai-hmall': ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
+  'hyundai-hmall': ['ven2_cd', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
 }
 
 /**

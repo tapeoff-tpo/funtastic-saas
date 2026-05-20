@@ -55,13 +55,13 @@ const credentialLabels: Record<string, string> = {
   oause_key: 'oauseKey',
   ven_cd: '협력사코드',
   ven2_cd: '2차협력사코드',
-  mda_gb: '매입처 코드',
+  mda_gb: '매체구분',
   dlv_form_gbcd: '배송형태구분코드',
   rgst_ip: '등록 IP',
 }
 
 const optionalCredentialFields: Record<string, string[]> = {
-  'hyundai-hmall': ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
+  'hyundai-hmall': ['ven2_cd', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
 }
 
 const METHOD_HELP: Record<IntegrationMethod, string> = {
@@ -79,7 +79,6 @@ function methodLabel(method: IntegrationMethod): string {
 
 function optionalPlaceholder(marketplaceId: string, credKey: string): string {
   if (marketplaceId === 'hyundai-hmall' && credKey === 'ven2_cd') return '예: 000000'
-  if (marketplaceId === 'hyundai-hmall' && credKey === 'mda_gb') return '예: 20'
   if (marketplaceId === 'hyundai-hmall' && credKey === 'dlv_form_gbcd') return '예: 40'
   return `${credentialLabels[credKey] ?? credKey} 입력`
 }

@@ -51,13 +51,13 @@ const credentialLabels: Record<string, string> = {
   oause_key: 'oauseKey',
   ven_cd: '협력사코드',
   ven2_cd: '2차협력사코드',
-  mda_gb: '매입처 코드',
+  mda_gb: '매체구분',
   dlv_form_gbcd: '배송형태구분코드',
   rgst_ip: '등록 IP',
 }
 
 const optionalCredentialFields: Record<string, string[]> = {
-  'hyundai-hmall': ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
+  'hyundai-hmall': ['ven2_cd', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
 }
 
 export function CredentialForm({

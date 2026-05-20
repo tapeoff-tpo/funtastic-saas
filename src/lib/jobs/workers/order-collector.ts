@@ -438,7 +438,7 @@ export async function collectOrdersForConnection(params: {
     if (marketplaceId === 'playauto-emp' || marketplaceId === 'hyundai-hmall') {
       const optionalKeys = marketplaceId === 'playauto-emp'
         ? []
-        : ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip']
+        : ['ven2_cd', 'dlv_form_gbcd', 'base_url', 'rgst_ip']
       for (const credKey of optionalKeys) {
         const vaultKey = `${credKey}${aliasTag}`
         const value = await readCredential(marketplaceId, userId, vaultKey)

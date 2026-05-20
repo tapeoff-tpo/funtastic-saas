@@ -167,6 +167,15 @@ function shouldAutoConfirmOrders(): boolean {
   return false
 }
 
+function shouldConfirmOnCollect(marketplaceId: string): boolean {
+  return marketplaceId === 'funtastic-b2b'
+}
+
+function confirmedMarketplaceStatus(marketplaceId: string): string {
+  if (marketplaceId === 'funtastic-b2b') return 'PREPARING'
+  return 'CONFIRMED'
+}
+
 const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'ownerclan',
   '10x10',
@@ -487,6 +496,8 @@ export async function collectOrdersForConnection(params: {
       `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` - 저장/갱신 ${ordersToSave.length}건, 기존 ${skippedExistingCount}건 포함` : ''}`,
     )
 
+    type ConfirmTarget = { id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
+    const confirmTargets: ConfirmTarget[] = []
     const totalOrders = ordersToSave.length
     let idx = 0
     for (const order of ordersToSave) {
@@ -512,6 +523,14 @@ export async function collectOrdersForConnection(params: {
       }
       ordersCollected++
 
+      if (shouldConfirmOnCollect(marketplaceId) && upsertedOrder.status === 'new') {
+        confirmTargets.push({
+          id: upsertedOrder.id,
+          marketplaceOrderId: order.marketplaceOrderId,
+          rawData: enrichOrderRawData(orderForSave),
+        })
+      }
+
       // 진행률 표시(많은 주문 시): 5건마다 또는 마지막 1건에서 갱신
       if (totalOrders >= 5 && (idx % 5 === 0 || idx === totalOrders)) {
         await setProgress(`주문 저장 중 (${idx}/${totalOrders})`)
@@ -519,7 +538,43 @@ export async function collectOrdersForConnection(params: {
 
     }
 
-    // 4.5 Auto-confirm is permanently disabled. Default workflow:
+    if (confirmTargets.length > 0 && typeof adapter.confirmOrder === 'function') {
+      await setProgress(`수집 주문 상태 전환 중... (0/${confirmTargets.length})`)
+      let confirmIdx = 0
+      const confirmFailures: string[] = []
+
+      for (const target of confirmTargets) {
+        confirmIdx++
+        try {
+          const result = await adapter.confirmOrder(target.marketplaceOrderId, target.rawData ?? undefined)
+          if (result.success) {
+            await db
+              .update(orders)
+              .set({
+                status: 'confirmed',
+                marketplaceStatus: confirmedMarketplaceStatus(marketplaceId),
+                updatedAt: new Date(),
+              })
+              .where(eq(orders.id, target.id))
+          } else {
+            confirmFailures.push(`${target.marketplaceOrderId}: ${result.error ?? 'unknown error'}`)
+          }
+        } catch (err) {
+          confirmFailures.push(`${target.marketplaceOrderId}: ${err instanceof Error ? err.message : String(err)}`)
+        }
+
+        if (confirmIdx === confirmTargets.length || confirmIdx % 5 === 0) {
+          await setProgress(`수집 주문 상태 전환 중... (${confirmIdx}/${confirmTargets.length})`)
+        }
+      }
+
+      if (confirmFailures.length > 0) {
+        throw new Error(`${marketplaceId} 주문 상태 전환 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)
+      }
+    }
+
+    // 4.5 Auto-confirm is disabled except for marketplaces that require a
+    // source-side transition immediately after collection, such as Funtastic B2B.
     // 수집 → 신규(status='new') → 매핑 → 사용자가 [확정] 클릭 → 확인(status='confirmed').
     if (ordersCollected > 0 && !shouldAutoConfirmOrders()) {
       await setProgress(`${ordersCollected}건 신규/기존 주문 저장 완료`)

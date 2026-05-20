@@ -4,6 +4,12 @@ import { useState, useTransition } from 'react'
 import { toast } from 'sonner'
 import { bulkUploadInvoiceAction } from './actions'
 
+const CARRIER_LABELS: Record<string, string> = {
+  CJGLS: 'CJ대한통운',
+  KDEXP: '경동택배',
+  DAESIN: '대신택배',
+}
+
 interface InvoiceImportTemplate {
   id: string
   name: string
@@ -23,6 +29,24 @@ const INVOICE_IMPORT_TEMPLATES: InvoiceImportTemplate[] = [
     carrierCol: null,
     fixedCarrierId: 'CJGLS',
     description: '고객주문번호 19열, 운송장번호 8열, 택배사 CJ대한통운 고정',
+  },
+  {
+    id: 'kyungdong-invoice-registration',
+    name: '경동택배 송장등록 양식',
+    orderIdCol: 6,
+    trackingNumberCol: 5,
+    carrierCol: null,
+    fixedCarrierId: 'KDEXP',
+    description: '고객사주문번호 6열, 운송장번호 5열, 택배사 경동택배 고정',
+  },
+  {
+    id: 'daesin-invoice-registration',
+    name: '대신택배 송장등록 양식',
+    orderIdCol: 10,
+    trackingNumberCol: 3,
+    carrierCol: null,
+    fixedCarrierId: 'DAESIN',
+    description: '품명 10열, 운송장번호 3열, 택배사 대신택배 고정',
   },
 ]
 
@@ -130,7 +154,7 @@ export function ExcelImportDialog({
       const orders = result.matched.map((m) => ({
         orderId: m.orderId,
         trackingNumber: m.trackingNumber,
-        carrierId: m.carrierId ?? 'CJGLS',
+        carrierId: m.carrierId ?? selectedTemplate.fixedCarrierId ?? 'CJGLS',
       }))
 
       const uploadResult = await bulkUploadInvoiceAction(orders)
@@ -252,7 +276,7 @@ export function ExcelImportDialog({
                 <>
                   <span className="mb-1 block text-sm font-medium">택배사</span>
                   <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
-                    CJ대한통운 고정
+                    {CARRIER_LABELS[selectedTemplate.fixedCarrierId ?? ''] ?? selectedTemplate.fixedCarrierId} 고정
                   </div>
                 </>
               ) : (

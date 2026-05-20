@@ -169,6 +169,7 @@ None yet.
 | 260515-collect-result-label | 주문수집 결과 문구를 수집/갱신 의미로 수정 | 2026-05-15 | pending | [260515-collect-result-label](.planning/quick/260515-collect-result-label/) |
 | 260515-specialoffer-collectable-orders | 스페셜오퍼 수집 대상을 배송준비/미송장 주문으로 제한 | 2026-05-15 | pending | [260515-specialoffer-collectable-orders](.planning/quick/260515-specialoffer-collectable-orders/) |
 | 260518-tobizon-vendor-api | 투비즈온 공급사 상품 API 인증/상품 등록·수정 helper 반영 | 2026-05-18 | pending | [260518-tobizon-vendor-api](.planning/quick/260518-tobizon-vendor-api/) |
+| 260520-domesin-playwright-rpa | 도매의신 Playwright RPA 로그인/세션 골격 추가 | 2026-05-20 | pending | [260520-domesin-playwright-rpa](.planning/quick/260520-domesin-playwright-rpa/) |
 
 ## Session Continuity
 

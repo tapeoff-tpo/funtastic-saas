@@ -9,6 +9,9 @@
  */
 
 import { createAdminClient } from '@/lib/supabase/admin'
+import { db } from '@/lib/db'
+import { marketplaceConnections } from '@/lib/db/schema'
+import { and, eq } from 'drizzle-orm'
 import type { ScraperCredentials } from './types'
 
 function key(userId: string, marketplaceId: string, connectionId: string, field: string): string {
@@ -55,16 +58,40 @@ export async function readScrapeCredentials(
   connectionId: string,
 ): Promise<ScraperCredentials | null> {
   const admin = createAdminClient()
-  const readField = async (field: string): Promise<string | null> => {
+  const readVaultName = async (name: string): Promise<string | null> => {
     const { data, error } = await admin.rpc('read_marketplace_credential', {
-      p_name: key(userId, marketplaceId, connectionId, field),
+      p_name: name,
     })
     if (error) return null
     return (data as string | null) ?? null
   }
+  const readField = (field: string): Promise<string | null> =>
+    readVaultName(key(userId, marketplaceId, connectionId, field))
 
-  const email = await readField('email')
-  const password = await readField('password')
+  let email = await readField('email')
+  let password = await readField('password')
+
+  // RPA connections created from the settings page are stored with the same
+  // marketplace credential key pattern as API connections. Keep this fallback
+  // until the UI can persist connection-id-scoped scraper credentials directly.
+  if (!email || !password) {
+    const [connection] = await db
+      .select({ storeAlias: marketplaceConnections.storeAlias })
+      .from(marketplaceConnections)
+      .where(
+        and(
+          eq(marketplaceConnections.id, connectionId),
+          eq(marketplaceConnections.userId, userId),
+        ),
+      )
+      .limit(1)
+
+    const aliasTag = !connection || connection.storeAlias === 'default'
+      ? ''
+      : `_${connection.storeAlias}`
+    email = email ?? await readVaultName(`mkt_${userId}_${marketplaceId}_email${aliasTag}`)
+    password = password ?? await readVaultName(`mkt_${userId}_${marketplaceId}_password${aliasTag}`)
+  }
   if (!email || !password) return null
 
   const extrasRaw = await readField('extras')

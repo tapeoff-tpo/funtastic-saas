@@ -22,6 +22,7 @@ const INTEGRATION_METHOD_DESCRIPTIONS: Record<IntegrationMethod, string> = {
 
 const RPA_MARKETPLACES = new Set([
   'always',
+  'domesin',
   'onchannel',
   'ohouse',
   'domechango',

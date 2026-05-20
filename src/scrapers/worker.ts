@@ -16,7 +16,7 @@ import { Worker, type Job } from 'bullmq'
 import { getConnection } from '@/lib/jobs/connection'
 import { getScraper, hasScraper } from './registry'
 import { closeBrowser } from './browser'
-import { readScrapeCredentials } from './credentials'
+import { readScrapeCredentials, saveStorageState } from './credentials'
 import { db } from '@/lib/db'
 import { jobLogs, shipments } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
@@ -59,6 +59,18 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   // Load encrypted credentials from Supabase Vault
   const credentials = await readScrapeCredentials(marketplaceId, userId, connectionId)
   if (!credentials) throw new Error(`No credentials for ${marketplaceId}/${connectionId}`)
+
+  const session = credentials.storageState
+    ? await scraper.testSession(credentials)
+    : { ok: false }
+  if (!session.ok) {
+    const login = await scraper.login(credentials)
+    if (!login.success) throw new Error(login.error ?? `${marketplaceId} login failed`)
+    if (login.storageState) {
+      await saveStorageState(userId, marketplaceId, connectionId, login.storageState)
+      credentials.storageState = login.storageState
+    }
+  }
 
   // Log job start
   const logValues = {

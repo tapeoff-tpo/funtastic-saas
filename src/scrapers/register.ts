@@ -14,6 +14,7 @@ import { DomechangoScraper } from './domechango/scraper'
 import { OnchannelScraper } from './onchannel/scraper'
 import { TobizonScraper } from './tobizon/scraper'
 import { BananaB2bScraper } from './banana-b2b/scraper'
+import { DomesinScraper } from './domesin/scraper'
 // import { AblyScraper } from './ably/scraper'
 // import { OhouseScraper } from './ohouse/scraper'
 
@@ -21,5 +22,6 @@ registerScraper(new DomechangoScraper())
 registerScraper(new OnchannelScraper())
 registerScraper(new TobizonScraper())
 registerScraper(new BananaB2bScraper())
+registerScraper(new DomesinScraper())
 // registerScraper(new AblyScraper())
 // registerScraper(new OhouseScraper())

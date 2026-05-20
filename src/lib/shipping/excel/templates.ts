@@ -162,7 +162,7 @@ export const DEFAULT_CARRIER_TEMPLATES: CarrierTemplateDef[] = [
       { header: '주소', field: 'shippingAddress.address1', width: 28, required: true },
       { header: '상세주소', field: 'shippingAddress.address2', width: 36, required: false },
       { header: '운송장번호', field: 'trackingNumber', width: 16, required: false },
-      { header: '고객사주문번호', field: 'marketplaceItemId', width: 18, required: false },
+      { header: '고객사주문번호', field: 'internalNo', width: 18, required: false },
       { header: '우편번호', field: 'shippingAddress.zipCode', width: 10, required: true },
       { header: '도착영업소', field: 'etc1', width: 12, required: false },
       { header: '전화번호', field: 'recipientPhone', width: 16, required: false },

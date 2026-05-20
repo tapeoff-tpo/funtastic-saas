@@ -21,7 +21,7 @@ import { HyundaiHmallAdapter } from '@/lib/marketplace/adapters/hyundai-hmall/ad
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { getIntegrationMethod, getSupportedIntegrationMethods } from '@/lib/marketplace/integration-methods'
 import { nanoid } from 'nanoid'
 import { storeScrapeCredentials } from '@/scrapers/credentials'
 
@@ -443,7 +443,7 @@ export async function registerRpaMarketplaceConnection(
   }
 
   const config = marketplaceRegistry.get(marketplaceId).config
-  if (getIntegrationMethod(marketplaceId, { authType: config.authType }) !== 'rpa') {
+  if (!getSupportedIntegrationMethods(marketplaceId, { authType: config.authType }).includes('rpa')) {
     return { error: `${config.name}은(는) RPA 연동 대상이 아닙니다.` }
   }
 

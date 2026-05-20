@@ -32,6 +32,8 @@ const RPA_MARKETPLACES = new Set([
 ])
 
 const MULTI_METHOD_MARKETPLACES: Partial<Record<string, IntegrationMethod[]>> = {
+  ably: ['api', 'rpa', 'excel'],
+  ohouse: ['api', 'rpa', 'excel'],
   tobizon: ['rpa', 'api', 'excel'],
   'banana-b2b': ['rpa', 'api', 'excel'],
 }
@@ -45,6 +47,11 @@ export function getIntegrationMethod(
   options: { isManual?: boolean; authType?: string | null } = {},
 ): IntegrationMethod {
   if (options.isManual) return 'excel'
+  const multiMethod = MULTI_METHOD_MARKETPLACES[marketplaceId]
+  if (multiMethod) {
+    if (options.authType === 'session' && multiMethod.includes('rpa')) return 'rpa'
+    return multiMethod[0]
+  }
   if (HUB_MARKETPLACES.has(marketplaceId)) return 'hub'
   if (RPA_MARKETPLACES.has(marketplaceId)) return 'rpa'
   if (options.authType === 'session') return 'rpa'

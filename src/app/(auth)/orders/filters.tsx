@@ -97,30 +97,50 @@ function toHangulInitials(value: string): string {
   }).join('')
 }
 
-function MarketplaceSearchSelect({
+function parseSelectedMarketplaces(value: string | null | undefined): string[] {
+  if (!value) return []
+  return Array.from(new Set(
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ))
+}
+
+function MarketplaceMultiSelect({
   options,
   value,
   onChange,
 }: {
   options: Array<{ value: string; label: string }>
-  value: string
-  onChange: (value: string) => void
+  value: string | null | undefined
+  onChange: (value: string | null) => void
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const selected = options.find((option) => option.value === value) ?? options[0]
+  const selectableOptions = useMemo(() => options.filter((option) => option.value), [options])
+  const selectedValues = useMemo(() => parseSelectedMarketplaces(value), [value])
+  const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues])
+  const selectedLabels = selectedValues.map((selectedValue) => (
+    options.find((option) => option.value === selectedValue)?.label ?? selectedValue
+  ))
+  const label = selectedLabels.length === 0
+    ? '전체 마켓'
+    : selectedLabels.length === 1
+      ? selectedLabels[0]
+      : selectedLabels.join(', ')
   const filteredOptions = useMemo(() => {
     const keyword = toSearchText(query)
-    if (!keyword) return options
-    return options.filter((option) => (
+    if (!keyword) return selectableOptions
+    return selectableOptions.filter((option) => (
       toSearchText(option.label).includes(keyword)
       || toSearchText(option.value).includes(keyword)
       || toSearchText(toHangulInitials(option.label)).includes(keyword)
     ))
-  }, [options, query])
+  }, [selectableOptions, query])
 
   useEffect(() => {
     if (!open) return
@@ -134,14 +154,19 @@ function MarketplaceSearchSelect({
     return () => document.removeEventListener('pointerdown', handlePointerDown)
   }, [open])
 
-  const selectOption = useCallback((nextValue: string) => {
-    onChange(nextValue)
-    setQuery('')
-    setOpen(false)
+  const commitMarketplaces = useCallback((nextValues: string[]) => {
+    onChange(nextValues.length > 0 ? nextValues.join(',') : null)
   }, [onChange])
 
+  const toggleOption = useCallback((nextValue: string) => {
+    const nextValues = selectedSet.has(nextValue)
+      ? selectedValues.filter((selectedValue) => selectedValue !== nextValue)
+      : [...selectedValues, nextValue]
+    commitMarketplaces(nextValues)
+  }, [commitMarketplaces, selectedSet, selectedValues])
+
   return (
-    <div ref={rootRef} className="relative w-[178px]">
+    <div ref={rootRef} className="relative w-[220px]">
       <button
         id="filter-marketplace"
         type="button"
@@ -150,7 +175,7 @@ function MarketplaceSearchSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
       >
-        <span className="truncate">{selected?.label ?? '전체 마켓'}</span>
+        <span className="truncate">{label}</span>
         <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
 
@@ -170,18 +195,27 @@ function MarketplaceSearchSelect({
             />
           </div>
           <div className="max-h-64 overflow-y-auto py-1" role="listbox" aria-labelledby="filter-marketplace">
+            <button
+              type="button"
+              onClick={() => commitMarketplaces([])}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+            >
+              <span>전체 마켓</span>
+              {selectedValues.length === 0 && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
+            </button>
+            <div className="my-1 border-t" />
             {filteredOptions.length > 0 ? (
               filteredOptions.map((option) => (
                 <button
-                  key={option.value || 'all'}
+                  key={option.value}
                   type="button"
-                  onClick={() => selectOption(option.value)}
+                  onClick={() => toggleOption(option.value)}
                   className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
                   role="option"
-                  aria-selected={option.value === value}
+                  aria-selected={selectedSet.has(option.value)}
                 >
                   <span className="truncate">{option.label}</span>
-                  {option.value === value && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
+                  {selectedSet.has(option.value) && <Check className="size-4 shrink-0 text-primary" aria-hidden="true" />}
                 </button>
               ))
             ) : (
@@ -426,10 +460,10 @@ export function OrderFilters({
         <label htmlFor="filter-marketplace" className="text-xs font-medium text-muted-foreground">
           마켓플레이스
         </label>
-        <MarketplaceSearchSelect
+        <MarketplaceMultiSelect
           options={mergedMarketplaceOptions}
-          value={filters.marketplace ?? ''}
-          onChange={(nextValue) => updateFilter({ marketplace: nextValue || null })}
+          value={filters.marketplace}
+          onChange={(nextValue) => updateFilter({ marketplace: nextValue })}
         />
       </div>
 

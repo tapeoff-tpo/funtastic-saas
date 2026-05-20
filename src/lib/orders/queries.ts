@@ -280,7 +280,9 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(inArray(orders.status, filters.statuses))
   }
 
-  if (filters.marketplace) {
+  if (filters.marketplaces?.length) {
+    conditions.push(inArray(orders.marketplaceId, filters.marketplaces))
+  } else if (filters.marketplace) {
     conditions.push(eq(orders.marketplaceId, filters.marketplace))
   }
 
@@ -513,6 +515,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   const userId = filters.userId
   const canUseCachedStatsTotal = !!userId
     && !filters.marketplace
+    && !filters.marketplaces?.length
     && !filters.search
     && !filters.dateFrom
     && !filters.dateTo

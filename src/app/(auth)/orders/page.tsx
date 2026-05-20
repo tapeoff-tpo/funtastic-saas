@@ -63,6 +63,16 @@ function parseStatusFilter(value: string | null): OrderStatus[] {
     .filter((status): status is OrderStatus => validStatuses.has(status))
 }
 
+function parseCommaFilter(value: string | null): string[] {
+  if (!value) return []
+  return Array.from(new Set(
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ))
+}
+
 function buildMarketplaceFilterOptions(
   connections: Array<{
     marketplaceId: string
@@ -106,6 +116,9 @@ export default async function OrdersPage({
   const selectedStatuses = parseStatusFilter(params.status)
   const singleStatus = selectedStatuses.length === 1 ? selectedStatuses[0] : undefined
   const multipleStatuses = selectedStatuses.length > 1 ? selectedStatuses : undefined
+  const selectedMarketplaces = parseCommaFilter(params.marketplace)
+  const singleMarketplace = selectedMarketplaces.length === 1 ? selectedMarketplaces[0] : undefined
+  const multipleMarketplaces = selectedMarketplaces.length > 1 ? selectedMarketplaces : undefined
   const connectionsPromise = db
     .select({
       marketplaceId: marketplaceConnections.marketplaceId,
@@ -139,7 +152,8 @@ export default async function OrdersPage({
         userId: workspaceUserId,
         status: singleStatus,
         statuses: multipleStatuses as OrderFiltersParams['statuses'],
-        marketplace: params.marketplace ?? undefined,
+        marketplace: singleMarketplace,
+        marketplaces: multipleMarketplaces,
         search: params.search ?? undefined,
         searchField: (params.searchField ?? undefined) as OrderFiltersParams['searchField'],
         dateField: (params.dateField ?? undefined) as OrderFiltersParams['dateField'],

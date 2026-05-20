@@ -93,6 +93,7 @@ export interface OrderFilters {
   status?: OrderStatus
   statuses?: OrderStatus[]
   marketplace?: string
+  marketplaces?: string[]
   search?: string
   searchField?: OrderSearchField
   /**

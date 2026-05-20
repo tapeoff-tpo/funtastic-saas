@@ -18,7 +18,6 @@ interface MarketplaceOption {
   id: string
   name: string
   requiredCredentials: string[]
-  isConnected: boolean
 }
 
 interface CredentialFormProps {
@@ -148,7 +147,6 @@ export function CredentialForm({
               {visibleMarketplaces.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
-                  {m.isConnected ? ' (연결됨)' : ''}
                 </option>
               ))}
             </select>

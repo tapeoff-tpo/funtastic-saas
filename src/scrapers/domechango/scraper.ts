@@ -21,6 +21,8 @@ const LOAD_STATE_TIMEOUT_MS = 8_000
 const ORDER_PAGE_REFERRER = `${WMS_BASE_URL}/order`
 const DOWNLOAD_TIMEOUT_MS = 60_000
 
+type DomechangoGridRow = Record<string, unknown>
+
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -202,6 +204,66 @@ async function selectFirstOrderForExcel(page: Page): Promise<void> {
   }
 }
 
+async function readSelectedOrderRows(page: Page): Promise<DomechangoGridRow[]> {
+  const rows = await page.evaluate(() => {
+    const appWindow = window as typeof window & {
+      __funtasticSelectedDomechangoRows?: Record<string, unknown>[]
+    }
+    const candidates: unknown[] = []
+    const orderListElement = document.querySelector('#order_list')
+    if (orderListElement) candidates.push(orderListElement)
+    for (const key of Object.keys(window)) {
+      const value = (window as unknown as Record<string, unknown>)[key]
+      if (value && typeof value === 'object') candidates.push(value)
+    }
+
+    for (const candidate of candidates) {
+      const maybeGrid = candidate as {
+        grid?: { getCheckedRows?: () => Record<string, unknown>[] }
+        getCheckedRows?: () => Record<string, unknown>[]
+      }
+      const checkedRows = maybeGrid.getCheckedRows?.() ?? maybeGrid.grid?.getCheckedRows?.()
+      if (Array.isArray(checkedRows) && checkedRows.length > 0) {
+        appWindow.__funtasticSelectedDomechangoRows = checkedRows
+        return checkedRows
+      }
+    }
+
+    return appWindow.__funtasticSelectedDomechangoRows ?? []
+  })
+
+  return rows
+}
+
+async function buildConfirmRowsFromWorkbook(buffer: Buffer): Promise<DomechangoGridRow[]> {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
+  const worksheet = workbook.worksheets[0]
+  if (!worksheet) return []
+
+  const headerRow = worksheet.getRow(1)
+  const columns = new Map<string, number>()
+  headerRow.eachCell((cell, colNumber) => {
+    const value = readCellText(cell.value)
+    if (value) columns.set(value, colNumber)
+  })
+
+  const get = (row: ExcelJS.Row, header: string) => {
+    const col = columns.get(header)
+    return col ? readCellText(row.getCell(col).value) : ''
+  }
+
+  const rows: DomechangoGridRow[] = []
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return
+    const oid = get(row, '주문번호').replace(/^_/, '')
+    const oiid = get(row, '주문상품번호')
+    if (!oid) return
+    rows.push({ oid, oiid })
+  })
+  return rows
+}
+
 async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
@@ -245,30 +307,33 @@ async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
-async function confirmSelectedOrders(page: Page): Promise<void> {
-  const statusSelect = page.locator('#act_status').first()
-  await statusSelect.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
+async function confirmSelectedOrders(page: Page, rows: DomechangoGridRow[]): Promise<void> {
+  if (rows.length === 0) {
+    throw new MarketplaceApiError('domechango', 500, `도매창고 주문확인 대상 주문 데이터를 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
 
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes('/wms/order/list/status/2') && res.request().method() === 'PATCH',
-      { timeout: 15_000 },
-    ),
-    statusSelect.selectOption('2', { timeout: 10_000 }),
-  ]).catch((error) => {
+  const result = await page.evaluate(async ({ rows }) => {
+    const appWindow = window as typeof window & {
+      axios?: {
+        patch: (url: string, data?: unknown) => Promise<{ status: number; data: { statusCode?: number; data?: unknown; message?: string } }>
+      }
+    }
+    if (!appWindow.axios?.patch) return { ok: false, status: 500, message: '도매창고 상태 변경 실행 환경을 찾지 못했습니다.' }
+
+    const response = await appWindow.axios.patch('/wms/order/list/status/2', rows)
+    const payload = response.data
+    return {
+      ok: response.status >= 200 && response.status < 300 && payload?.statusCode === 200,
+      status: response.status,
+      message: String(payload?.data ?? payload?.message ?? ''),
+    }
+  }, { rows })
+
+  if (!result.ok) {
     throw new MarketplaceApiError(
       'domechango',
-      500,
-      `도매창고 주문확인 처리 요청을 완료하지 못했습니다. (${error instanceof Error ? error.message : 'unknown error'})`,
-    )
-  })
-
-  const payload = await response.json().catch(() => null) as { statusCode?: number; data?: unknown; message?: string } | null
-  if (!response.ok() || payload?.statusCode !== 200) {
-    throw new MarketplaceApiError(
-      'domechango',
-      response.status() || 500,
-      `도매창고 주문확인 처리에 실패했습니다. (${String(payload?.data ?? payload?.message ?? response.statusText())})`,
+      result.status || 500,
+      `도매창고 주문확인 처리에 실패했습니다. (${result.message || 'unknown error'})`,
     )
   }
 }
@@ -411,8 +476,10 @@ export class DomechangoScraper implements MarketplaceScraper {
       await runStep('orders: open order list page', () => openOrderListPage(ctx.page))
       await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since, until))
       await runStep('orders: select first order', () => selectFirstOrderForExcel(ctx.page))
+      const selectedRows = await runStep('orders: read selected rows', () => readSelectedOrderRows(ctx.page))
       const workbook = await runStep('orders: download selected order excel', () => triggerSelectedOrderExcelDownload(ctx.page))
-      await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page))
+      const confirmRows = selectedRows.length > 0 ? selectedRows : await buildConfirmRowsFromWorkbook(workbook)
+      await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page, confirmRows))
       return workbook
     } finally {
       await ctx.close()

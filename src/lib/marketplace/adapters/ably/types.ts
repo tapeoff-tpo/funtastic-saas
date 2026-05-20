@@ -14,6 +14,17 @@ export interface AblyApiResponse<T> {
 /** A single order from Ably orders API */
 export interface AblyOrder {
   orderId: string
+  orderNo?: string
+  orderNumber?: string
+  orderCode?: string
+  order_id?: string
+  order_no?: string
+  order_number?: string
+  order_code?: string
+  productOrderId?: string
+  product_order_id?: string
+  orderItemId?: string
+  order_item_id?: string
   productName: string
   quantity: number
   buyerName: string

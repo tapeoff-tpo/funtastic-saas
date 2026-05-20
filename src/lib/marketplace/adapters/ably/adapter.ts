@@ -49,6 +49,68 @@ function normalizeAblyOrderId(orderId: string): string {
   return firstNumericGroup || raw
 }
 
+function asText(value: unknown): string | undefined {
+  if (value == null) return undefined
+  const text = String(value).trim()
+  return text.length > 0 ? text : undefined
+}
+
+function firstText(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = asText(value)
+    if (text) return text
+  }
+  return undefined
+}
+
+function resolveAblyOrderNumber(order: AblyOrder): string {
+  const explicitOrderNo = firstText(
+    order.orderNo,
+    order.orderNumber,
+    order.orderCode,
+    order.order_no,
+    order.order_number,
+    order.order_code,
+  )
+  if (explicitOrderNo) return explicitOrderNo
+
+  const fallback = firstText(order.orderId, order.order_id)
+  return fallback ? normalizeAblyOrderId(fallback) : ''
+}
+
+function resolveAblyApiOrderId(order: AblyOrder): string {
+  return firstText(
+    order.orderId,
+    order.order_id,
+    order.productOrderId,
+    order.product_order_id,
+    order.orderItemId,
+    order.order_item_id,
+    order.orderNo,
+    order.order_no,
+  ) ?? ''
+}
+
+function resolveInvoiceOrderId(orderId: string, rawData: unknown): string {
+  const raw = rawData && typeof rawData === 'object' && !Array.isArray(rawData)
+    ? rawData as Record<string, unknown>
+    : {}
+  const identity = raw.orderIdentity && typeof raw.orderIdentity === 'object'
+    ? raw.orderIdentity as { itemIds?: unknown }
+    : null
+  const itemIds = Array.isArray(identity?.itemIds) ? identity.itemIds : []
+
+  return firstText(
+    raw.ablyApiOrderId,
+    itemIds[0],
+    raw.originalOrderId,
+    raw.originalMarketplaceOrderId,
+    raw.orderId,
+    raw.order_id,
+    orderId,
+  ) ?? orderId
+}
+
 export class AblyAdapter implements MarketplaceAdapter {
   readonly config = ABLY_CONFIG
 
@@ -142,8 +204,9 @@ export class AblyAdapter implements MarketplaceAdapter {
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     try {
       const carrierCode = mapCarrierCode('ably', invoice.carrierId)
+      const apiOrderId = resolveInvoiceOrderId(orderId, invoice.rawData)
 
-      const response = await this.client.post(`orders/${orderId}/invoice`, {
+      const response = await this.client.post(`orders/${apiOrderId}/invoice`, {
         json: {
           shopId: this.shopId,
           carrierCode,
@@ -233,10 +296,21 @@ export class AblyAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrder(order: AblyOrder): NormalizedOrder {
-    const orderId = normalizeAblyOrderId(order.orderId)
+    const marketplaceOrderId = resolveAblyOrderNumber(order)
+    const apiOrderId = resolveAblyApiOrderId(order) || marketplaceOrderId
+    const rawData = {
+      ...(order as unknown as Record<string, unknown>),
+      originalOrderId: order.orderId,
+      normalizedOrderId: marketplaceOrderId,
+      ablyApiOrderId: apiOrderId,
+      marketplaceOrderIdentity: {
+        orderId: marketplaceOrderId,
+        itemIds: [apiOrderId],
+      },
+    }
 
     return {
-      marketplaceOrderId: orderId,
+      marketplaceOrderId,
       marketplaceId: 'ably',
       marketplaceStatus: order.orderStatus,
       status: mapAblyStatus(order.orderStatus),
@@ -251,7 +325,7 @@ export class AblyAdapter implements MarketplaceAdapter {
       },
       items: [
         {
-          marketplaceItemId: orderId,
+          marketplaceItemId: apiOrderId,
           productName: order.productName,
           optionText: order.options || undefined,
           quantity: order.quantity,
@@ -261,11 +335,7 @@ export class AblyAdapter implements MarketplaceAdapter {
       ],
       orderedAt: new Date(order.orderDate),
       totalAmount: order.paymentAmount,
-      rawData: {
-        ...order,
-        originalOrderId: order.orderId,
-        normalizedOrderId: orderId,
-      } as unknown as Record<string, unknown>,
+      rawData,
     }
   }
 

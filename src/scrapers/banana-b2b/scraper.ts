@@ -23,6 +23,8 @@ const ORDER_PAGE_CANDIDATES = [
   `${BANANA_B2B_BASE_URL}/order`,
   `${BANANA_B2B_BASE_URL}/order/list`,
   `${BANANA_B2B_BASE_URL}/orders/list`,
+  `${BANANA_B2B_BASE_URL}/admin/order`,
+  `${BANANA_B2B_BASE_URL}/admin/order/list`,
   `${BANANA_B2B_BASE_URL}/seller/orders`,
   `${BANANA_B2B_BASE_URL}/admin/orders`,
 ]
@@ -129,6 +131,49 @@ async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_0
   }, { source: pattern.source, flags: pattern.flags }).catch(() => false)
 }
 
+async function findOrderLinks(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const blocked = /취소|환불|교환|문의|정산|상품|설정|주소록|템플릿|공지|배너|스토어/
+    const candidates = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+      .map((anchor) => {
+        const text = (anchor.innerText || anchor.textContent || '').replace(/\s+/g, ' ').trim()
+        const href = anchor.getAttribute('href') || ''
+        return { text, href }
+      })
+      .filter(({ text, href }) => {
+        if (!href || href === '#' || href.startsWith('javascript:')) return false
+        if (blocked.test(text)) return false
+        return /주문\s*관리|주문\s*조회|주문\s*목록|발주/.test(text)
+      })
+      .sort((a, b) => {
+        const score = (item: { text: string; href: string }) => {
+          if (/^주문\s*관리$/.test(item.text)) return 0
+          if (/주문\s*관리/.test(item.text)) return 1
+          if (/주문/.test(item.text)) return 2
+          return 3
+        }
+        return score(a) - score(b)
+      })
+
+    return [...new Set(candidates.map(({ href }) => new URL(href, window.location.origin).toString()))]
+  }).catch(() => [])
+}
+
+async function openOrderLinkFromMenu(page: Page): Promise<boolean> {
+  let links = await findOrderLinks(page)
+  if (links.length === 0) {
+    await clickByText(page, /주문\s*[•/]\s*배송\s*관리|주문\s*배송\s*관리/i, 3000).catch(() => false)
+    await page.waitForTimeout(500)
+    links = await findOrderLinks(page)
+  }
+
+  for (const url of links) {
+    await gotoBanana(page, url).catch(() => undefined)
+    if (await hasOrderPage(page)) return true
+  }
+  return false
+}
+
 async function setInputValue(input: Locator, value: string): Promise<void> {
   await input.fill(value, { timeout: 3000 }).catch(async () => {
     await input.evaluate((element, nextValue) => {
@@ -178,11 +223,14 @@ async function openOrderManagementPage(page: Page): Promise<void> {
 
   if (await hasOrderPage(page)) return
 
+  if (await openOrderLinkFromMenu(page)) return
+
   const clicked = await clickByText(page, /주문\s*관리|주문\s*조회|주문\/배송|발주|배송\s*관리/i, 15_000)
   if (clicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1000)
     if (await hasOrderPage(page)) return
+    if (await openOrderLinkFromMenu(page)) return
   }
 
   for (const url of ORDER_PAGE_CANDIDATES) {
@@ -190,7 +238,9 @@ async function openOrderManagementPage(page: Page): Promise<void> {
     if (await hasOrderPage(page)) return
   }
 
-  throw new MarketplaceApiError('banana-b2b', 500, `바나나B2B 주문관리 화면을 열지 못했습니다. (${await summarizePage(page)})`)
+  const orderLinks = await findOrderLinks(page)
+  const linkSummary = orderLinks.length > 0 ? ` links=${orderLinks.join(', ')}` : ''
+  throw new MarketplaceApiError('banana-b2b', 500, `바나나B2B 주문관리 화면을 열지 못했습니다. (${await summarizePage(page)}${linkSummary})`)
 }
 
 async function applyOrderSearch(page: Page, since: Date): Promise<void> {

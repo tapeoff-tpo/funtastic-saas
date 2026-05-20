@@ -176,6 +176,7 @@ export function ConnectionRow({
         >
           <input type="hidden" name="marketplace_id" value={data.marketplaceId} />
           <input type="hidden" name="store_alias" value={data.storeAlias} />
+          <input type="hidden" name="connection_id" value={connectionId} />
 
           <p className="text-xs text-muted-foreground">
             연결 계정명: <span className="font-mono">{data.storeAlias}</span>

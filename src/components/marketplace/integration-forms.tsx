@@ -25,6 +25,7 @@ interface MarketplaceOption {
   requiredCredentials: string[]
   supportedMethods: IntegrationMethod[]
   connectedMethodCounts: Partial<Record<IntegrationMethod, number>>
+  connectedAliases: string[]
 }
 
 interface IntegrationFormsProps {
@@ -189,7 +190,13 @@ export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
   )
 }
 
-function StoreAliasInput({ id, placeholder = '기본값: default' }: { id: string; placeholder?: string }) {
+function StoreAliasInput({
+  id,
+  placeholder = '예: 쿠팡-본계정',
+}: {
+  id: string
+  placeholder?: string
+}) {
   return (
     <div className="space-y-1">
       <Label htmlFor={id}>연결 계정명</Label>
@@ -197,9 +204,10 @@ function StoreAliasInput({ id, placeholder = '기본값: default' }: { id: strin
         id={id}
         name="store_alias"
         placeholder={placeholder}
+        required
       />
       <p className="text-xs text-muted-foreground">
-        같은 마켓에 판매자 계정이 여러 개면 서로 다른 이름으로 추가하세요.
+        같은 마켓에 판매자 계정이 여러 개면 서로 다른 이름으로 추가하세요. 이미 있는 이름은 수정 화면에서만 변경됩니다.
       </p>
     </div>
   )
@@ -223,11 +231,18 @@ function ApiConnectionForm({
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="marketplace_id" value={marketplace.id} />
+      <input type="hidden" name="store_alias_required" value="true" />
 
       <StoreAliasInput
         id={`${marketplace.id}-${method}-store-alias`}
-        placeholder={method === 'hub' ? '예: tapeoff EMP' : '예: 일오삼공'}
+        placeholder={method === 'hub' ? '예: tapeoff EMP' : `예: ${marketplace.name}-본계정`}
       />
+
+      {marketplace.connectedAliases.length > 0 && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          이미 등록된 계정명: {marketplace.connectedAliases.join(', ')}. 새 계정을 추가하려면 다른 계정명을 입력하세요.
+        </p>
+      )}
 
       {marketplace.requiredCredentials.map((credKey) => (
         <div key={credKey} className="space-y-1">
@@ -282,6 +297,7 @@ function RpaConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) 
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="marketplace_id" value={marketplace.id} />
+      <input type="hidden" name="store_alias_required" value="true" />
 
       <StoreAliasInput id={`${marketplace.id}-rpa-store-alias`} placeholder="예: 기본계정" />
 
@@ -328,6 +344,7 @@ function ExcelConnectionForm({ marketplace }: { marketplace: MarketplaceOption }
   return (
     <form action={formAction} className="space-y-4">
       <input type="hidden" name="marketplace_id" value={marketplace.id} />
+      <input type="hidden" name="store_alias_required" value="true" />
 
       <div className="space-y-1">
         <Label htmlFor={`${marketplace.id}-excel-display-name`}>표시 이름</Label>

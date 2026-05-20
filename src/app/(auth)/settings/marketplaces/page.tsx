@@ -28,6 +28,7 @@ export default async function MarketplaceSettingsPage() {
     .where(eq(marketplaceConnections.userId, workspaceUserId))
 
   const connectedMethodCounts = new Map<string, Partial<Record<IntegrationMethod, number>>>()
+  const connectedAliases = new Map<string, string[]>()
   connections.forEach((c) => {
     const method = getIntegrationMethod(c.marketplaceId, {
       isManual: c.isManual,
@@ -36,6 +37,10 @@ export default async function MarketplaceSettingsPage() {
     const counts = connectedMethodCounts.get(c.marketplaceId) ?? {}
     counts[method] = (counts[method] ?? 0) + 1
     connectedMethodCounts.set(c.marketplaceId, counts)
+    connectedAliases.set(c.marketplaceId, [
+      ...(connectedAliases.get(c.marketplaceId) ?? []),
+      c.storeAlias,
+    ])
   })
 
   const catalog = configs.map((config) => ({
@@ -45,6 +50,7 @@ export default async function MarketplaceSettingsPage() {
     integrationMethod: getIntegrationMethod(config.id, { authType: config.authType }),
     supportedMethods: getSupportedIntegrationMethods(config.id, { authType: config.authType }),
     connectedMethodCounts: connectedMethodCounts.get(config.id) ?? {},
+    connectedAliases: connectedAliases.get(config.id) ?? [],
   }))
   const marketplaceNames = new Map(configs.map((config) => [config.id, config.name]))
   const connectionRows = connections.map((connection) => ({

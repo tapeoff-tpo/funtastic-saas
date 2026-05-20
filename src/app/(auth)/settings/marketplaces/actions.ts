@@ -251,7 +251,12 @@ export async function registerMarketplaceCredentials(
     return { error: '유효하지 않은 마켓플레이스입니다.' }
   }
 
-  const storeAlias = (formData.get('store_alias') as string)?.trim() || 'default'
+  const connectionId = String(formData.get('connection_id') ?? '').trim()
+  const rawStoreAlias = String(formData.get('store_alias') ?? '').trim()
+  if (formData.get('store_alias_required') === 'true' && !rawStoreAlias) {
+    return { error: '연결 계정명을 입력해주세요. 예: 쿠팡-본계정, 쿠팡-서브계정' }
+  }
+  const storeAlias = rawStoreAlias || 'default'
   const config = marketplaceRegistry.get(marketplaceId).config
   const vaultNames: string[] = []
   const optionalCredentialKeys = OPTIONAL_CREDENTIALS[marketplaceId] ?? []
@@ -281,6 +286,48 @@ export async function registerMarketplaceCredentials(
   }
 
   try {
+    if (connectionId) {
+      const target = await db
+        .select()
+        .from(marketplaceConnections)
+        .where(
+          and(
+            eq(marketplaceConnections.userId, workspaceUserId),
+            eq(marketplaceConnections.id, connectionId),
+            eq(marketplaceConnections.marketplaceId, marketplaceId),
+          )
+        )
+        .limit(1)
+
+      if (target.length === 0) {
+        return { error: '수정할 연결 정보를 찾을 수 없습니다.' }
+      }
+    } else {
+      const existing = await db
+        .select()
+        .from(marketplaceConnections)
+        .where(
+          and(
+            eq(marketplaceConnections.userId, workspaceUserId),
+            eq(marketplaceConnections.marketplaceId, marketplaceId),
+            eq(marketplaceConnections.storeAlias, storeAlias)
+          )
+        )
+        .limit(1)
+
+      if (existing.length > 0) {
+        return {
+          error: `${config.name}에 '${storeAlias}' 계정명이 이미 등록되어 있습니다. 기존 계정은 수정 버튼으로 변경하고, 새 계정은 다른 계정명을 입력해주세요.`,
+        }
+      }
+    }
+  } catch (err) {
+    return {
+      error: `연결 정보 확인 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+    }
+  }
+
+  try {
     for (const credKey of [...config.requiredCredentials, ...optionalCredentialKeys]) {
       const value = formData.get(credKey) as string
       if (!value || value.trim() === '') continue
@@ -295,7 +342,7 @@ export async function registerMarketplaceCredentials(
     }
   }
 
-  // Upsert connection (unique on userId + marketplaceId + storeAlias)
+  // Create new connections by alias, or update one explicit existing connection.
   const displayName = storeAlias === 'default'
     ? config.name
     : `${config.name} (${storeAlias})`
@@ -319,7 +366,23 @@ export async function registerMarketplaceCredentials(
       )
       .limit(1)
 
-    if (existing.length > 0) {
+    if (connectionId) {
+      const target = await db
+        .select()
+        .from(marketplaceConnections)
+        .where(
+          and(
+            eq(marketplaceConnections.userId, workspaceUserId),
+            eq(marketplaceConnections.id, connectionId),
+            eq(marketplaceConnections.marketplaceId, marketplaceId),
+          )
+        )
+        .limit(1)
+
+      if (target.length === 0) {
+        return { error: '수정할 연결 정보를 찾을 수 없습니다.' }
+      }
+
       await db
         .update(marketplaceConnections)
         .set({
@@ -329,8 +392,14 @@ export async function registerMarketplaceCredentials(
           status: 'connected',
           updatedAt: new Date(),
         })
-        .where(eq(marketplaceConnections.id, existing[0].id))
+        .where(eq(marketplaceConnections.id, connectionId))
     } else {
+      if (existing.length > 0) {
+        return {
+          error: `${config.name}에 '${storeAlias}' 계정명이 이미 등록되어 있습니다. 기존 계정은 수정 버튼으로 변경하고, 새 계정은 다른 계정명을 입력해주세요.`,
+        }
+      }
+
       await db.insert(marketplaceConnections).values({
         userId: workspaceUserId,
         marketplaceId,

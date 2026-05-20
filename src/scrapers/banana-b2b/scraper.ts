@@ -84,25 +84,37 @@ async function gotoBanana(page: Page, url = BANANA_B2B_BASE_URL): Promise<void> 
 }
 
 async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_000): Promise<boolean> {
-  const roleButton = root.getByRole('button', { name: pattern }).first()
-  if (await roleButton.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await roleButton.click({ timeout })
-    return true
+  try {
+    const roleButton = root.getByRole('button', { name: pattern }).first()
+    if (await roleButton.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await roleButton.click({ timeout, force: true })
+      return true
+    }
+  } catch (err) {
+    logStep(`clickByText (roleButton) failed: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  const roleLink = root.getByRole('link', { name: pattern }).first()
-  if (await roleLink.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await roleLink.click({ timeout })
-    return true
+  try {
+    const roleLink = root.getByRole('link', { name: pattern }).first()
+    if (await roleLink.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await roleLink.click({ timeout, force: true })
+      return true
+    }
+  } catch (err) {
+    logStep(`clickByText (roleLink) failed: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  const fallback = root
-    .locator('button, input[type="button"], input[type="submit"], a, area')
-    .filter({ hasText: pattern })
-    .first()
-  if (await fallback.isVisible({ timeout: 1500 }).catch(() => false)) {
-    await fallback.click({ timeout })
-    return true
+  try {
+    const fallback = root
+      .locator('button, input[type="button"], input[type="submit"], a, area')
+      .filter({ hasText: pattern })
+      .first()
+    if (await fallback.isVisible({ timeout: 1500 }).catch(() => false)) {
+      await fallback.click({ timeout, force: true })
+      return true
+    }
+  } catch (err) {
+    logStep(`clickByText (fallback) failed: ${err instanceof Error ? err.message : String(err)}`)
   }
 
   return root.locator('body, :scope').first().evaluate((element, source) => {

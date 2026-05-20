@@ -1,7 +1,7 @@
 import ky from 'ky'
 import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 
-const DEFAULT_HYUNDAI_HMALL_API_BASE = 'https://api.hmall.com'
+const DEFAULT_HYUNDAI_HMALL_API_BASE = 'http://openapi.hmall.com/front'
 
 export interface HyundaiHmallClientCredentials {
   oauser_id: string

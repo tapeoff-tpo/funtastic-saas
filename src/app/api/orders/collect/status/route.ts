@@ -4,6 +4,11 @@ import { db } from '@/lib/db'
 import { jobLogs } from '@/lib/db/schema'
 import { and, inArray, like, sql } from 'drizzle-orm'
 
+const RPA_QUEUE_TIMEOUT_MESSAGE =
+  'RPA 워커가 작업을 시작하지 못했습니다. scrape-worker 서비스가 실행 중인지 확인해주세요.'
+const RPA_RUNNING_TIMEOUT_MESSAGE =
+  'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
+
 /**
  * GET /api/orders/collect/status?ids=id1,id2,id3
  *
@@ -36,14 +41,30 @@ export async function GET(request: NextRequest) {
     .set({
       status: 'failed',
       completedAt: new Date(),
-      errorMessage: 'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.',
+      errorMessage: RPA_QUEUE_TIMEOUT_MESSAGE,
     })
     .where(
       and(
         inArray(jobLogs.id, ids),
-        inArray(jobLogs.status, ['queued', 'running']),
+        inArray(jobLogs.status, ['queued']),
         like(jobLogs.jobType, 'scrape-%'),
-        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '150 seconds'`,
+        sql`${jobLogs.createdAt} < now() - interval '330 seconds'`,
+      ),
+    )
+
+  await db
+    .update(jobLogs)
+    .set({
+      status: 'failed',
+      completedAt: new Date(),
+      errorMessage: RPA_RUNNING_TIMEOUT_MESSAGE,
+    })
+    .where(
+      and(
+        inArray(jobLogs.id, ids),
+        inArray(jobLogs.status, ['running']),
+        like(jobLogs.jobType, 'scrape-%'),
+        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '330 seconds'`,
       ),
     )
 

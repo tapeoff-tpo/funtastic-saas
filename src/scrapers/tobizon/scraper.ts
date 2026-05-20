@@ -15,6 +15,7 @@ import type {
 } from '../types'
 
 const TOBIZON_BASE_URL = 'https://tobizon.co.kr'
+const TOBIZON_ORDER_LIST_URL = `${TOBIZON_BASE_URL}/scm/order/order_list.php?type=s&otype=2`
 const DOWNLOAD_TIMEOUT_MS = 60_000
 
 function formatDateInput(date: Date): string {
@@ -150,7 +151,7 @@ async function setInputValue(input: Locator, value: string): Promise<void> {
 async function hasTobizonSession(page: Page): Promise<boolean> {
   if (/login/i.test(page.url())) return false
   const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  return /로그아웃|주문\/배송조회|주문\s*관리|적립금충전/.test(text) && !/로그인\s*아이디|비밀번호\s*찾기/.test(text)
+  return /로그아웃|ToBizOn\s*SCM|주문내역|주문\/배송조회|주문\s*관리|적립금충전/.test(text) && !/로그인\s*아이디|비밀번호\s*찾기/.test(text)
 }
 
 async function openLoginPage(page: Page): Promise<void> {
@@ -176,18 +177,13 @@ async function submitLoginForm(page: Page): Promise<void> {
 }
 
 async function openOrderManagementPage(page: Page): Promise<void> {
-  await gotoTobizon(page)
+  await gotoTobizon(page, TOBIZON_ORDER_LIST_URL)
   if (!(await hasTobizonSession(page))) {
     throw new MarketplaceApiError('tobizon', 401, `투비즈온 세션을 확인하지 못했습니다. (${await summarizePage(page)})`)
   }
 
-  const clicked = await clickByText(page, /주문\s*\/?\s*배송\s*조회|주문관리|전체\s*주문\s*내역/i, 15_000)
-  if (clicked) {
-    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-  }
-
   const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  if (!/전체\s*주문\s*내역|주문\s*상태|주문번호|엑셀|배송\s*완료/.test(text)) {
+  if (!/주문내역|주문\s*상태|주문번호|주문서?\s*엑셀|엑셀|배송\s*완료/.test(text)) {
     throw new MarketplaceApiError('tobizon', 500, `투비즈온 주문관리 화면을 열지 못했습니다. (${await summarizePage(page)})`)
   }
 }
@@ -226,22 +222,17 @@ async function hasNoOrders(page: Page): Promise<boolean> {
 
 async function selectOrderRows(page: Page): Promise<boolean> {
   return page.evaluate(() => {
-    const orderRows = Array.from(document.querySelectorAll('tr, .list-row, [role="row"]'))
+    const orderRows = Array.from(document.querySelectorAll<HTMLElement>('tr, .list-row, [role="row"]'))
       .filter((row) => {
         const text = row.textContent?.replace(/\s+/g, ' ') ?? ''
         if (/전체\s*선택|주문번호|상품명|수취인|받는사람/.test(text)) return false
-        return /주문|결제|배송|신규|\d{6,}/.test(text)
+        return /주문|결제|배송|신규|\d{6,}|[A-Z0-9]{10,}/.test(text)
       })
 
-    const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-      .filter((checkbox) => !checkbox.disabled && checkbox.offsetParent !== null)
-
     let selected = 0
-    for (const checkbox of checkboxes) {
-      const row = checkbox.closest('tr, .list-row, [role="row"]')
-      const text = row?.textContent?.replace(/\s+/g, ' ') ?? ''
-      if (!row || /전체\s*선택|주문번호|상품명|수취인|받는사람/.test(text)) continue
-      if (!/주문|결제|배송|신규|\d{6,}/.test(text)) continue
+    for (const row of orderRows) {
+      const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      if (!checkbox || checkbox.disabled) continue
       if (!checkbox.checked) checkbox.click()
       checkbox.dispatchEvent(new Event('change', { bubbles: true }))
       selected += 1
@@ -250,13 +241,15 @@ async function selectOrderRows(page: Page): Promise<boolean> {
     if (selected > 0) return true
     if (orderRows.length === 0) return false
 
+    const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      .filter((checkbox) => !checkbox.disabled)
     const selectAll = checkboxes.find((checkbox) => /전체/.test(checkbox.closest('label, th, td, div')?.textContent ?? ''))
     if (selectAll) {
       if (!selectAll.checked) selectAll.click()
       selectAll.dispatchEvent(new Event('change', { bubbles: true }))
       return true
     }
-    return true
+    return false
   }).catch(() => false)
 }
 
@@ -411,7 +404,7 @@ export class TobizonScraper implements MarketplaceScraper {
         }
       }
 
-      await runStep('orders: open home', () => gotoTobizon(ctx.page))
+      await runStep('orders: open order list', () => gotoTobizon(ctx.page, TOBIZON_ORDER_LIST_URL))
       if (!(await hasTobizonSession(ctx.page))) {
         logStep('orders: session invalid, login')
         await ctx.close()
@@ -421,7 +414,7 @@ export class TobizonScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
-        await runStep('orders: reopen home after login', () => gotoTobizon(ctx.page))
+        await runStep('orders: reopen order list after login', () => gotoTobizon(ctx.page, TOBIZON_ORDER_LIST_URL))
       }
 
       await runStep('orders: open order management', () => openOrderManagementPage(ctx.page))

@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
       expandedByOrder.set(row.orderId, list)
     }
 
-    // SKU 기준 products(위치) + inventory(현재고/확정옵션명) lookup —
+    // SKU 기준 products(원가) + inventory(현재고/로케이션/확정옵션명) lookup —
     // 매핑 확장 후 행들의 SKU 까지 모두 포함해야 함.
     const skuSet = [
       ...new Set([
@@ -166,9 +166,10 @@ export async function GET(request: NextRequest) {
         collectedProductName: rawFirst?.productName ?? '',
         collectedOption: rawFirst?.optionText ?? '',
         stock: sku ? inventoryMap.get(sku)?.stock ?? '' : '',
-        location: sku ? productMap.get(sku)?.location ?? '' : '',
+        // 위치 = 로케이션(inventory.sectorCode). 창고명(products.warehouseLocation)이 아니다.
+        location: sku ? inventoryMap.get(sku)?.sectorCode ?? '' : '',
         costPrice: sku ? productMap.get(sku)?.costPrice ?? '' : '',
-        // 피킹위치 (inventory.sectorCode) — 출력항목 'Location'
+        // 피킹위치 (inventory.sectorCode) — 출력항목 '피킹위치'
         pickingLocation: sku ? inventoryMap.get(sku)?.sectorCode ?? '' : '',
         // 포장 박스 종류 (inventory.packagingUnit) — 출력항목 '포장'
         packaging: sku ? inventoryMap.get(sku)?.packagingUnit ?? '' : '',

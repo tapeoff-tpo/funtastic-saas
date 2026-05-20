@@ -9,8 +9,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { orders, orderItems, companySettings } from '@/lib/db/schema'
-import { inArray, and, eq } from 'drizzle-orm'
+import { orders, orderItems, companySettings, inventory } from '@/lib/db/schema'
+import { inArray, and, eq, sql } from 'drizzle-orm'
 import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -65,6 +65,19 @@ export async function GET(req: NextRequest) {
     expandedByOrder.set(row.orderId, list)
   }
 
+  const skuSet = [...new Set(expanded.map((row) => row.sku).filter(Boolean))]
+  const inventoryRows = skuSet.length > 0
+    ? await db
+        .select({
+          sku: inventory.sku,
+          sectorCode: sql<string | null>`MAX(${inventory.sectorCode})`,
+        })
+        .from(inventory)
+        .where(and(eq(inventory.userId, workspaceUserId), inArray(inventory.sku, skuSet)))
+        .groupBy(inventory.sku)
+    : []
+  const locationBySku = new Map(inventoryRows.map((row) => [row.sku, row.sectorCode ?? '']))
+
   const cjRows: CjOrderRow[] = []
   for (const order of orderRows) {
     const rows = expandedByOrder.get(order.id) ?? []
@@ -95,7 +108,7 @@ export async function GET(req: NextRequest) {
         senderPhone: senderSettings?.phone ?? '',
         senderAddress: senderSettings?.address ?? '',
         originalProductName: row.source.productName ?? undefined,
-        pickingLocation: undefined,
+        pickingLocation: row.sku ? locationBySku.get(row.sku) || undefined : undefined,
       })
     }
   }

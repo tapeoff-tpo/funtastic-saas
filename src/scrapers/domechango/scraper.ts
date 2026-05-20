@@ -207,15 +207,25 @@ async function prepareOrderApiContext(page: Page, since: Date, until: Date): Pro
   await page.evaluate(({ since, until, orderPageUrl }) => {
     window.history.replaceState(null, '', orderPageUrl)
 
-    if (!document.querySelector('#frm')) {
-      const form = document.createElement('form')
-      form.id = 'frm'
-      document.body.appendChild(form)
+    let form = document.querySelector<HTMLFormElement>('#frm')
+    if (!form) {
+      const createdForm = document.createElement('form')
+      createdForm.id = 'frm'
+      document.body.appendChild(createdForm)
+      form = document.querySelector<HTMLFormElement>('#frm')
     }
 
-    const upsert = (name: string, value: string) => {
-      const form = document.querySelector<HTMLFormElement>('#frm')
-      if (!form) return
+    const fields = [
+      ['page', '1'],
+      ['list_size', '500'],
+      ['oistep', '1'],
+      ['sdate', since],
+      ['edate', until],
+      ['orderby', 'order_at-desc'],
+    ]
+
+    for (const [name, value] of fields) {
+      if (!form) continue
       let input = form.querySelector<HTMLInputElement>(`[name="${name}"]`)
       if (!input) {
         input = document.createElement('input')
@@ -224,13 +234,6 @@ async function prepareOrderApiContext(page: Page, since: Date, until: Date): Pro
       }
       input.value = value
     }
-
-    upsert('page', '1')
-    upsert('list_size', '500')
-    upsert('oistep', '1')
-    upsert('sdate', since)
-    upsert('edate', until)
-    upsert('orderby', 'order_at-desc')
   }, { since: formatDateInput(since), until: formatDateInput(until), orderPageUrl: ORDER_PAGE_REFERRER })
 }
 

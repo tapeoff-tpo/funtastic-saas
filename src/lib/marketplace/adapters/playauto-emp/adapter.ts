@@ -143,6 +143,15 @@ function responseMessage(response: PlayautoEmpSenderResponse): string {
   return asString(response.msg ?? response.message ?? response.error) || JSON.stringify(response).slice(0, 500)
 }
 
+function isHttpStatus(error: unknown, status: number): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'response' in error &&
+      (error as { response?: { status?: number } }).response?.status === status,
+  )
+}
+
 export class PlayautoEmpAdapter implements MarketplaceAdapter {
   readonly config = PLAYAUTO_EMP_CONFIG
 
@@ -195,7 +204,7 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
           })
           if (this.malls) appendMallParams(params, this.malls)
 
-          const response = await this.client.get('orders/', { searchParams: params }).json<PlayautoEmpListResponse>()
+          const response = await this.getOrdersPage(params)
           if (!Array.isArray(response) && response.success === false) {
             throw new MarketplaceApiError('playauto-emp', 400, response.message || response.msg || response.error || 'Failed to fetch EMP orders')
           }
@@ -213,6 +222,15 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
         throw new MarketplaceAuthError('playauto-emp', 'EMP API key authentication failed')
       }
       throw new MarketplaceApiError('playauto-emp', 500, error instanceof Error ? error.message : 'Unknown error')
+    }
+  }
+
+  private async getOrdersPage(params: URLSearchParams): Promise<PlayautoEmpListResponse> {
+    try {
+      return await this.client.get('orders', { searchParams: params }).json<PlayautoEmpListResponse>()
+    } catch (error) {
+      if (!isHttpStatus(error, 404)) throw error
+      return await this.client.get('orders/', { searchParams: params }).json<PlayautoEmpListResponse>()
     }
   }
 

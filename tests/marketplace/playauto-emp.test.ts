@@ -60,7 +60,7 @@ describe('PlayautoEmpAdapter', () => {
       new Date('2026-05-19T23:59:59+09:00'),
     )
 
-    expect(get).toHaveBeenCalledWith('orders/', {
+    expect(get).toHaveBeenCalledWith('orders', {
       searchParams: expect.any(URLSearchParams),
     })
     expect(orders).toHaveLength(1)
@@ -95,6 +95,32 @@ describe('PlayautoEmpAdapter', () => {
       empNumber: '1001',
       empSiteName: '11번가',
       originalMarketplaceId: 'A112:playauto',
+    })
+  })
+
+  it('falls back to the slash orders endpoint when EMP returns 404', async () => {
+    const notFound = new Error('not found') as Error & { response: { status: number } }
+    notFound.response = { status: 404 }
+    const get = vi.fn((path: string) => {
+      if (path === 'orders') throw notFound
+      return {
+        json: async () => [],
+      }
+    })
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new PlayautoEmpAdapter({ api_key: 'test-key', states: '신규주문' })
+    const orders = await adapter.getOrders(
+      new Date('2026-05-19T00:00:00+09:00'),
+      new Date('2026-05-19T23:59:59+09:00'),
+    )
+
+    expect(orders).toEqual([])
+    expect(get).toHaveBeenNthCalledWith(1, 'orders', {
+      searchParams: expect.any(URLSearchParams),
+    })
+    expect(get).toHaveBeenNthCalledWith(2, 'orders/', {
+      searchParams: expect.any(URLSearchParams),
     })
   })
 

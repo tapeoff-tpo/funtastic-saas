@@ -110,17 +110,6 @@ function mapOrderStatus(orderState: string): NormalizedOrder['status'] {
   return 'new'
 }
 
-function appendMallParams(params: URLSearchParams, malls: string): void {
-  const entries = malls
-    .split(/[;\n]/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-
-  entries.forEach((entry, index) => {
-    params.append(`malls[${index}]`, entry)
-  })
-}
-
 function isSuccessfulSenderResponse(response: PlayautoEmpSenderResponse): boolean {
   if (Array.isArray(response.data)) return response.data.every(isSuccessfulSenderResponse)
   if (Array.isArray(response.result)) return response.result.every(isSuccessfulSenderResponse)
@@ -152,16 +141,33 @@ function isHttpStatus(error: unknown, status: number): boolean {
   )
 }
 
+async function isNoOrdersError(error: unknown): Promise<boolean> {
+  if (!error || typeof error !== 'object' || !('response' in error)) return false
+  const response = (error as { response?: Response }).response
+  if (!response || ![400, 404].includes(response.status)) return false
+
+  try {
+    const body = await response.clone().json() as { message?: unknown; msg?: unknown; status?: unknown }
+    const message = asString(body.message ?? body.msg)
+    return body.status === false && message.includes('조회된 주문건이 없습니다')
+  } catch {
+    try {
+      const text = await response.clone().text()
+      return text.includes('조회된 주문건이 없습니다')
+    } catch {
+      return false
+    }
+  }
+}
+
 export class PlayautoEmpAdapter implements MarketplaceAdapter {
   readonly config = PLAYAUTO_EMP_CONFIG
 
   private readonly client: ReturnType<typeof createPlayautoEmpClient>
-  private readonly malls?: string
   private readonly states: string[]
 
-  constructor(credentials: { api_key: string; base_url?: string; malls?: string; states?: string }) {
+  constructor(credentials: { api_key: string; base_url?: string; states?: string }) {
     this.client = createPlayautoEmpClient(credentials)
-    this.malls = credentials.malls?.trim() || undefined
     this.states = (credentials.states?.trim() || DEFAULT_STATES.join(','))
       .split(',')
       .map((state) => state.trim())
@@ -202,7 +208,6 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
             page: String(page),
             count: String(ORDER_PAGE_SIZE),
           })
-          if (this.malls) appendMallParams(params, this.malls)
 
           const response = await this.getOrdersPage(params)
           if (!Array.isArray(response) && response.success === false) {
@@ -229,8 +234,14 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
     try {
       return await this.client.get('orders', { searchParams: params }).json<PlayautoEmpListResponse>()
     } catch (error) {
+      if (await isNoOrdersError(error)) return []
       if (!isHttpStatus(error, 404)) throw error
-      return await this.client.get('orders/', { searchParams: params }).json<PlayautoEmpListResponse>()
+      try {
+        return await this.client.get('orders/', { searchParams: params }).json<PlayautoEmpListResponse>()
+      } catch (fallbackError) {
+        if (await isNoOrdersError(fallbackError)) return []
+        throw fallbackError
+      }
     }
   }
 

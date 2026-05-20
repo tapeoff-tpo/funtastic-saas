@@ -51,8 +51,6 @@ const credentialLabels: Record<string, string> = {
   password: '비밀번호',
   vendor_password: '오너클랜 공급사 PW',
   base_url: 'API Base URL',
-  malls: 'EMP 쇼핑몰 필터',
-  states: 'EMP 주문상태',
   oauser_id: 'oauserId',
   oause_key: 'oauseKey',
   ven_cd: '협력사코드',
@@ -63,7 +61,6 @@ const credentialLabels: Record<string, string> = {
 }
 
 const optionalCredentialFields: Record<string, string[]> = {
-  'playauto-emp': ['base_url', 'malls', 'states'],
   'hyundai-hmall': ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
 }
 
@@ -79,8 +76,6 @@ function methodLabel(method: IntegrationMethod): string {
 }
 
 function optionalPlaceholder(marketplaceId: string, credKey: string): string {
-  if (credKey === 'malls') return '예: 11번가;스마트스토어;쿠팡'
-  if (credKey === 'states') return '예: 신규주문,주문확인'
   if (marketplaceId === 'hyundai-hmall' && credKey === 'ven2_cd') return '예: 000000'
   if (marketplaceId === 'hyundai-hmall' && credKey === 'mda_gb') return '예: 20'
   if (marketplaceId === 'hyundai-hmall' && credKey === 'dlv_form_gbcd') return '예: 40'
@@ -240,11 +235,6 @@ function ApiConnectionForm({
             placeholder={optionalPlaceholder(marketplace.id, credKey)}
             autoComplete="off"
           />
-          {credKey === 'malls' && (
-            <p className="text-xs text-muted-foreground">
-              하위 쇼핑몰명을 세미콜론(;) 또는 줄바꿈으로 구분하세요. 비우면 전체 주문을 조회합니다.
-            </p>
-          )}
         </div>
       ))}
 

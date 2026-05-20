@@ -32,15 +32,7 @@ interface ActionResult {
 }
 
 const OPTIONAL_CREDENTIALS: Record<string, string[]> = {
-  'playauto-emp': ['base_url', 'malls', 'states'],
   'hyundai-hmall': ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
-}
-
-function splitLinkedMarketplaces(value: string | null | undefined): string[] {
-  return (value ?? '')
-    .split(/[;\n]/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
 }
 
 /**
@@ -222,9 +214,6 @@ export async function testMarketplaceCredentials(
       case 'playauto-emp':
         result = await new PlayautoEmpAdapter({
           api_key: credentials.api_key?.trim() ?? '',
-          base_url: credentials.base_url?.trim() ?? '',
-          malls: credentials.malls?.trim() ?? '',
-          states: credentials.states?.trim() ?? '',
         }).testConnection()
         break
       default:
@@ -313,7 +302,7 @@ export async function registerMarketplaceCredentials(
   const metadata = marketplaceId === 'playauto-emp'
     ? {
         integrationMethod: 'hub',
-        linkedMarketplaces: splitLinkedMarketplaces((formData.get('malls') as string | null) ?? ''),
+        linkedMarketplaces: [],
       }
     : undefined
 

@@ -163,9 +163,6 @@ export function createAdapter(
     case 'playauto-emp':
       return new PlayautoEmpAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
-        base_url: credentials.base_url ?? credentials.baseUrl ?? '',
-        malls: credentials.malls ?? '',
-        states: credentials.states ?? '',
       })
     default:
       throw new Error(`Unknown marketplace: ${marketplaceId}. No adapter registered.`)
@@ -440,7 +437,7 @@ export async function collectOrdersForConnection(params: {
 
     if (marketplaceId === 'playauto-emp' || marketplaceId === 'hyundai-hmall') {
       const optionalKeys = marketplaceId === 'playauto-emp'
-        ? ['base_url', 'malls', 'states']
+        ? []
         : ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip']
       for (const credKey of optionalKeys) {
         const vaultKey = `${credKey}${aliasTag}`

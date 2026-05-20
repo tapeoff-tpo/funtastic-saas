@@ -124,6 +124,28 @@ describe('PlayautoEmpAdapter', () => {
     })
   })
 
+  it('treats EMP no-order 400/404 responses as an empty collection', async () => {
+    const response = new Response(
+      JSON.stringify({ status: false, message: '조회된 주문건이 없습니다.' }),
+      { status: 404, headers: { 'content-type': 'application/json' } },
+    )
+    const noOrders = new Error('no orders') as Error & { response: Response }
+    noOrders.response = response
+    const get = vi.fn(() => {
+      throw noOrders
+    })
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new PlayautoEmpAdapter({ api_key: 'test-key', states: '신규주문' })
+    const orders = await adapter.getOrders(
+      new Date('2026-05-19T00:00:00+09:00'),
+      new Date('2026-05-19T23:59:59+09:00'),
+    )
+
+    expect(orders).toEqual([])
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+
   it('uploads invoice data to EMP senders endpoint using the EMP order number', async () => {
     const patch = vi.fn(() => ({
       json: async () => ({ number: '1001', status: 'true', msg: '성공.' }),

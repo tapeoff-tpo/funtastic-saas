@@ -80,6 +80,7 @@ function methodLabel(method: IntegrationMethod): string {
 function optionalPlaceholder(marketplaceId: string, credKey: string): string {
   if (marketplaceId === 'hyundai-hmall' && credKey === 'ven2_cd') return '예: 000000'
   if (marketplaceId === 'hyundai-hmall' && credKey === 'dlv_form_gbcd') return '예: 40'
+  if (marketplaceId === 'hyundai-hmall' && credKey === 'base_url') return '기본: https://apim.hmall.com'
   return `${credentialLabels[credKey] ?? credKey} 입력`
 }
 

@@ -1,7 +1,7 @@
 import ky from 'ky'
 import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 
-const DEFAULT_HYUNDAI_HMALL_API_BASE = 'https://apim.hmall.com'
+const DEFAULT_HYUNDAI_HMALL_API_BASE = 'https://api.hmall.com'
 
 export interface HyundaiHmallClientCredentials {
   oauser_id: string
@@ -22,7 +22,7 @@ const builder = new XMLBuilder({
 
 function normalizeBaseUrl(baseUrl?: string): string {
   const trimmed = baseUrl?.trim().replace(/\/+$/, '')
-  if (!trimmed || trimmed === 'https://api.hmall.com') return DEFAULT_HYUNDAI_HMALL_API_BASE
+  if (!trimmed) return DEFAULT_HYUNDAI_HMALL_API_BASE
   return trimmed
 }
 

@@ -496,36 +496,31 @@ export async function collectOrdersForConnection(params: {
       `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` - 저장/갱신 ${ordersToSave.length}건, 기존 ${skippedExistingCount}건 포함` : ''}`,
     )
 
-    type ConfirmTarget = { id: string; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
+    type ConfirmTarget = { ids: string[]; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
     const confirmTargets: ConfirmTarget[] = []
     const totalOrders = ordersToSave.length
     let idx = 0
     for (const order of ordersToSave) {
       idx++
       const items = dedupeNormalizedOrderItems(order.items)
-      const orderForSave = { ...order, items }
+      const firstItem = items[0]
+      const orderForSave = firstItem && items.length > 1
+        ? { ...order, items: [firstItem], totalAmount: lineTotalAmount(firstItem) }
+        : { ...order, items }
       const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
       const isExistingOrder = existingOrderKeys.has(orderKey)
       const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
+      let splitCopyIds: string[] = []
 
       if (!isExistingOrder && items.length > 0) {
-        await db.insert(orderItems).values(
-          items.map((item) => ({
-            orderId: upsertedOrder.id,
-            marketplaceItemId: item.marketplaceItemId,
-            productName: item.productName,
-            optionText: item.optionText ?? null,
-            quantity: item.quantity,
-            unitPrice: String(item.unitPrice),
-            sku: item.sku ?? null,
-          }))
-        )
+        await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
+        splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
       }
       ordersCollected++
 
       if (shouldConfirmOnCollect(marketplaceId) && upsertedOrder.status === 'new') {
         confirmTargets.push({
-          id: upsertedOrder.id,
+          ids: [upsertedOrder.id, ...splitCopyIds],
           marketplaceOrderId: order.marketplaceOrderId,
           rawData: enrichOrderRawData(orderForSave),
         })
@@ -555,7 +550,7 @@ export async function collectOrdersForConnection(params: {
                 marketplaceStatus: confirmedMarketplaceStatus(marketplaceId),
                 updatedAt: new Date(),
               })
-              .where(eq(orders.id, target.id))
+              .where(inArray(orders.id, target.ids))
           } else {
             confirmFailures.push(`${target.marketplaceOrderId}: ${result.error ?? 'unknown error'}`)
           }
@@ -699,23 +694,17 @@ export async function saveNormalizedOrdersForConnection(params: {
 
   for (const order of normalizedOrders) {
     const items = dedupeNormalizedOrderItems(order.items)
-    const orderForSave = { ...order, items }
+    const firstItem = items[0]
+    const orderForSave = firstItem && items.length > 1
+      ? { ...order, items: [firstItem], totalAmount: lineTotalAmount(firstItem) }
+      : { ...order, items }
     const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
     const isExistingOrder = existingOrderKeys.has(orderKey)
     const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
 
     if (!isExistingOrder && items.length > 0) {
-      await db.insert(orderItems).values(
-        items.map((item) => ({
-          orderId: upsertedOrder.id,
-          marketplaceItemId: item.marketplaceItemId,
-          productName: item.productName,
-          optionText: item.optionText ?? null,
-          quantity: item.quantity,
-          unitPrice: String(item.unitPrice),
-          sku: item.sku ?? null,
-        }))
-      )
+      await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
+      await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
     }
     ordersCollected++
   }
@@ -867,6 +856,98 @@ function dedupeNormalizedOrderItems(items: NormalizedOrderItem[]): NormalizedOrd
   }
 
   return deduped
+}
+
+function lineTotalAmount(item: NormalizedOrderItem): number {
+  return (Number(item.unitPrice) || 0) * Math.max(1, Number(item.quantity) || 1)
+}
+
+function itemSplitRawData(rawData: Record<string, unknown>, meta: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...rawData,
+    itemSplit: meta,
+  }
+}
+
+function orderItemInsertValue(orderId: string, item: NormalizedOrderItem) {
+  return {
+    orderId,
+    marketplaceItemId: item.marketplaceItemId,
+    productName: item.productName,
+    optionText: item.optionText ?? null,
+    quantity: item.quantity,
+    unitPrice: String(item.unitPrice),
+    sku: item.sku ?? null,
+  }
+}
+
+async function createSplitOrderCopies(
+  order: NormalizedOrder,
+  items: NormalizedOrderItem[],
+  baseOrderId: string,
+  connectionId: string,
+  userId: string,
+): Promise<string[]> {
+  if (items.length <= 1) return []
+
+  const copyIds: string[] = []
+  const now = new Date()
+  const splitBase = {
+    sourceOrderId: baseOrderId,
+    splitAt: now.toISOString(),
+    totalParts: items.length,
+  }
+
+  await db
+    .update(orders)
+    .set({
+      rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [items[0]] }), {
+        ...splitBase,
+        partIndex: 1,
+        original: true,
+      }),
+      updatedAt: now,
+    })
+    .where(eq(orders.id, baseOrderId))
+
+  for (let index = 1; index < items.length; index += 1) {
+    const item = items[index]
+    const [copy] = await db
+      .insert(orders)
+      .values({
+        internalNo: generateInternalNo(),
+        userId,
+        connectionId,
+        marketplaceId: order.marketplaceId,
+        marketplaceOrderId: order.marketplaceOrderId,
+        status: order.status,
+        marketplaceStatus: order.marketplaceStatus,
+        buyerName: order.buyerName,
+        buyerPhone: order.buyerPhone,
+        buyerPhone2: order.buyerPhone2,
+        recipientName: order.recipientName,
+        recipientPhone: order.recipientPhone,
+        recipientPhone2: order.recipientPhone2,
+        shippingAddress: order.shippingAddress,
+        orderedAt: order.orderedAt,
+        totalAmount: String(lineTotalAmount(item)),
+        shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
+        deliveryMessage: order.deliveryMessage ?? null,
+        rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [item], totalAmount: lineTotalAmount(item) }), {
+          ...splitBase,
+          partIndex: index + 1,
+          originalOrderId: baseOrderId,
+        }),
+        collectedAt: now,
+        isCopy: true,
+      })
+      .returning({ id: orders.id })
+
+    await db.insert(orderItems).values(orderItemInsertValue(copy.id, item))
+    copyIds.push(copy.id)
+  }
+
+  return copyIds
 }
 
 function asPlainRecord(value: unknown): Record<string, unknown> | null {

@@ -16,9 +16,21 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
  * Upload an Excel file to import orders.
  * FormData: file (.xlsx), marketplaceId (string)
  *
- * Groups rows by orderNumber (same order, multiple items).
+ * Rows with the same orderNumber are split into separate internal orders per item.
  * Skips duplicate orders (same marketplaceId + marketplaceOrderId).
  */
+
+function importedLineAmount(item: { totalAmount: number; quantity: number }): number {
+  return item.totalAmount || 0
+}
+
+function itemSplitRawData(rawData: Record<string, unknown>, meta: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...rawData,
+    itemSplit: meta,
+  }
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const {
@@ -138,8 +150,17 @@ export async function POST(request: NextRequest) {
           orderedAt = new Date()
         }
 
-        // Sum totalAmount for all items in this order
-        const totalAmount = items.reduce((sum, item) => sum + item.totalAmount, 0)
+        const normalizedItems = items.map((item) => normalizeImportedOrderItem(item, marketplaceId))
+        const firstNormalized = normalizedItems[0]
+        const baseRawData = {
+          importTemplateId: templateId ?? null,
+          sourceFileName: file.name,
+          mallName: marketplaceName || marketplaceId,
+        }
+        const splitBase = {
+          splitAt: new Date().toISOString(),
+          totalParts: normalizedItems.length,
+        }
 
         try {
           // Insert order
@@ -161,32 +182,55 @@ export async function POST(request: NextRequest) {
                 address1: first.recipientAddress,
               },
               orderedAt,
-              totalAmount: String(totalAmount),
+              totalAmount: String(importedLineAmount(firstNormalized)),
               shippingFee: first.shippingFee == null ? null : String(first.shippingFee),
               deliveryMessage: first.deliveryMessage ?? null,
-              rawData: {
-                importTemplateId: templateId ?? null,
-                sourceFileName: file.name,
-                mallName: marketplaceName || marketplaceId,
-              },
+              rawData: itemSplitRawData(baseRawData, { ...splitBase, partIndex: 1, original: true }),
             })
             .returning({ id: orders.id })
 
-          // Insert order items
-          await tx.insert(orderItems).values(
-            items.map((item) => {
-              const normalized = normalizeImportedOrderItem(item, marketplaceId)
-              return {
-                orderId: newOrder.id,
-                marketplaceItemId: normalized.marketplaceItemId ?? null,
-                productName: normalized.productName,
-                optionText: normalized.optionText ?? null,
-                quantity: normalized.quantity,
-                unitPrice: String(normalized.totalAmount / normalized.quantity),
-                sku: normalized.sku ?? null,
-              }
-            }),
-          )
+          const orderItemValue = (orderId: string, item: typeof firstNormalized) => ({
+            orderId,
+            marketplaceItemId: item.marketplaceItemId ?? null,
+            productName: item.productName,
+            optionText: item.optionText ?? null,
+            quantity: item.quantity,
+            unitPrice: String(item.totalAmount / item.quantity),
+            sku: item.sku ?? null,
+          })
+
+          await tx.insert(orderItems).values(orderItemValue(newOrder.id, firstNormalized))
+
+          for (let index = 1; index < normalizedItems.length; index += 1) {
+            const item = normalizedItems[index]
+            const [copy] = await tx
+              .insert(orders)
+              .values({
+                internalNo: generateInternalNo(),
+                userId: workspaceUserId,
+                connectionId: null,
+                marketplaceId,
+                marketplaceOrderId: orderNumber,
+                status: 'new',
+                buyerName: first.buyerName,
+                buyerPhone2: first.buyerPhone ?? null,
+                recipientName: first.recipientName,
+                recipientPhone2: first.recipientPhone ?? null,
+                shippingAddress: {
+                  zipCode: first.zipCode ?? '',
+                  address1: first.recipientAddress,
+                },
+                orderedAt,
+                totalAmount: String(importedLineAmount(item)),
+                shippingFee: first.shippingFee == null ? null : String(first.shippingFee),
+                deliveryMessage: first.deliveryMessage ?? null,
+                rawData: itemSplitRawData(baseRawData, { ...splitBase, partIndex: index + 1, originalOrderId: newOrder.id }),
+                isCopy: true,
+              })
+              .returning({ id: orders.id })
+
+            await tx.insert(orderItems).values(orderItemValue(copy.id, item))
+          }
 
           inserted++
         } catch (error) {

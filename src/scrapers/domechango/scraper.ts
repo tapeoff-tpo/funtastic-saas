@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { Locator, Page } from 'playwright'
+import type { Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   InvoiceData,
@@ -18,7 +18,8 @@ const WMS_BASE_URL = 'https://www.wholesaledepot.co.kr/wms'
 const LOGIN_PAGE_URL = `${WMS_BASE_URL}/login`
 const NAVIGATION_TIMEOUT_MS = 20_000
 const LOAD_STATE_TIMEOUT_MS = 8_000
-const DOWNLOAD_TIMEOUT_MS = 25_000
+const ORDER_LIST_API_PATH = '/wms/order/list'
+const ORDER_EXCEL_API_PATH = '/wms/order/list/excel'
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -38,6 +39,10 @@ function readCellText(value: ExcelJS.CellValue): string {
     if ('result' in value && value.result !== undefined) return String(value.result).trim()
   }
   return String(value).trim()
+}
+
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
 }
 
 function parseNumber(value: string): number {
@@ -78,65 +83,6 @@ async function gotoDomechango(page: Page, url = WMS_BASE_URL): Promise<void> {
   await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
 }
 
-async function visibleLocators(root: Locator | Page, selector: string): Promise<Locator[]> {
-  const locator = root.locator(selector)
-  const locators: Locator[] = []
-  const count = await locator.count()
-  for (let index = 0; index < count; index += 1) {
-    const item = locator.nth(index)
-    if (await item.isVisible().catch(() => false)) locators.push(item)
-  }
-  return locators
-}
-
-async function setInputValue(input: Locator, value: string): Promise<void> {
-  await input.fill(value, { timeout: 3000 }).catch(async () => {
-    await input.evaluate((element, nextValue) => {
-      if (!(element instanceof HTMLInputElement)) return
-      element.removeAttribute('readonly')
-      element.value = nextValue
-      element.dispatchEvent(new Event('input', { bubbles: true }))
-      element.dispatchEvent(new Event('change', { bubbles: true }))
-    }, value)
-  })
-}
-
-async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise<void> {
-  const button = root.getByRole('button', { name: pattern }).first()
-  if (await button.isVisible().catch(() => false)) {
-    await button.click({ timeout: 15_000 })
-    return
-  }
-
-  const fallback = root
-    .locator('button, input[type="button"], input[type="submit"], a, .btn')
-    .filter({ hasText: pattern })
-    .first()
-  if (await fallback.isVisible().catch(() => false)) {
-    await fallback.click({ timeout: 15_000 })
-    return
-  }
-
-  const clicked = await root.locator('body, :scope').first().evaluate((element, source) => {
-    const regexp = new RegExp(source)
-    const controls = Array.from(
-      element.querySelectorAll('button, input[type="button"], input[type="submit"], a, .btn'),
-    )
-    for (const control of controls) {
-      if (!(control instanceof HTMLElement)) continue
-      const text = `${control.innerText || ''} ${(control as HTMLInputElement).value || ''}`.trim()
-      if (!regexp.test(text)) continue
-      control.click()
-      return true
-    }
-    return false
-  }, pattern.source).catch(() => false)
-
-  if (!clicked) {
-    throw new MarketplaceApiError('domechango', 500, `도매창고 버튼을 찾지 못했습니다. (${pattern.source})`)
-  }
-}
-
 async function submitLoginForm(page: Page): Promise<void> {
   const submit = page.locator('#btn_login, button[type="submit"], input[type="submit"], button, input[type="button"]').filter({
     hasText: /로그인|login/i,
@@ -160,217 +106,92 @@ async function submitLoginForm(page: Page): Promise<void> {
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
 }
 
-async function navigateToOrderList(page: Page): Promise<void> {
-  await gotoDomechango(page, WMS_BASE_URL)
-  if (await hasOrderList(page)) return
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const clicked = await page.evaluate(() => {
-      const isUsable = (element: Element) => {
-        if (!(element instanceof HTMLElement)) return false
-        const style = window.getComputedStyle(element)
-        const rect = element.getBoundingClientRect()
-        return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
-      }
-
-      const menuGroups = Array.from(document.querySelectorAll<HTMLElement>('.menues > ul, nav ul, aside ul, .lmenu ul, ul'))
-      const orderGroup = menuGroups.find((group) => {
-        const nextText = group.nextElementSibling?.textContent ?? ''
-        const groupText = group.textContent ?? ''
-        return /주문\s*\/?\s*배송/.test(groupText) || /주문\s*리스트/.test(nextText)
-      })
-      orderGroup?.click()
-
-      const orderListLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a'))
-        .filter((anchor) => /주문\s*리스트/.test(anchor.textContent ?? ''))
-        .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))[0]
-
-      if (orderListLink) {
-        orderListLink.scrollIntoView({ block: 'center', inline: 'center' })
-        orderListLink.click()
-        return true
-      }
-
-      const textTarget = Array.from(document.querySelectorAll<HTMLElement>('button, li, div, span'))
-        .filter((element) => isUsable(element) && /^주문\s*리스트$/.test((element.textContent ?? '').trim()))
-        .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))[0]
-
-      if (!textTarget) return false
-      textTarget.scrollIntoView({ block: 'center', inline: 'center' })
-      textTarget.click()
-      return true
-    }).catch(() => false)
-
-    if (clicked) {
-      await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
-      await page.waitForTimeout(800)
-      if (await hasOrderList(page)) return
-    }
-
-    if (/\/wms\/order(?:$|\?)/.test(page.url()) && (await summarizePage(page)).includes('Error (0) -> not found')) {
-      await gotoDomechango(page, WMS_BASE_URL)
-    }
-  }
-
-  throw new MarketplaceApiError('domechango', 404, `도매창고 주문 리스트를 열지 못했습니다. (${await summarizePage(page)})`)
-}
-
-async function selectNewOrderStatus(page: Page): Promise<void> {
-  const label = page.getByText(/^신규주문$/).first()
-  if (await label.isVisible().catch(() => false)) {
-    await label.click({ timeout: 3000 }).catch(() => undefined)
-    return
-  }
-
-  await page.evaluate(() => {
-    const radios = Array.from(document.querySelectorAll('input[type="radio"]'))
-    const target = radios.find((radio) => {
-      const root = radio.closest('label, td, div, li') ?? radio.parentElement
-      return /신규주문/.test(root?.textContent ?? '')
-    })
-    if (!(target instanceof HTMLInputElement)) return
-    target.checked = true
-    target.dispatchEvent(new Event('input', { bubbles: true }))
-    target.dispatchEvent(new Event('change', { bubbles: true }))
-  }).catch(() => undefined)
-}
-
-async function setSearchDates(page: Page, since: Date, until: Date): Promise<void> {
-  const dateInputs = await visibleLocators(page, 'input[type="date"], input[placeholder*="YYYY"], input[placeholder*="yyyy"], input[placeholder*="날짜"]')
-  if (dateInputs.length < 2) return
-
-  await setInputValue(dateInputs[0], formatDateInput(since))
-  await setInputValue(dateInputs[1], formatDateInput(until))
-}
-
-async function selectAllVisibleOrders(page: Page): Promise<void> {
-  const result = await page.evaluate(() => {
-    const isUsable = (element: Element) => {
-      if (!(element instanceof HTMLElement)) return false
-      const style = window.getComputedStyle(element)
-      const rect = element.getBoundingClientRect()
-      return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
-    }
-
-    const clickInput = (input: HTMLInputElement) => {
-      if (input.disabled) return false
-      input.scrollIntoView({ block: 'center', inline: 'center' })
-      input.click()
-      if (!input.checked) {
-        input.checked = true
-        input.dispatchEvent(new Event('input', { bubbles: true }))
-        input.dispatchEvent(new Event('change', { bubbles: true }))
-        input.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-      }
-      return input.checked
-    }
-
-    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-    const visibleInputs = inputs.filter((input) => isUsable(input))
-    const selectableInputs = visibleInputs.length > 0 ? visibleInputs : inputs.filter((input) => !input.disabled)
-
-    for (const input of selectableInputs) {
-      if (clickInput(input)) {
-        return {
-          selected: true,
-          totalCheckboxes: inputs.length,
-          visibleCheckboxes: visibleInputs.length,
-          bodyText: '',
-        }
-      }
-    }
-
-    const roleCheckboxes = Array.from(document.querySelectorAll<HTMLElement>('[role="checkbox"], .checkbox, .check, .chk'))
-      .filter(isUsable)
-    for (const checkbox of roleCheckboxes) {
-      checkbox.scrollIntoView({ block: 'center', inline: 'center' })
-      checkbox.click()
-      return {
-        selected: true,
-        totalCheckboxes: inputs.length,
-        visibleCheckboxes: visibleInputs.length,
-        bodyText: '',
-      }
-    }
-
-    return {
-      selected: false,
-      totalCheckboxes: inputs.length,
-      visibleCheckboxes: visibleInputs.length,
-      bodyText: (document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 260),
-    }
-  })
-
-  if (!result.selected) {
-    throw new MarketplaceApiError(
-      'domechango',
-      404,
-      `도매창고 주문 목록에서 선택할 주문 체크박스를 찾지 못했습니다. (checkbox=${result.totalCheckboxes}, visible=${result.visibleCheckboxes}, ${await summarizePage(page)}, pageText=${result.bodyText || '-'})`,
-    )
-  }
-
-  await page.waitForTimeout(300)
-}
-
-async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
-  page.on('dialog', async (dialog) => {
-    await dialog.accept().catch(() => undefined)
-  })
-
-  const downloadPromise = page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
-  const triggered = await page.evaluate(() => {
-    const selects = Array.from(document.querySelectorAll('select'))
-    const select = selects.find((item) => {
-      const text = Array.from(item.options).map((option) => option.textContent ?? '').join(' ')
-      return /선택주문|엑셀/.test(text)
-    })
-    if (select instanceof HTMLSelectElement) {
-      const option = Array.from(select.options).find((item) => /엑셀/.test(item.textContent ?? ''))
-      if (option) {
-        select.value = option.value
-        select.dispatchEvent(new Event('input', { bubbles: true }))
-        select.dispatchEvent(new Event('change', { bubbles: true }))
-        return true
-      }
-    }
-
-    const controls = Array.from(document.querySelectorAll('button, input[type="button"], a, .btn'))
-    const control = controls.find((item) => /엑셀/.test(item.textContent ?? (item as HTMLInputElement).value ?? ''))
-    if (control instanceof HTMLElement) {
-      control.click()
-      return true
-    }
-    return false
-  })
-
-  if (!triggered) {
-    downloadPromise.catch(() => undefined)
-    throw new MarketplaceApiError('domechango', 404, '도매창고 선택주문 엑셀 다운로드 컨트롤을 찾지 못했습니다.')
-  }
-
-  const download = await downloadPromise.catch((error) => {
-    throw new MarketplaceApiError(
-      'domechango',
-      504,
-      `도매창고 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
-    )
-  })
-
-  const stream = await download.createReadStream()
-  if (!stream) throw new MarketplaceApiError('domechango', 500, '도매창고 엑셀 다운로드 스트림을 열 수 없습니다.')
-
-  const chunks: Buffer[] = []
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
-}
-
 async function hasOrderList(page: Page): Promise<boolean> {
   if (/login|signin/i.test(page.url())) return false
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   if (/Error\s*\(\d+\)\s*->/i.test(bodyText)) return false
   return /주문\s*리스트|선택주문|택배송장\s*업로드/.test(bodyText)
+}
+
+async function hasWmsSession(page: Page): Promise<boolean> {
+  if (/login|signin/i.test(page.url())) return false
+  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  if (/Error\s*\(\d+\)\s*->/i.test(bodyText)) return false
+  return /주문\s*\/?\s*배송|긴급처리사항|로그아웃|신규주문|발송대상/.test(bodyText)
+}
+
+async function fetchWmsData<T>(
+  page: Page,
+  path: string,
+  params: Record<string, string | number | undefined>,
+): Promise<T> {
+  const response = await page.evaluate(async ({ path, params }) => {
+    const url = new URL(path, window.location.origin)
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== '') url.searchParams.set(key, String(value))
+    }
+
+    const res = await fetch(`${url.pathname}${url.search}`, {
+      credentials: 'include',
+      headers: {
+        Accept: 'application/json, text/plain, */*',
+        'X-Requested-With': 'XMLHttpRequest',
+      },
+    })
+    const text = await res.text()
+    let json: unknown = null
+    try {
+      json = JSON.parse(text)
+    } catch {
+      // Keep text for diagnostics below.
+    }
+    return { ok: res.ok, status: res.status, text: text.slice(0, 500), json }
+  }, { path, params })
+
+  const json = response.json as { statusCode?: number; data?: T } | null
+  if (!response.ok || !json || json.statusCode !== 200) {
+    const message = json && 'data' in json ? String(json.data) : response.text
+    throw new MarketplaceApiError('domechango', response.status || 500, `도매창고 API 호출 실패: ${path} (${message})`)
+  }
+  return json.data as T
+}
+
+function buildApiWorkbook(rows: Record<string, unknown>[]): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('orders')
+  const columns = [
+    ['주문번호', 'oid'],
+    ['주문상품번호', 'oiid'],
+    ['주문상태', 'status'],
+    ['택배업체코드', 'did'],
+    ['송장번호', 'dcode'],
+    ['수취인명', 'name_receiver'],
+    ['수취인전화번호', 'tel_receiver'],
+    ['수취인핸드폰', 'hp_receiver'],
+    ['우편번호', 'zip_receiver'],
+    ['주소', 'addr_receiver'],
+    ['상품코드', 'goodscd'],
+    ['업체상품코드', 'goodscd2'],
+    ['상품명', 'goodsnm'],
+    ['선택옵션', 'sel_option'],
+    ['입력옵션', 'input_option'],
+    ['공급가', 'price_supply'],
+    ['구매수량', 'ea'],
+    ['상품합계', 'total_price_goods'],
+    ['배송비구분', 'delivery_type'],
+    ['배송비', 'price_delivery'],
+    ['추가배송비', 'vendor_price_extra'],
+    ['총금액', 'total_settle_price'],
+    ['주문일', 'order_at'],
+    ['주문요청사항', 'memo'],
+    ['업체주문관리메모', 'vendor_memo'],
+  ] as const
+
+  sheet.addRow(columns.map(([header]) => header))
+  for (const row of rows) {
+    sheet.addRow(columns.map(([, key]) => stripHtml(String(row[key] ?? ''))))
+  }
+  return workbook.xlsx.writeBuffer().then((buffer) => Buffer.from(buffer))
 }
 
 export class DomechangoScraper implements MarketplaceScraper {
@@ -403,7 +224,7 @@ export class DomechangoScraper implements MarketplaceScraper {
       await submitLoginForm(page)
 
       logStep('login: navigate to order list')
-      await navigateToOrderList(page)
+      await gotoDomechango(page, WMS_BASE_URL)
       const ok = await this.isLoggedIn(page)
       if (!ok) {
         return {
@@ -430,7 +251,7 @@ export class DomechangoScraper implements MarketplaceScraper {
   async testSession(credentials: ScraperCredentials): Promise<{ ok: boolean; error?: string }> {
     const { page, close } = await openContext(credentials.storageState)
     try {
-      await navigateToOrderList(page)
+      await gotoDomechango(page, WMS_BASE_URL)
       if (await this.isLoggedIn(page)) return { ok: true }
 
       const loginResult = await this.login(credentials)
@@ -491,7 +312,7 @@ export class DomechangoScraper implements MarketplaceScraper {
         }
       }
 
-      await runStep('orders: open order list', () => navigateToOrderList(ctx.page))
+      await runStep('orders: open wms home', () => gotoDomechango(ctx.page, WMS_BASE_URL))
       if (!(await this.isLoggedIn(ctx.page))) {
         logStep('orders: session invalid, login')
         await ctx.close()
@@ -501,24 +322,32 @@ export class DomechangoScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
-        await runStep('orders: reopen order list after login', () => navigateToOrderList(ctx.page))
+        await runStep('orders: reopen wms home after login', () => gotoDomechango(ctx.page, WMS_BASE_URL))
       }
 
       if (!(await this.isLoggedIn(ctx.page))) {
-        throw new MarketplaceApiError('domechango', 401, `도매창고 주문 리스트에 접근하지 못했습니다. (${await summarizePage(ctx.page)})`)
+        throw new MarketplaceApiError('domechango', 401, `도매창고 WMS 세션을 확인하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
 
-      await runStep('orders: set search filters', async () => {
-        await setSearchDates(ctx.page, since, until)
-        await selectNewOrderStatus(ctx.page)
+      return await runStep('orders: fetch excel through wms api', async () => {
+        const commonParams = {
+          page: 1,
+          list_size: 500,
+          oistep: 1,
+          sdate: formatDateInput(since),
+          edate: formatDateInput(until),
+          orderby: 'order_at-desc',
+        }
+        const listRows = await fetchWmsData<Record<string, unknown>[]>(ctx.page, ORDER_LIST_API_PATH, commonParams)
+        const orderIds = listRows.map((row) => String(row.oid ?? '')).filter(Boolean)
+        if (orderIds.length === 0) return buildApiWorkbook([])
+
+        const excelRows = await fetchWmsData<Record<string, unknown>[]>(ctx.page, ORDER_EXCEL_API_PATH, {
+          codes: orderIds.join(','),
+          sel_step: 1,
+        }).catch(() => listRows)
+        return buildApiWorkbook(Array.isArray(excelRows) ? excelRows : listRows)
       })
-      await runStep('orders: search', async () => {
-        await clickButtonByText(ctx.page, /주문검색|검색/)
-      })
-      await ctx.page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
-      await ctx.page.waitForTimeout(1000)
-      await runStep('orders: select rows', () => selectAllVisibleOrders(ctx.page))
-      return await runStep('orders: download excel', () => triggerSelectedOrderExcelDownload(ctx.page))
     } finally {
       await ctx.close()
     }
@@ -612,6 +441,6 @@ export class DomechangoScraper implements MarketplaceScraper {
   }
 
   private async isLoggedIn(page: Page): Promise<boolean> {
-    return hasOrderList(page)
+    return (await hasOrderList(page)) || (await hasWmsSession(page))
   }
 }

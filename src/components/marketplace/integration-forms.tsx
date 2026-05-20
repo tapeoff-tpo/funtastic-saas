@@ -1,9 +1,11 @@
 'use client'
 
-import { useActionState, useEffect, useState } from 'react'
+import { useActionState, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   registerExcelMarketplaceConnection,
+  registerMarketplaceCredentials,
+  registerRpaMarketplaceConnection,
 } from '@/app/(auth)/settings/marketplaces/actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,97 +17,324 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { getIntegrationInfo, type IntegrationMethod } from '@/lib/marketplace/integration-methods'
 
-interface IntegrationOption {
+interface MarketplaceOption {
   id: string
   name: string
-  isConnected: boolean
+  requiredCredentials: string[]
+  supportedMethods: IntegrationMethod[]
+  connectedMethods: string[]
 }
 
 interface IntegrationFormsProps {
-  excelMarketplaces: IntegrationOption[]
+  marketplaces: MarketplaceOption[]
 }
 
-export function IntegrationForms({
-  excelMarketplaces,
-}: IntegrationFormsProps) {
-  return (
-    <div className="grid gap-4">
-      <ExcelConnectionForm marketplaces={excelMarketplaces} />
-    </div>
+const credentialLabels: Record<string, string> = {
+  access_key: '액세스 키',
+  secret_key: '시크릿 키',
+  vendor_id: '오너클랜 공급사 ID',
+  client_id: '클라이언트 ID',
+  client_secret: '클라이언트 시크릿',
+  master_id: 'ESM+ 마스터 ID',
+  api_key: 'API 키',
+  secure_key: 'SECURE 키',
+  client_server_ip: 'API 서버 IP',
+  shop_id: '브랜드 ID (brandId)',
+  mall_id: '몰 ID (예: mymall)',
+  access_token: '액세스 토큰',
+  seller_id: '판매자 ID',
+  admin_app_key: '연동대행사 Admin 키',
+  seller_app_key: '판매자 API 인증키',
+  username: '오너클랜 판매회원 ID',
+  password: '비밀번호',
+  vendor_password: '오너클랜 공급사 PW',
+  base_url: 'API Base URL',
+  malls: 'EMP 쇼핑몰 필터',
+  states: 'EMP 주문상태',
+  oauser_id: 'oauserId',
+  oause_key: 'oauseKey',
+  ven_cd: '협력사코드',
+  ven2_cd: '2차협력사코드',
+  mda_gb: '매입처 코드',
+  dlv_form_gbcd: '배송형태구분코드',
+  rgst_ip: '등록 IP',
+}
+
+const optionalCredentialFields: Record<string, string[]> = {
+  'playauto-emp': ['base_url', 'malls', 'states'],
+  'hyundai-hmall': ['ven2_cd', 'mda_gb', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
+}
+
+const METHOD_HELP: Record<IntegrationMethod, string> = {
+  api: '공식 API 키를 저장해 주문수집, 주문확인, 송장전송을 처리합니다.',
+  hub: '플레이오토 EMP처럼 여러 쇼핑몰을 한 번에 모아주는 연동몰을 연결합니다.',
+  rpa: '판매자센터 로그인 정보를 저장하고 화면 자동화로 주문 엑셀을 수집합니다.',
+  excel: 'API 없이 주문 엑셀을 업로드할 수 있는 몰로 등록합니다.',
+}
+
+function methodLabel(method: IntegrationMethod): string {
+  return getIntegrationInfo(method).label
+}
+
+function optionalPlaceholder(marketplaceId: string, credKey: string): string {
+  if (credKey === 'malls') return '예: 11번가;스마트스토어;쿠팡'
+  if (credKey === 'states') return '예: 신규주문,주문확인'
+  if (marketplaceId === 'hyundai-hmall' && credKey === 'ven2_cd') return '예: 000000'
+  if (marketplaceId === 'hyundai-hmall' && credKey === 'mda_gb') return '예: 20'
+  if (marketplaceId === 'hyundai-hmall' && credKey === 'dlv_form_gbcd') return '예: 40'
+  return `${credentialLabels[credKey] ?? credKey} 입력`
+}
+
+export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
+  const sortedMarketplaces = useMemo(
+    () => [...marketplaces].sort((a, b) => a.name.localeCompare(b.name, 'ko-KR')),
+    [marketplaces],
   )
-}
-
-function ExcelConnectionForm({ marketplaces }: { marketplaces: IntegrationOption[] }) {
   const [selectedId, setSelectedId] = useState('')
-  const [state, formAction, isPending] = useActionState(registerExcelMarketplaceConnection, null)
-
-  useEffect(() => {
-    if (state?.success && state.message) {
-      toast.success(state.message)
-    } else if (state?.error) {
-      toast.error(state.error)
-    }
-  }, [state])
+  const selectedMarketplace = sortedMarketplaces.find((marketplace) => marketplace.id === selectedId)
+  const [selectedMethod, setSelectedMethod] = useState<IntegrationMethod>('api')
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>엑셀 업로드몰 등록</CardTitle>
+        <CardTitle>마켓 연동 등록</CardTitle>
         <CardDescription>
-          자동 연동 전이라도 몰을 등록해두면 주문수집 화면에서 업로드 상태를 함께 볼 수 있습니다.
+          몰을 먼저 선택한 뒤 API, 연동몰, RPA, 엑셀 중 사용할 연동방식을 고르세요.
         </CardDescription>
       </CardHeader>
-      <CardContent>
-        <form action={formAction} className="space-y-4">
-          <input type="hidden" name="marketplace_id" value={selectedId} />
-
+      <CardContent className="space-y-5">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-2">
-            <Label htmlFor="excel-marketplace-select">기본 몰</Label>
+            <Label htmlFor="unified-marketplace-select">마켓</Label>
             <select
-              id="excel-marketplace-select"
+              id="unified-marketplace-select"
               value={selectedId}
-              onChange={(event) => setSelectedId(event.target.value)}
+              onChange={(event) => {
+                const nextId = event.target.value
+                const nextMarketplace = sortedMarketplaces.find((marketplace) => marketplace.id === nextId)
+                setSelectedId(nextId)
+                setSelectedMethod(nextMarketplace?.supportedMethods[0] ?? 'api')
+              }}
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              <option value="">직접 입력</option>
-              {marketplaces.map((marketplace) => (
+              <option value="">선택하세요</option>
+              {sortedMarketplaces.map((marketplace) => (
                 <option key={marketplace.id} value={marketplace.id}>
                   {marketplace.name}
-                  {marketplace.isConnected ? ' (등록됨)' : ''}
                 </option>
               ))}
             </select>
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="excel-display-name">표시 이름</Label>
-            <Input
-              id="excel-display-name"
-              name="display_name"
-              placeholder={selectedId ? '비워두면 기본 몰 이름 사용' : '예: 온채널, 올웨이즈'}
-              required={!selectedId}
-            />
+          <div className="space-y-2">
+            <Label>연동방식</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {(selectedMarketplace?.supportedMethods ?? ['api', 'excel']).map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setSelectedMethod(method)}
+                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                    selectedMethod === method
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {methodLabel(method)}
+                  {selectedMarketplace?.connectedMethods.includes(method) ? ' 등록됨' : ''}
+                </button>
+              ))}
+            </div>
           </div>
+        </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="excel-store-alias">스토어 별칭</Label>
-            <Input
-              id="excel-store-alias"
-              name="store_alias"
-              placeholder="기본값: excel"
-            />
+        {selectedMarketplace && (
+          <p className="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+            {METHOD_HELP[selectedMethod]}
+          </p>
+        )}
+
+        {!selectedMarketplace ? (
+          <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            등록할 마켓을 선택하면 가능한 연동방식과 입력 항목이 표시됩니다.
           </div>
-
-          <Button type="submit" disabled={isPending} className="w-full">
-            {isPending ? '등록 중...' : '엑셀 업로드몰 등록'}
-          </Button>
-
-          {state?.error && !isPending && (
-            <p className="text-sm text-red-600">{state.error}</p>
-          )}
-        </form>
+        ) : selectedMethod === 'excel' ? (
+          <ExcelConnectionForm marketplace={selectedMarketplace} />
+        ) : selectedMethod === 'rpa' ? (
+          <RpaConnectionForm marketplace={selectedMarketplace} />
+        ) : (
+          <ApiConnectionForm marketplace={selectedMarketplace} method={selectedMethod} />
+        )}
       </CardContent>
     </Card>
+  )
+}
+
+function StoreAliasInput({ id, placeholder = '기본값: default' }: { id: string; placeholder?: string }) {
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={id}>스토어 별칭</Label>
+      <Input
+        id={id}
+        name="store_alias"
+        placeholder={placeholder}
+      />
+      <p className="text-xs text-muted-foreground">
+        같은 몰에 여러 스토어를 등록할 때 구분용으로 입력하세요.
+      </p>
+    </div>
+  )
+}
+
+function ApiConnectionForm({
+  marketplace,
+  method,
+}: {
+  marketplace: MarketplaceOption
+  method: IntegrationMethod
+}) {
+  const [state, formAction, isPending] = useActionState(registerMarketplaceCredentials, null)
+  const optionalFields = optionalCredentialFields[marketplace.id] ?? []
+
+  useEffect(() => {
+    if (state?.success && state.message) toast.success(state.message)
+    if (state?.error) toast.error(state.error)
+  }, [state])
+
+  return (
+    <form action={formAction} className="space-y-4">
+      <input type="hidden" name="marketplace_id" value={marketplace.id} />
+
+      <StoreAliasInput
+        id={`${marketplace.id}-${method}-store-alias`}
+        placeholder={method === 'hub' ? '예: tapeoff EMP' : '예: 일오삼공'}
+      />
+
+      {marketplace.requiredCredentials.map((credKey) => (
+        <div key={credKey} className="space-y-1">
+          <Label htmlFor={`${marketplace.id}-${method}-${credKey}`}>
+            {credentialLabels[credKey] ?? credKey}
+          </Label>
+          <Input
+            id={`${marketplace.id}-${method}-${credKey}`}
+            name={credKey}
+            type="password"
+            required
+            placeholder={`${credentialLabels[credKey] ?? credKey}을(를) 입력하세요`}
+            autoComplete="off"
+          />
+        </div>
+      ))}
+
+      {optionalFields.map((credKey) => (
+        <div key={credKey} className="space-y-1">
+          <Label htmlFor={`${marketplace.id}-${method}-${credKey}`}>
+            {credentialLabels[credKey] ?? credKey}
+          </Label>
+          <Input
+            id={`${marketplace.id}-${method}-${credKey}`}
+            name={credKey}
+            type="text"
+            placeholder={optionalPlaceholder(marketplace.id, credKey)}
+            autoComplete="off"
+          />
+          {credKey === 'malls' && (
+            <p className="text-xs text-muted-foreground">
+              하위 쇼핑몰명을 세미콜론(;) 또는 줄바꿈으로 구분하세요. 비우면 전체 주문을 조회합니다.
+            </p>
+          )}
+        </div>
+      ))}
+
+      <Button type="submit" disabled={isPending} className="w-full">
+        {isPending ? '저장 중...' : `${methodLabel(method)} 연동 저장`}
+      </Button>
+
+      {state?.error && !isPending && (
+        <p className="text-sm text-red-600">{state.error}</p>
+      )}
+    </form>
+  )
+}
+
+function RpaConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) {
+  const [state, formAction, isPending] = useActionState(registerRpaMarketplaceConnection, null)
+
+  useEffect(() => {
+    if (state?.success && state.message) toast.success(state.message)
+    if (state?.error) toast.error(state.error)
+  }, [state])
+
+  return (
+    <form action={formAction} className="space-y-4">
+      <input type="hidden" name="marketplace_id" value={marketplace.id} />
+
+      <StoreAliasInput id={`${marketplace.id}-rpa-store-alias`} placeholder="예: 기본계정" />
+
+      <div className="space-y-1">
+        <Label htmlFor={`${marketplace.id}-rpa-email`}>로그인 ID</Label>
+        <Input
+          id={`${marketplace.id}-rpa-email`}
+          name="email"
+          required
+          autoComplete="off"
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor={`${marketplace.id}-rpa-password`}>비밀번호</Label>
+        <Input
+          id={`${marketplace.id}-rpa-password`}
+          name="password"
+          type="password"
+          required
+          autoComplete="off"
+        />
+      </div>
+
+      <Button type="submit" disabled={isPending} className="w-full">
+        {isPending ? '등록 중...' : 'RPA 연동 저장'}
+      </Button>
+
+      {state?.error && !isPending && (
+        <p className="text-sm text-red-600">{state.error}</p>
+      )}
+    </form>
+  )
+}
+
+function ExcelConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) {
+  const [state, formAction, isPending] = useActionState(registerExcelMarketplaceConnection, null)
+
+  useEffect(() => {
+    if (state?.success && state.message) toast.success(state.message)
+    if (state?.error) toast.error(state.error)
+  }, [state])
+
+  return (
+    <form action={formAction} className="space-y-4">
+      <input type="hidden" name="marketplace_id" value={marketplace.id} />
+
+      <div className="space-y-1">
+        <Label htmlFor={`${marketplace.id}-excel-display-name`}>표시 이름</Label>
+        <Input
+          id={`${marketplace.id}-excel-display-name`}
+          name="display_name"
+          placeholder={`비워두면 ${marketplace.name} 사용`}
+        />
+      </div>
+
+      <StoreAliasInput id={`${marketplace.id}-excel-store-alias`} placeholder="기본값: excel" />
+
+      <Button type="submit" disabled={isPending} className="w-full">
+        {isPending ? '등록 중...' : '엑셀 업로드몰 등록'}
+      </Button>
+
+      {state?.error && !isPending && (
+        <p className="text-sm text-red-600">{state.error}</p>
+      )}
+    </form>
   )
 }

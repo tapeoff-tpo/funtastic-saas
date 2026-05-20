@@ -43,6 +43,15 @@ export function getIntegrationMethod(
   return 'api'
 }
 
+export function getSupportedIntegrationMethods(
+  marketplaceId: string,
+  options: { authType?: string | null } = {},
+): IntegrationMethod[] {
+  if (HUB_MARKETPLACES.has(marketplaceId)) return ['hub', 'excel']
+  if (RPA_MARKETPLACES.has(marketplaceId) || options.authType === 'session') return ['rpa', 'excel']
+  return ['api', 'excel']
+}
+
 export function getIntegrationInfo(method: IntegrationMethod): MarketplaceIntegrationInfo {
   return {
     method,

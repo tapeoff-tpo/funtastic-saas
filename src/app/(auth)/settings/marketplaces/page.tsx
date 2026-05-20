@@ -3,9 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
-import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { getIntegrationMethod, getSupportedIntegrationMethods } from '@/lib/marketplace/integration-methods'
 import '@/lib/marketplace/adapters/configs'
-import { CredentialForm } from '@/components/marketplace/credential-form'
 import { IntegrationForms } from '@/components/marketplace/integration-forms'
 import { ConnectionList } from './connection-list'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -42,16 +41,10 @@ export default async function MarketplaceSettingsPage() {
     name: config.name,
     requiredCredentials: [...config.requiredCredentials],
     integrationMethod: getIntegrationMethod(config.id, { authType: config.authType }),
-  }))
-  const linkedMarketplaceOptions = catalog.map((marketplace) => ({
-    id: marketplace.id,
-    name: marketplace.name,
-    requiredCredentials: marketplace.requiredCredentials,
-  }))
-  const excelConnectionOptions = catalog.map((marketplace) => ({
-    id: marketplace.id,
-    name: marketplace.name,
-    isConnected: connectedMethodIds.has(`excel:${marketplace.id}`),
+    supportedMethods: getSupportedIntegrationMethods(config.id, { authType: config.authType }),
+    connectedMethods: ['api', 'hub', 'rpa', 'excel'].filter((method) =>
+      connectedMethodIds.has(`${method}:${config.id}`),
+    ),
   }))
   const connectionRows = connections.map((connection) => ({
     id: connection.id,
@@ -73,15 +66,8 @@ export default async function MarketplaceSettingsPage() {
         </p>
       </div>
 
-      <CredentialForm
-        title="연동"
-        description="API 또는 주문 허브로 연결하는 마켓을 등록합니다."
-        selectLabel="마켓"
-        marketplaces={linkedMarketplaceOptions}
-      />
-
       <IntegrationForms
-        excelMarketplaces={excelConnectionOptions}
+        marketplaces={catalog}
       />
 
       {connections.length > 0 && (

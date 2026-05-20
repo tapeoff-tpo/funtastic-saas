@@ -952,29 +952,6 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
   })
 
-  const getMappingStatus = (orderMarketplaceId: string, orderItems: typeof items): MappingStatus => {
-    if (orderItems.length === 0) return 'unmapped'
-    let mappedCount = 0
-    for (const item of orderItems) {
-      if (item.lockedAt) {
-        mappedCount++
-        continue
-      }
-      if (item.resolvedMappingCodeId) {
-        mappedCount++
-        continue
-      }
-      const hasSourceMatch = item.marketplaceItemId
-        ? lookupMappingRef(mappingIndex, orderMarketplaceId, item.marketplaceItemId, item.optionText) !== null
-        : false
-      const hasSkuMatch = item.sku ? skuSet.has(item.sku.trim()) : false
-      if (hasSourceMatch || hasSkuMatch) mappedCount++
-    }
-    if (mappedCount === orderItems.length) return 'mapped'
-    if (mappedCount === 0) return 'unmapped'
-    return 'partial'
-  }
-
   // Group items by orderId — Phase 8 shape (orderItems base + displayName + shippingCost)
   type ItemRow = typeof items[number]
   const itemsByOrderId = new Map<string, ItemRow[]>()
@@ -1008,9 +985,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       // Phase 8 — inquiry indicator source for orders UI (SC-03)
       hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,
-      mappingStatus: includeMappingDetails
-        ? getMappingStatus(order.marketplaceId, orderItemsData)
-        : (order.mappedAt ? 'mapped' : 'unmapped'),
+      mappingStatus: order.mappedAt ? 'mapped' : 'unmapped',
       marketplaceDisplayName: getOrderMarketplaceDisplayName(order),
       historicalClaimStatuses: getOrderHistoricalClaimStatuses(order),
     }

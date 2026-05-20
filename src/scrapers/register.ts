@@ -12,10 +12,12 @@
 import { registerScraper } from './registry'
 import { DomechangoScraper } from './domechango/scraper'
 import { OnchannelScraper } from './onchannel/scraper'
+import { TobizonScraper } from './tobizon/scraper'
 // import { AblyScraper } from './ably/scraper'
 // import { OhouseScraper } from './ohouse/scraper'
 
 registerScraper(new DomechangoScraper())
 registerScraper(new OnchannelScraper())
+registerScraper(new TobizonScraper())
 // registerScraper(new AblyScraper())
 // registerScraper(new OhouseScraper())

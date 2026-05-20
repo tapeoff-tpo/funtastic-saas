@@ -25,8 +25,13 @@ const RPA_MARKETPLACES = new Set([
   'onchannel',
   'ohouse',
   'domechango',
+  'tobizon',
   'gs-shop',
 ])
+
+const MULTI_METHOD_MARKETPLACES: Partial<Record<string, IntegrationMethod[]>> = {
+  tobizon: ['rpa', 'api', 'excel'],
+}
 
 const HUB_MARKETPLACES = new Set([
   'playauto-emp',
@@ -47,6 +52,8 @@ export function getSupportedIntegrationMethods(
   marketplaceId: string,
   options: { authType?: string | null } = {},
 ): IntegrationMethod[] {
+  const multiMethod = MULTI_METHOD_MARKETPLACES[marketplaceId]
+  if (multiMethod) return multiMethod
   if (HUB_MARKETPLACES.has(marketplaceId)) return ['hub', 'excel']
   if (RPA_MARKETPLACES.has(marketplaceId) || options.authType === 'session') return ['rpa', 'excel']
   return ['api', 'excel']

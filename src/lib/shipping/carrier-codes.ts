@@ -50,6 +50,30 @@ export function getCarrierName(code: string): string {
 const MARKETPLACE_CODE_OVERRIDES: Record<string, Record<string, string>> = {
   // Example: if coupang used a different code for CJ:
   // coupang: { CJGLS: 'CJGLS_COUPANG' },
+  gmarket: {
+    CJGLS: '10013',
+    HANJIN: '10007',
+    HYUNDAI: '10008',
+    EPOST: '10005',
+    KGB: '10003',
+    KDEXP: '10016',
+    CHUNIL: '10017',
+    DAESIN: '10014',
+    ILYANG: '10015',
+    ETC: '10034',
+  },
+  auction: {
+    CJGLS: '10013',
+    HANJIN: '10007',
+    HYUNDAI: '10008',
+    EPOST: '10005',
+    KGB: '10003',
+    KDEXP: '10016',
+    CHUNIL: '10017',
+    DAESIN: '10014',
+    ILYANG: '10015',
+    ETC: '10070',
+  },
 }
 
 /**

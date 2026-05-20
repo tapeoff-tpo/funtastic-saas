@@ -16,6 +16,15 @@ export interface EsmApiResponse<T> {
   TotalCount?: number
 }
 
+export interface EsmOrderListData {
+  SiteType?: number
+  PageIndex?: number
+  PageSize?: number
+  TotalCount?: number
+  SellerId?: string
+  RequestOrders?: EsmOrder[]
+}
+
 /** Site type discriminator: 'G' for Gmarket, 'A' for Auction */
 export type EsmSiteType = 'G' | 'A'
 
@@ -23,27 +32,37 @@ export type EsmSiteType = 'G' | 'A'
 export interface EsmOrder {
   orderNo?: string
   OrderNo?: number | string
-  siteType: EsmSiteType
+  siteType?: EsmSiteType
+  SiteType?: number
   orderItemSeq?: string
   OrderSeqNo?: number | string
   itemName?: string
   GoodsName?: string
   orderQty?: number
   OrderQty?: number
+  ContrAmount?: number
   buyerName?: string
   BuyerName?: string
   buyerPhone?: string
   BuyerTelNo?: string
+  BuyerMobileTel?: string
+  BuyerTel?: string
   receiverName?: string
   ReceiverName?: string
   receiverPhone?: string
   ReceiverTelNo?: string
+  HpNo?: string
+  TelNo?: string
   receiverZipcode?: string
   ZipCode?: string
   receiverAddress?: string
   Address?: string
+  DelFrontAddress?: string
+  DelFullAddress?: string
   receiverAddressDetail?: string
   AddressDetail?: string
+  DelBackAddress?: string
+  DelMemo?: string
   orderDate?: string
   OrderDate?: string
   PayDate?: string
@@ -51,12 +70,23 @@ export interface EsmOrder {
   OrderStatus?: string | number
   sellPrice?: number
   SellPrice?: number
+  SalePrice?: string | number
   payAmount?: number
   BuyerPayAmt?: number
+  AcntMoney?: string | number
+  OrderAmount?: string | number
+  ShippingFee?: string | number
   sellerItemCode?: string
   SellerCustNo?: string
+  OutGoodsNo?: string
+  SiteGoodsNo?: string
   optionInfo?: string
   OptionInfo?: string
+  ItemOptionSelectList?: Array<{
+    ItemOptionValue?: string
+    ItemOptionOrderCnt?: number
+    ItemOptionCode?: string
+  }>
 }
 
 /** A single claim from the ESM Trading API */

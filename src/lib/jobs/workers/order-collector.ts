@@ -177,11 +177,12 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'funtastic-b2b'
+  return marketplaceId === 'funtastic-b2b' || marketplaceId === 'gmarket' || marketplaceId === 'auction'
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
   if (marketplaceId === 'funtastic-b2b') return 'PREPARING'
+  if (marketplaceId === 'gmarket' || marketplaceId === 'auction') return '2'
   return 'CONFIRMED'
 }
 
@@ -193,6 +194,8 @@ const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'naver',
   'toss-shopping',
   'elevenst',
+  'gmarket',
+  'auction',
   'esm',
   'ably',
   'ohouse',
@@ -213,6 +216,8 @@ const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
   naver: 1,
   'toss-shopping': 2,
   elevenst: 2,
+  gmarket: 1,
+  auction: 1,
   esm: 2,
   ably: 2,
   ohouse: 2,

@@ -9,6 +9,11 @@ import type { OrderStatus } from '@/lib/orders/types'
 
 /** ESM order status -> internal OrderStatus mapping */
 export const ESM_STATUS_MAP: Record<string, OrderStatus> = {
+  '1': 'new',
+  '2': 'preparing',
+  '3': 'shipped',
+  '4': 'delivered',
+  '5': 'delivered',
   ORDER_RECEIVED: 'new',        // 주문접수
   PAYMENT_COMPLETE: 'new',      // 결제완료
   PRODUCT_PREPARE: 'preparing', // 상품준비중

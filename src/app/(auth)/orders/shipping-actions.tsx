@@ -361,9 +361,6 @@ export function ShippingActions({
 
   // For 일괄 매핑: 선택된 주문이 있으면 그 중 미매핑만, 없으면 전체 미매핑 카운트
   const ordersForMapping = selectedOrders.length > 0 ? selectedOrders : allOrders
-  const unmappedOrderCount = useMemo(() => {
-    return ordersForMapping.filter((o) => o.mappingStatus !== 'mapped').length
-  }, [ordersForMapping])
   const existingMappedOrders = useMemo(() => {
     return ordersForMapping.filter((order) => order.mappingStatus === 'mapped')
   }, [ordersForMapping])
@@ -373,7 +370,6 @@ export function ShippingActions({
 
   const mappingTargets = useMemo<MappingTarget[]>(() => {
     return ordersForMapping
-      .filter((order) => order.mappingStatus !== 'mapped')
       .flatMap((order) => order.items
         .filter((item) => item.marketplaceItemId)
         .map((item) => ({
@@ -449,14 +445,14 @@ export function ShippingActions({
   }
 
   const handleApplyExistingMappings = async () => {
-    if (existingMappedOrders.length === 0) {
-      toast.info('기존 매핑이 적용된 주문이 없습니다.')
+    if (ordersForMapping.length === 0) {
+      toast.info('매핑할 주문이 없습니다.')
       return
     }
 
     setApplyingMappings(true)
     try {
-      const orderIds = Array.from(new Set(existingMappedOrders.map((order) => order.id)))
+      const orderIds = Array.from(new Set(ordersForMapping.map((order) => order.id)))
       const res = await fetch('/api/orders/apply-mappings', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -620,13 +616,13 @@ export function ShippingActions({
             <button
               type="button"
               onClick={() => void handleApplyExistingMappings()}
-              disabled={applyingMappings || existingMappedOrders.length === 0}
+              disabled={applyingMappings || ordersForMapping.length === 0}
               className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
-              title={hasSelection ? '선택한 주문 중 기존 매핑이 있는 주문을 매핑완료 처리' : '현재 페이지에서 기존 매핑이 있는 주문을 매핑완료 처리'}
+              title={hasSelection ? '선택한 주문을 매핑완료 또는 재매핑 처리' : '현재 페이지 주문을 매핑완료 또는 재매핑 처리'}
             >
               {applyingMappings
                 ? '매핑 중...'
-                : `매핑${existingMappedOrders.length > 0 ? ` (${existingMappedOrders.length})` : ''}`}
+                : `매핑${ordersForMapping.length > 0 ? ` (${ordersForMapping.length})` : ''}`}
             </button>
             <button
               type="button"
@@ -639,7 +635,7 @@ export function ShippingActions({
               }}
               className="rounded-md bg-orange-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-orange-600"
             >
-              재고매핑 {unmappedOrderCount > 0 ? `(${unmappedOrderCount}건 미매핑)` : ''}
+              재고매핑 {ordersForMapping.length > 0 ? `(${ordersForMapping.length}건)` : ''}
             </button>
             <Link
               href="/products/mapping"

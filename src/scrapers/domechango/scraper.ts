@@ -229,21 +229,72 @@ async function setSearchDates(page: Page, since: Date, until: Date): Promise<voi
 }
 
 async function selectAllVisibleOrders(page: Page): Promise<void> {
-  const checkbox = page.locator('table input[type="checkbox"]:visible').first()
-  if (!(await checkbox.isVisible().catch(() => false))) {
-    throw new MarketplaceApiError('domechango', 404, '도매창고 주문 목록에서 선택할 주문 체크박스를 찾지 못했습니다.')
-  }
-  if (await checkbox.isChecked().catch(() => false)) return
+  const result = await page.evaluate(() => {
+    const isUsable = (element: Element) => {
+      if (!(element instanceof HTMLElement)) return false
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
+    }
 
-  await checkbox.check({ force: true, timeout: 3000 }).catch(async () => {
-    await checkbox.evaluate((element) => {
-      if (!(element instanceof HTMLInputElement)) return
-      element.checked = true
-      element.dispatchEvent(new Event('input', { bubbles: true }))
-      element.dispatchEvent(new Event('change', { bubbles: true }))
-      element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
+    const clickInput = (input: HTMLInputElement) => {
+      if (input.disabled) return false
+      input.scrollIntoView({ block: 'center', inline: 'center' })
+      input.click()
+      if (!input.checked) {
+        input.checked = true
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+        input.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      }
+      return input.checked
+    }
+
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+    const visibleInputs = inputs.filter((input) => isUsable(input))
+    const selectableInputs = visibleInputs.length > 0 ? visibleInputs : inputs.filter((input) => !input.disabled)
+
+    for (const input of selectableInputs) {
+      if (clickInput(input)) {
+        return {
+          selected: true,
+          totalCheckboxes: inputs.length,
+          visibleCheckboxes: visibleInputs.length,
+          bodyText: '',
+        }
+      }
+    }
+
+    const roleCheckboxes = Array.from(document.querySelectorAll<HTMLElement>('[role="checkbox"], .checkbox, .check, .chk'))
+      .filter(isUsable)
+    for (const checkbox of roleCheckboxes) {
+      checkbox.scrollIntoView({ block: 'center', inline: 'center' })
+      checkbox.click()
+      return {
+        selected: true,
+        totalCheckboxes: inputs.length,
+        visibleCheckboxes: visibleInputs.length,
+        bodyText: '',
+      }
+    }
+
+    return {
+      selected: false,
+      totalCheckboxes: inputs.length,
+      visibleCheckboxes: visibleInputs.length,
+      bodyText: (document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 260),
+    }
   })
+
+  if (!result.selected) {
+    throw new MarketplaceApiError(
+      'domechango',
+      404,
+      `도매창고 주문 목록에서 선택할 주문 체크박스를 찾지 못했습니다. (checkbox=${result.totalCheckboxes}, visible=${result.visibleCheckboxes}, ${await summarizePage(page)}, pageText=${result.bodyText || '-'})`,
+    )
+  }
+
+  await page.waitForTimeout(300)
 }
 
 async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {

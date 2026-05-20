@@ -133,8 +133,11 @@ async function fetchWmsData<T>(
 
     const res = await fetch(`${url.pathname}${url.search}`, {
       credentials: 'include',
+      referrer: `${window.location.origin}/wms/order`,
+      referrerPolicy: 'strict-origin-when-cross-origin',
       headers: {
         Accept: 'application/json, text/plain, */*',
+        Pragma: 'no-cache',
         'X-Requested-With': 'XMLHttpRequest',
       },
     })

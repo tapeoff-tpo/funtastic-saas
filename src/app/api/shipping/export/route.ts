@@ -16,6 +16,27 @@ import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/temp
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
+
+function getMarketplaceExportName(order: typeof orders.$inferSelect): string {
+  const rawData = order.rawData
+  if (rawData && typeof rawData === 'object' && !Array.isArray(rawData)) {
+    const data = rawData as {
+      mallName?: unknown
+      empSiteName?: unknown
+      SiteName?: unknown
+      siteName?: unknown
+    }
+    const candidates = [data.mallName, data.empSiteName, data.SiteName, data.siteName]
+    for (const candidate of candidates) {
+      if (typeof candidate !== 'string') continue
+      const trimmed = candidate.trim()
+      if (trimmed) return trimmed
+    }
+  }
+
+  return MARKETPLACE_DISPLAY_NAMES[order.marketplaceId] ?? order.marketplaceId
+}
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -132,6 +153,7 @@ export async function GET(request: NextRequest) {
       const productName = primary?.productName ?? rawFirst?.productName ?? ''
       const sku: string = primary?.sku ?? rawFirst?.sku ?? ''
       const optionText = primary?.optionText ?? ''
+      const marketplaceName = getMarketplaceExportName(order)
 
       return {
         // 사용자 노출용 8자리 내부 주문번호
@@ -140,7 +162,9 @@ export async function GET(request: NextRequest) {
         marketplaceOrderId: order.marketplaceOrderId,
         // 마켓 상품코드 — 쿠팡 vendorItemId / 네이버 productOrderId / Cafe24 item_no 등
         marketplaceItemId: rawFirst?.marketplaceItemId ?? '',
-        marketplaceId: order.marketplaceId,
+        marketplaceId: marketplaceName,
+        marketplaceName,
+        marketplaceCode: order.marketplaceId,
         buyerName: order.buyerName,
         // 기본 '구매자연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
         buyerPhone: order.buyerPhone2 || order.buyerPhone || '',

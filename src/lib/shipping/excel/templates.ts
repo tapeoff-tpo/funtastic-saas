@@ -30,6 +30,7 @@ export const AVAILABLE_ORDER_FIELDS: OrderFieldDef[] = [
   { field: 'marketplaceOrderId', label: '마켓 주문번호' },
   { field: 'marketplaceItemId', label: '마켓 상품코드' },
   { field: 'marketplaceId', label: '마켓플레이스' },
+  { field: 'marketplaceCode', label: '마켓플레이스 코드' },
   { field: 'productCode', label: '내부 상품코드' },
   { field: 'buyerName', label: '구매자' },
   { field: 'recipientName', label: '수령인' },

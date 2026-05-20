@@ -708,7 +708,7 @@ export async function saveNormalizedOrdersForConnection(params: {
 }): Promise<{ ordersCollected: number }> {
   const { marketplaceId, connectionId, userId } = params
   const normalizedOrders = mergeNormalizedOrdersByOrderId(canonicalizeMarketplaceOrderIds(params.normalizedOrders))
-  const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
+  const existingOrderMatches = await findExistingOrderMatches(userId, marketplaceId, normalizedOrders)
   let ordersCollected = 0
 
   for (const order of normalizedOrders) {
@@ -718,7 +718,11 @@ export async function saveNormalizedOrdersForConnection(params: {
       ? { ...order, items: [firstItem], totalAmount: lineTotalAmount(firstItem) }
       : { ...order, items }
     const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
-    const isExistingOrder = existingOrderKeys.has(orderKey)
+    if (existingOrderMatches.skipKeys.has(orderKey)) {
+      continue
+    }
+
+    const isExistingOrder = existingOrderMatches.upsertKeys.has(orderKey)
     const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
 
     if (!isExistingOrder && items.length > 0) {
@@ -742,32 +746,82 @@ export async function saveNormalizedOrdersForConnection(params: {
   return { ordersCollected }
 }
 
-async function findExistingOrderKeys(
+function normalizeDuplicateName(value?: string | null): string | null {
+  const normalized = value?.replace(/\s+/g, '').trim()
+  return normalized ? normalized : null
+}
+
+function hasMatchingCustomerName(
+  incoming: NormalizedOrder,
+  existing: { buyerName: string; recipientName: string },
+): boolean {
+  const incomingNames = [
+    normalizeDuplicateName(incoming.buyerName),
+    normalizeDuplicateName(incoming.recipientName),
+  ].filter(Boolean)
+  const existingNames = [
+    normalizeDuplicateName(existing.buyerName),
+    normalizeDuplicateName(existing.recipientName),
+  ].filter(Boolean)
+
+  if (incomingNames.length === 0 || existingNames.length === 0) return true
+  return incomingNames.some((name) => existingNames.includes(name))
+}
+
+async function findExistingOrderMatches(
   userId: string,
   marketplaceId: string,
   normalizedOrders: NormalizedOrder[],
-): Promise<Set<string>> {
+): Promise<{ upsertKeys: Set<string>; skipKeys: Set<string> }> {
   const marketplaceOrderIds = Array.from(
     new Set(normalizedOrders.map((order) => order.marketplaceOrderId).filter(Boolean)),
   )
-  if (marketplaceOrderIds.length === 0) return new Set()
+  if (marketplaceOrderIds.length === 0) {
+    return { upsertKeys: new Set(), skipKeys: new Set() }
+  }
 
   const existingOrders = await db
     .select({
       marketplaceId: orders.marketplaceId,
       marketplaceOrderId: orders.marketplaceOrderId,
+      buyerName: orders.buyerName,
+      recipientName: orders.recipientName,
     })
     .from(orders)
     .where(
       and(
         eq(orders.userId, userId),
-        eq(orders.marketplaceId, marketplaceId),
         eq(orders.isCopy, false),
         inArray(orders.marketplaceOrderId, marketplaceOrderIds),
       ),
     )
 
-  return new Set(existingOrders.map((order) => `${order.marketplaceId}:${order.marketplaceOrderId}`))
+  const existingByOrderId = new Map<string, typeof existingOrders>()
+  for (const order of existingOrders) {
+    const current = existingByOrderId.get(order.marketplaceOrderId) ?? []
+    current.push(order)
+    existingByOrderId.set(order.marketplaceOrderId, current)
+  }
+
+  const upsertKeys = new Set<string>()
+  const skipKeys = new Set<string>()
+
+  for (const order of normalizedOrders) {
+    const existing = existingByOrderId.get(order.marketplaceOrderId) ?? []
+    const exact = existing.find((candidate) => candidate.marketplaceId === marketplaceId)
+    const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
+
+    if (exact) {
+      upsertKeys.add(orderKey)
+      continue
+    }
+
+    if (existing.some((candidate) => hasMatchingCustomerName(order, candidate))) {
+      skipKeys.add(orderKey)
+    }
+  }
+
+  return { upsertKeys, skipKeys }
 }
 
 /**

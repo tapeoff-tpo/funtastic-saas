@@ -292,8 +292,13 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     { id: 'note', label: '알림', size: 260 },
     { id: 'actions', label: '액션', size: 220 },
   ]
-  const totalWidth = cols.reduce((s, c) => s + (columnSizing[c.id] ?? c.size), 0)
+  const flexibleColumnId = 'note'
+  const minTableWidth = cols.reduce((s, c) => s + (columnSizing[c.id] ?? c.size), 0)
   const sizeOf = (id: string) => columnSizing[id] ?? cols.find((c) => c.id === id)!.size
+  const columnWidthStyle = (id: string) =>
+    id === flexibleColumnId
+      ? { minWidth: sizeOf(id) }
+      : { width: sizeOf(id) }
 
   const onResize = (id: string) => (e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault()
@@ -505,10 +510,10 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
         </div>
       ) : (
         <SyncedScrollContainer>
-          <table className="table-fixed text-xs" style={{ width: totalWidth }}>
+          <table className="w-full table-fixed text-xs" style={{ minWidth: minTableWidth }}>
             <colgroup>
               {cols.map((c) => (
-                <col key={c.id} style={{ width: sizeOf(c.id) }} />
+                <col key={c.id} style={c.id === flexibleColumnId ? undefined : { width: sizeOf(c.id) }} />
               ))}
             </colgroup>
             <thead className="sticky top-0 z-[1] bg-muted/50">
@@ -516,7 +521,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
                 {cols.map((c) => (
                   <th
                     key={c.id}
-                    style={{ width: sizeOf(c.id) }}
+                    style={columnWidthStyle(c.id)}
                     className="relative whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground"
                   >
                     {c.id === 'select' ? (
@@ -796,7 +801,7 @@ function ConnRow({
         )}
       </td>
       {/* note */}
-      <td style={{ width: sizeOf('note') }} className="overflow-hidden px-2 py-1.5 align-middle">
+      <td style={{ minWidth: sizeOf('note') }} className="overflow-hidden px-2 py-1.5 align-middle">
         {errorMsg ? (
           <span className="line-clamp-2 text-red-600" title={errorMsg}>
             {errorMsg}

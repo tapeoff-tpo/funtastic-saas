@@ -121,54 +121,55 @@ export async function registerInvoice(
   userId: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const [order] = await db
-      .select({
-        id: orders.id,
-        status: orders.status,
-        mappedAt: orders.mappedAt,
-        userId: orders.userId,
-      })
-      .from(orders)
-      .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
-      .limit(1)
+    const carrierName = getCarrierName(carrierId)
+    await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select({
+          id: orders.id,
+          status: orders.status,
+          mappedAt: orders.mappedAt,
+          userId: orders.userId,
+        })
+        .from(orders)
+        .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
+        .limit(1)
 
-    if (!order) {
-      return { success: false, error: `Order not found: ${orderId}` }
-    }
-    if (order.status !== 'confirmed') {
-      return { success: false, error: '확인 상태 주문만 송장 등록할 수 있습니다.' }
-    }
-    if (!order.mappedAt) {
-      return { success: false, error: '매핑완료된 주문만 송장 등록할 수 있습니다.' }
-    }
+      if (!order) {
+        throw new Error(`Order not found: ${orderId}`)
+      }
+      if (order.status !== 'confirmed') {
+        throw new Error('확인 상태 주문만 송장 등록할 수 있습니다.')
+      }
+      if (!order.mappedAt) {
+        throw new Error('매핑완료된 주문만 송장 등록할 수 있습니다.')
+      }
 
-    const [existing] = await db
-      .select({ id: shipments.id })
-      .from(shipments)
-      .where(and(eq(shipments.orderId, orderId), eq(shipments.userId, userId)))
-      .limit(1)
+      const [existing] = await tx
+        .select({ id: shipments.id })
+        .from(shipments)
+        .where(and(eq(shipments.orderId, orderId), eq(shipments.userId, userId)))
+        .limit(1)
 
-    if (existing) {
-      await db.update(shipments).set({
-        trackingNumber,
-        carrierId,
-        carrierName: getCarrierName(carrierId),
-        uploadStatus: 'pending',
-        marketplaceUploadError: null,
-        updatedAt: new Date(),
-      }).where(eq(shipments.id, existing.id))
-    } else {
-      await createShipment({
-        orderId,
-        userId,
-        trackingNumber,
-        carrierId,
-        carrierName: getCarrierName(carrierId),
-      })
-    }
+      if (existing) {
+        await tx.update(shipments).set({
+          trackingNumber,
+          carrierId,
+          carrierName,
+          uploadStatus: 'pending',
+          marketplaceUploadError: null,
+          updatedAt: new Date(),
+        }).where(eq(shipments.id, existing.id))
+      } else {
+        await tx.insert(shipments).values({
+          orderId,
+          userId,
+          trackingNumber,
+          carrierId,
+          carrierName,
+        })
+      }
 
-    if (order.status === 'confirmed') {
-      await db
+      const updated = await tx
         .update(orders)
         .set({
           status: 'preparing',
@@ -176,15 +177,40 @@ export async function registerInvoice(
           updatedAt: new Date(),
         })
         .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
-      await logOrderChange({
-        orderId,
-        userId,
-        action: 'invoice.registered',
-        title: '송장번호등록',
-        description: `${getCarrierName(carrierId)} ${trackingNumber}`,
-        before: { status: order.status },
-        after: { status: 'preparing', trackingNumber, carrierId },
-      })
+        .returning({ id: orders.id })
+
+      if (updated.length === 0) {
+        throw new Error('주문 상태를 출고대기로 변경하지 못했습니다.')
+      }
+    })
+
+    await logOrderChange({
+      orderId,
+      userId,
+      action: 'invoice.registered',
+      title: '송장번호등록',
+      description: `${carrierName} ${trackingNumber}`,
+      before: { status: 'confirmed' },
+      after: { status: 'preparing', trackingNumber, carrierId },
+    })
+
+    const [saved] = await db
+      .select({ id: shipments.id, status: orders.status })
+      .from(shipments)
+      .innerJoin(orders, eq(orders.id, shipments.orderId))
+      .where(and(
+        eq(shipments.orderId, orderId),
+        eq(shipments.userId, userId),
+        eq(shipments.trackingNumber, trackingNumber),
+        eq(orders.status, 'preparing'),
+      ))
+      .limit(1)
+
+    if (!saved) {
+      return {
+        success: false,
+        error: '송장등록 결과 확인에 실패했습니다.',
+      }
     }
 
     return { success: true }

@@ -57,14 +57,17 @@ export function InvoiceUploadDialog({
           carrierId,
         }))
         const result = await bulkUploadInvoiceAction(orders)
-        if (result.errors.length === 0) {
+        if (result.errors.length === 0 && result.queued === orders.length) {
           toast.success(`${result.queued}건 송장등록 완료`)
           onOpenChange(false)
           setTrackingNumber('')
         } else {
           toast.warning(
-            `${result.queued}건 성공, ${result.errors.length}건 실패`,
+            `${result.queued}건 성공, ${orders.length - result.queued}건 미등록`,
           )
+          for (const failure of result.errors.slice(0, 5)) {
+            toast.error(failure.error, { duration: 7000 })
+          }
         }
       }
     })

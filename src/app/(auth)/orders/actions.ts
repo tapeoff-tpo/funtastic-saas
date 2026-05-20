@@ -241,7 +241,12 @@ export async function bulkUploadInvoiceAction(
 ): Promise<{ queued: number; errors: Array<{ orderId: string; error: string }> }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { queued: 0, errors: [] }
+  if (!user) {
+    return {
+      queued: 0,
+      errors: orders.map((order) => ({ orderId: order.orderId, error: 'Unauthorized' })),
+    }
+  }
   const result = await bulkRegisterInvoice(orders, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')

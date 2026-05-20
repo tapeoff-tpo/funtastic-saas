@@ -174,13 +174,13 @@ export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoice
 
     startTransition(async () => {
       const result = await bulkUploadInvoiceAction(payload)
-      if (result.errors.length === 0) {
+      if (result.errors.length === 0 && result.queued === payload.length) {
         toast.success(`${result.queued}건 송장등록 요청 완료`)
         setOpen(false)
         setTrackingByOrderId({})
         onChanged?.()
       } else {
-        toast.warning(`${result.queued}건 성공, ${result.errors.length}건 실패`)
+        toast.warning(`${result.queued}건 성공, ${payload.length - result.queued}건 미등록`)
         for (const failure of result.errors.slice(0, 5)) {
           toast.error(failure.error, { duration: 7000 })
         }

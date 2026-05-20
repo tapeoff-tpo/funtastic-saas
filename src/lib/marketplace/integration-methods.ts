@@ -26,11 +26,13 @@ const RPA_MARKETPLACES = new Set([
   'ohouse',
   'domechango',
   'tobizon',
+  'banana-b2b',
   'gs-shop',
 ])
 
 const MULTI_METHOD_MARKETPLACES: Partial<Record<string, IntegrationMethod[]>> = {
   tobizon: ['rpa', 'api', 'excel'],
+  'banana-b2b': ['rpa', 'api', 'excel'],
 }
 
 const HUB_MARKETPLACES = new Set([

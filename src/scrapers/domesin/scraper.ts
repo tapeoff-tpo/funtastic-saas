@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { Locator, Page } from 'playwright'
+import type { Dialog, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import { dumpStorageState, openContext } from '../browser'
 import type {
@@ -9,9 +9,9 @@ import type {
 } from '../types'
 import type { InvoiceData, NormalizedClaim, NormalizedOrder } from '@/lib/marketplace/types'
 
-const DOMESIN_HOME_URL = 'https://www.domesin.com/'
-const DOMESIN_LOGIN_URL = 'https://www.domesin.com/index.html?p=member/login_form.html'
-const DOMESIN_ORDER_LIST_URL = 'https://www.domesin.com/index.html?p=my/order_list.html'
+const DOMESIN_HOME_URL = 'https://domesin.com/'
+const DOMESIN_LOGIN_URL = 'https://domesin.com/index.html?p=member/login_form.html'
+const DOMESIN_ORDER_LIST_URL = 'https://domesin.com/scm/M_order/list.html'
 const DOWNLOAD_TIMEOUT_MS = 60_000
 
 function formatDateInput(date: Date): string {
@@ -171,7 +171,7 @@ async function setInputValue(input: Locator, value: string): Promise<void> {
 async function hasDomesinSession(page: Page): Promise<boolean> {
   if (/login/i.test(page.url())) return false
   const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  return /로그아웃|주문조회|주문\/배송조회|엑셀주문|적립금\s*충전/.test(text) && !/아이디\s*찾기|비밀번호\s*찾기/.test(text)
+  return /로그아웃|주문관리|신규주문관리|주문조회|주문\/배송조회|엑셀주문|적립금\s*충전/.test(text) && !/아이디\s*찾기|비밀번호\s*찾기/.test(text)
 }
 
 async function openOrderListPage(page: Page): Promise<void> {
@@ -182,7 +182,7 @@ async function openOrderListPage(page: Page): Promise<void> {
   }
 
   const text = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '')
-  if (!/주문조회|주문\/배송조회|주문번호|수취인|엑셀|주문상태/.test(text)) {
+  if (!/주문관리|신규주문관리|주문조회|주문\/배송조회|주문번호|수취인|엑셀|주문상태/.test(text)) {
     throw new MarketplaceApiError('domesin', 500, `도매의신 주문조회 화면을 열지 못했습니다. (${await summarizePage(page)})`)
   }
 }
@@ -288,29 +288,39 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
     return Buffer.alloc(0)
   }
 
-  const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-    page.evaluate(() => {
-      const controls = Array.from(
-        document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, area'),
-      )
-      const candidate = controls.find((control) => {
-        const inputValue = control instanceof HTMLInputElement ? control.value : ''
-        const href = control instanceof HTMLAnchorElement ? control.href : ''
-        const text = `${control.innerText || ''} ${inputValue} ${control.getAttribute('alt') || ''} ${control.getAttribute('title') || ''}`.replace(/\s+/g, ' ')
-        if (/상품\s*DB|상품DB|API/.test(text)) return false
-        return /주문.*엑셀|엑셀.*주문|엑셀\s*다운|다운로드|xls/i.test(`${text} ${href}`)
-      })
-      if (!candidate) throw new Error('주문 엑셀 다운로드 버튼을 찾지 못했습니다.')
-      candidate.click()
-    }),
-  ]).catch((error) => {
+  const dialogHandler = (dialog: Dialog) => {
+    void dialog.accept().catch(() => undefined)
+  }
+  page.on('dialog', dialogHandler)
+
+  let download
+  try {
+    [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
+      page.evaluate(() => {
+        const controls = Array.from(
+          document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, area'),
+        )
+        const candidate = controls.find((control) => {
+          const inputValue = control instanceof HTMLInputElement ? control.value : ''
+          const href = control instanceof HTMLAnchorElement ? control.href : ''
+          const text = `${control.innerText || ''} ${inputValue} ${control.getAttribute('alt') || ''} ${control.getAttribute('title') || ''}`.replace(/\s+/g, ' ')
+          if (/상품\s*DB|상품DB|API/.test(text)) return false
+          return /선택\s*주문\s*엑셀|주문.*엑셀|엑셀.*주문|엑셀\s*다운|다운로드|xls/i.test(`${text} ${href}`)
+        })
+        if (!candidate) throw new Error('주문 엑셀 다운로드 버튼을 찾지 못했습니다.')
+        candidate.click()
+      }),
+    ])
+  } catch (error) {
     throw new MarketplaceApiError(
       'domesin',
       504,
       `도매의신 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
     )
-  })
+  } finally {
+    page.off('dialog', dialogHandler)
+  }
 
   const stream = await download.createReadStream()
   if (!stream) throw new MarketplaceApiError('domesin', 500, '도매의신 엑셀 다운로드 스트림을 열 수 없습니다.')
@@ -432,7 +442,7 @@ function makeOrdersFromRows(rows: OrderRow[], source: string): NormalizedOrder[]
         address1: getRowValue(row, '주소', '배송주소', '수취인주소'),
         address2: getRowValue(row, '상세주소', '나머지주소') || undefined,
       },
-      orderedAt: parseKstDate(getRowValue(row, '주문일', '주문일자', '등록일', '결제일')),
+      orderedAt: parseKstDate(getRowValue(row, '주문일시', '주문일', '주문일자', '등록일', '결제일')),
       totalAmount,
       shippingType: getRowValue(row, '배송비구분', '배송구분') || null,
       shippingFee,
@@ -578,7 +588,7 @@ export class DomesinScraper implements MarketplaceScraper {
         }
       }
 
-      await runStep('orders: open home', () => gotoDomesin(ctx.page, DOMESIN_HOME_URL))
+      await runStep('orders: open order list', () => gotoDomesin(ctx.page, DOMESIN_ORDER_LIST_URL))
       await closePopups(ctx.page)
       if (!(await hasDomesinSession(ctx.page))) {
         logStep('orders: session invalid, login')
@@ -589,7 +599,7 @@ export class DomesinScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
-        await runStep('orders: reopen home after login', () => gotoDomesin(ctx.page, DOMESIN_HOME_URL))
+        await runStep('orders: reopen order list after login', () => gotoDomesin(ctx.page, DOMESIN_ORDER_LIST_URL))
       }
 
       if (!(await hasDomesinSession(ctx.page))) {

@@ -19,6 +19,8 @@ interface ConnectionListProps {
   pageSize?: number
 }
 
+type FilterKey = 'all' | 'api' | 'rpa' | 'excel'
+
 const METHOD_ORDER: Record<IntegrationMethod, number> = {
   api: 0,
   hub: 1,
@@ -30,34 +32,100 @@ function displayMethod(method: IntegrationMethod): IntegrationMethod {
   return method === 'hub' ? 'api' : method
 }
 
+function matchesFilter(connection: ConnectionListItem, filter: FilterKey): boolean {
+  if (filter === 'all') return true
+  if (filter === 'api') return connection.integrationMethod === 'api' || connection.integrationMethod === 'hub'
+  return connection.integrationMethod === filter
+}
+
 export function ConnectionList({ connections, pageSize = 10 }: ConnectionListProps) {
   const [page, setPage] = useState(0)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<FilterKey>('all')
+  const counts = useMemo(() => ({
+    all: connections.length,
+    api: connections.filter((connection) => matchesFilter(connection, 'api')).length,
+    rpa: connections.filter((connection) => connection.integrationMethod === 'rpa').length,
+    excel: connections.filter((connection) => connection.integrationMethod === 'excel').length,
+  }), [connections])
+  const filteredConnections = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return connections
+      .filter((connection) => matchesFilter(connection, filter))
+      .filter((connection) => {
+        if (!query) return true
+        return [
+          connection.displayName,
+          connection.status,
+          ...connection.linkedMarketplaces,
+        ].some((value) => value.toLowerCase().includes(query))
+      })
+  }, [connections, filter, search])
   const sortedConnections = useMemo(
-    () => [...connections].sort((a, b) => {
+    () => [...filteredConnections].sort((a, b) => {
       const methodDiff = METHOD_ORDER[a.integrationMethod] - METHOD_ORDER[b.integrationMethod]
       if (methodDiff !== 0) return methodDiff
       return a.displayName.localeCompare(b.displayName, 'ko-KR')
     }),
-    [connections],
+    [filteredConnections],
   )
   const totalPages = Math.max(1, Math.ceil(sortedConnections.length / pageSize))
   const currentPage = Math.min(page, totalPages - 1)
   const visibleConnections = sortedConnections.slice(currentPage * pageSize, currentPage * pageSize + pageSize)
+  const filterButtons: { key: FilterKey; label: string; count: number }[] = [
+    { key: 'all', label: '전체', count: counts.all },
+    { key: 'api', label: 'API', count: counts.api },
+    { key: 'rpa', label: 'RPA', count: counts.rpa },
+    { key: 'excel', label: '엑셀', count: counts.excel },
+  ]
 
   return (
     <section className="overflow-hidden rounded-lg border bg-white">
       <div className="border-b bg-muted/30 px-4 py-3">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-3">
           <div>
             <h2 className="text-lg font-semibold">연결된 마켓플레이스</h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              연동 방식과 상관없이 한 목록에서 확인하고, 10개씩 넘겨 봅니다.
+              검색과 연동 방식 필터로 필요한 연결만 빠르게 확인합니다.
             </p>
           </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="rounded-full bg-background px-2 py-0.5 font-medium">
-              총 {connections.length}개
-            </span>
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {filterButtons.map((button) => (
+                <button
+                  key={button.key}
+                  type="button"
+                  onClick={() => {
+                    setFilter(button.key)
+                    setPage(0)
+                  }}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                    filter === button.key
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'bg-background text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {button.label} {button.count}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value)
+                  setPage(0)
+                }}
+                placeholder="마켓명, 연동몰 검색"
+                className="h-8 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring lg:w-64"
+              />
+              <span className="whitespace-nowrap rounded-full bg-background px-2 py-1 text-xs font-medium text-muted-foreground">
+                {sortedConnections.length}/{connections.length}개
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
             <Button
               type="button"
               variant="outline"
@@ -85,7 +153,11 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
         </div>
       </div>
       <div className="divide-y">
-        {visibleConnections.map((connection) => {
+        {visibleConnections.length === 0 ? (
+          <div className="px-4 py-10 text-center text-sm text-muted-foreground">
+            조건에 맞는 연결이 없습니다.
+          </div>
+        ) : visibleConnections.map((connection) => {
           const method = displayMethod(connection.integrationMethod)
           const info = getIntegrationInfo(method)
 

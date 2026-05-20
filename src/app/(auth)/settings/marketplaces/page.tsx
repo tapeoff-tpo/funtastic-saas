@@ -43,13 +43,11 @@ export default async function MarketplaceSettingsPage() {
     requiredCredentials: [...config.requiredCredentials],
     integrationMethod: getIntegrationMethod(config.id, { authType: config.authType }),
   }))
-  const linkedMarketplaceOptions = catalog
-    .filter((marketplace) => marketplace.integrationMethod === 'api' || marketplace.integrationMethod === 'hub')
-    .map((marketplace) => ({
-      id: marketplace.id,
-      name: marketplace.name,
-      requiredCredentials: marketplace.requiredCredentials,
-    }))
+  const linkedMarketplaceOptions = catalog.map((marketplace) => ({
+    id: marketplace.id,
+    name: marketplace.name,
+    requiredCredentials: marketplace.requiredCredentials,
+  }))
   const excelConnectionOptions = catalog.map((marketplace) => ({
     id: marketplace.id,
     name: marketplace.name,
@@ -80,7 +78,6 @@ export default async function MarketplaceSettingsPage() {
         description="API 또는 주문 허브로 연결하는 마켓을 등록합니다."
         selectLabel="마켓"
         marketplaces={linkedMarketplaceOptions}
-        pageSize={10}
       />
 
       <IntegrationForms

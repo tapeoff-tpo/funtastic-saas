@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState, useEffect, useMemo } from 'react'
+import { useActionState, useState, useEffect } from 'react'
 import { toast } from 'sonner'
 import { registerMarketplaceCredentials } from '@/app/(auth)/settings/marketplaces/actions'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,6 @@ interface CredentialFormProps {
   title?: string
   description?: string
   selectLabel?: string
-  pageSize?: number
 }
 
 const credentialLabels: Record<string, string> = {
@@ -69,21 +68,13 @@ export function CredentialForm({
   title = '인증정보 등록',
   description = '마켓플레이스를 선택하고 API 인증정보를 입력하세요.',
   selectLabel = '마켓플레이스',
-  pageSize = 10,
 }: CredentialFormProps) {
   const [selectedId, setSelectedId] = useState('')
-  const [page, setPage] = useState(0)
   const [state, formAction, isPending] = useActionState(
     registerMarketplaceCredentials,
     null
   )
 
-  const totalPages = Math.max(1, Math.ceil(marketplaces.length / pageSize))
-  const currentPage = Math.min(page, totalPages - 1)
-  const visibleMarketplaces = useMemo(
-    () => marketplaces.slice(currentPage * pageSize, currentPage * pageSize + pageSize),
-    [marketplaces, currentPage, pageSize],
-  )
   const selectedMarketplace = marketplaces.find((m) => m.id === selectedId)
   const optionalFields = selectedMarketplace ? optionalCredentialFields[selectedMarketplace.id] ?? [] : []
 
@@ -111,39 +102,6 @@ export function CredentialForm({
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <Label htmlFor={`marketplace-select-${title}`}>{selectLabel}</Label>
-              {totalPages > 1 && (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2"
-                    disabled={currentPage === 0}
-                    onClick={() => {
-                      setSelectedId('')
-                      setPage((value) => Math.max(0, value - 1))
-                    }}
-                  >
-                    ←
-                  </Button>
-                  <span className="min-w-12 text-center">
-                    {currentPage + 1}/{totalPages}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-2"
-                    disabled={currentPage >= totalPages - 1}
-                    onClick={() => {
-                      setSelectedId('')
-                      setPage((value) => Math.min(totalPages - 1, value + 1))
-                    }}
-                  >
-                    →
-                  </Button>
-                </div>
-              )}
             </div>
             <select
               id={`marketplace-select-${title}`}
@@ -152,7 +110,7 @@ export function CredentialForm({
               className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
               <option value="">선택하세요</option>
-              {visibleMarketplaces.map((m) => (
+              {marketplaces.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
                 </option>

@@ -197,7 +197,7 @@ export async function GET(request: NextRequest) {
         pickingLocation: sku ? inventoryMap.get(sku)?.sectorCode ?? '' : '',
         // 포장 박스 종류 (inventory.packagingUnit) — 출력항목 '포장'
         packaging: sku ? inventoryMap.get(sku)?.packagingUnit ?? '' : '',
-        senderName: order.connectionId ? connectionMap.get(order.connectionId) ?? '' : '',
+        senderName: marketplaceName || (order.connectionId ? connectionMap.get(order.connectionId) ?? '' : ''),
         // 배송메세지 — 구매자가 마켓에서 입력한 배송 요청 (쿠팡 parcelPrintMessage 등)
         deliveryMessage: order.deliveryMessage ?? '',
         // 명시적 phone2 (휴대폰) 출력항목 — migration 020 이후 DB 에 직접 저장됨

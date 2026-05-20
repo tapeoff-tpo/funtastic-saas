@@ -18,7 +18,7 @@ import type { IntegrationMethod } from '@/lib/marketplace/integration-methods'
 const credentialLabels: Record<string, string> = {
   access_key: '액세스 키',
   secret_key: '시크릿 키',
-  vendor_id: '오너클랜 공급사 ID',
+  vendor_id: '업체/판매자 ID',
   client_id: '클라이언트 ID',
   client_secret: '클라이언트 시크릿',
   master_id: 'ESM+ 마스터 ID',

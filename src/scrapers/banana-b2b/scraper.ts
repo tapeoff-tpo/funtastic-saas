@@ -83,42 +83,37 @@ async function gotoBanana(page: Page, url = BANANA_B2B_BASE_URL): Promise<void> 
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
 }
 
+async function tryClick(locator: Locator, timeout: number): Promise<boolean> {
+  if (!(await locator.isVisible({ timeout: 1500 }).catch(() => false))) return false
+
+  const clicked = await locator.click({ timeout }).then(() => true).catch(() => false)
+  if (clicked) return true
+
+  const forceClicked = await locator.click({ timeout: 3000, force: true }).then(() => true).catch(() => false)
+  if (forceClicked) return true
+
+  return locator.evaluate((element) => {
+    if (!(element instanceof HTMLElement)) return false
+    element.click()
+    return true
+  }).catch(() => false)
+}
+
 async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_000): Promise<boolean> {
-  try {
-    const roleButton = root.getByRole('button', { name: pattern }).first()
-    if (await roleButton.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await roleButton.click({ timeout, force: true })
-      return true
-    }
-  } catch (err) {
-    logStep(`clickByText (roleButton) failed: ${err instanceof Error ? err.message : String(err)}`)
-  }
+  const roleButton = root.getByRole('button', { name: pattern }).first()
+  if (await tryClick(roleButton, timeout)) return true
 
-  try {
-    const roleLink = root.getByRole('link', { name: pattern }).first()
-    if (await roleLink.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await roleLink.click({ timeout, force: true })
-      return true
-    }
-  } catch (err) {
-    logStep(`clickByText (roleLink) failed: ${err instanceof Error ? err.message : String(err)}`)
-  }
+  const roleLink = root.getByRole('link', { name: pattern }).first()
+  if (await tryClick(roleLink, timeout)) return true
 
-  try {
-    const fallback = root
-      .locator('button, input[type="button"], input[type="submit"], a, area')
-      .filter({ hasText: pattern })
-      .first()
-    if (await fallback.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await fallback.click({ timeout, force: true })
-      return true
-    }
-  } catch (err) {
-    logStep(`clickByText (fallback) failed: ${err instanceof Error ? err.message : String(err)}`)
-  }
+  const fallback = root
+    .locator('button, input[type="button"], input[type="submit"], a, area')
+    .filter({ hasText: pattern })
+    .first()
+  if (await tryClick(fallback, timeout)) return true
 
-  return root.locator('body, :scope').first().evaluate((element, source) => {
-    const regexp = new RegExp(source)
+  return root.locator('body, :scope').first().evaluate((element, { source, flags }) => {
+    const regexp = new RegExp(source, flags)
     const controls = Array.from(
       element.querySelectorAll('button, input[type="button"], input[type="submit"], a, area'),
     )
@@ -131,7 +126,7 @@ async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_0
       return true
     }
     return false
-  }, pattern.source).catch(() => false)
+  }, { source: pattern.source, flags: pattern.flags }).catch(() => false)
 }
 
 async function setInputValue(input: Locator, value: string): Promise<void> {

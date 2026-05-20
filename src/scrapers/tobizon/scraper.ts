@@ -19,6 +19,23 @@ const TOBIZON_LOGIN_URL = `${TOBIZON_BASE_URL}/mall/member/login.php?ltype=vende
 const TOBIZON_ORDER_LIST_URL = `${TOBIZON_BASE_URL}/scm/order/order_list.php?type=s&otype=2`
 const DOWNLOAD_TIMEOUT_MS = 30_000
 
+type TobizonDownloadResult = {
+  buffer: Buffer
+  visibleOrders: NormalizedOrder[]
+}
+
+type TobizonVisibleOrderRow = {
+  rowIndex: number
+  orderNo: string
+  orderedAt: string
+  recipientName: string
+  productName: string
+  quantity: string
+  totalAmount: string
+  supplyPrice: string
+  marketplaceStatus: string
+}
+
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -86,6 +103,12 @@ function extractOrderNumber(value: string): string {
   const trimmed = value.replace(/^_/, '').trim()
   const match = trimmed.match(/[A-Z0-9]*\d{10,}[A-Z0-9]*/i)
   return (match?.[0] ?? trimmed.split(/\s+/)[0] ?? trimmed).trim()
+}
+
+function extractFirstDate(value: string): string {
+  return value.match(/\d{4}[.-]\d{1,2}[.-]\d{1,2}(?:\s*\(?\d{1,2}:\d{2}\)?)?/)?.[0]
+    ?.replace(/[()]/g, '')
+    .trim() ?? ''
 }
 
 function logStep(step: string): void {
@@ -300,6 +323,57 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+async function readVisibleOrderRows(page: Page): Promise<TobizonVisibleOrderRow[]> {
+  return page.evaluate(() => {
+    const normalize = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+    const cleanHeader = (value: string) => normalize(value).replace(/\s+/g, '')
+    const orderIdPattern = /[A-Z0-9]*\d{10,}[A-Z0-9]*/i
+    const rows = Array.from(document.querySelectorAll<HTMLTableRowElement>('tr'))
+    const headerIndex = rows.findIndex((row) => {
+      const text = cleanHeader(row.textContent ?? '')
+      return /주문번호/.test(text) && /주문상품|상품명|상품/.test(text)
+    })
+    if (headerIndex < 0) return []
+
+    const headers = Array.from(rows[headerIndex].querySelectorAll('th,td')).map((cell) => cleanHeader(cell.textContent ?? ''))
+    const findColumn = (...patterns: RegExp[]) => {
+      const index = headers.findIndex((header) => patterns.some((pattern) => pattern.test(header)))
+      return index >= 0 ? index : -1
+    }
+
+    const orderNoIndex = findColumn(/주문번호/)
+    const recipientIndex = findColumn(/수취인|받는사람|수령인/)
+    const productIndex = findColumn(/주문상품|상품명|상품/)
+    const quantityIndex = findColumn(/구매수량|주문수량|수량/)
+    const totalIndex = findColumn(/상품합계|총금액|결제금액|상품금액/)
+    const statusIndex = findColumn(/주문상태|상태/)
+
+    const result: TobizonVisibleOrderRow[] = []
+    for (const [offset, row] of rows.slice(headerIndex + 1).entries()) {
+      const cells = Array.from(row.querySelectorAll('td')).map((cell) => normalize(cell.textContent))
+      const rowText = normalize(row.textContent)
+      const orderNo = cells[orderNoIndex] ?? rowText
+      if (!orderIdPattern.test(orderNo)) continue
+
+      const productName = cells[productIndex] ?? ''
+      if (!productName || /선택상품|주문상품/.test(productName)) continue
+
+      result.push({
+        rowIndex: headerIndex + offset + 2,
+        orderNo,
+        orderedAt: orderNo,
+        recipientName: cells[recipientIndex] ?? '',
+        productName,
+        quantity: cells[quantityIndex] ?? '',
+        totalAmount: cells[totalIndex] ?? '',
+        supplyPrice: rowText.match(/공급단가\s*[:：]?\s*([\d,]+)/)?.[1] ?? '',
+        marketplaceStatus: cells[statusIndex] ?? '입금완료',
+      })
+    }
+    return result
+  }).catch(() => [])
+}
+
 export class TobizonScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'tobizon'
   readonly displayName = '투비즈온'
@@ -378,10 +452,13 @@ export class TobizonScraper implements MarketplaceScraper {
     since: Date,
     setProgress?: (message: string) => Promise<void>,
   ): Promise<NormalizedOrder[]> {
-    const buffer = await this.downloadOrdersExcel(credentials, since, setProgress)
+    const { buffer, visibleOrders } = await this.downloadOrdersExcel(credentials, since, setProgress)
     await setProgress?.('투비즈온 주문 엑셀 파싱 중...')
-    if (buffer.length === 0) return []
-    return this.parseOrdersExcel(buffer)
+    if (buffer.length === 0) return visibleOrders
+    const parsedOrders = await this.parseOrdersExcel(buffer)
+    if (parsedOrders.length > 0) return parsedOrders
+    await setProgress?.(`투비즈온 엑셀 파싱 0건, 화면 주문 ${visibleOrders.length}건으로 저장 중...`)
+    return visibleOrders
   }
 
   async getClaimsOrders(): Promise<NormalizedClaim[]> {
@@ -406,7 +483,7 @@ export class TobizonScraper implements MarketplaceScraper {
     credentials: ScraperCredentials,
     since: Date,
     setProgress?: (message: string) => Promise<void>,
-  ): Promise<Buffer> {
+  ): Promise<TobizonDownloadResult> {
     let sessionState = credentials.storageState
     let ctx = await openContext(sessionState)
 
@@ -441,14 +518,59 @@ export class TobizonScraper implements MarketplaceScraper {
 
       await runStep('orders: open order management', () => openOrderManagementPage(ctx.page))
       await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since))
+      const visibleRows = await runStep('orders: read visible order table', () => readVisibleOrderRows(ctx.page))
+      const visibleOrders = visibleRows.map((row) => this.normalizeVisibleOrder(row))
       const selected = await runStep('orders: select order rows', () => selectOrderRows(ctx.page))
       if (!selected) {
         logStep('orders: no selectable orders')
-        return Buffer.alloc(0)
+        return { buffer: Buffer.alloc(0), visibleOrders }
       }
-      return await runStep('orders: download order excel', () => downloadOrdersExcel(ctx.page))
+      const buffer = await runStep('orders: download order excel', () => downloadOrdersExcel(ctx.page))
+      return { buffer, visibleOrders }
     } finally {
       await ctx.close()
+    }
+  }
+
+  private normalizeVisibleOrder(row: TobizonVisibleOrderRow): NormalizedOrder {
+    const orderNo = extractOrderNumber(row.orderNo)
+    const quantity = Math.max(parseNumber(row.quantity), 1)
+    const supplyPrice = parseNumber(row.supplyPrice)
+    const totalAmount = parseNumber(row.totalAmount) || supplyPrice * quantity
+    const productName = row.productName
+      .replace(/\s*free\s*$/i, '')
+      .replace(/\s*공급단가\s*[:：]?\s*[\d,]+원?.*$/i, '')
+      .trim()
+
+    return {
+      marketplaceId: 'tobizon',
+      marketplaceOrderId: orderNo,
+      marketplaceStatus: row.marketplaceStatus || '입금완료',
+      status: 'new',
+      buyerName: row.recipientName,
+      recipientName: row.recipientName,
+      shippingAddress: {
+        zipCode: '',
+        address1: '',
+      },
+      orderedAt: parseKstDate(extractFirstDate(row.orderedAt)),
+      totalAmount,
+      shippingType: null,
+      shippingFee: null,
+      deliveryMessage: null,
+      rawData: {
+        source: 'rpa-visible-table',
+        rowIndex: row.rowIndex,
+        visibleOrderText: row,
+      },
+      items: [
+        {
+          marketplaceItemId: orderNo,
+          productName,
+          quantity,
+          unitPrice: supplyPrice || (quantity > 0 ? totalAmount / quantity : totalAmount),
+        },
+      ],
     }
   }
 

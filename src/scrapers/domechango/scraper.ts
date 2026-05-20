@@ -17,6 +17,8 @@ import type {
 const WMS_BASE_URL = 'https://www.wholesaledepot.co.kr/wms'
 const LOGIN_PAGE_URL = `${WMS_BASE_URL}/login`
 const ORDER_PAGE_URL = `${WMS_BASE_URL}/order`
+const NAVIGATION_TIMEOUT_MS = 20_000
+const LOAD_STATE_TIMEOUT_MS = 8_000
 const DOWNLOAD_TIMEOUT_MS = 25_000
 
 function formatDateInput(date: Date): string {
@@ -67,8 +69,14 @@ async function summarizePage(page: Page): Promise<string> {
 }
 
 async function gotoDomechango(page: Page, url = ORDER_PAGE_URL): Promise<void> {
-  await page.goto(url, { waitUntil: 'commit', timeout: 60_000 })
-  await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+  await page.goto(url, { waitUntil: 'commit', timeout: NAVIGATION_TIMEOUT_MS }).catch((error) => {
+    throw new MarketplaceApiError(
+      'domechango',
+      504,
+      `도매창고 페이지 이동이 ${NAVIGATION_TIMEOUT_MS / 1000}초 안에 끝나지 않았습니다. (${url}, ${error instanceof Error ? error.message : 'navigation timeout'})`,
+    )
+  })
+  await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
 }
 
 async function visibleLocators(root: Locator | Page, selector: string): Promise<Locator[]> {
@@ -160,7 +168,7 @@ async function navigateToOrderList(page: Page): Promise<void> {
   const orderMenu = page.getByText(/주문\s*리스트/).first()
   if (await orderMenu.isVisible().catch(() => false)) {
     await Promise.all([
-      page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined),
+      page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined),
       orderMenu.click({ timeout: 5000 }),
     ])
     await page.waitForTimeout(500)
@@ -181,12 +189,15 @@ async function navigateToOrderList(page: Page): Promise<void> {
   }).catch(() => false)
 
   if (clicked) {
-    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+    await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
     await page.waitForTimeout(500)
     if (await hasOrderList(page)) return
   }
 
   await gotoDomechango(page, ORDER_PAGE_URL)
+  if (!(await hasOrderList(page))) {
+    throw new MarketplaceApiError('domechango', 404, `도매창고 주문 리스트를 열지 못했습니다. (${await summarizePage(page)})`)
+  }
 }
 
 async function selectNewOrderStatus(page: Page): Promise<void> {
@@ -400,8 +411,21 @@ export class DomechangoScraper implements MarketplaceScraper {
     let ctx = await openContext(sessionState)
 
     try {
-      logStep('orders: open order list')
-      await navigateToOrderList(ctx.page)
+      const runStep = async <T>(label: string, task: () => Promise<T>): Promise<T> => {
+        logStep(label)
+        try {
+          return await task()
+        } catch (error) {
+          if (error instanceof MarketplaceApiError) throw error
+          throw new MarketplaceApiError(
+            'domechango',
+            500,
+            `도매창고 RPA 단계 실패: ${label} (${error instanceof Error ? error.message : 'unknown error'})`,
+          )
+        }
+      }
+
+      await runStep('orders: open order list', () => navigateToOrderList(ctx.page))
       if (!(await this.isLoggedIn(ctx.page))) {
         logStep('orders: session invalid, login')
         await ctx.close()
@@ -411,25 +435,24 @@ export class DomechangoScraper implements MarketplaceScraper {
         }
         sessionState = loginResult.storageState
         ctx = await openContext(sessionState)
-        logStep('orders: reopen order list after login')
-        await navigateToOrderList(ctx.page)
+        await runStep('orders: reopen order list after login', () => navigateToOrderList(ctx.page))
       }
 
       if (!(await this.isLoggedIn(ctx.page))) {
         throw new MarketplaceApiError('domechango', 401, `도매창고 주문 리스트에 접근하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
 
-      logStep('orders: set search filters')
-      await setSearchDates(ctx.page, since, until)
-      await selectNewOrderStatus(ctx.page)
-      logStep('orders: search')
-      await clickButtonByText(ctx.page, /주문검색|검색/)
-      await ctx.page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+      await runStep('orders: set search filters', async () => {
+        await setSearchDates(ctx.page, since, until)
+        await selectNewOrderStatus(ctx.page)
+      })
+      await runStep('orders: search', async () => {
+        await clickButtonByText(ctx.page, /주문검색|검색/)
+      })
+      await ctx.page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
       await ctx.page.waitForTimeout(1000)
-      logStep('orders: select rows')
-      await selectAllVisibleOrders(ctx.page)
-      logStep('orders: download excel')
-      return triggerSelectedOrderExcelDownload(ctx.page)
+      await runStep('orders: select rows', () => selectAllVisibleOrders(ctx.page))
+      return await runStep('orders: download excel', () => triggerSelectedOrderExcelDownload(ctx.page))
     } finally {
       await ctx.close()
     }

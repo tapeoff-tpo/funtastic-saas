@@ -78,10 +78,16 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
     })
     .returning({ id: jobLogs.id })
 
+  const setProgress = async (message: string) => {
+    await db.update(jobLogs).set({ progressMessage: message }).where(eq(jobLogs.id, logRow.id)).catch(() => {})
+  }
+
   try {
     if (jobType === 'scrape-orders') {
+      await setProgress('RPA 브라우저로 주문 페이지 접속 중...')
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000)
       const orders = await runWithTimeout(scraper.getOrders(credentials, sinceDate), SCRAPE_JOB_TIMEOUT_MS)
+      await setProgress(`${orders.length}건 수집 완료, 주문 저장 중...`)
       const result = await saveNormalizedOrdersForConnection({
         marketplaceId,
         connectionId,
@@ -94,6 +100,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         .set({ status: 'completed', completedAt: new Date(), ordersCollected: result.ordersCollected })
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'scrape-claims') {
+      await setProgress('RPA 브라우저로 클레임 페이지 접속 중...')
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       const claims = await runWithTimeout(scraper.getClaimsOrders(credentials, sinceDate), SCRAPE_JOB_TIMEOUT_MS)
       console.log(`[scrape-worker] ${marketplaceId}: ${claims.length} claims fetched`)
@@ -102,6 +109,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         .set({ status: 'completed', completedAt: new Date(), claimsCollected: claims.length })
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'upload-invoice') {
+      await setProgress('RPA 브라우저로 송장 전송 준비 중...')
       if (!orderId || !shipmentId || !invoice) throw new Error('orderId/shipmentId/invoice required for upload-invoice')
       const [shipment] = await db
         .select({ orderId: shipments.orderId, uploadAttempts: shipments.uploadAttempts })

@@ -263,9 +263,11 @@ export class BananaB2bScraper implements MarketplaceScraper {
 
       logStep('login: fill credentials')
       const idInput = page
-        .locator('input[name="id"], input[name="userId"], input[name="userid"], input[name="loginId"], input[name="login_id"], input[name="email"], input[type="text"], input[type="email"]')
+        .locator('input[placeholder*="아이디"], input[placeholder*="ID"], input[name="id"], input[name="userId"], input[name="userid"], input[name="loginId"], input[name="login_id"], input[name="email"], input[type="text"], input[type="email"], input:not([type])')
         .first()
-      const passwordInput = page.locator('input[name="password"], input[name="passwd"], input[name="pw"], input[type="password"]').first()
+      const passwordInput = page
+        .locator('input[placeholder*="비밀번호"], input[placeholder*="패스워드"], input[name="password"], input[name="passwd"], input[name="pw"], input[type="password"]')
+        .first()
 
       await setInputValue(idInput, credentials.email)
       await setInputValue(passwordInput, credentials.password)

@@ -127,6 +127,42 @@ describe('PlayautoEmpAdapter', () => {
     })
   })
 
+  it('removes the trailing Ably sequence from EMP order codes', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ([
+        {
+          Number: '1002',
+          SiteCode: 'ABLY',
+          SiteName: '에이블리',
+          SiteId: 'playauto',
+          OrderState: '신규주문',
+          OrderCode: '1779172568293 616118025',
+          ProdName: 'Ably product',
+          Price: '10000',
+          Count: '1',
+          OrderName: 'Buyer',
+          RecipientName: 'Receiver',
+          OrderDate: '2026-05-20 11:00:00',
+        },
+      ]),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new PlayautoEmpAdapter({ api_key: 'test-key', states: '신규주문' })
+    const orders = await adapter.getOrders(
+      new Date('2026-05-20T00:00:00+09:00'),
+      new Date('2026-05-20T23:59:59+09:00'),
+    )
+
+    expect(orders[0].marketplaceOrderId).toBe('1779172568293')
+    expect(orders[0].rawData).toMatchObject({
+      originalMarketplaceOrderId: '1779172568293 616118025',
+      marketplaceOrderIdentity: {
+        orderId: '1779172568293',
+      },
+    })
+  })
+
   it('treats EMP no-order 400/404 responses as an empty collection', async () => {
     const response = new Response(
       JSON.stringify({ status: false, message: '조회된 주문건이 없습니다.' }),

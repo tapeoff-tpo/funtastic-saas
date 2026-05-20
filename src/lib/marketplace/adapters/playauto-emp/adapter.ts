@@ -61,6 +61,22 @@ function asNumber(value: unknown): number {
   return 0
 }
 
+function isAblyMall(siteName: string, siteCode: string): boolean {
+  const source = `${siteName} ${siteCode}`.toLowerCase()
+  return source.includes('ably') || source.includes('\uC5D0\uC774\uBE14\uB9AC')
+}
+
+function normalizeAblyOrderCode(orderCode: string, siteName: string, siteCode: string): string {
+  if (!isAblyMall(siteName, siteCode)) return orderCode
+
+  const numericGroups = orderCode.match(/\d+/g) ?? []
+  if (numericGroups[0] && numericGroups[0].length >= 10) return numericGroups[0]
+
+  const digitsOnly = orderCode.replace(/\D/g, '')
+  if (digitsOnly.length > 13) return digitsOnly.slice(0, 13)
+  return orderCode
+}
+
 function parseDate(value: unknown): Date {
   const raw = asString(value)
   if (!raw || raw.startsWith('0001-01-01')) return new Date()
@@ -298,11 +314,12 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrder(order: PlayautoEmpOrder): NormalizedOrder {
-    const orderCode = asString(order.OrderCode) || asString(order.UniqueId) || asString(order.Number)
+    const rawOrderCode = asString(order.OrderCode) || asString(order.UniqueId) || asString(order.Number)
     const number = asString(order.Number)
     const siteCode = asString(order.SiteCode)
     const siteName = asString(order.SiteName)
     const siteId = asString(order.SiteId)
+    const orderCode = normalizeAblyOrderCode(rawOrderCode, siteName, siteCode)
     const itemId = number || asString(order.UniqueId) || asString(order.ProdCode) || orderCode
     const quantity = Math.max(1, asNumber(order.Count) || 1)
     const totalAmount = asNumber(order.Price) * quantity
@@ -347,6 +364,7 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
         mallCode: siteCode || undefined,
         mallAccount: siteId || undefined,
         empNumber: number,
+        originalMarketplaceOrderId: rawOrderCode !== orderCode ? rawOrderCode : undefined,
         empSiteCode: siteCode || undefined,
         empSiteName: siteName || undefined,
         empSiteId: siteId || undefined,

@@ -238,6 +238,36 @@ function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): stri
   return fallback.length > 0 ? fallback : null
 }
 
+function isAblyOrderRawData(rawData: Record<string, unknown>): boolean {
+  const candidates = [rawData.mallName, rawData.empSiteName, rawData.SiteName, rawData.siteName, rawData.empSiteCode, rawData.SiteCode]
+  return candidates.some((candidate) => {
+    if (typeof candidate !== 'string') return false
+    const value = candidate.toLowerCase()
+    return value.includes('ably') || value.includes('\uC5D0\uC774\uBE14\uB9AC')
+  })
+}
+
+function normalizeAblyDisplayOrderId(orderId: string, rawData: Record<string, unknown>): string {
+  if (!isAblyOrderRawData(rawData)) return orderId
+
+  const numericGroups = orderId.match(/\d+/g) ?? []
+  if (numericGroups[0] && numericGroups[0].length >= 10) return numericGroups[0]
+
+  const digitsOnly = orderId.replace(/\D/g, '')
+  if (digitsOnly.length > 13) return digitsOnly.slice(0, 13)
+  return orderId
+}
+
+function getOrderMarketplaceOrderDisplayId(order: typeof orders.$inferSelect): string {
+  const rawData = order.rawData
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return order.marketplaceOrderId
+  const original = (rawData as { originalMarketplaceOrderId?: unknown }).originalMarketplaceOrderId
+  const candidate = typeof original === 'string' && original.trim().length > 0
+    ? original.trim()
+    : order.marketplaceOrderId
+  return normalizeAblyDisplayOrderId(candidate, rawData as Record<string, unknown>)
+}
+
 function getOrderHistoricalClaimStatuses(order: typeof orders.$inferSelect): string[] {
   const rawData = order.rawData
   if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return []
@@ -970,6 +1000,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     const latestScan = latestScanByOrderId.get(order.id) ?? null
     return {
       ...order,
+      marketplaceOrderId: getOrderMarketplaceOrderDisplayId(order),
       claimType: claim?.claimType ?? null,
       claimId: claim?.id ?? null,
       claimStatus: claim?.claimStatus ?? null,

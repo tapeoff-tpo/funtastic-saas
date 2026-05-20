@@ -262,7 +262,8 @@ export default async function OrdersPage({
           total={total}
           page={params.page}
           pageSize={params.pageSize}
-          showMappingAction={isNewTab || isConfirmedTab}
+          showMappingAction={isNewTab}
+          showMappingColumn={isNewTab || isConfirmedTab}
           canUnlockOrderSnapshots={profile?.role === 'super_admin'}
         />
       ) : (

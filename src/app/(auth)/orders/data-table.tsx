@@ -26,6 +26,7 @@ interface DataTableProps {
   page: number
   stage?: OrderStage
   showMappingAction?: boolean
+  showMappingColumn?: boolean
   canUnlockOrderSnapshots?: boolean
 }
 
@@ -37,9 +38,10 @@ export function DataTable({
   page,
   stage,
   showMappingAction = false,
+  showMappingColumn: showMappingColumnProp = false,
   canUnlockOrderSnapshots = false,
 }: DataTableProps) {
-  const showMappingColumn = stage === 'mapping' || showMappingAction
+  const showMappingColumn = stage === 'mapping' || showMappingAction || showMappingColumnProp
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(
     // 매핑 컬럼은 매핑 필요 스테이지에서만 노출
     { mappingStatus: showMappingColumn },

@@ -657,13 +657,19 @@ export function OrderFilters({
               </option>
             ))}
           </select>
-          <input
+          <textarea
             id="filter-search"
-            type="text"
-            placeholder="검색어 입력"
+            placeholder="검색어 입력, 여러 건은 쉼표/줄바꿈"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-[220px] rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault()
+                submitSearch()
+              }
+            }}
+            rows={1}
+            className="min-h-9 w-[260px] resize-y rounded-md border px-3 py-1.5 text-sm placeholder:text-muted-foreground"
           />
           <button
             type="submit"

@@ -174,21 +174,31 @@ function expandSkuSearchTerms(skus: string[]): string[] {
   return [...terms]
 }
 
+function parseSearchTerms(search: string): string[] {
+  return Array.from(new Set(
+    search
+      .split(/[\n\r,;，、\t]+/)
+      .map((term) => term.trim())
+      .filter(Boolean),
+  )).slice(0, 50)
+}
+
 async function getConfirmedProductSearchSkus(userId: string, search: string): Promise<string[]> {
-  const trimmed = search.trim()
-  if (!trimmed) return []
-  const searchPattern = `%${trimmed}%`
+  const terms = parseSearchTerms(search)
+  if (terms.length === 0) return []
+  const productNameConditions = terms.map((term) => ilike(products.name, `%${term}%`))
+  const inventoryNameConditions = terms.map((term) => ilike(inventory.productName, `%${term}%`))
 
   const [productRows, inventoryRows] = await Promise.all([
     db
       .select({ sku: products.internalSku })
       .from(products)
-      .where(and(eq(products.userId, userId), ilike(products.name, searchPattern)))
+      .where(and(eq(products.userId, userId), or(...productNameConditions)!))
       .limit(500),
     db
       .select({ sku: inventory.sku })
       .from(inventory)
-      .where(and(eq(inventory.userId, userId), ilike(inventory.productName, searchPattern)))
+      .where(and(eq(inventory.userId, userId), or(...inventoryNameConditions)!))
       .groupBy(inventory.sku)
       .limit(500),
   ])
@@ -301,8 +311,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   }
 
   if (filters.search) {
-    const trimmed = filters.search.trim()
-    const searchPattern = `%${trimmed}%`
+    const searchTerms = parseSearchTerms(filters.search)
     const searchField = filters.searchField ?? 'all'
     const itemExists = (condition: SQL<unknown>) => exists(
       db
@@ -313,19 +322,22 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     const confirmedProductExists = filters.confirmedProductSearchSkus?.length
       ? itemExists(inArray(orderItems.sku, filters.confirmedProductSearchSkus))
       : sql`false`
-    const trackingExists = exists(
-      db
-        .select({ x: sql`1` })
-        .from(shipments)
-        .where(
-          and(
-            eq(shipments.orderId, orders.id),
-            ilike(shipments.trackingNumber, searchPattern),
-          ),
-        ),
-    )
 
-    const searchCondition = (() => {
+    const buildSearchCondition = (term: string): SQL<unknown> | undefined => {
+      const searchPattern = `%${term}%`
+      const internalNoPattern = `%${term.replace(/^#/, '')}%`
+      const trackingExists = exists(
+        db
+          .select({ x: sql`1` })
+          .from(shipments)
+          .where(
+            and(
+              eq(shipments.orderId, orders.id),
+              ilike(shipments.trackingNumber, searchPattern),
+            ),
+          ),
+      )
+
       switch (searchField) {
         case 'buyerName':
           return ilike(orders.buyerName, searchPattern)
@@ -334,7 +346,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
         case 'marketplaceOrderId':
           return ilike(orders.marketplaceOrderId, searchPattern)
         case 'internalNo':
-          return ilike(orders.internalNo, `%${trimmed.replace(/^#/, '')}%`)
+          return ilike(orders.internalNo, internalNoPattern)
         case 'sku':
           return itemExists(ilike(orderItems.sku, searchPattern))
         case 'marketplaceProductCode':
@@ -359,7 +371,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
         default:
           return or(
             ilike(orders.marketplaceOrderId, searchPattern),
-            ilike(orders.internalNo, `%${trimmed.replace(/^#/, '')}%`),
+            ilike(orders.internalNo, internalNoPattern),
             ilike(orders.buyerName, searchPattern),
             ilike(orders.buyerPhone, searchPattern),
             ilike(orders.buyerPhone2, searchPattern),
@@ -374,9 +386,12 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
             trackingExists,
           )
       }
-    })()
+    }
 
-    if (searchCondition) conditions.push(searchCondition)
+    const searchConditions = searchTerms
+      .map(buildSearchCondition)
+      .filter((condition): condition is SQL<unknown> => Boolean(condition))
+    if (searchConditions.length > 0) conditions.push(or(...searchConditions)!)
   }
 
   if (filters.isHeld) {

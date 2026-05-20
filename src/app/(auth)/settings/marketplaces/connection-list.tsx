@@ -19,7 +19,7 @@ interface ConnectionListProps {
   pageSize?: number
 }
 
-type FilterKey = 'all' | 'api' | 'rpa' | 'excel'
+type FilterKey = 'all' | 'api' | 'hub' | 'rpa' | 'excel'
 
 const METHOD_ORDER: Record<IntegrationMethod, number> = {
   api: 0,
@@ -28,13 +28,8 @@ const METHOD_ORDER: Record<IntegrationMethod, number> = {
   excel: 3,
 }
 
-function displayMethod(method: IntegrationMethod): IntegrationMethod {
-  return method === 'hub' ? 'api' : method
-}
-
 function matchesFilter(connection: ConnectionListItem, filter: FilterKey): boolean {
   if (filter === 'all') return true
-  if (filter === 'api') return connection.integrationMethod === 'api' || connection.integrationMethod === 'hub'
   return connection.integrationMethod === filter
 }
 
@@ -44,7 +39,8 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
   const [filter, setFilter] = useState<FilterKey>('all')
   const counts = useMemo(() => ({
     all: connections.length,
-    api: connections.filter((connection) => matchesFilter(connection, 'api')).length,
+    api: connections.filter((connection) => connection.integrationMethod === 'api').length,
+    hub: connections.filter((connection) => connection.integrationMethod === 'hub').length,
     rpa: connections.filter((connection) => connection.integrationMethod === 'rpa').length,
     excel: connections.filter((connection) => connection.integrationMethod === 'excel').length,
   }), [connections])
@@ -75,6 +71,7 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
   const filterButtons: { key: FilterKey; label: string; count: number }[] = [
     { key: 'all', label: '전체', count: counts.all },
     { key: 'api', label: 'API', count: counts.api },
+    { key: 'hub', label: '연동몰', count: counts.hub },
     { key: 'rpa', label: 'RPA', count: counts.rpa },
     { key: 'excel', label: '엑셀', count: counts.excel },
   ]
@@ -117,7 +114,7 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
                   setSearch(event.target.value)
                   setPage(0)
                 }}
-                placeholder="마켓명, 연동몰 검색"
+                placeholder="마켓명, 하위몰 검색"
                 className="h-8 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring lg:w-64"
               />
               <span className="whitespace-nowrap rounded-full bg-background px-2 py-1 text-xs font-medium text-muted-foreground">
@@ -158,8 +155,7 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
             조건에 맞는 연결이 없습니다.
           </div>
         ) : visibleConnections.map((connection) => {
-          const method = displayMethod(connection.integrationMethod)
-          const info = getIntegrationInfo(method)
+          const info = getIntegrationInfo(connection.integrationMethod)
 
           return (
             <div key={connection.id} className="grid gap-0 md:grid-cols-[120px_1fr]">

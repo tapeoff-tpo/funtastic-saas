@@ -45,6 +45,8 @@ const credentialLabels: Record<string, string> = {
 
 interface ConnectionRowProps {
   connectionId: string
+  marketplaceName: string
+  storeAlias: string
   displayName: string
   status: ConnectionStatus
   integrationMethod: IntegrationMethod
@@ -61,6 +63,8 @@ interface LoadedData {
 
 export function ConnectionRow({
   connectionId,
+  marketplaceName,
+  storeAlias,
   displayName,
   status,
   integrationMethod,
@@ -124,19 +128,25 @@ export function ConnectionRow({
   return (
     <div className="px-4 py-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <span className="font-medium">{displayName}</span>
-          <StatusBadge status={status} />
-          {integrationMethod === 'hub' && (
-            <span
-              className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-700"
-              title={linkedMarketplaces.length > 0 ? linkedMarketplaces.join(', ') : 'EMP 설정 전체'}
-            >
-              {linkedMarketplaces.length > 0
-                ? `연동몰 ${linkedMarketplaces.length}개`
-                : 'EMP 전체'}
-            </span>
-          )}
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{marketplaceName}</span>
+            <StatusBadge status={status} />
+            {integrationMethod === 'hub' && (
+              <span
+                className="rounded-full bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-700"
+                title={linkedMarketplaces.length > 0 ? linkedMarketplaces.join(', ') : 'EMP 설정 전체'}
+              >
+                {linkedMarketplaces.length > 0
+                  ? `연동몰 ${linkedMarketplaces.length}개`
+                  : 'EMP 전체'}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            연결 계정명: <span className="font-medium text-foreground">{storeAlias}</span>
+            {displayName !== marketplaceName ? ` · 표시 이름: ${displayName}` : ''}
+          </p>
         </div>
         <div className="flex gap-2">
           {(integrationMethod === 'api' || integrationMethod === 'hub') && (
@@ -168,7 +178,7 @@ export function ConnectionRow({
           <input type="hidden" name="store_alias" value={data.storeAlias} />
 
           <p className="text-xs text-muted-foreground">
-            스토어 별칭: <span className="font-mono">{data.storeAlias}</span>
+            연결 계정명: <span className="font-mono">{data.storeAlias}</span>
             {' · '}저장하면 기존 값이 덮어써집니다.
           </p>
 

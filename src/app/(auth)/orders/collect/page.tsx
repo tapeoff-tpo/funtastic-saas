@@ -2,7 +2,6 @@ import { eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
-import { AUTO_MARKETPLACE_OPTIONS } from '@/lib/marketplace/collect-options'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { DEFAULT_ORDER_IMPORT_TEMPLATES } from '@/lib/orders/default-import-templates'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
@@ -53,47 +52,26 @@ export default async function OrdersCollectPage() {
     ...DEFAULT_ORDER_IMPORT_TEMPLATES.filter((template) => !userTemplateNames.has(template.name)),
   ]
 
-  const connectionRows = connections.map((c) => ({
-    id: c.id,
-    marketplaceId: c.marketplaceId,
-    displayName: c.displayName,
-    status: c.status,
-    lastCheckedAt: c.lastCheckedAt,
-    lastErrorMessage: c.lastErrorMessage,
-    expiresAt: c.expiresAt,
-    isManual: c.isManual,
-    integrationMethod: getIntegrationMethod(c.marketplaceId, {
+  const dashboardConnections = connections
+    .filter((c) => c.status !== 'disconnected')
+    .map((c) => ({
+      id: c.id,
+      marketplaceId: c.marketplaceId,
+      displayName: c.displayName,
+      status: c.status,
+      lastCheckedAt: c.lastCheckedAt,
+      lastErrorMessage: c.lastErrorMessage,
+      expiresAt: c.expiresAt,
       isManual: c.isManual,
-      authType: c.authType,
-    }),
-    linkedMarketplaces: linkedMarketplacesFromMetadata(c.metadata),
-  }))
-
-  const existingAutoMarketplaceIds = new Set(
-    connectionRows.filter((c) => !c.isManual).map((c) => c.marketplaceId)
-  )
-
-  const dashboardConnections = [
-    ...connectionRows,
-    ...AUTO_MARKETPLACE_OPTIONS
-      .filter((marketplace) => !existingAutoMarketplaceIds.has(marketplace.marketplaceId))
-      .map((marketplace) => ({
-        id: `auto-placeholder-${marketplace.marketplaceId}`,
-        marketplaceId: marketplace.marketplaceId,
-        displayName: marketplace.displayName,
-        status: 'disconnected',
-        lastCheckedAt: null,
-        lastErrorMessage: null,
-        expiresAt: null,
-        isManual: false,
-        integrationMethod: getIntegrationMethod(marketplace.marketplaceId),
-        linkedMarketplaces: [],
-      })),
-  ]
+      integrationMethod: getIntegrationMethod(c.marketplaceId, {
+        isManual: c.isManual,
+        authType: c.authType,
+      }),
+      linkedMarketplaces: linkedMarketplacesFromMetadata(c.metadata),
+    }))
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">주문 수집</h1>
+    <div>
       <MarketplaceDashboard
         connections={dashboardConnections}
         importTemplates={importTemplates}

@@ -24,7 +24,7 @@ interface MarketplaceOption {
   name: string
   requiredCredentials: string[]
   supportedMethods: IntegrationMethod[]
-  connectedMethods: string[]
+  connectedMethodCounts: Partial<Record<IntegrationMethod, number>>
 }
 
 interface IntegrationFormsProps {
@@ -71,6 +71,8 @@ const METHOD_HELP: Record<IntegrationMethod, string> = {
   excel: 'API 없이 주문 엑셀을 업로드할 수 있는 몰로 등록합니다.',
 }
 
+const ALL_METHODS: IntegrationMethod[] = ['api', 'hub', 'rpa', 'excel']
+
 function methodLabel(method: IntegrationMethod): string {
   return getIntegrationInfo(method).label
 }
@@ -82,6 +84,11 @@ function optionalPlaceholder(marketplaceId: string, credKey: string): string {
   return `${credentialLabels[credKey] ?? credKey} 입력`
 }
 
+function connectionCountLabel(count: number | undefined): string {
+  if (!count) return '계정 추가'
+  return `연결 ${count}개`
+}
+
 export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
   const sortedMarketplaces = useMemo(
     () => [...marketplaces].sort((a, b) => a.name.localeCompare(b.name, 'ko-KR')),
@@ -90,6 +97,7 @@ export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
   const [selectedId, setSelectedId] = useState('')
   const selectedMarketplace = sortedMarketplaces.find((marketplace) => marketplace.id === selectedId)
   const [selectedMethod, setSelectedMethod] = useState<IntegrationMethod>('api')
+  const selectedMethodSupported = selectedMarketplace?.supportedMethods.includes(selectedMethod) ?? true
 
   return (
     <Card>
@@ -126,34 +134,48 @@ export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
           <div className="space-y-2">
             <Label>연동방식</Label>
             <div className="grid grid-cols-2 gap-2">
-              {(selectedMarketplace?.supportedMethods ?? ['api', 'excel']).map((method) => (
-                <button
-                  key={method}
-                  type="button"
-                  onClick={() => setSelectedMethod(method)}
-                  className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
-                    selectedMethod === method
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'bg-background text-muted-foreground hover:bg-muted'
-                  }`}
-                >
-                  {methodLabel(method)}
-                  {selectedMarketplace?.connectedMethods.includes(method) ? ' 등록됨' : ''}
-                </button>
-              ))}
+              {ALL_METHODS.map((method) => {
+                const supported = selectedMarketplace?.supportedMethods.includes(method) ?? (method === 'api' || method === 'excel')
+                const count = selectedMarketplace?.connectedMethodCounts[method]
+
+                return (
+                  <button
+                    key={method}
+                    type="button"
+                    disabled={!supported}
+                    onClick={() => setSelectedMethod(method)}
+                    className={`rounded-md border px-3 py-2 text-left text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                      selectedMethod === method
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'bg-background text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    <span className="block">{methodLabel(method)}</span>
+                    <span className="block text-[11px] font-normal">
+                      {supported ? connectionCountLabel(count) : '지원 안함'}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           </div>
         </div>
 
         {selectedMarketplace && (
           <p className="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-            {METHOD_HELP[selectedMethod]}
+            {selectedMethodSupported
+              ? METHOD_HELP[selectedMethod]
+              : `${selectedMarketplace.name}은(는) 현재 ${methodLabel(selectedMethod)} 연동을 지원하지 않습니다.`}
           </p>
         )}
 
         {!selectedMarketplace ? (
           <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
             등록할 마켓을 선택하면 가능한 연동방식과 입력 항목이 표시됩니다.
+          </div>
+        ) : !selectedMethodSupported ? (
+          <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
+            다른 연동방식을 선택하거나, 이 마켓의 지원 방식 설정을 먼저 추가해야 합니다.
           </div>
         ) : selectedMethod === 'excel' ? (
           <ExcelConnectionForm marketplace={selectedMarketplace} />
@@ -170,14 +192,14 @@ export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
 function StoreAliasInput({ id, placeholder = '기본값: default' }: { id: string; placeholder?: string }) {
   return (
     <div className="space-y-1">
-      <Label htmlFor={id}>스토어 별칭</Label>
+      <Label htmlFor={id}>연결 계정명</Label>
       <Input
         id={id}
         name="store_alias"
         placeholder={placeholder}
       />
       <p className="text-xs text-muted-foreground">
-        같은 몰에 여러 스토어를 등록할 때 구분용으로 입력하세요.
+        같은 마켓에 판매자 계정이 여러 개면 서로 다른 이름으로 추가하세요.
       </p>
     </div>
   )

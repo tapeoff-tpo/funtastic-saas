@@ -8,6 +8,7 @@ import '@/lib/marketplace/adapters/configs'
 import { IntegrationForms } from '@/components/marketplace/integration-forms'
 import { ConnectionList } from './connection-list'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import type { IntegrationMethod } from '@/lib/marketplace/integration-methods'
 
 export default async function MarketplaceSettingsPage() {
   const supabase = await createClient()
@@ -26,15 +27,16 @@ export default async function MarketplaceSettingsPage() {
     .from(marketplaceConnections)
     .where(eq(marketplaceConnections.userId, workspaceUserId))
 
-  const connectedMethodIds = new Set(
-    connections.map((c) => {
-      const method = getIntegrationMethod(c.marketplaceId, {
-        isManual: c.isManual,
-        authType: c.authType,
-      })
-      return `${method}:${c.marketplaceId}`
-    }),
-  )
+  const connectedMethodCounts = new Map<string, Partial<Record<IntegrationMethod, number>>>()
+  connections.forEach((c) => {
+    const method = getIntegrationMethod(c.marketplaceId, {
+      isManual: c.isManual,
+      authType: c.authType,
+    })
+    const counts = connectedMethodCounts.get(c.marketplaceId) ?? {}
+    counts[method] = (counts[method] ?? 0) + 1
+    connectedMethodCounts.set(c.marketplaceId, counts)
+  })
 
   const catalog = configs.map((config) => ({
     id: config.id,
@@ -42,12 +44,14 @@ export default async function MarketplaceSettingsPage() {
     requiredCredentials: [...config.requiredCredentials],
     integrationMethod: getIntegrationMethod(config.id, { authType: config.authType }),
     supportedMethods: getSupportedIntegrationMethods(config.id, { authType: config.authType }),
-    connectedMethods: ['api', 'hub', 'rpa', 'excel'].filter((method) =>
-      connectedMethodIds.has(`${method}:${config.id}`),
-    ),
+    connectedMethodCounts: connectedMethodCounts.get(config.id) ?? {},
   }))
+  const marketplaceNames = new Map(configs.map((config) => [config.id, config.name]))
   const connectionRows = connections.map((connection) => ({
     id: connection.id,
+    marketplaceId: connection.marketplaceId,
+    marketplaceName: marketplaceNames.get(connection.marketplaceId) ?? connection.displayName,
+    storeAlias: connection.storeAlias,
     displayName: connection.displayName,
     status: connection.status,
     integrationMethod: getIntegrationMethod(connection.marketplaceId, {

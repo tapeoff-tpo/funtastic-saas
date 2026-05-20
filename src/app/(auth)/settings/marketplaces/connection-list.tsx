@@ -8,6 +8,9 @@ import { ConnectionRow } from './edit-button'
 
 interface ConnectionListItem {
   id: string
+  marketplaceId: string
+  marketplaceName: string
+  storeAlias: string
   displayName: string
   status: string
   integrationMethod: IntegrationMethod
@@ -51,6 +54,9 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
       .filter((connection) => {
         if (!query) return true
         return [
+          connection.marketplaceId,
+          connection.marketplaceName,
+          connection.storeAlias,
           connection.displayName,
           connection.status,
           ...connection.linkedMarketplaces,
@@ -114,7 +120,7 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
                   setSearch(event.target.value)
                   setPage(0)
                 }}
-                placeholder="마켓명, 하위몰 검색"
+                placeholder="마켓명, 계정명, 하위몰 검색"
                 className="h-8 w-full rounded-md border bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring lg:w-64"
               />
               <span className="whitespace-nowrap rounded-full bg-background px-2 py-1 text-xs font-medium text-muted-foreground">
@@ -166,6 +172,8 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
               </div>
               <ConnectionRow
                 connectionId={connection.id}
+                marketplaceName={connection.marketplaceName}
+                storeAlias={connection.storeAlias}
                 displayName={connection.displayName}
                 status={connection.status as ConnectionStatus}
                 integrationMethod={connection.integrationMethod}

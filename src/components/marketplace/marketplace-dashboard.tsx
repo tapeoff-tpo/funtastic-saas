@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useTransition, useMemo, useCallback } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCollectPoll, type JobLogResult } from '@/lib/hooks/use-collect-poll'
 import { StatusBadge } from './status-badge'
@@ -9,7 +10,6 @@ import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import { getIntegrationInfo, type IntegrationMethod } from '@/lib/marketplace/integration-methods'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
 import {
-  addManualChannel,
   createExcelImportTemplate,
   deleteExcelImportTemplate,
   updateExcelImportTemplate,
@@ -59,18 +59,17 @@ function isExpiringSoon(expiresAt: Date): boolean {
 
 /**
  * 위험순 점수 — 작을수록 화면 상단으로.
- * 0 오류 → 1 만료임박 → 2 미수집(lastCheckedAt 없음) → 3 연결됨(오래된순) → 4 미연결 → 5 엑셀(수동)
+ * 0 오류 → 1 만료임박 → 2 미수집(lastCheckedAt 없음) → 3 연결됨(오래된순) → 4 엑셀(수동)
  */
 function riskScore(c: Connection): number {
-  if (c.isManual) return 5
+  if (c.isManual) return 4
   if (c.status === 'error') return 0
   if (c.expiresAt && isExpiringSoon(c.expiresAt)) return 1
-  if (c.status === 'disconnected') return 4
   if (c.lastCheckedAt == null) return 2
   return 3
 }
 
-type FilterKey = 'all' | 'api' | 'hub' | 'rpa' | 'excel' | 'connected' | 'error' | 'expiring' | 'disconnected'
+type FilterKey = 'all' | 'api' | 'hub' | 'rpa' | 'excel' | 'connected' | 'error' | 'expiring'
 type CollectionRangeMode = 'preset' | 'custom'
 
 function toDateInputValue(date: Date): string {
@@ -127,7 +126,6 @@ function findTemplateForConnection(
 
 export function MarketplaceDashboard({ connections, importTemplates: initialImportTemplates }: MarketplaceDashboardProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [showAddModal, setShowAddModal] = useState(false)
   const [importTemplateModal, setImportTemplateModal] = useState<{
     templateId?: string
     draftName?: string
@@ -152,11 +150,10 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
 
   // 필터 카운트 — 칩에 표시
   const counts = useMemo(() => {
-    const c = { all: connections.length, api: 0, hub: 0, rpa: 0, excel: 0, connected: 0, error: 0, expiring: 0, disconnected: 0 }
+    const c = { all: connections.length, api: 0, hub: 0, rpa: 0, excel: 0, connected: 0, error: 0, expiring: 0 }
     for (const conn of connections) {
       c[conn.integrationMethod]++
       if (conn.status === 'error') c.error++
-      else if (conn.status === 'disconnected') c.disconnected++
       else {
         c.connected++
         if (conn.expiresAt && isExpiringSoon(conn.expiresAt)) c.expiring++
@@ -177,7 +174,6 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
         if (filter === 'connected') return !c.isManual && c.status !== 'disconnected' && c.status !== 'error'
         if (filter === 'error') return c.status === 'error'
         if (filter === 'expiring') return !c.isManual && !!c.expiresAt && isExpiringSoon(c.expiresAt)
-        if (filter === 'disconnected') return c.status === 'disconnected'
         return true
       })
       .filter((c) => (q ? c.displayName.toLowerCase().includes(q) : true))
@@ -203,7 +199,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     const rpa = visible.filter((c) => c.integrationMethod === 'rpa')
     const excel = visible.filter((c) => c.integrationMethod === 'excel')
     return [
-      { key: 'hub', label: '허브 연동', description: '여러 쇼핑몰을 모아주는 중계 API로 주문을 수집합니다.', rows: hub },
+      { key: 'hub', label: '연동몰', description: '여러 쇼핑몰을 모아주는 중계 API로 주문을 수집합니다.', rows: hub },
       { key: 'api', label: 'API 연동', description: '공식/제휴 API로 주문을 수집합니다', rows: api },
       { key: 'rpa', label: 'RPA 자동화', description: '판매자센터 화면에서 엑셀 다운로드를 자동화합니다', rows: rpa },
       { key: 'excel', label: '엑셀 수동', description: '주문 엑셀 업로드로 수집합니다', rows: excel },
@@ -324,13 +320,12 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
   const filterChips: { key: FilterKey; label: string; count: number; dot?: string }[] = [
     { key: 'all', label: '전체', count: counts.all },
     { key: 'api', label: 'API', count: counts.api, dot: 'bg-emerald-500' },
-    { key: 'hub', label: '허브', count: counts.hub, dot: 'bg-cyan-500' },
+    { key: 'hub', label: '연동몰', count: counts.hub, dot: 'bg-cyan-500' },
     { key: 'rpa', label: 'RPA', count: counts.rpa, dot: 'bg-violet-500' },
     { key: 'excel', label: '엑셀', count: counts.excel, dot: 'bg-blue-500' },
     { key: 'connected', label: '연결됨', count: counts.connected, dot: 'bg-green-500' },
     { key: 'error', label: '오류', count: counts.error, dot: 'bg-red-500' },
     { key: 'expiring', label: '만료임박', count: counts.expiring, dot: 'bg-amber-500' },
-    { key: 'disconnected', label: '미연결', count: counts.disconnected, dot: 'bg-gray-400' },
   ]
 
   const pickImportTemplate = (templateId: string) => {
@@ -347,38 +342,9 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
 
   return (
     <div className="space-y-3">
-      {/* 상단 툴바: 필터칩 + 검색 + 일괄수집/추가 */}
-      <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
-        {filterChips.map((chip) => (
-          <button
-            key={chip.key}
-            type="button"
-            onClick={() => setFilter(chip.key)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-              filter === chip.key
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'bg-white hover:bg-muted'
-            }`}
-          >
-            {chip.dot && <span className={`h-2 w-2 rounded-full ${chip.dot}`} />}
-            {chip.label}
-            <span
-              className={`rounded-full px-1.5 text-[10px] ${
-                filter === chip.key ? 'bg-primary-foreground/20' : 'bg-muted-foreground/10'
-              }`}
-            >
-              {chip.count}
-            </span>
-          </button>
-        ))}
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="마켓명 검색"
-          className="ml-2 w-[180px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
-        />
-        <div className="ml-auto flex items-center gap-1">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <h1 className="text-2xl font-bold">주문 수집</h1>
+        <div className="flex flex-wrap items-center gap-1 lg:justify-end">
           <label className="flex items-center gap-1 rounded-md border bg-white px-2 py-1 text-xs">
             <span className="whitespace-nowrap">수집기간</span>
             <select
@@ -440,7 +406,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
               <button
                 type="button"
                 onClick={() => setSelected(new Set())}
-                className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+                className="rounded-md border bg-white px-2 py-1 text-xs hover:bg-muted"
               >
                 선택 해제
               </button>
@@ -456,13 +422,12 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
               {collecting ? '수집 중...' : `전체 수집 (${connectedMarkets.length})`}
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setShowAddModal(true)}
-            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
+          <Link
+            href="/settings/marketplaces"
+            className="rounded-md border bg-white px-3 py-1 text-xs font-medium hover:bg-muted"
           >
-            + 수동 쇼핑몰
-          </button>
+            연동 관리
+          </Link>
           {importTemplates.length > 0 && (
             <select
               value={activeImportTemplate?.id ?? ''}
@@ -488,16 +453,64 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
         </div>
       </div>
 
+      {/* 상단 툴바: 필터칩 + 검색 */}
+      <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 p-2">
+        {filterChips.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => setFilter(chip.key)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+              filter === chip.key
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'bg-white hover:bg-muted'
+            }`}
+          >
+            {chip.dot && <span className={`h-2 w-2 rounded-full ${chip.dot}`} />}
+            {chip.label}
+            <span
+              className={`rounded-full px-1.5 text-[10px] ${
+                filter === chip.key ? 'bg-primary-foreground/20' : 'bg-muted-foreground/10'
+              }`}
+            >
+              {chip.count}
+            </span>
+          </button>
+        ))}
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="마켓명 검색"
+          className="ml-2 w-[180px] rounded-md border bg-white px-2 py-1 text-xs placeholder:text-muted-foreground"
+        />
+      </div>
+
       {/* 테이블 */}
       {visible.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-muted/30 px-4 py-12 text-center text-sm text-muted-foreground">
-          {connections.length === 0
-            ? '연결된 마켓플레이스가 없습니다.'
-            : '조건에 맞는 마켓이 없습니다.'}
+          {connections.length === 0 ? (
+            <div className="space-y-3">
+              <p>주문수집에 사용할 연동이 없습니다.</p>
+              <Link
+                href="/settings/marketplaces"
+                className="inline-flex rounded-md border bg-background px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                마켓연동 등록으로 이동
+              </Link>
+            </div>
+          ) : (
+            '조건에 맞는 마켓이 없습니다.'
+          )}
         </div>
       ) : (
         <SyncedScrollContainer>
-          <table className="text-xs" style={{ width: totalWidth }}>
+          <table className="table-fixed text-xs" style={{ width: totalWidth }}>
+            <colgroup>
+              {cols.map((c) => (
+                <col key={c.id} style={{ width: sizeOf(c.id) }} />
+              ))}
+            </colgroup>
             <thead className="sticky top-0 z-[1] bg-muted/50">
               <tr className="border-b">
                 {cols.map((c) => (
@@ -546,11 +559,6 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
             </tbody>
           </table>
         </SyncedScrollContainer>
-      )}
-
-      {/* Add manual channel modal */}
-      {showAddModal && (
-        <AddManualChannelModal onClose={() => setShowAddModal(false)} />
       )}
 
       {importTemplateModal && (
@@ -843,82 +851,6 @@ function ConnRow({
         </div>
       </td>
     </tr>
-  )
-}
-
-function AddManualChannelModal({ onClose }: { onClose: () => void }) {
-  const router = useRouter()
-  const [isPending, startTransition] = useTransition()
-  const [error, setError] = useState<string | null>(null)
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    setError(null)
-    const formData = new FormData(e.currentTarget)
-
-    startTransition(async () => {
-      const result = await addManualChannel(formData)
-      if (result.error) {
-        setError(result.error)
-      } else {
-        router.refresh()
-        onClose()
-      }
-    })
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-sm rounded-xl border bg-background shadow-2xl">
-        <div className="flex items-center justify-between border-b px-5 py-4">
-          <h2 className="text-base font-semibold">수동 쇼핑몰 추가</h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="닫기"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 6 6 18" />
-              <path d="m6 6 12 12" />
-            </svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-5">
-          <label htmlFor="displayName" className="block text-sm font-medium">
-            쇼핑몰 이름
-          </label>
-          <input
-            id="displayName"
-            name="displayName"
-            type="text"
-            required
-            maxLength={100}
-            placeholder="예: 자사몰, 네이버 수동, 오프라인"
-            className="mt-1.5 w-full rounded-lg border px-3 py-2 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-            autoFocus
-          />
-          {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-
-          <div className="mt-4 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-muted"
-            >
-              취소
-            </button>
-            <button
-              type="submit"
-              disabled={isPending}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/80 disabled:opacity-70"
-            >
-              {isPending ? '추가 중...' : '추가'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
   )
 }
 

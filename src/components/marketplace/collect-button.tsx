@@ -55,11 +55,8 @@ export function CollectButton({
                 )}
               </>
             ) : (
-              <span title={log.errorMessage ?? ''}>
-                ✗{' '}
-                {log.errorMessage && log.errorMessage.length > 24
-                  ? log.errorMessage.slice(0, 24) + '…'
-                  : (log.errorMessage ?? '오류')}
+              <span className="max-w-[320px] break-words text-right" title={log.errorMessage ?? ''}>
+                ✗ {log.errorMessage ?? log.progressMessage ?? '오류'}
               </span>
             )}
           </span>

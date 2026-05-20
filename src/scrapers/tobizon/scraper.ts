@@ -16,7 +16,7 @@ import type {
 
 const TOBIZON_BASE_URL = 'https://tobizon.co.kr'
 const TOBIZON_ORDER_LIST_URL = `${TOBIZON_BASE_URL}/scm/order/order_list.php?type=s&otype=2`
-const DOWNLOAD_TIMEOUT_MS = 60_000
+const DOWNLOAD_TIMEOUT_MS = 30_000
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -93,8 +93,8 @@ async function summarizePage(page: Page): Promise<string> {
 }
 
 async function gotoTobizon(page: Page, url = TOBIZON_BASE_URL): Promise<void> {
-  await page.goto(url, { waitUntil: 'commit', timeout: 60_000 })
-  await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+  await page.goto(url, { waitUntil: 'commit', timeout: 30_000 })
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
 }
 
 async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_000): Promise<boolean> {
@@ -358,8 +358,13 @@ export class TobizonScraper implements MarketplaceScraper {
     }
   }
 
-  async getOrders(credentials: ScraperCredentials, since: Date): Promise<NormalizedOrder[]> {
-    const buffer = await this.downloadOrdersExcel(credentials, since)
+  async getOrders(
+    credentials: ScraperCredentials,
+    since: Date,
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedOrder[]> {
+    const buffer = await this.downloadOrdersExcel(credentials, since, setProgress)
+    await setProgress?.('투비즈온 주문 엑셀 파싱 중...')
     if (buffer.length === 0) return []
     return this.parseOrdersExcel(buffer)
   }
@@ -385,6 +390,7 @@ export class TobizonScraper implements MarketplaceScraper {
   private async downloadOrdersExcel(
     credentials: ScraperCredentials,
     since: Date,
+    setProgress?: (message: string) => Promise<void>,
   ): Promise<Buffer> {
     let sessionState = credentials.storageState
     let ctx = await openContext(sessionState)
@@ -392,6 +398,7 @@ export class TobizonScraper implements MarketplaceScraper {
     try {
       const runStep = async <T>(label: string, task: () => Promise<T>): Promise<T> => {
         logStep(label)
+        await setProgress?.(`투비즈온 ${label}`)
         try {
           return await task()
         } catch (error) {

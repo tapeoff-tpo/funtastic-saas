@@ -60,6 +60,7 @@ export interface MarketplaceScraper {
   getOrders(
     credentials: ScraperCredentials,
     since: Date,
+    setProgress?: (message: string) => Promise<void>,
   ): Promise<NormalizedOrder[]>
 
   /** Fetch claims (cancel/return/exchange) since a date. */

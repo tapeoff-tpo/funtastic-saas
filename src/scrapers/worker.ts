@@ -49,30 +49,6 @@ async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promis
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   const { marketplaceId, connectionId, userId, jobType, jobLogId, since, orderId, shipmentId, invoice } = job.data
 
-  if (!hasScraper(marketplaceId as MarketplaceId)) {
-    throw new Error(`No scraper registered for ${marketplaceId}`)
-  }
-
-  const scraper = getScraper(marketplaceId as MarketplaceId)
-  if (!scraper) throw new Error(`Scraper missing: ${marketplaceId}`)
-
-  // Load encrypted credentials from Supabase Vault
-  const credentials = await readScrapeCredentials(marketplaceId, userId, connectionId)
-  if (!credentials) throw new Error(`No credentials for ${marketplaceId}/${connectionId}`)
-
-  const session = credentials.storageState
-    ? await scraper.testSession(credentials)
-    : { ok: false }
-  if (!session.ok) {
-    const login = await scraper.login(credentials)
-    if (!login.success) throw new Error(login.error ?? `${marketplaceId} login failed`)
-    if (login.storageState) {
-      await saveStorageState(userId, marketplaceId, connectionId, login.storageState)
-      credentials.storageState = login.storageState
-    }
-  }
-
-  // Log job start
   const logValues = {
     ...(jobLogId ? { id: jobLogId } : {}),
     jobType: `scrape-${jobType}`,
@@ -95,10 +71,37 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   }
 
   try {
+  if (!hasScraper(marketplaceId as MarketplaceId)) {
+    throw new Error(`No scraper registered for ${marketplaceId}`)
+  }
+
+  const scraper = getScraper(marketplaceId as MarketplaceId)
+  if (!scraper) throw new Error(`Scraper missing: ${marketplaceId}`)
+
+  // Load encrypted credentials from Supabase Vault
+  await setProgress('RPA 인증 정보 확인 중...')
+  const credentials = await readScrapeCredentials(marketplaceId, userId, connectionId)
+  if (!credentials) throw new Error(`No credentials for ${marketplaceId}/${connectionId}`)
+
+  await setProgress('RPA 세션 확인 중...')
+  const session = credentials.storageState
+    ? await scraper.testSession(credentials)
+    : { ok: false }
+  if (!session.ok) {
+    await setProgress('RPA 로그인 중...')
+    const login = await scraper.login(credentials)
+    if (!login.success) throw new Error(login.error ?? `${marketplaceId} login failed`)
+    if (login.storageState) {
+      await setProgress('RPA 세션 저장 중...')
+      await saveStorageState(userId, marketplaceId, connectionId, login.storageState)
+      credentials.storageState = login.storageState
+    }
+  }
+
     if (jobType === 'scrape-orders') {
       await setProgress('RPA 브라우저로 주문 페이지 접속 중...')
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000)
-      const orders = await runWithTimeout(scraper.getOrders(credentials, sinceDate), SCRAPE_JOB_TIMEOUT_MS)
+      const orders = await runWithTimeout(scraper.getOrders(credentials, sinceDate, setProgress), SCRAPE_JOB_TIMEOUT_MS)
       await setProgress(`${orders.length}건 수집 완료, 주문 저장 중...`)
       const result = await saveNormalizedOrdersForConnection({
         marketplaceId,

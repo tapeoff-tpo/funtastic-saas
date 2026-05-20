@@ -813,7 +813,10 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       )}
 
       {bulkAdjustmentOpen && (
-        <BulkAdjustmentDialog onClose={() => setBulkAdjustmentOpen(false)} />
+        <BulkAdjustmentDialog
+          warehouseZones={warehouseZones}
+          onClose={() => setBulkAdjustmentOpen(false)}
+        />
       )}
 
     </div>

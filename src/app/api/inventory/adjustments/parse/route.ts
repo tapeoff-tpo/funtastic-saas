@@ -14,14 +14,9 @@ const HEADER_MAP: Record<string, string> = {
   품목코드: 'sku',
   SKU: 'sku',
   sku: 'sku',
-  창고: 'warehouseZone',
-  창고구분: 'warehouseZone',
-  창고명: 'warehouseZone',
-  로케이션: 'sectorCode',
-  피킹위치: 'sectorCode',
-  위치: 'sectorCode',
-  Location: 'sectorCode',
-  location: 'sectorCode',
+  입고증가차감: 'delta',
+  입고증가차감수량: 'delta',
+  '입고증가/차감': 'delta',
   변동수량: 'delta',
   조정수량: 'delta',
   수량: 'delta',
@@ -34,6 +29,8 @@ const HEADER_MAP: Record<string, string> = {
 const REASON_MAP: Record<string, AdjustmentReason> = {
   입고: 'incoming',
   incoming: 'incoming',
+  증가: 'incoming',
+  차감: 'order_ship',
   출고: 'order_ship',
   출고차감: 'order_ship',
   order_ship: 'order_ship',
@@ -51,8 +48,6 @@ const REASON_MAP: Record<string, AdjustmentReason> = {
 type ParsedRow = {
   rowNum: number
   sku: string
-  warehouseZone: string | null
-  sectorCode: string | null
   delta: number
   reason: AdjustmentReason
   note: string
@@ -78,10 +73,6 @@ function normalizeHeader(value: string) {
   return value.replace(/\s+/g, '').replace(/\n/g, '')
 }
 
-function keyOf(sku: string, warehouseZone: string | null, sectorCode: string | null) {
-  return `${sku}::${warehouseZone ?? ''}::${sectorCode ?? ''}`
-}
-
 function parseReason(value: string): AdjustmentReason {
   return REASON_MAP[value.trim()] ?? 'other'
 }
@@ -102,6 +93,10 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file')
   if (!(file instanceof Blob)) {
     return NextResponse.json({ error: 'file 필드가 없습니다.' }, { status: 400 })
+  }
+  const selectedWarehouse = String(formData.get('warehouseZone') ?? '').trim()
+  if (!selectedWarehouse) {
+    return NextResponse.json({ error: '창고를 선택해주세요.' }, { status: 400 })
   }
 
   const workbook = new ExcelJS.Workbook()
@@ -161,8 +156,6 @@ export async function POST(req: NextRequest) {
     parsed.push({
       rowNum: rowNumber,
       sku,
-      warehouseZone: raw.warehouseZone?.trim() || null,
-      sectorCode: raw.sectorCode?.trim() || null,
       delta,
       reason: parseReason(raw.reason ?? ''),
       note: raw.note?.trim() ?? '',
@@ -186,12 +179,13 @@ export async function POST(req: NextRequest) {
           totalStock: inventory.totalStock,
         })
         .from(inventory)
-        .where(and(eq(inventory.userId, workspaceUserId), inArray(inventory.sku, skus)))
+        .where(and(
+          eq(inventory.userId, workspaceUserId),
+          eq(inventory.warehouseZone, selectedWarehouse),
+          inArray(inventory.sku, skus),
+        ))
     : []
 
-  const exactMap = new Map(
-    inventoryRows.map((row) => [keyOf(row.sku, row.warehouseZone, row.sectorCode), row]),
-  )
   const rowsBySku = new Map<string, typeof inventoryRows>()
   for (const row of inventoryRows) {
     rowsBySku.set(row.sku, [...(rowsBySku.get(row.sku) ?? []), row])
@@ -199,26 +193,23 @@ export async function POST(req: NextRequest) {
 
   const rows = [
     ...parsed.map((row) => {
-      let matched = exactMap.get(keyOf(row.sku, row.warehouseZone, row.sectorCode))
+      let matched: typeof inventoryRows[number] | undefined
       let error: string | undefined
-
-      if (!matched && !row.warehouseZone && !row.sectorCode) {
-        const skuRows = rowsBySku.get(row.sku) ?? []
-        if (skuRows.length === 1) {
-          matched = skuRows[0]
-        } else if (skuRows.length > 1) {
-          error = '같은 상품코드가 여러 창고/로케이션에 있습니다. 창고와 로케이션을 입력해주세요.'
-        }
+      const skuRows = rowsBySku.get(row.sku) ?? []
+      if (skuRows.length === 1) {
+        matched = skuRows[0]
+      } else if (skuRows.length > 1) {
+        error = '선택한 창고 안에 같은 상품코드가 여러 로케이션에 있습니다. 재고관리에서 위치를 정리한 뒤 처리해주세요.'
       }
 
-      if (!matched && !error) error = '재고관리에서 해당 상품코드/창고/로케이션을 찾을 수 없습니다.'
+      if (!matched && !error) error = `선택한 창고(${selectedWarehouse})에서 해당 상품코드를 찾을 수 없습니다.`
 
       return {
         ...row,
         productName: matched?.productName ?? row.sku,
         optionName: matched?.optionName ?? null,
-        warehouseZone: matched?.warehouseZone ?? row.warehouseZone,
-        sectorCode: matched?.sectorCode ?? row.sectorCode,
+        warehouseZone: matched?.warehouseZone ?? selectedWarehouse,
+        sectorCode: matched?.sectorCode ?? null,
         inventoryExists: !!matched,
         currentStock: matched?.totalStock ?? 0,
         error,
@@ -229,7 +220,7 @@ export async function POST(req: NextRequest) {
       sku: row.sku,
       productName: row.sku,
       optionName: null,
-      warehouseZone: null,
+      warehouseZone: selectedWarehouse,
       sectorCode: null,
       delta: 0,
       reason: 'other' as AdjustmentReason,

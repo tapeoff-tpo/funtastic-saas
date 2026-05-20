@@ -31,6 +31,7 @@ type Step = 'upload' | 'preview' | 'done'
 
 interface BulkAdjustmentDialogProps {
   onClose: () => void
+  warehouseZones: string[]
 }
 
 const REASON_LABELS: Record<AdjustmentReason, string> = {
@@ -41,10 +42,11 @@ const REASON_LABELS: Record<AdjustmentReason, string> = {
   other: '기타',
 }
 
-export function BulkAdjustmentDialog({ onClose }: BulkAdjustmentDialogProps) {
+export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustmentDialogProps) {
   const router = useRouter()
   const [step, setStep] = useState<Step>('upload')
   const [file, setFile] = useState<File | null>(null)
+  const [warehouseZone, setWarehouseZone] = useState(warehouseZones[0] ?? '')
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState<string | null>(null)
   const [rows, setRows] = useState<AdjustmentRow[]>([])
@@ -54,11 +56,16 @@ export function BulkAdjustmentDialog({ onClose }: BulkAdjustmentDialogProps) {
 
   const handleParse = async () => {
     if (!file) return
+    if (!warehouseZone) {
+      setParseError('창고를 선택해주세요.')
+      return
+    }
     setParsing(true)
     setParseError(null)
     try {
       const formData = new FormData()
       formData.append('file', file)
+      formData.append('warehouseZone', warehouseZone)
       const res = await fetch('/api/inventory/adjustments/parse', { method: 'POST', body: formData })
       const data = await res.json()
       if (!res.ok) {
@@ -140,7 +147,7 @@ export function BulkAdjustmentDialog({ onClose }: BulkAdjustmentDialogProps) {
             <h3 className="text-base font-semibold">대량 재고조정</h3>
             {step === 'preview' && (
               <p className="mt-0.5 text-xs text-muted-foreground">
-                시트: {sheetName} · {rows.length}건 인식 · 변동수량/사유/메모 수정 후 확정하세요
+                창고: {warehouseZone} · 시트: {sheetName} · {rows.length}건 인식 · 수량/사유 수정 후 확정하세요
               </p>
             )}
           </div>
@@ -153,11 +160,24 @@ export function BulkAdjustmentDialog({ onClose }: BulkAdjustmentDialogProps) {
           {step === 'upload' && (
             <div className="space-y-4 p-6">
               <p className="text-sm text-muted-foreground">
-                엑셀 양식에 상품코드, 창고, 로케이션, 변동수량을 입력해 업로드하세요.
+                창고를 선택한 뒤 상품코드, 사유, 입고증가/차감 수량이 있는 엑셀을 업로드하세요.
               </p>
               <p className="text-xs text-muted-foreground">
-                변동수량은 양수면 입고, 음수면 출고/차감입니다. 창고와 로케이션이 있으면 해당 위치 재고만 조정합니다.
+                수량은 양수면 입고/증가, 음수면 차감입니다. 선택한 창고의 재고만 조정됩니다.
               </p>
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">창고선택</span>
+                <select
+                  value={warehouseZone}
+                  onChange={(e) => { setWarehouseZone(e.target.value); setParseError(null) }}
+                  className="w-full rounded-md border px-3 py-2 text-sm"
+                >
+                  {warehouseZones.length === 0 && <option value="">등록된 창고 없음</option>}
+                  {warehouseZones.map((zone) => (
+                    <option key={zone} value={zone}>{zone}</option>
+                  ))}
+                </select>
+              </label>
               <a
                 href="/api/inventory/adjustments/template"
                 className="inline-flex rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
@@ -178,7 +198,7 @@ export function BulkAdjustmentDialog({ onClose }: BulkAdjustmentDialogProps) {
                 <button
                   type="button"
                   onClick={handleParse}
-                  disabled={!file || parsing}
+                  disabled={!file || !warehouseZone || parsing}
                   className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
                   {parsing ? '인식 중...' : '파일 인식'}

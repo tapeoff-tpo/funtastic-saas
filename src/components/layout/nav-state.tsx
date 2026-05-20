@@ -48,6 +48,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/products/categories': '카테고리',
   '/products/marketplace-categories': '카테고리 매핑',
   '/inventory': '재고관리',
+  '/inventory/adjustments': '입출고관리',
   '/analytics': '매출분석',
   '/settings': '설정',
   '/settings/company': '회사 정보',
@@ -87,6 +88,7 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const t = localStorage.getItem(TABS_KEY)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (t) setTabs(JSON.parse(t))
       const f = localStorage.getItem(FAVS_KEY)
       if (f) setFavorites(JSON.parse(f))
@@ -124,6 +126,7 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     if (!pathname || pathname === '/dashboard') return
     const search = searchParams?.toString() ?? ''
     const fullHref = search ? `${pathname}?${search}` : pathname
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTabs((prev) => {
       const idx = prev.findIndex((t) => stripQuery(t.href) === pathname)
       if (idx >= 0) {

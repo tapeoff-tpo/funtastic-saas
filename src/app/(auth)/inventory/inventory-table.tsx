@@ -8,14 +8,13 @@ import {
   flexRender,
   createColumnHelper,
   type RowSelectionState,
-  type SortingState,
 } from '@tanstack/react-table'
 import { useQueryState, useQueryStates, parseAsInteger, parseAsString } from 'nuqs'
 import { toast } from 'sonner'
 import { AdjustStockDialog } from './adjust-stock-dialog'
 import { HistoryDialog } from './history-dialog'
 import { ExcelUploadDialog } from './excel-upload-dialog'
-import { IncomingDialog } from './incoming-dialog'
+import { BulkAdjustmentDialog } from './bulk-adjustment-dialog'
 import { Pagination } from '@/components/ui/pagination'
 import { Input } from '@/components/ui/input'
 import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
@@ -50,6 +49,7 @@ interface InventoryTableProps {
   warehouseZones: string[]
   /** 검색 sentinel — false 면 안내 메시지만 표시하고 fetch 안 함 */
   searched: boolean
+  mode?: 'inventory' | 'adjustments'
 }
 
 
@@ -123,7 +123,7 @@ function ShippingCostCell({
   )
 }
 
-export function InventoryTable({ data, total, page, pageSize, warehouseZones, searched }: InventoryTableProps) {
+export function InventoryTable({ data, total, page, pageSize, warehouseZones, searched, mode = 'inventory' }: InventoryTableProps) {
   const [adjustDialog, setAdjustDialog] = useState<{
     open: boolean
     mode: 'set' | 'adjust'
@@ -139,7 +139,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
   }>({ open: false, inventoryId: '', sku: '' })
 
   const [excelDialogOpen, setExcelDialogOpen] = useState(false)
-  const [incomingDialogOpen, setIncomingDialogOpen] = useState(false)
+  const [bulkAdjustmentOpen, setBulkAdjustmentOpen] = useState(false)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
   const [, setPage] = useQueryState(
@@ -461,21 +461,23 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
         const row = info.row.original
         return (
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() =>
-                setAdjustDialog({
-                  open: true,
-                  mode: 'adjust',
-                  sku: row.sku,
-                  productName: row.productName,
-                  currentStock: row.totalStock,
-                })
-              }
-              className="rounded border px-2 py-1 text-xs hover:bg-muted"
-            >
-              조정
-            </button>
+            {mode === 'adjustments' && (
+              <button
+                type="button"
+                onClick={() =>
+                  setAdjustDialog({
+                    open: true,
+                    mode: 'adjust',
+                    sku: row.sku,
+                    productName: row.productName,
+                    currentStock: row.totalStock,
+                  })
+                }
+                className="rounded border px-2 py-1 text-xs hover:bg-muted"
+              >
+                조정
+              </button>
+            )}
             <button
               type="button"
               onClick={() =>
@@ -679,27 +681,40 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
           >
             일괄 다운
           </button>
-          <button
-            type="button"
-            onClick={() => setExcelDialogOpen(true)}
-            className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
-          >
-            엑셀 업로드
-          </button>
-          <button
-            type="button"
-            onClick={() => setIncomingDialogOpen(true)}
-            className="rounded-md border border-green-600 px-3 py-1 text-xs font-medium text-green-700 hover:bg-green-50"
-          >
-            입고 처리
-          </button>
-          <button
-            type="button"
-            onClick={() => setAdjustDialog({ open: true, mode: 'set' })}
-            className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            재고 등록
-          </button>
+          {mode === 'inventory' && (
+            <button
+              type="button"
+              onClick={() => setExcelDialogOpen(true)}
+              className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
+            >
+              엑셀 업로드
+            </button>
+          )}
+          {mode === 'adjustments' ? (
+            <>
+              <a
+                href="/api/inventory/adjustments/template"
+                className="rounded-md border px-3 py-1 text-xs font-medium hover:bg-muted"
+              >
+                엑셀양식 다운로드
+              </a>
+              <button
+                type="button"
+                onClick={() => setBulkAdjustmentOpen(true)}
+                className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+              >
+                대량등록
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setAdjustDialog({ open: true, mode: 'set' })}
+              className="rounded-md bg-primary px-3 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              재고 등록
+            </button>
+          )}
         </div>
       </div>
 
@@ -797,8 +812,8 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
         <ExcelUploadDialog onClose={() => setExcelDialogOpen(false)} />
       )}
 
-      {incomingDialogOpen && (
-        <IncomingDialog onClose={() => setIncomingDialogOpen(false)} />
+      {bulkAdjustmentOpen && (
+        <BulkAdjustmentDialog onClose={() => setBulkAdjustmentOpen(false)} />
       )}
 
     </div>

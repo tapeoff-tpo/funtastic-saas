@@ -65,6 +65,7 @@ const navSections: NavSection[] = [
       { href: '/products/mapping-codes', label: '매핑코드 마스터', icon: ArrowRightLeft },
       { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
       { href: '/inventory', label: '재고관리', icon: Warehouse },
+      { href: '/inventory/adjustments', label: '입출고관리', icon: ArrowRightLeft },
     ],
   },
   {
@@ -113,7 +114,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
 
   function isItemActive(href: string) {
     const itemPath = href.split('?')[0]
-    if (itemPath === '/orders' || itemPath === '/settings' || itemPath === '/products') {
+    if (itemPath === '/orders' || itemPath === '/settings' || itemPath === '/products' || itemPath === '/inventory') {
       return pathname === itemPath
     }
     return pathname.startsWith(itemPath)

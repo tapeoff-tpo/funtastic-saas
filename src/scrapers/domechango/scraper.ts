@@ -20,6 +20,7 @@ const NAVIGATION_TIMEOUT_MS = 20_000
 const LOAD_STATE_TIMEOUT_MS = 8_000
 const ORDER_LIST_API_PATH = '/wms/order/list'
 const ORDER_EXCEL_API_PATH = '/wms/order/list/excel'
+const ORDER_PAGE_REFERRER = `${WMS_BASE_URL}/order`
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -126,15 +127,41 @@ async function fetchWmsData<T>(
   params: Record<string, string | number | undefined>,
 ): Promise<T> {
   const response = await page.evaluate(async ({ path, params }) => {
+    const appWindow = window as typeof window & {
+      axios?: {
+        get: (url: string, config?: { params?: Record<string, string | number | undefined> }) => Promise<{ data: unknown }>
+      }
+      common?: {
+        serialize_object?: (selector: string) => Record<string, unknown>
+      }
+    }
+
+    const formParams = appWindow.common?.serialize_object?.('#frm') ?? {}
+    const mergedParams = { ...formParams, ...params }
+
+    try {
+      if (appWindow.axios?.get) {
+        const axiosResponse = await appWindow.axios.get(path, { params: mergedParams })
+        return { ok: true, status: 200, text: '', json: axiosResponse.data, href: window.location.href }
+      }
+    } catch (error) {
+      const response = (error as { response?: { status?: number; data?: unknown } }).response
+      return {
+        ok: false,
+        status: response?.status ?? 500,
+        text: typeof response?.data === 'string' ? response.data.slice(0, 500) : JSON.stringify(response?.data ?? {}).slice(0, 500),
+        json: response?.data ?? null,
+        href: window.location.href,
+      }
+    }
+
     const url = new URL(path, window.location.origin)
-    for (const [key, value] of Object.entries(params)) {
+    for (const [key, value] of Object.entries(mergedParams)) {
       if (value !== undefined && value !== '') url.searchParams.set(key, String(value))
     }
 
     const res = await fetch(`${url.pathname}${url.search}`, {
       credentials: 'include',
-      referrer: `${window.location.origin}/wms/order`,
-      referrerPolicy: 'strict-origin-when-cross-origin',
       headers: {
         Accept: 'application/json, text/plain, */*',
         Pragma: 'no-cache',
@@ -148,15 +175,63 @@ async function fetchWmsData<T>(
     } catch {
       // Keep text for diagnostics below.
     }
-    return { ok: res.ok, status: res.status, text: text.slice(0, 500), json }
+    return { ok: res.ok, status: res.status, text: text.slice(0, 500), json, href: window.location.href }
   }, { path, params })
 
   const json = response.json as { statusCode?: number; data?: T } | null
   if (!response.ok || !json || json.statusCode !== 200) {
     const message = json && 'data' in json ? String(json.data) : response.text
-    throw new MarketplaceApiError('domechango', response.status || 500, `도매창고 API 호출 실패: ${path} (${message})`)
+    throw new MarketplaceApiError('domechango', response.status || 500, `도매창고 API 호출 실패: ${path} (${message}, page=${response.href})`)
   }
   return json.data as T
+}
+
+async function prepareOrderApiContext(page: Page, since: Date, until: Date): Promise<void> {
+  await gotoDomechango(page, WMS_BASE_URL)
+
+  const hasWmsRuntime = await page
+    .waitForFunction(() => {
+      const appWindow = window as typeof window & {
+        axios?: unknown
+        common?: unknown
+      }
+      return Boolean(appWindow.axios && appWindow.common)
+    }, undefined, { timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false)
+
+  if (!hasWmsRuntime) {
+    throw new MarketplaceApiError('domechango', 500, `도매창고 WMS 실행 환경을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
+
+  await page.evaluate(({ since, until, orderPageUrl }) => {
+    window.history.replaceState(null, '', orderPageUrl)
+
+    if (!document.querySelector('#frm')) {
+      const form = document.createElement('form')
+      form.id = 'frm'
+      document.body.appendChild(form)
+    }
+
+    const upsert = (name: string, value: string) => {
+      const form = document.querySelector<HTMLFormElement>('#frm')
+      if (!form) return
+      let input = form.querySelector<HTMLInputElement>(`[name="${name}"]`)
+      if (!input) {
+        input = document.createElement('input')
+        input.name = name
+        form.appendChild(input)
+      }
+      input.value = value
+    }
+
+    upsert('page', '1')
+    upsert('list_size', '500')
+    upsert('oistep', '1')
+    upsert('sdate', since)
+    upsert('edate', until)
+    upsert('orderby', 'order_at-desc')
+  }, { since: formatDateInput(since), until: formatDateInput(until), orderPageUrl: ORDER_PAGE_REFERRER })
 }
 
 function buildApiWorkbook(rows: Record<string, unknown>[]): Promise<Buffer> {
@@ -331,6 +406,8 @@ export class DomechangoScraper implements MarketplaceScraper {
       if (!(await this.isLoggedIn(ctx.page))) {
         throw new MarketplaceApiError('domechango', 401, `도매창고 WMS 세션을 확인하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
+
+      await runStep('orders: prepare wms order api context', () => prepareOrderApiContext(ctx.page, since, until))
 
       return await runStep('orders: fetch excel through wms api', async () => {
         const commonParams = {

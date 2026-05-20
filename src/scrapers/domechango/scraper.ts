@@ -106,7 +106,10 @@ async function hasOrderList(page: Page): Promise<boolean> {
   if (/login|signin/i.test(page.url())) return false
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   if (/Error\s*\(\d+\)\s*->/i.test(bodyText)) return false
-  return /주문\s*리스트|선택주문|택배송장\s*업로드/.test(bodyText)
+  const isOrderPath = new URL(page.url()).pathname === '/wms/order'
+  const hasOrderControls = /선택주문|택배송장\s*업로드|주문검색/.test(bodyText)
+  const hasOrderGrid = await page.locator('#order_list, #goods_list').first().isVisible({ timeout: 1000 }).catch(() => false)
+  return isOrderPath && (hasOrderControls || hasOrderGrid)
 }
 
 async function hasWmsSession(page: Page): Promise<boolean> {
@@ -120,16 +123,21 @@ async function openOrderListPage(page: Page): Promise<void> {
   await gotoDomechango(page, WMS_BASE_URL)
   if (await hasOrderList(page)) return
 
-  const orderLink = page
-    .locator('a[href="/wms/order"], a[href$="/wms/order"], a')
-    .filter({ hasText: /주문\s*리스트|주문\s*목록|주문\s*\/?\s*배송/ })
+  const clicked = await page
+    .locator('a[href="/wms/order"], a[href$="/wms/order"]')
     .first()
+    .click({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false)
 
-  await orderLink.click({ timeout: 10_000 }).catch(async () => {
+  if (clicked) {
+    await page.waitForURL((url) => url.pathname === '/wms/order', { timeout: 10_000 }).catch(() => undefined)
+  }
+  if (!(await hasOrderList(page))) {
     await gotoDomechango(page, ORDER_PAGE_REFERRER)
-  })
+  }
   await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
-  await page.waitForTimeout(1500)
+  await page.locator('#order_list, #goods_list, text=선택주문').first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
 
   if (!(await hasOrderList(page))) {
     throw new MarketplaceApiError('domechango', 500, `도매창고 주문 리스트를 열지 못했습니다. (${await summarizePage(page)})`)

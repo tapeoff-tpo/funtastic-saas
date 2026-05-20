@@ -22,7 +22,9 @@ const builder = new XMLBuilder({
 
 function normalizeBaseUrl(baseUrl?: string): string {
   const trimmed = baseUrl?.trim().replace(/\/+$/, '')
-  if (!trimmed) return DEFAULT_HYUNDAI_HMALL_API_BASE
+  if (!trimmed || trimmed === 'https://api.hmall.com' || trimmed === 'http://api.hmall.com') {
+    return DEFAULT_HYUNDAI_HMALL_API_BASE
+  }
   return trimmed
 }
 

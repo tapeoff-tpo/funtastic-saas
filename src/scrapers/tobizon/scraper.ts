@@ -82,6 +82,12 @@ function parseKstDate(value: string): Date {
   return Number.isNaN(date.getTime()) ? new Date(value) : date
 }
 
+function extractOrderNumber(value: string): string {
+  const trimmed = value.replace(/^_/, '').trim()
+  const match = trimmed.match(/[A-Z0-9]*\d{10,}[A-Z0-9]*/i)
+  return (match?.[0] ?? trimmed.split(/\s+/)[0] ?? trimmed).trim()
+}
+
 function logStep(step: string): void {
   console.log(`[투비즈온-rpa] ${step}`)
 }
@@ -467,7 +473,7 @@ export class TobizonScraper implements MarketplaceScraper {
         const value = normalizeHeader(readCellText(cell.value))
         if (value) current.set(value, colNumber)
       })
-      if ([...current.keys()].some((header) => /주문번호|상품명|수취인|받는사람|송장번호/.test(header))) {
+      if ([...current.keys()].some((header) => /주문번호|주문상품|상품명|수취인|받는사람|송장번호/.test(header))) {
         headerRowNumber = rowNumber
         columns.clear()
         current.forEach((value, key) => columns.set(key, value))
@@ -490,8 +496,8 @@ export class TobizonScraper implements MarketplaceScraper {
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber <= headerRowNumber) return
 
-      const orderNo = get(row, '주문번호', '주문번호주문일자', '주문코드').replace(/^_/, '')
-      const productName = get(row, '상품명', '품명')
+      const orderNo = extractOrderNumber(get(row, '주문번호', '주문번호주문일자', '주문코드'))
+      const productName = get(row, '주문상품', '상품명', '상품', '품명', '제품명')
       if (!orderNo || !productName) return
 
       const quantity = Math.max(parseNumber(get(row, '수량', '구매수량', '주문수량')), 1)
@@ -557,7 +563,7 @@ export class TobizonScraper implements MarketplaceScraper {
 
     const header = tableRows.find((row) => {
       const text = row.cells.map(normalizeHeader).join(' ')
-      return /주문번호|주문일|상품명|수취인|받는사람/.test(text)
+      return /주문번호|주문일|주문상품|상품명|수취인|받는사람/.test(text)
     })
     if (!header) return []
 
@@ -574,8 +580,8 @@ export class TobizonScraper implements MarketplaceScraper {
     const orders: NormalizedOrder[] = []
     for (const row of tableRows) {
       if (row.rowNumber <= header.rowNumber) continue
-      const orderNo = get(row, '주문번호', '주문코드').replace(/^_/, '')
-      const productName = get(row, '상품명', '품명')
+      const orderNo = extractOrderNumber(get(row, '주문번호', '주문코드'))
+      const productName = get(row, '주문상품', '상품명', '상품', '품명', '제품명')
       if (!orderNo || !productName) continue
 
       const quantity = Math.max(parseNumber(get(row, '수량', '구매수량', '주문수량')), 1)

@@ -8,13 +8,17 @@ const tabs = [
   { href: '/shipping/scan',     label: '🔍 스캔 출고' },
   { href: '/shipping/combined', label: '합포장 관리' },
   { href: '/shipping/split',    label: '분리출고' },
-  { href: '/shipping/held',     label: '미발송 관리' },
   { href: '/shipping/print',    label: '송장 출력' },
   { href: '/shipping/templates', label: '템플릿' },
 ]
 
 export default function ShippingLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const isStandalonePage = pathname.startsWith('/shipping/held')
+
+  if (isStandalonePage) {
+    return <>{children}</>
+  }
 
   return (
     <div>

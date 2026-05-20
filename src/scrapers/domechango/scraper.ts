@@ -16,7 +16,6 @@ import type {
 
 const WMS_BASE_URL = 'https://www.wholesaledepot.co.kr/wms'
 const LOGIN_PAGE_URL = `${WMS_BASE_URL}/login`
-const ORDER_PAGE_URL = `${WMS_BASE_URL}/order`
 const NAVIGATION_TIMEOUT_MS = 20_000
 const LOAD_STATE_TIMEOUT_MS = 8_000
 const DOWNLOAD_TIMEOUT_MS = 25_000
@@ -68,7 +67,7 @@ async function summarizePage(page: Page): Promise<string> {
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
 }
 
-async function gotoDomechango(page: Page, url = ORDER_PAGE_URL): Promise<void> {
+async function gotoDomechango(page: Page, url = WMS_BASE_URL): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: NAVIGATION_TIMEOUT_MS }).catch((error) => {
     throw new MarketplaceApiError(
       'domechango',
@@ -165,39 +164,55 @@ async function navigateToOrderList(page: Page): Promise<void> {
   await gotoDomechango(page, WMS_BASE_URL)
   if (await hasOrderList(page)) return
 
-  const orderMenu = page.getByText(/주문\s*리스트/).first()
-  if (await orderMenu.isVisible().catch(() => false)) {
-    await Promise.all([
-      page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined),
-      orderMenu.click({ timeout: 5000 }),
-    ])
-    await page.waitForTimeout(500)
-    if (await hasOrderList(page)) return
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const clicked = await page.evaluate(() => {
+      const isUsable = (element: Element) => {
+        if (!(element instanceof HTMLElement)) return false
+        const style = window.getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
+      }
+
+      const menuGroups = Array.from(document.querySelectorAll<HTMLElement>('.menues > ul, nav ul, aside ul, .lmenu ul, ul'))
+      const orderGroup = menuGroups.find((group) => {
+        const nextText = group.nextElementSibling?.textContent ?? ''
+        const groupText = group.textContent ?? ''
+        return /주문\s*\/?\s*배송/.test(groupText) || /주문\s*리스트/.test(nextText)
+      })
+      orderGroup?.click()
+
+      const orderListLink = Array.from(document.querySelectorAll<HTMLAnchorElement>('a'))
+        .filter((anchor) => /주문\s*리스트/.test(anchor.textContent ?? ''))
+        .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))[0]
+
+      if (orderListLink) {
+        orderListLink.scrollIntoView({ block: 'center', inline: 'center' })
+        orderListLink.click()
+        return true
+      }
+
+      const textTarget = Array.from(document.querySelectorAll<HTMLElement>('button, li, div, span'))
+        .filter((element) => isUsable(element) && /^주문\s*리스트$/.test((element.textContent ?? '').trim()))
+        .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))[0]
+
+      if (!textTarget) return false
+      textTarget.scrollIntoView({ block: 'center', inline: 'center' })
+      textTarget.click()
+      return true
+    }).catch(() => false)
+
+    if (clicked) {
+      await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
+      await page.waitForTimeout(800)
+      if (await hasOrderList(page)) return
+    }
+
+    if (/\/wms\/order(?:$|\?)/.test(page.url()) && (await summarizePage(page)).includes('Error (0) -> not found')) {
+      await gotoDomechango(page, WMS_BASE_URL)
+    }
   }
 
-  const clicked = await page.evaluate(() => {
-    const candidates = Array.from(document.querySelectorAll('a, button, li, div, span'))
-      .filter((element) => /주문\s*리스트/.test(element.textContent ?? ''))
-      .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))
-    const directLink = Array.from(document.querySelectorAll('a'))
-      .find((anchor) => /\/wms\/order(?:$|\?)/.test((anchor as HTMLAnchorElement).href))
-
-    const target = directLink ?? candidates[0]
-    if (!(target instanceof HTMLElement)) return false
-    target.click()
-    return true
-  }).catch(() => false)
-
-  if (clicked) {
-    await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
-    await page.waitForTimeout(500)
-    if (await hasOrderList(page)) return
-  }
-
-  await gotoDomechango(page, ORDER_PAGE_URL)
-  if (!(await hasOrderList(page))) {
-    throw new MarketplaceApiError('domechango', 404, `도매창고 주문 리스트를 열지 못했습니다. (${await summarizePage(page)})`)
-  }
+  throw new MarketplaceApiError('domechango', 404, `도매창고 주문 리스트를 열지 못했습니다. (${await summarizePage(page)})`)
 }
 
 async function selectNewOrderStatus(page: Page): Promise<void> {

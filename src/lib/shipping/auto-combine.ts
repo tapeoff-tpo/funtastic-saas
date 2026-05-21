@@ -1,31 +1,37 @@
 /**
- * 자동 합포장 로직 (수령인 이름 + 주소 + 전화 기준).
+ * 자동 합포장 로직 (마켓 + 수취인 + 우편번호 + 주소 기준).
  *
  * 매핑 적용 직후 또는 명시적으로 호출되어, 해당 사용자의
- * 미출고 주문 중 수령인 이름/주소/전화가 동일한 묶음을 찾아
+ * 미출고 주문 중 마켓/수취인/주소가 동일한 묶음을 찾아
  * shipmentGroups 로 생성한다. 이미 그룹에 속한 주문은 제외.
  */
 
+import { createHash } from 'crypto'
 import { db } from '@/lib/db'
 import {
   orders,
   orderItems,
+  shipments,
   shipmentGroupOrders,
 } from '@/lib/db/schema'
 import { and, eq, inArray } from 'drizzle-orm'
 import { createShipmentGroup } from './combined-queries'
-import { normalizeAddress } from './combined-shipping'
+import {
+  buildAutoCombineKey,
+  getBlockedClaimOrderIds,
+  hasRequiredCombineAddress,
+  releaseShipmentGroupsWithConflictingShipments,
+} from './combined-safety'
 
 const MAX_PACK = 10
-
-/** 전화번호 정규화: 숫자만 남김 */
-function normalizePhone(raw: string | null | undefined): string {
-  return (raw ?? '').replace(/[^\d]/g, '')
-}
 
 export interface AutoCombineResult {
   created: number
   totalOrders: number
+}
+
+function keyHash(value: string): string {
+  return createHash('sha1').update(value).digest('hex').slice(0, 16)
 }
 
 /**
@@ -40,6 +46,8 @@ export async function runAutoCombineByContact(
   userId: string,
   scopeOrderIds?: string[],
 ): Promise<AutoCombineResult> {
+  await releaseShipmentGroupsWithConflictingShipments(userId, scopeOrderIds)
+
   // 이미 shipmentGroup에 속한 주문 ID 수집 (중복 그룹화 방지)
   const alreadyGrouped = await db
     .select({ orderId: shipmentGroupOrders.orderId })
@@ -55,42 +63,70 @@ export async function runAutoCombineByContact(
     .select({
       id: orders.id,
       status: orders.status,
+      marketplaceId: orders.marketplaceId,
       recipientName: orders.recipientName,
-      recipientPhone: orders.recipientPhone,
       shippingAddress: orders.shippingAddress,
+      isHeld: orders.isHeld,
     })
     .from(orders)
     .where(and(eq(orders.userId, userId), scopeCondition))
 
+  const candidateIds = candidates.map((o) => o.id)
+  const [blockedClaimIds, shipmentRows] = await Promise.all([
+    getBlockedClaimOrderIds(candidateIds),
+    candidateIds.length > 0
+      ? db
+          .select({
+            orderId: shipments.orderId,
+            carrierId: shipments.carrierId,
+            trackingNumber: shipments.trackingNumber,
+          })
+          .from(shipments)
+          .where(and(eq(shipments.userId, userId), inArray(shipments.orderId, candidateIds)))
+      : [],
+  ])
+
+  const shipmentsByOrder = new Map<string, typeof shipmentRows>()
+  for (const row of shipmentRows) {
+    const list = shipmentsByOrder.get(row.orderId) ?? []
+    list.push(row)
+    shipmentsByOrder.set(row.orderId, list)
+  }
+
   // 그룹 매칭 대상 필터링
-  const eligible = candidates.filter((o) => !groupedSet.has(o.id))
+  const eligible = candidates.filter((o) => (
+    !groupedSet.has(o.id)
+    && !o.isHeld
+    && o.status !== 'cancelled'
+    && !blockedClaimIds.has(o.id)
+  ))
   if (eligible.length < 2) return { created: 0, totalOrders: 0 }
 
-  // 이름 + 주소 + 전화 기준 그룹화
+  // 마켓 + 수취인 + 우편번호 + 주소 + 상세주소 기준 그룹화
   type Candidate = (typeof eligible)[number]
   const byKey = new Map<string, Candidate[]>()
   for (const o of eligible) {
-    const name = (o.recipientName ?? '').trim()
-    const phone = normalizePhone(o.recipientPhone)
-    const addr = o.shippingAddress as {
-      zipCode?: string
-      address1?: string
-      address2?: string
-    } | null
-    if (!name || !phone || !addr?.zipCode || !addr?.address1) continue
-    const addrKey = normalizeAddress({
-      zipCode: addr.zipCode,
-      address1: addr.address1,
-      address2: addr.address2,
-    })
-    const key = `${name}|${phone}|${addrKey}`
+    if (!hasRequiredCombineAddress(o)) continue
+    const key = buildAutoCombineKey(o)
     const list = byKey.get(key) ?? []
     list.push(o)
     byKey.set(key, list)
   }
 
-  // 2건 이상 그룹만 유지
-  const mergeKeys = [...byKey.entries()].filter(([, list]) => list.length >= 2)
+  // 2건 이상, 기존 택배사/송장번호가 충돌하지 않는 그룹만 유지
+  const mergeKeys = [...byKey.entries()].filter(([, list]) => {
+    if (list.length < 2) return false
+    const carriers = new Set<string>()
+    const trackingNumbers = new Set<string>()
+    for (const order of list) {
+      const rows = shipmentsByOrder.get(order.id) ?? []
+      for (const row of rows) {
+        if (row.carrierId) carriers.add(row.carrierId)
+        if (row.trackingNumber) trackingNumbers.add(row.trackingNumber)
+      }
+    }
+    return carriers.size <= 1 && trackingNumbers.size <= 1
+  })
   if (mergeKeys.length === 0) return { created: 0, totalOrders: 0 }
 
   const scopedKeys = mergeKeys
@@ -136,7 +172,7 @@ export async function runAutoCombineByContact(
         if (chunk.length < 2) continue
         await createShipmentGroup({
           userId,
-          groupKey: `auto|${key}|${code}`,
+          groupKey: `auto|${keyHash(key)}|${code}`,
           fulfillmentCode: code,
           orderIds: chunk,
         })

@@ -419,15 +419,15 @@ export function ShippingActions({
       return
     }
     const confirmMsg = selectedOrderIds.length > 0
-      ? `선택한 ${scope.length}건에서 이름+연락처 동일 주문을 합포장으로 묶습니다. 계속하시겠습니까?`
-      : `현재 페이지 ${scope.length}건에서 이름+연락처 동일 주문을 합포장으로 묶습니다. 계속하시겠습니까?`
+      ? `선택한 ${scope.length}건에서 마켓+수취인+주소 동일 주문을 합포장으로 묶습니다. 계속하시겠습니까?`
+      : `현재 페이지 ${scope.length}건에서 마켓+수취인+주소 동일 주문을 합포장으로 묶습니다. 계속하시겠습니까?`
     if (!window.confirm(confirmMsg)) return
 
     setCombining(true)
     try {
       const result = await bulkCombineByContactAction(scope)
       if (result.created === 0) {
-        toast.info('합포장 대상이 없습니다 (이름+연락처 동일 주문이 2건 이상인 경우에만 묶입니다).')
+        toast.info('합포장 대상이 없습니다 (마켓+수취인+주소 동일 주문이 2건 이상인 경우에만 묶입니다).')
       } else {
         toast.success(`${result.created}개 그룹 생성 (${result.totalOrders}건 포함). /shipping/combined 에서 확인하세요.`)
       }
@@ -703,13 +703,13 @@ export function ShippingActions({
             onClick={() => void handleBulkCombineByContact()}
             disabled={combining}
             className="rounded-md bg-purple-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50"
-            title="이름+연락처가 동일한 주문을 자동으로 합포장 그룹으로 묶습니다"
+            title="마켓, 수취인, 우편번호, 주소가 동일한 주문을 자동으로 합포장 그룹으로 묶습니다"
           >
             {combining
               ? '묶는 중...'
               : hasSelection
-                ? `선택 합포장 (${selectedOrderIds.length}건, 이름+연락처)`
-                : '일괄 합포장 (이름+연락처)'}
+                ? `선택 합포장 (${selectedOrderIds.length}건, 주소기준)`
+                : '일괄 합포장 (주소기준)'}
           </button>
         )}
 

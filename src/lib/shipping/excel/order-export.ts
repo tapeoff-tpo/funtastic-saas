@@ -27,6 +27,18 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
   right: { style: 'thin' },
 }
 
+const COMBINED_SHIPMENT_FILL: ExcelJS.FillPattern = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFD8E4BC' },
+}
+
+function fillWholeRow(row: ExcelJS.Row, columnCount: number): void {
+  for (let index = 1; index <= columnCount; index += 1) {
+    row.getCell(index).fill = COMBINED_SHIPMENT_FILL
+  }
+}
+
 /**
  * Estimate column width based on field type.
  */
@@ -76,7 +88,10 @@ export async function exportOrdersToExcel(
     for (const col of columns) {
       rowData[col.field] = getNestedValue(order, col.field)
     }
-    worksheet.addRow(rowData)
+    const row = worksheet.addRow(rowData)
+    if (order.shipmentGroupId || order.isCombinedShipment) {
+      fillWholeRow(row, columns.length)
+    }
   }
 
   const arrayBuffer = await workbook.xlsx.writeBuffer()

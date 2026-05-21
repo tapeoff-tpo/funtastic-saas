@@ -25,6 +25,7 @@ export interface CjOrderRow {
   senderAddress: string
   originalProductName?: string  // 수집상품명 (마켓 원본)
   pickingLocation?: string      // 피킹위치 (e.g. '1창고 A-01-03')
+  shipmentGroupId?: string
 }
 
 const HEADERS = [
@@ -76,22 +77,10 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
     width: [15, 15, 15, 40, 30, 8, 8, 8, 20, 36, 8, 30, 10, 15, 40, 15, 20, 20, 20, 8, 30, 20, 35, 10, 15][i] ?? 15,
   }))
 
-  // Detect 합배송: group by (recipientName + recipientAddress)
-  const recipientKey = (r: CjOrderRow) =>
-    `${(r.recipientName ?? '').trim()}||${(r.recipientAddress ?? '').trim()}`
-  const recipientCount = new Map<string, number>()
-  for (const row of rows) {
-    const key = recipientKey(row)
-    recipientCount.set(key, (recipientCount.get(key) ?? 0) + 1)
-  }
-  const combinedRecipients = new Set(
-    [...recipientCount.entries()].filter(([, c]) => c > 1).map(([k]) => k),
-  )
-
   const COMBINED_FILL: ExcelJS.FillPattern = {
     type: 'pattern',
     pattern: 'solid',
-    fgColor: { argb: 'FF66CCFF' }, // 파란 음영 (합배송)
+    fgColor: { argb: 'FFD8E4BC' },
   }
 
   for (const row of rows) {
@@ -132,11 +121,11 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
       '',
     ])
 
-    // 합배송 행에 파란 음영 적용
-    if (combinedRecipients.has(recipientKey(row))) {
-      dataRow.eachCell((cell) => {
-        cell.fill = COMBINED_FILL
-      })
+    // 합포장 행은 실제 shipment group 기준으로 표시한다.
+    if (row.shipmentGroupId) {
+      for (let index = 1; index <= HEADERS.length; index += 1) {
+        dataRow.getCell(index).fill = COMBINED_FILL
+      }
     }
   }
 

@@ -17,6 +17,7 @@ import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
+import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
 
 function getMarketplaceExportName(order: typeof orders.$inferSelect): string {
   const rawData = order.rawData
@@ -69,10 +70,11 @@ export async function GET(request: NextRequest) {
 
   try {
     // Fetch orders with items and shipment data
-    const [orderRows, itemRows, shipmentRows] = await Promise.all([
+    const [orderRows, itemRows, shipmentRows, groupIdByOrder] = await Promise.all([
       db.select().from(orders).where(and(inArray(orders.id, orderIds), eq(orders.userId, workspaceUserId))),
       db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
       db.select().from(shipments).where(inArray(shipments.orderId, orderIds)),
+      getCombinedShipmentGroupIds(workspaceUserId, orderIds),
     ])
 
     // 쇼핑몰 displayName lookup (보내는분성명 = 쇼핑몰명)
@@ -142,6 +144,7 @@ export async function GET(request: NextRequest) {
       const items = itemRows.filter((item) => item.orderId === order.id)
       const shipment = shipmentRows.find((s) => s.orderId === order.id)
       const expandedRows = expandedByOrder.get(order.id) ?? []
+      const shipmentGroupId = groupIdByOrder.get(order.id)
 
       // 매핑 전 원본 (수집상품명/수집옵션명 용)
       const rawFirst = items[0]
@@ -160,6 +163,8 @@ export async function GET(request: NextRequest) {
         orderId: order.internalNo,
         internalNo: order.internalNo,
         marketplaceOrderId: order.marketplaceOrderId,
+        shipmentGroupId: shipmentGroupId ?? '',
+        isCombinedShipment: Boolean(shipmentGroupId),
         // 마켓 상품코드 — 쿠팡 vendorItemId / 네이버 productOrderId / Cafe24 item_no 등
         marketplaceItemId: rawFirst?.marketplaceItemId ?? '',
         marketplaceId: marketplaceName,

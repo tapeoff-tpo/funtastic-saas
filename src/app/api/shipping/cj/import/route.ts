@@ -14,6 +14,7 @@ import { shipments, orders } from '@/lib/db/schema'
 import { eq, and, inArray, or, sql } from 'drizzle-orm'
 import { parseCjInvoiceExcel } from '@/lib/shipping/excel/cj-import'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { releaseShipmentGroupsWithConflictingShipments } from '@/lib/shipping/combined-safety'
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -71,6 +72,7 @@ export async function POST(req: NextRequest) {
 
   let matched = 0
   let unmatched = 0
+  const touchedOrderIds: string[] = []
   const unmatchedRows: { rowNum: number; orderId: string; trackingNumber: string; reason: string }[] = []
 
   for (const row of rows) {
@@ -120,7 +122,10 @@ export async function POST(req: NextRequest) {
       })
       .where(and(eq(orders.id, order.id), eq(orders.userId, workspaceUserId), eq(orders.status, 'confirmed')))
     matched++
+    touchedOrderIds.push(order.id)
   }
+
+  await releaseShipmentGroupsWithConflictingShipments(workspaceUserId, touchedOrderIds)
 
   revalidatePath('/orders')
   revalidateTag('orders', 'max')

@@ -19,6 +19,7 @@ import { createShipment } from './queries'
 import { getCarrierName } from './carrier-codes'
 import { queueInvoiceUploadJob } from '@/lib/jobs/queues'
 import { logOrderChange } from '@/lib/orders/change-log'
+import { releaseShipmentGroupsWithConflictingShipments } from './combined-safety'
 
 /**
  * Queue a single invoice upload.
@@ -50,6 +51,9 @@ export async function queueInvoiceUpload(
 
     if (!order) {
       return { success: false, error: `Order not found: ${orderId}` }
+    }
+    if (!order.connectionId) {
+      return { success: false, error: '마켓 연동 정보가 없어 송장 전송을 예약할 수 없습니다.' }
     }
     if (order.status !== 'confirmed') {
       return { success: false, error: '확인 상태 주문만 송장 등록할 수 있습니다.' }
@@ -98,6 +102,8 @@ export async function queueInvoiceUpload(
         after: { status: 'preparing', trackingNumber, carrierId },
       })
     }
+
+    await releaseShipmentGroupsWithConflictingShipments(userId, [orderId])
 
     return { success: true }
   } catch (error) {
@@ -193,6 +199,8 @@ export async function registerInvoice(
       before: { status: 'confirmed' },
       after: { status: 'preparing', trackingNumber, carrierId },
     })
+
+    await releaseShipmentGroupsWithConflictingShipments(userId, [orderId])
 
     const [saved] = await db
       .select({ id: shipments.id, status: orders.status })

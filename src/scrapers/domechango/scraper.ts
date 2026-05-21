@@ -681,23 +681,7 @@ async function tryInlineInvoiceUpload(page: Page, orderId: string, invoice: Invo
   if (await button.isVisible().catch(() => false)) {
     await button.click({ timeout: 10_000 }).catch(() => undefined)
   } else {
-    const actionSelect = page.locator('#act_status, select[name*="status" i], select[name*="act" i]').first()
-    if (await actionSelect.isVisible().catch(() => false)) {
-      await actionSelect.evaluate(`(element) => {
-        if (!(element instanceof HTMLSelectElement)) return
-        let option = null
-        for (const item of Array.from(element.options)) {
-          if (/송장|배송|발송|출고/.test(item.textContent ?? '')) {
-            option = item
-            break
-          }
-        }
-        if (!option) return
-        element.value = option.value
-        element.dispatchEvent(new Event('input', { bubbles: true }))
-        element.dispatchEvent(new Event('change', { bubbles: true }))
-      }`).catch(() => undefined)
-    }
+    return false
   }
 
   await page.waitForTimeout(1500)
@@ -705,7 +689,7 @@ async function tryInlineInvoiceUpload(page: Page, orderId: string, invoice: Invo
   if (/실패|오류|error|잘못|필수|확인해주세요/.test(bodyText) && !/완료|성공|등록/.test(bodyText)) {
     throw new MarketplaceApiError('domechango', 500, '도매창고 송장 입력 후 오류 메시지가 표시되었습니다.')
   }
-  return true
+  return bodyText.includes(invoice.trackingNumber) || /완료|성공|등록/.test(bodyText)
 }
 
 function findHeaderColumn(worksheet: ExcelJS.Worksheet, aliases: string[]): number | null {
@@ -816,6 +800,12 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
   const combined = `${dialogMessage ?? ''} ${responseText} ${bodyText}`
   if (/실패|오류|error|잘못|필수|확인해주세요/.test(combined) && !/완료|성공|등록/.test(combined)) {
     throw new MarketplaceApiError('domechango', 500, dialogMessage ?? '도매창고 송장 업로드 후 오류 메시지가 표시되었습니다.')
+  }
+  const hasSuccessSignal =
+    /완료|성공|등록|처리되었습니다|업로드되었습니다/.test(combined) ||
+    Boolean(response?.ok() && responseText && !/실패|오류|error/.test(responseText))
+  if (!hasSuccessSignal) {
+    throw new MarketplaceApiError('domechango', 500, '도매창고 송장 업로드 완료 여부를 확인하지 못했습니다. 실제 등록을 확인할 수 없어 실패 처리했습니다.')
   }
 }
 

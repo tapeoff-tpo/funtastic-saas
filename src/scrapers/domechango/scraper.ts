@@ -514,43 +514,44 @@ async function moveSelectedNewOrdersToShippingTarget(
 async function applyInvoiceOrderSearch(page: Page, orderId: string): Promise<void> {
   const until = new Date()
   const since = new Date(until.getTime() - 1000 * 60 * 60 * 24 * 60)
+  const payload = JSON.stringify({ since: formatDateInput(since), until: formatDateInput(until), orderId })
 
-  await page.evaluate(({ since, until, orderId }) => {
-    const setValue = (selector: string, value: string) => {
-      const input = document.querySelector<HTMLInputElement | HTMLSelectElement>(selector)
+  await page.evaluate(`((data) => {
+    const setValue = (selector, value) => {
+      const input = document.querySelector(selector)
       if (!input) return
       input.value = value
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
-    setValue('#sdate, input[name="sdate"]', since)
-    setValue('#edate, input[name="edate"]', until)
+    setValue('#sdate, input[name="sdate"]', data.since)
+    setValue('#edate, input[name="edate"]', data.until)
     setValue('#list_size, select[name="list_size"]', '500')
     setValue('#page, input[name="page"]', '1')
 
-    const statusInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="oistep"], input[name*="status" i]'))
+    const statusInputs = Array.from(document.querySelectorAll('input[name="oistep"], input[name*="status" i]'))
     const allStatus = statusInputs.find((input) => input.value === '' || input.value === '0' || /all|전체/i.test(input.id + input.name))
     if (allStatus) {
       allStatus.checked = true
       allStatus.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
-    const candidates = Array.from(document.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])'))
+    const candidates = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])'))
       .filter((input) => {
-        const key = `${input.id} ${input.name} ${input.placeholder}`.toLowerCase()
+        const key = String(input.id) + ' ' + String(input.name) + ' ' + String(input.placeholder)
         if (/sdate|edate|date|page|list|size/.test(key)) return false
-        return /keyword|search|sword|order|ord|code|goods|name|주문|검색|번호/.test(key)
+        return /keyword|search|sword|order|ord|code|goods|name|주문|검색|번호/.test(key.toLowerCase())
       })
 
-    const input = candidates[0] ?? Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]'))
-      .find((item) => !/sdate|edate|date|page|list|size/i.test(`${item.id} ${item.name}`))
+    const input = candidates[0] ?? Array.from(document.querySelectorAll('input[type="text"]'))
+      .find((item) => !/sdate|edate|date|page|list|size/i.test(String(item.id) + ' ' + String(item.name)))
     if (input) {
-      input.value = orderId
+      input.value = data.orderId
       input.dispatchEvent(new Event('input', { bubbles: true }))
       input.dispatchEvent(new Event('change', { bubbles: true }))
     }
-  }, { since: formatDateInput(since), until: formatDateInput(until), orderId })
+  })(${payload})`)
 
   await page.locator('#btn_search, button, input[type="button"], input[type="submit"]')
     .filter({ hasText: /주문검색|검색|조회/ })
@@ -561,12 +562,14 @@ async function applyInvoiceOrderSearch(page: Page, orderId: string): Promise<voi
 }
 
 async function selectOrderByText(page: Page, orderId: string): Promise<boolean> {
-  return page.evaluate((targetOrderId) => {
+  const targetOrderId = JSON.stringify(orderId)
+  return page.evaluate(`(() => {
+    const targetOrderId = ${targetOrderId}
     const roots = [
       document.querySelector('#order_list'),
       document.querySelector('#goods_list'),
       document,
-    ].filter(Boolean) as Element[]
+    ].filter(Boolean)
 
     for (const root of roots) {
       const rows = Array.from(root.querySelectorAll('tr, .tui-grid-row, [role="row"], li, div'))
@@ -574,8 +577,8 @@ async function selectOrderByText(page: Page, orderId: string): Promise<boolean> 
         const text = row.textContent ?? ''
         if (!text.includes(targetOrderId)) continue
 
-        const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
-          ?? row.closest('tr, .tui-grid-row, [role="row"]')?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+        const checkbox = row.querySelector('input[type="checkbox"]')
+          ?? row.closest('tr, .tui-grid-row, [role="row"]')?.querySelector('input[type="checkbox"]')
         if (!checkbox || checkbox.disabled) return true
         if (!checkbox.checked) checkbox.click()
         checkbox.dispatchEvent(new Event('change', { bubbles: true }))
@@ -583,7 +586,7 @@ async function selectOrderByText(page: Page, orderId: string): Promise<boolean> 
       }
     }
     return false
-  }, orderId).catch(() => false)
+  })()`).catch(() => false)
 }
 
 async function selectCarrier(root: Locator | Page, invoice: InvoiceData): Promise<void> {
@@ -603,18 +606,24 @@ async function selectCarrier(root: Locator | Page, invoice: InvoiceData): Promis
   }
 
   const normalizedCarrierName = carrierName.replace(/\s+/g, '')
-  const selectedByText = await select.evaluate((element, targetName) => {
+  const targetCarrierName = JSON.stringify(normalizedCarrierName)
+  const selectedByText = await select.evaluate(`(element) => {
     if (!(element instanceof HTMLSelectElement)) return false
-    const option = Array.from(element.options).find((item) => {
+    const targetName = ${targetCarrierName}
+    let option = null
+    for (const item of Array.from(element.options)) {
       const label = (item.textContent ?? '').replace(/\s+/g, '')
-      return label.includes(targetName) || targetName.includes(label)
-    })
+      if (label.includes(targetName) || targetName.includes(label)) {
+        option = item
+        break
+      }
+    }
     if (!option) return false
     element.value = option.value
     element.dispatchEvent(new Event('input', { bubbles: true }))
     element.dispatchEvent(new Event('change', { bubbles: true }))
     return true
-  }, normalizedCarrierName).catch(() => false)
+  }`).catch(() => false)
 
   if (!selectedByText) {
     throw new MarketplaceApiError('domechango', 500, `도매창고 택배사를 선택하지 못했습니다. (${carrierName})`)
@@ -653,14 +662,20 @@ async function tryInlineInvoiceUpload(page: Page, orderId: string, invoice: Invo
   } else {
     const actionSelect = page.locator('#act_status, select[name*="status" i], select[name*="act" i]').first()
     if (await actionSelect.isVisible().catch(() => false)) {
-      await actionSelect.evaluate((element) => {
+      await actionSelect.evaluate(`(element) => {
         if (!(element instanceof HTMLSelectElement)) return
-        const option = Array.from(element.options).find((item) => /송장|배송|발송|출고/.test(item.textContent ?? ''))
+        let option = null
+        for (const item of Array.from(element.options)) {
+          if (/송장|배송|발송|출고/.test(item.textContent ?? '')) {
+            option = item
+            break
+          }
+        }
         if (!option) return
         element.value = option.value
         element.dispatchEvent(new Event('input', { bubbles: true }))
         element.dispatchEvent(new Event('change', { bubbles: true }))
-      }).catch(() => undefined)
+      }`).catch(() => undefined)
     }
   }
 

@@ -703,7 +703,7 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
   const uploadedCount = Number(uploadedCountText.replace(/[^\d]/g, '')) || 0
   const uploadCombined = `${uploadDialogMessage ?? ''} ${uploadResponseText} ${await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')}`
   if (!uploadResponse?.ok() && uploadedCount <= 0) {
-    throw new MarketplaceApiError('domechango', 500, `도매창고 송장 엑셀 업로드에 실패했습니다. (${uploadDialogMessage ?? uploadResponseText || '응답 없음'})`)
+    throw new MarketplaceApiError('domechango', 500, `도매창고 송장 엑셀 업로드에 실패했습니다. (${uploadDialogMessage ?? (uploadResponseText || '응답 없음')})`)
   }
   if (/실패|오류|error|잘못|필수|확인해주세요|선택해주세요/.test(uploadCombined) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|업로드되었습니다/.test(uploadCombined)) {
     throw new MarketplaceApiError('domechango', 500, uploadDialogMessage ?? '도매창고 송장 엑셀 업로드 후 오류 메시지가 표시되었습니다.')

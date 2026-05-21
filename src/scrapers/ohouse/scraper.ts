@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v10'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v11'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -149,6 +149,26 @@ async function hasOhouseSession(page: Page): Promise<boolean> {
   return false
 }
 
+async function waitForOhouseAppReady(page: Page): Promise<boolean> {
+  return page
+    .waitForFunction(() => {
+      const hasTokenLikeStorage = (storage: Storage) =>
+        Array.from({ length: storage.length }).some((_, index) => {
+          const key = storage.key(index) ?? ''
+          const value = storage.getItem(key) ?? ''
+          return /token|access|auth|session|jwt/i.test(key) || /eyJ[A-Za-z0-9_-]+\./.test(value)
+        })
+
+      const text = document.body?.innerText ?? ''
+      return (
+        /로그아웃|주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(text) &&
+        (hasTokenLikeStorage(window.localStorage) || hasTokenLikeStorage(window.sessionStorage) || document.cookie.length > 0)
+      )
+    }, undefined, { timeout: 30_000 })
+    .then(() => true)
+    .catch(() => false)
+}
+
 async function isSecondFactorPage(page: Page): Promise<boolean> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   if (/인증\s*(번호|코드)|2차\s*인증|이메일\s*인증|메일로\s*전송/.test(bodyText)) return true
@@ -220,8 +240,9 @@ async function performOhouseLogin(page: Page, credentials: ScraperCredentials): 
   }
 
   await gotoOhouse(page, PARTNER_BASE_URL).catch(() => undefined)
-  if (!(await hasOhouseSession(page))) {
-    return `오늘의집 로그인에 실패했거나 세션을 확인하지 못했습니다. (${await summarizePage(page)})`
+  await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
+  if (!(await waitForOhouseAppReady(page))) {
+    return `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후 주문 앱 인증 상태를 확인하지 못했습니다. (${await summarizePage(page)})`
   }
 
   return null
@@ -367,7 +388,7 @@ export class OhouseScraper implements MarketplaceScraper {
 
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')
       await openOrdersPage(ctx.page)
-      if (!(await hasOhouseSession(ctx.page)) || /\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
+      if (!(await waitForOhouseAppReady(ctx.page)) || /\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
       await setProgress?.('오늘의집 주문 검색 조건 적용 중...')

@@ -16,6 +16,7 @@ export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
 import { getOrderChangeLogs } from './change-log'
+import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 
 /**
  * mappingStatus/displayName 계산용 매핑 조회.
@@ -242,7 +243,7 @@ function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): stri
     if (typeof candidate !== 'string') continue
     const trimmed = candidate.trim()
     if (trimmed === '사방넷' || trimmed.toLowerCase() === 'sabangnet') continue
-    if (trimmed.length > 0) return trimmed
+    if (trimmed.length > 0) return resolveMarketplaceDisplayName(order.marketplaceId, trimmed)
   }
 
   const siteCode = typeof data.empSiteCode === 'string' ? data.empSiteCode : data.SiteCode
@@ -251,7 +252,7 @@ function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): stri
     .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     .map((value) => value.trim())
     .join(' / ')
-  return fallback.length > 0 ? fallback : null
+  return fallback.length > 0 ? fallback : resolveMarketplaceDisplayName(order.marketplaceId)
 }
 
 function isAblyOrderRawData(rawData: Record<string, unknown>): boolean {

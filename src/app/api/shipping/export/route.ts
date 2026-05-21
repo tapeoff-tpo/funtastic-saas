@@ -16,7 +16,7 @@ import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/temp
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
+import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 
 function getMarketplaceExportName(order: typeof orders.$inferSelect): string {
   const rawData = order.rawData
@@ -31,11 +31,11 @@ function getMarketplaceExportName(order: typeof orders.$inferSelect): string {
     for (const candidate of candidates) {
       if (typeof candidate !== 'string') continue
       const trimmed = candidate.trim()
-      if (trimmed) return trimmed
+      if (trimmed) return resolveMarketplaceDisplayName(order.marketplaceId, trimmed)
     }
   }
 
-  return MARKETPLACE_DISPLAY_NAMES[order.marketplaceId] ?? order.marketplaceId
+  return resolveMarketplaceDisplayName(order.marketplaceId)
 }
 
 export async function GET(request: NextRequest) {

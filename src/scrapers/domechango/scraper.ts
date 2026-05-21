@@ -530,21 +530,42 @@ async function applyInvoiceOrderSearch(page: Page, orderId: string): Promise<voi
     setValue('#list_size, select[name="list_size"]', '500')
     setValue('#page, input[name="page"]', '1')
 
-    const statusInputs = Array.from(document.querySelectorAll('input[name="oistep"], input[name*="status" i]'))
-    const allStatus = statusInputs.find((input) => input.value === '' || input.value === '0' || /all|전체/i.test(input.id + input.name))
-    if (allStatus) {
-      allStatus.checked = true
-      allStatus.dispatchEvent(new Event('change', { bubbles: true }))
+    const searchTypeSelect = Array.from(document.querySelectorAll('select')).find((select) => {
+      const key = String(select.id) + ' ' + String(select.name) + ' ' + String(select.className)
+      const optionText = Array.from(select.options).map((option) => option.textContent ?? '').join(' ')
+      return /검색|keyword|skey|stype|search/i.test(key) || /주문번호|상품코드|자체상품코드/.test(optionText)
+    })
+    if (searchTypeSelect) {
+      const orderOption = Array.from(searchTypeSelect.options).find((option) => /주문\s*번호|주문번호/.test(option.textContent ?? ''))
+      if (orderOption) {
+        searchTypeSelect.value = orderOption.value
+        searchTypeSelect.dispatchEvent(new Event('input', { bubbles: true }))
+        searchTypeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      }
     }
 
-    const candidates = Array.from(document.querySelectorAll('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])'))
+    const statusInputs = Array.from(document.querySelectorAll('input[name="oistep"], input[name*="status" i]'))
+    const shippingStatus = statusInputs.find((input) => {
+      const label = input.closest('label')?.textContent ?? document.querySelector('label[for="' + input.id + '"]')?.textContent ?? ''
+      return input.value === '2' || /배송\s*준비|배송준비중|발송\s*대상/.test(label)
+    })
+    const allStatus = statusInputs.find((input) => input.value === '' || input.value === '0' || /all|전체/i.test(input.id + input.name))
+    const targetStatus = shippingStatus ?? allStatus
+    if (targetStatus) {
+      targetStatus.checked = true
+      targetStatus.dispatchEvent(new Event('click', { bubbles: true }))
+      targetStatus.dispatchEvent(new Event('input', { bubbles: true }))
+      targetStatus.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    const candidates = Array.from(document.querySelectorAll('textarea, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])'))
       .filter((input) => {
         const key = String(input.id) + ' ' + String(input.name) + ' ' + String(input.placeholder)
         if (/sdate|edate|date|page|list|size/.test(key)) return false
         return /keyword|search|sword|order|ord|code|goods|name|주문|검색|번호/.test(key.toLowerCase())
       })
 
-    const input = candidates[0] ?? Array.from(document.querySelectorAll('input[type="text"]'))
+    const input = candidates[0] ?? Array.from(document.querySelectorAll('textarea, input[type="text"]'))
       .find((item) => !/sdate|edate|date|page|list|size/i.test(String(item.id) + ' ' + String(item.name)))
     if (input) {
       input.value = data.orderId

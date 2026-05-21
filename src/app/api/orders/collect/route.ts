@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
+import { marketplaceConnections } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { collectOrdersForConnection } from '@/lib/jobs/workers/order-collector'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { createCollectionJobLogsWithLock } from '@/lib/jobs/collection-lock'
 
 /**
  * POST /api/orders/collect
@@ -93,25 +94,40 @@ export async function POST(request: NextRequest) {
     )
   }
 
-  // Pre-create job_log entries (status: queued) and run collection in background
-  const jobLogIds: string[] = []
-
-  for (const conn of connections) {
+  const plannedJobs = connections.map((conn) => {
     const integrationMethod = getIntegrationMethod(conn.marketplaceId, {
       isManual: conn.isManual,
       authType: conn.authType,
     })
-    const [logRow] = await db
-      .insert(jobLogs)
-      .values({
-        jobType: integrationMethod === 'rpa' ? 'scrape-orders' : 'manual-order-collection',
-        marketplaceId: conn.marketplaceId,
-        connectionId: conn.id,
-        status: 'queued',
-      })
-      .returning({ id: jobLogs.id })
+    return {
+      conn,
+      integrationMethod,
+      jobType: integrationMethod === 'rpa' ? 'scrape-orders' : 'manual-order-collection',
+    }
+  })
 
-    jobLogIds.push(logRow.id)
+  const lockResult = await createCollectionJobLogsWithLock(plannedJobs.map(({ conn, jobType }) => ({
+    jobType,
+    marketplaceId: conn.marketplaceId,
+    connectionId: conn.id,
+  })))
+
+  if (!lockResult.ok) {
+    return NextResponse.json(
+      {
+        error: '다른 수집 작업이 진행 중입니다. 현재 작업이 끝난 뒤 다시 실행해주세요.',
+        activeJob: lockResult.activeJob,
+      },
+      { status: 409 },
+    )
+  }
+
+  const jobLogIds = lockResult.jobLogIds
+
+  for (const [index, planned] of plannedJobs.entries()) {
+    const { conn, integrationMethod } = planned
+    const jobLogId = jobLogIds[index]
+    if (!jobLogId) continue
 
     if (integrationMethod === 'rpa') {
       const since = manualDateFrom
@@ -124,7 +140,7 @@ export async function POST(request: NextRequest) {
           connectionId: conn.id,
           userId: workspaceUserId,
           jobType: 'scrape-orders',
-          jobLogId: logRow.id,
+          jobLogId,
           since: since.toISOString(),
         },
         {
@@ -141,7 +157,7 @@ export async function POST(request: NextRequest) {
       connectionId: conn.id,
       userId: workspaceUserId,
       jobType: 'manual-order-collection',
-      jobLogId: logRow.id,
+      jobLogId,
       manualLookbackDays: safeManualLookbackDays,
       manualDateFrom: manualDateFrom ?? undefined,
       manualDateTo: manualDateTo ?? undefined,

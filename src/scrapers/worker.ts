@@ -22,7 +22,7 @@ import { jobLogs, shipments } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import type { ScrapeJobData } from './types'
 import type { MarketplaceId } from '@/lib/marketplace/types'
-import { saveNormalizedOrdersForConnection } from '@/lib/jobs/workers/order-collector'
+import { saveNormalizedOrdersForConnection, upsertClaim } from '@/lib/jobs/workers/order-collector'
 import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 
 // Side-effect import — registers all scraper instances on the registry
@@ -129,10 +129,19 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
       await setProgress('RPA 브라우저로 클레임 페이지 접속 중...')
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
       const claims = await runWithTimeout(scraper.getClaimsOrders(credentials, sinceDate), SCRAPE_JOB_TIMEOUT_MS)
+      let claimsCollected = 0
+      for (const claim of claims) {
+        if (await upsertClaim(claim, userId)) claimsCollected++
+      }
       console.log(`[scrape-worker] ${marketplaceId}: ${claims.length} claims fetched`)
       await db
         .update(jobLogs)
-        .set({ status: 'completed', completedAt: new Date(), claimsCollected: claims.length })
+        .set({
+          status: 'completed',
+          completedAt: new Date(),
+          claimsCollected,
+          progressMessage: `CS ${claimsCollected}건 수집/갱신`,
+        })
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'upload-invoice') {
       await setProgress('RPA 브라우저로 송장 전송 준비 중...')

@@ -49,7 +49,7 @@ import type {
 export function createAdapter(
   marketplaceId: string,
   credentials: Record<string, string>
-): Pick<MarketplaceAdapter, 'config' | 'getOrders' | 'getClaimsOrders' | 'confirmOrder' | 'uploadInvoice'> {
+): Pick<MarketplaceAdapter, 'config' | 'getOrders' | 'getClaimsOrders' | 'confirmOrder' | 'uploadInvoice' | 'getInquiries'> {
   switch (marketplaceId) {
     case 'coupang':
       return new CoupangAdapter({
@@ -396,7 +396,7 @@ export async function collectOrdersForConnection(params: {
   const jobLog = { id: logId }
 
   let ordersCollected = 0
-  let claimsCollected = 0
+  const claimsCollected = 0
 
   // Helper: 사용자에게 보여줄 진행 상태 메시지를 job_logs에 기록.
   // 최선의 노력으로 실행하고 실패해도 본 수집 흐름을 막지 않음.
@@ -597,23 +597,8 @@ export async function collectOrdersForConnection(params: {
       await setProgress(`${ordersCollected}건 신규/기존 주문 저장 완료`)
     }
 
-    // 5. Fetch claims — manual 수집에서는 스킵 (속도 우선, 주문 수집/갱신만 수행)
-    //    스케줄 잡(7일치)은 그대로 클레임도 수집해 놓치는 건 없게 함.
-    if (jobType !== 'manual-order-collection') {
-      await setProgress('클레임(취소/교환/반품) 조회 중...')
-      try {
-        const normalizedClaims = await adapter.getClaimsOrders(since)
-        for (const claim of normalizedClaims) {
-          const wasUpserted = await upsertClaim(claim, userId)
-          if (wasUpserted) {
-            claimsCollected++
-          }
-        }
-      } catch (claimError) {
-        console.warn(`[OrderCollector] Claims collection failed for ${marketplaceId}:`, claimError instanceof Error ? claimError.message : claimError)
-        // Don't let claims failure block order collection success
-      }
-    }
+    // 5. CS data is collected only from the CS management module.
+    // Keep order collection focused on orders so manual and scheduled runs stay fast.
 
     // 6. Update job log with success
     await db
@@ -1122,7 +1107,7 @@ function enrichOrderRawData(order: NormalizedOrder): Record<string, unknown> {
  * Looks up the orderId from the orders table using marketplaceOrderId.
  * Deduplicates on (marketplace_id, marketplace_claim_id) per D-04.
  */
-async function upsertClaim(
+export async function upsertClaim(
   claim: NormalizedClaim,
   userId: string
 ): Promise<boolean> {

@@ -5,6 +5,7 @@ import { AlertCircle, ArrowRight, MessageSquareText, RotateCcw, Undo2, XCircle }
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCsOverview } from '@/lib/cs/queries'
+import { CsCollectPanel } from '@/components/cs/cs-collect-panel'
 import type { ClaimStatus, ClaimType } from '@/lib/orders/types'
 
 export const metadata: Metadata = {
@@ -98,6 +99,8 @@ export default async function CsPage() {
         <StatItem label="처리중" value={overview.claimsByStatus.processing} tone="blue" />
         <StatItem label="미답변 문의" value={overview.unansweredInquiries} />
       </div>
+
+      <CsCollectPanel />
 
       <section className="rounded-md border bg-white">
         <div className="flex items-center justify-between border-b px-4 py-3">

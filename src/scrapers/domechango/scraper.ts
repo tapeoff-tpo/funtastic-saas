@@ -182,10 +182,17 @@ async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<v
       input.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
-    const newOrderRadio = document.querySelector<HTMLInputElement>('#oistep1, input[name="oistep"][value="1"]')
-    if (newOrderRadio) {
-      newOrderRadio.checked = true
-      newOrderRadio.dispatchEvent(new Event('change', { bubbles: true }))
+    const shippingTargetRadio =
+      document.querySelector<HTMLInputElement>('#oistep2, input[name="oistep"][value="2"]') ??
+      Array.from(document.querySelectorAll<HTMLInputElement>('input[name="oistep"]')).find((input) => {
+        const label = input.closest('label')?.textContent ?? document.querySelector(`label[for="${input.id}"]`)?.textContent ?? ''
+        return /발송대상|배송준비|주문확인/.test(label)
+      })
+    if (shippingTargetRadio) {
+      shippingTargetRadio.checked = true
+      shippingTargetRadio.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+      shippingTargetRadio.dispatchEvent(new Event('input', { bubbles: true }))
+      shippingTargetRadio.dispatchEvent(new Event('change', { bubbles: true }))
     }
   }, { since: formatDateInput(since), until: formatDateInput(until) })
 
@@ -198,13 +205,14 @@ async function selectFirstOrderForExcel(page: Page): Promise<void> {
   let selected = false
 
   for (const checkbox of checkboxLocators) {
-    const candidate = await checkbox.evaluate((element) => {
+    const candidate = await checkbox.evaluate((element, index) => {
       if (!(element instanceof HTMLInputElement)) return false
       if (element.disabled) return false
       const row = element.closest('tr, .tui-grid-row, [role="row"]')
       const text = row?.textContent ?? ''
-      return /\d{8,}|신규주문|배송준비중|배송중|배송완료/.test(text)
-    }).catch(() => false)
+      if (/전체|선택|checkbox/i.test(`${element.name} ${element.id}`) && !row) return false
+      return /\d{6,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text) || index > 0
+    }, checkboxLocators.indexOf(checkbox)).catch(() => false)
     if (!candidate) continue
 
     await checkbox.scrollIntoViewIfNeeded().catch(() => undefined)
@@ -237,7 +245,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<void> {
       let rowCheckbox: HTMLInputElement | undefined
       for (const checkbox of visibleCheckboxes) {
         const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
-        if (row && /\d{8,}|신규주문|배송준비중|배송중|배송완료/.test(row.textContent ?? '')) {
+        if (row && /\d{6,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(row.textContent ?? '')) {
           rowCheckbox = checkbox
           break
         }

@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v6'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v7'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -61,6 +61,16 @@ function parseKstDate(value: string): Date {
 
 function normalizeAccountKey(value: string | undefined): string {
   return (value || 'default').replace(/[^0-9A-Za-z가-힣_-]/g, '_')
+}
+
+function validateOhouseSecondFactor(credentials: ScraperCredentials): string | null {
+  if (credentials.extras?.twoFactorMethod !== 'naver_email') {
+    return '오늘의집 RPA는 네이버 메일 2차 인증 방식으로 다시 저장해야 합니다.'
+  }
+  if (!credentials.extras.naverEmail || !credentials.extras.naverPassword) {
+    return '오늘의집 RPA 네이버 메일 주소/앱 비밀번호가 저장되어 있지 않습니다.'
+  }
+  return null
 }
 
 async function summarizePage(page: Page): Promise<string> {
@@ -295,6 +305,14 @@ export class OhouseScraper implements MarketplaceScraper {
   readonly displayName = '오늘의집'
 
   async login(credentials: ScraperCredentials): Promise<ScraperLoginResult> {
+    const secondFactorError = validateOhouseSecondFactor(credentials)
+    if (secondFactorError) {
+      return {
+        success: false,
+        error: `${OHOUSE_RPA_VERSION}: ${secondFactorError} 마켓연동에서 같은 계정명으로 오늘의집 RPA를 다시 저장해주세요.`,
+      }
+    }
+
     const { context, page, close } = await openContext()
 
     try {

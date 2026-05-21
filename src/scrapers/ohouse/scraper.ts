@@ -2,7 +2,7 @@ import ExcelJS from 'exceljs'
 import type { Download, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type { InvoiceData, MarketplaceId, NormalizedClaim, NormalizedOrder } from '@/lib/marketplace/types'
-import { dumpStorageState, openContext } from '../browser'
+import { openContext } from '../browser'
 import { readNaverVerificationCode } from '../mail/naver'
 import type { MarketplaceScraper, ScraperCredentials, ScraperLoginResult } from '../types'
 
@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v9'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v10'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -342,45 +342,14 @@ export class OhouseScraper implements MarketplaceScraper {
       }
     }
 
-    const { context, page, close } = await openContext()
-
-    try {
-      logStep('login: open login page')
-      const error = await performOhouseLogin(page, credentials)
-      if (error) {
-        return {
-          success: false,
-          error,
-        }
-      }
-
-      return {
-        success: true,
-        storageState: await dumpStorageState(context),
-        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 8),
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown login error',
-      }
-    } finally {
-      await close()
+    return {
+      success: true,
+      expiresAt: new Date(Date.now() + 1000 * 60 * 10),
     }
   }
 
-  async testSession(credentials: ScraperCredentials): Promise<{ ok: boolean; error?: string }> {
-    const { page, close } = await openContext(credentials.storageState)
-    try {
-      await gotoOhouse(page, PARTNER_BASE_URL)
-      if (await hasOhouseSession(page)) return { ok: true }
-      const loginResult = await this.login(credentials)
-      return loginResult.success ? { ok: true } : { ok: false, error: loginResult.error ?? '오늘의집 세션 확인 실패' }
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Unknown session error' }
-    } finally {
-      await close()
-    }
+  async testSession(): Promise<{ ok: boolean; error?: string }> {
+    return { ok: false, error: `${OHOUSE_RPA_VERSION}: 오늘의집은 저장 세션을 쓰지 않고 수집마다 새로 로그인합니다.` }
   }
 
   async getOrders(
@@ -389,19 +358,12 @@ export class OhouseScraper implements MarketplaceScraper {
     setProgress?: (message: string) => Promise<void>,
   ): Promise<NormalizedOrder[]> {
     const until = new Date()
-    let sessionState = credentials.storageState
-    let ctx = await openContext(sessionState)
+    const ctx = await openContext()
 
     try {
-      await setProgress?.('오늘의집 파트너센터 접속 중...')
-      await gotoOhouse(ctx.page, PARTNER_BASE_URL)
-      if (!(await hasOhouseSession(ctx.page))) {
-        await setProgress?.('오늘의집 로그인 세션 복원 실패, 같은 브라우저에서 다시 로그인 중...')
-        const error = await performOhouseLogin(ctx.page, credentials)
-        if (error) throw new MarketplaceApiError('ohouse', 401, error)
-        sessionState = await dumpStorageState(ctx.context)
-        credentials.storageState = sessionState
-      }
+      await setProgress?.('오늘의집 새 브라우저 세션으로 로그인 중...')
+      const error = await performOhouseLogin(ctx.page, credentials)
+      if (error) throw new MarketplaceApiError('ohouse', 401, error)
 
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')
       await openOrdersPage(ctx.page)

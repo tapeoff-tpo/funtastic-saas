@@ -10,9 +10,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "worker": "node --import tsx src/worker.ts",
     "worker:start": "node --env-file=.env.local --import tsx src/worker.ts",
     "worker:railway": "node --import tsx src/worker.ts",
     "worker:dev": "node --env-file=.env.local --import tsx --watch src/worker.ts",
+    "scrape-worker": "node --import tsx src/scrapers/worker.ts",
     "scrape-worker:start": "node --env-file=.env.local --import tsx src/scrapers/worker.ts",
     "scrape-worker:railway": "node --import tsx src/scrapers/worker.ts",
     "scrape-worker:dev": "node --env-file=.env.local --import tsx --watch src/scrapers/worker.ts"

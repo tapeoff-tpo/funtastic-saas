@@ -1,7 +1,7 @@
 import { mkdir, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import ExcelJS from 'exceljs'
-import type { Download, Locator, Page } from 'playwright'
+import type { Download, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   InvoiceData,
@@ -96,18 +96,6 @@ async function readDownloadBuffer(download: Download): Promise<Buffer> {
       }, DOWNLOAD_STREAM_TIMEOUT_MS)
     }),
   ])
-}
-
-async function setInputValue(input: Locator, value: string): Promise<void> {
-  await input.fill(value, { timeout: 3000 }).catch(async () => {
-    await input.evaluate((element, nextValue) => {
-      if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) return
-      element.removeAttribute('readonly')
-      element.value = nextValue
-      element.dispatchEvent(new Event('input', { bubbles: true }))
-      element.dispatchEvent(new Event('change', { bubbles: true }))
-    }, value)
-  })
 }
 
 async function gotoDomechango(page: Page, url = WMS_BASE_URL): Promise<void> {
@@ -610,103 +598,6 @@ async function selectOrderByText(page: Page, orderId: string): Promise<boolean> 
   })()`).catch(() => false)
 }
 
-async function selectCarrier(root: Locator | Page, invoice: InvoiceData): Promise<void> {
-  const carrierName = getCarrierName(invoice.carrierId)
-  const carrierCode = mapCarrierCode('domechango', invoice.carrierId)
-  const select = root.locator('select:visible').first()
-  if (!(await select.isVisible().catch(() => false))) return
-
-  for (const option of [
-    { label: carrierName },
-    { label: carrierName.replace(/\s+/g, '') },
-    { value: carrierCode },
-    { value: invoice.carrierId },
-  ]) {
-    const selected = await select.selectOption(option, { timeout: 2000 }).then(() => true).catch(() => false)
-    if (selected) return
-  }
-
-  const normalizedCarrierName = carrierName.replace(/\s+/g, '')
-  const targetCarrierName = JSON.stringify(normalizedCarrierName)
-  const selectedByText = await select.evaluate(`(element) => {
-    if (!(element instanceof HTMLSelectElement)) return false
-    const targetName = ${targetCarrierName}
-    let option = null
-    for (const item of Array.from(element.options)) {
-      const label = (item.textContent ?? '').replace(/\s+/g, '')
-      if (label.includes(targetName) || targetName.includes(label)) {
-        option = item
-        break
-      }
-    }
-    if (!option) return false
-    element.value = option.value
-    element.dispatchEvent(new Event('input', { bubbles: true }))
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-    return true
-  }`).catch(() => false)
-
-  if (!selectedByText) {
-    throw new MarketplaceApiError('domechango', 500, `도매창고 택배사를 선택하지 못했습니다. (${carrierName})`)
-  }
-}
-
-async function tryInlineInvoiceUpload(page: Page, orderId: string, invoice: InvoiceData): Promise<boolean> {
-  const row = page.locator('tr, .tui-grid-row, [role="row"]').filter({ hasText: orderId }).first()
-  if (!(await row.isVisible().catch(() => false))) return false
-
-  const trackingInput = row
-    .locator([
-      'input[name*="invoice" i]',
-      'input[name*="tracking" i]',
-      'input[name*="songjang" i]',
-      'input[id*="invoice" i]',
-      'input[id*="tracking" i]',
-      'input[id*="songjang" i]',
-      'input[placeholder*="송장"]',
-      'input[placeholder*="운송장"]',
-      'input[title*="송장"]',
-    ].join(', '))
-    .first()
-  const hasTrackingInput = await trackingInput.isVisible().catch(() => false)
-  if (!hasTrackingInput) return false
-
-  await selectCarrier(row, invoice)
-  await setInputValue(trackingInput, invoice.trackingNumber)
-
-  const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
-    .then(async (dialogEvent) => {
-      const message = dialogEvent.message()
-      await dialogEvent.accept().catch(() => undefined)
-      return message
-    })
-    .catch(() => null)
-  const responsePromise = page.waitForResponse(
-    (res) => res.request().method() !== 'GET' && /wms|order|invoice|delivery|songjang|tracking/i.test(res.url()),
-    { timeout: 10_000 },
-  ).catch(() => null)
-
-  const button = row
-    .locator('button, input[type="button"], input[type="submit"], a')
-    .filter({ hasText: /송장|배송|저장|등록|전송|확인/ })
-    .first()
-  if (await button.isVisible().catch(() => false)) {
-    await button.click({ timeout: 10_000 }).catch(() => undefined)
-  } else {
-    return false
-  }
-
-  const [dialogMessage, response] = await Promise.all([dialogPromise, responsePromise])
-  const responseText = response ? await response.text().catch(() => '') : ''
-  await page.waitForTimeout(1000)
-  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  const resultText = `${dialogMessage ?? ''} ${responseText}`
-  if (/실패|오류|error|잘못|필수|확인해주세요/.test(`${resultText} ${bodyText}`) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다/.test(resultText)) {
-    throw new MarketplaceApiError('domechango', 500, dialogMessage ?? '도매창고 송장 입력 후 오류 메시지가 표시되었습니다.')
-  }
-  return /완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|송장\s*(등록|저장|전송)/.test(resultText)
-}
-
 function findHeaderColumn(worksheet: ExcelJS.Worksheet, aliases: string[]): number | null {
   const headerRow = worksheet.getRow(1)
   let found: number | null = null
@@ -769,59 +660,81 @@ async function buildInvoiceWorkbook(
 }
 
 async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void> {
-  const uploadButton = page
-    .locator('button, input[type="button"], input[type="submit"], a')
-    .filter({ hasText: /택배송장\s*업로드|송장\s*업로드|배송\s*업로드|엑셀\s*업로드/ })
-    .first()
-
-  if (await uploadButton.isVisible().catch(() => false)) {
-    await uploadButton.click({ timeout: 10_000 }).catch(() => undefined)
-    await page.waitForTimeout(1000)
+  const uploadButton = page.locator('#btn_songjang_upload').first()
+  if (!(await uploadButton.isVisible({ timeout: 10_000 }).catch(() => false))) {
+    throw new MarketplaceApiError('domechango', 500, `도매창고 택배송장 업로드 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
   }
 
-  const fileInput = page.locator('input[type="file"]').last()
-  await fileInput.waitFor({ state: 'attached', timeout: 10_000 }).catch(() => undefined)
-  if (!(await fileInput.count())) {
-    throw new MarketplaceApiError('domechango', 500, `도매창고 송장 업로드 파일 선택창을 찾지 못했습니다. (${await summarizePage(page)})`)
+  await uploadButton.click({ timeout: 10_000 })
+
+  const frameElement = page.locator('iframe#added_frame').first()
+  await frameElement.waitFor({ state: 'attached', timeout: 10_000 })
+  const frame = await frameElement.contentFrame()
+  if (!frame) {
+    throw new MarketplaceApiError('domechango', 500, '도매창고 택배송장 업로드 화면을 열지 못했습니다.')
   }
 
-  await fileInput.setInputFiles(filePath)
+  await frame.locator('body').waitFor({ state: 'visible', timeout: 10_000 })
+  const fileInput = frame.locator('#excel_file, input[type="file"]').first()
+  await fileInput.waitFor({ state: 'attached', timeout: 10_000 })
 
-  const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
+  const uploadResponsePromise = page.waitForResponse(
+    (res) => res.request().method() === 'POST' && /\/wms\/order\/songjang\/list(?:\?|$)/.test(res.url()),
+    { timeout: 30_000 },
+  ).catch(() => null)
+  const uploadDialogPromise = page.waitForEvent('dialog', { timeout: 10_000 })
     .then(async (dialogEvent) => {
+      const message = dialogEvent.message()
       await dialogEvent.accept().catch(() => undefined)
-      return dialogEvent.message()
+      return message
     })
     .catch(() => null)
 
-  const responsePromise = page.waitForResponse(
-    (res) => res.request().method() !== 'GET' && /wms|order|invoice|upload|excel|delivery|songjang/i.test(res.url()),
+  await fileInput.setInputFiles(filePath)
+
+  const [uploadResponse, uploadDialogMessage] = await Promise.all([uploadResponsePromise, uploadDialogPromise])
+  const uploadResponseText = uploadResponse ? await uploadResponse.text().catch(() => '') : ''
+  await frame.waitForFunction(() => {
+    const totalText = document.querySelector('#order_list_total')?.textContent ?? ''
+    return Number(totalText.replace(/[^\d]/g, '')) > 0
+  }, undefined, { timeout: 15_000 }).catch(() => undefined)
+
+  const uploadedCountText = await frame.locator('#order_list_total').innerText({ timeout: 3000 }).catch(() => '')
+  const uploadedCount = Number(uploadedCountText.replace(/[^\d]/g, '')) || 0
+  const uploadCombined = `${uploadDialogMessage ?? ''} ${uploadResponseText} ${await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')}`
+  if (!uploadResponse?.ok() && uploadedCount <= 0) {
+    throw new MarketplaceApiError('domechango', 500, `도매창고 송장 엑셀 업로드에 실패했습니다. (${uploadDialogMessage ?? uploadResponseText || '응답 없음'})`)
+  }
+  if (/실패|오류|error|잘못|필수|확인해주세요|선택해주세요/.test(uploadCombined) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|업로드되었습니다/.test(uploadCombined)) {
+    throw new MarketplaceApiError('domechango', 500, uploadDialogMessage ?? '도매창고 송장 엑셀 업로드 후 오류 메시지가 표시되었습니다.')
+  }
+  if (uploadedCount <= 0) {
+    throw new MarketplaceApiError('domechango', 500, '도매창고 송장 엑셀 업로드 후 처리할 주문이 표시되지 않았습니다.')
+  }
+
+  const registerResponsePromise = page.waitForResponse(
+    (res) => res.request().method() === 'PATCH' && /\/wms\/order\/list\/status\/4(?:\?|$)/.test(res.url()),
     { timeout: 30_000 },
   ).catch(() => null)
+  const registerDialogPromise = page.waitForEvent('dialog', { timeout: 10_000 })
+    .then(async (dialogEvent) => {
+      const message = dialogEvent.message()
+      await dialogEvent.accept().catch(() => undefined)
+      return message
+    })
+    .catch(() => null)
 
-  const submit = page
-    .locator('button, input[type="button"], input[type="submit"], a')
-    .filter({ hasText: /업로드|저장|등록|전송|확인/ })
-    .last()
-  if (await submit.isVisible().catch(() => false)) {
-    await submit.click({ timeout: 10_000 }).catch(() => undefined)
+  await frame.locator('#act_status').selectOption('regist', { timeout: 10_000 })
+
+  const [registerResponse, registerDialogMessage] = await Promise.all([registerResponsePromise, registerDialogPromise])
+  const registerResponseText = registerResponse ? await registerResponse.text().catch(() => '') : ''
+  await page.waitForTimeout(1000)
+  const registerCombined = `${registerDialogMessage ?? ''} ${registerResponseText} ${await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')}`
+  if (/실패|오류|error|잘못|필수|확인해주세요|택배사를 선택|송장번호를 입력/.test(registerCombined) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다/.test(registerCombined)) {
+    throw new MarketplaceApiError('domechango', 500, registerDialogMessage ?? '도매창고 송장등록 후 오류 메시지가 표시되었습니다.')
   }
-
-  const [dialogMessage, response] = await Promise.all([dialogPromise, responsePromise])
-  await page.waitForTimeout(1500)
-
-  const responseText = response ? await response.text().catch(() => '') : ''
-  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  const resultText = `${dialogMessage ?? ''} ${responseText}`
-  const combined = `${resultText} ${bodyText}`
-  if (/실패|오류|error|잘못|필수|확인해주세요/.test(combined) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|업로드되었습니다/.test(resultText)) {
-    throw new MarketplaceApiError('domechango', 500, dialogMessage ?? '도매창고 송장 업로드 후 오류 메시지가 표시되었습니다.')
-  }
-  const hasSuccessSignal =
-    /완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|업로드되었습니다|송장\s*(등록|저장|전송)/.test(resultText) ||
-    Boolean(response?.ok() && responseText && !/실패|오류|error/.test(responseText))
-  if (!hasSuccessSignal) {
-    throw new MarketplaceApiError('domechango', 500, '도매창고 송장 업로드 완료 여부를 확인하지 못했습니다. 실제 등록을 확인할 수 없어 실패 처리했습니다.')
+  if (!registerResponse?.ok() && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다/.test(registerCombined)) {
+    throw new MarketplaceApiError('domechango', 500, '도매창고 송장등록 완료 여부를 확인하지 못했습니다. 실제 등록을 확인할 수 없어 실패 처리했습니다.')
   }
 }
 
@@ -958,9 +871,6 @@ export class DomechangoScraper implements MarketplaceScraper {
       if (!selected) {
         throw new MarketplaceApiError('domechango', 404, `도매창고 주문을 찾지 못했습니다. (${orderId}, ${await summarizePage(ctx.page)})`)
       }
-
-      const inlineUploaded = await runStep('invoice: try inline upload', () => tryInlineInvoiceUpload(ctx.page, orderId, invoice))
-      if (inlineUploaded) return { success: true }
 
       const templateBuffer = await triggerSelectedOrderExcelDownload(ctx.page, undefined, 15_000).catch(() => undefined)
       const workbookBuffer = await runStep('invoice: build upload workbook', () => buildInvoiceWorkbook(orderId, invoice, templateBuffer))

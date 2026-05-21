@@ -215,14 +215,14 @@ async function applyOrderSearch(
 }
 
 async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
-  const domSelected = await page.evaluate(() => {
-    const isVisible = (element: HTMLElement) => {
+  const domSelected = await page.evaluate(`(() => {
+    const isVisible = (element) => {
       const rect = element.getBoundingClientRect()
       const style = window.getComputedStyle(element)
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
     }
 
-    const markCheckbox = (checkbox: HTMLInputElement) => {
+    const markCheckbox = (checkbox) => {
       checkbox.scrollIntoView({ block: 'center', inline: 'center' })
       if (!checkbox.checked) checkbox.click()
       if (!checkbox.checked) {
@@ -233,21 +233,21 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       return checkbox.checked
     }
 
-    const rows = Array.from(document.querySelectorAll<HTMLElement>('tr, .tui-grid-row, [role="row"]'))
+    const rows = Array.from(document.querySelectorAll('tr, .tui-grid-row, [role="row"]'))
     for (const row of rows) {
       const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-      const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      const checkbox = row.querySelector('input[type="checkbox"]')
       if (!checkbox || checkbox.disabled) continue
       if (!/\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text)) continue
       if (markCheckbox(checkbox)) return true
     }
 
-    const tableCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"], table input[type="checkbox"]'))
+    const tableCheckboxes = Array.from(document.querySelectorAll('tbody input[type="checkbox"], table input[type="checkbox"]'))
       .filter((checkbox) => !checkbox.disabled)
     for (const checkbox of tableCheckboxes) {
       const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
       const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-      const key = `${checkbox.name} ${checkbox.id} ${checkbox.className}`
+      const key = String(checkbox.name) + ' ' + String(checkbox.id) + ' ' + String(checkbox.className)
       if (!isVisible(checkbox) && !/\d{10,}|배송준비중|배송중|배송완료/.test(text)) continue
       if (/전체|all|header/i.test(key) && !/\d{10,}|배송준비중|배송중|배송완료/.test(text)) continue
       if (/보류주문|검색어|기간|주문상태/.test(text) && !/\d{10,}/.test(text)) continue
@@ -257,7 +257,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
     const bodyText = document.body.textContent ?? ''
     const hasResultCount = /총\s*[1-9]\d*\s*개/.test(bodyText)
     if (hasResultCount) {
-      const allCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      const allCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'))
         .filter((checkbox) => !checkbox.disabled)
       const dataCheckbox = allCheckboxes.find((checkbox) => {
         const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
@@ -268,7 +268,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
     }
 
     return false
-  }).catch(() => false)
+  })()`).catch(() => false)
 
   if (domSelected) return true
 
@@ -306,15 +306,15 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
   }
 
   if (!selected) {
-    selected = await page.evaluate(() => {
+    selected = await page.evaluate(`(() => {
       const gridRoot = document.querySelector('#order_list') ?? document.querySelector('#goods_list') ?? document
-      const checkboxes = gridRoot.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
-      const selectableCheckboxes: HTMLInputElement[] = []
+      const checkboxes = gridRoot.querySelectorAll('input[type="checkbox"]')
+      const selectableCheckboxes = []
       for (const checkbox of checkboxes) {
         if (!checkbox.disabled) selectableCheckboxes.push(checkbox)
       }
 
-      let rowCheckbox: HTMLInputElement | undefined
+      let rowCheckbox
       for (const checkbox of selectableCheckboxes) {
         const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
         if (row && /\d{6,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(row.textContent ?? '')) {
@@ -332,7 +332,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
         rowCheckbox.dispatchEvent(new Event('change', { bubbles: true }))
       }
       return rowCheckbox.checked
-    })
+    })()`)
   }
 
   return selected
@@ -366,17 +366,17 @@ async function triggerSelectedOrderExcelDownload(
 
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-    page.evaluate(() => {
-      const selects = document.querySelectorAll<HTMLSelectElement>('select')
-      let select: HTMLSelectElement | undefined
-      let option: HTMLOptionElement | undefined
+    page.evaluate(`(() => {
+      const selects = document.querySelectorAll('select')
+      let select
+      let option
       const visibleSelects = Array.from(selects).filter((candidate) => candidate.offsetParent !== null)
-      const isSelectedOrderSelect = (candidate: HTMLSelectElement) => {
-        const key = `${candidate.id} ${candidate.name} ${candidate.className} ${candidate.selectedOptions[0]?.textContent ?? ''}`
+      const isSelectedOrderSelect = (candidate) => {
+        const key = String(candidate.id) + ' ' + String(candidate.name) + ' ' + String(candidate.className) + ' ' + String(candidate.selectedOptions[0]?.textContent ?? '')
         const optionText = Array.from(candidate.options).map((candidateOption) => candidateOption.textContent ?? '').join(' ')
         if (/list_size|검색어|search|sdate|edate|page/i.test(key)) return false
         if (/50개씩|주문번호|상품코드|자체상품코드/.test(optionText)) return false
-        return /선택\s*주문|선택주문|엑셀\s*다운|다운로드/.test(`${key} ${optionText}`)
+        return /선택\s*주문|선택주문|엑셀\s*다운|다운로드/.test(key + ' ' + optionText)
       }
 
       for (const candidate of visibleSelects.filter(isSelectedOrderSelect)) {
@@ -410,8 +410,8 @@ async function triggerSelectedOrderExcelDownload(
       select.value = option.value
       select.dispatchEvent(new Event('input', { bubbles: true }))
       select.dispatchEvent(new Event('change', { bubbles: true }))
-      select.onchange?.(new Event('change') as Event)
-    }),
+      if (typeof select.onchange === 'function') select.onchange(new Event('change'))
+    })()`),
   ]).catch(async (error) => {
     const dialogMessage = await dialogPromise
     throw new MarketplaceApiError(

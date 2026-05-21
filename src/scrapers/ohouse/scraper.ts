@@ -6,12 +6,12 @@ import { dumpStorageState, openContext } from '../browser'
 import { readNaverVerificationCode } from '../mail/naver'
 import type { MarketplaceScraper, ScraperCredentials, ScraperLoginResult } from '../types'
 
-const PARTNER_BASE_URL = 'https://partners.ohou.se'
-const LOGIN_URL = `${PARTNER_BASE_URL}/users/sign_in`
+const PARTNER_BASE_URL = 'https://orora.ohou.se'
+const LOGIN_URL = `${PARTNER_BASE_URL}/signin?redirectUrl=%2F`
 const ORDER_URL_CANDIDATES = [
-  `${PARTNER_BASE_URL}/orders`,
-  `${PARTNER_BASE_URL}/orders?customFilters=PAYMENT_COMPLETE`,
-  `${PARTNER_BASE_URL}/orders?customFilters=READY_FOR_DELIVERY`,
+  `${PARTNER_BASE_URL}/orders?customFilters=PAYMENT_COMPLETE&order=PAYMENT_AT_DESC`,
+  `${PARTNER_BASE_URL}/orders?customFilters=READY_FOR_DELIVERY&order=PAYMENT_AT_DESC`,
+  `${PARTNER_BASE_URL}/orders?order=PAYMENT_AT_DESC`,
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
@@ -121,7 +121,7 @@ async function readDownloadBuffer(download: Download): Promise<Buffer> {
 
 async function hasOhouseSession(page: Page): Promise<boolean> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  if (/로그아웃|주문\s*관리|상품\s*관리|배송\s*관리|정산\s*관리|매출\s*현황|판매진행|미확인주문|배송준비중/.test(bodyText)) {
+  if (/로그아웃|주문\s*관리|상품\s*관리|배송\s*관리|정산\s*관리|매출\s*현황|판매진행|미확인주문|배송준비중|주문배송현황|검색결과\s*엑셀\s*다운로드/.test(bodyText)) {
     return true
   }
   if (/login|signin/i.test(page.url())) return false
@@ -173,6 +173,23 @@ async function submitLogin(page: Page): Promise<void> {
   await page.waitForTimeout(1500)
 }
 
+async function openLoginForm(page: Page): Promise<void> {
+  const hasEmailInput = await page
+    .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[placeholder*="아이디"], input[placeholder*="이메일"], input[type="email"], input[type="text"]')
+    .first()
+    .isVisible({ timeout: 1500 })
+    .catch(() => false)
+  if (hasEmailInput) return
+
+  await clickByText(page, /판매자\s*로그인|로그인/i).catch(() => false)
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await page
+    .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[placeholder*="아이디"], input[placeholder*="이메일"], input[type="email"], input[type="text"]')
+    .first()
+    .waitFor({ state: 'visible', timeout: 10_000 })
+    .catch(() => undefined)
+}
+
 async function openOrdersPage(page: Page): Promise<void> {
   for (const url of ORDER_URL_CANDIDATES) {
     await gotoOhouse(page, url).catch(() => undefined)
@@ -219,7 +236,7 @@ async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<v
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   const downloadPromise = page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
-  const clicked = await clickByText(page, /엑셀|excel|다운로드|download/i)
+  const clicked = await clickByText(page, /검색결과\s*엑셀\s*다운로드/i)
   if (!clicked) {
     downloadPromise.catch(() => undefined)
     throw new MarketplaceApiError('ohouse', 500, `오늘의집 주문 엑셀 다운로드 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
@@ -245,12 +262,13 @@ export class OhouseScraper implements MarketplaceScraper {
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 8),
         }
       }
+      await openLoginForm(page)
 
       const idInput = page
-        .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[type="email"], input[type="text"]')
+        .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[placeholder*="아이디"], input[placeholder*="이메일"], input[type="email"], input[type="text"]')
         .first()
       const passwordInput = page
-        .locator('input#user_password, input[name="user[password]"], input[name="password"], input[name*="password" i], input[name*="pw" i], input[type="password"]')
+        .locator('input#user_password, input[name="user[password]"], input[name="password"], input[name*="password" i], input[name*="pw" i], input[placeholder*="비밀번호"], input[type="password"]')
         .first()
       await setInputValue(idInput, credentials.email)
       await setInputValue(passwordInput, credentials.password)

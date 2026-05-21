@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { Dialog, Locator, Page } from 'playwright'
+import type { Dialog, Frame, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   InvoiceData,
@@ -119,8 +119,16 @@ function logStep(step: string): void {
 async function summarizePage(page: Page): Promise<string> {
   const title = await page.title().catch(() => '')
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 240)
-  return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
+  const frameTexts = await Promise.all(
+    page.frames().slice(1, 4).map((frame, index) =>
+      frame.locator('body').innerText({ timeout: 1500 })
+        .then((text) => `frame${index + 1}=${text.replace(/\s+/g, ' ').trim().slice(0, 180)}`)
+        .catch(() => ''),
+    ),
+  )
+  const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 360)
+  const compactFrames = frameTexts.filter(Boolean).join(' ')
+  return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}${compactFrames ? ` ${compactFrames}` : ''}`
 }
 
 async function gotoTobizon(page: Page, url = TOBIZON_BASE_URL): Promise<void> {
@@ -325,7 +333,21 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
 }
 
 async function readVisibleOrderRows(page: Page): Promise<TobizonVisibleOrderRow[]> {
-  return page.evaluate(() => {
+  await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => undefined)
+  await page.waitForTimeout(2500)
+
+  const frames = [page.mainFrame(), ...page.frames().filter((frame) => frame !== page.mainFrame())]
+  for (const frame of frames) {
+    await frame.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => undefined)
+    const rows = await readVisibleOrderRowsFromFrame(frame)
+    if (rows.length > 0) return rows
+  }
+
+  return []
+}
+
+async function readVisibleOrderRowsFromFrame(frame: Frame): Promise<TobizonVisibleOrderRow[]> {
+  return frame.evaluate(() => {
     const normalize = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
     const cleanHeader = (value: string) => normalize(value).replace(/\s+/g, '')
     const orderIdPattern = /[A-Z0-9]*\d{12,}[A-Z0-9]*/i

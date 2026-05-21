@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import * as XLSX from 'xlsx'
 import type { Dialog, Frame, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
@@ -82,6 +83,42 @@ function stripHtml(value: string): string {
   return decodeHtmlEntities(value.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+function splitDelimitedLine(line: string, delimiter: string): string[] {
+  const cells: string[] = []
+  let current = ''
+  let quoted = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    const next = line[index + 1]
+    if (char === '"' && quoted && next === '"') {
+      current += '"'
+      index += 1
+      continue
+    }
+    if (char === '"') {
+      quoted = !quoted
+      continue
+    }
+    if (char === delimiter && !quoted) {
+      cells.push(current.trim())
+      current = ''
+      continue
+    }
+    current += char
+  }
+  cells.push(current.trim())
+  return cells
+}
+
+function sniffWorkbook(buffer: Buffer): string {
+  const signature = buffer.subarray(0, 8).toString('hex')
+  const preview = decodeWorkbookText(buffer)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240)
+  return `bytes=${buffer.length} sig=${signature} preview=${preview || '-'}`
 }
 
 function parseNumber(value: string): number {
@@ -720,9 +757,17 @@ export class TobizonScraper implements MarketplaceScraper {
     try {
       await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     } catch (error) {
+      const workbookOrders = this.parseWorkbookWithXlsx(buffer)
+      if (workbookOrders.length > 0) return workbookOrders
       const htmlOrders = this.parseHtmlOrders(buffer)
       if (htmlOrders.length > 0) return htmlOrders
-      throw error
+      const textOrders = this.parseTextOrders(buffer)
+      if (textOrders.length > 0) return textOrders
+      throw new MarketplaceApiError(
+        'tobizon',
+        500,
+        `투비즈온 주문 파일을 엑셀로 해석하지 못했습니다. 내려받은 파일이 실제 주문 엑셀이 아닐 수 있습니다. (${error instanceof Error ? error.message : 'unknown workbook error'}; ${sniffWorkbook(buffer)})`,
+      )
     }
     const worksheet = workbook.worksheets[0]
     if (!worksheet) return []
@@ -830,6 +875,25 @@ export class TobizonScraper implements MarketplaceScraper {
     return orders
   }
 
+  private parseWorkbookWithXlsx(buffer: Buffer): NormalizedOrder[] {
+    try {
+      const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false })
+      const sheetName = workbook.SheetNames[0]
+      if (!sheetName) return []
+      const sheet = workbook.Sheets[sheetName]
+      if (!sheet) return []
+      const rows = XLSX.utils.sheet_to_json<string[]>(sheet, {
+        header: 1,
+        defval: '',
+        raw: false,
+        blankrows: false,
+      }).map((row) => row.map((cell) => String(cell ?? '').trim()))
+      return this.parseOrderRows(rows, 'rpa-xls')
+    } catch {
+      return []
+    }
+  }
+
   private parseHtmlOrders(buffer: Buffer): NormalizedOrder[] {
     const html = decodeWorkbookText(buffer)
     const tableRows = Array.from(html.matchAll(/<tr[\s\S]*?<\/tr>/gi)).map((rowMatch, index) => ({
@@ -921,6 +985,118 @@ export class TobizonScraper implements MarketplaceScraper {
         const looseOrder = this.normalizeLooseRowOrder(row.cells, row.rowNumber, 'rpa-html-excel-loose')
         if (looseOrder) orders.push(looseOrder)
       }
+    }
+
+    return orders
+  }
+
+  private parseTextOrders(buffer: Buffer): NormalizedOrder[] {
+    const text = decodeWorkbookText(buffer)
+    const lines = text
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+    if (lines.length === 0) return []
+
+    const delimiter = lines.slice(0, 10).reduce((best, line) => {
+      const candidates = ['\t', ',', ';']
+      const next = candidates
+        .map((candidate) => ({ delimiter: candidate, count: splitDelimitedLine(line, candidate).length }))
+        .sort((a, b) => b.count - a.count)[0]
+      return next.count > best.count ? next : best
+    }, { delimiter: '\t', count: 1 }).delimiter
+
+    const rows = lines
+      .map((line) => splitDelimitedLine(line, delimiter))
+      .filter((row) => row.some((cell) => cell.trim()))
+
+    return this.parseOrderRows(rows, 'rpa-text-excel')
+  }
+
+  private parseOrderRows(rows: string[][], source: string): NormalizedOrder[] {
+    const normalizedRows = rows.map((row) => row.map((cell) => String(cell ?? '').replace(/\s+/g, ' ').trim()))
+    const headerIndex = normalizedRows.findIndex((row, index) => {
+      if (index > 20) return false
+      const text = row.map(normalizeHeader).join(' ')
+      return /주문번호|주문일|주문상품|상품명|수취인|받는사람/.test(text)
+    })
+
+    if (headerIndex < 0) {
+      return normalizedRows
+        .map((row, rowIndex) => this.normalizeLooseRowOrder(row, rowIndex + 1, `${source}-loose`))
+        .filter((order): order is NormalizedOrder => Boolean(order))
+    }
+
+    const columns = normalizedRows[headerIndex].map(normalizeHeader)
+    const get = (row: string[], ...headers: string[]) => {
+      for (const headerName of headers) {
+        const normalized = normalizeHeader(headerName)
+        const index = columns.findIndex((column) => column === normalized || column.includes(normalized) || normalized.includes(column))
+        if (index >= 0) return row[index] ?? ''
+      }
+      return ''
+    }
+
+    const orders: NormalizedOrder[] = []
+    for (const [index, row] of normalizedRows.entries()) {
+      if (index <= headerIndex) continue
+      const orderNo = extractOrderNumber(get(row, '주문번호', '주문번호주문일자', '주문코드'))
+      const productName = get(row, '주문상품', '상품명', '상품', '품명', '제품명')
+      if (!orderNo || !productName) {
+        const looseOrder = this.normalizeLooseRowOrder(row, index + 1, `${source}-loose`)
+        if (looseOrder) orders.push(looseOrder)
+        continue
+      }
+
+      const quantity = Math.max(parseNumber(get(row, '수량', '구매수량', '주문수량')), 1)
+      const itemTotal = parseNumber(get(row, '상품금액', '상품합계', '결제금액', '총금액'))
+      const supplyPrice = parseNumber(get(row, '공급가', '공급단가', '단가'))
+      const shippingFee = parseNumber(get(row, '배송비', '배송료'))
+      const recipientName = get(row, '수취인', '수취인명', '받는사람', '수령인')
+      const recipientPhone = get(row, '수취인전화번호', '수취인연락처', '핸드폰', '휴대폰', '전화번호')
+      const buyerName = get(row, '주문자', '주문자명', '구매자') || recipientName
+      const buyerPhone = get(row, '주문자전화번호', '주문자연락처') || recipientPhone
+      const productCode = get(row, '상품코드', '상품번호')
+      const sku = get(row, '자체상품코드', '판매자상품코드', '업체상품코드') || productCode
+      const optionText = get(row, '옵션', '옵션명', '선택옵션')
+
+      orders.push({
+        marketplaceId: 'tobizon',
+        marketplaceOrderId: orderNo,
+        marketplaceStatus: get(row, '주문상태', '상태') || '주문',
+        status: 'new',
+        buyerName,
+        buyerPhone,
+        recipientName,
+        recipientPhone,
+        shippingAddress: {
+          zipCode: get(row, '우편번호', '우편'),
+          address1: get(row, '주소', '배송주소', '수취인주소'),
+          address2: get(row, '상세주소', '나머지주소') || undefined,
+        },
+        orderedAt: parseKstDate(get(row, '주문일자', '주문일', '등록일')),
+        totalAmount: itemTotal || supplyPrice * quantity,
+        shippingType: get(row, '배송구분', '배송비구분') || null,
+        shippingFee,
+        deliveryMessage: get(row, '배송메세지', '배송메시지', '요청사항', '배송시요청사항') || null,
+        rawData: {
+          source,
+          rowNumber: index + 1,
+          productCode,
+          carrierName: get(row, '택배사', '배송사') || null,
+          trackingNumber: get(row, '송장번호') || null,
+        },
+        items: [
+          {
+            marketplaceItemId: get(row, '주문상품번호', '상품주문번호') || productCode || orderNo,
+            productName,
+            optionText: optionText || undefined,
+            quantity,
+            unitPrice: supplyPrice || (quantity > 0 ? itemTotal / quantity : itemTotal),
+            sku: sku || undefined,
+          },
+        ],
+      })
     }
 
     return orders

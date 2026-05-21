@@ -47,23 +47,23 @@ export default async function CsInquiriesPage({
   const result = await getCsTickets(workspaceUserId, filters)
 
   return (
-    <div className="space-y-3">
-      <div className="grid gap-3 lg:grid-cols-2">
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
         <CsCollectPanel
-          title="API 문의 수집"
           buttonLabel="API 문의 수집"
-          runningLabel="API 문의 수집 중..."
+          runningLabel="API 수집 중..."
           scope="inquiries"
           method="api"
           lookbackDays={7}
+          compact
         />
         <CsCollectPanel
-          title="RPA 문의 수집"
           buttonLabel="RPA 문의 수집"
-          runningLabel="RPA 문의 수집 중..."
+          runningLabel="RPA 수집 중..."
           scope="inquiries"
           method="rpa"
           lookbackDays={7}
+          compact
         />
       </div>
       <CsWorkbench

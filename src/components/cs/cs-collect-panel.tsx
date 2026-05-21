@@ -16,6 +16,7 @@ interface CsCollectPanelProps {
   lookbackDays?: number
   scope?: CsCollectScope
   method?: CsCollectMethod
+  compact?: boolean
 }
 
 export function CsCollectPanel({
@@ -25,6 +26,7 @@ export function CsCollectPanel({
   lookbackDays = 7,
   scope = 'all',
   method = 'all',
+  compact = false,
 }: CsCollectPanelProps) {
   const [collecting, setCollecting] = useState(false)
   const [logs, setLogs] = useState<JobLogResult[] | null>(null)
@@ -103,6 +105,28 @@ export function CsCollectPanel({
   const safeLogs = logs ?? []
   const totalCollected = safeLogs.reduce((sum, log) => sum + (log.claimsCollected ?? 0), 0)
   const allDone = safeLogs.length > 0 && safeLogs.every((log) => ['completed', 'failed', 'cancelled'].includes(log.status))
+  const hasFailure = safeLogs.some((log) => log.status === 'failed')
+
+  if (compact) {
+    return (
+      <div className="inline-flex min-h-9 items-center gap-2">
+        <button
+          type="button"
+          onClick={startCollect}
+          disabled={collecting}
+          className="inline-flex h-9 items-center gap-1.5 rounded-md bg-gray-900 px-3 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
+        >
+          <RefreshCw className={`h-4 w-4 ${collecting ? 'animate-spin' : ''}`} />
+          {collecting ? runningLabel : buttonLabel}
+        </button>
+        {logs && (
+          <span className={`text-xs ${hasFailure ? 'text-red-600' : 'text-gray-500'}`}>
+            {allDone ? `총 ${totalCollected.toLocaleString('ko-KR')}건` : '진행 중'}
+          </span>
+        )}
+      </div>
+    )
+  }
 
   return (
     <section className="rounded-md border bg-white">

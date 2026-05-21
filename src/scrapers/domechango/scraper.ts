@@ -222,13 +222,14 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
     }
 
-    const clickCheckbox = (checkbox: HTMLInputElement) => {
+    const markCheckbox = (checkbox: HTMLInputElement) => {
       checkbox.scrollIntoView({ block: 'center', inline: 'center' })
       if (!checkbox.checked) checkbox.click()
-      checkbox.checked = true
-      checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-      checkbox.dispatchEvent(new Event('input', { bubbles: true }))
-      checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+      if (!checkbox.checked) {
+        checkbox.checked = true
+        checkbox.dispatchEvent(new Event('input', { bubbles: true }))
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+      }
       return checkbox.checked
     }
 
@@ -238,21 +239,33 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
       if (!checkbox || checkbox.disabled) continue
       if (!/\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text)) continue
-      if (clickCheckbox(checkbox)) return true
+      if (markCheckbox(checkbox)) return true
     }
 
     const tableCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"], table input[type="checkbox"]'))
-      .filter((checkbox) => !checkbox.disabled && isVisible(checkbox))
+      .filter((checkbox) => !checkbox.disabled)
     for (const checkbox of tableCheckboxes) {
       const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
       const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+      const key = `${checkbox.name} ${checkbox.id} ${checkbox.className}`
+      if (!isVisible(checkbox) && !/\d{10,}|배송준비중|배송중|배송완료/.test(text)) continue
+      if (/전체|all|header/i.test(key) && !/\d{10,}|배송준비중|배송중|배송완료/.test(text)) continue
       if (/보류주문|검색어|기간|주문상태/.test(text) && !/\d{10,}/.test(text)) continue
-      if (clickCheckbox(checkbox)) return true
+      if (markCheckbox(checkbox)) return true
     }
 
     const bodyText = document.body.textContent ?? ''
     const hasResultCount = /총\s*[1-9]\d*\s*개/.test(bodyText)
-    if (hasResultCount && tableCheckboxes[0]) return clickCheckbox(tableCheckboxes[0])
+    if (hasResultCount) {
+      const allCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+        .filter((checkbox) => !checkbox.disabled)
+      const dataCheckbox = allCheckboxes.find((checkbox) => {
+        const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
+        const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+        return /\d{10,}|배송준비중|배송중|배송완료/.test(text)
+      }) ?? tableCheckboxes.at(-1) ?? allCheckboxes.at(-1)
+      if (dataCheckbox) return markCheckbox(dataCheckbox)
+    }
 
     return false
   }).catch(() => false)
@@ -275,17 +288,18 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
 
     await checkbox.scrollIntoViewIfNeeded().catch(() => undefined)
     const box = await checkbox.boundingBox().catch(() => null)
-    if (box) {
+    if (box && !(await checkbox.isChecked().catch(() => false))) {
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
       await page.waitForTimeout(300)
     }
     await checkbox.evaluate((element) => {
       if (!(element instanceof HTMLInputElement)) return
       if (!element.checked) element.click()
-      element.checked = true
-      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-      element.dispatchEvent(new Event('input', { bubbles: true }))
-      element.dispatchEvent(new Event('change', { bubbles: true }))
+      if (!element.checked) {
+        element.checked = true
+        element.dispatchEvent(new Event('input', { bubbles: true }))
+        element.dispatchEvent(new Event('change', { bubbles: true }))
+      }
     }).catch(() => undefined)
     selected = await checkbox.isChecked().catch(() => false)
     if (selected) break
@@ -295,27 +309,28 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
     selected = await page.evaluate(() => {
       const gridRoot = document.querySelector('#order_list') ?? document.querySelector('#goods_list') ?? document
       const checkboxes = gridRoot.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
-      const visibleCheckboxes: HTMLInputElement[] = []
+      const selectableCheckboxes: HTMLInputElement[] = []
       for (const checkbox of checkboxes) {
-        if (!checkbox.disabled && checkbox.offsetParent !== null) visibleCheckboxes.push(checkbox)
+        if (!checkbox.disabled) selectableCheckboxes.push(checkbox)
       }
 
       let rowCheckbox: HTMLInputElement | undefined
-      for (const checkbox of visibleCheckboxes) {
+      for (const checkbox of selectableCheckboxes) {
         const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
         if (row && /\d{6,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(row.textContent ?? '')) {
           rowCheckbox = checkbox
           break
         }
       }
-      rowCheckbox = rowCheckbox ?? visibleCheckboxes[1] ?? visibleCheckboxes[0]
+      rowCheckbox = rowCheckbox ?? selectableCheckboxes.at(-1)
 
       if (!rowCheckbox) return false
       if (!rowCheckbox.checked) rowCheckbox.click()
-      rowCheckbox.checked = true
-      rowCheckbox.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-      rowCheckbox.dispatchEvent(new Event('input', { bubbles: true }))
-      rowCheckbox.dispatchEvent(new Event('change', { bubbles: true }))
+      if (!rowCheckbox.checked) {
+        rowCheckbox.checked = true
+        rowCheckbox.dispatchEvent(new Event('input', { bubbles: true }))
+        rowCheckbox.dispatchEvent(new Event('change', { bubbles: true }))
+      }
       return rowCheckbox.checked
     })
   }

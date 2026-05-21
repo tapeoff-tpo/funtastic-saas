@@ -322,6 +322,8 @@ function RpaConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) 
         />
       </div>
 
+      {marketplace.id === 'ohouse' && <OhouseSecondFactorFields marketplaceId={marketplace.id} />}
+
       <Button type="submit" disabled={isPending} className="w-full">
         {isPending ? '등록 중...' : 'RPA 연동 저장'}
       </Button>
@@ -330,6 +332,36 @@ function RpaConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) 
         <p className="text-sm text-red-600">{state.error}</p>
       )}
     </form>
+  )
+}
+
+function OhouseSecondFactorFields({ marketplaceId }: { marketplaceId: string }) {
+  return (
+    <div className="space-y-4 border-t pt-4">
+      <input type="hidden" name="two_factor_method" value="naver_email" />
+
+      <div className="space-y-1">
+        <Label htmlFor={`${marketplaceId}-rpa-naver-email`}>네이버 메일 주소</Label>
+        <Input
+          id={`${marketplaceId}-rpa-naver-email`}
+          name="naver_email"
+          type="email"
+          required
+          autoComplete="off"
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor={`${marketplaceId}-rpa-naver-password`}>네이버 메일 앱 비밀번호</Label>
+        <Input
+          id={`${marketplaceId}-rpa-naver-password`}
+          name="naver_password"
+          type="password"
+          required
+          autoComplete="off"
+        />
+      </div>
+    </div>
   )
 }
 

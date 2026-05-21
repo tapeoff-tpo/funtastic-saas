@@ -453,6 +453,19 @@ export async function registerRpaMarketplaceConnection(
   if (!email || !password) {
     return { error: '로그인 ID와 비밀번호를 입력해주세요.' }
   }
+  const twoFactorMethod = String(formData.get('two_factor_method') ?? '').trim()
+  const naverEmail = String(formData.get('naver_email') ?? '').trim()
+  const naverPassword = String(formData.get('naver_password') ?? '').trim()
+  const extras: Record<string, string> = {}
+  if (marketplaceId === 'ohouse') {
+    if (twoFactorMethod !== 'naver_email' || !naverEmail || !naverPassword) {
+      return { error: '오늘의집 RPA는 네이버 메일 2차 인증 정보가 필요합니다.' }
+    }
+    extras.twoFactorMethod = 'naver_email'
+    extras.naverEmail = naverEmail
+    extras.naverPassword = naverPassword
+    extras.accountKey = storeAlias
+  }
 
   const displayName = storeAlias === 'default' ? config.name : `${config.name} (${storeAlias})`
   let connectionId: string
@@ -505,13 +518,20 @@ export async function registerRpaMarketplaceConnection(
   }
 
   try {
-    await storeScrapeCredentials(workspaceUserId, marketplaceId, connectionId, { email, password })
+    await storeScrapeCredentials(workspaceUserId, marketplaceId, connectionId, {
+      email,
+      password,
+      extras: Object.keys(extras).length > 0 ? extras : undefined,
+    })
     await db
       .update(marketplaceConnections)
       .set({
         vaultSecretNames: [
           `scrape_${workspaceUserId}_${marketplaceId}_${connectionId}_email`,
           `scrape_${workspaceUserId}_${marketplaceId}_${connectionId}_password`,
+          ...(Object.keys(extras).length > 0
+            ? [`scrape_${workspaceUserId}_${marketplaceId}_${connectionId}_extras`]
+            : []),
         ],
         updatedAt: new Date(),
       })

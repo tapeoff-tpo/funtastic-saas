@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { marketplaceConnections } from '@/lib/db/schema'
+import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { collectOrdersForConnection } from '@/lib/jobs/workers/order-collector'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createCollectionJobLogsWithLock } from '@/lib/jobs/collection-lock'
+import { isRegisteredScraperMarketplace } from '@/scrapers/supported'
 
 /**
  * POST /api/orders/collect
@@ -130,6 +131,18 @@ export async function POST(request: NextRequest) {
     if (!jobLogId) continue
 
     if (integrationMethod === 'rpa') {
+      if (!isRegisteredScraperMarketplace(conn.marketplaceId)) {
+        await db
+          .update(jobLogs)
+          .set({
+            status: 'failed',
+            completedAt: new Date(),
+            errorMessage: `${conn.displayName} RPA 수집 스크래퍼가 아직 구현되지 않았습니다. 먼저 해당 마켓 전용 RPA 스크래퍼를 추가해야 합니다.`,
+          })
+          .where(eq(jobLogs.id, jobLogId))
+        continue
+      }
+
       const since = manualDateFrom
         ? new Date(`${manualDateFrom}T00:00:00+09:00`)
         : new Date(Date.now() - (safeManualLookbackDays ?? 3) * 24 * 60 * 60 * 1000)

@@ -717,6 +717,19 @@ export class TobizonScraper implements MarketplaceScraper {
       })
     })
 
+    if (orders.length === 0) {
+      worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber <= headerRowNumber) return
+        const cells: string[] = []
+        row.eachCell((cell) => {
+          const text = readCellText(cell.value)
+          if (text) cells.push(text)
+        })
+        const looseOrder = this.normalizeLooseRowOrder(cells, rowNumber, 'rpa-excel-loose')
+        if (looseOrder) orders.push(looseOrder)
+      })
+    }
+
     return orders
   }
 
@@ -731,7 +744,11 @@ export class TobizonScraper implements MarketplaceScraper {
       const text = row.cells.map(normalizeHeader).join(' ')
       return /주문번호|주문일|주문상품|상품명|수취인|받는사람/.test(text)
     })
-    if (!header) return []
+    if (!header) {
+      return tableRows
+        .map((row) => this.normalizeLooseRowOrder(row.cells, row.rowNumber, 'rpa-html-excel-loose'))
+        .filter((order): order is NormalizedOrder => Boolean(order))
+    }
 
     const columns = header.cells.map(normalizeHeader)
     const get = (row: { cells: string[] }, ...headers: string[]) => {
@@ -801,6 +818,77 @@ export class TobizonScraper implements MarketplaceScraper {
       })
     }
 
+    if (orders.length === 0) {
+      for (const row of tableRows) {
+        if (row.rowNumber <= header.rowNumber) continue
+        const looseOrder = this.normalizeLooseRowOrder(row.cells, row.rowNumber, 'rpa-html-excel-loose')
+        if (looseOrder) orders.push(looseOrder)
+      }
+    }
+
     return orders
+  }
+
+  private normalizeLooseRowOrder(
+    cells: string[],
+    rowNumber: number,
+    source: string,
+  ): NormalizedOrder | null {
+    const joined = cells.join(' ')
+    const orderNo = extractOrderNumber(joined)
+    if (!orderNo || !/\d{12,}/.test(orderNo)) return null
+
+    const productName = cells
+      .map((cell) => cell.replace(/\s+/g, ' ').trim())
+      .filter((cell) => {
+        if (!cell || cell.includes(orderNo)) return false
+        if (/주문번호|주문상품|상품명|수취인|배송|상태|번호|선택|엑셀/.test(cell)) return false
+        if (/^\d+$/.test(cell.replaceAll(',', ''))) return false
+        if (/^\d{4}[.-]\d{1,2}[.-]\d{1,2}/.test(cell)) return false
+        if (/입금완료|배송준비|배송완료|신규|과세|free/i.test(cell)) return false
+        return /[가-힣A-Za-z]/.test(cell)
+      })
+      .sort((a, b) => b.length - a.length)[0]
+      ?? `투비즈온 주문 ${orderNo}`
+
+    const quantityText = cells.find((cell) => /^\s*\d+\s*개?\s*$/.test(cell)) ?? '1'
+    const quantity = Math.max(parseNumber(quantityText), 1)
+    const amountText = [...cells]
+      .reverse()
+      .find((cell) => parseNumber(cell) > 0 && /[\d,]+/.test(cell))
+      ?? ''
+    const totalAmount = parseNumber(amountText)
+    const recipientName = cells.find((cell) => /^[가-힣]{2,8}$/.test(cell.trim())) ?? '투비즈온'
+
+    return {
+      marketplaceId: 'tobizon',
+      marketplaceOrderId: orderNo,
+      marketplaceStatus: joined.match(/입금완료|배송준비|배송완료|신규/)?.[0] ?? '입금완료',
+      status: 'new',
+      buyerName: recipientName,
+      recipientName,
+      shippingAddress: {
+        zipCode: '',
+        address1: '',
+      },
+      orderedAt: parseKstDate(extractFirstDate(joined)),
+      totalAmount,
+      shippingType: null,
+      shippingFee: null,
+      deliveryMessage: null,
+      rawData: {
+        source,
+        rowNumber,
+        cells,
+      },
+      items: [
+        {
+          marketplaceItemId: orderNo,
+          productName,
+          quantity,
+          unitPrice: quantity > 0 ? totalAmount / quantity : totalAmount,
+        },
+      ],
+    }
   }
 }

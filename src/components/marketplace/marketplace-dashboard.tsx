@@ -1378,12 +1378,17 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{log.displayName}</p>
         {isCompleted && (
-          <p className="text-sm text-muted-foreground">
-            주문 <span className="font-medium text-foreground">{log.ordersCollected ?? 0}건</span>
-            {(log.claimsCollected ?? 0) > 0 && (
-              <>, 클레임 <span className="font-medium text-foreground">{log.claimsCollected}건</span></>
-            )}{' '}수집/갱신
-          </p>
+          <>
+            <p className="text-sm text-muted-foreground">
+              주문 <span className="font-medium text-foreground">{log.ordersCollected ?? 0}건</span>
+              {(log.claimsCollected ?? 0) > 0 && (
+                <>, 클레임 <span className="font-medium text-foreground">{log.claimsCollected}건</span></>
+              )}{' '}수집/갱신
+            </p>
+            {log.progressMessage && (
+              <p className="break-words text-xs text-muted-foreground">{log.progressMessage}</p>
+            )}
+          </>
         )}
         {isFailed && (
           <p className="break-words text-sm text-red-500">{log.errorMessage ?? '알 수 없는 오류'}</p>

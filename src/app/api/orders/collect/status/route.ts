@@ -21,7 +21,7 @@ const withLastProgress = (message: string) =>
 async function markTimedOutInvoiceShipments(jobLogIds: string[], message: string): Promise<void> {
   if (jobLogIds.length === 0) return
   const queue = getMarketplaceScrapeQueue()
-  const jobs = await queue.getJobs(['waiting', 'active', 'delayed', 'prioritized'], 0, 500)
+  const jobs = await queue.getJobs(['wait', 'active', 'delayed', 'prioritized', 'paused'], 0, 500)
   const targetIds = new Set(jobLogIds)
 
   await Promise.all(jobs.map(async (job) => {

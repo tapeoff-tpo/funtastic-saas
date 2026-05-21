@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v8'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v9'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -195,6 +195,38 @@ async function submitLogin(page: Page): Promise<void> {
   await page.waitForTimeout(2500)
 }
 
+async function performOhouseLogin(page: Page, credentials: ScraperCredentials): Promise<string | null> {
+  await gotoOhouse(page, LOGIN_URL)
+  if (await hasOhouseSession(page)) return null
+  await openLoginForm(page)
+
+  const idInput = page
+    .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[placeholder*="아이디"], input[placeholder*="이메일"], input[type="email"], input[type="text"]')
+    .first()
+  const passwordInput = page
+    .locator('input#user_password, input[name="user[password]"], input[name="password"], input[name*="password" i], input[name*="pw" i], input[placeholder*="비밀번호"], input[type="password"]')
+    .first()
+  await setInputValue(idInput, credentials.email)
+  await setInputValue(passwordInput, credentials.password)
+
+  logStep('login: submit credentials')
+  await submitLogin(page)
+  await handleEmailSecondFactor(page, credentials)
+
+  if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
+    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+    const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력|계정.*확인|판매자.*확인|인증.*필요/)?.[0]
+    return `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후에도 로그인 화면에 머물러 있습니다.${reason ? ` (${reason})` : ' 오늘의집 ID/PW, 판매자 계정 권한, 2차 인증 설정을 확인해주세요.'} (${await summarizePage(page)})`
+  }
+
+  await gotoOhouse(page, PARTNER_BASE_URL).catch(() => undefined)
+  if (!(await hasOhouseSession(page))) {
+    return `오늘의집 로그인에 실패했거나 세션을 확인하지 못했습니다. (${await summarizePage(page)})`
+  }
+
+  return null
+}
+
 async function openLoginForm(page: Page): Promise<void> {
   const hasEmailInput = await page
     .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[placeholder*="아이디"], input[placeholder*="이메일"], input[type="email"], input[type="text"]')
@@ -314,42 +346,11 @@ export class OhouseScraper implements MarketplaceScraper {
 
     try {
       logStep('login: open login page')
-      await gotoOhouse(page, LOGIN_URL)
-      if (await hasOhouseSession(page)) {
-        return {
-          success: true,
-          storageState: await dumpStorageState(context),
-          expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 8),
-        }
-      }
-      await openLoginForm(page)
-
-      const idInput = page
-        .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[placeholder*="아이디"], input[placeholder*="이메일"], input[type="email"], input[type="text"]')
-        .first()
-      const passwordInput = page
-        .locator('input#user_password, input[name="user[password]"], input[name="password"], input[name*="password" i], input[name*="pw" i], input[placeholder*="비밀번호"], input[type="password"]')
-        .first()
-      await setInputValue(idInput, credentials.email)
-      await setInputValue(passwordInput, credentials.password)
-
-      logStep('login: submit credentials')
-      await submitLogin(page)
-      await handleEmailSecondFactor(page, credentials)
-      if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
-        const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-        const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력|계정.*확인|판매자.*확인|인증.*필요/)?.[0]
+      const error = await performOhouseLogin(page, credentials)
+      if (error) {
         return {
           success: false,
-          error: `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후에도 로그인 화면에 머물러 있습니다.${reason ? ` (${reason})` : ' 오늘의집 ID/PW, 판매자 계정 권한, 2차 인증 설정을 확인해주세요.'} (${await summarizePage(page)})`,
-        }
-      }
-      await gotoOhouse(page, PARTNER_BASE_URL).catch(() => undefined)
-
-      if (!(await hasOhouseSession(page))) {
-        return {
-          success: false,
-          error: `오늘의집 로그인에 실패했거나 세션을 확인하지 못했습니다. (${await summarizePage(page)})`,
+          error,
         }
       }
 
@@ -395,13 +396,11 @@ export class OhouseScraper implements MarketplaceScraper {
       await setProgress?.('오늘의집 파트너센터 접속 중...')
       await gotoOhouse(ctx.page, PARTNER_BASE_URL)
       if (!(await hasOhouseSession(ctx.page))) {
-        await ctx.close()
-        const loginResult = await this.login(credentials)
-        if (!loginResult.success || !loginResult.storageState) {
-          throw new MarketplaceApiError('ohouse', 401, loginResult.error ?? '오늘의집 로그인 실패')
-        }
-        sessionState = loginResult.storageState
-        ctx = await openContext(sessionState)
+        await setProgress?.('오늘의집 로그인 세션 복원 실패, 같은 브라우저에서 다시 로그인 중...')
+        const error = await performOhouseLogin(ctx.page, credentials)
+        if (error) throw new MarketplaceApiError('ohouse', 401, error)
+        sessionState = await dumpStorageState(ctx.context)
+        credentials.storageState = sessionState
       }
 
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')

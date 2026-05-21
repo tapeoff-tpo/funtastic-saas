@@ -4,6 +4,7 @@ export interface JobLogResult {
   id: string
   marketplaceId: string | null
   connectionId: string | null
+  jobType?: string | null
   status: string
   ordersCollected: number | null
   claimsCollected: number | null
@@ -28,6 +29,23 @@ interface UseCollectPollReturn {
 const POLL_INTERVAL = 1500
 const MAX_POLL_DURATION = 3 * 60 * 1000
 const POLL_TIMEOUT_MESSAGE = 'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
+
+function formatActiveCollectionError(error: string, activeJob: unknown): string {
+  if (!activeJob || typeof activeJob !== 'object') return error
+  const job = activeJob as {
+    jobType?: string | null
+    marketplaceId?: string | null
+    status?: string | null
+    progressMessage?: string | null
+  }
+  const parts = [
+    job.marketplaceId ? `마켓=${job.marketplaceId}` : null,
+    job.jobType ? `작업=${job.jobType}` : null,
+    job.status ? `상태=${job.status}` : null,
+    job.progressMessage ? `마지막 단계=${job.progressMessage}` : null,
+  ].filter(Boolean)
+  return parts.length > 0 ? `${error} (${parts.join(', ')})` : error
+}
 
 /**
  * Hook: POST /api/orders/collect → poll /api/orders/collect/status until all done.
@@ -145,13 +163,14 @@ export function useCollectPoll(): UseCollectPollReturn {
           setLogs([
             {
               id: '__error__',
-              marketplaceId: null,
-              connectionId: null,
+              marketplaceId: data.activeJob?.marketplaceId ?? null,
+              connectionId: data.activeJob?.connectionId ?? null,
+              jobType: data.activeJob?.jobType ?? null,
               status: 'failed',
               ordersCollected: null,
               claimsCollected: null,
-              errorMessage: data.error || '주문 수집 요청 실패',
-              progressMessage: null,
+              errorMessage: formatActiveCollectionError(data.error || '주문 수집 요청 실패', data.activeJob),
+              progressMessage: data.activeJob?.progressMessage ?? null,
               completedAt: null,
             },
           ])

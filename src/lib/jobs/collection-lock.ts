@@ -48,7 +48,10 @@ async function markStaleCollectionJobsFailed(tx: Tx) {
       and(
         inArray(jobLogs.status, ['queued', 'running']),
         inArray(jobLogs.jobType, [...COLLECTION_JOB_TYPES]),
-        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '15 minutes'`,
+        sql`(
+          (${jobLogs.jobType} like 'scrape-%' and coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '360 seconds')
+          or (${jobLogs.jobType} not like 'scrape-%' and coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '15 minutes')
+        )`,
       ),
     )
 }

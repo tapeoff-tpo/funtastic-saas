@@ -14,8 +14,8 @@ const ORDER_URL_CANDIDATES = [
   `${PARTNER_BASE_URL}/orders?order=PAYMENT_AT_DESC`,
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
-const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v14'
+const DOWNLOAD_TIMEOUT_MS = 45_000
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v15'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -313,10 +313,38 @@ async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<v
   await page.waitForTimeout(2500)
 }
 
-async function downloadOrdersExcel(page: Page): Promise<Buffer> {
+async function clickDownloadConfirmIfPresent(page: Page): Promise<string | null> {
+  const dialog = page
+    .locator('[role="dialog"], [aria-modal="true"], .modal, .ant-modal, .MuiDialog-root, .ReactModal__Content')
+    .filter({ hasText: /다운로드|엑셀|개인정보|주문|확인/ })
+    .first()
+  const dialogVisible = await dialog.isVisible({ timeout: 1500 }).catch(() => false)
+  if (!dialogVisible) return null
+
+  const dialogText = await dialog.innerText({ timeout: 1500 }).catch(() => '')
+  const clicked = await dialog
+    .locator('button, input[type="button"], input[type="submit"], a')
+    .filter({ hasText: /확인|다운로드|예|동의|계속/ })
+    .first()
+    .click({ timeout: 3000 })
+    .then(() => true)
+    .catch(() => false)
+
+  return clicked ? dialogText.replace(/\s+/g, ' ').trim().slice(0, 160) : null
+}
+
+async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Promise<Buffer> {
   if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
     throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 화면이라 엑셀 다운로드를 시도할 수 없습니다. (${await summarizePage(page)})`)
   }
+  const dialogPromise = page
+    .waitForEvent('dialog', { timeout: 8000 })
+    .then(async (dialog) => {
+      const message = dialog.message()
+      await dialog.accept().catch(() => undefined)
+      return message
+    })
+    .catch(() => null)
   const downloadPromise = page
     .waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
     .then((download) => readDownloadBuffer(download))
@@ -340,15 +368,23 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
     throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 엑셀 다운로드 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
   }
 
+  const dialogMessage = await Promise.race([
+    dialogPromise,
+    page.waitForTimeout(1500).then(() => null),
+  ])
+  const modalMessage = await clickDownloadConfirmIfPresent(page)
+
   try {
     return await Promise.race([downloadPromise, excelResponsePromise])
   } catch (error) {
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
     const notice = bodyText.match(/다운로드[^.\n]*|엑셀[^.\n]*|권한[^.\n]*|로그인이 필요합니다\.?|오류[^.\n]*/)?.[0]
+    const authNotice = authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''
+    const confirmNotice = dialogMessage || modalMessage ? ` confirm=${dialogMessage || modalMessage}` : ''
     throw new MarketplaceApiError(
       'ohouse',
       504,
-      `${OHOUSE_RPA_VERSION}: 오늘의집 엑셀 다운로드 응답을 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 받지 못했습니다.${notice ? ` (${notice})` : ''} (${error instanceof Error ? error.message : 'download timeout'})`,
+      `${OHOUSE_RPA_VERSION}: 오늘의집 엑셀 다운로드 응답을 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 받지 못했습니다.${authNotice}${confirmNotice}${notice ? ` (${notice})` : ''} (${error instanceof Error ? error.message : 'download timeout'})`,
     )
   }
 }
@@ -406,7 +442,7 @@ export class OhouseScraper implements MarketplaceScraper {
           `${OHOUSE_RPA_VERSION}: 오늘의집 주문 화면이 로그인 화면으로 리다이렉트되었습니다.${authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''} (${await summarizePage(ctx.page)})`,
         )
       }
-      const workbook = await downloadOrdersExcel(ctx.page)
+      const workbook = await downloadOrdersExcel(ctx.page, authFailures)
       return this.parseOrdersExcel(workbook, credentials)
     } finally {
       await ctx.close()

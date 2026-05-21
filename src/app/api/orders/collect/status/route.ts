@@ -74,6 +74,25 @@ export async function GET(request: NextRequest) {
       ),
     )
 
+  await db
+    .update(jobLogs)
+    .set({
+      status: 'failed',
+      completedAt: new Date(),
+      errorMessage: withLastProgress(
+        '투비즈온 RPA가 0건 완료로 끝났습니다. 최신 scrape-worker 코드라면 0건 완료가 아니라 실패해야 하므로, scrape-worker 서비스 재배포 상태를 확인해주세요.',
+      ),
+    })
+    .where(
+      and(
+        inArray(jobLogs.id, ids),
+        inArray(jobLogs.status, ['completed']),
+        like(jobLogs.jobType, 'scrape-%'),
+        sql`${jobLogs.marketplaceId} = 'tobizon'`,
+        sql`coalesce(${jobLogs.ordersCollected}, 0) = 0`,
+      ),
+    )
+
   const logs = await db
     .select({
       id: jobLogs.id,

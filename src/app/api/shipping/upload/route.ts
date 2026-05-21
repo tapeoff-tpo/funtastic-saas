@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { shipments, orders, marketplaceConnections } from '@/lib/db/schema'
+import { shipments, orders, marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray, isNotNull, gte } from 'drizzle-orm'
 import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from '@/lib/jobs/workers/order-collector'
@@ -19,6 +19,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { markShipmentUploadedAndOrderShipped } from '@/lib/shipping/upload-status'
 import { logOrderChange } from '@/lib/orders/change-log'
+import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
 
@@ -85,9 +86,11 @@ export async function POST(req: NextRequest) {
     shipmentId: string
     trackingNumber: string
     success: boolean
+    queued?: boolean
     error?: string
     marketplaceId?: string
   }> = []
+  const queue = getMarketplaceScrapeQueue()
 
   // Group by marketplaceId + connectionId for adapter reuse
   const groups = new Map<string, typeof targetShipments>()
@@ -136,11 +139,71 @@ export async function POST(req: NextRequest) {
 
     if (getIntegrationMethod(marketplaceId, { authType: conn?.authType, isManual: conn?.isManual }) === 'rpa') {
       for (const s of groupShipments) {
+        const ord = orderMap.get(s.orderId)
+        if (!ord) {
+          results.push({
+            shipmentId: s.id,
+            trackingNumber: s.trackingNumber,
+            success: false,
+            error: '주문 정보를 찾지 못했습니다.',
+            marketplaceId,
+          })
+          continue
+        }
+
+        const [logRow] = await db
+          .insert(jobLogs)
+          .values({
+            jobType: 'scrape-upload-invoice',
+            marketplaceId,
+            connectionId,
+            status: 'queued',
+          })
+          .returning({ id: jobLogs.id })
+
+        await db.update(shipments).set({
+          uploadStatus: 'uploading',
+          marketplaceUploadError: null,
+          updatedAt: new Date(),
+        }).where(eq(shipments.id, s.id))
+        await logOrderChange({
+          orderId: s.orderId,
+          userId: workspaceUserId,
+          actorId: user.id,
+          action: 'invoice.send_requested',
+          title: 'RPA 송장 송신시작',
+          description: s.trackingNumber,
+          after: { uploadStatus: 'uploading', trackingNumber: s.trackingNumber },
+          metadata: { shipmentId: s.id, marketplaceId },
+        })
+
+        await queue.add(
+          `manual-scrape-invoice-${marketplaceId}-${Date.now()}-${s.id}`,
+          {
+            marketplaceId,
+            connectionId,
+            userId: workspaceUserId,
+            jobType: 'upload-invoice',
+            jobLogId: logRow.id,
+            orderId: ord.marketplaceOrderId,
+            shipmentId: s.id,
+            invoice: {
+              trackingNumber: s.trackingNumber,
+              carrierId: s.carrierId,
+              rawData: ord.rawData,
+            },
+          },
+          {
+            removeOnComplete: { count: 100 },
+            removeOnFail: { count: 100 },
+          },
+        )
+
         results.push({
           shipmentId: s.id,
           trackingNumber: s.trackingNumber,
-          success: false,
-          error: 'RPA 연동 주문은 [RPA 송장 전송] 버튼을 사용하세요.',
+          success: true,
+          queued: true,
           marketplaceId,
         })
       }
@@ -211,8 +274,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const uploaded = results.filter((r) => r.success).length
+  const queued = results.filter((r) => r.queued).length
+  const uploaded = results.filter((r) => r.success && !r.queued).length
   const failed = results.filter((r) => !r.success).length
 
-  return NextResponse.json({ uploaded, failed, total: results.length, results })
+  return NextResponse.json({ uploaded, queued, failed, total: results.length, results })
 }

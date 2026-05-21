@@ -130,10 +130,11 @@ export default function ScanPage() {
         headers: { 'Content-Type': 'application/json' },
       })
       const data = await res.json()
-      const result = { uploaded: data.uploaded ?? 0, failed: data.failed ?? 0, total: data.total ?? 0 }
+      const queued = data.queued ?? 0
+      const result = { uploaded: (data.uploaded ?? 0) + queued, failed: data.failed ?? 0, total: data.total ?? 0 }
       setUploadResult(result)
       if (result.uploaded > 0 || result.failed > 0) {
-        speak(`${result.uploaded}건 전송 완료. ${result.failed > 0 ? `${result.failed}건 실패.` : ''}`)
+        speak(`${result.uploaded}건 전송 ${queued > 0 ? '시작' : '완료'}. ${result.failed > 0 ? `${result.failed}건 실패.` : ''}`)
       } else {
         speak('전송할 건이 없습니다')
       }

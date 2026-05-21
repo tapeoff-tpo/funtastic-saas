@@ -1,5 +1,7 @@
+import { mkdir, unlink, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import ExcelJS from 'exceljs'
-import type { Download, Page } from 'playwright'
+import type { Download, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   InvoiceData,
@@ -7,6 +9,7 @@ import type {
   NormalizedClaim,
   NormalizedOrder,
 } from '@/lib/marketplace/types'
+import { getCarrierName, mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import { dumpStorageState, openContext } from '../browser'
 import type {
   MarketplaceScraper,
@@ -22,6 +25,7 @@ const ORDER_PAGE_REFERRER = `${WMS_BASE_URL}/order`
 const DOWNLOAD_TIMEOUT_MS = 120_000
 const DOWNLOAD_STREAM_TIMEOUT_MS = 60_000
 type DomechangoOrderSearchStatus = 'new' | 'shipping-target'
+const INVOICE_UPLOAD_TMP_DIR = path.join(process.cwd(), 'tmp', 'rpa-invoices')
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -92,6 +96,18 @@ async function readDownloadBuffer(download: Download): Promise<Buffer> {
       }, DOWNLOAD_STREAM_TIMEOUT_MS)
     }),
   ])
+}
+
+async function setInputValue(input: Locator, value: string): Promise<void> {
+  await input.fill(value, { timeout: 3000 }).catch(async () => {
+    await input.evaluate((element, nextValue) => {
+      if (!(element instanceof HTMLInputElement) && !(element instanceof HTMLTextAreaElement)) return
+      element.removeAttribute('readonly')
+      element.value = nextValue
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+      element.dispatchEvent(new Event('change', { bubbles: true }))
+    }, value)
+  })
 }
 
 async function gotoDomechango(page: Page, url = WMS_BASE_URL): Promise<void> {
@@ -354,6 +370,7 @@ async function summarizeOrderSearchState(page: Page): Promise<string> {
 async function triggerSelectedOrderExcelDownload(
   page: Page,
   setProgress?: (message: string) => Promise<void>,
+  timeoutMs = DOWNLOAD_TIMEOUT_MS,
 ): Promise<Buffer> {
   await setProgress?.('도매창고 엑셀 다운로드 요청 중...')
   const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
@@ -365,7 +382,7 @@ async function triggerSelectedOrderExcelDownload(
     .catch(() => null)
 
   const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
+    page.waitForEvent('download', { timeout: timeoutMs }),
     page.evaluate(`(() => {
       const selects = document.querySelectorAll('select')
       let select
@@ -417,7 +434,7 @@ async function triggerSelectedOrderExcelDownload(
     throw new MarketplaceApiError(
       'domechango',
       504,
-      `도매창고 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''})`,
+      `도매창고 주문 엑셀 다운로드가 ${timeoutMs / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''})`,
     )
   })
 
@@ -492,6 +509,278 @@ async function moveSelectedNewOrdersToShippingTarget(
   await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
   await page.waitForTimeout(2000)
   return true
+}
+
+async function applyInvoiceOrderSearch(page: Page, orderId: string): Promise<void> {
+  const until = new Date()
+  const since = new Date(until.getTime() - 1000 * 60 * 60 * 24 * 60)
+
+  await page.evaluate(({ since, until, orderId }) => {
+    const setValue = (selector: string, value: string) => {
+      const input = document.querySelector<HTMLInputElement | HTMLSelectElement>(selector)
+      if (!input) return
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    setValue('#sdate, input[name="sdate"]', since)
+    setValue('#edate, input[name="edate"]', until)
+    setValue('#list_size, select[name="list_size"]', '500')
+    setValue('#page, input[name="page"]', '1')
+
+    const statusInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="oistep"], input[name*="status" i]'))
+    const allStatus = statusInputs.find((input) => input.value === '' || input.value === '0' || /all|전체/i.test(input.id + input.name))
+    if (allStatus) {
+      allStatus.checked = true
+      allStatus.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    const candidates = Array.from(document.querySelectorAll<HTMLInputElement>('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"])'))
+      .filter((input) => {
+        const key = `${input.id} ${input.name} ${input.placeholder}`.toLowerCase()
+        if (/sdate|edate|date|page|list|size/.test(key)) return false
+        return /keyword|search|sword|order|ord|code|goods|name|주문|검색|번호/.test(key)
+      })
+
+    const input = candidates[0] ?? Array.from(document.querySelectorAll<HTMLInputElement>('input[type="text"]'))
+      .find((item) => !/sdate|edate|date|page|list|size/i.test(`${item.id} ${item.name}`))
+    if (input) {
+      input.value = orderId
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+  }, { since: formatDateInput(since), until: formatDateInput(until), orderId })
+
+  await page.locator('#btn_search, button, input[type="button"], input[type="submit"]')
+    .filter({ hasText: /주문검색|검색|조회/ })
+    .first()
+    .click({ timeout: 10_000 })
+    .catch(() => undefined)
+  await page.waitForTimeout(2500)
+}
+
+async function selectOrderByText(page: Page, orderId: string): Promise<boolean> {
+  return page.evaluate((targetOrderId) => {
+    const roots = [
+      document.querySelector('#order_list'),
+      document.querySelector('#goods_list'),
+      document,
+    ].filter(Boolean) as Element[]
+
+    for (const root of roots) {
+      const rows = Array.from(root.querySelectorAll('tr, .tui-grid-row, [role="row"], li, div'))
+      for (const row of rows) {
+        const text = row.textContent ?? ''
+        if (!text.includes(targetOrderId)) continue
+
+        const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
+          ?? row.closest('tr, .tui-grid-row, [role="row"]')?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+        if (!checkbox || checkbox.disabled) return true
+        if (!checkbox.checked) checkbox.click()
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+        return true
+      }
+    }
+    return false
+  }, orderId).catch(() => false)
+}
+
+async function selectCarrier(root: Locator | Page, invoice: InvoiceData): Promise<void> {
+  const carrierName = getCarrierName(invoice.carrierId)
+  const carrierCode = mapCarrierCode('domechango', invoice.carrierId)
+  const select = root.locator('select:visible').first()
+  if (!(await select.isVisible().catch(() => false))) return
+
+  for (const option of [
+    { label: carrierName },
+    { label: carrierName.replace(/\s+/g, '') },
+    { value: carrierCode },
+    { value: invoice.carrierId },
+  ]) {
+    const selected = await select.selectOption(option, { timeout: 2000 }).then(() => true).catch(() => false)
+    if (selected) return
+  }
+
+  const normalizedCarrierName = carrierName.replace(/\s+/g, '')
+  const selectedByText = await select.evaluate((element, targetName) => {
+    if (!(element instanceof HTMLSelectElement)) return false
+    const option = Array.from(element.options).find((item) => {
+      const label = (item.textContent ?? '').replace(/\s+/g, '')
+      return label.includes(targetName) || targetName.includes(label)
+    })
+    if (!option) return false
+    element.value = option.value
+    element.dispatchEvent(new Event('input', { bubbles: true }))
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }, normalizedCarrierName).catch(() => false)
+
+  if (!selectedByText) {
+    throw new MarketplaceApiError('domechango', 500, `도매창고 택배사를 선택하지 못했습니다. (${carrierName})`)
+  }
+}
+
+async function tryInlineInvoiceUpload(page: Page, orderId: string, invoice: InvoiceData): Promise<boolean> {
+  const row = page.locator('tr, .tui-grid-row, [role="row"]').filter({ hasText: orderId }).first()
+  if (!(await row.isVisible().catch(() => false))) return false
+
+  const trackingInput = row
+    .locator([
+      'input[name*="invoice" i]',
+      'input[name*="tracking" i]',
+      'input[name*="songjang" i]',
+      'input[id*="invoice" i]',
+      'input[id*="tracking" i]',
+      'input[id*="songjang" i]',
+      'input[placeholder*="송장"]',
+      'input[placeholder*="운송장"]',
+      'input[title*="송장"]',
+    ].join(', '))
+    .first()
+  const hasTrackingInput = await trackingInput.isVisible().catch(() => false)
+  if (!hasTrackingInput) return false
+
+  await selectCarrier(row, invoice)
+  await setInputValue(trackingInput, invoice.trackingNumber)
+
+  const button = row
+    .locator('button, input[type="button"], input[type="submit"], a')
+    .filter({ hasText: /송장|배송|저장|등록|전송|확인/ })
+    .first()
+  if (await button.isVisible().catch(() => false)) {
+    await button.click({ timeout: 10_000 }).catch(() => undefined)
+  } else {
+    const actionSelect = page.locator('#act_status, select[name*="status" i], select[name*="act" i]').first()
+    if (await actionSelect.isVisible().catch(() => false)) {
+      await actionSelect.evaluate((element) => {
+        if (!(element instanceof HTMLSelectElement)) return
+        const option = Array.from(element.options).find((item) => /송장|배송|발송|출고/.test(item.textContent ?? ''))
+        if (!option) return
+        element.value = option.value
+        element.dispatchEvent(new Event('input', { bubbles: true }))
+        element.dispatchEvent(new Event('change', { bubbles: true }))
+      }).catch(() => undefined)
+    }
+  }
+
+  await page.waitForTimeout(1500)
+  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  if (/실패|오류|error|잘못|필수|확인해주세요/.test(bodyText) && !/완료|성공|등록/.test(bodyText)) {
+    throw new MarketplaceApiError('domechango', 500, '도매창고 송장 입력 후 오류 메시지가 표시되었습니다.')
+  }
+  return true
+}
+
+function findHeaderColumn(worksheet: ExcelJS.Worksheet, aliases: string[]): number | null {
+  const headerRow = worksheet.getRow(1)
+  let found: number | null = null
+  headerRow.eachCell((cell, colNumber) => {
+    if (found) return
+    const value = readCellText(cell.value).replace(/\s+/g, '')
+    if (aliases.some((alias) => value === alias.replace(/\s+/g, ''))) found = colNumber
+  })
+  return found
+}
+
+async function buildInvoiceWorkbook(
+  orderId: string,
+  invoice: InvoiceData,
+  templateBuffer?: Buffer,
+): Promise<Buffer> {
+  const carrierCode = mapCarrierCode('domechango', invoice.carrierId)
+  const carrierName = getCarrierName(invoice.carrierId)
+  const workbook = new ExcelJS.Workbook()
+
+  if (templateBuffer?.length) {
+    await workbook.xlsx.load(templateBuffer as unknown as ExcelJS.Buffer)
+  } else {
+    const worksheet = workbook.addWorksheet('invoice')
+    worksheet.addRow(['주문번호', '택배업체코드', '택배사', '송장번호'])
+    worksheet.addRow([orderId, carrierCode, carrierName, invoice.trackingNumber])
+  }
+
+  const worksheet = workbook.worksheets[0]
+  if (!worksheet) throw new MarketplaceApiError('domechango', 500, '도매창고 송장 업로드 엑셀 시트를 만들지 못했습니다.')
+
+  const orderColumn = findHeaderColumn(worksheet, ['주문번호', '주문상품번호', '주문코드'])
+  const trackingColumn = findHeaderColumn(worksheet, ['송장번호', '운송장번호', '택배송장번호'])
+  const carrierCodeColumn = findHeaderColumn(worksheet, ['택배업체코드', '택배사코드', '배송사코드'])
+  const carrierNameColumn = findHeaderColumn(worksheet, ['택배업체', '택배사', '배송사'])
+
+  if (!trackingColumn) throw new MarketplaceApiError('domechango', 500, '도매창고 송장번호 엑셀 컬럼을 찾지 못했습니다.')
+
+  let updated = false
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber === 1) return
+    const rowOrderId = orderColumn ? readCellText(row.getCell(orderColumn).value).replace(/^_/, '') : ''
+    if (rowOrderId && !rowOrderId.includes(orderId)) return
+    row.getCell(trackingColumn).value = invoice.trackingNumber
+    if (carrierCodeColumn) row.getCell(carrierCodeColumn).value = carrierCode
+    if (carrierNameColumn) row.getCell(carrierNameColumn).value = carrierName
+    updated = true
+  })
+
+  if (!updated) {
+    const row = worksheet.addRow([])
+    if (orderColumn) row.getCell(orderColumn).value = orderId
+    row.getCell(trackingColumn).value = invoice.trackingNumber
+    if (carrierCodeColumn) row.getCell(carrierCodeColumn).value = carrierCode
+    if (carrierNameColumn) row.getCell(carrierNameColumn).value = carrierName
+  }
+
+  const raw = await workbook.xlsx.writeBuffer()
+  return Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer)
+}
+
+async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void> {
+  const uploadButton = page
+    .locator('button, input[type="button"], input[type="submit"], a')
+    .filter({ hasText: /택배송장\s*업로드|송장\s*업로드|배송\s*업로드|엑셀\s*업로드/ })
+    .first()
+
+  if (await uploadButton.isVisible().catch(() => false)) {
+    await uploadButton.click({ timeout: 10_000 }).catch(() => undefined)
+    await page.waitForTimeout(1000)
+  }
+
+  const fileInput = page.locator('input[type="file"]').last()
+  await fileInput.waitFor({ state: 'attached', timeout: 10_000 }).catch(() => undefined)
+  if (!(await fileInput.count())) {
+    throw new MarketplaceApiError('domechango', 500, `도매창고 송장 업로드 파일 선택창을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
+
+  await fileInput.setInputFiles(filePath)
+
+  const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
+    .then(async (dialogEvent) => {
+      await dialogEvent.accept().catch(() => undefined)
+      return dialogEvent.message()
+    })
+    .catch(() => null)
+
+  const responsePromise = page.waitForResponse(
+    (res) => res.request().method() !== 'GET' && /wms|order|invoice|upload|excel|delivery|songjang/i.test(res.url()),
+    { timeout: 30_000 },
+  ).catch(() => null)
+
+  const submit = page
+    .locator('button, input[type="button"], input[type="submit"], a')
+    .filter({ hasText: /업로드|저장|등록|전송|확인/ })
+    .last()
+  if (await submit.isVisible().catch(() => false)) {
+    await submit.click({ timeout: 10_000 }).catch(() => undefined)
+  }
+
+  const [dialogMessage, response] = await Promise.all([dialogPromise, responsePromise])
+  await page.waitForTimeout(1500)
+
+  const responseText = response ? await response.text().catch(() => '') : ''
+  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  const combined = `${dialogMessage ?? ''} ${responseText} ${bodyText}`
+  if (/실패|오류|error|잘못|필수|확인해주세요/.test(combined) && !/완료|성공|등록/.test(combined)) {
+    throw new MarketplaceApiError('domechango', 500, dialogMessage ?? '도매창고 송장 업로드 후 오류 메시지가 표시되었습니다.')
+  }
 }
 
 export class DomechangoScraper implements MarketplaceScraper {
@@ -585,12 +874,68 @@ export class DomechangoScraper implements MarketplaceScraper {
     orderId: string,
     invoice: InvoiceData,
   ): Promise<{ success: boolean; error?: string }> {
-    void credentials
-    void orderId
-    void invoice
-    return {
-      success: false,
-      error: '도매창고 송장 업로드 RPA는 주문 엑셀 수집 안정화 후 택배송장 업로드 양식으로 연결해야 합니다.',
+    let sessionState = credentials.storageState
+    let ctx = await openContext(sessionState)
+    let tmpFilePath: string | null = null
+
+    try {
+      const runStep = async <T>(label: string, task: () => Promise<T>): Promise<T> => {
+        logStep(label)
+        try {
+          return await task()
+        } catch (error) {
+          if (error instanceof MarketplaceApiError) throw error
+          throw new MarketplaceApiError(
+            'domechango',
+            500,
+            `도매창고 RPA 송장전송 실패: ${label} (${error instanceof Error ? error.message : 'unknown error'})`,
+          )
+        }
+      }
+
+      await runStep('invoice: open wms home', () => gotoDomechango(ctx.page, WMS_BASE_URL))
+      if (!(await this.isLoggedIn(ctx.page))) {
+        logStep('invoice: session invalid, login')
+        await ctx.close()
+        const loginResult = await this.login(credentials)
+        if (!loginResult.success || !loginResult.storageState) {
+          return { success: false, error: loginResult.error ?? '도매창고 로그인 실패' }
+        }
+        sessionState = loginResult.storageState
+        ctx = await openContext(sessionState)
+        await runStep('invoice: reopen wms home after login', () => gotoDomechango(ctx.page, WMS_BASE_URL))
+      }
+
+      if (!(await this.isLoggedIn(ctx.page))) {
+        throw new MarketplaceApiError('domechango', 401, `도매창고 WMS 세션을 확인하지 못했습니다. (${await summarizePage(ctx.page)})`)
+      }
+
+      await runStep('invoice: open order list page', () => openOrderListPage(ctx.page))
+      await runStep('invoice: search order', () => applyInvoiceOrderSearch(ctx.page, orderId))
+      const selected = await runStep('invoice: select order row', () => selectOrderByText(ctx.page, orderId))
+      if (!selected) {
+        throw new MarketplaceApiError('domechango', 404, `도매창고 주문을 찾지 못했습니다. (${orderId}, ${await summarizePage(ctx.page)})`)
+      }
+
+      const inlineUploaded = await runStep('invoice: try inline upload', () => tryInlineInvoiceUpload(ctx.page, orderId, invoice))
+      if (inlineUploaded) return { success: true }
+
+      const templateBuffer = await triggerSelectedOrderExcelDownload(ctx.page, undefined, 15_000).catch(() => undefined)
+      const workbookBuffer = await runStep('invoice: build upload workbook', () => buildInvoiceWorkbook(orderId, invoice, templateBuffer))
+      await mkdir(INVOICE_UPLOAD_TMP_DIR, { recursive: true })
+      tmpFilePath = path.join(INVOICE_UPLOAD_TMP_DIR, `domechango-invoice-${orderId}-${Date.now()}.xlsx`)
+      await writeFile(tmpFilePath, workbookBuffer)
+
+      await runStep('invoice: upload workbook', () => uploadInvoiceWorkbook(ctx.page, tmpFilePath!))
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '도매창고 송장 RPA 전송 실패',
+      }
+    } finally {
+      if (tmpFilePath) await unlink(tmpFilePath).catch(() => undefined)
+      await ctx.close()
     }
   }
 

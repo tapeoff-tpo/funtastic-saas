@@ -25,6 +25,7 @@ import {
   XCircle,
   Undo2,
   RotateCcw,
+  Headphones,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -51,6 +52,7 @@ const navSections: NavSection[] = [
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
       { href: '/orders/collect', label: '주문 수집', icon: Download },
+      { href: '/cs', label: 'CS 작업함', icon: Headphones },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
     ],
   },

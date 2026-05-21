@@ -8,19 +8,19 @@ const FAVS_KEY = 'funtastic-favorites'
 const MAX_TABS = 12
 
 export interface OpenTab {
-  /** Full URL including query string (e.g. "/products/mapping?q=글라손&page=3").
+  /** Full URL including query string (e.g. "/products/mapping?q=?リ섣???源?&page=3").
    *  Stored full so reopening the tab restores nuqs/useQueryStates filter state. */
   href: string
   label: string
 }
 
-/** Strip query string — tabs are identified by pathname only, but href remembers state. */
+/** Strip query string ??tabs are identified by pathname only, but href remembers state. */
 function stripQuery(href: string): string {
   const i = href.indexOf('?')
   return i === -1 ? href : href.slice(0, i)
 }
 
-/** Public helper — used by tab-bar to compare tab.href against current pathname. */
+/** Public helper ??used by tab-bar to compare tab.href against current pathname. */
 export function tabPathname(tab: { href: string }): string {
   return stripQuery(tab.href)
 }
@@ -30,42 +30,41 @@ export function tabPathname(tab: { href: string }): string {
  * we fall back to a generic label or the segment.
  */
 const ROUTE_LABELS: Record<string, string> = {
-  '/dashboard': '대시보드',
-  '/orders': '전체 주문',
-  '/orders/collect': '주문 수집',
-  '/orders/import': '주문 엑셀 임포트',
-  '/orders/claims': '클레임 관리',
-  '/cs': 'CS 대시보드',
-  '/cs/cancel': '취소 관리',
-  '/cs/return': '반품 관리',
-  '/cs/exchange': '교환 관리',
-  '/cs/inquiries': '문의 관리',
-  '/shipping': '배송 관리',
-  '/shipping/held': '미발송 관리',
-  '/shipping/scan': '바코드 스캔/출고',
-  '/shipping/invoice': '송장 업로드 현황',
-  '/shipping/combined': '합포장 관리',
-  '/shipping/templates': '송장 템플릿',
-  '/shipping/print': '송장 출력',
-  '/products': '상품 관리',
-  '/products/new': '상품 등록',
-  '/products/mapping': '매핑관리',
-  '/products/categories': '카테고리',
-  '/products/marketplace-categories': '카테고리 매핑',
-  '/inventory': '재고관리',
-  '/inventory/adjustments': '입출고관리',
-  '/analytics': '매출분석',
-  '/settings': '설정',
-  '/settings/company': '회사 정보',
-  '/settings/marketplaces': '마켓연동',
+  '/dashboard': 'Dashboard',
+  '/orders': 'Orders',
+  '/orders/collect': 'Order Collection',
+  '/orders/import': 'Order Import',
+  '/orders/claims': 'Claims',
+  '/cs': 'CS Workbench',
+  '/cs/cancel': 'Cancel CS',
+  '/cs/return': 'Return CS',
+  '/cs/exchange': 'Exchange CS',
+  '/cs/inquiries': 'Inquiries',
+  '/shipping': 'Shipping',
+  '/shipping/held': 'Held Orders',
+  '/shipping/scan': 'Barcode Scan',
+  '/shipping/invoice': 'Invoice Uploads',
+  '/shipping/combined': 'Combined Shipping',
+  '/shipping/templates': 'Invoice Templates',
+  '/shipping/print': 'Invoice Print',
+  '/products': 'Products',
+  '/products/new': 'New Product',
+  '/products/mapping': 'Mapping',
+  '/products/categories': 'Categories',
+  '/products/marketplace-categories': 'Marketplace Categories',
+  '/inventory': 'Inventory',
+  '/inventory/adjustments': 'Inventory Adjustments',
+  '/analytics': 'Analytics',
+  '/settings': 'Settings',
+  '/settings/company': 'Company Settings',
+  '/settings/marketplaces': 'Market Connections',
 }
 
 export function getRouteLabel(pathname: string): string {
   if (ROUTE_LABELS[pathname]) return ROUTE_LABELS[pathname]
   // Dynamic detail pages
-  if (/^\/orders\/[^/]+$/.test(pathname)) return '주문 상세'
-  if (/^\/products\/[^/]+$/.test(pathname)) return '상품 상세'
-  // Fallback: last segment
+  if (/^\/orders\/[^/]+$/.test(pathname)) return 'Order Detail'
+  if (/^\/products\/[^/]+$/.test(pathname)) return 'Product Detail'
   const seg = pathname.split('/').filter(Boolean).pop()
   return seg ?? pathname
 }
@@ -135,7 +134,7 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     setTabs((prev) => {
       const idx = prev.findIndex((t) => stripQuery(t.href) === pathname)
       if (idx >= 0) {
-        // Existing tab — refresh its href to the latest URL so the next reopen restores state.
+        // Existing tab ??refresh its href to the latest URL so the next reopen restores state.
         if (prev[idx].href === fullHref) return prev
         const updated = prev.slice()
         updated[idx] = { ...prev[idx], href: fullHref }
@@ -147,7 +146,7 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     })
   }, [pathname, searchParams, hydrated])
 
-  // Close handlers match by pathname — caller may pass full href or bare path.
+  // Close handlers match by pathname ??caller may pass full href or bare path.
   const closeTab = useCallback((href: string) => {
     const path = stripQuery(href)
     setTabs((prev) => prev.filter((t) => stripQuery(t.href) !== path))

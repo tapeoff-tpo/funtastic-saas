@@ -17,12 +17,15 @@ interface MemoAttachment {
   type: string
   dataUrl: string
   size: number
+  expiresAt?: string
 }
 
 const MAX_ATTACHMENTS = 5
-const MAX_ATTACHMENT_BYTES = 3 * 1024 * 1024
+const MAX_ATTACHMENT_BYTES = 1024 * 1024
+const ATTACHMENT_RETENTION_DAYS = 30
 
 function normalizeAttachments(value: unknown): MemoAttachment[] {
+  const expiresAt = new Date(Date.now() + ATTACHMENT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString()
   if (!Array.isArray(value)) return []
   return value.slice(0, MAX_ATTACHMENTS).flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return []
@@ -34,7 +37,7 @@ function normalizeAttachments(value: unknown): MemoAttachment[] {
     if (!type.startsWith('image/')) return []
     if (!dataUrl.startsWith(`data:${type};base64,`)) return []
     if (!Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_BYTES) return []
-    return [{ name: name || 'image', type, dataUrl, size }]
+    return [{ name: name || 'image', type, dataUrl, size, expiresAt }]
   })
 }
 
@@ -91,14 +94,14 @@ export async function POST(
     return NextResponse.json({ error: '메모 내용 또는 사진을 추가하세요.' }, { status: 400 })
   }
   if (Array.isArray(body.attachments) && body.attachments.length > 0 && attachments.length === 0) {
-    return NextResponse.json({ error: '첨부할 수 있는 이미지는 3MB 이하 사진 파일입니다.' }, { status: 400 })
+    return NextResponse.json({ error: '첨부 가능한 이미지는 1MB 이하 사진 파일입니다.' }, { status: 400 })
   }
 
   const [created] = await db
     .insert(orderMemos)
     .values({
       orderId: id,
-      userId: user.id,
+      userId: workspaceUserId,
       content,
       memoType: body.memoType?.trim() || 'general',
       attachments,

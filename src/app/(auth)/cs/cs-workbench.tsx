@@ -1,9 +1,10 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition, type FormEvent } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
+  Barcode,
   Camera,
   CheckCircle2,
   Clipboard,
@@ -11,6 +12,7 @@ import {
   FileImage,
   MessageSquareReply,
   PackageCheck,
+  PackageSearch,
   Search,
   Send,
   X,
@@ -67,9 +69,35 @@ interface CompressedAttachment {
   size: number
 }
 
+interface BarcodeLookupOrder {
+  orderId: string
+  internalNo: string
+  marketplaceId: string
+  marketplaceName: string
+  marketplaceOrderId: string
+  status: string
+  buyerName: string
+  recipientName: string
+  recipientPhone: string | null
+  trackingNumber: string
+  carrierName: string
+  shippedAt: string | null
+  deliveryMessage: string | null
+  items: Array<{
+    id: string
+    productName: string
+    optionText: string | null
+    quantity: number
+    sku: string | null
+    lockedProductName: string | null
+    lockedOptionName: string | null
+    lockedQuantity: number | null
+  }>
+}
+
 const SOURCE_OPTIONS = [
   { value: 'all', label: '전체' },
-  { value: 'claim', label: '취소/반품/교환' },
+  { value: 'claim', label: '검수 요청' },
   { value: 'inquiry', label: '문의' },
 ]
 
@@ -198,6 +226,10 @@ export function CsWorkbench({
   const [note, setNote] = useState('')
   const [attachments, setAttachments] = useState<CompressedAttachment[]>([])
   const [message, setMessage] = useState<string | null>(null)
+  const [trackingNumber, setTrackingNumber] = useState('')
+  const [barcodeOrder, setBarcodeOrder] = useState<BarcodeLookupOrder | null>(null)
+  const [barcodeMessage, setBarcodeMessage] = useState<string | null>(null)
+  const [barcodeSearching, setBarcodeSearching] = useState(false)
   const [isPending, startTransition] = useTransition()
 
   const totalPages = Math.max(Math.ceil(total / pageSize), 1)
@@ -269,14 +301,50 @@ export function CsWorkbench({
     setMessage('마켓 회신 문구를 복사했습니다.')
   }
 
+  async function searchBarcode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const value = trackingNumber.trim()
+    if (!value) {
+      setBarcodeMessage('송장 바코드를 스캔하거나 입력해주세요.')
+      setBarcodeOrder(null)
+      return
+    }
+
+    setBarcodeSearching(true)
+    setBarcodeMessage(null)
+    setBarcodeOrder(null)
+    try {
+      const res = await fetch(`/api/cs/barcode?trackingNumber=${encodeURIComponent(value)}`)
+      const data = await res.json().catch(() => null) as {
+        found?: boolean
+        error?: string
+        order?: BarcodeLookupOrder
+      } | null
+      if (!res.ok) {
+        setBarcodeMessage(data?.error ?? '송장 조회에 실패했습니다.')
+        return
+      }
+      if (!data?.found || !data.order) {
+        setBarcodeMessage('해당 송장으로 출고된 주문을 찾지 못했습니다.')
+        return
+      }
+      setBarcodeOrder(data.order)
+      setBarcodeMessage('출고 주문을 찾았습니다.')
+    } catch {
+      setBarcodeMessage('송장 조회 중 네트워크 오류가 발생했습니다.')
+    } finally {
+      setBarcodeSearching(false)
+    }
+  }
+
   return (
     <div className="flex h-[calc(100vh-5.5rem)] min-h-[680px] flex-col overflow-hidden">
       <div className="shrink-0 border-b bg-white px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-gray-950">CS 작업함</h1>
+            <h1 className="text-xl font-semibold text-gray-950">상품검수 / CS 작업함</h1>
             <p className="mt-1 text-sm text-gray-500">
-              문의, 취소/반품/교환, 물류 검수, 마켓 회신을 한 화면에서 처리합니다.
+              물류팀이 반품 상품을 확인하고, CS가 검수 결과를 바탕으로 최종 안내와 마켓 처리를 진행합니다.
             </p>
           </div>
           <div className="overflow-hidden rounded border bg-white">
@@ -333,6 +401,73 @@ export function CsWorkbench({
               {option.label}
             </Link>
           ))}
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(360px,0.9fr)_1fr]">
+          <section className="rounded-md border bg-gray-50 px-3 py-3">
+            <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-950">
+              <Barcode className="h-4 w-4" />
+              반품 송장 바코드 조회
+            </div>
+            <form onSubmit={searchBarcode} className="flex gap-2">
+              <Input
+                value={trackingNumber}
+                onChange={(event) => setTrackingNumber(event.target.value)}
+                placeholder="기존 출고 송장번호 스캔"
+                className="bg-white"
+                autoComplete="off"
+              />
+              <Button type="submit" size="sm" disabled={barcodeSearching}>
+                {barcodeSearching ? '조회 중' : '조회'}
+              </Button>
+            </form>
+            {barcodeMessage && <p className="mt-2 text-xs text-gray-600">{barcodeMessage}</p>}
+          </section>
+
+          <section className="rounded-md border bg-white px-3 py-3">
+            {barcodeOrder ? (
+              <div className="grid gap-3 text-sm lg:grid-cols-[1fr_1.4fr]">
+                <div>
+                  <div className="flex items-center gap-2 font-semibold text-gray-950">
+                    <PackageSearch className="h-4 w-4" />
+                    {barcodeOrder.marketplaceName}
+                  </div>
+                  <dl className="mt-2 grid grid-cols-[72px_1fr] gap-y-1 text-xs">
+                    <dt className="text-gray-500">주문번호</dt>
+                    <dd className="font-mono text-gray-900">{barcodeOrder.marketplaceOrderId}</dd>
+                    <dt className="text-gray-500">관리번호</dt>
+                    <dd className="text-gray-900">#{barcodeOrder.internalNo}</dd>
+                    <dt className="text-gray-500">수령자</dt>
+                    <dd className="text-gray-900">{barcodeOrder.recipientName} {barcodeOrder.recipientPhone ?? ''}</dd>
+                    <dt className="text-gray-500">송장</dt>
+                    <dd className="text-gray-900">{barcodeOrder.carrierName} {barcodeOrder.trackingNumber}</dd>
+                  </dl>
+                  <Button variant="outline" size="sm" className="mt-2" render={<Link href={`/orders/${barcodeOrder.orderId}`} />}>
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    주문 상세
+                  </Button>
+                </div>
+                <div className="min-w-0">
+                  <div className="mb-1 text-xs font-semibold text-gray-500">출고 상품</div>
+                  <div className="max-h-28 space-y-1 overflow-auto">
+                    {barcodeOrder.items.map((item) => (
+                      <div key={item.id} className="rounded border bg-gray-50 px-2 py-1.5 text-xs">
+                        <div className="truncate font-medium text-gray-900">{item.lockedProductName ?? item.productName}</div>
+                        <div className="mt-0.5 text-gray-500">
+                          {item.lockedOptionName ?? item.optionText ?? '옵션 없음'} · {item.lockedQuantity ?? item.quantity}개
+                          {item.sku ? ` · ${item.sku}` : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-24 items-center text-sm text-gray-500">
+                반품 상품이 들어오면 기존 출고 송장 바코드를 스캔해 주문과 상품 구성을 바로 확인할 수 있습니다.
+              </div>
+            )}
+          </section>
         </div>
       </div>
 

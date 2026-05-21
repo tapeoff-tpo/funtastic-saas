@@ -1,16 +1,5 @@
-import type { Metadata } from 'next'
-import { CsClaimPage } from '@/components/cs/cs-claim-page'
+import { redirect } from 'next/navigation'
 
-export const metadata: Metadata = {
-  title: '교환 관리',
-}
-
-export default async function CsExchangePage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>
-}) {
-  const params = await searchParams
-  const page = params.page ? Number(params.page) : 1
-  return <CsClaimPage claimType="exchange" page={page} />
+export default function CsExchangePage() {
+  redirect('/orders/claims?claimType=exchange')
 }

@@ -319,7 +319,7 @@ export async function getCsTickets(
     }
   }
 
-  const claimTickets: CsTicket[] = claimRows.map((row) => {
+  const claimTickets: CsTicket[] = claimRows.filter((row) => row.claimType !== 'cancel').map((row) => {
     const type = row.claimType as ClaimType
     const status = row.claimStatus as ClaimStatus
     const needsLogistics = type === 'return' || type === 'exchange'

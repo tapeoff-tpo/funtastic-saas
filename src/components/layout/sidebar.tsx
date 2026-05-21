@@ -21,10 +21,6 @@ import {
   ChevronsLeft,
   Download,
   Star,
-  MessageSquareText,
-  XCircle,
-  Undo2,
-  RotateCcw,
   Headphones,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -59,11 +55,7 @@ const navSections: NavSection[] = [
   {
     title: 'CS',
     items: [
-      { href: '/cs', label: '대시보드', icon: MessageSquareText },
-      { href: '/cs/cancel', label: '취소', icon: XCircle },
-      { href: '/cs/return', label: '반품', icon: Undo2 },
-      { href: '/cs/exchange', label: '교환', icon: RotateCcw },
-      { href: '/cs/inquiries', label: '문의', icon: MessageSquareText },
+      { href: '/cs', label: '상품검수/CS', icon: Headphones },
     ],
   },
   {

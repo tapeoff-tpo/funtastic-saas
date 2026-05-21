@@ -47,22 +47,31 @@ export async function getHeldShipments(userId: string): Promise<HeldShipmentRow[
       marketplaceOrderId: orders.marketplaceOrderId,
       marketplaceId: orders.marketplaceId,
       marketplaceName: sql<string | null>`COALESCE(
-        ${orders.rawData}->>'mallName',
-        ${orders.rawData}->'sabangnetRaw'->>'쇼핑몰명',
-        ${orders.rawData}->'sabangnetSync'->>'mallName',
+        NULLIF(${orders.rawData}->'sabangnetRaw'->>'쇼핑몰명', ''),
+        NULLIF(${orders.rawData}->'sabangnetSync'->>'mallName', ''),
+        NULLIF(CASE
+          WHEN ${orders.rawData}->>'mallName' IN ('사방넷', 'sabangnet', 'SABANGNET') THEN NULL
+          ELSE ${orders.rawData}->>'mallName'
+        END, ''),
         (
           SELECT COALESCE(
-            o2.raw_data->>'mallName',
-            o2.raw_data->'sabangnetRaw'->>'쇼핑몰명',
-            o2.raw_data->'sabangnetSync'->>'mallName'
+            NULLIF(o2.raw_data->'sabangnetRaw'->>'쇼핑몰명', ''),
+            NULLIF(o2.raw_data->'sabangnetSync'->>'mallName', ''),
+            NULLIF(CASE
+              WHEN o2.raw_data->>'mallName' IN ('사방넷', 'sabangnet', 'SABANGNET') THEN NULL
+              ELSE o2.raw_data->>'mallName'
+            END, '')
           )
           FROM ${orders} o2
           WHERE o2.user_id = ${orders.userId}
             AND o2.marketplace_id = ${orders.marketplaceId}
             AND COALESCE(
-              o2.raw_data->>'mallName',
-              o2.raw_data->'sabangnetRaw'->>'쇼핑몰명',
-              o2.raw_data->'sabangnetSync'->>'mallName'
+              NULLIF(o2.raw_data->'sabangnetRaw'->>'쇼핑몰명', ''),
+              NULLIF(o2.raw_data->'sabangnetSync'->>'mallName', ''),
+              NULLIF(CASE
+                WHEN o2.raw_data->>'mallName' IN ('사방넷', 'sabangnet', 'SABANGNET') THEN NULL
+                ELSE o2.raw_data->>'mallName'
+              END, '')
             ) IS NOT NULL
           ORDER BY o2.updated_at DESC
           LIMIT 1

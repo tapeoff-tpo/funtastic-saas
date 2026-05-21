@@ -231,9 +231,9 @@ function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): stri
     ? data.sabangnetSync as { mallName?: unknown }
     : null
   const candidates = [
-    data.mallName,
     sabangnetRaw?.쇼핑몰명,
     sabangnetSync?.mallName,
+    data.mallName,
     data.empSiteName,
     data.SiteName,
     data.siteName,
@@ -241,6 +241,7 @@ function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): stri
   for (const candidate of candidates) {
     if (typeof candidate !== 'string') continue
     const trimmed = candidate.trim()
+    if (trimmed === '사방넷' || trimmed.toLowerCase() === 'sabangnet') continue
     if (trimmed.length > 0) return trimmed
   }
 

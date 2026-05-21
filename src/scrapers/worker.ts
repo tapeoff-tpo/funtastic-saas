@@ -97,18 +97,20 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   const credentials = await readScrapeCredentials(marketplaceId, userId, connectionId)
   if (!credentials) throw new Error(`No credentials for ${marketplaceId}/${connectionId}`)
 
-  await setProgress('RPA 세션 확인 중...')
-  const session = credentials.storageState
-    ? await runWithTimeout(scraper.testSession(credentials), 60_000)
-    : { ok: false }
-  if (!session.ok) {
-    await setProgress('RPA 로그인 중...')
-    const login = await runWithTimeout(scraper.login(credentials), 90_000)
-    if (!login.success) throw new Error(login.error ?? `${marketplaceId} login failed`)
-    if (login.storageState) {
-      await setProgress('RPA 세션 저장 중...')
-      await saveStorageState(userId, marketplaceId, connectionId, login.storageState)
-      credentials.storageState = login.storageState
+  if (jobType !== 'upload-invoice') {
+    await setProgress('RPA 세션 확인 중...')
+    const session = credentials.storageState
+      ? await runWithTimeout(scraper.testSession(credentials), 60_000)
+      : { ok: false }
+    if (!session.ok) {
+      await setProgress('RPA 로그인 중...')
+      const login = await runWithTimeout(scraper.login(credentials), 90_000)
+      if (!login.success) throw new Error(login.error ?? `${marketplaceId} login failed`)
+      if (login.storageState) {
+        await setProgress('RPA 세션 저장 중...')
+        await saveStorageState(userId, marketplaceId, connectionId, login.storageState)
+        credentials.storageState = login.storageState
+      }
     }
   }
 

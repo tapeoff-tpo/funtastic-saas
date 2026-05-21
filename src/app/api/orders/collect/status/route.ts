@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { jobLogs } from '@/lib/db/schema'
-import { and, inArray, like, sql } from 'drizzle-orm'
+import { jobLogs, shipments } from '@/lib/db/schema'
+import { and, eq, inArray, like, sql } from 'drizzle-orm'
+import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
+import { markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 
 const RPA_QUEUE_TIMEOUT_MESSAGE =
   'RPA 워커가 작업을 시작하지 못했습니다. scrape-worker 서비스가 실행 중인지 확인해주세요.'
@@ -14,6 +16,28 @@ const withLastProgress = (message: string) =>
       then ${message} || ' 마지막 단계: ' || ${jobLogs.progressMessage}
     else ${message}
   end`
+
+async function markTimedOutInvoiceShipments(jobLogIds: string[], message: string): Promise<void> {
+  if (jobLogIds.length === 0) return
+  const queue = getMarketplaceScrapeQueue()
+  const jobs = await queue.getJobs(['waiting', 'active', 'delayed', 'prioritized'], 0, 500)
+  const targetIds = new Set(jobLogIds)
+
+  await Promise.all(jobs.map(async (job) => {
+    const data = job.data
+    if (data.jobType !== 'upload-invoice' || !data.jobLogId || !targetIds.has(data.jobLogId) || !data.shipmentId) return
+
+    const [shipment] = await db
+      .select({ uploadAttempts: shipments.uploadAttempts })
+      .from(shipments)
+      .where(eq(shipments.id, data.shipmentId))
+      .limit(1)
+      .catch(() => [])
+
+    await markShipmentUploadFailed(data.shipmentId, message, (shipment?.uploadAttempts ?? 0) + 1).catch(() => {})
+    await job.remove().catch(() => {})
+  }))
+}
 
 /**
  * GET /api/orders/collect/status?ids=id1,id2,id3
@@ -41,6 +65,28 @@ export async function GET(request: NextRequest) {
   if (ids.length === 0) {
     return NextResponse.json({ error: 'ids must not be empty' }, { status: 400 })
   }
+
+  const timedOutQueuedInvoiceLogs = await db
+    .update(jobLogs)
+    .set({
+      status: 'failed',
+      completedAt: new Date(),
+      errorMessage: withLastProgress(RPA_QUEUE_TIMEOUT_MESSAGE),
+    })
+    .where(
+      and(
+        inArray(jobLogs.id, ids),
+        inArray(jobLogs.status, ['queued']),
+        eq(jobLogs.jobType, 'scrape-upload-invoice'),
+        sql`${jobLogs.createdAt} < now() - interval '120 seconds'`,
+      ),
+    )
+    .returning({ id: jobLogs.id })
+
+  await markTimedOutInvoiceShipments(
+    timedOutQueuedInvoiceLogs.map((log) => log.id),
+    RPA_QUEUE_TIMEOUT_MESSAGE,
+  )
 
   await db
     .update(jobLogs)

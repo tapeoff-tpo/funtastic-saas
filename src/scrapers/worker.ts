@@ -49,6 +49,18 @@ async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promis
 async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   const { marketplaceId, connectionId, userId, jobType, jobLogId, since, orderId, shipmentId, invoice } = job.data
 
+  if (jobLogId) {
+    const [existingLog] = await db
+      .select({ status: jobLogs.status })
+      .from(jobLogs)
+      .where(eq(jobLogs.id, jobLogId))
+      .limit(1)
+    if (existingLog && ['completed', 'failed', 'cancelled'].includes(existingLog.status)) {
+      console.log(`[scrape-worker] skip stale ${marketplaceId} ${jobType} (${jobLogId}) status=${existingLog.status}`)
+      return
+    }
+  }
+
   const logValues = {
     ...(jobLogId ? { id: jobLogId } : {}),
     jobType: `scrape-${jobType}`,

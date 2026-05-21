@@ -215,6 +215,50 @@ async function applyOrderSearch(
 }
 
 async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
+  const domSelected = await page.evaluate(() => {
+    const isVisible = (element: HTMLElement) => {
+      const rect = element.getBoundingClientRect()
+      const style = window.getComputedStyle(element)
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+    }
+
+    const clickCheckbox = (checkbox: HTMLInputElement) => {
+      checkbox.scrollIntoView({ block: 'center', inline: 'center' })
+      if (!checkbox.checked) checkbox.click()
+      checkbox.checked = true
+      checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }))
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+      return checkbox.checked
+    }
+
+    const rows = Array.from(document.querySelectorAll<HTMLElement>('tr, .tui-grid-row, [role="row"]'))
+    for (const row of rows) {
+      const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+      const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      if (!checkbox || checkbox.disabled) continue
+      if (!/\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text)) continue
+      if (clickCheckbox(checkbox)) return true
+    }
+
+    const tableCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"], table input[type="checkbox"]'))
+      .filter((checkbox) => !checkbox.disabled && isVisible(checkbox))
+    for (const checkbox of tableCheckboxes) {
+      const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
+      const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+      if (/보류주문|검색어|기간|주문상태/.test(text) && !/\d{10,}/.test(text)) continue
+      if (clickCheckbox(checkbox)) return true
+    }
+
+    const bodyText = document.body.textContent ?? ''
+    const hasResultCount = /총\s*[1-9]\d*\s*개/.test(bodyText)
+    if (hasResultCount && tableCheckboxes[0]) return clickCheckbox(tableCheckboxes[0])
+
+    return false
+  }).catch(() => false)
+
+  if (domSelected) return true
+
   const checkboxLocators = await page.locator('#order_list input[type="checkbox"], #goods_list input[type="checkbox"]').all()
   let selected = false
 
@@ -277,6 +321,19 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
   }
 
   return selected
+}
+
+async function summarizeOrderSearchState(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const text = document.body.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    const counts = text.match(/(?:총\s*\d+\s*개|신규주문\s*\d+\s*건|발송대상\s*\d+\s*건|보류주문\s*\d+\s*건)/g) ?? []
+    const rows = Array.from(document.querySelectorAll('tr, .tui-grid-row, [role="row"]'))
+      .map((row) => row.textContent?.replace(/\s+/g, ' ').trim() ?? '')
+      .filter((rowText) => /\d{10,}|신규주문|발송대상|배송준비중/.test(rowText))
+      .slice(0, 3)
+    const checkboxCount = document.querySelectorAll('input[type="checkbox"]').length
+    return `counts=${counts.join(', ') || '-'} checkboxes=${checkboxCount} rows=${rows.join(' / ') || '-'}`
+  }).catch(async () => summarizePage(page))
 }
 
 async function triggerSelectedOrderExcelDownload(
@@ -509,7 +566,11 @@ export class DomechangoScraper implements MarketplaceScraper {
         await runStep(`orders: apply order search (${status})`, () => applyOrderSearch(ctx.page, since, until, status))
         await setProgress?.(`도매창고 ${statusLabel[status]} 엑셀 다운로드 대상 선택 중...`)
         const hasOrder = await runStep(`orders: select first order (${status})`, () => selectFirstOrderForExcel(ctx.page))
-        if (!hasOrder) continue
+        if (!hasOrder) {
+          const state = await summarizeOrderSearchState(ctx.page)
+          await setProgress?.(`도매창고 ${statusLabel[status]} 선택 대상 없음 (${state})`)
+          continue
+        }
 
         matchedStatus = status
         workbook = await runStep(`orders: download selected order excel (${status})`, () => triggerSelectedOrderExcelDownload(ctx.page, setProgress))
@@ -517,7 +578,11 @@ export class DomechangoScraper implements MarketplaceScraper {
       }
 
       if (!workbook || !matchedStatus) {
-        await setProgress?.('도매창고 수집 대상 주문 0건')
+        const state = await summarizeOrderSearchState(ctx.page)
+        if (/총\s*[1-9]\d*\s*개|신규주문\s*[1-9]\d*\s*건|발송대상\s*[1-9]\d*\s*건/.test(state)) {
+          throw new MarketplaceApiError('domechango', 500, `도매창고 주문은 보이지만 선택할 주문을 잡지 못했습니다. (${state})`)
+        }
+        await setProgress?.(`도매창고 수집 대상 주문 0건 (${state})`)
         return null
       }
       await setProgress?.('도매창고 주문 엑셀 다운로드 완료')

@@ -22,6 +22,7 @@ import {
   Download,
   Star,
   Headphones,
+  MessageSquareText,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -48,7 +49,6 @@ const navSections: NavSection[] = [
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
       { href: '/orders/collect', label: '주문 수집', icon: Download },
-      { href: '/cs', label: 'CS 작업함', icon: Headphones },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
     ],
   },
@@ -56,6 +56,7 @@ const navSections: NavSection[] = [
     title: 'CS',
     items: [
       { href: '/cs', label: '상품검수/CS', icon: Headphones },
+      { href: '/cs/inquiries', label: '문의', icon: MessageSquareText },
     ],
   },
   {

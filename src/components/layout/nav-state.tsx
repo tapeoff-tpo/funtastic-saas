@@ -36,6 +36,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/orders/import': 'Order Import',
   '/orders/claims': 'Claims',
   '/cs': 'Product Inspection',
+  '/cs/inquiries': 'Inquiries',
   '/shipping': 'Shipping',
   '/shipping/held': 'Held Orders',
   '/shipping/scan': 'Barcode Scan',

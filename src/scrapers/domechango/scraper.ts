@@ -694,12 +694,14 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
 
   const [uploadResponse, uploadDialogMessage] = await Promise.all([uploadResponsePromise, uploadDialogPromise])
   const uploadResponseText = uploadResponse ? await uploadResponse.text().catch(() => '') : ''
-  await frame.waitForFunction(() => {
-    const totalText = document.querySelector('#order_list_total')?.textContent ?? ''
-    return Number(totalText.replace(/[^\d]/g, '')) > 0
-  }, undefined, { timeout: 15_000 }).catch(() => undefined)
-
-  const uploadedCountText = await frame.locator('#order_list_total').innerText({ timeout: 3000 }).catch(() => '')
+  const orderListTotal = frame.locator('#order_list_total').first()
+  const uploadCountDeadline = Date.now() + 15_000
+  let uploadedCountText = ''
+  while (Date.now() < uploadCountDeadline) {
+    uploadedCountText = await orderListTotal.innerText({ timeout: 1000 }).catch(() => '')
+    if (Number(uploadedCountText.replace(/[^\d]/g, '')) > 0) break
+    await page.waitForTimeout(500)
+  }
   const uploadedCount = Number(uploadedCountText.replace(/[^\d]/g, '')) || 0
   const uploadCombined = `${uploadDialogMessage ?? ''} ${uploadResponseText} ${await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')}`
   if (!uploadResponse?.ok() && uploadedCount <= 0) {

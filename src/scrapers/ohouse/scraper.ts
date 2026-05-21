@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v7'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v8'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -121,19 +121,13 @@ async function clickByText(page: Page, pattern: RegExp): Promise<boolean> {
 }
 
 async function clickOhouseLoginButton(page: Page): Promise<void> {
-  const clicked = await page
-    .locator('button[aria-label="로그인 버튼"], button[type="submit"]')
-    .evaluateAll((elements) => {
-      const target = elements.find((element) => /로그인/.test(element.textContent ?? '')) as HTMLElement | undefined
-      target?.click()
-      return Boolean(target)
-    })
-    .catch(() => false)
-  if (!clicked) {
-    await clickByText(page, /로그인/i).then(async (fallbackClicked) => {
-      if (!fallbackClicked) await page.keyboard.press('Enter')
-    })
-  }
+  const loginButton = page.locator('button[aria-label="로그인 버튼"], button[type="submit"]').filter({ hasText: /로그인/ }).first()
+  const clicked = await loginButton.click({ timeout: 5000 }).then(() => true).catch(() => false)
+  if (clicked) return
+
+  await clickByText(page, /로그인/i).then(async (fallbackClicked) => {
+    if (!fallbackClicked) await page.keyboard.press('Enter')
+  })
 }
 
 async function readDownloadBuffer(download: Download): Promise<Buffer> {
@@ -194,8 +188,11 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
 
 async function submitLogin(page: Page): Promise<void> {
   await clickOhouseLoginButton(page)
-  await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-  await page.waitForTimeout(1500)
+  await Promise.race([
+    page.waitForURL((url) => !/\/signin(?:$|\?)/.test(url.pathname), { timeout: 20_000 }),
+    page.waitForLoadState('domcontentloaded', { timeout: 20_000 }),
+  ]).catch(() => undefined)
+  await page.waitForTimeout(2500)
 }
 
 async function openLoginForm(page: Page): Promise<void> {
@@ -341,10 +338,10 @@ export class OhouseScraper implements MarketplaceScraper {
       await handleEmailSecondFactor(page, credentials)
       if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
         const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-        const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력/)?.[0]
+        const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력|계정.*확인|판매자.*확인|인증.*필요/)?.[0]
         return {
           success: false,
-          error: `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후에도 로그인 화면에 머물러 있습니다.${reason ? ` (${reason})` : ''} (${await summarizePage(page)})`,
+          error: `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후에도 로그인 화면에 머물러 있습니다.${reason ? ` (${reason})` : ' 오늘의집 ID/PW, 판매자 계정 권한, 2차 인증 설정을 확인해주세요.'} (${await summarizePage(page)})`,
         }
       }
       await gotoOhouse(page, PARTNER_BASE_URL).catch(() => undefined)

@@ -19,6 +19,7 @@ const BANANA_B2B_LOGIN_URL = `${BANANA_B2B_BASE_URL}/login`
 const DOWNLOAD_TIMEOUT_MS = 60_000
 
 const ORDER_PAGE_CANDIDATES = [
+  `${BANANA_B2B_BASE_URL}/order-delivery/order`,
   `${BANANA_B2B_BASE_URL}/orders`,
   `${BANANA_B2B_BASE_URL}/order`,
   `${BANANA_B2B_BASE_URL}/order/list`,

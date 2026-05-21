@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import type { Page } from 'playwright'
+import type { Download, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   InvoiceData,
@@ -20,6 +20,7 @@ const NAVIGATION_TIMEOUT_MS = 20_000
 const LOAD_STATE_TIMEOUT_MS = 8_000
 const ORDER_PAGE_REFERRER = `${WMS_BASE_URL}/order`
 const DOWNLOAD_TIMEOUT_MS = 120_000
+const DOWNLOAD_STREAM_TIMEOUT_MS = 60_000
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -66,6 +67,26 @@ async function summarizePage(page: Page): Promise<string> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 240)
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
+}
+
+async function readDownloadBuffer(download: Download): Promise<Buffer> {
+  const stream = await download.createReadStream()
+  if (!stream) throw new MarketplaceApiError('domechango', 500, '도매창고 엑셀 다운로드 스트림을 열 수 없습니다.')
+
+  return Promise.race([
+    (async () => {
+      const chunks: Buffer[] = []
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      }
+      return Buffer.concat(chunks)
+    })(),
+    new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new MarketplaceApiError('domechango', 504, `도매창고 엑셀 다운로드 스트림 수신이 ${DOWNLOAD_STREAM_TIMEOUT_MS / 1000}초 안에 끝나지 않았습니다.`))
+      }, DOWNLOAD_STREAM_TIMEOUT_MS)
+    }),
+  ])
 }
 
 async function gotoDomechango(page: Page, url = WMS_BASE_URL): Promise<void> {
@@ -202,7 +223,11 @@ async function selectFirstOrderForExcel(page: Page): Promise<void> {
   }
 }
 
-async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
+async function triggerSelectedOrderExcelDownload(
+  page: Page,
+  setProgress?: (message: string) => Promise<void>,
+): Promise<Buffer> {
+  await setProgress?.('도매창고 엑셀 다운로드 요청 중...')
   const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
     .then(async (dialog) => {
       const message = dialog.message()
@@ -246,14 +271,8 @@ async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
     )
   })
 
-  const stream = await download.createReadStream()
-  if (!stream) throw new MarketplaceApiError('domechango', 500, '도매창고 엑셀 다운로드 스트림을 열 수 없습니다.')
-
-  const chunks: Buffer[] = []
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
+  await setProgress?.('도매창고 엑셀 파일 수신 중...')
+  return readDownloadBuffer(download)
 }
 
 async function confirmSelectedOrders(page: Page): Promise<void> {
@@ -355,9 +374,13 @@ export class DomechangoScraper implements MarketplaceScraper {
     }
   }
 
-  async getOrders(credentials: ScraperCredentials, since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(
+    credentials: ScraperCredentials,
+    since: Date,
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedOrder[]> {
     const until = new Date()
-    const workbookBuffer = await this.downloadOrdersExcel(credentials, since, until)
+    const workbookBuffer = await this.downloadOrdersExcel(credentials, since, until, setProgress)
     return this.parseOrdersExcel(workbookBuffer)
   }
 
@@ -383,6 +406,7 @@ export class DomechangoScraper implements MarketplaceScraper {
     credentials: ScraperCredentials,
     since: Date,
     until: Date,
+    setProgress?: (message: string) => Promise<void>,
   ): Promise<Buffer> {
     let sessionState = credentials.storageState
     let ctx = await openContext(sessionState)
@@ -419,12 +443,18 @@ export class DomechangoScraper implements MarketplaceScraper {
         throw new MarketplaceApiError('domechango', 401, `도매창고 WMS 세션을 확인하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
 
+      await setProgress?.('도매창고 주문 목록 여는 중...')
       await runStep('orders: open order list page', () => openOrderListPage(ctx.page))
+      await setProgress?.('도매창고 주문 검색 중...')
       await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since, until))
+      await setProgress?.('도매창고 엑셀 다운로드 대상 선택 중...')
       await runStep('orders: select first order', () => selectFirstOrderForExcel(ctx.page))
-      const workbook = await runStep('orders: download selected order excel', () => triggerSelectedOrderExcelDownload(ctx.page))
+      const workbook = await runStep('orders: download selected order excel', () => triggerSelectedOrderExcelDownload(ctx.page, setProgress))
+      await setProgress?.('도매창고 주문확인 처리 전 목록 갱신 중...')
       await runStep('orders: refresh order list before confirm', () => applyOrderSearch(ctx.page, since, until))
+      await setProgress?.('도매창고 주문확인 대상 다시 선택 중...')
       await runStep('orders: reselect order before confirm', () => selectFirstOrderForExcel(ctx.page))
+      await setProgress?.('도매창고 주문확인 처리 중...')
       await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page))
       return workbook
     } finally {

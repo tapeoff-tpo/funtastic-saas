@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { claims } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { ClaimStatus } from './types'
 
 type ActionResult = { success: boolean; error?: string }
@@ -33,13 +34,15 @@ export async function updateClaimStatus(
     return { success: false, error: 'Not authenticated' }
   }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
   const [updated] = await db
     .update(claims)
     .set({
       claimStatus: status,
       updatedAt: new Date(),
     })
-    .where(and(eq(claims.id, claimId), eq(claims.userId, user.id)))
+    .where(and(eq(claims.id, claimId), eq(claims.userId, workspaceUserId)))
     .returning({ id: claims.id })
 
   if (!updated) {
@@ -47,6 +50,7 @@ export async function updateClaimStatus(
   }
 
   revalidatePath('/orders/claims')
+  revalidatePath('/cs')
   revalidateTag('orders', 'max')
   return { success: true }
 }
@@ -69,13 +73,15 @@ export async function updateClaimMemo(
     return { success: false, error: 'Not authenticated' }
   }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
   const [updated] = await db
     .update(claims)
     .set({
       reason: memo,
       updatedAt: new Date(),
     })
-    .where(and(eq(claims.id, claimId), eq(claims.userId, user.id)))
+    .where(and(eq(claims.id, claimId), eq(claims.userId, workspaceUserId)))
     .returning({ id: claims.id })
 
   if (!updated) {
@@ -83,6 +89,7 @@ export async function updateClaimMemo(
   }
 
   revalidatePath('/orders/claims')
+  revalidatePath('/cs')
   revalidateTag('orders', 'max')
   return { success: true }
 }

@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { getClaims } from '@/lib/orders/claims-queries'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { ClaimsTable } from './claims-table'
 import type { Metadata } from 'next'
 import type { ClaimType, ClaimStatus } from '@/lib/orders/types'
@@ -43,8 +44,9 @@ export default async function ClaimsPage({
   const claimType = (params.claimType as ClaimType | undefined) ?? undefined
   const claimStatus = (params.claimStatus as ClaimStatus | undefined) ?? undefined
   const page = params.page ? Number(params.page) : 1
+  const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  const { claims, total } = await getClaims(user.id, {
+  const { claims, total } = await getClaims(workspaceUserId, {
     claimType: claimType || undefined,
     claimStatus: claimStatus || undefined,
     page,

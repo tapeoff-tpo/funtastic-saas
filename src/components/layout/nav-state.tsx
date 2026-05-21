@@ -35,6 +35,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/orders/collect': '주문 수집',
   '/orders/import': '주문 엑셀 임포트',
   '/orders/claims': '클레임 관리',
+  '/cs': 'CS 관리',
   '/shipping': '배송 관리',
   '/shipping/held': '미발송 관리',
   '/shipping/scan': '바코드 스캔/출고',

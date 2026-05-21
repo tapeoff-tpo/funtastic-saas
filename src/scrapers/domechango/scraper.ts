@@ -200,7 +200,7 @@ async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<v
   await page.waitForTimeout(3000)
 }
 
-async function selectFirstOrderForExcel(page: Page): Promise<void> {
+async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
   const checkboxLocators = await page.locator('#order_list input[type="checkbox"], #goods_list input[type="checkbox"]').all()
   let selected = false
 
@@ -262,9 +262,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<void> {
     })
   }
 
-  if (!selected) {
-    throw new MarketplaceApiError('domechango', 500, `도매창고 주문 목록에서 선택할 주문 체크박스를 찾지 못했습니다. (${await summarizePage(page)})`)
-  }
+  return selected
 }
 
 async function triggerSelectedOrderExcelDownload(
@@ -425,6 +423,7 @@ export class DomechangoScraper implements MarketplaceScraper {
   ): Promise<NormalizedOrder[]> {
     const until = new Date()
     const workbookBuffer = await this.downloadOrdersExcel(credentials, since, until, setProgress)
+    if (!workbookBuffer) return []
     return this.parseOrdersExcel(workbookBuffer)
   }
 
@@ -451,7 +450,7 @@ export class DomechangoScraper implements MarketplaceScraper {
     since: Date,
     until: Date,
     setProgress?: (message: string) => Promise<void>,
-  ): Promise<Buffer> {
+  ): Promise<Buffer | null> {
     let sessionState = credentials.storageState
     let ctx = await openContext(sessionState)
 
@@ -492,14 +491,20 @@ export class DomechangoScraper implements MarketplaceScraper {
       await setProgress?.('도매창고 주문 검색 중...')
       await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since, until))
       await setProgress?.('도매창고 엑셀 다운로드 대상 선택 중...')
-      await runStep('orders: select first order', () => selectFirstOrderForExcel(ctx.page))
+      const hasOrder = await runStep('orders: select first order', () => selectFirstOrderForExcel(ctx.page))
+      if (!hasOrder) {
+        await setProgress?.('도매창고 수집 대상 주문 0건')
+        return null
+      }
       const workbook = await runStep('orders: download selected order excel', () => triggerSelectedOrderExcelDownload(ctx.page, setProgress))
       await setProgress?.('도매창고 주문확인 처리 전 목록 갱신 중...')
       await runStep('orders: refresh order list before confirm', () => applyOrderSearch(ctx.page, since, until))
       await setProgress?.('도매창고 주문확인 대상 다시 선택 중...')
-      await runStep('orders: reselect order before confirm', () => selectFirstOrderForExcel(ctx.page))
-      await setProgress?.('도매창고 주문확인 처리 중...')
-      await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page))
+      const hasOrderToConfirm = await runStep('orders: reselect order before confirm', () => selectFirstOrderForExcel(ctx.page))
+      if (hasOrderToConfirm) {
+        await setProgress?.('도매창고 주문확인 처리 중...')
+        await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page))
+      }
       return workbook
     } finally {
       await ctx.close()

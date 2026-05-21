@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v4'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v5'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -370,6 +370,9 @@ export class OhouseScraper implements MarketplaceScraper {
       }
       await setProgress?.('오늘의집 주문 검색 조건 적용 중...')
       await applyOrderSearch(ctx.page, since, until)
+      if (/\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
+        throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 검색 후 로그인 화면으로 이동했습니다. 세션 쿠키가 만료됐거나 로그인/2차 인증이 완료되지 않았습니다. (${await summarizePage(ctx.page)})`)
+      }
       await setProgress?.('오늘의집 주문 엑셀 다운로드 중...')
       const workbook = await downloadOrdersExcel(ctx.page)
       return this.parseOrdersExcel(workbook, credentials)

@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as {
     connectionIds?: string[]
     lookbackDays?: number
+    scope?: 'all' | 'claims' | 'inquiries'
   }
 
   const requestedIds = Array.isArray(body.connectionIds)
@@ -32,6 +33,7 @@ export async function POST(request: NextRequest) {
   const lookbackDays = Number.isFinite(Number(body.lookbackDays))
     ? Math.min(Math.max(Math.floor(Number(body.lookbackDays)), 1), 14)
     : 7
+  const scope = body.scope === 'claims' || body.scope === 'inquiries' ? body.scope : 'all'
 
   const conditions: SQL[] = [
     eq(marketplaceConnections.userId, workspaceUserId),
@@ -55,6 +57,7 @@ export async function POST(request: NextRequest) {
       return { conn, integrationMethod }
     })
     .filter(({ integrationMethod }) => integrationMethod !== 'excel')
+    .filter(({ integrationMethod }) => !(scope === 'inquiries' && integrationMethod === 'rpa'))
 
   if (targets.length === 0) {
     return NextResponse.json({ error: 'CS 수집 가능한 마켓 연동이 없습니다.' }, { status: 404 })
@@ -104,6 +107,7 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       jobLogId,
       lookbackDays,
+      scope,
     }).catch((error) => {
       console.error('[cs-collect] Background CS collection failed:', error)
     })

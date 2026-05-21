@@ -5,6 +5,13 @@ This version has breaking changes — APIs, conventions, and file structure may 
 <!-- END:nextjs-agent-rules -->
 ## Project Critical Rules
 
+### Collection Responsibility Policy
+
+- All-market order collection must stay fast. `/orders/collect` is responsible only for collecting orders and moving eligible marketplace orders into order-confirmed/shipping-prep status.
+- Do not add inquiry, claim, return-inspection, or unrelated CS collection work to the all-market order collection path.
+- Marketplace inquiries must be collected from the dedicated CS inquiry collection button/page, not as a side effect of order collection.
+- When adding or changing marketplace integrations, keep `getOrders` / order confirmation logic separate from `getInquiries` / CS claim logic so a slow CS endpoint cannot block daily order collection.
+
 ### Admin Account Policy
 
 - Operational data is shared across all admin accounts.

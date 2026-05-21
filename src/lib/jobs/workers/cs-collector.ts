@@ -13,6 +13,7 @@ export async function collectCsForConnection(params: {
   userId: string
   jobLogId: string
   lookbackDays?: number
+  scope?: 'all' | 'claims' | 'inquiries'
 }): Promise<void> {
   const {
     marketplaceId,
@@ -20,6 +21,7 @@ export async function collectCsForConnection(params: {
     userId,
     jobLogId,
     lookbackDays = 7,
+    scope = 'all',
   } = params
 
   const setProgress = async (message: string) => {
@@ -72,30 +74,33 @@ export async function collectCsForConnection(params: {
     const adapter = createAdapter(marketplaceId, credentials)
     const since = new Date(Date.now() - Math.min(Math.max(Math.floor(lookbackDays), 1), 14) * 24 * 60 * 60 * 1000)
 
-    await setProgress('취소/반품/교환 조회 중...')
-    try {
-      const claims = await adapter.getClaimsOrders(since)
-      for (const claim of claims) {
-        if (await upsertClaim(claim, userId)) claimsCollected++
+    if (scope !== 'inquiries') {
+      await setProgress('취소/반품/교환 조회 중...')
+      try {
+        const claims = await adapter.getClaimsOrders(since)
+        for (const claim of claims) {
+          if (await upsertClaim(claim, userId)) claimsCollected++
+        }
+      } catch (error) {
+        if (!(error instanceof MarketplaceApiError && error.statusCode === 501)) throw error
       }
-    } catch (error) {
-      if (!(error instanceof MarketplaceApiError && error.statusCode === 501)) throw error
     }
 
-    if (adapter.getInquiries) {
+    if (scope !== 'claims' && adapter.getInquiries) {
       await setProgress('미답변 문의 조회 중...')
       const inquiries = await adapter.getInquiries(since)
       const result = await upsertInquiries(userId, marketplaceId, inquiries)
       inquiriesCollected = result.inserted + result.updated
     }
 
-    const summary = `CS ${claimsCollected + inquiriesCollected}건 수집/갱신`
+    const totalCollected = claimsCollected + inquiriesCollected
+    const summary = `${scope === 'inquiries' ? '문의' : 'CS'} ${totalCollected}건 수집/갱신`
     await db
       .update(jobLogs)
       .set({
         status: 'completed',
         completedAt: new Date(),
-        claimsCollected,
+        claimsCollected: totalCollected,
         progressMessage: summary,
       })
       .where(eq(jobLogs.id, jobLogId))

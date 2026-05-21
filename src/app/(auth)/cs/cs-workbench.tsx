@@ -53,6 +53,8 @@ interface CsWorkbenchProps {
   marketplaces: Array<{ value: string; label: string }>
   page: number
   pageSize: number
+  basePath?: string
+  fixedSource?: CsTicketSource
   filters: {
     source: string
     workstream: string
@@ -218,6 +220,8 @@ export function CsWorkbench({
   marketplaces,
   page,
   pageSize,
+  basePath = '/cs',
+  fixedSource,
   filters,
 }: CsWorkbenchProps) {
   const router = useRouter()
@@ -233,6 +237,7 @@ export function CsWorkbench({
   const [isPending, startTransition] = useTransition()
 
   const totalPages = Math.max(Math.ceil(total / pageSize), 1)
+  const sourceLocked = Boolean(fixedSource)
   const activeTicketIds = useMemo(() => new Set(tickets.map((ticket) => ticket.id)), [tickets])
   const activeSelected = selected && activeTicketIds.has(selected.id) ? selected : tickets[0] ?? null
   const replyDraft = activeSelected ? buildReplyDraft(activeSelected, inspection, note) : ''
@@ -244,7 +249,7 @@ export function CsWorkbench({
     })
     if (value) sp.set(key, value)
     const qs = sp.toString()
-    return `/cs${qs ? `?${qs}` : ''}`
+    return `${basePath}${qs ? `?${qs}` : ''}`
   }
 
   const pageHref = (nextPage: number) => {
@@ -253,7 +258,7 @@ export function CsWorkbench({
       if (filterValue) sp.set(filterKey, filterValue)
     })
     sp.set('page', String(nextPage))
-    return `/cs?${sp.toString()}`
+    return `${basePath}?${sp.toString()}`
   }
 
   async function handleFiles(files: FileList | null) {
@@ -358,12 +363,14 @@ export function CsWorkbench({
           </div>
         </div>
 
-        <form action="/cs" className="mt-4 grid gap-2 lg:grid-cols-[180px_180px_180px_180px_1fr_auto]">
-          <select name="source" defaultValue={filters.source} className="h-8 rounded border px-2 text-sm">
-            {SOURCE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+        <form action={basePath} className={`mt-4 grid gap-2 ${sourceLocked ? 'lg:grid-cols-[180px_180px_180px_1fr_auto]' : 'lg:grid-cols-[180px_180px_180px_180px_1fr_auto]'}`}>
+          {!sourceLocked && (
+            <select name="source" defaultValue={filters.source} className="h-8 rounded border px-2 text-sm">
+              {SOURCE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          )}
           <select name="workstream" defaultValue={filters.workstream} className="h-8 rounded border px-2 text-sm">
             {WORKSTREAM_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>

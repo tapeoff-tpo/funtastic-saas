@@ -49,8 +49,8 @@ function claimTypeFor(status) {
 function orderStatusFor(status, trackingNumber) {
   if (status.includes('취소완료')) return 'cancelled'
   if (status.includes('출고완료') || status.includes('교환발송완료') || status.includes('교환완료')) return 'delivered'
-  if (status.startsWith('취소접수')) return trackingNumber ? 'preparing' : 'confirmed'
-  if (status.startsWith('반품') || status.startsWith('교환')) return trackingNumber ? 'preparing' : 'confirmed'
+  if (status.startsWith('취소접수')) return 'confirmed'
+  if (status.startsWith('반품') || status.startsWith('교환')) return status.includes('완료') ? 'cancelled' : 'confirmed'
   return trackingNumber ? 'preparing' : 'new'
 }
 

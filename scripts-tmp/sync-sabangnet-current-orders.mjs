@@ -86,7 +86,7 @@ function classifyStatus(statusRaw, trackingNumber) {
 
   if (isCancelRequest) {
     return {
-      status: trackingNumber ? 'preparing' : 'confirmed',
+      status: 'confirmed',
       isHeld: true,
       holdReason: '취소접수',
       logisticsMessage: null,
@@ -113,7 +113,7 @@ function classifyStatus(statusRaw, trackingNumber) {
 
   if (isClaimRequest) {
     return {
-      status: status.includes('완료') ? 'cancelled' : (trackingNumber ? 'preparing' : 'confirmed'),
+      status: status.includes('완료') ? 'cancelled' : 'confirmed',
       isHeld: false,
       holdReason: null,
       logisticsMessage: null,

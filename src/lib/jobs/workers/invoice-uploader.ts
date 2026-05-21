@@ -18,9 +18,9 @@ import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { updateShipmentStatus } from '@/lib/shipping/queries'
 import { db } from '@/lib/db'
 import { orders } from '@/lib/db/schema'
-import { deductForOrder } from '@/lib/inventory/actions'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
 import type { InvoiceData } from '@/lib/marketplace/types'
+import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 
 /**
  * For 10x10, look up detailIdx from the order's stored rawData.
@@ -46,26 +46,6 @@ async function resolveOrderRawData(orderId: string): Promise<Record<string, unkn
     .where(eq(orders.id, orderId))
     .limit(1)
   return (row?.rawData ?? null) as Record<string, unknown> | null
-}
-
-async function markOrderShippedAfterInvoiceUpload(orderId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [order] = await tx
-      .select({ id: orders.id, status: orders.status, userId: orders.userId })
-      .from(orders)
-      .where(eq(orders.id, orderId))
-      .for('update')
-      .limit(1)
-
-    if (order?.status !== 'ready') return
-
-    await tx.update(orders).set({
-      status: 'shipped',
-      previousStatus: 'ready',
-      updatedAt: new Date(),
-    }).where(eq(orders.id, orderId))
-    await deductForOrder(tx, order.userId, orderId)
-  })
 }
 
 /**
@@ -111,11 +91,10 @@ export async function processInvoiceUpload(
 
   // 5. Update status based on result
   if (result.success) {
-    await updateShipmentStatus(shipmentId, 'uploaded')
-    await markOrderShippedAfterInvoiceUpload(orderId)
+    await markShipmentUploadedAndOrderShipped(shipmentId, orderId, job.attemptsMade + 1)
   } else {
     const errorMessage = result.error || 'Unknown upload error'
-    await updateShipmentStatus(shipmentId, 'failed', errorMessage)
+    await markShipmentUploadFailed(shipmentId, errorMessage, job.attemptsMade + 1)
     // Throw to trigger BullMQ retry
     throw new Error(errorMessage)
   }

@@ -17,7 +17,7 @@ import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
-import { markShipmentUploadedAndOrderShipped } from '@/lib/shipping/upload-status'
+import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 import { logOrderChange } from '@/lib/orders/change-log'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
 import '@/lib/marketplace/adapters/configs'
@@ -253,22 +253,12 @@ export async function POST(req: NextRequest) {
           await markShipmentUploadedAndOrderShipped(s.id, s.orderId, s.uploadAttempts + 1)
           results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: true, marketplaceId })
         } else {
-          await db.update(shipments).set({
-            uploadStatus: 'failed',
-            marketplaceUploadError: result.error ?? null,
-            uploadAttempts: s.uploadAttempts + 1,
-            updatedAt: new Date(),
-          }).where(eq(shipments.id, s.id))
+          await markShipmentUploadFailed(s.id, result.error ?? 'Unknown error', s.uploadAttempts + 1)
           results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: false, error: result.error, marketplaceId })
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Unknown error'
-        await db.update(shipments).set({
-          uploadStatus: 'failed',
-          marketplaceUploadError: msg,
-          uploadAttempts: s.uploadAttempts + 1,
-          updatedAt: new Date(),
-        }).where(eq(shipments.id, s.id))
+        await markShipmentUploadFailed(s.id, msg, s.uploadAttempts + 1)
         results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: false, error: msg, marketplaceId })
       }
     }

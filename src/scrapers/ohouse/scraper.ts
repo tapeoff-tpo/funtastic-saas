@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v5'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v6'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -254,14 +254,40 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
     throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 화면이라 엑셀 다운로드를 시도할 수 없습니다. (${await summarizePage(page)})`)
   }
-  const downloadPromise = page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
+  const downloadPromise = page
+    .waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
+    .then((download) => readDownloadBuffer(download))
+  const excelResponsePromise = page
+    .waitForResponse((response) => {
+      const headers = response.headers()
+      const contentType = headers['content-type'] ?? ''
+      const disposition = headers['content-disposition'] ?? ''
+      return (
+        /attachment|filename/i.test(disposition) ||
+        /excel|spreadsheet|officedocument|octet-stream/i.test(contentType) ||
+        /\.(xlsx?|csv)(?:$|\?)/i.test(response.url())
+      )
+    }, { timeout: DOWNLOAD_TIMEOUT_MS })
+    .then((response) => response.body())
+
   const clicked = await clickByText(page, /검색결과\s*엑셀\s*다운로드/i)
   if (!clicked) {
     downloadPromise.catch(() => undefined)
+    excelResponsePromise.catch(() => undefined)
     throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 엑셀 다운로드 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
   }
-  const download = await downloadPromise
-  return readDownloadBuffer(download)
+
+  try {
+    return await Promise.race([downloadPromise, excelResponsePromise])
+  } catch (error) {
+    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+    const notice = bodyText.match(/다운로드[^.\n]*|엑셀[^.\n]*|권한[^.\n]*|로그인이 필요합니다\.?|오류[^.\n]*/)?.[0]
+    throw new MarketplaceApiError(
+      'ohouse',
+      504,
+      `${OHOUSE_RPA_VERSION}: 오늘의집 엑셀 다운로드 응답을 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 받지 못했습니다.${notice ? ` (${notice})` : ''} (${error instanceof Error ? error.message : 'download timeout'})`,
+    )
+  }
 }
 
 export class OhouseScraper implements MarketplaceScraper {

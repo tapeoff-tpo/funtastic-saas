@@ -7,6 +7,7 @@ import type { JobLogResult } from '@/lib/hooks/use-collect-poll'
 const POLL_INTERVAL = 1500
 
 type CsCollectScope = 'all' | 'claims' | 'inquiries'
+type CsCollectMethod = 'all' | 'api' | 'rpa'
 
 interface CsCollectPanelProps {
   title?: string
@@ -14,6 +15,7 @@ interface CsCollectPanelProps {
   runningLabel?: string
   lookbackDays?: number
   scope?: CsCollectScope
+  method?: CsCollectMethod
 }
 
 export function CsCollectPanel({
@@ -22,6 +24,7 @@ export function CsCollectPanel({
   runningLabel = '수집 중...',
   lookbackDays = 7,
   scope = 'all',
+  method = 'all',
 }: CsCollectPanelProps) {
   const [collecting, setCollecting] = useState(false)
   const [logs, setLogs] = useState<JobLogResult[] | null>(null)
@@ -60,7 +63,7 @@ export function CsCollectPanel({
       const res = await fetch('/api/cs/collect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lookbackDays, scope }),
+        body: JSON.stringify({ lookbackDays, scope, method }),
       })
       const data = await res.json()
 

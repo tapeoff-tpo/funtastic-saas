@@ -10,6 +10,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - All-market order collection must stay fast. `/orders/collect` is responsible only for collecting orders and moving eligible marketplace orders into order-confirmed/shipping-prep status.
 - Do not add inquiry, claim, return-inspection, or unrelated CS collection work to the all-market order collection path.
 - Marketplace inquiries must be collected from the dedicated CS inquiry collection button/page, not as a side effect of order collection.
+- Inquiry collection must keep API and RPA paths separate: API inquiries use adapter `getInquiries`, while RPA inquiries use scraper `getInquiries` from marketplace customer inquiry/1:1 boards.
 - When adding or changing marketplace integrations, keep `getOrders` / order confirmation logic separate from `getInquiries` / CS claim logic so a slow CS endpoint cannot block daily order collection.
 
 ### Admin Account Policy

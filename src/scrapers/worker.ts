@@ -23,6 +23,7 @@ import { eq } from 'drizzle-orm'
 import type { ScrapeJobData } from './types'
 import type { MarketplaceId } from '@/lib/marketplace/types'
 import { saveNormalizedOrdersForConnection, upsertClaim } from '@/lib/jobs/workers/order-collector'
+import { upsertInquiries } from '@/lib/orders/inquiry-queries'
 import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 
 // Side-effect import — registers all scraper instances on the registry
@@ -154,6 +155,26 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
           completedAt: new Date(),
           claimsCollected,
           progressMessage: `CS ${claimsCollected}건 수집/갱신`,
+        })
+        .where(eq(jobLogs.id, logRow.id))
+    } else if (jobType === 'scrape-inquiries') {
+      if (!scraper.getInquiries) {
+        throw new Error(`${marketplaceId} RPA 문의수집은 아직 지원하지 않습니다.`)
+      }
+
+      await setProgress('RPA 브라우저로 문의 게시판 접속 중...')
+      const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+      const inquiries = await runWithTimeout(scraper.getInquiries(credentials, sinceDate, setProgress), SCRAPE_JOB_TIMEOUT_MS)
+      const result = await upsertInquiries(userId, marketplaceId, inquiries)
+      const inquiriesCollected = result.inserted + result.updated
+      console.log(`[scrape-worker] ${marketplaceId}: ${inquiries.length} inquiries fetched`)
+      await db
+        .update(jobLogs)
+        .set({
+          status: 'completed',
+          completedAt: new Date(),
+          claimsCollected: inquiriesCollected,
+          progressMessage: `문의 ${inquiriesCollected}건 수집/갱신`,
         })
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'upload-invoice') {

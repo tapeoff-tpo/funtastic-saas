@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
       and(
         inArray(jobLogs.id, ids),
         inArray(jobLogs.status, ['queued', 'running']),
-        sql`(${jobLogs.jobType} = 'cs-collection' or ${jobLogs.jobType} = 'scrape-claims')`,
+        sql`(${jobLogs.jobType} = 'cs-collection' or ${jobLogs.jobType} = 'scrape-claims' or ${jobLogs.jobType} = 'scrape-inquiries')`,
         sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '360 seconds'`,
       ),
     )
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
       completedAt: jobLogs.completedAt,
     })
     .from(jobLogs)
-    .where(and(inArray(jobLogs.id, ids), sql`(${jobLogs.jobType} = 'cs-collection' or ${jobLogs.jobType} = 'scrape-claims')`))
+    .where(and(inArray(jobLogs.id, ids), sql`(${jobLogs.jobType} = 'cs-collection' or ${jobLogs.jobType} = 'scrape-claims' or ${jobLogs.jobType} = 'scrape-inquiries')`))
 
   const allDone = logs.length > 0 && logs.every(
     (log) => log.status === 'completed' || log.status === 'failed' || log.status === 'cancelled',

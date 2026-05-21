@@ -25,6 +25,7 @@ export async function POST(request: NextRequest) {
     connectionIds?: string[]
     lookbackDays?: number
     scope?: 'all' | 'claims' | 'inquiries'
+    method?: 'all' | 'api' | 'rpa'
   }
 
   const requestedIds = Array.isArray(body.connectionIds)
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
     ? Math.min(Math.max(Math.floor(Number(body.lookbackDays)), 1), 14)
     : 7
   const scope = body.scope === 'claims' || body.scope === 'inquiries' ? body.scope : 'all'
+  const method = body.method === 'api' || body.method === 'rpa' ? body.method : 'all'
 
   const conditions: SQL[] = [
     eq(marketplaceConnections.userId, workspaceUserId),
@@ -57,14 +59,20 @@ export async function POST(request: NextRequest) {
       return { conn, integrationMethod }
     })
     .filter(({ integrationMethod }) => integrationMethod !== 'excel')
-    .filter(({ integrationMethod }) => !(scope === 'inquiries' && integrationMethod === 'rpa'))
+    .filter(({ integrationMethod }) => {
+      if (method === 'api') return integrationMethod !== 'rpa'
+      if (method === 'rpa') return integrationMethod === 'rpa'
+      return true
+    })
 
   if (targets.length === 0) {
     return NextResponse.json({ error: 'CS 수집 가능한 마켓 연동이 없습니다.' }, { status: 404 })
   }
 
   const lockResult = await createCollectionJobLogsWithLock(targets.map(({ conn, integrationMethod }) => ({
-    jobType: integrationMethod === 'rpa' ? 'scrape-claims' : 'cs-collection',
+    jobType: integrationMethod === 'rpa'
+      ? (scope === 'inquiries' ? 'scrape-inquiries' : 'scrape-claims')
+      : 'cs-collection',
     marketplaceId: conn.marketplaceId,
     connectionId: conn.id,
   })))
@@ -83,13 +91,14 @@ export async function POST(request: NextRequest) {
     const jobLogId = lockResult.jobLogIds[index]
     if (!jobLogId) continue
     if (target.integrationMethod === 'rpa') {
+      const rpaJobType = scope === 'inquiries' ? 'scrape-inquiries' : 'scrape-claims'
       await getMarketplaceScrapeQueue().add(
         `manual-cs-${target.conn.marketplaceId}-${Date.now()}`,
         {
           marketplaceId: target.conn.marketplaceId,
           connectionId: target.conn.id,
           userId: workspaceUserId,
-          jobType: 'scrape-claims',
+          jobType: rpaJobType,
           jobLogId,
           since: new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000).toISOString(),
         },

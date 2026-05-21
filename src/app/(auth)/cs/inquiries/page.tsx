@@ -48,13 +48,24 @@ export default async function CsInquiriesPage({
 
   return (
     <div className="space-y-3">
-      <CsCollectPanel
-        title="문의 수집"
-        buttonLabel="문의 수집"
-        runningLabel="문의 수집 중..."
-        scope="inquiries"
-        lookbackDays={7}
-      />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <CsCollectPanel
+          title="API 문의 수집"
+          buttonLabel="API 문의 수집"
+          runningLabel="API 문의 수집 중..."
+          scope="inquiries"
+          method="api"
+          lookbackDays={7}
+        />
+        <CsCollectPanel
+          title="RPA 문의 수집"
+          buttonLabel="RPA 문의 수집"
+          runningLabel="RPA 문의 수집 중..."
+          scope="inquiries"
+          method="rpa"
+          lookbackDays={7}
+        />
+      </div>
       <CsWorkbench
         tickets={result.tickets.map(serializeTicket)}
         stats={result.stats}

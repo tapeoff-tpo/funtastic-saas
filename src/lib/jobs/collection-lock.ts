@@ -7,6 +7,7 @@ const COLLECTION_JOB_TYPES = [
   'manual-order-collection',
   'scrape-orders',
   'scrape-claims',
+  'scrape-inquiries',
   'cs-collection',
 ] as const
 

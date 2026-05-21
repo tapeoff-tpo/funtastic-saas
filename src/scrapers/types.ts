@@ -12,6 +12,7 @@
 import type {
   NormalizedOrder,
   NormalizedClaim,
+  NormalizedInquiry,
   InvoiceData,
   MarketplaceId,
 } from '@/lib/marketplace/types'
@@ -69,6 +70,13 @@ export interface MarketplaceScraper {
     since: Date,
   ): Promise<NormalizedClaim[]>
 
+  /** Fetch marketplace 1:1/customer inquiries since a date. */
+  getInquiries?(
+    credentials: ScraperCredentials,
+    since: Date,
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedInquiry[]>
+
   /** Upload an invoice (tracking number) for an order. */
   uploadInvoice(
     credentials: ScraperCredentials,
@@ -82,10 +90,10 @@ export interface ScrapeJobData {
   marketplaceId: MarketplaceId
   connectionId: string
   userId: string
-  jobType: 'scrape-orders' | 'scrape-claims' | 'upload-invoice'
+  jobType: 'scrape-orders' | 'scrape-claims' | 'scrape-inquiries' | 'upload-invoice'
   /** Pre-created job_logs row ID for UI polling */
   jobLogId?: string
-  /** For 'scrape-orders' / 'scrape-claims': ISO timestamp to fetch since */
+  /** For collection jobs: ISO timestamp to fetch since */
   since?: string
   /** For 'upload-invoice': specific order + tracking */
   orderId?: string

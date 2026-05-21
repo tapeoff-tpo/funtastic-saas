@@ -294,10 +294,18 @@ async function triggerSelectedOrderExcelDownload(
       const selects = document.querySelectorAll<HTMLSelectElement>('select')
       let select: HTMLSelectElement | undefined
       let option: HTMLOptionElement | undefined
+      const visibleSelects = Array.from(selects).filter((candidate) => candidate.offsetParent !== null)
+      const isSelectedOrderSelect = (candidate: HTMLSelectElement) => {
+        const key = `${candidate.id} ${candidate.name} ${candidate.className} ${candidate.selectedOptions[0]?.textContent ?? ''}`
+        const optionText = Array.from(candidate.options).map((candidateOption) => candidateOption.textContent ?? '').join(' ')
+        if (/list_size|검색어|search|sdate|edate|page/i.test(key)) return false
+        if (/50개씩|주문번호|상품코드|자체상품코드/.test(optionText)) return false
+        return /선택\s*주문|선택주문|엑셀\s*다운|다운로드/.test(`${key} ${optionText}`)
+      }
 
-      for (const candidate of selects) {
+      for (const candidate of visibleSelects.filter(isSelectedOrderSelect)) {
         for (const candidateOption of candidate.options) {
-          if (/엑셀\s*다운|다운/.test(candidateOption.textContent ?? '')) {
+          if (/엑셀\s*다운|엑셀.*다운|다운로드/.test(candidateOption.textContent ?? '')) {
             select = candidate
             option = candidateOption
             break
@@ -306,8 +314,22 @@ async function triggerSelectedOrderExcelDownload(
         if (select && option) break
       }
 
-      if (!select) throw new Error('엑셀 다운받기 선택 상자를 찾지 못했습니다.')
-      if (!option) throw new Error('엑셀 다운받기 옵션을 찾지 못했습니다.')
+      if (!select || !option) {
+        for (const candidate of visibleSelects) {
+          for (const candidateOption of candidate.options) {
+            const text = candidateOption.textContent ?? ''
+            if (/엑셀\s*다운|엑셀.*다운|다운로드/.test(text)) {
+              select = candidate
+              option = candidateOption
+              break
+            }
+          }
+          if (select && option) break
+        }
+      }
+
+      if (!select) throw new Error('선택주문 엑셀 다운로드 선택 상자를 찾지 못했습니다.')
+      if (!option) throw new Error('선택주문 엑셀 다운로드 옵션을 찾지 못했습니다.')
 
       select.value = option.value
       select.dispatchEvent(new Event('input', { bubbles: true }))
@@ -325,34 +347,6 @@ async function triggerSelectedOrderExcelDownload(
 
   await setProgress?.('도매창고 엑셀 파일 수신 중...')
   return readDownloadBuffer(download)
-}
-
-async function confirmSelectedOrders(page: Page): Promise<void> {
-  const statusSelect = page.locator('#act_status').first()
-  await statusSelect.waitFor({ state: 'visible', timeout: 10_000 }).catch(() => undefined)
-
-  const [response] = await Promise.all([
-    page.waitForResponse(
-      (res) => res.url().includes('/wms/order/list/status/2') && res.request().method() === 'PATCH',
-      { timeout: 15_000 },
-    ),
-    statusSelect.selectOption('2', { timeout: 10_000 }),
-  ]).catch((error) => {
-    throw new MarketplaceApiError(
-      'domechango',
-      500,
-      `도매창고 주문확인 처리 요청을 완료하지 못했습니다. (${error instanceof Error ? error.message : 'unknown error'})`,
-    )
-  })
-
-  const payload = await response.json().catch(() => null) as { statusCode?: number; data?: unknown; message?: string } | null
-  if (!response.ok() || payload?.statusCode !== 200) {
-    throw new MarketplaceApiError(
-      'domechango',
-      response.status() || 500,
-      `도매창고 주문확인 처리에 실패했습니다. (${String(payload?.data ?? payload?.message ?? response.statusText())})`,
-    )
-  }
 }
 
 export class DomechangoScraper implements MarketplaceScraper {
@@ -522,15 +516,7 @@ export class DomechangoScraper implements MarketplaceScraper {
         await setProgress?.('도매창고 수집 대상 주문 0건')
         return null
       }
-
-      await setProgress?.('도매창고 주문확인 처리 전 목록 갱신 중...')
-      await runStep('orders: refresh order list before confirm', () => applyOrderSearch(ctx.page, since, until, matchedStatus))
-      await setProgress?.('도매창고 주문확인 대상 다시 선택 중...')
-      const hasOrderToConfirm = await runStep('orders: reselect order before confirm', () => selectFirstOrderForExcel(ctx.page))
-      if (hasOrderToConfirm) {
-        await setProgress?.('도매창고 주문확인 처리 중...')
-        await runStep('orders: confirm selected orders', () => confirmSelectedOrders(ctx.page))
-      }
+      await setProgress?.('도매창고 주문 엑셀 다운로드 완료')
       return workbook
     } finally {
       await ctx.close()

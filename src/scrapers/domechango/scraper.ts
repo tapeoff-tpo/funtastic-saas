@@ -425,6 +425,60 @@ async function triggerSelectedOrderExcelDownload(
   return readDownloadBuffer(download)
 }
 
+async function moveSelectedNewOrdersToShippingTarget(
+  page: Page,
+  setProgress?: (message: string) => Promise<void>,
+): Promise<boolean> {
+  await setProgress?.('도매창고 신규주문 발송대상 전환 중...')
+  const dialogPromise = page.waitForEvent('dialog', { timeout: 8000 })
+    .then(async (dialog) => {
+      const message = dialog.message()
+      await dialog.accept().catch(() => undefined)
+      return message
+    })
+    .catch(() => null)
+
+  const moved = await page.evaluate(`(() => {
+    const selects = document.querySelectorAll('select')
+    let select
+    let option
+    const visibleSelects = Array.from(selects).filter((candidate) => candidate.offsetParent !== null)
+    const isSelectedOrderSelect = (candidate) => {
+      const key = String(candidate.id) + ' ' + String(candidate.name) + ' ' + String(candidate.className) + ' ' + String(candidate.selectedOptions[0]?.textContent ?? '')
+      const optionText = Array.from(candidate.options).map((candidateOption) => candidateOption.textContent ?? '').join(' ')
+      if (/list_size|검색어|search|sdate|edate|page/i.test(key)) return false
+      if (/50개씩|주문번호|상품코드|자체상품코드/.test(optionText)) return false
+      return /선택\s*주문|선택주문|주문\s*확인|발송\s*대상|배송\s*준비/.test(key + ' ' + optionText)
+    }
+
+    for (const candidate of visibleSelects.filter(isSelectedOrderSelect)) {
+      for (const candidateOption of candidate.options) {
+        const text = candidateOption.textContent ?? ''
+        if (/주문\s*확인|발송\s*대상|배송\s*준비/.test(text)) {
+          select = candidate
+          option = candidateOption
+          break
+        }
+      }
+      if (select && option) break
+    }
+
+    if (!select || !option) return false
+
+    select.value = option.value
+    select.dispatchEvent(new Event('input', { bubbles: true }))
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    if (typeof select.onchange === 'function') select.onchange(new Event('change'))
+    return true
+  })()`).catch(() => false)
+
+  if (!moved) return false
+  await dialogPromise
+  await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
+  await page.waitForTimeout(2000)
+  return true
+}
+
 export class DomechangoScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'domechango'
   readonly displayName = '도매창고'
@@ -589,6 +643,12 @@ export class DomechangoScraper implements MarketplaceScraper {
 
         matchedStatus = status
         workbook = await runStep(`orders: download selected order excel (${status})`, () => triggerSelectedOrderExcelDownload(ctx.page, setProgress))
+        if (status === 'new') {
+          const moved = await runStep('orders: move selected new order to shipping-target', () => moveSelectedNewOrdersToShippingTarget(ctx.page, setProgress))
+          if (!moved) {
+            await setProgress?.('도매창고 신규주문 발송대상 전환 옵션을 찾지 못했습니다. 이미 이동됐을 수 있습니다.')
+          }
+        }
         break
       }
 

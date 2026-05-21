@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v13'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v14'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -157,6 +157,19 @@ async function waitForOhouseAppReady(page: Page): Promise<boolean> {
     }, undefined, { timeout: 30_000 })
     .then(() => true)
     .catch(() => false)
+}
+
+function watchOhouseAuthFailures(page: Page): string[] {
+  const failures: string[] = []
+  page.on('response', (response) => {
+    const status = response.status()
+    if (status !== 401 && status !== 403) return
+    const url = response.url()
+    if (!/orora|ohou|bucketplace/i.test(url)) return
+    failures.push(`${status} ${url}`)
+    if (failures.length > 8) failures.shift()
+  })
+  return failures
 }
 
 async function isSecondFactorPage(page: Page): Promise<boolean> {
@@ -370,6 +383,7 @@ export class OhouseScraper implements MarketplaceScraper {
   ): Promise<NormalizedOrder[]> {
     const until = new Date()
     const ctx = await openContext()
+    const authFailures = watchOhouseAuthFailures(ctx.page)
 
     try {
       await setProgress?.('오늘의집 새 브라우저 세션으로 로그인 중...')
@@ -385,6 +399,13 @@ export class OhouseScraper implements MarketplaceScraper {
       void until
       await setProgress?.('오늘의집 주문 목록 확인 중...')
       await setProgress?.('오늘의집 주문 엑셀 다운로드 중...')
+      if (/\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
+        throw new MarketplaceApiError(
+          'ohouse',
+          401,
+          `${OHOUSE_RPA_VERSION}: 오늘의집 주문 화면이 로그인 화면으로 리다이렉트되었습니다.${authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''} (${await summarizePage(ctx.page)})`,
+        )
+      }
       const workbook = await downloadOrdersExcel(ctx.page)
       return this.parseOrdersExcel(workbook, credentials)
     } finally {

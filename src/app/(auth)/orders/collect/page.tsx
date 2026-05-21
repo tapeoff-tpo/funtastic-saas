@@ -53,6 +53,7 @@ export default async function OrdersCollectPage() {
   ]
 
   const dashboardConnections = connections
+    .filter((c) => !(c.marketplaceId === 'domechango' && c.isManual))
     .filter((c) => c.status !== 'disconnected')
     .map((c) => ({
       id: c.id,

@@ -62,6 +62,7 @@ export function getSupportedIntegrationMethods(
   marketplaceId: string,
   options: { authType?: string | null } = {},
 ): IntegrationMethod[] {
+  if (marketplaceId === 'domechango') return ['rpa']
   const multiMethod = MULTI_METHOD_MARKETPLACES[marketplaceId]
   if (multiMethod) return multiMethod
   if (HUB_MARKETPLACES.has(marketplaceId)) return ['hub', 'excel']

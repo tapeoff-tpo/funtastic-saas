@@ -42,11 +42,15 @@ const REASON_LABELS: Record<AdjustmentReason, string> = {
   other: '기타',
 }
 
+function defaultWarehouseZone(warehouseZones: string[]): string {
+  return warehouseZones.includes('1창고') ? '1창고' : (warehouseZones[0] ?? '')
+}
+
 export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustmentDialogProps) {
   const router = useRouter()
   const [step, setStep] = useState<Step>('upload')
   const [file, setFile] = useState<File | null>(null)
-  const [warehouseZone, setWarehouseZone] = useState(warehouseZones[0] ?? '')
+  const [warehouseZone, setWarehouseZone] = useState(() => defaultWarehouseZone(warehouseZones))
   const [parsing, setParsing] = useState(false)
   const [parseError, setParseError] = useState<string | null>(null)
   const [rows, setRows] = useState<AdjustmentRow[]>([])

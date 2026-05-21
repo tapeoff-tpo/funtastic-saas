@@ -132,13 +132,9 @@ export default async function OrdersPage({
   const isConfirmedTab = singleStatus === 'confirmed'
   const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
   const shouldExcludeHeld = !params.held && Boolean(params.status || params.claimType || params.cancel)
-  const mappingFilter = isNewTab
-    ? (params.mapping === 'all'
-        ? undefined
-        : ((params.mapping ?? 'unmapped') as 'mapped' | 'unmapped'))
-    : (params.mapping === 'all'
-        ? undefined
-        : ((params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined))
+  const mappingFilter = params.mapping === 'all'
+    ? undefined
+    : ((params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined)
 
   // 탭 미선택(사이드바 진입 직후) — 어떤 쿼리도 실행하지 않는다.
   // 탭(전체/신규/.../반품) 클릭 시점에만 status/claimType/cancel/tab 중 하나가 붙어 fetch 시작.

@@ -496,7 +496,7 @@ export function OrderFilters({
           </label>
           <select
             id="filter-mapping"
-            value={filters.mapping ?? (isNewTab ? 'unmapped' : 'all')}
+            value={filters.mapping ?? 'all'}
             onChange={(e) => updateFilter({ mapping: e.target.value })}
             className="rounded-md border px-3 py-1.5 text-sm"
           >

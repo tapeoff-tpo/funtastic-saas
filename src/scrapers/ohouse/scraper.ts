@@ -193,8 +193,9 @@ async function openLoginForm(page: Page): Promise<void> {
 async function openOrdersPage(page: Page): Promise<void> {
   for (const url of ORDER_URL_CANDIDATES) {
     await gotoOhouse(page, url).catch(() => undefined)
+    if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) continue
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    if (/주문|배송|엑셀|다운로드|검색/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return
+    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return
   }
 
   await gotoOhouse(page, PARTNER_BASE_URL)
@@ -208,7 +209,7 @@ async function openOrdersPage(page: Page): Promise<void> {
 
   if (clicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-    return
+    if (!/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) return
   }
 
   throw new MarketplaceApiError('ohouse', 500, `오늘의집 주문 관리 화면을 찾지 못했습니다. (${await summarizePage(page)})`)
@@ -338,6 +339,9 @@ export class OhouseScraper implements MarketplaceScraper {
 
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')
       await openOrdersPage(ctx.page)
+      if (!(await hasOhouseSession(ctx.page)) || /\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
+        throw new MarketplaceApiError('ohouse', 401, `오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
+      }
       await setProgress?.('오늘의집 주문 검색 조건 적용 중...')
       await applyOrderSearch(ctx.page, since, until)
       await setProgress?.('오늘의집 주문 엑셀 다운로드 중...')

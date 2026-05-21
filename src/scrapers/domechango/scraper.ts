@@ -43,6 +43,10 @@ function readCellText(value: ExcelJS.CellValue): string {
   return String(value).trim()
 }
 
+function normalizeHeader(value: string): string {
+  return value.replace(/\s+/g, '').replace(/[()[\]{}]/g, '').trim()
+}
+
 function parseNumber(value: string): number {
   const num = Number(value.replaceAll(',', '').replace(/[^\d.-]/g, ''))
   return Number.isFinite(num) ? num : 0
@@ -529,37 +533,69 @@ export class DomechangoScraper implements MarketplaceScraper {
     const worksheet = workbook.worksheets[0]
     if (!worksheet) return []
 
-    const headerRow = worksheet.getRow(1)
+    let headerRow: ExcelJS.Row | null = null
+    for (let rowNumber = 1; rowNumber <= Math.min(20, worksheet.rowCount); rowNumber++) {
+      const row = worksheet.getRow(rowNumber)
+      const headers: string[] = []
+      row.eachCell((cell) => {
+        const value = normalizeHeader(readCellText(cell.value))
+        if (value) headers.push(value)
+      })
+      if (headers.includes('주문번호') && (headers.includes('상품명') || headers.includes('수취인명'))) {
+        headerRow = row
+        break
+      }
+    }
+
+    if (!headerRow) {
+      const firstRows: string[] = []
+      for (let rowNumber = 1; rowNumber <= Math.min(5, worksheet.rowCount); rowNumber++) {
+        const values: string[] = []
+        worksheet.getRow(rowNumber).eachCell((cell) => values.push(readCellText(cell.value)))
+        if (values.length > 0) firstRows.push(values.join(' | '))
+      }
+      throw new MarketplaceApiError(
+        'domechango',
+        500,
+        `도매창고 주문 엑셀 헤더를 찾지 못했습니다. (${firstRows.join(' / ') || 'empty sheet'})`,
+      )
+    }
+
     const columns = new Map<string, number>()
     headerRow.eachCell((cell, colNumber) => {
-      const value = readCellText(cell.value)
+      const value = normalizeHeader(readCellText(cell.value))
       if (value) columns.set(value, colNumber)
     })
 
-    const get = (row: ExcelJS.Row, header: string) => {
-      const col = columns.get(header)
-      return col ? readCellText(row.getCell(col).value) : ''
+    const get = (row: ExcelJS.Row, ...headers: string[]) => {
+      for (const header of headers) {
+        const col = columns.get(normalizeHeader(header))
+        if (!col) continue
+        const value = readCellText(row.getCell(col).value)
+        if (value) return value
+      }
+      return ''
     }
 
     const orders: NormalizedOrder[] = []
     worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber === 1) return
+      if (rowNumber <= (headerRow?.number ?? 1)) return
 
-      const orderNo = get(row, '주문번호').replace(/^_/, '')
-      const orderItemNo = get(row, '주문상품번호')
+      const orderNo = get(row, '주문번호').replace(/^[_']+/, '')
+      const orderItemNo = get(row, '주문상품번호', '주문상품번호순번', '주문상세번호')
       if (!orderNo) return
 
-      const quantity = Math.max(parseNumber(get(row, '구매수량')), 1)
-      const itemTotal = parseNumber(get(row, '상품합계'))
-      const totalAmount = parseNumber(get(row, '총금액')) || itemTotal
-      const supplyPrice = parseNumber(get(row, '공급가'))
-      const shippingFee = parseNumber(get(row, '배송비')) + parseNumber(get(row, '추가배송비'))
-      const recipientName = get(row, '수취인명')
-      const phone = get(row, '수취인전화번호')
-      const mobile = get(row, '수취인핸드폰')
+      const quantity = Math.max(parseNumber(get(row, '구매수량', '구매수량개', '수량', '주문수량')), 1)
+      const itemTotal = parseNumber(get(row, '상품합계', '상품금액', '상품총액', '총상품금액'))
+      const totalAmount = parseNumber(get(row, '총금액', '결제금액', '주문금액', '총주문금액')) || itemTotal
+      const supplyPrice = parseNumber(get(row, '공급가', '판매가', '상품가', '단가'))
+      const shippingFee = parseNumber(get(row, '배송비', '택배비')) + parseNumber(get(row, '추가배송비', '도서산간배송비'))
+      const recipientName = get(row, '수취인명', '받는사람', '수령인')
+      const phone = get(row, '수취인전화번호', '수취인전화', '수령인전화번호', '전화번호')
+      const mobile = get(row, '수취인핸드폰', '수취인휴대폰', '수령인핸드폰', '휴대폰')
       const productName = get(row, '상품명')
       const productCode = get(row, '상품코드')
-      const vendorProductCode = get(row, '업체상품코드')
+      const vendorProductCode = get(row, '업체상품코드', '자체상품코드', '판매자상품코드')
       const optionText = [get(row, '선택옵션'), get(row, '입력옵션')].filter(Boolean).join(' / ')
 
       orders.push({
@@ -574,14 +610,14 @@ export class DomechangoScraper implements MarketplaceScraper {
         recipientPhone: phone || mobile,
         recipientPhone2: mobile && mobile !== phone ? mobile : undefined,
         shippingAddress: {
-          zipCode: get(row, '우편번호'),
-          address1: get(row, '주소'),
+          zipCode: get(row, '우편번호', '수취인우편번호', '배송지우편번호'),
+          address1: get(row, '주소', '수취인주소', '배송지주소'),
         },
-        orderedAt: parseKstDate(get(row, '주문일')),
-        totalAmount,
-        shippingType: get(row, '배송비구분') || null,
+        orderedAt: parseKstDate(get(row, '주문일시', '주문일', '주문일자')),
+        totalAmount: totalAmount || itemTotal,
+        shippingType: get(row, '배송비구분', '배송구분') || null,
         shippingFee,
-        deliveryMessage: get(row, '주문요청사항') || null,
+        deliveryMessage: get(row, '주문요청사항', '배송메세지', '배송메시지', '주문메모') || null,
         rawData: {
           source: 'rpa-excel',
           rowNumber,
@@ -589,7 +625,7 @@ export class DomechangoScraper implements MarketplaceScraper {
           orderItemNo,
           productCode,
           vendorProductCode,
-          carrierCode: get(row, '택배업체코드') || null,
+          carrierCode: get(row, '택배업체코드', '택배사코드') || null,
           trackingNumber: get(row, '송장번호') || null,
           taxType: get(row, '과세여부') || null,
           memo: get(row, '업체주문관리메모') || null,
@@ -606,6 +642,21 @@ export class DomechangoScraper implements MarketplaceScraper {
         ],
       })
     })
+
+    if (orders.length === 0 && worksheet.rowCount > headerRow.number) {
+      const headers = [...columns.keys()].join(', ')
+      const sampleRows: string[] = []
+      for (let rowNumber = headerRow.number + 1; rowNumber <= Math.min(headerRow.number + 3, worksheet.rowCount); rowNumber++) {
+        const values: string[] = []
+        worksheet.getRow(rowNumber).eachCell((cell) => values.push(readCellText(cell.value)))
+        if (values.length > 0) sampleRows.push(values.join(' | '))
+      }
+      throw new MarketplaceApiError(
+        'domechango',
+        500,
+        `도매창고 주문 엑셀을 받았지만 주문번호를 읽지 못했습니다. headers=${headers || '-'} sample=${sampleRows.join(' / ') || '-'}`,
+      )
+    }
 
     return orders
   }

@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v16'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v17'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -179,15 +179,109 @@ interface OhouseApiSessionCheck {
   url: string
   body?: string
   error?: string
+  tokenSource?: string
+  storageKeys?: string[]
+}
+
+interface OhouseAuthToken {
+  value: string
+  source: string
+  storageKeys: string[]
+}
+
+function normalizeAuthHeader(value: string): string {
+  return /^Bearer\s+/i.test(value) ? value : `Bearer ${value}`
+}
+
+function findJwtCandidate(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const direct = value.match(/Bearer\s+[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/i)?.[0]
+  if (direct) return direct
+  return value.match(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)?.[0] ?? null
+}
+
+async function readOhouseAuthToken(page: Page): Promise<OhouseAuthToken | null> {
+  return page
+    .evaluate(async () => {
+      const storageKeys: string[] = []
+      const inspectValue = (source: string, key: string, value: unknown): { value: string; source: string; storageKeys: string[] } | null => {
+        storageKeys.push(`${source}:${key}`)
+        const queue: unknown[] = [value]
+        for (let index = 0; index < queue.length; index++) {
+          const current = queue[index]
+          if (typeof current === 'string') {
+            const candidate =
+              current.match(/Bearer\s+[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/i)?.[0] ??
+              current.match(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)?.[0]
+            if (candidate) return { value: candidate, source: `${source}:${key}`, storageKeys }
+            if (/token|auth|access|jwt|authorization/i.test(key) && current.length > 20) {
+              return { value: current, source: `${source}:${key}`, storageKeys }
+            }
+            try {
+              queue.push(JSON.parse(current))
+            } catch {
+              // ignore plain strings
+            }
+          } else if (current && typeof current === 'object') {
+            for (const [childKey, childValue] of Object.entries(current as Record<string, unknown>)) {
+              if (!/token|auth|access|jwt|authorization/i.test(childKey)) continue
+              if (typeof childValue === 'string' && childValue.length > 20) {
+                return { value: childValue, source: `${source}:${key}.${childKey}`, storageKeys }
+              }
+              queue.push(childValue)
+            }
+          }
+        }
+        return null
+      }
+
+      for (const storage of [
+        { name: 'localStorage', value: window.localStorage },
+        { name: 'sessionStorage', value: window.sessionStorage },
+      ]) {
+        for (let index = 0; index < storage.value.length; index++) {
+          const key = storage.value.key(index)
+          if (!key) continue
+          const result = inspectValue(storage.name, key, storage.value.getItem(key))
+          if (result) return result
+        }
+      }
+
+      const idb = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string | null }>> }
+      const databases = await idb.databases?.().catch(() => []) ?? []
+      for (const database of databases) {
+        if (database.name) storageKeys.push(`indexedDB:${database.name}`)
+      }
+
+      return { value: '', source: '', storageKeys }
+    })
+    .then((result) => {
+      if (!result?.value) return result ? { value: '', source: '', storageKeys: result.storageKeys ?? [] } : null
+      const candidate = findJwtCandidate(result.value)
+      if (!candidate) return { value: normalizeAuthHeader(result.value), source: result.source || 'unknown', storageKeys: result.storageKeys ?? [] }
+      return {
+        value: normalizeAuthHeader(candidate),
+        source: result.source || 'unknown',
+        storageKeys: result.storageKeys ?? [],
+      }
+    })
+    .catch(() => null)
 }
 
 async function checkOhouseApiSession(page: Page): Promise<OhouseApiSessionCheck> {
+  const token = await readOhouseAuthToken(page)
+  if (token?.value) {
+    await page.setExtraHTTPHeaders({ Authorization: token.value }).catch(() => undefined)
+  }
+
   return page
-    .evaluate(async (url) => {
+    .evaluate(async ({ url, authorization }) => {
       try {
+        const headers: Record<string, string> = { accept: 'application/json' }
+        if (authorization) headers.Authorization = authorization
         const response = await fetch(url, {
           credentials: 'include',
-          headers: { accept: 'application/json' },
+          headers,
         })
         const body = await response.text().catch(() => '')
         return {
@@ -203,16 +297,25 @@ async function checkOhouseApiSession(page: Page): Promise<OhouseApiSessionCheck>
           error: error instanceof Error ? error.message : 'api session check failed',
         }
       }
-    }, OHOUSE_ACCOUNT_API_URL)
+    }, { url: OHOUSE_ACCOUNT_API_URL, authorization: token?.value ?? '' })
+    .then((result) => ({
+      ...result,
+      tokenSource: token?.source || undefined,
+      storageKeys: token?.storageKeys,
+    }))
     .catch((error) => ({
       ok: false,
       url: OHOUSE_ACCOUNT_API_URL,
       error: error instanceof Error ? error.message : 'api session check failed',
+      tokenSource: token?.source || undefined,
+      storageKeys: token?.storageKeys,
     }))
 }
 
 function formatApiSessionCheck(check: OhouseApiSessionCheck): string {
-  return `apiSession=${check.status ?? '-'} ${check.url}${check.body ? ` body=${check.body}` : ''}${check.error ? ` error=${check.error}` : ''}`
+  const token = check.tokenSource ? ` token=${check.tokenSource}` : ''
+  const keys = check.storageKeys?.length ? ` storageKeys=${check.storageKeys.slice(0, 12).join('|')}` : ''
+  return `apiSession=${check.status ?? '-'} ${check.url}${token}${keys}${check.body ? ` body=${check.body}` : ''}${check.error ? ` error=${check.error}` : ''}`
 }
 
 async function isSecondFactorPage(page: Page): Promise<boolean> {

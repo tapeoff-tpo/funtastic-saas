@@ -80,27 +80,29 @@ export async function POST(req: NextRequest) {
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  // Look up all active shipments for this tracking number. 합배송/묶음 송장은
-  // 같은 운송장번호가 여러 주문에 연결될 수 있으므로 1건만 처리하면
-  // 같은 송장 안에서 스캔/미스캔 상태가 갈린다.
+  // Look up all shipments for this tracking number. 묶음 기준은
+  // 마켓 + 마켓주문번호 + 운송장번호 + 택배사다. 같은 운송장번호라도
+  // 다른 마켓주문번호에 연결되어 있으면 자동 정상 처리하지 않는다.
   const matchingShipments = await db
     .select({
       id: shipments.id,
       orderId: shipments.orderId,
+      trackingNumber: shipments.trackingNumber,
       carrierId: shipments.carrierId,
       carrierName: shipments.carrierName,
       shippedAt: shipments.shippedAt,
       uploadStatus: shipments.uploadStatus,
       orderStatus: orders.status,
+      isHeld: orders.isHeld,
+      marketplaceId: orders.marketplaceId,
+      marketplaceOrderId: orders.marketplaceOrderId,
     })
     .from(shipments)
-    .leftJoin(orders, eq(orders.id, shipments.orderId))
+    .innerJoin(orders, eq(orders.id, shipments.orderId))
     .where(and(eq(shipments.userId, workspaceUserId), eq(shipments.trackingNumber, trackingNumber)))
 
-  const activeShipments = matchingShipments.filter((shipment) => shipment.orderStatus !== 'cancelled')
-
   // 비정상: 시스템에 없는 운송장
-  if (activeShipments.length === 0) {
+  if (matchingShipments.length === 0) {
     // 비정상 스캔도 이력으로 남김 (shipment_id/order_id = null)
     await db.insert(scanLogs).values({
       userId: workspaceUserId,
@@ -116,11 +118,57 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  const groupKey = (shipment: typeof matchingShipments[number]) =>
+    `${shipment.marketplaceId}::${shipment.marketplaceOrderId}::${shipment.trackingNumber ?? trackingNumber}::${shipment.carrierId}`
+  const groups = new Map<string, typeof matchingShipments>()
+  for (const shipment of matchingShipments) {
+    const key = groupKey(shipment)
+    groups.set(key, [...(groups.get(key) ?? []), shipment])
+  }
+
+  if (groups.size !== 1) {
+    await db.insert(scanLogs).values(
+      matchingShipments.map((shipment) => ({
+        userId: workspaceUserId,
+        shipmentId: shipment.id,
+        orderId: shipment.orderId,
+        trackingNumber,
+        status: 'not_found',
+      })),
+    )
+    return NextResponse.json({
+      status: 'not_found',
+      message: '비정상입니다: 같은 송장번호가 여러 주문묶음에 연결되어 있습니다',
+      tts: '비정상입니다',
+    })
+  }
+
+  const groupedShipments = [...groups.values()][0]
+  const invalidGroup = groupedShipments.filter((shipment) =>
+    shipment.isHeld || shipment.orderStatus === 'cancelled',
+  )
+  if (invalidGroup.length > 0) {
+    await db.insert(scanLogs).values(
+      groupedShipments.map((shipment) => ({
+        userId: workspaceUserId,
+        shipmentId: shipment.id,
+        orderId: shipment.orderId,
+        trackingNumber,
+        status: 'not_found',
+      })),
+    )
+    return NextResponse.json({
+      status: 'not_found',
+      message: '비정상입니다: 같은 주문묶음 안에 처리할 수 없는 주문이 있습니다',
+      tts: '비정상입니다',
+    })
+  }
+
   // 중복: 오늘 이미 스캔됨
   const todayStart = startOfDay(new Date())
-  const pendingShipments = activeShipments.filter((shipment) => !shipment.shippedAt || new Date(shipment.shippedAt) < todayStart)
+  const pendingShipments = groupedShipments.filter((shipment) => !shipment.shippedAt || new Date(shipment.shippedAt) < todayStart)
   if (pendingShipments.length === 0) {
-    const shipment = activeShipments[0]
+    const shipment = groupedShipments[0]
     // Fetch order info for display
     const [order] = await db
       .select({ recipientName: orders.recipientName, marketplaceId: orders.marketplaceId })

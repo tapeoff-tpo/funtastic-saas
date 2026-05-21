@@ -85,10 +85,10 @@ export default async function CsPage() {
           <p className="mt-1 text-sm text-muted-foreground">클레임 {overview.totalClaims.toLocaleString('ko-KR')}건</p>
         </div>
         <Link
-          href="/orders/claims"
+          href="/cs/inquiries"
           className="inline-flex h-9 items-center gap-1.5 rounded-md border bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
-          클레임 목록
+          문의 관리
           <ArrowRight className="h-4 w-4" />
         </Link>
       </div>
@@ -113,7 +113,7 @@ export default async function CsPage() {
             return (
               <Link
                 key={item.type}
-                href={`/orders/claims?claimType=${item.type}&claimStatus=requested`}
+                href={`/cs/${item.type}`}
                 className="flex items-center justify-between bg-white px-4 py-4 hover:bg-gray-50"
               >
                 <span className="flex items-center gap-2 text-sm font-medium text-gray-800">
@@ -153,7 +153,9 @@ export default async function CsPage() {
         <section className="rounded-md border bg-white">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <h2 className="text-sm font-semibold text-gray-900">미답변 문의</h2>
-            <span className="text-xs font-medium text-gray-500">{overview.unansweredInquiries.toLocaleString('ko-KR')}건</span>
+            <Link href="/cs/inquiries" className="text-xs font-medium text-blue-600 hover:underline">
+              {overview.unansweredInquiries.toLocaleString('ko-KR')}건
+            </Link>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">

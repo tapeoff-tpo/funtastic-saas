@@ -28,6 +28,11 @@ export interface CsInquiryRow {
   requestedAt: Date
 }
 
+export interface CsInquiryListResult {
+  inquiries: CsInquiryRow[]
+  total: number
+}
+
 const CLAIM_TYPES: ClaimType[] = ['cancel', 'return', 'exchange']
 const CLAIM_STATUSES: ClaimStatus[] = ['requested', 'processing', 'completed', 'rejected']
 
@@ -97,5 +102,41 @@ export async function getCsOverview(userId: string): Promise<CsOverview> {
     claimsByType,
     claimsByStatus,
     recentUnansweredInquiries,
+  }
+}
+
+export async function getUnansweredInquiries(
+  userId: string,
+  page = 1,
+  pageSize = 50,
+): Promise<CsInquiryListResult> {
+  const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1
+  const offset = (safePage - 1) * pageSize
+  const [totalRows, rows] = await Promise.all([
+    db
+      .select({ value: count(inquiries.id) })
+      .from(inquiries)
+      .where(and(eq(inquiries.userId, userId), isNull(inquiries.answeredAt))),
+    db
+      .select({
+        id: inquiries.id,
+        marketplaceId: inquiries.marketplaceId,
+        marketplaceInquiryId: inquiries.marketplaceInquiryId,
+        marketplaceOrderId: inquiries.marketplaceOrderId,
+        orderId: inquiries.orderId,
+        inquiryType: inquiries.inquiryType,
+        question: inquiries.question,
+        requestedAt: inquiries.requestedAt,
+      })
+      .from(inquiries)
+      .where(and(eq(inquiries.userId, userId), isNull(inquiries.answeredAt)))
+      .orderBy(desc(inquiries.requestedAt))
+      .limit(pageSize)
+      .offset(offset),
+  ])
+
+  return {
+    inquiries: rows,
+    total: totalRows[0]?.value ?? 0,
   }
 }

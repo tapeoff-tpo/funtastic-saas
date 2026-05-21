@@ -22,6 +22,9 @@ import {
   Download,
   Star,
   MessageSquareText,
+  XCircle,
+  Undo2,
+  RotateCcw,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -48,8 +51,17 @@ const navSections: NavSection[] = [
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
       { href: '/orders/collect', label: '주문 수집', icon: Download },
-      { href: '/cs', label: 'CS 관리', icon: MessageSquareText },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
+    ],
+  },
+  {
+    title: 'CS',
+    items: [
+      { href: '/cs', label: '대시보드', icon: MessageSquareText },
+      { href: '/cs/cancel', label: '취소', icon: XCircle },
+      { href: '/cs/return', label: '반품', icon: Undo2 },
+      { href: '/cs/exchange', label: '교환', icon: RotateCcw },
+      { href: '/cs/inquiries', label: '문의', icon: MessageSquareText },
     ],
   },
   {
@@ -116,7 +128,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
 
   function isItemActive(href: string) {
     const itemPath = href.split('?')[0]
-    if (itemPath === '/orders' || itemPath === '/settings' || itemPath === '/products' || itemPath === '/inventory') {
+    if (itemPath === '/orders' || itemPath === '/cs' || itemPath === '/settings' || itemPath === '/products' || itemPath === '/inventory') {
       return pathname === itemPath
     }
     return pathname.startsWith(itemPath)

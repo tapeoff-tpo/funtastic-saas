@@ -15,7 +15,8 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v15'
+const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v16'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -172,6 +173,48 @@ function watchOhouseAuthFailures(page: Page): string[] {
   return failures
 }
 
+interface OhouseApiSessionCheck {
+  ok: boolean
+  status?: number
+  url: string
+  body?: string
+  error?: string
+}
+
+async function checkOhouseApiSession(page: Page): Promise<OhouseApiSessionCheck> {
+  return page
+    .evaluate(async (url) => {
+      try {
+        const response = await fetch(url, {
+          credentials: 'include',
+          headers: { accept: 'application/json' },
+        })
+        const body = await response.text().catch(() => '')
+        return {
+          ok: response.ok,
+          status: response.status,
+          url: response.url,
+          body: body.replace(/\s+/g, ' ').slice(0, 220),
+        }
+      } catch (error) {
+        return {
+          ok: false,
+          url,
+          error: error instanceof Error ? error.message : 'api session check failed',
+        }
+      }
+    }, OHOUSE_ACCOUNT_API_URL)
+    .catch((error) => ({
+      ok: false,
+      url: OHOUSE_ACCOUNT_API_URL,
+      error: error instanceof Error ? error.message : 'api session check failed',
+    }))
+}
+
+function formatApiSessionCheck(check: OhouseApiSessionCheck): string {
+  return `apiSession=${check.status ?? '-'} ${check.url}${check.body ? ` body=${check.body}` : ''}${check.error ? ` error=${check.error}` : ''}`
+}
+
 async function isSecondFactorPage(page: Page): Promise<boolean> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   if (/인증\s*(번호|코드)|2차\s*인증|이메일\s*인증|메일로\s*전송/.test(bodyText)) return true
@@ -249,6 +292,30 @@ async function performOhouseLogin(page: Page, credentials: ScraperCredentials): 
   }
 
   return null
+}
+
+async function completeOhouseAppAuth(page: Page, credentials: ScraperCredentials): Promise<OhouseApiSessionCheck> {
+  let check = await checkOhouseApiSession(page)
+  if (check.ok) return check
+
+  const appLoginClicked = await page
+    .locator('button, a')
+    .filter({ hasText: /^로그인$/ })
+    .first()
+    .click({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+
+  if (appLoginClicked) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+    await page.waitForTimeout(1500)
+    await handleEmailSecondFactor(page, credentials)
+    await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
+    await waitForOhouseAppReady(page).catch(() => false)
+    check = await checkOhouseApiSession(page)
+  }
+
+  return check
 }
 
 async function openLoginForm(page: Page): Promise<void> {
@@ -430,6 +497,15 @@ export class OhouseScraper implements MarketplaceScraper {
       await openOrdersPage(ctx.page)
       if (!(await waitForOhouseAppReady(ctx.page)) || /\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
+      }
+      await setProgress?.('오늘의집 주문 API 인증 확인 중...')
+      const apiSession = await completeOhouseAppAuth(ctx.page, credentials)
+      if (!apiSession.ok) {
+        throw new MarketplaceApiError(
+          'ohouse',
+          401,
+          `${OHOUSE_RPA_VERSION}: 오늘의집 주문 화면은 열렸지만 내부 API 인증이 되지 않았습니다. 2차 인증/판매자 계정 선택이 완료되지 않은 상태입니다.${authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''} ${formatApiSessionCheck(apiSession)} (${await summarizePage(ctx.page)})`,
+        )
       }
       void since
       void until

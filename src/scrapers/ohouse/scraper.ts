@@ -110,6 +110,22 @@ async function clickByText(page: Page, pattern: RegExp): Promise<boolean> {
     .catch(() => false)
 }
 
+async function clickOhouseLoginButton(page: Page): Promise<void> {
+  const clicked = await page
+    .locator('button[aria-label="로그인 버튼"], button[type="submit"]')
+    .evaluateAll((elements) => {
+      const target = elements.find((element) => /로그인/.test(element.textContent ?? '')) as HTMLElement | undefined
+      target?.click()
+      return Boolean(target)
+    })
+    .catch(() => false)
+  if (!clicked) {
+    await clickByText(page, /로그인/i).then(async (fallbackClicked) => {
+      if (!fallbackClicked) await page.keyboard.press('Enter')
+    })
+  }
+}
+
 async function readDownloadBuffer(download: Download): Promise<Buffer> {
   const stream = await download.createReadStream()
   if (!stream) throw new MarketplaceApiError('ohouse', 500, '오늘의집 엑셀 다운로드 스트림을 열 수 없습니다.')
@@ -167,9 +183,7 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
 }
 
 async function submitLogin(page: Page): Promise<void> {
-  await clickByText(page, /로그인|login/i).then(async (clicked) => {
-    if (!clicked) await page.keyboard.press('Enter')
-  })
+  await clickOhouseLoginButton(page)
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
   await page.waitForTimeout(1500)
 }
@@ -281,6 +295,14 @@ export class OhouseScraper implements MarketplaceScraper {
       logStep('login: submit credentials')
       await submitLogin(page)
       await handleEmailSecondFactor(page, credentials)
+      if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
+        const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+        const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력/)?.[0]
+        return {
+          success: false,
+          error: `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후에도 로그인 화면에 머물러 있습니다.${reason ? ` (${reason})` : ''} (${await summarizePage(page)})`,
+        }
+      }
       await gotoOhouse(page, PARTNER_BASE_URL).catch(() => undefined)
 
       if (!(await hasOhouseSession(page))) {

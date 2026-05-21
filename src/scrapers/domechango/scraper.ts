@@ -674,6 +674,18 @@ async function tryInlineInvoiceUpload(page: Page, orderId: string, invoice: Invo
   await selectCarrier(row, invoice)
   await setInputValue(trackingInput, invoice.trackingNumber)
 
+  const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
+    .then(async (dialogEvent) => {
+      const message = dialogEvent.message()
+      await dialogEvent.accept().catch(() => undefined)
+      return message
+    })
+    .catch(() => null)
+  const responsePromise = page.waitForResponse(
+    (res) => res.request().method() !== 'GET' && /wms|order|invoice|delivery|songjang|tracking/i.test(res.url()),
+    { timeout: 10_000 },
+  ).catch(() => null)
+
   const button = row
     .locator('button, input[type="button"], input[type="submit"], a')
     .filter({ hasText: /송장|배송|저장|등록|전송|확인/ })
@@ -684,12 +696,15 @@ async function tryInlineInvoiceUpload(page: Page, orderId: string, invoice: Invo
     return false
   }
 
-  await page.waitForTimeout(1500)
+  const [dialogMessage, response] = await Promise.all([dialogPromise, responsePromise])
+  const responseText = response ? await response.text().catch(() => '') : ''
+  await page.waitForTimeout(1000)
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  if (/실패|오류|error|잘못|필수|확인해주세요/.test(bodyText) && !/완료|성공|등록/.test(bodyText)) {
-    throw new MarketplaceApiError('domechango', 500, '도매창고 송장 입력 후 오류 메시지가 표시되었습니다.')
+  const resultText = `${dialogMessage ?? ''} ${responseText}`
+  if (/실패|오류|error|잘못|필수|확인해주세요/.test(`${resultText} ${bodyText}`) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다/.test(resultText)) {
+    throw new MarketplaceApiError('domechango', 500, dialogMessage ?? '도매창고 송장 입력 후 오류 메시지가 표시되었습니다.')
   }
-  return bodyText.includes(invoice.trackingNumber) || /완료|성공|등록/.test(bodyText)
+  return /완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|송장\s*(등록|저장|전송)/.test(resultText)
 }
 
 function findHeaderColumn(worksheet: ExcelJS.Worksheet, aliases: string[]): number | null {
@@ -797,12 +812,13 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
 
   const responseText = response ? await response.text().catch(() => '') : ''
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  const combined = `${dialogMessage ?? ''} ${responseText} ${bodyText}`
-  if (/실패|오류|error|잘못|필수|확인해주세요/.test(combined) && !/완료|성공|등록/.test(combined)) {
+  const resultText = `${dialogMessage ?? ''} ${responseText}`
+  const combined = `${resultText} ${bodyText}`
+  if (/실패|오류|error|잘못|필수|확인해주세요/.test(combined) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|업로드되었습니다/.test(resultText)) {
     throw new MarketplaceApiError('domechango', 500, dialogMessage ?? '도매창고 송장 업로드 후 오류 메시지가 표시되었습니다.')
   }
   const hasSuccessSignal =
-    /완료|성공|등록|처리되었습니다|업로드되었습니다/.test(combined) ||
+    /완료|성공|처리되었습니다|등록되었습니다|저장되었습니다|업로드되었습니다|송장\s*(등록|저장|전송)/.test(resultText) ||
     Boolean(response?.ok() && responseText && !/실패|오류|error/.test(responseText))
   if (!hasSuccessSignal) {
     throw new MarketplaceApiError('domechango', 500, '도매창고 송장 업로드 완료 여부를 확인하지 못했습니다. 실제 등록을 확인할 수 없어 실패 처리했습니다.')

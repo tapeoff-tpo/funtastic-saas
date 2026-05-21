@@ -109,10 +109,18 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         userId,
         normalizedOrders: orders,
       })
-      console.log(`[scrape-worker] ${marketplaceId}: ${orders.length} orders fetched`)
+      const sampleOrderIds = orders.slice(0, 3).map((order) => order.marketplaceOrderId).filter(Boolean).join(', ')
+      const summary = `${orders.length}건 수집, ${result.ordersCollected}건 저장/갱신${result.ordersSkipped > 0 ? `, ${result.ordersSkipped}건 스킵` : ''}${sampleOrderIds ? ` (${sampleOrderIds})` : ''}`
+      await setProgress(summary)
+      console.log(`[scrape-worker] ${marketplaceId}: ${summary}`)
       await db
         .update(jobLogs)
-        .set({ status: 'completed', completedAt: new Date(), ordersCollected: result.ordersCollected })
+        .set({
+          status: 'completed',
+          completedAt: new Date(),
+          ordersCollected: result.ordersCollected,
+          progressMessage: summary,
+        })
         .where(eq(jobLogs.id, logRow.id))
     } else if (jobType === 'scrape-claims') {
       await setProgress('RPA 브라우저로 클레임 페이지 접속 중...')

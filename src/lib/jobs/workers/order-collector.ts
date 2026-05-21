@@ -705,11 +705,12 @@ export async function saveNormalizedOrdersForConnection(params: {
   connectionId: string
   userId: string
   normalizedOrders: NormalizedOrder[]
-}): Promise<{ ordersCollected: number }> {
+}): Promise<{ ordersCollected: number; ordersSkipped: number; ordersFetched: number }> {
   const { marketplaceId, connectionId, userId } = params
   const normalizedOrders = mergeNormalizedOrdersByOrderId(canonicalizeMarketplaceOrderIds(params.normalizedOrders))
   const existingOrderMatches = await findExistingOrderMatches(userId, marketplaceId, normalizedOrders)
   let ordersCollected = 0
+  let ordersSkipped = 0
 
   for (const order of normalizedOrders) {
     const items = dedupeNormalizedOrderItems(order.items)
@@ -719,6 +720,7 @@ export async function saveNormalizedOrdersForConnection(params: {
       : { ...order, items }
     const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
     if (existingOrderMatches.skipKeys.has(orderKey)) {
+      ordersSkipped++
       continue
     }
 
@@ -743,7 +745,7 @@ export async function saveNormalizedOrdersForConnection(params: {
     })
     .where(eq(marketplaceConnections.id, connectionId))
 
-  return { ordersCollected }
+  return { ordersCollected, ordersSkipped, ordersFetched: normalizedOrders.length }
 }
 
 function normalizeDuplicateName(value?: string | null): string | null {
@@ -764,7 +766,7 @@ function hasMatchingCustomerName(
     normalizeDuplicateName(existing.recipientName),
   ].filter(Boolean)
 
-  if (incomingNames.length === 0 || existingNames.length === 0) return true
+  if (incomingNames.length === 0 || existingNames.length === 0) return false
   return incomingNames.some((name) => existingNames.includes(name))
 }
 

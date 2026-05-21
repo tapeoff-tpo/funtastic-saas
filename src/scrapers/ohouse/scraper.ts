@@ -6,13 +6,12 @@ import { dumpStorageState, openContext } from '../browser'
 import { readNaverVerificationCode } from '../mail/naver'
 import type { MarketplaceScraper, ScraperCredentials, ScraperLoginResult } from '../types'
 
-const PARTNER_BASE_URL = 'https://pro.ohou.se'
-const LOGIN_URL = `${PARTNER_BASE_URL}/login`
+const PARTNER_BASE_URL = 'https://partners.ohou.se'
+const LOGIN_URL = `${PARTNER_BASE_URL}/users/sign_in`
 const ORDER_URL_CANDIDATES = [
   `${PARTNER_BASE_URL}/orders`,
-  `${PARTNER_BASE_URL}/order`,
-  `${PARTNER_BASE_URL}/commerce/orders`,
-  `${PARTNER_BASE_URL}/seller/orders`,
+  `${PARTNER_BASE_URL}/orders?customFilters=PAYMENT_COMPLETE`,
+  `${PARTNER_BASE_URL}/orders?customFilters=READY_FOR_DELIVERY`,
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
@@ -121,9 +120,12 @@ async function readDownloadBuffer(download: Download): Promise<Buffer> {
 }
 
 async function hasOhouseSession(page: Page): Promise<boolean> {
-  if (/login|signin/i.test(page.url())) return false
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  return /로그아웃|주문\s*관리|상품\s*관리|배송\s*관리|정산\s*관리|매출\s*현황/.test(bodyText)
+  if (/로그아웃|주문\s*관리|상품\s*관리|배송\s*관리|정산\s*관리|매출\s*현황|판매진행|미확인주문|배송준비중/.test(bodyText)) {
+    return true
+  }
+  if (/login|signin/i.test(page.url())) return false
+  return false
 }
 
 async function isSecondFactorPage(page: Page): Promise<boolean> {
@@ -244,8 +246,12 @@ export class OhouseScraper implements MarketplaceScraper {
         }
       }
 
-      const idInput = page.locator('input[name*="email" i], input[name*="id" i], input[type="email"], input[type="text"]').first()
-      const passwordInput = page.locator('input[name*="password" i], input[name*="pw" i], input[type="password"]').first()
+      const idInput = page
+        .locator('input#user_email, input[name="user[email]"], input[name="email"], input[name*="email" i], input[name*="login" i], input[name*="id" i], input[type="email"], input[type="text"]')
+        .first()
+      const passwordInput = page
+        .locator('input#user_password, input[name="user[password]"], input[name="password"], input[name*="password" i], input[name*="pw" i], input[type="password"]')
+        .first()
       await setInputValue(idInput, credentials.email)
       await setInputValue(passwordInput, credentials.password)
 

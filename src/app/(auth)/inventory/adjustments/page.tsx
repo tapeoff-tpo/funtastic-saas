@@ -1,17 +1,16 @@
 import {
   createSearchParamsCache,
-  parseAsString,
   parseAsInteger,
+  parseAsString,
 } from 'nuqs/server'
+import { desc, sql } from 'drizzle-orm'
+import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
-import { db } from '@/lib/db'
-import { inventory } from '@/lib/db/schema'
-import { eq, isNotNull, and } from 'drizzle-orm'
-import { getInventoryList } from '@/lib/inventory/queries'
-import { InventoryTable } from '../inventory-table'
-import type { InventoryFilters } from '@/lib/inventory/types'
-import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { db } from '@/lib/db'
+import { inventory, inventoryAdjustmentSlips } from '@/lib/db/schema'
+import { InventoryAdjustmentsTable, type AdjustmentSlipRow } from './table'
+import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: '입출고관리',
@@ -20,103 +19,110 @@ export const metadata: Metadata = {
 const searchParamsCache = createSearchParamsCache({
   page: parseAsInteger.withDefault(1),
   pageSize: parseAsInteger.withDefault(25),
+  movement: parseAsString.withDefault('all'),
+  status: parseAsString.withDefault('all'),
+  dateField: parseAsString.withDefault('movement'),
+  dateFrom: parseAsString,
+  dateTo: parseAsString,
   search: parseAsString,
-  productCode: parseAsString,
-  optionCode: parseAsString,
-  maxStock: parseAsInteger,
-  sort: parseAsString,
-  order: parseAsString,
   warehouseZone: parseAsString,
-  // 검색 트리거 sentinel — 이게 없으면 페이지 진입 직후엔 fetch 하지 않는다.
-  searched: parseAsString,
 })
+
+function parseKstDate(value: string, boundary: 'start' | 'end'): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value)
+  return new Date(`${value}T${boundary === 'start' ? '00:00:00.000' : '23:59:59.999'}+09:00`)
+}
 
 export default async function InventoryAdjustmentsPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+  const workspaceUserId = await getWorkspaceUserId(user.id)
   const params = await searchParamsCache.parse(searchParams)
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    return null
-  }
-  const workspaceUserId = await getWorkspaceUserId(user.id)
-
-  const filters: InventoryFilters = {
-    page: params.page,
-    pageSize: params.pageSize,
-    search: params.search ?? undefined,
-    productCode: params.productCode ?? undefined,
-    optionCode: params.optionCode ?? undefined,
-    maxStock: params.maxStock ?? undefined,
-    sort: params.sort ?? undefined,
-    order: (params.order as 'asc' | 'desc') ?? undefined,
-    warehouseZone: params.warehouseZone ?? undefined,
+  const where = [
+    sql`${inventoryAdjustmentSlips.userId} = ${workspaceUserId}`,
+  ]
+  if (params.movement === 'incoming') where.push(sql`${inventoryAdjustmentSlips.delta} > 0`)
+  if (params.movement === 'outgoing') where.push(sql`${inventoryAdjustmentSlips.delta} < 0`)
+  if (params.status === 'pending') where.push(sql`${inventoryAdjustmentSlips.status} = 'pending'`)
+  if (params.status === 'confirmed') where.push(sql`${inventoryAdjustmentSlips.status} = 'confirmed'`)
+  if (params.warehouseZone) where.push(sql`${inventoryAdjustmentSlips.warehouseZone} = ${params.warehouseZone}`)
+  if (params.search) {
+    const pattern = `%${params.search.trim()}%`
+    where.push(sql`(
+      ${inventoryAdjustmentSlips.sku} ILIKE ${pattern}
+      OR ${inventoryAdjustmentSlips.productName} ILIKE ${pattern}
+      OR COALESCE(${inventoryAdjustmentSlips.optionName}, '') ILIKE ${pattern}
+    )`)
   }
 
-  // 검색 버튼 누르기 전엔 재고 fetch 하지 않음. 창고 목록은 항상 로드 (필터 select 채우기 위함).
-  const searched = !!params.searched
-  const [{ items, total }, warehouseZoneRows] = await Promise.all([
-    searched
-      ? getInventoryList(workspaceUserId, filters)
-      : Promise.resolve({
-          items: [] as Awaited<ReturnType<typeof getInventoryList>>['items'],
-          total: 0,
-        }),
+  const dateColumn = params.dateField === 'confirmed'
+    ? inventoryAdjustmentSlips.confirmedAt
+    : inventoryAdjustmentSlips.createdAt
+  if (params.dateField === 'incoming') where.push(sql`${inventoryAdjustmentSlips.delta} > 0`)
+  if (params.dateField === 'outgoing') where.push(sql`${inventoryAdjustmentSlips.delta} < 0`)
+  if (params.dateFrom) where.push(sql`${dateColumn} >= ${parseKstDate(params.dateFrom, 'start')}`)
+  if (params.dateTo) where.push(sql`${dateColumn} <= ${parseKstDate(params.dateTo, 'end')}`)
+
+  const whereClause = where.length > 0 ? sql`WHERE ${sql.join(where, sql` AND `)}` : sql``
+  const page = Math.max(1, params.page)
+  const pageSize = Math.max(10, params.pageSize)
+  const offset = (page - 1) * pageSize
+
+  const [rows, countRows, warehouseZoneRows] = await Promise.all([
+    db.execute(sql`
+      SELECT
+        id::text,
+        sku,
+        product_name AS "productName",
+        option_name AS "optionName",
+        warehouse_zone AS "warehouseZone",
+        delta,
+        status,
+        created_at AS "createdAt",
+        confirmed_at AS "confirmedAt",
+        registered_by_name AS "registeredByName"
+      FROM ${inventoryAdjustmentSlips}
+      ${whereClause}
+      ORDER BY ${inventoryAdjustmentSlips.createdAt} DESC
+      LIMIT ${pageSize}
+      OFFSET ${offset}
+    `),
+    db.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM ${inventoryAdjustmentSlips}
+      ${whereClause}
+    `),
     db
       .selectDistinct({ warehouseZone: inventory.warehouseZone })
       .from(inventory)
-      .where(and(eq(inventory.userId, workspaceUserId), isNotNull(inventory.warehouseZone))),
+      .orderBy(desc(inventory.warehouseZone)),
   ])
 
+  const data = rows as unknown as AdjustmentSlipRow[]
+  const total = Number((countRows[0] as { count?: number } | undefined)?.count ?? 0)
   const warehouseZones = warehouseZoneRows
-    .map((r) => r.warehouseZone)
-    .filter((z): z is string => z !== null)
+    .map((row) => row.warehouseZone)
+    .filter((zone): zone is string => !!zone)
 
   return (
     <div className="space-y-2">
-      {/* Header */}
-      <div className="flex items-baseline gap-3">
+      <div className="flex flex-wrap items-baseline gap-3">
         <h1 className="text-xl font-bold">입출고관리</h1>
         <span className="text-sm text-muted-foreground">
-          {searched
-            ? `전체 ${total.toLocaleString('ko-KR')}개 품목`
-            : '검색 조건을 입력하고 검색 버튼을 눌러주세요.'}
+          {total.toLocaleString('ko-KR')}건
         </span>
       </div>
-
-      {/* Table */}
-      <InventoryTable
-        mode="adjustments"
-        searched={searched}
-        data={items.map((item) => ({
-          id: item.id,
-          productId: item.productId,
-          sku: item.sku,
-          productName: item.productName,
-          optionName: item.optionName ?? null,
-          packagingUnit: item.packagingUnit ?? null,
-          warehouseZone: item.warehouseZone,
-          sectorCode: item.sectorCode,
-          totalStock: item.totalStock,
-          reservedStock: item.reservedStock,
-          availableStock: item.availableStock,
-          monthlyIncoming: item.monthlyIncoming,
-          monthlyOutgoing: item.monthlyOutgoing,
-          lastIncomingAt: item.lastIncomingAt ?? null,
-          lastOutgoingAt: item.lastOutgoingAt ?? null,
-          shippingCost: item.shippingCost,
-          updatedAt: item.updatedAt,
-        }))}
+      <InventoryAdjustmentsTable
+        data={data}
         total={total}
-        page={params.page}
-        pageSize={params.pageSize}
+        page={page}
+        pageSize={pageSize}
         warehouseZones={warehouseZones}
       />
     </div>

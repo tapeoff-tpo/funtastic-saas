@@ -151,7 +151,7 @@ export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustment
             <h3 className="text-base font-semibold">대량 재고조정</h3>
             {step === 'preview' && (
               <p className="mt-0.5 text-xs text-muted-foreground">
-                창고: {warehouseZone} · 시트: {sheetName} · {rows.length}건 인식 · 수량/사유 수정 후 확정하세요
+                창고: {warehouseZone} · 시트: {sheetName} · {rows.length}건 인식 · 수량/사유 수정 후 미확정 전표로 등록하세요
               </p>
             )}
           </div>
@@ -167,7 +167,7 @@ export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustment
                 창고를 선택한 뒤 상품코드, 사유, 입고증가/차감 수량이 있는 엑셀을 업로드하세요.
               </p>
               <p className="text-xs text-muted-foreground">
-                수량은 양수면 입고/증가, 음수면 차감입니다. 선택한 창고의 재고만 조정됩니다.
+                수량은 양수면 입고, 음수면 출고입니다. 등록 후 입출고관리에서 선택 확정해야 재고가 변경됩니다.
               </p>
               <label className="block space-y-1">
                 <span className="text-sm font-medium">창고선택</span>
@@ -296,7 +296,7 @@ export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustment
                     disabled={confirming || validRows.length === 0}
                     className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                   >
-                    {confirming ? '처리 중...' : `대량등록 (${validRows.length}건)`}
+                    {confirming ? '등록 중...' : `미확정 전표 등록 (${validRows.length}건)`}
                   </button>
                 </div>
               </div>
@@ -307,7 +307,7 @@ export function BulkAdjustmentDialog({ onClose, warehouseZones }: BulkAdjustment
             <div className="space-y-4 p-6">
               <div className="rounded-md border p-4">
                 <p className="text-sm font-medium">
-                  총 {result.total}건 중 <span className="text-green-600">{result.success}건 완료</span>
+                  총 {result.total}건 중 <span className="text-green-600">{result.success}건 전표 등록</span>
                   {result.failed > 0 && (
                     <>
                       , <span className="text-red-600">{result.failed}건 실패</span>

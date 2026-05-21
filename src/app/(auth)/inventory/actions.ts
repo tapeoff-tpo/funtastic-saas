@@ -4,11 +4,11 @@ import { revalidatePath } from 'next/cache'
 import { eq, and } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products } from '@/lib/db/schema'
-import { setStock, adjustStock } from '@/lib/inventory/actions'
+import { inventory, inventoryAdjustmentSlips, products } from '@/lib/db/schema'
+import { setStock } from '@/lib/inventory/actions'
 import { getInventoryHistory } from '@/lib/inventory/queries'
 import type { AdjustmentReason } from '@/lib/inventory/types'
-import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getProfile, getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 interface ActionResult {
   success: boolean
@@ -95,9 +95,37 @@ export async function adjustStockAction(
   }
 
   const delta = Number(deltaStr)
-  const result = await adjustStock(await getWorkspaceUserId(user.id), sku.trim(), delta, reason, { note })
-  revalidatePath('/inventory')
-  return result
+  const [workspaceUserId, profile] = await Promise.all([
+    getWorkspaceUserId(user.id),
+    getProfile(user.id),
+  ])
+  const [record] = await db
+    .select()
+    .from(inventory)
+    .where(and(eq(inventory.userId, workspaceUserId), eq(inventory.sku, sku.trim())))
+    .limit(1)
+
+  if (!record) {
+    return { success: false, error: '재고관리에서 해당 상품코드를 찾을 수 없습니다.' }
+  }
+
+  await db.insert(inventoryAdjustmentSlips).values({
+    inventoryId: record.id,
+    userId: workspaceUserId,
+    sku: record.sku,
+    productName: record.productName,
+    optionName: record.optionName,
+    warehouseZone: record.warehouseZone,
+    sectorCode: record.sectorCode,
+    adjustmentReason: reason,
+    delta,
+    note,
+    status: 'pending',
+    registeredBy: user.id,
+    registeredByName: profile?.displayName ?? profile?.email ?? user.email ?? null,
+  })
+  revalidatePath('/inventory/adjustments')
+  return { success: true }
 }
 
 /**

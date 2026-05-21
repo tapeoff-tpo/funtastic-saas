@@ -474,6 +474,41 @@ export const inventoryHistory = pgTable(
   ],
 )
 
+export const inventoryAdjustmentSlips = pgTable(
+  'inventory_adjustment_slips',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    inventoryId: uuid('inventory_id')
+      .notNull()
+      .references(() => inventory.id),
+    userId: uuid('user_id').notNull(),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    productName: text('product_name').notNull(),
+    optionName: varchar('option_name', { length: 200 }),
+    warehouseZone: varchar('warehouse_zone', { length: 100 }),
+    sectorCode: varchar('sector_code', { length: 100 }),
+    adjustmentReason: adjustmentReasonEnum('adjustment_reason').notNull(),
+    delta: integer('delta').notNull(),
+    note: text('note'),
+    status: varchar('status', { length: 20 }).notNull().default('pending'),
+    registeredBy: uuid('registered_by'),
+    registeredByName: text('registered_by_name'),
+    confirmedBy: uuid('confirmed_by'),
+    confirmedAt: timestamp('confirmed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('inventory_adjustment_slips_user_created').on(table.userId, table.createdAt),
+    index('inventory_adjustment_slips_status').on(table.status),
+    index('inventory_adjustment_slips_inventory_id').on(table.inventoryId),
+  ],
+)
+
 // ─── Phase 5: Product Management ────────────────────────────────
 
 export const productStatusEnum = pgEnum('product_status', [

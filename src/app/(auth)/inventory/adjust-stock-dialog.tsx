@@ -74,10 +74,10 @@ export function AdjustStockDialog({
       startTransition(async () => {
         const result = await adjustStockAction(formData)
         if (result.success) {
-          toast.success('재고가 조정되었습니다.')
+          toast.success('미확정 전표가 등록되었습니다.')
           onClose()
         } else {
-          toast.error(result.error ?? '재고 조정에 실패했습니다.')
+          toast.error(result.error ?? '전표 등록에 실패했습니다.')
         }
       })
     }

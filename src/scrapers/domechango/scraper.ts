@@ -203,6 +203,14 @@ async function selectFirstOrderForExcel(page: Page): Promise<void> {
 }
 
 async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
+  const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
+    .then(async (dialog) => {
+      const message = dialog.message()
+      await dialog.accept().catch(() => undefined)
+      return message
+    })
+    .catch(() => null)
+
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
     page.evaluate(() => {
@@ -225,13 +233,16 @@ async function triggerSelectedOrderExcelDownload(page: Page): Promise<Buffer> {
       if (!option) throw new Error('엑셀 다운받기 옵션을 찾지 못했습니다.')
 
       select.value = option.value
+      select.dispatchEvent(new Event('input', { bubbles: true }))
       select.dispatchEvent(new Event('change', { bubbles: true }))
+      select.onchange?.(new Event('change') as Event)
     }),
-  ]).catch((error) => {
+  ]).catch(async (error) => {
+    const dialogMessage = await dialogPromise
     throw new MarketplaceApiError(
       'domechango',
       504,
-      `도매창고 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
+      `도매창고 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''})`,
     )
   })
 

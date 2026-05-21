@@ -543,14 +543,22 @@ export class OnchannelScraper implements MarketplaceScraper {
       await ensureCheckboxChecked(downloadRoot, checkbox)
 
       await dismissOnchannelPopups(ctx.page)
+      const dialogPromise = ctx.page.waitForEvent('dialog', { timeout: 5000 })
+        .then(async (dialogEvent) => {
+          const message = dialogEvent.message()
+          await dialogEvent.accept().catch(() => undefined)
+          return message
+        })
+        .catch(() => null)
       const [download] = await Promise.all([
         ctx.page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
         downloadRoot.getByRole('button', { name: /^다운로드$/ }).click({ timeout: 15_000 }),
-      ]).catch((error) => {
+      ]).catch(async (error) => {
+        const dialogMessage = await dialogPromise
         throw new MarketplaceApiError(
           'onchannel',
           504,
-          `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
+          `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
         )
       })
       const stream = await download.createReadStream()

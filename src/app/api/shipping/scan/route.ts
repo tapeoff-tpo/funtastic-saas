@@ -13,7 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
-import { eq, and, gte, count, isNull, or } from 'drizzle-orm'
+import { eq, and, gte, count, isNull, or, inArray } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
@@ -80,8 +80,10 @@ export async function POST(req: NextRequest) {
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  // Look up shipment
-  const [shipment] = await db
+  // Look up all active shipments for this tracking number. 합배송/묶음 송장은
+  // 같은 운송장번호가 여러 주문에 연결될 수 있으므로 1건만 처리하면
+  // 같은 송장 안에서 스캔/미스캔 상태가 갈린다.
+  const matchingShipments = await db
     .select({
       id: shipments.id,
       orderId: shipments.orderId,
@@ -89,16 +91,19 @@ export async function POST(req: NextRequest) {
       carrierName: shipments.carrierName,
       shippedAt: shipments.shippedAt,
       uploadStatus: shipments.uploadStatus,
+      orderStatus: orders.status,
     })
     .from(shipments)
+    .leftJoin(orders, eq(orders.id, shipments.orderId))
     .where(and(eq(shipments.userId, workspaceUserId), eq(shipments.trackingNumber, trackingNumber)))
-    .limit(1)
+
+  const activeShipments = matchingShipments.filter((shipment) => shipment.orderStatus !== 'cancelled')
 
   // 비정상: 시스템에 없는 운송장
-  if (!shipment) {
+  if (activeShipments.length === 0) {
     // 비정상 스캔도 이력으로 남김 (shipment_id/order_id = null)
     await db.insert(scanLogs).values({
-      userId: user.id,
+      userId: workspaceUserId,
       shipmentId: null,
       orderId: null,
       trackingNumber,
@@ -113,14 +118,16 @@ export async function POST(req: NextRequest) {
 
   // 중복: 오늘 이미 스캔됨
   const todayStart = startOfDay(new Date())
-  if (shipment.shippedAt && new Date(shipment.shippedAt) >= todayStart) {
+  const pendingShipments = activeShipments.filter((shipment) => !shipment.shippedAt || new Date(shipment.shippedAt) < todayStart)
+  if (pendingShipments.length === 0) {
+    const shipment = activeShipments[0]
     // Fetch order info for display
     const [order] = await db
       .select({ recipientName: orders.recipientName, marketplaceId: orders.marketplaceId })
       .from(orders).where(eq(orders.id, shipment.orderId)).limit(1)
 
     await db.insert(scanLogs).values({
-      userId: user.id,
+      userId: workspaceUserId,
       shipmentId: shipment.id,
       orderId: shipment.orderId,
       trackingNumber,
@@ -137,27 +144,34 @@ export async function POST(req: NextRequest) {
 
   // 정상: 출고 처리 + 주문 상태를 출고준비(ready)로 전환
   // 출고대기(preparing) 상태일 때만 ready로 승격 (이미 ready 이상이면 변경 없음)
+  const now = new Date()
+  const pendingShipmentIds = pendingShipments.map((shipment) => shipment.id)
+  const pendingOrderIds = pendingShipments.map((shipment) => shipment.orderId)
   await db
     .update(shipments)
     .set({
-      shippedAt: new Date(),
+      shippedAt: now,
       uploadStatus: 'pending',
-      updatedAt: new Date(),
+      updatedAt: now,
     })
-    .where(eq(shipments.id, shipment.id))
+    .where(inArray(shipments.id, pendingShipmentIds))
 
   await db
     .update(orders)
-    .set({ status: 'ready', updatedAt: new Date() })
-    .where(and(eq(orders.id, shipment.orderId), eq(orders.status, 'preparing')))
+    .set({ status: 'ready', updatedAt: now })
+    .where(and(inArray(orders.id, pendingOrderIds), eq(orders.status, 'preparing')))
 
-  await db.insert(scanLogs).values({
-    userId: user.id,
-    shipmentId: shipment.id,
-    orderId: shipment.orderId,
-    trackingNumber,
-    status: 'ok',
-  })
+  await db.insert(scanLogs).values(
+    pendingShipments.map((shipment) => ({
+      userId: workspaceUserId,
+      shipmentId: shipment.id,
+      orderId: shipment.orderId,
+      trackingNumber,
+      status: 'ok',
+    })),
+  )
+
+  const primaryShipment = pendingShipments[0]
 
   // Fetch order + item info for display
   const [order] = await db
@@ -168,7 +182,7 @@ export async function POST(req: NextRequest) {
       marketplaceId: orders.marketplaceId,
       marketplaceOrderId: orders.marketplaceOrderId,
     })
-    .from(orders).where(eq(orders.id, shipment.orderId)).limit(1)
+    .from(orders).where(eq(orders.id, primaryShipment.orderId)).limit(1)
 
   const items = order
     ? await db.select({ productName: orderItems.productName, quantity: orderItems.quantity })
@@ -193,10 +207,11 @@ export async function POST(req: NextRequest) {
     message: '정상입니다',
     tts: '정상입니다',
     trackingNumber,
-    carrierId: shipment.carrierId,
-    carrierName: shipment.carrierName,
+    carrierId: primaryShipment.carrierId,
+    carrierName: primaryShipment.carrierName,
     order: order ?? null,
     items,
     todayCount: todayCount ? Number(todayCount[0]?.value ?? 0) : undefined,
+    processedCount: pendingShipments.length,
   })
 }

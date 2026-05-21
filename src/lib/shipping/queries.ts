@@ -17,6 +17,7 @@ export interface HeldShipmentRow {
   orderId: string
   marketplaceOrderId: string
   marketplaceId: string
+  marketplaceName: string | null
   buyerName: string
   recipientName: string
   status: string
@@ -45,6 +46,28 @@ export async function getHeldShipments(userId: string): Promise<HeldShipmentRow[
       orderId: orders.id,
       marketplaceOrderId: orders.marketplaceOrderId,
       marketplaceId: orders.marketplaceId,
+      marketplaceName: sql<string | null>`COALESCE(
+        ${orders.rawData}->>'mallName',
+        ${orders.rawData}->'sabangnetRaw'->>'쇼핑몰명',
+        ${orders.rawData}->'sabangnetSync'->>'mallName',
+        (
+          SELECT COALESCE(
+            o2.raw_data->>'mallName',
+            o2.raw_data->'sabangnetRaw'->>'쇼핑몰명',
+            o2.raw_data->'sabangnetSync'->>'mallName'
+          )
+          FROM ${orders} o2
+          WHERE o2.user_id = ${orders.userId}
+            AND o2.marketplace_id = ${orders.marketplaceId}
+            AND COALESCE(
+              o2.raw_data->>'mallName',
+              o2.raw_data->'sabangnetRaw'->>'쇼핑몰명',
+              o2.raw_data->'sabangnetSync'->>'mallName'
+            ) IS NOT NULL
+          ORDER BY o2.updated_at DESC
+          LIMIT 1
+        )
+      )`,
       buyerName: orders.buyerName,
       recipientName: orders.recipientName,
       status: orders.status,

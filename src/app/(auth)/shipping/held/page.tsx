@@ -14,6 +14,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { getHeldShipments } from '@/lib/shipping/queries'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { HeldShipmentRow } from '@/lib/shipping/queries'
 import type { Metadata } from 'next'
 import { HeldOrderActions } from './client'
@@ -49,7 +50,8 @@ export default async function HeldShipmentsPage() {
     redirect('/login')
   }
 
-  const heldOrders = await getHeldShipments(user.id)
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const heldOrders = await getHeldShipments(workspaceUserId)
   const count = heldOrders.length
 
   return (
@@ -126,12 +128,13 @@ function HeldOrderRow({ row }: { row: HeldShipmentRow }) {
   const statusLabel = UPLOAD_STATUS_LABELS[row.uploadStatus] ?? row.uploadStatus
   const statusStyle =
     UPLOAD_STATUS_STYLES[row.uploadStatus] ?? 'bg-gray-100 text-gray-700'
+  const marketplaceLabel = row.marketplaceName ?? row.marketplaceId
 
   return (
     <tr className="bg-white hover:bg-gray-50">
       {/* 마켓 */}
-      <td className="whitespace-nowrap px-4 py-3 font-medium">
-        {row.marketplaceId}
+      <td className="whitespace-nowrap px-4 py-3 font-medium" title={row.marketplaceId}>
+        {marketplaceLabel}
       </td>
 
       {/* 주문번호 */}

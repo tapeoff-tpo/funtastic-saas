@@ -217,12 +217,27 @@ function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): stri
     empSiteName?: unknown
     SiteName?: unknown
     siteName?: unknown
+    sabangnetRaw?: unknown
+    sabangnetSync?: unknown
     empSiteCode?: unknown
     SiteCode?: unknown
     empSiteId?: unknown
     SiteId?: unknown
   }
-  const candidates = [data.mallName, data.empSiteName, data.SiteName, data.siteName]
+  const sabangnetRaw = data.sabangnetRaw && typeof data.sabangnetRaw === 'object' && !Array.isArray(data.sabangnetRaw)
+    ? data.sabangnetRaw as { 쇼핑몰명?: unknown }
+    : null
+  const sabangnetSync = data.sabangnetSync && typeof data.sabangnetSync === 'object' && !Array.isArray(data.sabangnetSync)
+    ? data.sabangnetSync as { mallName?: unknown }
+    : null
+  const candidates = [
+    data.mallName,
+    sabangnetRaw?.쇼핑몰명,
+    sabangnetSync?.mallName,
+    data.empSiteName,
+    data.SiteName,
+    data.siteName,
+  ]
   for (const candidate of candidates) {
     if (typeof candidate !== 'string') continue
     const trimmed = candidate.trim()

@@ -19,7 +19,7 @@ const LOGIN_PAGE_URL = `${WMS_BASE_URL}/login`
 const NAVIGATION_TIMEOUT_MS = 20_000
 const LOAD_STATE_TIMEOUT_MS = 8_000
 const ORDER_PAGE_REFERRER = `${WMS_BASE_URL}/order`
-const DOWNLOAD_TIMEOUT_MS = 60_000
+const DOWNLOAD_TIMEOUT_MS = 120_000
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()

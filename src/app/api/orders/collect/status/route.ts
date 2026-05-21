@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
         inArray(jobLogs.id, ids),
         inArray(jobLogs.status, ['queued']),
         like(jobLogs.jobType, 'scrape-%'),
-        sql`${jobLogs.createdAt} < now() - interval '330 seconds'`,
+        sql`${jobLogs.createdAt} < now() - interval '360 seconds'`,
       ),
     )
 
@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
         inArray(jobLogs.id, ids),
         inArray(jobLogs.status, ['running']),
         like(jobLogs.jobType, 'scrape-%'),
-        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '330 seconds'`,
+        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '360 seconds'`,
       ),
     )
 

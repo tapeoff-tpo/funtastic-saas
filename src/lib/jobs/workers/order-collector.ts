@@ -508,9 +508,12 @@ export async function collectOrdersForConnection(params: {
     }
     const fetchedOrders = await fetchOrdersForRange(adapter, marketplaceId, effectiveSince, effectiveUntil, setProgress)
     const normalizedOrders = mergeNormalizedOrdersByOrderId(canonicalizeMarketplaceOrderIds(fetchedOrders))
-    const existingOrderKeys = await findExistingOrderKeys(userId, marketplaceId, normalizedOrders)
-    const ordersToSave = normalizedOrders
-    const skippedExistingCount = existingOrderKeys.size
+    const existingOrderMatches = await findExistingOrderMatches(userId, marketplaceId, normalizedOrders)
+    const ordersToSave = normalizedOrders.filter((order) => {
+      const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
+      return !existingOrderMatches.skipKeys.has(orderKey)
+    })
+    const skippedExistingCount = existingOrderMatches.upsertKeys.size + existingOrderMatches.skipKeys.size
     await setProgress(
       `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` - 저장/갱신 ${ordersToSave.length}건, 기존 ${skippedExistingCount}건 포함` : ''}`,
     )
@@ -527,7 +530,7 @@ export async function collectOrdersForConnection(params: {
         ? { ...order, items: [firstItem], totalAmount: lineTotalAmount(firstItem) }
         : { ...order, items }
       const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
-      const isExistingOrder = existingOrderKeys.has(orderKey)
+      const isExistingOrder = existingOrderMatches.upsertKeys.has(orderKey)
       const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
       let splitCopyIds: string[] = []
 
@@ -770,7 +773,7 @@ function hasMatchingCustomerName(
   return incomingNames.some((name) => existingNames.includes(name))
 }
 
-async function findExistingOrderMatches(
+export async function findExistingOrderMatches(
   userId: string,
   marketplaceId: string,
   normalizedOrders: NormalizedOrder[],

@@ -17,7 +17,7 @@ import type {
 
 const ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=preparing'
 const ALL_ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=all&orderDate=all&orderBy=obd.id%7Cdesc'
-const DOWNLOAD_TIMEOUT_MS = 60_000
+const DOWNLOAD_TIMEOUT_MS = 120_000
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()

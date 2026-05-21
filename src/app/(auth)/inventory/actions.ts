@@ -80,11 +80,12 @@ export async function adjustStockAction(
   }
 
   const sku = formData.get('sku') as string | null
+  const inventoryId = formData.get('inventoryId') as string | null
   const deltaStr = formData.get('delta') as string | null
   const reason = formData.get('reason') as AdjustmentReason | null
   const note = (formData.get('note') as string | null)?.trim() || undefined
 
-  if (!sku?.trim()) {
+  if (!inventoryId?.trim() && !sku?.trim()) {
     return { success: false, error: '상품코드를 입력해주세요.' }
   }
   if (!deltaStr || isNaN(Number(deltaStr)) || Number(deltaStr) === 0) {
@@ -102,7 +103,11 @@ export async function adjustStockAction(
   const [record] = await db
     .select()
     .from(inventory)
-    .where(and(eq(inventory.userId, workspaceUserId), eq(inventory.sku, sku.trim())))
+    .where(
+      inventoryId?.trim()
+        ? and(eq(inventory.userId, workspaceUserId), eq(inventory.id, inventoryId.trim()))
+        : and(eq(inventory.userId, workspaceUserId), eq(inventory.sku, sku?.trim() ?? '')),
+    )
     .limit(1)
 
   if (!record) {

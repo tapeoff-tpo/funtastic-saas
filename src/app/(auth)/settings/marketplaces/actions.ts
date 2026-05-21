@@ -567,6 +567,10 @@ export async function registerExcelMarketplaceConnection(
   const customName = String(formData.get('display_name') ?? '').trim()
   const storeAlias = String(formData.get('store_alias') ?? '').trim() || 'excel'
 
+  if (rawMarketplaceId === 'domechango' || customName.replace(/\s+/g, '').includes('도매창고')) {
+    return { error: '도매창고는 엑셀 수동이 아니라 RPA 자동화로 등록해주세요.' }
+  }
+
   let marketplaceId = rawMarketplaceId
   let displayName = customName
   if (marketplaceId && marketplaceRegistry.has(marketplaceId)) {

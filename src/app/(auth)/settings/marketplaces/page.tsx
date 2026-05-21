@@ -26,10 +26,11 @@ export default async function MarketplaceSettingsPage() {
     .select()
     .from(marketplaceConnections)
     .where(eq(marketplaceConnections.userId, workspaceUserId))
+  const visibleConnections = connections.filter((connection) => !isDomechangoManualConnection(connection))
 
   const connectedMethodCounts = new Map<string, Partial<Record<IntegrationMethod, number>>>()
   const connectedAliases = new Map<string, string[]>()
-  connections.forEach((c) => {
+  visibleConnections.forEach((c) => {
     const method = getIntegrationMethod(c.marketplaceId, {
       isManual: c.isManual,
       authType: c.authType,
@@ -53,7 +54,7 @@ export default async function MarketplaceSettingsPage() {
     connectedAliases: connectedAliases.get(config.id) ?? [],
   }))
   const marketplaceNames = new Map(configs.map((config) => [config.id, config.name]))
-  const connectionRows = connections.map((connection) => ({
+  const connectionRows = visibleConnections.map((connection) => ({
     id: connection.id,
     marketplaceId: connection.marketplaceId,
     marketplaceName: marketplaceNames.get(connection.marketplaceId) ?? connection.displayName,
@@ -80,7 +81,7 @@ export default async function MarketplaceSettingsPage() {
         marketplaces={catalog}
       />
 
-      {connections.length > 0 && (
+      {connectionRows.length > 0 && (
         <ConnectionList connections={connectionRows} pageSize={10} />
       )}
     </div>
@@ -92,4 +93,9 @@ function linkedMarketplacesFromMetadata(metadata: Record<string, unknown> | null
   return Array.isArray(value)
     ? value.map((entry) => String(entry).trim()).filter(Boolean)
     : []
+}
+
+function isDomechangoManualConnection(connection: typeof marketplaceConnections.$inferSelect): boolean {
+  const displayNameKey = connection.displayName.replace(/\s+/g, '')
+  return connection.isManual && (connection.marketplaceId === 'domechango' || displayNameKey.includes('도매창고'))
 }

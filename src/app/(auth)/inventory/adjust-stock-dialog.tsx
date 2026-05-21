@@ -19,6 +19,7 @@ const MANUAL_REASONS: AdjustmentReason[] = [
 
 interface AdjustStockDialogProps {
   mode: 'set' | 'adjust'
+  inventoryId?: string
   sku?: string
   productName?: string
   currentStock?: number
@@ -27,6 +28,7 @@ interface AdjustStockDialogProps {
 
 export function AdjustStockDialog({
   mode,
+  inventoryId,
   sku: initialSku,
   productName: initialProductName,
   currentStock,
@@ -66,6 +68,7 @@ export function AdjustStockDialog({
         }
       })
     } else {
+      if (inventoryId) formData.set('inventoryId', inventoryId)
       formData.set('sku', initialSku ?? '')
       formData.set('delta', delta)
       formData.set('reason', reason)

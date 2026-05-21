@@ -127,6 +127,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
   const [adjustDialog, setAdjustDialog] = useState<{
     open: boolean
     mode: 'set' | 'adjust'
+    inventoryId?: string
     sku?: string
     productName?: string
     currentStock?: number
@@ -455,29 +456,28 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
     }),
     columnHelper.display({
       id: 'actions',
-      size: 100,
+      size: 120,
       header: '작업',
       cell: (info) => {
         const row = info.row.original
         return (
           <div className="flex items-center gap-1">
-            {mode === 'adjustments' && (
-              <button
-                type="button"
-                onClick={() =>
-                  setAdjustDialog({
-                    open: true,
-                    mode: 'adjust',
-                    sku: row.sku,
-                    productName: row.productName,
-                    currentStock: row.totalStock,
-                  })
-                }
-                className="rounded border px-2 py-1 text-xs hover:bg-muted"
-              >
-                조정
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() =>
+                setAdjustDialog({
+                  open: true,
+                  mode: 'adjust',
+                  inventoryId: row.id,
+                  sku: row.sku,
+                  productName: row.productName,
+                  currentStock: row.totalStock,
+                })
+              }
+              className="rounded border px-2 py-1 text-xs hover:bg-muted"
+            >
+              조정
+            </button>
             <button
               type="button"
               onClick={() =>
@@ -793,6 +793,7 @@ export function InventoryTable({ data, total, page, pageSize, warehouseZones, se
       {adjustDialog.open && (
         <AdjustStockDialog
           mode={adjustDialog.mode}
+          inventoryId={adjustDialog.inventoryId}
           sku={adjustDialog.sku}
           productName={adjustDialog.productName}
           currentStock={adjustDialog.currentStock}

@@ -41,3 +41,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .claude/
+
+# local runtime artifacts
+.local-tools/
+dev-server*.log
+dev-server.pid

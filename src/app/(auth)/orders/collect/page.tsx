@@ -19,6 +19,11 @@ function linkedMarketplacesFromMetadata(metadata: Record<string, unknown> | null
     : []
 }
 
+function isDomechangoManualConnection(connection: typeof marketplaceConnections.$inferSelect): boolean {
+  const displayNameKey = connection.displayName.replace(/\s+/g, '')
+  return connection.isManual && (connection.marketplaceId === 'domechango' || displayNameKey.includes('도매창고'))
+}
+
 export default async function OrdersCollectPage() {
   const supabase = await createClient()
   const {
@@ -53,7 +58,7 @@ export default async function OrdersCollectPage() {
   ]
 
   const dashboardConnections = connections
-    .filter((c) => !(c.marketplaceId === 'domechango' && c.isManual))
+    .filter((c) => !isDomechangoManualConnection(c))
     .filter((c) => c.status !== 'disconnected')
     .map((c) => ({
       id: c.id,

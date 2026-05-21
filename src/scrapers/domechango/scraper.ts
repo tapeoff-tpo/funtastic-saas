@@ -21,6 +21,7 @@ const LOAD_STATE_TIMEOUT_MS = 8_000
 const ORDER_PAGE_REFERRER = `${WMS_BASE_URL}/order`
 const DOWNLOAD_TIMEOUT_MS = 120_000
 const DOWNLOAD_STREAM_TIMEOUT_MS = 60_000
+type DomechangoOrderSearchStatus = 'new' | 'shipping-target'
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -165,8 +166,13 @@ async function openOrderListPage(page: Page): Promise<void> {
   }
 }
 
-async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<void> {
-  await page.evaluate(({ since, until }) => {
+async function applyOrderSearch(
+  page: Page,
+  since: Date,
+  until: Date,
+  status: DomechangoOrderSearchStatus,
+): Promise<void> {
+  await page.evaluate(({ since, until, status }) => {
     const fields = [
       ['#sdate, input[name="sdate"]', since],
       ['#edate, input[name="edate"]', until],
@@ -182,19 +188,23 @@ async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<v
       input.dispatchEvent(new Event('change', { bubbles: true }))
     }
 
-    const shippingTargetRadio =
-      document.querySelector<HTMLInputElement>('#oistep2, input[name="oistep"][value="2"]') ??
+    const statusPatterns = status === 'new'
+      ? [/신규\s*주문/, /주문\s*접수/]
+      : [/발송\s*대상/, /배송\s*준비/, /주문\s*확인/]
+    const preferredValue = status === 'new' ? '1' : '2'
+    const orderStatusRadio =
+      document.querySelector<HTMLInputElement>(`#oistep${preferredValue}, input[name="oistep"][value="${preferredValue}"]`) ??
       Array.from(document.querySelectorAll<HTMLInputElement>('input[name="oistep"]')).find((input) => {
         const label = input.closest('label')?.textContent ?? document.querySelector(`label[for="${input.id}"]`)?.textContent ?? ''
-        return /발송대상|배송준비|주문확인/.test(label)
+        return statusPatterns.some((pattern) => pattern.test(label))
       })
-    if (shippingTargetRadio) {
-      shippingTargetRadio.checked = true
-      shippingTargetRadio.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-      shippingTargetRadio.dispatchEvent(new Event('input', { bubbles: true }))
-      shippingTargetRadio.dispatchEvent(new Event('change', { bubbles: true }))
+    if (orderStatusRadio) {
+      orderStatusRadio.checked = true
+      orderStatusRadio.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+      orderStatusRadio.dispatchEvent(new Event('input', { bubbles: true }))
+      orderStatusRadio.dispatchEvent(new Event('change', { bubbles: true }))
     }
-  }, { since: formatDateInput(since), until: formatDateInput(until) })
+  }, { since: formatDateInput(since), until: formatDateInput(until), status })
 
   await page.locator('#btn_search, button').filter({ hasText: /주문검색|검색/ }).first().click({ timeout: 10_000 }).catch(() => undefined)
   await page.waitForTimeout(3000)
@@ -488,17 +498,33 @@ export class DomechangoScraper implements MarketplaceScraper {
 
       await setProgress?.('도매창고 주문 목록 여는 중...')
       await runStep('orders: open order list page', () => openOrderListPage(ctx.page))
-      await setProgress?.('도매창고 주문 검색 중...')
-      await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since, until))
-      await setProgress?.('도매창고 엑셀 다운로드 대상 선택 중...')
-      const hasOrder = await runStep('orders: select first order', () => selectFirstOrderForExcel(ctx.page))
-      if (!hasOrder) {
+      let workbook: Buffer | null = null
+      let matchedStatus: DomechangoOrderSearchStatus | null = null
+      const searchStatuses: DomechangoOrderSearchStatus[] = ['new', 'shipping-target']
+      const statusLabel: Record<DomechangoOrderSearchStatus, string> = {
+        new: '신규주문',
+        'shipping-target': '발송대상',
+      }
+
+      for (const status of searchStatuses) {
+        await setProgress?.(`도매창고 ${statusLabel[status]} 검색 중...`)
+        await runStep(`orders: apply order search (${status})`, () => applyOrderSearch(ctx.page, since, until, status))
+        await setProgress?.(`도매창고 ${statusLabel[status]} 엑셀 다운로드 대상 선택 중...`)
+        const hasOrder = await runStep(`orders: select first order (${status})`, () => selectFirstOrderForExcel(ctx.page))
+        if (!hasOrder) continue
+
+        matchedStatus = status
+        workbook = await runStep(`orders: download selected order excel (${status})`, () => triggerSelectedOrderExcelDownload(ctx.page, setProgress))
+        break
+      }
+
+      if (!workbook || !matchedStatus) {
         await setProgress?.('도매창고 수집 대상 주문 0건')
         return null
       }
-      const workbook = await runStep('orders: download selected order excel', () => triggerSelectedOrderExcelDownload(ctx.page, setProgress))
+
       await setProgress?.('도매창고 주문확인 처리 전 목록 갱신 중...')
-      await runStep('orders: refresh order list before confirm', () => applyOrderSearch(ctx.page, since, until))
+      await runStep('orders: refresh order list before confirm', () => applyOrderSearch(ctx.page, since, until, matchedStatus))
       await setProgress?.('도매창고 주문확인 대상 다시 선택 중...')
       const hasOrderToConfirm = await runStep('orders: reselect order before confirm', () => selectFirstOrderForExcel(ctx.page))
       if (hasOrderToConfirm) {

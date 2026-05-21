@@ -15,7 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v11'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v12'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -152,18 +152,8 @@ async function hasOhouseSession(page: Page): Promise<boolean> {
 async function waitForOhouseAppReady(page: Page): Promise<boolean> {
   return page
     .waitForFunction(() => {
-      const hasTokenLikeStorage = (storage: Storage) =>
-        Array.from({ length: storage.length }).some((_, index) => {
-          const key = storage.key(index) ?? ''
-          const value = storage.getItem(key) ?? ''
-          return /token|access|auth|session|jwt/i.test(key) || /eyJ[A-Za-z0-9_-]+\./.test(value)
-        })
-
       const text = document.body?.innerText ?? ''
-      return (
-        /로그아웃|주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(text) &&
-        (hasTokenLikeStorage(window.localStorage) || hasTokenLikeStorage(window.sessionStorage) || document.cookie.length > 0)
-      )
+      return /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록|개씩\s*보기|송장\s*입력/.test(text)
     }, undefined, { timeout: 30_000 })
     .then(() => true)
     .catch(() => false)

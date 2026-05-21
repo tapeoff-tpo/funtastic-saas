@@ -102,6 +102,9 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
       await setProgress('RPA 브라우저로 주문 페이지 접속 중...')
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 24 * 60 * 60 * 1000)
       const orders = await runWithTimeout(scraper.getOrders(credentials, sinceDate, setProgress), SCRAPE_JOB_TIMEOUT_MS)
+      if (marketplaceId === 'tobizon' && orders.length === 0) {
+        throw new Error('투비즈온 주문 0건으로 수집되었습니다. 주문 페이지의 실제 목록을 읽지 못한 상태라 완료 처리하지 않습니다. scrape-worker 최신 배포와 투비즈온 주문 화면을 확인해주세요.')
+      }
       await setProgress(`${orders.length}건 수집 완료, 주문 저장 중...`)
       const result = await saveNormalizedOrdersForConnection({
         marketplaceId,

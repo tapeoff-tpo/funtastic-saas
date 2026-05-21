@@ -10,6 +10,7 @@ const RPA_QUEUE_TIMEOUT_MESSAGE =
   'RPA 워커가 작업을 시작하지 못했습니다. scrape-worker 서비스가 실행 중인지 확인해주세요.'
 const RPA_RUNNING_TIMEOUT_MESSAGE =
   'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
+const RPA_INVOICE_TIMEOUT_SECONDS = 30
 const withLastProgress = (message: string) =>
   sql<string>`case
     when ${jobLogs.progressMessage} is not null and ${jobLogs.progressMessage} <> ''
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
         inArray(jobLogs.id, ids),
         inArray(jobLogs.status, ['queued']),
         eq(jobLogs.jobType, 'scrape-upload-invoice'),
-        sql`${jobLogs.createdAt} < now() - interval '120 seconds'`,
+        sql`${jobLogs.createdAt} < now() - (${RPA_INVOICE_TIMEOUT_SECONDS} * interval '1 second')`,
       ),
     )
     .returning({ id: jobLogs.id })
@@ -86,6 +87,28 @@ export async function GET(request: NextRequest) {
   await markTimedOutInvoiceShipments(
     timedOutQueuedInvoiceLogs.map((log) => log.id),
     RPA_QUEUE_TIMEOUT_MESSAGE,
+  )
+
+  const timedOutRunningInvoiceLogs = await db
+    .update(jobLogs)
+    .set({
+      status: 'failed',
+      completedAt: new Date(),
+      errorMessage: withLastProgress(RPA_RUNNING_TIMEOUT_MESSAGE),
+    })
+    .where(
+      and(
+        inArray(jobLogs.id, ids),
+        inArray(jobLogs.status, ['running']),
+        eq(jobLogs.jobType, 'scrape-upload-invoice'),
+        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - (${RPA_INVOICE_TIMEOUT_SECONDS} * interval '1 second')`,
+      ),
+    )
+    .returning({ id: jobLogs.id })
+
+  await markTimedOutInvoiceShipments(
+    timedOutRunningInvoiceLogs.map((log) => log.id),
+    RPA_RUNNING_TIMEOUT_MESSAGE,
   )
 
   await db

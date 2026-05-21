@@ -53,7 +53,7 @@ interface MappingTarget {
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
 const EXACT_OPTION_ID = '__exact__'
 const RPA_INVOICE_POLL_INTERVAL_MS = 1500
-const RPA_INVOICE_POLL_TIMEOUT_MS = 3 * 60 * 1000
+const RPA_INVOICE_POLL_TIMEOUT_MS = 35 * 1000
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]

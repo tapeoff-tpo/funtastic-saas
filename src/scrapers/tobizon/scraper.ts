@@ -119,6 +119,26 @@ function logStep(step: string): void {
 async function summarizePage(page: Page): Promise<string> {
   const title = await page.title().catch(() => '')
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  const controls = await page.locator('body').evaluate((body) => {
+    const normalize = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+    return Array.from(body.querySelectorAll<HTMLElement>('button, input, a, area, [onclick]'))
+      .map((element) => {
+        const inputValue = element instanceof HTMLInputElement ? element.value : ''
+        return normalize([
+          element.tagName.toLowerCase(),
+          element.id ? `#${element.id}` : '',
+          element.getAttribute('name') ? `[name=${element.getAttribute('name')}]` : '',
+          element.getAttribute('href') ?? '',
+          element.getAttribute('onclick') ?? '',
+          inputValue,
+          element.innerText,
+          element.getAttribute('alt') ?? '',
+          element.getAttribute('title') ?? '',
+        ].filter(Boolean).join(' '))
+      })
+      .filter((text) => /주문|엑셀|다운|배송|검색|order|excel|down/i.test(text))
+      .slice(0, 12)
+  }).catch(() => [])
   const frameTexts = await Promise.all(
     page.frames().slice(1, 4).map((frame, index) =>
       frame.locator('body').innerText({ timeout: 1500 })
@@ -128,7 +148,8 @@ async function summarizePage(page: Page): Promise<string> {
   )
   const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 360)
   const compactFrames = frameTexts.filter(Boolean).join(' ')
-  return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}${compactFrames ? ` ${compactFrames}` : ''}`
+  const compactControls = controls.length > 0 ? ` controls=${controls.join(' | ').slice(0, 420)}` : ''
+  return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}${compactFrames ? ` ${compactFrames}` : ''}${compactControls}`
 }
 
 async function gotoTobizon(page: Page, url = TOBIZON_BASE_URL): Promise<void> {
@@ -150,7 +171,7 @@ async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_0
   }
 
   const fallback = root
-    .locator('button, input[type="button"], input[type="submit"], a, area')
+    .locator('button, input[type="button"], input[type="submit"], a, area, [onclick]')
     .filter({ hasText: pattern })
     .first()
   if (await fallback.isVisible({ timeout: 1500 }).catch(() => false)) {
@@ -158,21 +179,48 @@ async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_0
     return true
   }
 
-  return root.locator('body, :scope').first().evaluate((element, source) => {
-    const regexp = new RegExp(source)
+  return root.locator('body, :scope').first().evaluate((element, { source, flags }) => {
+    const regexp = new RegExp(source, flags)
     const controls = Array.from(
-      element.querySelectorAll('button, input[type="button"], input[type="submit"], a, area'),
+      element.querySelectorAll('button, input[type="button"], input[type="submit"], a, area, [onclick]'),
     )
     for (const control of controls) {
       if (!(control instanceof HTMLElement)) continue
       const inputValue = control instanceof HTMLInputElement ? control.value : ''
-      const text = `${control.innerText || ''} ${inputValue} ${control.getAttribute('alt') || ''} ${control.getAttribute('title') || ''}`.trim()
+      const text = `${control.innerText || ''} ${inputValue} ${control.getAttribute('alt') || ''} ${control.getAttribute('title') || ''} ${control.getAttribute('onclick') || ''} ${control.getAttribute('href') || ''}`.trim()
       if (!regexp.test(text)) continue
       control.click()
       return true
     }
     return false
-  }, pattern.source).catch(() => false)
+  }, { source: pattern.source, flags: pattern.flags }).catch(() => false)
+}
+
+async function hasOrderListContent(page: Page): Promise<boolean> {
+  const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  if (/주문서?\s*엑셀|총\s*[:：]?\s*\d+\s*개|주문번호|주문상품|입금완료/.test(text)) return true
+  return page.locator('body').evaluate((body) => {
+    const source = Array.from(body.querySelectorAll<HTMLElement>('button, input, a, area, [onclick]'))
+      .map((element) => `${element.innerText || ''} ${element instanceof HTMLInputElement ? element.value : ''} ${element.getAttribute('onclick') || ''} ${element.getAttribute('href') || ''}`)
+      .join(' ')
+    return /엑셀|excel|down_excel|order_down|order_excel/i.test(source)
+  }).catch(() => false)
+}
+
+async function ensureOrderListContent(page: Page): Promise<void> {
+  if (await hasOrderListContent(page)) return
+
+  await clickByText(page, /주문내역/i, 5000).catch(() => false)
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await page.waitForTimeout(2500)
+  if (await hasOrderListContent(page)) return
+
+  await page.goto(TOBIZON_ORDER_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined)
+  for (const delay of [1500, 3000, 5000]) {
+    await page.waitForTimeout(delay)
+    if (await hasOrderListContent(page)) return
+  }
 }
 
 async function setInputValue(input: Locator, value: string): Promise<void> {
@@ -224,6 +272,8 @@ async function openOrderManagementPage(page: Page): Promise<void> {
   if (!(await hasTobizonSession(page))) {
     throw new MarketplaceApiError('tobizon', 401, `투비즈온 세션을 확인하지 못했습니다. (${await summarizePage(page)})`)
   }
+
+  await ensureOrderListContent(page)
 
   const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   if (!/주문내역|주문\s*상태|주문번호|주문서?\s*엑셀|엑셀|배송\s*완료/.test(text)) {

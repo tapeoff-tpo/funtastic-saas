@@ -22,6 +22,7 @@ const DOWNLOAD_TIMEOUT_MS = 30_000
 type TobizonDownloadResult = {
   buffer: Buffer
   visibleOrders: NormalizedOrder[]
+  pageSummary?: string
 }
 
 type TobizonVisibleOrderRow = {
@@ -494,14 +495,20 @@ export class TobizonScraper implements MarketplaceScraper {
     since: Date,
     setProgress?: (message: string) => Promise<void>,
   ): Promise<NormalizedOrder[]> {
-    const { buffer, visibleOrders } = await this.downloadOrdersExcel(credentials, since, setProgress)
+    const { buffer, visibleOrders, pageSummary } = await this.downloadOrdersExcel(credentials, since, setProgress)
+    if (visibleOrders.length > 0) {
+      await setProgress?.(`투비즈온 화면 주문 ${visibleOrders.length}건 저장 중...`)
+      return visibleOrders
+    }
     await setProgress?.('투비즈온 주문 엑셀 파싱 중...')
-    if (buffer.length === 0) return visibleOrders
+    if (buffer.length === 0) {
+      if (/총\s*[:：]?\s*0|0\s*건|자료가\s*없|내역이\s*없/.test(pageSummary ?? '')) return []
+      throw new MarketplaceApiError('tobizon', 500, `투비즈온 주문 목록과 엑셀 다운로드가 모두 비어 있습니다. (${pageSummary ?? 'page summary unavailable'})`)
+    }
     const parsedOrders = await this.parseOrdersExcel(buffer)
     await setProgress?.(`투비즈온 엑셀 주문 ${parsedOrders.length}건, 화면 주문 ${visibleOrders.length}건 확인`)
     if (parsedOrders.length > 0) return parsedOrders
-    await setProgress?.(`투비즈온 엑셀 파싱 0건, 화면 주문 ${visibleOrders.length}건으로 저장 중...`)
-    return visibleOrders
+    throw new MarketplaceApiError('tobizon', 500, `투비즈온 주문 엑셀과 화면에서 주문을 찾지 못했습니다. (${pageSummary ?? 'page summary unavailable'})`)
   }
 
   async getClaimsOrders(): Promise<NormalizedClaim[]> {
@@ -560,17 +567,23 @@ export class TobizonScraper implements MarketplaceScraper {
       }
 
       await runStep('orders: open order management', () => openOrderManagementPage(ctx.page))
-      await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since))
       const visibleRows = await runStep('orders: read visible order table', () => readVisibleOrderRows(ctx.page))
       const visibleOrders = visibleRows.map((row) => this.normalizeVisibleOrder(row))
       await setProgress?.(`투비즈온 화면 주문 ${visibleOrders.length}건 확인`)
+      if (visibleOrders.length > 0) {
+        return { buffer: Buffer.alloc(0), visibleOrders, pageSummary: await summarizePage(ctx.page) }
+      }
       const selected = await runStep('orders: select order rows', () => selectOrderRows(ctx.page))
       if (!selected) {
         logStep('orders: no selectable orders')
-        return { buffer: Buffer.alloc(0), visibleOrders }
+        if (visibleOrders.length === 0) {
+          if (await hasNoOrders(ctx.page)) return { buffer: Buffer.alloc(0), visibleOrders, pageSummary: await summarizePage(ctx.page) }
+          throw new MarketplaceApiError('tobizon', 500, `투비즈온 주문 목록을 읽지 못했습니다. (${await summarizePage(ctx.page)})`)
+        }
+        return { buffer: Buffer.alloc(0), visibleOrders, pageSummary: await summarizePage(ctx.page) }
       }
       const buffer = await runStep('orders: download order excel', () => downloadOrdersExcel(ctx.page))
-      return { buffer, visibleOrders }
+      return { buffer, visibleOrders, pageSummary: await summarizePage(ctx.page) }
     } finally {
       await ctx.close()
     }

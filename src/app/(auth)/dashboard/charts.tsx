@@ -33,6 +33,13 @@ function formatAmountShort(v: number): string {
   return v.toLocaleString('ko-KR')
 }
 
+function formatTooltipNumber(value: unknown, suffix: string): string {
+  const numericValue = typeof value === 'number' ? value : Number(value ?? 0)
+  const safeValue = Number.isFinite(numericValue) ? numericValue : 0
+
+  return `${safeValue.toLocaleString('ko-KR')}${suffix}`
+}
+
 export function DailyOrdersChart({ data }: { data: DailyPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={240}>
@@ -43,7 +50,7 @@ export function DailyOrdersChart({ data }: { data: DailyPoint[] }) {
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
           labelFormatter={(l) => `${l}`}
-          formatter={(v: number) => [`${v.toLocaleString('ko-KR')}건`, '주문']}
+          formatter={(v) => [formatTooltipNumber(v, '건'), '주문']}
         />
         <Bar dataKey="count" fill="#3b82f6" radius={[4, 4, 0, 0]} />
       </BarChart>
@@ -60,7 +67,7 @@ export function MonthlyOrdersChart({ data }: { data: MonthlyPoint[] }) {
         <YAxis tick={{ fontSize: 11 }} stroke="#6b7280" allowDecimals={false} />
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
-          formatter={(v: number) => [`${v.toLocaleString('ko-KR')}건`, '주문']}
+          formatter={(v) => [formatTooltipNumber(v, '건'), '주문']}
         />
         <Line
           type="monotone"
@@ -90,7 +97,7 @@ export function DailySalesChart({ data }: { data: DailyPoint[] }) {
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
           labelFormatter={(l) => `${l}`}
-          formatter={(v: number) => [`${v.toLocaleString('ko-KR')}원`, '매출']}
+          formatter={(v) => [formatTooltipNumber(v, '원'), '매출']}
         />
         <Bar dataKey="amount" fill="#f59e0b" radius={[4, 4, 0, 0]} />
       </BarChart>
@@ -112,7 +119,7 @@ export function MonthlySalesChart({ data }: { data: MonthlyPoint[] }) {
         />
         <Tooltip
           contentStyle={{ fontSize: 12, borderRadius: 6 }}
-          formatter={(v: number) => [`${v.toLocaleString('ko-KR')}원`, '매출']}
+          formatter={(v) => [formatTooltipNumber(v, '원'), '매출']}
         />
         <Line
           type="monotone"

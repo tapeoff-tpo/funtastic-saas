@@ -47,11 +47,11 @@ function ensureArray<T>(value: T | T[] | { item?: T | T[] } | undefined): T[] {
   if (!value) return []
   if (Array.isArray(value)) return value
   if (typeof value === 'object' && 'item' in value) {
-    const item = value.item
+    const item = (value as { item?: T | T[] }).item
     if (!item) return []
     return Array.isArray(item) ? item : [item]
   }
-  return [value]
+  return [value as T]
 }
 
 function parseDomeggookDate(value: unknown): Date {

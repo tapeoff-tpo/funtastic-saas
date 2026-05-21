@@ -346,7 +346,7 @@ export class TenByTenAdapter implements MarketplaceAdapter {
     })
     if (includeBrandId && creds.shop_id) search.set('brandId', String(creds.shop_id))
 
-    let env: TenByTenEnvelope<OrdersListResponse>
+    let env: TenByTenEnvelope<OrdersListPayload>
     try {
       env = await this.client(creds)
         .get(`${path}?${search.toString()}`)

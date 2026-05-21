@@ -329,7 +329,7 @@ export class Cafe24Adapter implements MarketplaceAdapter {
     const normalizedVariants = variants.map((v) => ({
       // 자체상품코드 우선, 없으면 Cafe24 variant_code
       sku: v.custom_variant_code?.trim() || v.variant_code,
-      price: v.price != null ? Number(v.price) : undefined,
+      price: v.price != null ? Number(v.price) : 0,
       optionText: v.options.map((o) => `${o.name}: ${o.value}`).join(' / '),
       stock: v.stock_quantity ?? undefined,
     }))

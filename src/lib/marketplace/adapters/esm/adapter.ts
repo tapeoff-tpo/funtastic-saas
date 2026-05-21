@@ -194,7 +194,7 @@ export class EsmAdapter implements MarketplaceAdapter {
       }).json<EsmApiResponse<EsmProduct[]>>()
 
       if (response.resultCode !== '0' && response.resultCode !== 'OK') {
-        throw new MarketplaceApiError(this.config.id, 500, response.resultMessage)
+        throw new MarketplaceApiError(this.config.id, 500, response.resultMessage ?? 'ESM product API failed')
       }
 
       return (response.data || []).map((product) => this.normalizeProduct(product))

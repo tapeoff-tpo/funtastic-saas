@@ -194,29 +194,65 @@ async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<v
 }
 
 async function selectFirstOrderForExcel(page: Page): Promise<void> {
-  const selected = await page.evaluate(() => {
-    const gridRoot = document.querySelector('#order_list') ?? document
-    const checkboxes = gridRoot.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
-    const visibleCheckboxes: HTMLInputElement[] = []
-    for (const checkbox of checkboxes) {
-      if (!checkbox.disabled && checkbox.offsetParent !== null) visibleCheckboxes.push(checkbox)
-    }
+  const checkboxLocators = await page.locator('#order_list input[type="checkbox"], #goods_list input[type="checkbox"]').all()
+  let selected = false
 
-    let rowCheckbox: HTMLInputElement | undefined
-    for (const checkbox of visibleCheckboxes) {
-      const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
-      if (row && /\d{8,}|신규주문|배송준비중|배송중|배송완료/.test(row.textContent ?? '')) {
-        rowCheckbox = checkbox
-        break
+  for (const checkbox of checkboxLocators) {
+    const candidate = await checkbox.evaluate((element) => {
+      if (!(element instanceof HTMLInputElement)) return false
+      if (element.disabled) return false
+      const row = element.closest('tr, .tui-grid-row, [role="row"]')
+      const text = row?.textContent ?? ''
+      return /\d{8,}|신규주문|배송준비중|배송중|배송완료/.test(text)
+    }).catch(() => false)
+    if (!candidate) continue
+
+    await checkbox.scrollIntoViewIfNeeded().catch(() => undefined)
+    const box = await checkbox.boundingBox().catch(() => null)
+    if (box) {
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+      await page.waitForTimeout(300)
+    }
+    await checkbox.evaluate((element) => {
+      if (!(element instanceof HTMLInputElement)) return
+      if (!element.checked) element.click()
+      element.checked = true
+      element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+      element.dispatchEvent(new Event('change', { bubbles: true }))
+    }).catch(() => undefined)
+    selected = await checkbox.isChecked().catch(() => false)
+    if (selected) break
+  }
+
+  if (!selected) {
+    selected = await page.evaluate(() => {
+      const gridRoot = document.querySelector('#order_list') ?? document.querySelector('#goods_list') ?? document
+      const checkboxes = gridRoot.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')
+      const visibleCheckboxes: HTMLInputElement[] = []
+      for (const checkbox of checkboxes) {
+        if (!checkbox.disabled && checkbox.offsetParent !== null) visibleCheckboxes.push(checkbox)
       }
-    }
-    rowCheckbox = rowCheckbox ?? visibleCheckboxes[1] ?? visibleCheckboxes[0]
 
-    if (!rowCheckbox) return false
-    if (!rowCheckbox.checked) rowCheckbox.click()
-    rowCheckbox.dispatchEvent(new Event('change', { bubbles: true }))
-    return true
-  })
+      let rowCheckbox: HTMLInputElement | undefined
+      for (const checkbox of visibleCheckboxes) {
+        const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
+        if (row && /\d{8,}|신규주문|배송준비중|배송중|배송완료/.test(row.textContent ?? '')) {
+          rowCheckbox = checkbox
+          break
+        }
+      }
+      rowCheckbox = rowCheckbox ?? visibleCheckboxes[1] ?? visibleCheckboxes[0]
+
+      if (!rowCheckbox) return false
+      if (!rowCheckbox.checked) rowCheckbox.click()
+      rowCheckbox.checked = true
+      rowCheckbox.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+      rowCheckbox.dispatchEvent(new Event('input', { bubbles: true }))
+      rowCheckbox.dispatchEvent(new Event('change', { bubbles: true }))
+      return rowCheckbox.checked
+    })
+  }
 
   if (!selected) {
     throw new MarketplaceApiError('domechango', 500, `도매창고 주문 목록에서 선택할 주문 체크박스를 찾지 못했습니다. (${await summarizePage(page)})`)

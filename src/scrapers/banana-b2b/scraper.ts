@@ -285,16 +285,28 @@ async function applyOrderSearch(page: Page, since: Date): Promise<void> {
 }
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
+  const directBuffer = await page.evaluate(async () => {
+    const response = await fetch('/api/v1/order/delivery/excel', {
+      credentials: 'include',
+      headers: { accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,*/*' },
+    })
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      throw new Error(`발주서 다운로드 API 실패: ${response.status} ${text.slice(0, 160)}`)
+    }
+    return Array.from(new Uint8Array(await response.arrayBuffer()))
+  }).then((bytes) => Buffer.from(bytes)).catch(() => null)
+
+  if (directBuffer && directBuffer.length > 0) return directBuffer
+
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-    clickByText(page, /주문서?\s*엑셀|엑셀\s*다운|엑셀|다운로드/i, 15_000).then((clicked) => {
-      if (!clicked) throw new Error('주문 엑셀 다운로드 버튼을 찾지 못했습니다.')
-    }),
+    page.locator('a[href="/api/v1/order/delivery/excel"], a[download]').filter({ hasText: /발주서|다운로드|엑셀/i }).first().click({ timeout: 15_000 }),
   ]).catch((error) => {
     throw new MarketplaceApiError(
       'banana-b2b',
       504,
-      `바나나B2B 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
+      `바나나B2B 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}; ${page.url()})`,
     )
   })
 

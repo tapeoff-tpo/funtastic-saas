@@ -429,7 +429,7 @@ async function moveSelectedNewOrdersToShippingTarget(
   page: Page,
   setProgress?: (message: string) => Promise<void>,
 ): Promise<boolean> {
-  await setProgress?.('도매창고 신규주문 발송대상 전환 중...')
+  await setProgress?.('도매창고 신규주문 배송준비중 전환 중...')
   const dialogPromise = page.waitForEvent('dialog', { timeout: 8000 })
     .then(async (dialog) => {
       const message = dialog.message()
@@ -443,24 +443,39 @@ async function moveSelectedNewOrdersToShippingTarget(
     let select
     let option
     const visibleSelects = Array.from(selects).filter((candidate) => candidate.offsetParent !== null)
-    const isSelectedOrderSelect = (candidate) => {
+    const isOrderProcessSelect = (candidate) => {
       const key = String(candidate.id) + ' ' + String(candidate.name) + ' ' + String(candidate.className) + ' ' + String(candidate.selectedOptions[0]?.textContent ?? '')
       const optionText = Array.from(candidate.options).map((candidateOption) => candidateOption.textContent ?? '').join(' ')
       if (/list_size|검색어|search|sdate|edate|page/i.test(key)) return false
       if (/50개씩|주문번호|상품코드|자체상품코드/.test(optionText)) return false
-      return /선택\s*주문|선택주문|주문\s*확인|발송\s*대상|배송\s*준비/.test(key + ' ' + optionText)
+      if (/엑셀\s*다운|다운로드|선택\s*주문|선택주문/.test(optionText)) return false
+      return /주문\s*처리|배송\s*준비|배송준비중|발송\s*대상/.test(key + ' ' + optionText)
     }
 
-    for (const candidate of visibleSelects.filter(isSelectedOrderSelect)) {
+    for (const candidate of visibleSelects.filter(isOrderProcessSelect)) {
       for (const candidateOption of candidate.options) {
         const text = candidateOption.textContent ?? ''
-        if (/주문\s*확인|발송\s*대상|배송\s*준비/.test(text)) {
+        if (/배송\s*준비\s*중|배송준비중/.test(text)) {
           select = candidate
           option = candidateOption
           break
         }
       }
       if (select && option) break
+    }
+
+    if (!select || !option) {
+      for (const candidate of visibleSelects.filter(isOrderProcessSelect)) {
+        for (const candidateOption of candidate.options) {
+          const text = candidateOption.textContent ?? ''
+          if (/주문\s*확인|발송\s*대상|배송\s*준비/.test(text) && !/엑셀|다운로드/.test(text)) {
+            select = candidate
+            option = candidateOption
+            break
+          }
+        }
+        if (select && option) break
+      }
     }
 
     if (!select || !option) return false

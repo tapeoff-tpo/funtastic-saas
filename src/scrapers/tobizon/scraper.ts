@@ -337,10 +337,16 @@ async function readVisibleOrderRows(page: Page): Promise<TobizonVisibleOrderRow[
   await page.waitForTimeout(2500)
 
   const frames = [page.mainFrame(), ...page.frames().filter((frame) => frame !== page.mainFrame())]
-  for (const frame of frames) {
-    await frame.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => undefined)
-    const rows = await readVisibleOrderRowsFromFrame(frame)
-    if (rows.length > 0) return rows
+  for (const delay of [0, 2500, 5000]) {
+    if (delay > 0) await page.waitForTimeout(delay)
+    for (const frame of frames) {
+      await frame.evaluate(() => {
+        window.scrollTo(0, 0)
+        window.scrollTo(0, document.body.scrollHeight)
+      }).catch(() => undefined)
+      const rows = await readVisibleOrderRowsFromFrame(frame)
+      if (rows.length > 0) return rows
+    }
   }
 
   return []
@@ -597,12 +603,18 @@ export class TobizonScraper implements MarketplaceScraper {
       }
       const selected = await runStep('orders: select order rows', () => selectOrderRows(ctx.page))
       if (!selected) {
-        logStep('orders: no selectable orders')
-        if (visibleOrders.length === 0) {
-          if (await hasNoOrders(ctx.page)) return { buffer: Buffer.alloc(0), visibleOrders, pageSummary: await summarizePage(ctx.page) }
-          throw new MarketplaceApiError('tobizon', 500, `투비즈온 주문 목록을 읽지 못했습니다. (${await summarizePage(ctx.page)})`)
+        logStep('orders: no selectable orders; try excel download from current list')
+        try {
+          const buffer = await runStep('orders: download order excel without row selection', () => downloadOrdersExcel(ctx.page))
+          return { buffer, visibleOrders, pageSummary: await summarizePage(ctx.page) }
+        } catch (error) {
+          if (visibleOrders.length === 0) {
+            if (await hasNoOrders(ctx.page)) return { buffer: Buffer.alloc(0), visibleOrders, pageSummary: await summarizePage(ctx.page) }
+            const reason = error instanceof Error ? error.message : 'unknown download error'
+            throw new MarketplaceApiError('tobizon', 500, `투비즈온 주문 목록을 읽거나 엑셀 다운로드하지 못했습니다. (${reason}; ${await summarizePage(ctx.page)})`)
+          }
+          return { buffer: Buffer.alloc(0), visibleOrders, pageSummary: await summarizePage(ctx.page) }
         }
-        return { buffer: Buffer.alloc(0), visibleOrders, pageSummary: await summarizePage(ctx.page) }
       }
       const buffer = await runStep('orders: download order excel', () => downloadOrdersExcel(ctx.page))
       return { buffer, visibleOrders, pageSummary: await summarizePage(ctx.page) }

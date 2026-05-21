@@ -327,15 +327,37 @@ async function readVisibleOrderRows(page: Page): Promise<TobizonVisibleOrderRow[
   return page.evaluate(() => {
     const normalize = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
     const cleanHeader = (value: string) => normalize(value).replace(/\s+/g, '')
-    const orderIdPattern = /[A-Z0-9]*\d{10,}[A-Z0-9]*/i
+    const orderIdPattern = /[A-Z0-9]*\d{12,}[A-Z0-9]*/i
+    const allOrderIds = (text: string) => Array.from(text.matchAll(new RegExp(orderIdPattern, 'gi'))).map((match) => match[0])
+    const extractOrderNo = (text: string) => allOrderIds(text)[0] ?? ''
+    const deriveProductName = (row: HTMLElement, rowText: string, preferredCell?: string) => {
+      if (preferredCell && !/선택상품|주문상품/.test(preferredCell)) return preferredCell
+
+      const links = Array.from(row.querySelectorAll('a'))
+        .map((link) => normalize(link.textContent))
+        .filter((text) => text && !orderIdPattern.test(text) && !/과세|free|1:1문의/.test(text))
+        .sort((a, b) => b.length - a.length)
+      if (links[0]) return links[0]
+
+      const cleaned = rowText
+        .replace(orderIdPattern, ' ')
+        .replace(/\d{4}[.-]\d{1,2}[.-]\d{1,2}(?:\s*\(?\d{1,2}:\d{2}\)?)?/g, ' ')
+        .replace(/공급단가\s*[:：]?\s*[\d,]+원?/g, ' ')
+        .replace(/\bfree\b/gi, ' ')
+        .replace(/입금완료|배송준비|배송완료|신규|과세|선택|주문서?\s*엑셀\s*다운로드/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      return cleaned.slice(0, 120) || `투비즈온 주문 ${extractOrderNo(rowText)}`
+    }
+
     const rows = Array.from(document.querySelectorAll<HTMLTableRowElement>('tr'))
     const headerIndex = rows.findIndex((row) => {
       const text = cleanHeader(row.textContent ?? '')
       return /주문번호/.test(text) && /주문상품|상품명|상품/.test(text)
     })
-    if (headerIndex < 0) return []
-
-    const headers = Array.from(rows[headerIndex].querySelectorAll('th,td')).map((cell) => cleanHeader(cell.textContent ?? ''))
+    const headers = headerIndex >= 0
+      ? Array.from(rows[headerIndex].querySelectorAll('th,td')).map((cell) => cleanHeader(cell.textContent ?? ''))
+      : []
     const findColumn = (...patterns: RegExp[]) => {
       const index = headers.findIndex((header) => patterns.some((pattern) => pattern.test(header)))
       return index >= 0 ? index : -1
@@ -349,27 +371,47 @@ async function readVisibleOrderRows(page: Page): Promise<TobizonVisibleOrderRow[
     const statusIndex = findColumn(/주문상태|상태/)
 
     const result: TobizonVisibleOrderRow[] = []
-    for (const [offset, row] of rows.slice(headerIndex + 1).entries()) {
+    const candidateRows = headerIndex >= 0 ? rows.slice(headerIndex + 1) : rows
+    for (const [offset, row] of candidateRows.entries()) {
       const cells = Array.from(row.querySelectorAll('td')).map((cell) => normalize(cell.textContent))
       const rowText = normalize(row.textContent)
-      const orderNo = cells[orderNoIndex] ?? rowText
-      if (!orderIdPattern.test(orderNo)) continue
+      const orderNo = extractOrderNo(orderNoIndex >= 0 ? cells[orderNoIndex] ?? rowText : rowText)
+      if (!orderNo) continue
 
-      const productName = cells[productIndex] ?? ''
-      if (!productName || /선택상품|주문상품/.test(productName)) continue
+      const productName = deriveProductName(row, rowText, productIndex >= 0 ? cells[productIndex] : undefined)
 
       result.push({
-        rowIndex: headerIndex + offset + 2,
+        rowIndex: (headerIndex >= 0 ? headerIndex : 0) + offset + 1,
         orderNo,
         orderedAt: orderNo,
-        recipientName: cells[recipientIndex] ?? '',
+        recipientName: recipientIndex >= 0 ? cells[recipientIndex] ?? '' : '',
         productName,
-        quantity: cells[quantityIndex] ?? '',
-        totalAmount: cells[totalIndex] ?? '',
+        quantity: quantityIndex >= 0 ? cells[quantityIndex] ?? '' : '',
+        totalAmount: totalIndex >= 0 ? cells[totalIndex] ?? '' : '',
         supplyPrice: rowText.match(/공급단가\s*[:：]?\s*([\d,]+)/)?.[1] ?? '',
-        marketplaceStatus: cells[statusIndex] ?? '입금완료',
+        marketplaceStatus: statusIndex >= 0 ? cells[statusIndex] ?? '입금완료' : rowText.match(/입금완료|배송준비|배송완료|신규/)?.[0] ?? '입금완료',
       })
     }
+
+    if (result.length === 0) {
+      const bodyText = normalize(document.body?.innerText)
+      for (const orderNo of [...new Set(allOrderIds(bodyText))]) {
+        const index = bodyText.indexOf(orderNo)
+        const context = bodyText.slice(Math.max(0, index - 80), index + 260)
+        result.push({
+          rowIndex: result.length + 1,
+          orderNo,
+          orderedAt: context,
+          recipientName: '',
+          productName: deriveProductName(document.body, context),
+          quantity: context.match(/(?:구매수량|수량)\s*[:：]?\s*(\d+)/)?.[1] ?? '1',
+          totalAmount: context.match(/(?:상품합계|총금액|결제금액|상품금액)\s*[:：]?\s*([\d,]+)/)?.[1] ?? '',
+          supplyPrice: context.match(/공급단가\s*[:：]?\s*([\d,]+)/)?.[1] ?? '',
+          marketplaceStatus: context.match(/입금완료|배송준비|배송완료|신규/)?.[0] ?? '입금완료',
+        })
+      }
+    }
+
     return result
   }).catch(() => [])
 }
@@ -456,6 +498,7 @@ export class TobizonScraper implements MarketplaceScraper {
     await setProgress?.('투비즈온 주문 엑셀 파싱 중...')
     if (buffer.length === 0) return visibleOrders
     const parsedOrders = await this.parseOrdersExcel(buffer)
+    await setProgress?.(`투비즈온 엑셀 주문 ${parsedOrders.length}건, 화면 주문 ${visibleOrders.length}건 확인`)
     if (parsedOrders.length > 0) return parsedOrders
     await setProgress?.(`투비즈온 엑셀 파싱 0건, 화면 주문 ${visibleOrders.length}건으로 저장 중...`)
     return visibleOrders
@@ -520,6 +563,7 @@ export class TobizonScraper implements MarketplaceScraper {
       await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since))
       const visibleRows = await runStep('orders: read visible order table', () => readVisibleOrderRows(ctx.page))
       const visibleOrders = visibleRows.map((row) => this.normalizeVisibleOrder(row))
+      await setProgress?.(`투비즈온 화면 주문 ${visibleOrders.length}건 확인`)
       const selected = await runStep('orders: select order rows', () => selectOrderRows(ctx.page))
       if (!selected) {
         logStep('orders: no selectable orders')

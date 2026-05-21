@@ -55,6 +55,10 @@ interface CsWorkbenchProps {
   pageSize: number
   basePath?: string
   fixedSource?: CsTicketSource
+  title?: string
+  description?: string
+  showBarcodeLookup?: boolean
+  showInspectionTools?: boolean
   filters: {
     source: string
     workstream: string
@@ -222,6 +226,10 @@ export function CsWorkbench({
   pageSize,
   basePath = '/cs',
   fixedSource,
+  title = '상품검수 / CS 작업함',
+  description = '물류팀은 반품 상품을 확인하고, CS는 검수 결과를 바탕으로 최종 안내와 마켓 처리를 진행합니다.',
+  showBarcodeLookup = true,
+  showInspectionTools = true,
   filters,
 }: CsWorkbenchProps) {
   const router = useRouter()
@@ -240,7 +248,7 @@ export function CsWorkbench({
   const sourceLocked = Boolean(fixedSource)
   const activeTicketIds = useMemo(() => new Set(tickets.map((ticket) => ticket.id)), [tickets])
   const activeSelected = selected && activeTicketIds.has(selected.id) ? selected : tickets[0] ?? null
-  const replyDraft = activeSelected ? buildReplyDraft(activeSelected, inspection, note) : ''
+  const replyDraft = activeSelected ? buildReplyDraft(activeSelected, showInspectionTools ? inspection : '', note) : ''
 
   const filterHref = (key: string, value: string) => {
     const sp = new URLSearchParams()
@@ -347,9 +355,9 @@ export function CsWorkbench({
       <div className="shrink-0 border-b bg-white px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold text-gray-950">상품검수 / CS 작업함</h1>
+            <h1 className="text-xl font-semibold text-gray-950">{title}</h1>
             <p className="mt-1 text-sm text-gray-500">
-              물류팀이 반품 상품을 확인하고, CS가 검수 결과를 바탕으로 최종 안내와 마켓 처리를 진행합니다.
+              {description}
             </p>
           </div>
           <div className="overflow-hidden rounded border bg-white">
@@ -410,6 +418,7 @@ export function CsWorkbench({
           ))}
         </div>
 
+        {showBarcodeLookup && (
         <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(360px,0.9fr)_1fr]">
           <section className="rounded-md border bg-gray-50 px-3 py-3">
             <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-gray-950">
@@ -476,6 +485,7 @@ export function CsWorkbench({
             )}
           </section>
         </div>
+        )}
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(760px,1fr)_420px] bg-gray-50">
@@ -611,6 +621,7 @@ export function CsWorkbench({
                   )}
                 </section>
 
+                {showInspectionTools && (
                 <section className="rounded border bg-gray-50 p-3">
                   <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-950">
                     <PackageCheck className="h-4 w-4" />
@@ -655,6 +666,7 @@ export function CsWorkbench({
                     </p>
                   </div>
                 </section>
+                )}
 
                 <section className="space-y-2">
                   <div className="flex items-center gap-2 text-sm font-semibold text-gray-950">
@@ -672,10 +684,12 @@ export function CsWorkbench({
                       <Clipboard className="h-3.5 w-3.5" />
                       문구 복사
                     </Button>
-                    <Button type="button" size="sm" onClick={saveInspection} disabled={isPending}>
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      검수 저장
-                    </Button>
+                    {showInspectionTools && (
+                      <Button type="button" size="sm" onClick={saveInspection} disabled={isPending}>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        검수 저장
+                      </Button>
+                    )}
                   </div>
                   {message && <p className="text-xs text-gray-600">{message}</p>}
                 </section>

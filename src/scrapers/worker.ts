@@ -217,4 +217,6 @@ async function shutdown(): Promise<void> {
 process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
 
-console.log('[scrape-worker] online — listening on queue: marketplace-scrape')
+console.log(
+  `[scrape-worker] online — listening on queue: marketplace-scrape commit=${process.env.RAILWAY_GIT_COMMIT_SHA ?? 'local'} deployment=${process.env.RAILWAY_DEPLOYMENT_ID ?? 'local'}`,
+)

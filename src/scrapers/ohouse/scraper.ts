@@ -15,6 +15,7 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 120_000
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v4'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -236,11 +237,14 @@ async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<v
 }
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
+  if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
+    throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 화면이라 엑셀 다운로드를 시도할 수 없습니다. (${await summarizePage(page)})`)
+  }
   const downloadPromise = page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
   const clicked = await clickByText(page, /검색결과\s*엑셀\s*다운로드/i)
   if (!clicked) {
     downloadPromise.catch(() => undefined)
-    throw new MarketplaceApiError('ohouse', 500, `오늘의집 주문 엑셀 다운로드 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+    throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 엑셀 다운로드 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
   }
   const download = await downloadPromise
   return readDownloadBuffer(download)
@@ -340,7 +344,7 @@ export class OhouseScraper implements MarketplaceScraper {
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')
       await openOrdersPage(ctx.page)
       if (!(await hasOhouseSession(ctx.page)) || /\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
-        throw new MarketplaceApiError('ohouse', 401, `오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
+        throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
       await setProgress?.('오늘의집 주문 검색 조건 적용 중...')
       await applyOrderSearch(ctx.page, since, until)

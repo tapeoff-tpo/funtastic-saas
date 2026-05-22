@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v27'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v28'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -548,7 +548,11 @@ async function assertOhouseSecondFactorFresh(page: Page, context: string): Promi
   }
 }
 
-async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<string> {
+async function handleEmailSecondFactor(
+  page: Page,
+  credentials: ScraperCredentials,
+  initialCodeRequestedAt?: Date,
+): Promise<string> {
   if (!(await isSecondFactorPage(page))) return 'not-detected'
 
   const method = credentials.extras?.twoFactorMethod
@@ -558,19 +562,14 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
     throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증이 필요하지만 네이버 메일 인증 정보가 저장되어 있지 않습니다.')
   }
 
-  let codeRequestedAt = new Date(Date.now() - 2 * 60 * 1000)
+  let codeRequestedAt = initialCodeRequestedAt ?? new Date(Date.now() - 2 * 60 * 1000)
 
   if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
-    codeRequestedAt = new Date()
+    codeRequestedAt = new Date(Date.now() - 15_000)
     const sent = await sendOhouseSecondFactorFromMethodPage(page)
     if (!sent) throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 메일 발송 후 유효시간이 갱신되지 않았습니다.`)
   } else if (/\/signin\/multi-factor\/auth/.test(new URL(page.url()).pathname)) {
-    codeRequestedAt = new Date()
-    const refreshMethod = await refreshOhouseSecondFactorEmail(page)
-    if (refreshMethod === 'failed') {
-      throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 재발송을 눌렀지만 유효시간이 갱신되지 않았습니다.`)
-    }
-    await page.waitForTimeout(1500)
+    await page.waitForTimeout(1000)
   }
 
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -671,10 +670,12 @@ async function waitForOhouseLoginResult(
   diagnostics.loginWait = 'timeout'
 }
 
-async function submitLogin(page: Page, diagnostics: OhouseLoginDiagnostics): Promise<void> {
+async function submitLogin(page: Page, diagnostics: OhouseLoginDiagnostics): Promise<Date> {
+  const submittedAt = new Date(Date.now() - 15_000)
   await clickOhouseLoginButton(page)
   await page.waitForLoadState('domcontentloaded', { timeout: 20_000 }).catch(() => undefined)
   await waitForOhouseLoginResult(page, diagnostics)
+  return submittedAt
 }
 
 async function performOhouseLogin(
@@ -696,8 +697,8 @@ async function performOhouseLogin(
   await setInputValue(passwordInput, credentials.password)
 
   logStep('login: submit credentials')
-  await submitLogin(page, diagnostics)
-  diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
+  const loginSubmittedAt = await submitLogin(page, diagnostics)
+  diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials, loginSubmittedAt)
   if (diagnostics.secondFactor.startsWith('code-submitted')) {
     await waitForOhouseLoginResult(page, diagnostics, { stopOnSecondFactor: false })
   }
@@ -725,6 +726,7 @@ async function completeOhouseAppAuth(
   let check = await checkOhouseApiSession(page, diagnostics.observedAuthorization)
   if (check.ok) return check
 
+  const appLoginRequestedAt = new Date(Date.now() - 15_000)
   const appLoginClicked = await page
     .locator('button, a')
     .filter({ hasText: /^로그인$/ })
@@ -736,7 +738,7 @@ async function completeOhouseAppAuth(
   if (appLoginClicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1500)
-    diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
+    diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials, appLoginRequestedAt)
     await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
     await waitForOhouseAppReady(page).catch(() => false)
     check = await checkOhouseApiSession(page, diagnostics.observedAuthorization)

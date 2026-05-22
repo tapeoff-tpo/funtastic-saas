@@ -1007,7 +1007,8 @@ export class DomechangoScraper implements MarketplaceScraper {
         throw new MarketplaceApiError('domechango', 404, `도매창고 송장등록 가능한 주문을 찾지 못했습니다. (${orderId}, ${await summarizePage(ctx.page)})`)
       }
 
-      const workbookBuffer = await runStep('invoice: build upload workbook', () => buildInvoiceWorkbook(orderId, invoice))
+      const templateBuffer = await runStep('invoice: download selected order template', () => triggerSelectedOrderExcelDownload(ctx.page, undefined, 15_000))
+      const workbookBuffer = await runStep('invoice: build upload workbook', () => buildInvoiceWorkbook(orderId, invoice, templateBuffer))
       await mkdir(INVOICE_UPLOAD_TMP_DIR, { recursive: true })
       tmpFilePath = path.join(INVOICE_UPLOAD_TMP_DIR, `domechango-invoice-${orderId}-${Date.now()}.xlsx`)
       await writeFile(tmpFilePath, workbookBuffer)

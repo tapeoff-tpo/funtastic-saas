@@ -3,7 +3,8 @@
 import { createClient } from '@/lib/supabase/server'
 import { storeCredential, deleteCredential, deleteCredentialByName, readCredential } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
-import { marketplaceConnections } from '@/lib/db/schema'
+import { commonAuthProfiles, marketplaceConnections } from '@/lib/db/schema'
+import { ensureCommonAuthProfilesTable, storeCommonAuthProfileCredentials } from '@/lib/common-auth-profiles'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import '@/lib/marketplace/adapters/configs'
 import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
@@ -33,6 +34,98 @@ interface ActionResult {
 
 const OPTIONAL_CREDENTIALS: Record<string, string[]> = {
   'hyundai-hmall': ['ven2_cd', 'dlv_form_gbcd', 'base_url', 'rgst_ip'],
+}
+
+export async function saveCommonAuthProfile(
+  _prevState: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    return { error: '인증이 필요합니다.' }
+  }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
+  const provider = String(formData.get('provider') ?? 'naver_email').trim()
+  const name = String(formData.get('name') ?? '').trim() || '기본 네이버 메일'
+  const accountEmail = String(formData.get('account_email') ?? '').trim()
+  const appPassword = String(formData.get('app_password') ?? '').replace(/\s+/g, '')
+
+  if (provider !== 'naver_email') {
+    return { error: '현재는 네이버 메일 인증수단만 지원합니다.' }
+  }
+  if (!accountEmail || !appPassword) {
+    return { error: '네이버 메일 주소와 애플리케이션 비밀번호를 입력해주세요.' }
+  }
+
+  try {
+    await ensureCommonAuthProfilesTable()
+    const existing = await db
+      .select({ id: commonAuthProfiles.id })
+      .from(commonAuthProfiles)
+      .where(
+        and(
+          eq(commonAuthProfiles.userId, workspaceUserId),
+          eq(commonAuthProfiles.provider, provider),
+          eq(commonAuthProfiles.name, name),
+        ),
+      )
+      .limit(1)
+
+    let profileId = existing[0]?.id
+    if (profileId) {
+      await db
+        .update(commonAuthProfiles)
+        .set({
+          accountEmail,
+          updatedAt: new Date(),
+        })
+        .where(eq(commonAuthProfiles.id, profileId))
+    } else {
+      const [created] = await db
+        .insert(commonAuthProfiles)
+        .values({
+          userId: workspaceUserId,
+          provider,
+          name,
+          accountEmail,
+          isDefault: true,
+          vaultSecretNames: [],
+        })
+        .returning({ id: commonAuthProfiles.id })
+      profileId = created.id
+    }
+    if (!profileId) {
+      return { error: '공통 인증수단 ID를 생성하지 못했습니다.' }
+    }
+
+    const vaultSecretNames = await storeCommonAuthProfileCredentials({
+      userId: workspaceUserId,
+      profileId,
+      email: accountEmail,
+      password: appPassword,
+    })
+
+    await db
+      .update(commonAuthProfiles)
+      .set({
+        vaultSecretNames,
+        updatedAt: new Date(),
+      })
+      .where(eq(commonAuthProfiles.id, profileId))
+  } catch (err) {
+    return {
+      error: `공통 인증수단 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+    }
+  }
+
+  revalidatePath('/settings/marketplaces')
+  return { success: true, message: `${name} 인증수단이 저장되었습니다.` }
 }
 
 /**
@@ -454,16 +547,29 @@ export async function registerRpaMarketplaceConnection(
     return { error: '로그인 ID와 비밀번호를 입력해주세요.' }
   }
   const twoFactorMethod = String(formData.get('two_factor_method') ?? '').trim()
-  const naverEmail = String(formData.get('naver_email') ?? '').trim()
-  const naverPassword = String(formData.get('naver_password') ?? '').trim()
+  const twoFactorProfileId = String(formData.get('two_factor_profile_id') ?? '').trim()
   const extras: Record<string, string> = {}
   if (marketplaceId === 'ohouse') {
-    if (twoFactorMethod !== 'naver_email' || !naverEmail || !naverPassword) {
-      return { error: '오늘의집 RPA는 네이버 메일 2차 인증 정보가 필요합니다.' }
+    if (twoFactorMethod !== 'naver_email' || !twoFactorProfileId) {
+      return { error: '오늘의집 RPA는 공통 네이버 메일 인증수단 선택이 필요합니다.' }
+    }
+    await ensureCommonAuthProfilesTable()
+    const [profile] = await db
+      .select({ id: commonAuthProfiles.id })
+      .from(commonAuthProfiles)
+      .where(
+        and(
+          eq(commonAuthProfiles.id, twoFactorProfileId),
+          eq(commonAuthProfiles.userId, workspaceUserId),
+          eq(commonAuthProfiles.provider, 'naver_email'),
+        ),
+      )
+      .limit(1)
+    if (!profile) {
+      return { error: '선택한 네이버 메일 인증수단을 찾을 수 없습니다.' }
     }
     extras.twoFactorMethod = 'naver_email'
-    extras.naverEmail = naverEmail
-    extras.naverPassword = naverPassword
+    extras.twoFactorProfileId = twoFactorProfileId
     extras.accountKey = storeAlias
   }
 

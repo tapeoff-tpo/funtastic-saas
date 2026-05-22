@@ -58,6 +58,27 @@ export const marketplaceConnections = pgTable('marketplace_connections', {
   ),
 ])
 
+export const commonAuthProfiles = pgTable('common_auth_profiles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull(),
+  name: varchar('name', { length: 100 }).notNull(),
+  provider: varchar('provider', { length: 50 }).notNull().default('naver_email'),
+  accountEmail: varchar('account_email', { length: 255 }).notNull(),
+  vaultSecretNames: jsonb('vault_secret_names').$type<string[]>().notNull().default([]),
+  isDefault: boolean('is_default').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .defaultNow()
+    .notNull(),
+}, (table) => [
+  uniqueIndex('common_auth_profiles_user_provider_name').on(
+    table.userId, table.provider, table.name,
+  ),
+  index('common_auth_profiles_user_provider').on(table.userId, table.provider),
+])
+
 // ─── Phase 2: Order Management ──────────────────────────────────
 
 export const orderStatusEnum = pgEnum('order_status', [

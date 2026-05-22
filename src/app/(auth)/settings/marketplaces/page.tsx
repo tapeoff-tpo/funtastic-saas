@@ -1,13 +1,14 @@
 import { eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { marketplaceConnections } from '@/lib/db/schema'
+import { commonAuthProfiles, marketplaceConnections } from '@/lib/db/schema'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getIntegrationMethod, getSupportedIntegrationMethods } from '@/lib/marketplace/integration-methods'
 import '@/lib/marketplace/adapters/configs'
 import { IntegrationForms } from '@/components/marketplace/integration-forms'
 import { ConnectionList } from './connection-list'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { ensureCommonAuthProfilesTable } from '@/lib/common-auth-profiles'
 import type { IntegrationMethod } from '@/lib/marketplace/integration-methods'
 
 export default async function MarketplaceSettingsPage() {
@@ -26,6 +27,28 @@ export default async function MarketplaceSettingsPage() {
     .select()
     .from(marketplaceConnections)
     .where(eq(marketplaceConnections.userId, workspaceUserId))
+  let authProfiles: Array<{
+    id: string
+    name: string
+    provider: string
+    accountEmail: string
+    isDefault: boolean
+  }> = []
+  try {
+    await ensureCommonAuthProfilesTable()
+    authProfiles = await db
+      .select({
+        id: commonAuthProfiles.id,
+        name: commonAuthProfiles.name,
+        provider: commonAuthProfiles.provider,
+        accountEmail: commonAuthProfiles.accountEmail,
+        isDefault: commonAuthProfiles.isDefault,
+      })
+      .from(commonAuthProfiles)
+      .where(eq(commonAuthProfiles.userId, workspaceUserId))
+  } catch (error) {
+    console.error('[settings/marketplaces] common auth profile table unavailable', error)
+  }
   const visibleConnections = connections.filter((connection) => !isDomechangoManualConnection(connection))
 
   const connectedMethodCounts = new Map<string, Partial<Record<IntegrationMethod, number>>>()
@@ -79,6 +102,7 @@ export default async function MarketplaceSettingsPage() {
 
       <IntegrationForms
         marketplaces={catalog}
+        authProfiles={authProfiles}
       />
 
       {connectionRows.length > 0 && (

@@ -12,6 +12,7 @@ import { createAdminClient } from '@/lib/supabase/admin'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { and, eq } from 'drizzle-orm'
+import { readCommonAuthProfileCredentials } from '@/lib/common-auth-profiles'
 import type { ScraperCredentials } from './types'
 
 function key(userId: string, marketplaceId: string, connectionId: string, field: string): string {
@@ -96,11 +97,24 @@ export async function readScrapeCredentials(
 
   const extrasRaw = await readField('extras')
   const storageState = await readField('storageState')
+  const extras = extrasRaw ? (JSON.parse(extrasRaw) as Record<string, string>) : undefined
+
+  if (extras?.twoFactorMethod === 'naver_email' && extras.twoFactorProfileId) {
+    const profile = await readCommonAuthProfileCredentials({
+      userId,
+      profileId: extras.twoFactorProfileId,
+      provider: 'naver_email',
+    })
+    if (profile) {
+      extras.naverEmail = profile.email
+      extras.naverPassword = profile.password
+    }
+  }
 
   return {
     email,
     password,
-    extras: extrasRaw ? (JSON.parse(extrasRaw) as Record<string, string>) : undefined,
+    extras,
     storageState: storageState ?? undefined,
   }
 }

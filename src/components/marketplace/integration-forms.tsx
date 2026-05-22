@@ -6,6 +6,7 @@ import {
   registerExcelMarketplaceConnection,
   registerMarketplaceCredentials,
   registerRpaMarketplaceConnection,
+  saveCommonAuthProfile,
 } from '@/app/(auth)/settings/marketplaces/actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,6 +31,15 @@ interface MarketplaceOption {
 
 interface IntegrationFormsProps {
   marketplaces: MarketplaceOption[]
+  authProfiles: CommonAuthProfileOption[]
+}
+
+interface CommonAuthProfileOption {
+  id: string
+  name: string
+  provider: string
+  accountEmail: string
+  isDefault: boolean
 }
 
 const credentialLabels: Record<string, string> = {
@@ -90,7 +100,7 @@ function connectionCountLabel(count: number | undefined): string {
   return `연결 ${count}개`
 }
 
-export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
+export function IntegrationForms({ marketplaces, authProfiles }: IntegrationFormsProps) {
   const sortedMarketplaces = useMemo(
     () => [...marketplaces].sort((a, b) => a.name.localeCompare(b.name, 'ko-KR')),
     [marketplaces],
@@ -109,6 +119,8 @@ export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
+        <CommonAuthProfilesPanel authProfiles={authProfiles} />
+
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-2">
             <Label htmlFor="unified-marketplace-select">마켓</Label>
@@ -181,12 +193,89 @@ export function IntegrationForms({ marketplaces }: IntegrationFormsProps) {
         ) : selectedMethod === 'excel' ? (
           <ExcelConnectionForm marketplace={selectedMarketplace} />
         ) : selectedMethod === 'rpa' ? (
-          <RpaConnectionForm marketplace={selectedMarketplace} />
+          <RpaConnectionForm marketplace={selectedMarketplace} authProfiles={authProfiles} />
         ) : (
           <ApiConnectionForm marketplace={selectedMarketplace} method={selectedMethod} />
         )}
       </CardContent>
     </Card>
+  )
+}
+
+function CommonAuthProfilesPanel({ authProfiles }: { authProfiles: CommonAuthProfileOption[] }) {
+  const [state, formAction, isPending] = useActionState(saveCommonAuthProfile, null)
+
+  useEffect(() => {
+    if (state?.success && state.message) toast.success(state.message)
+    if (state?.error) toast.error(state.error)
+  }, [state])
+
+  const naverProfiles = authProfiles.filter((profile) => profile.provider === 'naver_email')
+
+  return (
+    <section className="rounded-lg border bg-muted/20 p-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+        <div>
+          <h3 className="text-sm font-semibold">공통 인증수단</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            RPA 2차 인증에 쓰는 네이버 메일을 한 번 저장하고 여러 몰에서 같이 사용합니다.
+          </p>
+          <div className="mt-3 space-y-2">
+            {naverProfiles.length === 0 ? (
+              <p className="rounded-md border border-dashed bg-background px-3 py-3 text-xs text-muted-foreground">
+                저장된 네이버 메일 인증수단이 없습니다.
+              </p>
+            ) : naverProfiles.map((profile) => (
+              <div key={profile.id} className="rounded-md border bg-background px-3 py-2 text-sm">
+                <div className="font-medium">{profile.name}</div>
+                <div className="text-xs text-muted-foreground">{profile.accountEmail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <form action={formAction} className="space-y-3 rounded-md border bg-background p-3">
+          <input type="hidden" name="provider" value="naver_email" />
+          <div className="space-y-1">
+            <Label htmlFor="common-auth-name">인증수단 이름</Label>
+            <Input
+              id="common-auth-name"
+              name="name"
+              defaultValue="기본 네이버 메일"
+              required
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="common-auth-email">네이버 메일 주소</Label>
+            <Input
+              id="common-auth-email"
+              name="account_email"
+              type="email"
+              placeholder="tapeoff@naver.com"
+              required
+              autoComplete="off"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="common-auth-password">네이버 앱 비밀번호</Label>
+            <Input
+              id="common-auth-password"
+              name="app_password"
+              type="password"
+              required
+              autoComplete="off"
+            />
+          </div>
+          <Button type="submit" disabled={isPending} className="w-full">
+            {isPending ? '저장 중...' : '공통 인증수단 저장'}
+          </Button>
+          {state?.error && !isPending && (
+            <p className="text-sm text-red-600">{state.error}</p>
+          )}
+        </form>
+      </div>
+    </section>
   )
 }
 
@@ -286,7 +375,13 @@ function ApiConnectionForm({
   )
 }
 
-function RpaConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) {
+function RpaConnectionForm({
+  marketplace,
+  authProfiles,
+}: {
+  marketplace: MarketplaceOption
+  authProfiles: CommonAuthProfileOption[]
+}) {
   const [state, formAction, isPending] = useActionState(registerRpaMarketplaceConnection, null)
 
   useEffect(() => {
@@ -322,7 +417,9 @@ function RpaConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) 
         />
       </div>
 
-      {marketplace.id === 'ohouse' && <OhouseSecondFactorFields marketplaceId={marketplace.id} />}
+      {marketplace.id === 'ohouse' && (
+        <OhouseSecondFactorFields marketplaceId={marketplace.id} authProfiles={authProfiles} />
+      )}
 
       <Button type="submit" disabled={isPending} className="w-full">
         {isPending ? '등록 중...' : 'RPA 연동 저장'}
@@ -335,31 +432,41 @@ function RpaConnectionForm({ marketplace }: { marketplace: MarketplaceOption }) 
   )
 }
 
-function OhouseSecondFactorFields({ marketplaceId }: { marketplaceId: string }) {
+function OhouseSecondFactorFields({
+  marketplaceId,
+  authProfiles,
+}: {
+  marketplaceId: string
+  authProfiles: CommonAuthProfileOption[]
+}) {
+  const naverProfiles = authProfiles.filter((profile) => profile.provider === 'naver_email')
+  const defaultProfileId = naverProfiles.find((profile) => profile.isDefault)?.id ?? naverProfiles[0]?.id ?? ''
+
   return (
     <div className="space-y-4 border-t pt-4">
       <input type="hidden" name="two_factor_method" value="naver_email" />
 
       <div className="space-y-1">
-        <Label htmlFor={`${marketplaceId}-rpa-naver-email`}>네이버 메일 주소</Label>
-        <Input
-          id={`${marketplaceId}-rpa-naver-email`}
-          name="naver_email"
-          type="email"
+        <Label htmlFor={`${marketplaceId}-rpa-two-factor-profile`}>2차 인증 네이버 메일</Label>
+        <select
+          id={`${marketplaceId}-rpa-two-factor-profile`}
+          name="two_factor_profile_id"
+          defaultValue={defaultProfileId}
           required
-          autoComplete="off"
-        />
-      </div>
-
-      <div className="space-y-1">
-        <Label htmlFor={`${marketplaceId}-rpa-naver-password`}>네이버 메일 앱 비밀번호</Label>
-        <Input
-          id={`${marketplaceId}-rpa-naver-password`}
-          name="naver_password"
-          type="password"
-          required
-          autoComplete="off"
-        />
+          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <option value="">공통 인증수단을 선택하세요</option>
+          {naverProfiles.map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.name} ({profile.accountEmail})
+            </option>
+          ))}
+        </select>
+        {naverProfiles.length === 0 && (
+          <p className="text-xs text-red-600">
+            먼저 위의 공통 인증수단에 네이버 메일 앱 비밀번호를 저장해주세요.
+          </p>
+        )}
       </div>
     </div>
   )

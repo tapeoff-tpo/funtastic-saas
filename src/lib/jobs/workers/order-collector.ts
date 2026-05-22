@@ -191,6 +191,37 @@ function collectedOrderStatus(status: NormalizedOrder['status']): NormalizedOrde
   return status === 'confirmed' ? 'new' : status
 }
 
+function orderStatusRank(value: unknown): SQL<number> {
+  return sql<number>`CASE ${value}
+    WHEN 'new' THEN 1
+    WHEN 'confirmed' THEN 2
+    WHEN 'preparing' THEN 3
+    WHEN 'ready' THEN 4
+    WHEN 'shipped' THEN 5
+    WHEN 'delivering' THEN 6
+    WHEN 'delivered' THEN 7
+    WHEN 'cancelled' THEN 99
+    ELSE 0
+  END`
+}
+
+function collectedOrderUpdateStatus(status: NormalizedOrder['status']): SQL {
+  if (status === 'cancelled') return sql`'cancelled'::order_status`
+  if (status === 'new') return sql`${orders.status}`
+  if (status === 'confirmed') {
+    return sql`CASE
+      WHEN ${orders.status} <> 'new' THEN ${orders.status}
+      WHEN ${orders.mappedAt} IS NULL THEN 'new'::order_status
+      ELSE ${orders.status}
+    END`
+  }
+
+  return sql`CASE
+    WHEN ${orderStatusRank(orders.status)} >= ${orderStatusRank(status)} THEN ${orders.status}
+    ELSE ${status}::order_status
+  END`
+}
+
 const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'ownerclan',
   '10x10',
@@ -830,9 +861,7 @@ async function upsertOrder(
 ) {
   const rawData = enrichOrderRawData(order)
   const insertStatus = collectedOrderStatus(order.status)
-  const updateStatus = order.status === 'confirmed'
-    ? sql`CASE WHEN ${orders.mappedAt} IS NULL THEN 'new'::order_status ELSE ${orders.status} END`
-    : order.status
+  const updateStatus = collectedOrderUpdateStatus(order.status)
 
   return db
     .insert(orders)

@@ -86,7 +86,31 @@ function readString(record: JsonRecord, aliases: string[]): string {
   for (const alias of aliases) {
     const value = record[alias]
     if (value === null || value === undefined) continue
+    if (typeof value === 'object') continue
     const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function readNestedNumber(record: JsonRecord, paths: string[]): number {
+  const text = readNestedString(record, paths)
+  const num = Number(text.replaceAll(',', '').replace(/[^\d.-]/g, ''))
+  return Number.isFinite(num) ? num : 0
+}
+
+function readNestedString(record: JsonRecord, paths: string[]): string {
+  for (const path of paths) {
+    let value: unknown = record
+    for (const part of path.split('.')) {
+      if (!isRecord(value)) {
+        value = undefined
+        break
+      }
+      value = value[part]
+    }
+    if (value === null || value === undefined) continue
+    const text = typeof value === 'object' ? '' : String(value).trim()
     if (text) return text
   }
   return ''
@@ -121,16 +145,39 @@ function collectOrderLikeRecords(payload: unknown): JsonRecord[] {
       return
     }
     if (!isRecord(value)) return
-    const keys = Object.keys(value).join(' ').toLowerCase()
-    const hasOrderSignal = /order|payed|shipping|receiver|recipient|item|deal|goods|product|status|주문/.test(keys)
-    const hasIdentity = ['orderId', 'id', '_id', 'orderNumber', 'orderNo', 'itemId', 'dealItemId'].some((key) => key in value)
-    if (hasOrderSignal && hasIdentity) results.push(value)
+    if (isAlwaysDashboardOrder(value)) results.push(value)
     for (const child of Object.values(value)) {
       if (Array.isArray(child) || isRecord(child)) visit(child)
     }
   }
   visit(payload)
   return results
+}
+
+function isAlwaysDashboardOrder(row: JsonRecord): boolean {
+  const status = readString(row, ['status', 'orderStatus', 'shippingStatus', 'displayStatus'])
+  const orderedAt = readString(row, ['payedAt', 'paidAt', 'orderedAt', 'createdAt', 'orderCreatedAt'])
+  const hasProduct = isRecord(row.itemInfo) || isRecord(row.item) || isRecord(row.product)
+  const hasOrderIdentity = Boolean(readString(row, ['orderId', 'orderNumber', 'orderNo', 'id', '_id', 'merchantOrderId']))
+  return hasOrderIdentity && hasProduct && Boolean(orderedAt) && /pre-shipping|paid|payed|payment|결제|신규|주문|shipping/i.test(status)
+}
+
+function readAlwaysOptionText(row: JsonRecord): string {
+  const selectedOption = isRecord(row.selectedOption) ? row.selectedOption : null
+  const selectedId = selectedOption ? readString(selectedOption, ['_id', 'id']) : ''
+  const optionsInfo = isRecord(row.itemInfo) && isRecord(row.itemInfo.optionsInfo) ? row.itemInfo.optionsInfo : null
+  const totalOptions = Array.isArray(optionsInfo?.totalOptions) ? optionsInfo.totalOptions : []
+  const names: string[] = []
+  for (const group of totalOptions) {
+    if (!Array.isArray(group)) continue
+    for (const option of group) {
+      if (!isRecord(option)) continue
+      const optionId = readString(option, ['_id', 'id'])
+      const optionName = readString(option, ['name', 'label', 'value'])
+      if (optionName && (!selectedId || selectedId === optionId)) names.push(optionName)
+    }
+  }
+  return names.join(' / ')
 }
 
 function normalizeAlwaysOrder(row: JsonRecord): NormalizedOrder | null {
@@ -160,34 +207,49 @@ function normalizeAlwaysOrder(row: JsonRecord): NormalizedOrder | null {
     'dealName',
     'name',
     'title',
-  ]) || '올웨이즈 상품'
+  ]) || readNestedString(row, ['itemInfo.itemTitle', 'itemInfo.title', 'item.name', 'product.name']) || '올웨이즈 상품'
   const quantity = readNumber(row, ['quantity', 'qty', 'count', 'itemCount', 'orderCount']) || 1
   const unitPrice = readNumber(row, ['unitPrice', 'price', 'salesPrice', 'itemPrice', 'paidPrice'])
   const marketplaceStatus = readString(row, ['status', 'orderStatus', 'shippingStatus', 'displayStatus']) || 'unknown'
   const orderedAt = readDate(row, ['payedAt', 'paidAt', 'orderedAt', 'createdAt', 'created_at', 'orderCreatedAt'])
   const address = readString(row, ['address', 'address1', 'shippingAddress', 'receiverAddress', 'roadAddress'])
+    || readNestedString(row, ['shippingAddressInfo.address', 'shippingAddressInfo.address1', 'shippingInfo.address'])
+    || readNestedString(row, ['addressInfo.postcodeAddress'])
   const zipCode = readString(row, ['zipCode', 'zipcode', 'postalCode', 'zonecode'])
+    || readNestedString(row, ['shippingAddressInfo.zipCode', 'shippingAddressInfo.postalCode'])
+    || readNestedString(row, ['addressInfo.postcode'])
 
   return {
     marketplaceOrderId: orderId,
     marketplaceId: 'always',
     marketplaceStatus,
     status: /취소|cancel/i.test(marketplaceStatus) ? 'cancelled' : 'new',
-    buyerName: readString(row, ['buyerName', 'ordererName', 'userName', 'nickname']) || '-',
-    buyerPhone: readString(row, ['buyerPhone', 'ordererPhoneNumber', 'phoneNumber', 'userPhoneNumber']),
+    buyerName: readString(row, ['buyerName', 'ordererName', 'userName', 'nickname'])
+      || readNestedString(row, ['userInfo.name', 'ordererInfo.name'])
+      || '-',
+    buyerPhone: readString(row, ['buyerPhone', 'ordererPhoneNumber', 'phoneNumber', 'userPhoneNumber'])
+      || readNestedString(row, ['userInfo.phoneNumber', 'ordererInfo.phoneNumber']),
     buyerPhone2: readString(row, ['buyerPhone2', 'ordererMobilePhoneNumber', 'mobilePhoneNumber']),
-    recipientName: readString(row, ['recipientName', 'receiverName', 'nameReceiver', 'shippingName']) || '-',
-    recipientPhone: readString(row, ['recipientPhone', 'receiverPhoneNumber', 'shippingPhoneNumber']),
-    recipientPhone2: readString(row, ['recipientPhone2', 'receiverMobilePhoneNumber', 'shippingMobilePhoneNumber']),
+    recipientName: readString(row, ['recipientName', 'receiverName', 'nameReceiver', 'shippingName'])
+      || readNestedString(row, ['shippingAddressInfo.name', 'receiverInfo.name'])
+      || readNestedString(row, ['addressInfo.recipient'])
+      || '-',
+    recipientPhone: readString(row, ['recipientPhone', 'receiverPhoneNumber', 'shippingPhoneNumber'])
+      || readNestedString(row, ['shippingAddressInfo.phoneNumber', 'receiverInfo.phoneNumber']),
+    recipientPhone2: readString(row, ['recipientPhone2', 'receiverMobilePhoneNumber', 'shippingMobilePhoneNumber'])
+      || readNestedString(row, ['addressInfo.recipientPhoneNumber']),
     shippingAddress: {
       zipCode,
       address1: address,
-      address2: readString(row, ['address2', 'shippingAddressDetail', 'receiverAddressDetail', 'detailAddress']),
+      address2: readString(row, ['address2', 'shippingAddressDetail', 'receiverAddressDetail', 'detailAddress'])
+        || readNestedString(row, ['addressInfo.detailAddress']),
     },
     items: [{
       marketplaceItemId: itemId,
       productName,
-      optionText: readString(row, ['optionName', 'optionText', 'selectedOption', 'option']),
+      optionText: readString(row, ['optionName', 'optionText', 'selectedOption', 'option'])
+        || readNestedString(row, ['itemInfo.optionName', 'itemInfo.selectedOption'])
+        || readAlwaysOptionText(row),
       quantity,
       unitPrice,
       sku: readString(row, ['sku', 'sellerSku', 'itemCode']),
@@ -195,7 +257,9 @@ function normalizeAlwaysOrder(row: JsonRecord): NormalizedOrder | null {
     orderedAt,
     totalAmount: readNumber(row, ['totalAmount', 'totalPrice', 'paidPrice', 'paymentAmount']) || unitPrice * quantity,
     shippingType: readString(row, ['shippingType', 'deliveryType']) || null,
-    shippingFee: readNumber(row, ['shippingFee', 'deliveryFee']) || null,
+    shippingFee: readNumber(row, ['shippingFee', 'deliveryFee'])
+      || readNestedNumber(row, ['itemInfo.shippingInfo.shippingFee'])
+      || null,
     deliveryMessage: readString(row, ['deliveryMessage', 'shippingMessage', 'memo']) || null,
     rawData: row,
   }
@@ -277,12 +341,11 @@ export class AlwaysScraper implements MarketplaceScraper {
     await setProgress?.('올웨이즈 주문 API 조회 중...')
     const payloads: unknown[] = []
     const requests: Array<Promise<unknown>> = [
-      requestAlways('/sellers/orders', { method: 'GET', token }),
       requestAlways('/sellers/orders/status-recent', { method: 'GET', token }),
       requestAlways('/sellers/orders/status/info-request', {
         method: 'POST',
         token,
-        body: JSON.stringify({ status: 'PAYED', payedAt: since.toISOString(), preExcel: false }),
+        body: JSON.stringify({ status: 'pre-shipping', payedAt: since.toISOString(), preExcel: false }),
       }),
     ]
     for (const result of await Promise.allSettled(requests)) {

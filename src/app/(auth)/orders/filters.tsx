@@ -1,7 +1,6 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
-import { useRouter } from 'next/navigation'
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { ORDER_STATUS_LABELS, type OrderSearchField, type OrderStatus } from '@/lib/orders/types'
@@ -325,7 +324,6 @@ export function OrderFilters({
 }: {
   marketplaceOptions?: Array<{ value: string; label: string }>
 }) {
-  const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const mergedMarketplaceOptions = useMemo(() => {
     const options = new Map<string, string>()
@@ -371,10 +369,10 @@ export function OrderFilters({
   const updateFilter = useCallback(
     (updates: Partial<typeof filters>) => {
       startTransition(() => {
-        void setFilters({ ...updates, page: 1 }).then(() => router.refresh())
+        void setFilters({ ...updates, page: 1 })
       })
     },
-    [router, setFilters],
+    [setFilters],
   )
 
   const submitSearch = useCallback(() => {
@@ -399,9 +397,9 @@ export function OrderFilters({
         datePreset: null,
         page: 1,
         pageSize: filters.pageSize,
-      }).then(() => router.refresh())
+      })
     })
-  }, [filters.pageSize, router, setFilters])
+  }, [filters.pageSize, setFilters])
 
   const setToday = useCallback(() => {
     const today = formatDateInput(new Date())

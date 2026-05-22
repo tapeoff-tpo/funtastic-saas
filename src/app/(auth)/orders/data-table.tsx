@@ -217,10 +217,10 @@ export function DataTable({
           total={total}
           pageSizeOptions={[25, 50, 100, 200, 500, 1000]}
           onPageSizeChange={(s) => {
-            void setPageSize(s).then(() => router.refresh())
+            void setPageSize(s)
           }}
           onPageChange={(p) => {
-            void setPage(p).then(() => router.refresh())
+            void setPage(p)
           }}
           className="ml-auto"
         />
@@ -297,10 +297,10 @@ export function DataTable({
         total={total}
         hidePageSize
         onPageChange={(p) => {
-          void setPage(p).then(() => router.refresh())
+          void setPage(p)
         }}
         onPageSizeChange={(s) => {
-          void setPageSize(s).then(() => router.refresh())
+          void setPageSize(s)
         }}
       />
 

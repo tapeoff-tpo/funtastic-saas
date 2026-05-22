@@ -149,34 +149,45 @@ export const orders = pgTable(
       .on(table.marketplaceId, table.marketplaceOrderId)
       .where(sql`${table.isCopy} = false`),
     index('orders_user_status').on(table.userId, table.status),
+    index('orders_user_status_ordered_at').on(table.userId, table.status, table.orderedAt),
+    index('orders_user_marketplace_ordered_at').on(table.userId, table.marketplaceId, table.orderedAt),
+    index('orders_user_collected_at').on(table.userId, table.collectedAt),
     index('orders_ordered_at').on(table.orderedAt),
     uniqueIndex('orders_user_internal_no_unique').on(table.userId, table.internalNo),
   ],
 )
 
-export const orderItems = pgTable('order_items', {
-  id: uuid('id').defaultRandom().primaryKey(),
-  orderId: uuid('order_id')
-    .notNull()
-    .references(() => orders.id, { onDelete: 'cascade' }),
-  marketplaceItemId: varchar('marketplace_item_id', { length: 200 }),
-  productName: text('product_name').notNull(),
-  optionText: text('option_text'),
-  quantity: integer('quantity').notNull().default(1),
-  unitPrice: numeric('unit_price', { precision: 12, scale: 2 }).notNull(),
-  sku: varchar('sku', { length: 100 }),
-  /** 매핑에서 가져온 멀티플라이어. 예: "A 2개입" 마켓 상품 매핑 시 2 */
-  skuMultiplier: integer('sku_multiplier').notNull().default(1),
-  fulfillmentCode: varchar('fulfillment_code', { length: 50 }).default('normal'),
-  lockedSku: varchar('locked_sku', { length: 100 }),
-  lockedProductName: text('locked_product_name'),
-  lockedOptionName: text('locked_option_name'),
-  lockedQuantity: integer('locked_quantity'),
-  lockedMappingCodeId: uuid('locked_mapping_code_id'),
-  lockedMappingCode: varchar('locked_mapping_code', { length: 100 }),
-  lockedAt: timestamp('locked_at', { withTimezone: true }),
-  lockedByUserId: uuid('locked_by_user_id'),
-})
+export const orderItems = pgTable(
+  'order_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    orderId: uuid('order_id')
+      .notNull()
+      .references(() => orders.id, { onDelete: 'cascade' }),
+    marketplaceItemId: varchar('marketplace_item_id', { length: 200 }),
+    productName: text('product_name').notNull(),
+    optionText: text('option_text'),
+    quantity: integer('quantity').notNull().default(1),
+    unitPrice: numeric('unit_price', { precision: 12, scale: 2 }).notNull(),
+    sku: varchar('sku', { length: 100 }),
+    /** 매핑에서 가져온 멀티플라이어. 예: "A 2개입" 마켓 상품 매핑 시 2 */
+    skuMultiplier: integer('sku_multiplier').notNull().default(1),
+    fulfillmentCode: varchar('fulfillment_code', { length: 50 }).default('normal'),
+    lockedSku: varchar('locked_sku', { length: 100 }),
+    lockedProductName: text('locked_product_name'),
+    lockedOptionName: text('locked_option_name'),
+    lockedQuantity: integer('locked_quantity'),
+    lockedMappingCodeId: uuid('locked_mapping_code_id'),
+    lockedMappingCode: varchar('locked_mapping_code', { length: 100 }),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    lockedByUserId: uuid('locked_by_user_id'),
+  },
+  (table) => [
+    index('order_items_order_id').on(table.orderId),
+    index('order_items_sku').on(table.sku),
+    index('order_items_marketplace_item_id').on(table.marketplaceItemId),
+  ],
+)
 
 export const orderMemos = pgTable(
   'order_memos',

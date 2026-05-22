@@ -677,10 +677,10 @@ async function findSelectedOrderStatusText(page: Page, orderId: string): Promise
 
 async function ensureInvoiceOrderReadyForUpload(page: Page, orderId: string): Promise<boolean> {
   await applyInvoiceOrderSearch(page, orderId, 'shipping-target')
-  if (await selectOrderByText(page, orderId)) return true
+  if (await selectFirstOrderForExcel(page)) return true
 
   await applyInvoiceOrderSearch(page, orderId, 'new')
-  const foundNewOrder = await selectOrderByText(page, orderId)
+  const foundNewOrder = await selectFirstOrderForExcel(page)
   if (!foundNewOrder) return false
 
   const rowText = await findSelectedOrderStatusText(page, orderId)
@@ -688,38 +688,10 @@ async function ensureInvoiceOrderReadyForUpload(page: Page, orderId: string): Pr
   if (needsMove) {
     await moveSelectedNewOrdersToShippingTarget(page)
     await applyInvoiceOrderSearch(page, orderId, 'shipping-target')
-    return selectOrderByText(page, orderId)
+    return selectFirstOrderForExcel(page)
   }
 
   return true
-}
-
-async function selectOrderByText(page: Page, orderId: string): Promise<boolean> {
-  const targetOrderId = JSON.stringify(orderId)
-  return page.evaluate(`(() => {
-    const targetOrderId = ${targetOrderId}
-    const roots = [
-      document.querySelector('#order_list'),
-      document.querySelector('#goods_list'),
-      document,
-    ].filter(Boolean)
-
-    for (const root of roots) {
-      const rows = Array.from(root.querySelectorAll('tr, .tui-grid-row, [role="row"], li, div'))
-      for (const row of rows) {
-        const text = row.textContent ?? ''
-        if (!text.includes(targetOrderId)) continue
-
-        const checkbox = row.querySelector('input[type="checkbox"]')
-          ?? row.closest('tr, .tui-grid-row, [role="row"]')?.querySelector('input[type="checkbox"]')
-        if (!checkbox || checkbox.disabled) return true
-        if (!checkbox.checked) checkbox.click()
-        checkbox.dispatchEvent(new Event('change', { bubbles: true }))
-        return true
-      }
-    }
-    return false
-  })()`).catch(() => false)
 }
 
 function findHeaderColumn(worksheet: ExcelJS.Worksheet, aliases: string[]): number | null {

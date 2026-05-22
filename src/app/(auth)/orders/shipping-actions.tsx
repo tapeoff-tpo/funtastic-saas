@@ -302,15 +302,6 @@ export function ShippingActions({
     }
 
     const poll = async () => {
-      if (
-        rpaInvoicePollStartedAtRef.current &&
-        Date.now() - rpaInvoicePollStartedAtRef.current > RPA_INVOICE_POLL_TIMEOUT_MS
-      ) {
-        finishPolling()
-        toast.error('RPA 송장 전송 완료 확인이 지연되고 있습니다. 잠시 후 새로고침해서 확인해주세요.')
-        return
-      }
-
       try {
         const res = await fetch(`/api/orders/collect/status?ids=${idsParam}`)
         if (!res.ok) return
@@ -336,6 +327,14 @@ export function ShippingActions({
         }
       } catch {
         // 네트워크 오류는 다음 폴링에서 다시 확인
+      }
+
+      if (
+        rpaInvoicePollStartedAtRef.current &&
+        Date.now() - rpaInvoicePollStartedAtRef.current > RPA_INVOICE_POLL_TIMEOUT_MS
+      ) {
+        finishPolling()
+        toast.error('RPA 송장 전송 완료 확인이 지연되고 있습니다. 잠시 후 새로고침해서 확인해주세요.')
       }
     }
 

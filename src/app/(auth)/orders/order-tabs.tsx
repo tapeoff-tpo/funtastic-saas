@@ -76,17 +76,23 @@ export function OrderTabs() {
     params.delete('scan')
     params.delete('scanResult')
 
-    if (tab.kind === 'status') {
-      params.set('status', tab.id)
-    } else if (tab.kind === 'cancel') {
-      params.set('cancel', 'true')
-    } else if (tab.kind === 'claim') {
-      params.set('claimType', tab.id)
-    } else if (tab.kind === 'held') {
+    const showAllDatesByDefault = () => {
       params.delete('dateField')
       params.delete('dateFrom')
       params.delete('dateTo')
       params.set('datePreset', 'all')
+    }
+
+    if (tab.kind === 'status') {
+      params.set('status', tab.id)
+    } else if (tab.kind === 'cancel') {
+      showAllDatesByDefault()
+      params.set('cancel', 'true')
+    } else if (tab.kind === 'claim') {
+      showAllDatesByDefault()
+      params.set('claimType', tab.id)
+    } else if (tab.kind === 'held') {
+      showAllDatesByDefault()
       params.set('held', 'true')
     } else if (tab.kind === 'all') {
       // 전체 탭도 명시적으로 ?tab=all 을 붙여서 fetch 트리거

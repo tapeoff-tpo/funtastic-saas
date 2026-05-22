@@ -106,7 +106,11 @@ async function clickEmailVerificationButton(page: Page): Promise<boolean> {
       })
       .map((element) => {
         const containerText = (element.closest('li, tr, .row, div')?.textContent || '').replace(/\s+/g, ' ')
-        const score = /@|메일|email/i.test(containerText) ? 0 : 1
+        let score = 100
+        if (/영업담당자/.test(containerText) && /@naver\.com/i.test(containerText)) score = 0
+        else if (/영업담당자/.test(containerText) && /@/i.test(containerText)) score = 10
+        else if (/@naver\.com/i.test(containerText)) score = 20
+        else if (/@|메일|email/i.test(containerText)) score = 50
         return { element, score }
       })
       .sort((a, b) => a.score - b.score)

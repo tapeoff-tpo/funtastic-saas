@@ -836,8 +836,16 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
     if (Number(uploadedCountText.replace(/[^\d]/g, '')) > 0) break
     await page.waitForTimeout(500)
   }
-  const uploadedCount = Number(uploadedCountText.replace(/[^\d]/g, '')) || 0
-  const uploadCombined = `${uploadDialogMessage ?? ''} ${uploadResponseText} ${await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')}`
+  let uploadResponseCount = 0
+  try {
+    const parsed = JSON.parse(uploadResponseText) as { data?: unknown }
+    uploadResponseCount = Array.isArray(parsed.data) ? parsed.data.length : 0
+  } catch {
+    uploadResponseCount = 0
+  }
+  const uploadedCount = Math.max(Number(uploadedCountText.replace(/[^\d]/g, '')) || 0, uploadResponseCount)
+  const frameBodyText = await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  const uploadCombined = `${uploadDialogMessage ?? ''} ${uploadResponseText} ${frameBodyText}`
   if (!uploadResponse?.ok() && uploadedCount <= 0) {
     throw new MarketplaceApiError('domechango', 500, `도매창고 송장 엑셀 업로드에 실패했습니다. (${uploadDialogMessage ?? (uploadResponseText || '응답 없음')})`)
   }
@@ -845,7 +853,13 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
     throw new MarketplaceApiError('domechango', 500, uploadDialogMessage ?? '도매창고 송장 엑셀 업로드 후 오류 메시지가 표시되었습니다.')
   }
   if (uploadedCount <= 0) {
-    throw new MarketplaceApiError('domechango', 500, '도매창고 송장 엑셀 업로드 후 처리할 주문이 표시되지 않았습니다.')
+    const responsePreview = uploadResponseText.replace(/\s+/g, ' ').trim().slice(0, 500)
+    const bodyPreview = frameBodyText.replace(/\s+/g, ' ').trim().slice(0, 500)
+    throw new MarketplaceApiError(
+      'domechango',
+      500,
+      `도매창고 송장 엑셀 업로드 후 처리할 주문이 표시되지 않았습니다. (total=${uploadedCountText || '-'} response=${responsePreview || '-'} body=${bodyPreview || '-'})`,
+    )
   }
 
   const registerResponsePromise = page.waitForResponse(

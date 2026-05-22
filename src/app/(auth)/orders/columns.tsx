@@ -351,6 +351,13 @@ function ProductNameCell({ order }: { order: OrderRow }) {
   )
 }
 
+function normalizeOptionLabel(option: string | null | undefined): string | null {
+  const normalized = option
+    ?.replace(/^\s*(선택|옵션)\s*[:：]?\s*/i, '')
+    .trim()
+  return normalized || null
+}
+
 function OptionInfoCell({ order }: { order: OrderRow }) {
   const items = order.items
   if (!items || items.length === 0) {
@@ -360,18 +367,21 @@ function OptionInfoCell({ order }: { order: OrderRow }) {
   return (
     <div className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-tight">
       {items.map((item, index) => {
-        const rawOption = item.displayOptionName ?? item.optionText
-        const option = rawOption
-          ?.replace(/^\s*(선택|옵션)\s*[:：]?\s*/i, '')
-          .trim()
+        const collectedOption = normalizeOptionLabel(item.optionText)
+        const confirmedOption = normalizeOptionLabel(item.displayOptionName ?? item.optionText)
         return (
           <div
             key={item.id}
-            className={`min-w-0 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
+            className={`flex min-w-0 flex-col gap-0.5 ${index > 0 ? 'border-t border-slate-100 pt-0.5' : ''}`}
           >
-            {option ? (
-              <span className="block truncate" title={option}>
-                {option}
+            {collectedOption && (
+              <span className="block truncate text-[10px] text-muted-foreground" title={`수집옵션명: ${collectedOption}`}>
+                {collectedOption}
+              </span>
+            )}
+            {confirmedOption ? (
+              <span className="block truncate font-medium" title={confirmedOption}>
+                {confirmedOption}
               </span>
             ) : (
               <span className="text-muted-foreground">-</span>
@@ -794,7 +804,12 @@ export const columns: ColumnDef<OrderRow>[] = [
 
   {
     id: 'optionInfo',
-    header: '옵션명',
+    header: () => (
+      <div className="flex flex-col leading-tight">
+        <span className="text-[10px] font-normal text-muted-foreground">수집옵션명</span>
+        <span>확정옵션명</span>
+      </div>
+    ),
     cell: ({ row }) => <OptionInfoCell order={row.original} />,
     size: 220,
     minSize: 150,

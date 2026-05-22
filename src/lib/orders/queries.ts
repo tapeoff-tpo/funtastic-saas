@@ -14,7 +14,7 @@ import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './type
 // re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
 export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
-import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
+import { buildMappingIndex, EXACT_OPTION_ID, lookupMappingRef, type MappingSource } from './mapping-match'
 import { getOrderChangeLogs } from './change-log'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 
@@ -951,6 +951,39 @@ export async function getOrders(filters: OrderFilters = {}) {
     componentsByCode.set(component.mappingCodeId, list)
   }
 
+  const componentSignatureByCode = new Map<string, string>()
+  for (const [mappingCodeId, components] of componentsByCode) {
+    componentSignatureByCode.set(
+      mappingCodeId,
+      components
+        .map((component) => `${component.sku}:${component.quantity}`)
+        .sort()
+        .join('|'),
+    )
+  }
+
+  const resolveSameComponentMappingCode = (
+    candidateIds: string[],
+    optionText: string | null,
+  ): string | null => {
+    const normalizedOptionText = optionText?.trim().slice(0, 100)
+    const candidateSet = new Set(candidateIds)
+    const matchedSources = mappingSourceRows.filter((source) => {
+      if (!candidateSet.has(source.marketplaceProductId)) return false
+      if (normalizedOptionText) {
+        return source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === ''
+      }
+      return source.marketplaceOptionId === '' || source.marketplaceOptionId === EXACT_OPTION_ID
+    })
+    const signatures = new Map<string, string>()
+    for (const source of matchedSources) {
+      const signature = componentSignatureByCode.get(source.mappingCodeId)
+      if (!signature) continue
+      signatures.set(signature, source.mappingCodeId)
+    }
+    return signatures.size === 1 ? Array.from(signatures.values())[0] : null
+  }
+
   const getMappedItemInfo = (
     marketplaceId: string,
     marketplaceItemId: string | null,
@@ -969,6 +1002,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     const mappingCodeId = candidateIds
       .map((candidateId) => lookupMappingRef(mappingIndex, marketplaceId, candidateId, optionText))
       .find((ref): ref is string => !!ref)
+      ?? resolveSameComponentMappingCode(candidateIds, optionText)
     if (!mappingCodeId) return null
     const components = componentsByCode.get(mappingCodeId) ?? []
     if (components.length === 0) return null

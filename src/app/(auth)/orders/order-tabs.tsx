@@ -83,6 +83,7 @@ export function OrderTabs() {
     } else if (tab.kind === 'claim') {
       params.set('claimType', tab.id)
     } else if (tab.kind === 'held') {
+      params.delete('dateField')
       params.delete('dateFrom')
       params.delete('dateTo')
       params.set('datePreset', 'all')

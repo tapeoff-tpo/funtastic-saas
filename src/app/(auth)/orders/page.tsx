@@ -140,10 +140,11 @@ export default async function OrdersPage({
   // 탭 미선택(사이드바 진입 직후) — 어떤 쿼리도 실행하지 않는다.
   // 탭(전체/신규/.../반품) 클릭 시점에만 status/claimType/cancel/tab 중 하나가 붙어 fetch 시작.
   const tabSelected = true
+  const shouldRunQuery = tabSelected && (hasDateFilter || Boolean(params.held))
 
   // 탭별 카운트(getOrderStats)는 매 조회마다 11개 status COUNT 쿼리를 추가로 실행해
   // 응답을 느리게 한다. 현재 선택된 탭의 total 만 헤더에 노출하면 충분하므로 제거.
-  const ordersPromise = tabSelected && hasDateFilter
+  const ordersPromise = shouldRunQuery
     ? getOrders({
         page: params.page,
         pageSize: params.pageSize,
@@ -235,7 +236,7 @@ export default async function OrdersPage({
       {/* Compact header — title + count (Excel import entry-point removed in Phase 8) */}
       <div className="flex flex-wrap items-baseline gap-3">
         <h1 className="text-xl font-bold">주문 관리</h1>
-        {tabSelected && hasDateFilter && (
+        {shouldRunQuery && (
           <span className="text-sm text-muted-foreground">
             {total.toLocaleString('ko-KR')}건
           </span>
@@ -253,7 +254,7 @@ export default async function OrdersPage({
       </Suspense>
 
       {/* Data Table — 탭 미선택 시 안내 문구로 대체 (쿼리 0번) */}
-      {tabSelected && hasDateFilter ? (
+      {shouldRunQuery ? (
         <DataTable
           data={data}
           total={total}

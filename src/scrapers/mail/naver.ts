@@ -7,9 +7,12 @@ interface NaverMailCodeOptions {
   receivedAfter?: Date
   timeoutMs?: number
   pollIntervalMs?: number
+  receivedAfterSlackMs?: number
   fromHints?: string[]
   subjectHints?: string[]
   onlyUnread?: boolean
+  codeLength?: number
+  markAsRead?: boolean
 }
 
 const IMAP_HOST = 'imap.naver.com'
@@ -75,12 +78,13 @@ function extractMessageBody(message: string): string {
     .join('\n')
 }
 
-function normalizeCodeCandidate(value: string): string | null {
+function normalizeCodeCandidate(value: string, codeLength?: number): string | null {
   const digits = value.replace(/\D/g, '')
+  if (codeLength) return digits.length === codeLength ? digits : null
   return digits.length >= 4 && digits.length <= 8 ? digits : null
 }
 
-function extractVerificationCode(message: string): string | null {
+function extractVerificationCode(message: string, codeLength?: number): string | null {
   const body = extractMessageBody(message)
   const decoded = decodeMimeWord(stripHtml(decodeQuotedPrintable(body)))
     .replace(/https?:\/\/\S+/gi, ' ')
@@ -93,12 +97,13 @@ function extractVerificationCode(message: string): string | null {
   for (const pattern of focusedPatterns) {
     const match = decoded.match(pattern)
     if (match?.[1]) {
-      const code = normalizeCodeCandidate(match[1])
+      const code = normalizeCodeCandidate(match[1], codeLength)
       if (code) return code
     }
   }
 
-  const candidates = [...decoded.matchAll(/\b(\d{6})\b/g)].map((match) => match[1])
+  const length = codeLength ?? 6
+  const candidates = [...decoded.matchAll(new RegExp(`\\b(\\d{${length}})\\b`, 'g'))].map((match) => match[1])
   return candidates[0] ?? null
 }
 
@@ -173,6 +178,10 @@ class SimpleImapClient {
     return this.command(`UID FETCH ${uid} (FLAGS INTERNALDATE BODY.PEEK[])`, 20_000)
   }
 
+  async markAsRead(uid: number): Promise<void> {
+    await this.command(`UID STORE ${uid} +FLAGS.SILENT (\\Seen)`)
+  }
+
   close(): void {
     this.socket?.end()
     this.socket?.destroy()
@@ -208,6 +217,7 @@ export async function readNaverVerificationCode(options: NaverMailCodeOptions): 
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
   const since = options.since ?? new Date(Date.now() - 10 * 60 * 1000)
   const receivedAfter = options.receivedAfter?.getTime()
+  const receivedAfterSlackMs = options.receivedAfterSlackMs ?? 5000
   const subjectHints = options.subjectHints ?? ['오늘의집', 'ohou', '인증']
   const startedAt = Date.now()
 
@@ -226,11 +236,14 @@ export async function readNaverVerificationCode(options: NaverMailCodeOptions): 
       for (const uid of uids) {
         const message = await client.fetchMessage(uid)
         const messageDate = extractMessageDate(message)
-        if (receivedAfter && messageDate && messageDate.getTime() < receivedAfter - 5000) continue
+        if (receivedAfter && messageDate && messageDate.getTime() < receivedAfter - receivedAfterSlackMs) continue
         const decoded = decodeMimeWord(decodeQuotedPrintable(message)).toLowerCase()
         if (!subjectHints.some((hint) => decoded.includes(hint.toLowerCase()))) continue
-        const code = extractVerificationCode(message)
-        if (code) return code
+        const code = extractVerificationCode(message, options.codeLength)
+        if (code) {
+          if (options.markAsRead) await client.markAsRead(uid).catch(() => undefined)
+          return code
+        }
       }
     } finally {
       client.close()

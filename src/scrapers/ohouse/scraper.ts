@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v30'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v31'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -509,6 +509,85 @@ async function clickOhouseSecondFactorSubmit(page: Page): Promise<boolean> {
   return true
 }
 
+async function fillOhouseSecondFactorCode(page: Page, code: string): Promise<string> {
+  const filled = await page
+    .evaluate((verificationCode) => {
+      const visible = (element: HTMLElement) => {
+        const style = window.getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+      }
+      const setNativeValue = (input: HTMLInputElement, value: string) => {
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+        setter?.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        input.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      const scoreInput = (input: HTMLInputElement) => {
+        const text = [
+          input.name,
+          input.id,
+          input.autocomplete,
+          input.placeholder,
+          input.getAttribute('aria-label') ?? '',
+          input.closest('form, section, div')?.textContent ?? '',
+        ].join(' ')
+        let score = 0
+        if (/one-time-code|otp|code|verification|auth/i.test(text)) score += 4
+        if (/인증|번호|코드/.test(text)) score += 4
+        if (input.maxLength > 0 && input.maxLength <= 6) score += 2
+        if (['tel', 'number'].includes(input.type)) score += 1
+        return score
+      }
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+        .filter((input) => !input.disabled && !input.readOnly && input.type !== 'hidden' && visible(input))
+        .map((input) => ({ input, score: scoreInput(input) }))
+        .filter((item) => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+
+      const digitInputs = inputs
+        .filter(({ input }) => input.maxLength === 1 || input.getAttribute('maxlength') === '1')
+        .map(({ input }) => input)
+        .slice(0, verificationCode.length)
+      if (digitInputs.length >= verificationCode.length) {
+        digitInputs.forEach((input, index) => setNativeValue(input, verificationCode[index] ?? ''))
+        digitInputs.at(-1)?.focus()
+        return `multi:${digitInputs.length}`
+      }
+
+      const target = inputs[0]?.input
+      if (!target) return ''
+      setNativeValue(target, verificationCode)
+      target.focus()
+      return `single:maxLength=${target.maxLength || 'none'}`
+    }, code)
+    .catch(() => '')
+
+  if (filled) return filled
+
+  const input = page
+    .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
+    .first()
+  await setInputValue(input, code)
+  return 'locator'
+}
+
+async function readOhouseSecondFactorSubmitReason(page: Page): Promise<string | null> {
+  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  return bodyText.match(/인증 요청이 취소되었습니다\.?|다시 인증해 주세요\.?|인증번호[^.\n]*(?:일치|확인|틀|잘못|오류|실패)[^.\n]*|유효시간[^.\n]*(?:만료|00:00)[^.\n]*|인증[^.\n]*(?:만료|실패|취소)[^.\n]*/)?.[0] ?? null
+}
+
+async function waitForOhouseSecondFactorSubmitResult(page: Page, timeoutMs = 18_000): Promise<'passed' | 'stayed'> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => undefined)
+    if (!(await isSecondFactorPage(page))) return 'passed'
+    if (await readOhouseSecondFactorSubmitReason(page)) return 'stayed'
+    await page.waitForTimeout(600)
+  }
+  return (await isSecondFactorPage(page)) ? 'stayed' : 'passed'
+}
+
 async function selectOhouseSecondFactorEmailMethod(page: Page): Promise<boolean> {
   const selected = await page
     .evaluate(() => {
@@ -591,14 +670,14 @@ async function handleEmailSecondFactor(
     throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증이 필요하지만 네이버 메일 인증 정보가 저장되어 있지 않습니다.')
   }
 
-  let codeRequestedAt = new Date(Date.now() - 5_000)
+  let codeRequestedAt = new Date()
 
   if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
-    codeRequestedAt = new Date(Date.now() - 5_000)
+    codeRequestedAt = new Date()
     const sent = await sendOhouseSecondFactorFromMethodPage(page)
     if (!sent) throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 메일 발송 후 유효시간이 갱신되지 않았습니다.`)
   } else if (/\/signin\/multi-factor\/auth/.test(new URL(page.url()).pathname)) {
-    codeRequestedAt = new Date(Date.now() - 5_000)
+    codeRequestedAt = new Date()
     const refreshMethod = await refreshOhouseSecondFactorEmail(page)
     if (refreshMethod === 'failed') {
       throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 요청 버튼을 눌렀지만 새 인증 시간이 시작되지 않았습니다.`)
@@ -609,7 +688,7 @@ async function handleEmailSecondFactor(
   for (let attempt = 1; attempt <= 3; attempt++) {
     const remainingSeconds = await readOhouseSecondFactorRemainingSeconds(page)
     if (remainingSeconds !== null && remainingSeconds <= 20) {
-      codeRequestedAt = new Date(Date.now() - 5_000)
+      codeRequestedAt = new Date()
       const refreshMethod = await refreshOhouseSecondFactorEmail(page)
       if (refreshMethod === 'failed') {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 재발송 후에도 유효시간이 00:00에서 갱신되지 않았습니다.`)
@@ -622,18 +701,21 @@ async function handleEmailSecondFactor(
     const code = await readNaverVerificationCode({
       email: naverEmail,
       password: naverPassword,
-      since: new Date(codeRequestedAt.getTime() - 60_000),
+      since: new Date(codeRequestedAt.getTime() - 30_000),
       receivedAfter: codeRequestedAt,
+      receivedAfterSlackMs: 1000,
       timeoutMs: 45_000,
       pollIntervalMs: 3_000,
       fromHints: ['bucketplace', 'ohou', '오늘의집', ''],
       subjectHints: ['오늘의집', 'ohou', '인증'],
       onlyUnread: true,
+      codeLength: 6,
+      markAsRead: true,
     })
     if (!code && attempt >= 3) {
       throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 네이버 메일에서 오늘의집 2차 인증번호를 찾지 못했습니다.`)
     } else if (!code) {
-      codeRequestedAt = new Date(Date.now() - 5_000)
+      codeRequestedAt = new Date()
       const refreshMethod = await refreshOhouseSecondFactorEmail(page)
       if (refreshMethod === 'failed') {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 네이버 메일에서 인증번호를 찾지 못했고 오늘의집 인증 재발송도 실패했습니다.`)
@@ -642,28 +724,16 @@ async function handleEmailSecondFactor(
       continue
     }
 
-    const codeInput = page
-      .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
-      .first()
-    await setInputValue(codeInput, code)
+    const inputMode = await fillOhouseSecondFactorCode(page, code)
     await clickOhouseSecondFactorSubmit(page)
-    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-    await page.waitForTimeout(2500)
+    const submitResult = await waitForOhouseSecondFactorSubmitResult(page)
 
-    if (!(await isSecondFactorPage(page))) return attempt === 1 ? 'code-submitted' : 'code-submitted-after-resend'
+    if (submitResult === 'passed') return attempt === 1 ? 'code-submitted' : 'code-submitted-after-resend'
+    const reason = await readOhouseSecondFactorSubmitReason(page)
     if (await hasExpiredOhouseSecondFactorTimer(page)) {
-      throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호를 입력했지만 이미 만료된 상태입니다. (${await summarizePage(page)})`)
+      throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호 제출 후 만료 상태입니다. input=${inputMode}${reason ? ` reason=${reason}` : ''} (${await summarizePage(page)})`)
     }
-    if (attempt === 3) {
-      throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호 입력 후에도 인증 화면에 머물러 있습니다. (${await summarizePage(page)})`)
-    }
-
-    codeRequestedAt = new Date(Date.now() - 5_000)
-    const refreshMethod = await refreshOhouseSecondFactorEmail(page)
-    if (refreshMethod === 'failed') {
-      throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호 입력 실패 후 재발송도 실패했습니다.`)
-    }
-    await page.waitForTimeout(1500)
+    throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호 제출 후에도 인증 화면에 머물러 있습니다. input=${inputMode}${reason ? ` reason=${reason}` : ''} (${await summarizePage(page)})`)
   }
 
   return 'code-submitted'

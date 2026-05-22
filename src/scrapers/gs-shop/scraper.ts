@@ -162,6 +162,42 @@ async function clickEmailVerificationButton(page: Page): Promise<boolean> {
   }).catch(() => false)
 }
 
+async function clickNaverEmailVerificationButton(page: Page): Promise<boolean> {
+  const clickedByCoordinate = await page.evaluate(() => {
+    const textOf = (element: Element): string => {
+      if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || ''
+      return element.textContent || element.getAttribute('aria-label') || ''
+    }
+
+    const textElements = Array.from(document.querySelectorAll('body *'))
+      .filter((element) => /@naver\.com/i.test((element.textContent || '').replace(/\s+/g, ' ')))
+      .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+      .sort((a, b) => (a.rect.width * a.rect.height) - (b.rect.width * b.rect.height))
+
+    const emailRect = textElements[0]?.rect
+    if (!emailRect) return false
+
+    const emailCenterY = emailRect.top + emailRect.height / 2
+    const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'))
+      .map((element) => ({ element, rect: element.getBoundingClientRect(), text: textOf(element).replace(/\s+/g, ' ').trim() }))
+      .filter(({ rect, text }) => rect.width > 0 && rect.height > 0 && (/인증번호/.test(text) || /verification/i.test(text)))
+      .map(({ element, rect }) => ({
+        element,
+        score: Math.abs((rect.top + rect.height / 2) - emailCenterY) + (rect.left > emailRect.left ? 0 : 500),
+      }))
+      .sort((a, b) => a.score - b.score)
+
+    const target = buttons[0]?.element
+    if (!(target instanceof HTMLElement)) return false
+    target.click()
+    return true
+  }).catch(() => false)
+
+  if (clickedByCoordinate) return true
+  return clickEmailVerificationButton(page)
+}
+
 async function fillVerificationCode(page: Page, code: string): Promise<void> {
   const codeInput = await firstVisible(page, [
     'input[autocomplete="one-time-code"]',
@@ -222,7 +258,7 @@ async function handleNaverEmailSecondFactor(page: Page, credentials: ScraperCred
   }
 
   const requestedAt = new Date()
-  const requested = await clickEmailVerificationButton(page)
+  const requested = await clickNaverEmailVerificationButton(page)
   if (!requested) {
     throw new MarketplaceApiError(MARKETPLACE_ID, 401, `GS SHOP 이메일 인증번호 받기 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
   }

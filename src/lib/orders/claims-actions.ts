@@ -9,7 +9,7 @@
 
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { db } from '@/lib/db'
-import { claims } from '@/lib/db/schema'
+import { claims, orders } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -43,10 +43,17 @@ export async function updateClaimStatus(
       updatedAt: new Date(),
     })
     .where(and(eq(claims.id, claimId), eq(claims.userId, workspaceUserId)))
-    .returning({ id: claims.id })
+    .returning({ id: claims.id, orderId: claims.orderId })
 
   if (!updated) {
     return { success: false, error: 'Claim not found or access denied' }
+  }
+
+  if (status === 'rejected' || status === 'withdrawn') {
+    await db
+      .update(orders)
+      .set({ marketplaceStatus: null, updatedAt: new Date() })
+      .where(and(eq(orders.id, updated.orderId), eq(orders.userId, workspaceUserId)))
   }
 
   revalidatePath('/orders/claims')

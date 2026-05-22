@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { and, eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { claims } from '@/lib/db/schema'
+import { claims, orders } from '@/lib/db/schema'
 import { completeReturnClaim, getReturnableItemsForClaim } from '@/lib/inventory/actions'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
@@ -70,10 +70,17 @@ export async function PATCH(
     .update(claims)
     .set({ claimStatus: body.claimStatus, updatedAt: new Date() })
     .where(and(eq(claims.id, id), eq(claims.userId, workspaceUserId)))
-    .returning({ id: claims.id, claimStatus: claims.claimStatus })
+    .returning({ id: claims.id, orderId: claims.orderId, claimStatus: claims.claimStatus })
 
   if (updated.length === 0) {
     return NextResponse.json({ error: '클레임을 찾을 수 없습니다.' }, { status: 404 })
+  }
+
+  if (body.claimStatus === 'rejected' || body.claimStatus === 'withdrawn') {
+    await db
+      .update(orders)
+      .set({ marketplaceStatus: null, updatedAt: new Date() })
+      .where(and(eq(orders.id, updated[0].orderId), eq(orders.userId, workspaceUserId)))
   }
 
   return NextResponse.json({ success: true, claim: updated[0] })

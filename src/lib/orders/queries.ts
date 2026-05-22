@@ -8,7 +8,7 @@
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs, mappingSources, mappingComponents } from '@/lib/db/schema'
-import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, isNotNull, isNull, exists } from 'drizzle-orm'
+import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, notInArray, isNotNull, isNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
 // re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
@@ -162,6 +162,9 @@ export function matchStage(
 }
 
 const DEFAULT_PAGE_SIZE = 50
+const INACTIVE_CLAIM_STATUSES = ['rejected', 'withdrawn'] as const
+const CLAIM_LIKE_MARKETPLACE_STATUS_PATTERN = '^(\uCDE8\uC18C|\uBC18\uD488|\uAD50\uD658)'
+const INACTIVE_MARKETPLACE_CLAIM_STATUS_PATTERN = '(\uAC70\uC808|\uAC70\uBD80|\uBC18\uB824|\uCCA0\uD68C)'
 
 function expandSkuSearchTerms(skus: string[]): string[] {
   const terms = new Set<string>()
@@ -515,7 +518,11 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
         db
           .select({ x: sql`1` })
           .from(claims)
-          .where(and(eq(claims.orderId, orders.id), eq(claims.claimType, filters.claimType))),
+          .where(and(
+            eq(claims.orderId, orders.id),
+            eq(claims.claimType, filters.claimType),
+            notInArray(claims.claimStatus, [...INACTIVE_CLAIM_STATUSES]),
+          )),
       ),
     )
   }
@@ -533,6 +540,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
               and(
                 eq(claims.orderId, orders.id),
                 eq(claims.claimType, 'cancel'),
+                notInArray(claims.claimStatus, [...INACTIVE_CLAIM_STATUSES]),
               ),
             ),
         ),
@@ -546,16 +554,32 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
         SELECT 1
         FROM ${claims}
         WHERE ${claims.orderId} = ${orders.id}
+          AND ${claims.claimStatus} NOT IN ('rejected', 'withdrawn')
       )`,
     )
     conditions.push(
       sql`NOT (
-        COALESCE(${orders.marketplaceStatus}, '') ~ '^(취소|반품|교환)'
-        OR COALESCE(${orders.rawData}->>'주문상태', '') ~ '^(취소|반품|교환)'
-        OR EXISTS (
+        NOT EXISTS (
           SELECT 1
-          FROM jsonb_array_elements(COALESCE(${orders.rawData}->'rows', '[]'::jsonb)) AS raw_row(value)
-          WHERE COALESCE(raw_row.value #>> '{raw,주문상태}', '') ~ '^(취소|반품|교환)'
+          FROM ${claims}
+          WHERE ${claims.orderId} = ${orders.id}
+            AND ${claims.claimStatus} IN ('rejected', 'withdrawn')
+        )
+        AND (
+          (
+            COALESCE(${orders.marketplaceStatus}, '') ~ ${CLAIM_LIKE_MARKETPLACE_STATUS_PATTERN}
+            AND COALESCE(${orders.marketplaceStatus}, '') !~ ${INACTIVE_MARKETPLACE_CLAIM_STATUS_PATTERN}
+          )
+          OR (
+            COALESCE(${orders.rawData}->>'주문상태', '') ~ ${CLAIM_LIKE_MARKETPLACE_STATUS_PATTERN}
+            AND COALESCE(${orders.rawData}->>'주문상태', '') !~ ${INACTIVE_MARKETPLACE_CLAIM_STATUS_PATTERN}
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(COALESCE(${orders.rawData}->'rows', '[]'::jsonb)) AS raw_row(value)
+            WHERE COALESCE(raw_row.value #>> '{raw,주문상태}', '') ~ ${CLAIM_LIKE_MARKETPLACE_STATUS_PATTERN}
+              AND COALESCE(raw_row.value #>> '{raw,주문상태}', '') !~ ${INACTIVE_MARKETPLACE_CLAIM_STATUS_PATTERN}
+          )
         )
       )`,
     )
@@ -932,6 +956,9 @@ export async function getOrders(filters: OrderFilters = {}) {
   type ClaimSummary = { id: string; claimType: string; claimStatus: string; reason: string | null }
   const claimByOrderId = new Map<string, ClaimSummary>()
   for (const claim of claimRows) {
+    if (INACTIVE_CLAIM_STATUSES.includes(claim.claimStatus as (typeof INACTIVE_CLAIM_STATUSES)[number])) {
+      continue
+    }
     const existing = claimByOrderId.get(claim.orderId)
     if (!existing || claim.requestedAt > (claimRows.find((c) => c.id === existing.id)?.requestedAt ?? new Date(0))) {
       claimByOrderId.set(claim.orderId, {
@@ -1534,14 +1561,18 @@ async function getOrderStatsImpl(userId: string): Promise<OrderStats> {
       .select({ claimType: claims.claimType, value: countDistinct(claims.orderId) })
       .from(claims)
       .innerJoin(orders, eq(orders.id, claims.orderId))
-      .where(eq(orders.userId, userId))
+      .where(and(eq(orders.userId, userId), notInArray(claims.claimStatus, [...INACTIVE_CLAIM_STATUSES])))
       .groupBy(claims.claimType),
     db
       .select({ value: countDistinct(orders.id) })
       .from(orders)
       .leftJoin(
         claims,
-        and(eq(claims.orderId, orders.id), eq(claims.claimType, 'cancel')),
+        and(
+          eq(claims.orderId, orders.id),
+          eq(claims.claimType, 'cancel'),
+          notInArray(claims.claimStatus, [...INACTIVE_CLAIM_STATUSES]),
+        ),
       )
       .where(
         and(

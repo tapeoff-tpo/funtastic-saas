@@ -1,0 +1,318 @@
+import { MarketplaceApiError } from '@/lib/marketplace/errors'
+import type {
+  InvoiceData,
+  MarketplaceId,
+  NormalizedClaim,
+  NormalizedOrder,
+} from '@/lib/marketplace/types'
+import type {
+  MarketplaceScraper,
+  ScraperCredentials,
+  ScraperLoginResult,
+} from '../types'
+
+const ALWAYS_SELLER_URL = 'https://alwayzseller.ilevit.com'
+const ALWAYS_API_BASE_URL = 'https://alwayz-seller-back.ilevit.com'
+const TOKEN_STORAGE_KEY = '@alwayz@seller@token@'
+
+type JsonRecord = Record<string, unknown>
+
+function logStep(step: string): void {
+  console.log(`[올웨이즈-rpa] ${step}`)
+}
+
+function authHeaders(token?: string): HeadersInit {
+  return {
+    accept: 'application/json, text/plain, */*',
+    'content-type': 'application/json',
+    origin: ALWAYS_SELLER_URL,
+    referer: `${ALWAYS_SELLER_URL}/`,
+    'user-agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    ...(token ? { 'x-access-token': token } : {}),
+  }
+}
+
+async function requestAlways(
+  path: string,
+  options: RequestInit & { token?: string } = {},
+): Promise<unknown> {
+  const response = await fetch(`${ALWAYS_API_BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      ...authHeaders(options.token),
+      ...(options.headers ?? {}),
+    },
+  })
+  const text = await response.text()
+  let payload: unknown = text
+  try {
+    payload = text ? JSON.parse(text) : null
+  } catch {
+    payload = text
+  }
+
+  if (!response.ok) {
+    const message = typeof payload === 'object' && payload && 'msg' in payload
+      ? String((payload as { msg?: unknown }).msg)
+      : text.slice(0, 240)
+    throw new MarketplaceApiError('always', response.status, message || '올웨이즈 요청 실패')
+  }
+  return payload
+}
+
+function tokenFromStorageState(storageState?: string): string | null {
+  if (!storageState) return null
+  try {
+    const parsed = JSON.parse(storageState) as unknown
+    if (parsed && typeof parsed === 'object' && 'alwaysToken' in parsed) {
+      const token = (parsed as { alwaysToken?: unknown }).alwaysToken
+      return typeof token === 'string' && token ? token : null
+    }
+    if (parsed && typeof parsed === 'object' && 'origins' in parsed) {
+      const origins = (parsed as { origins?: Array<{ localStorage?: Array<{ name: string; value: string }> }> }).origins ?? []
+      for (const origin of origins) {
+        const token = origin.localStorage?.find((item) => item.name === TOKEN_STORAGE_KEY)?.value
+        if (token) return token
+      }
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function readString(record: JsonRecord, aliases: string[]): string {
+  for (const alias of aliases) {
+    const value = record[alias]
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function readNumber(record: JsonRecord, aliases: string[]): number {
+  const text = readString(record, aliases)
+  const num = Number(text.replaceAll(',', '').replace(/[^\d.-]/g, ''))
+  return Number.isFinite(num) ? num : 0
+}
+
+function readDate(record: JsonRecord, aliases: string[]): Date {
+  const text = readString(record, aliases)
+  if (!text) return new Date()
+  const normalized = text.includes('T') ? text : text.replace(/\s+/, 'T')
+  const date = new Date(normalized.includes('+') || normalized.endsWith('Z') ? normalized : `${normalized}+09:00`)
+  return Number.isNaN(date.getTime()) ? new Date(text) : date
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function collectOrderLikeRecords(payload: unknown): JsonRecord[] {
+  const results: JsonRecord[] = []
+  const visited = new Set<unknown>()
+  const visit = (value: unknown) => {
+    if (!value || visited.has(value)) return
+    if (typeof value === 'object') visited.add(value)
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item)
+      return
+    }
+    if (!isRecord(value)) return
+    const keys = Object.keys(value).join(' ').toLowerCase()
+    const hasOrderSignal = /order|payed|shipping|receiver|recipient|item|deal|goods|product|status|주문/.test(keys)
+    const hasIdentity = ['orderId', 'id', '_id', 'orderNumber', 'orderNo', 'itemId', 'dealItemId'].some((key) => key in value)
+    if (hasOrderSignal && hasIdentity) results.push(value)
+    for (const child of Object.values(value)) {
+      if (Array.isArray(child) || isRecord(child)) visit(child)
+    }
+  }
+  visit(payload)
+  return results
+}
+
+function normalizeAlwaysOrder(row: JsonRecord): NormalizedOrder | null {
+  const orderId = readString(row, [
+    'orderId',
+    'orderNumber',
+    'orderNo',
+    'id',
+    '_id',
+    'merchantOrderId',
+  ])
+  if (!orderId) return null
+
+  const itemId = readString(row, [
+    'itemId',
+    'dealItemId',
+    'orderItemId',
+    'productId',
+    'catalogId',
+    'id',
+    '_id',
+  ]) || orderId
+  const productName = readString(row, [
+    'itemName',
+    'productName',
+    'goodsName',
+    'dealName',
+    'name',
+    'title',
+  ]) || '올웨이즈 상품'
+  const quantity = readNumber(row, ['quantity', 'qty', 'count', 'itemCount', 'orderCount']) || 1
+  const unitPrice = readNumber(row, ['unitPrice', 'price', 'salesPrice', 'itemPrice', 'paidPrice'])
+  const marketplaceStatus = readString(row, ['status', 'orderStatus', 'shippingStatus', 'displayStatus']) || 'unknown'
+  const orderedAt = readDate(row, ['payedAt', 'paidAt', 'orderedAt', 'createdAt', 'created_at', 'orderCreatedAt'])
+  const address = readString(row, ['address', 'address1', 'shippingAddress', 'receiverAddress', 'roadAddress'])
+  const zipCode = readString(row, ['zipCode', 'zipcode', 'postalCode', 'zonecode'])
+
+  return {
+    marketplaceOrderId: orderId,
+    marketplaceId: 'always',
+    marketplaceStatus,
+    status: /취소|cancel/i.test(marketplaceStatus) ? 'cancelled' : 'new',
+    buyerName: readString(row, ['buyerName', 'ordererName', 'userName', 'nickname']) || '-',
+    buyerPhone: readString(row, ['buyerPhone', 'ordererPhoneNumber', 'phoneNumber', 'userPhoneNumber']),
+    buyerPhone2: readString(row, ['buyerPhone2', 'ordererMobilePhoneNumber', 'mobilePhoneNumber']),
+    recipientName: readString(row, ['recipientName', 'receiverName', 'nameReceiver', 'shippingName']) || '-',
+    recipientPhone: readString(row, ['recipientPhone', 'receiverPhoneNumber', 'shippingPhoneNumber']),
+    recipientPhone2: readString(row, ['recipientPhone2', 'receiverMobilePhoneNumber', 'shippingMobilePhoneNumber']),
+    shippingAddress: {
+      zipCode,
+      address1: address,
+      address2: readString(row, ['address2', 'shippingAddressDetail', 'receiverAddressDetail', 'detailAddress']),
+    },
+    items: [{
+      marketplaceItemId: itemId,
+      productName,
+      optionText: readString(row, ['optionName', 'optionText', 'selectedOption', 'option']),
+      quantity,
+      unitPrice,
+      sku: readString(row, ['sku', 'sellerSku', 'itemCode']),
+    }],
+    orderedAt,
+    totalAmount: readNumber(row, ['totalAmount', 'totalPrice', 'paidPrice', 'paymentAmount']) || unitPrice * quantity,
+    shippingType: readString(row, ['shippingType', 'deliveryType']) || null,
+    shippingFee: readNumber(row, ['shippingFee', 'deliveryFee']) || null,
+    deliveryMessage: readString(row, ['deliveryMessage', 'shippingMessage', 'memo']) || null,
+    rawData: row,
+  }
+}
+
+function uniqueOrders(rows: NormalizedOrder[]): NormalizedOrder[] {
+  const byKey = new Map<string, NormalizedOrder>()
+  for (const order of rows) {
+    const itemKey = order.items.map((item) => item.marketplaceItemId).join(',')
+    byKey.set(`${order.marketplaceOrderId}:${itemKey}`, order)
+  }
+  return [...byKey.values()]
+}
+
+export class AlwaysScraper implements MarketplaceScraper {
+  readonly marketplaceId: MarketplaceId = 'always'
+  readonly displayName = '올웨이즈'
+
+  async login(credentials: ScraperCredentials): Promise<ScraperLoginResult> {
+    try {
+      logStep('login: request token')
+      const payload = await requestAlways('/sellers/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          sellerName: credentials.email,
+          password: credentials.password,
+        }),
+      })
+      const data = isRecord(payload) && isRecord(payload.data) ? payload.data : null
+      const token = data ? readString(data, ['token', 'accessToken']) : ''
+      if (!token) {
+        return { success: false, error: '올웨이즈 로그인 토큰을 받지 못했습니다.' }
+      }
+      return {
+        success: true,
+        storageState: JSON.stringify({
+          alwaysToken: token,
+          origins: [{
+            origin: ALWAYS_SELLER_URL,
+            localStorage: [{ name: TOKEN_STORAGE_KEY, value: token }],
+          }],
+        }),
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 12),
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '올웨이즈 로그인 실패',
+      }
+    }
+  }
+
+  async testSession(credentials: ScraperCredentials): Promise<{ ok: boolean; error?: string }> {
+    const token = tokenFromStorageState(credentials.storageState)
+    if (!token) return { ok: false, error: '올웨이즈 저장 세션이 없습니다.' }
+    try {
+      await requestAlways('/sellers', { method: 'GET', token })
+      return { ok: true }
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : '올웨이즈 세션 확인 실패' }
+    }
+  }
+
+  async getOrders(
+    credentials: ScraperCredentials,
+    since: Date,
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedOrder[]> {
+    let token = tokenFromStorageState(credentials.storageState)
+    if (!token) {
+      const login = await this.login(credentials)
+      if (!login.success || !login.storageState) {
+        throw new MarketplaceApiError('always', 401, login.error ?? '올웨이즈 로그인 실패')
+      }
+      token = tokenFromStorageState(login.storageState)
+    }
+    if (!token) throw new MarketplaceApiError('always', 401, '올웨이즈 로그인 토큰이 없습니다.')
+
+    await setProgress?.('올웨이즈 주문 API 조회 중...')
+    const payloads: unknown[] = []
+    const requests: Array<Promise<unknown>> = [
+      requestAlways('/sellers/orders', { method: 'GET', token }),
+      requestAlways('/sellers/orders/status-recent', { method: 'GET', token }),
+      requestAlways('/sellers/orders/status/info-request', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ status: 'PAYED', payedAt: since.toISOString(), preExcel: false }),
+      }),
+    ]
+    for (const result of await Promise.allSettled(requests)) {
+      if (result.status === 'fulfilled') payloads.push(result.value)
+    }
+
+    const orders = payloads
+      .flatMap(collectOrderLikeRecords)
+      .map(normalizeAlwaysOrder)
+      .filter((order): order is NormalizedOrder => Boolean(order))
+      .filter((order) => order.orderedAt >= since)
+
+    return uniqueOrders(orders)
+  }
+
+  async getClaimsOrders(): Promise<NormalizedClaim[]> {
+    return []
+  }
+
+  async uploadInvoice(
+    credentials: ScraperCredentials,
+    orderId: string,
+    invoice: InvoiceData,
+  ): Promise<{ success: boolean; error?: string }> {
+    void credentials
+    void orderId
+    void invoice
+    return {
+      success: false,
+      error: '올웨이즈 RPA 송장 전송은 주문수집 안정화 후 별도 구현이 필요합니다.',
+    }
+  }
+}

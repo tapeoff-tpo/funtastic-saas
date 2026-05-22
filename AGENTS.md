@@ -8,6 +8,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ### Collection Responsibility Policy
 
 - All-market order collection must stay fast. `/orders/collect` is responsible only for collecting orders and moving eligible marketplace orders into order-confirmed/shipping-prep status.
+- Marketplace order collection must stay isolated per marketplace and per integration path. Do not make one API/RPA agent collect every mall in a single browser/session/task. Each marketplace should have its own adapter/scraper/worker path so failures, timeouts, logins, and DOM changes do not affect other marketplaces.
+- Keep API, RPA, Excel, and connected-mall collection paths independent. Shared orchestration may enqueue or summarize work, but the actual collection logic must run through the marketplace-specific agent.
+- Independent RPA marketplaces currently include 도매창고(`domechango`), 바나나B2B(`banana-b2b`), 온채널(`onchannel`), 투비즈온(`tobizon`), 도매의신(`domesin`), and 올웨이즈(`always`). Keep each one on its own scraper path.
+- Domechango order collection and invoice upload RPA must remain independent and fixed to the Domechango scraper flow. Do not merge Domechango RPA into a generic all-mall RPA agent or rewrite it into shared browser automation unless the user explicitly asks to redesign that integration.
 - Do not add inquiry, claim, return-inspection, or unrelated CS collection work to the all-market order collection path.
 - Marketplace inquiries must be collected from the dedicated CS inquiry collection button/page, not as a side effect of order collection.
 - Inquiry collection must keep API and RPA paths separate: API inquiries use adapter `getInquiries`, while RPA inquiries use scraper `getInquiries` from marketplace customer inquiry/1:1 boards.

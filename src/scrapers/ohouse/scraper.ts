@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v23'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v24'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -411,6 +411,40 @@ async function isOhouseSecondFactorExpired(page: Page): Promise<boolean> {
   return /00:00\s*남음|유효\s*시간.*만료|인증.*만료|다시\s*인증하기/.test(bodyText)
 }
 
+async function readOhouseSecondFactorRemainingSeconds(page: Page): Promise<number | null> {
+  const bodyText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '')
+  const match = bodyText.match(/인증\s*유효시간\s*(\d{1,2}):(\d{2})\s*남음/)
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+async function requestOhouseSecondFactorEmail(page: Page): Promise<boolean> {
+  return page
+    .evaluate(async () => {
+      const url = new URL(window.location.href)
+      const destination = url.searchParams.get('destination')
+      const method = url.searchParams.get('method')
+      const accountId = url.searchParams.get('accountId')
+      if (!destination || !method || !accountId) return false
+
+      const response = await fetch('https://api.ohou.se/orora/member/v1/auth/mfa', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          destination,
+          type: method,
+          partnerId: accountId,
+        }),
+      })
+      return response.ok
+    })
+    .catch(() => false)
+}
+
 async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<string> {
   if (!(await isSecondFactorPage(page))) return 'not-detected'
 
@@ -438,21 +472,44 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
     await page.waitForTimeout(1500)
   } else if (await isOhouseSecondFactorExpired(page)) {
     codeRequestedAt = new Date()
-    await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+    const requested = await requestOhouseSecondFactorEmail(page)
+    if (!requested) {
+      await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+    }
     await page.waitForTimeout(1500)
   }
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const remainingSeconds = await readOhouseSecondFactorRemainingSeconds(page)
+    if (remainingSeconds !== null && remainingSeconds <= 20) {
+      codeRequestedAt = new Date()
+      const requested = await requestOhouseSecondFactorEmail(page)
+      if (!requested) {
+        await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+      }
+      await page.waitForTimeout(1500)
+    }
+
     const code = await readNaverVerificationCode({
       email: naverEmail,
       password: naverPassword,
       since: new Date(codeRequestedAt.getTime() - 60_000),
       receivedAfter: codeRequestedAt,
+      timeoutMs: 25_000,
+      pollIntervalMs: 3_000,
       fromHints: ['bucketplace', 'ohou', '오늘의집', ''],
       subjectHints: ['오늘의집', 'ohou', '인증'],
     })
-    if (!code) {
+    if (!code && attempt >= 3) {
       throw new MarketplaceApiError('ohouse', 401, '네이버 메일에서 오늘의집 2차 인증번호를 찾지 못했습니다.')
+    } else if (!code) {
+      codeRequestedAt = new Date()
+      const requested = await requestOhouseSecondFactorEmail(page)
+      if (!requested) {
+        await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+      }
+      await page.waitForTimeout(1500)
+      continue
     }
 
     const codeInput = page
@@ -464,10 +521,13 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
     await page.waitForTimeout(2500)
 
     if (!(await isSecondFactorPage(page))) return attempt === 1 ? 'code-submitted' : 'code-submitted-after-resend'
-    if (attempt === 2) return 'code-submitted-expired'
+    if (attempt === 3) return 'code-submitted-expired'
 
     codeRequestedAt = new Date()
-    await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+    const requested = await requestOhouseSecondFactorEmail(page)
+    if (!requested) {
+      await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+    }
     await page.waitForTimeout(1500)
   }
 

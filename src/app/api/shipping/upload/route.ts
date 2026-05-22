@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
       marketplaceOrderId: orders.marketplaceOrderId,
       connectionId: orders.connectionId,
       rawData: orders.rawData,
+      recipientName: orders.recipientName,
     })
     .from(orders)
     .where(inArray(orders.id, orderIds))
@@ -246,6 +247,7 @@ export async function POST(req: NextRequest) {
         const result = await adapter.uploadInvoice(ord.marketplaceOrderId, {
           trackingNumber: s.trackingNumber,
           carrierId: s.carrierId,
+          recipientName: ord.recipientName,
           rawData: ord.rawData,
         })
 

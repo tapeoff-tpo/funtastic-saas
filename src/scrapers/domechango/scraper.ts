@@ -687,9 +687,15 @@ function findHeaderColumn(worksheet: ExcelJS.Worksheet, aliases: string[]): numb
 }
 
 function readRawInvoiceText(invoice: InvoiceData, aliases: string[]): string {
+  for (const alias of aliases) {
+    const value = invoice[alias]
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+
   const rawData = invoice.rawData
   if (!rawData || typeof rawData !== 'object') return ''
-
   const record = rawData as Record<string, unknown>
   for (const alias of aliases) {
     const value = record[alias]
@@ -719,9 +725,16 @@ async function buildInvoiceWorkbook(
       'name_receiver',
       'receiverName',
     ])
+    const orderItemNo = readRawInvoiceText(invoice, [
+      '주문상품번호',
+      'orderItemNo',
+      'orderItemId',
+      'marketplaceItemId',
+      'oiid',
+    ])
     const worksheet = workbook.addWorksheet('invoice')
-    worksheet.addRow(['주문번호', '택배업체코드', '송장번호', '수취인명'])
-    worksheet.addRow([orderId, carrierCode, invoice.trackingNumber, receiverName])
+    worksheet.addRow(['주문번호', '주문상품번호', '택배업체코드', '송장번호', '수취인명'])
+    worksheet.addRow([orderId, orderItemNo, carrierCode, invoice.trackingNumber, receiverName])
     const raw = await workbook.xlsx.writeBuffer()
     return Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer)
   }

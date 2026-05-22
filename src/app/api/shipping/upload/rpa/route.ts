@@ -39,6 +39,7 @@ export async function POST(req: NextRequest) {
       marketplaceOrderId: orders.marketplaceOrderId,
       connectionId: orders.connectionId,
       rawData: orders.rawData,
+      recipientName: orders.recipientName,
       trackingNumber: shipments.trackingNumber,
       carrierId: shipments.carrierId,
       authType: marketplaceConnections.authType,
@@ -119,6 +120,7 @@ export async function POST(req: NextRequest) {
         invoice: {
           trackingNumber: row.trackingNumber,
           carrierId: row.carrierId,
+          recipientName: row.recipientName,
           rawData: row.rawData,
         },
       },

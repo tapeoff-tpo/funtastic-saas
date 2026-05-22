@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import {
   useReactTable,
   getCoreRowModel,
@@ -34,7 +33,6 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   // 펼쳐진 품번 prefix 모음. 기본 모두 접힘 — 헤더 행만 보이고 자식은 토글로.
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const router = useRouter()
 
   const toggleExpand = (prefix: string) => {
     setExpanded((prev) => {
@@ -247,10 +245,10 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
         pageSize={pageSize}
         total={total}
         onPageChange={(p) => {
-          void setPage(p).then(() => router.refresh())
+          void setPage(p)
         }}
         onPageSizeChange={(s) => {
-          void setPageSize(s).then(() => router.refresh())
+          void setPageSize(s)
         }}
       />
     </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ChevronsRight } from 'lucide-react'
 import { Sidebar } from './sidebar'
 import { TabBar } from './tab-bar'
@@ -13,18 +13,13 @@ interface AppShellProps {
 const STORAGE_KEY = 'funtastic-sidebar-collapsed'
 
 export function AppShell({ children }: AppShellProps) {
-  const [collapsed, setCollapsed] = useState(false)
-
-  useEffect(() => {
+  const [collapsed, setCollapsed] = useState(() => {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored === 'true') {
-        setCollapsed(true)
-      }
+      return localStorage.getItem(STORAGE_KEY) === 'true'
     } catch {
-      // localStorage unavailable (private mode, etc.) — use default
+      return false
     }
-  }, [])
+  })
 
   function toggleCollapsed() {
     setCollapsed((prev) => {

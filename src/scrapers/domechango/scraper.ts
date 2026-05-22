@@ -793,7 +793,7 @@ async function buildInvoiceWorkbook(
   return Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer)
 }
 
-async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void> {
+async function uploadInvoiceWorkbook(page: Page, filePath: string, trackingNumber: string): Promise<void> {
   const uploadButton = page.locator('#btn_songjang_upload').first()
   if (!(await uploadButton.isVisible({ timeout: 10_000 }).catch(() => false))) {
     throw new MarketplaceApiError('domechango', 500, `도매창고 택배송장 업로드 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
@@ -836,13 +836,14 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
     if (Number(uploadedCountText.replace(/[^\d]/g, '')) > 0) break
     await page.waitForTimeout(500)
   }
-  let uploadResponseCount = 0
+  let uploadedRows: unknown[] = []
   try {
     const parsed = JSON.parse(uploadResponseText) as { data?: unknown }
-    uploadResponseCount = Array.isArray(parsed.data) ? parsed.data.length : 0
+    uploadedRows = Array.isArray(parsed.data) ? parsed.data : []
   } catch {
-    uploadResponseCount = 0
+    uploadedRows = []
   }
+  const uploadResponseCount = uploadedRows.length
   const uploadedCount = Math.max(Number(uploadedCountText.replace(/[^\d]/g, '')) || 0, uploadResponseCount)
   const frameBodyText = await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   const uploadCombined = `${uploadDialogMessage ?? ''} ${uploadResponseText} ${frameBodyText}`
@@ -862,6 +863,20 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
     )
   }
 
+  if (uploadedInvoiceRowsAlreadyRegistered(uploadedRows, trackingNumber)) return
+
+  const directRegisterResponseText = await registerUploadedInvoiceRows(frame, uploadedRows)
+  if (directRegisterResponseText) {
+    try {
+      const parsed = JSON.parse(directRegisterResponseText) as { statusCode?: unknown; data?: unknown }
+      if (typeof parsed.statusCode === 'number' && parsed.statusCode < 400) return
+    } catch {
+      if (/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다/.test(directRegisterResponseText)) return
+    }
+  }
+
+  await selectUploadedInvoiceRows(frame)
+
   const registerResponsePromise = page.waitForResponse(
     (res) => res.request().method() === 'PATCH' && /\/wms\/order\/list\/status\/4(?:\?|$)/.test(res.url()),
     { timeout: 30_000 },
@@ -874,18 +889,113 @@ async function uploadInvoiceWorkbook(page: Page, filePath: string): Promise<void
     })
     .catch(() => null)
 
-  await frame.locator('#act_status').selectOption('regist', { timeout: 10_000 })
+  const actionSelect = frame.locator('#act_status').first()
+  await actionSelect.waitFor({ state: 'attached', timeout: 10_000 })
+  await actionSelect.selectOption('regist', { timeout: 10_000 })
+  await actionSelect.evaluate(`(() => {
+    const select = document.querySelector('#act_status')
+    if (!select) return
+    select.value = 'regist'
+    select.dispatchEvent(new Event('input', { bubbles: true }))
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    if (typeof window.$ === 'function') window.$(select).trigger('change')
+  })()`)
 
   const [registerResponse, registerDialogMessage] = await Promise.all([registerResponsePromise, registerDialogPromise])
   const registerResponseText = registerResponse ? await registerResponse.text().catch(() => '') : ''
+  let registerAppStatusCode = registerResponse?.status() ?? 0
+  try {
+    const parsed = JSON.parse(registerResponseText) as { statusCode?: unknown }
+    if (typeof parsed.statusCode === 'number') registerAppStatusCode = parsed.statusCode
+  } catch {
+    // keep HTTP status
+  }
   await page.waitForTimeout(1000)
   const registerCombined = `${registerDialogMessage ?? ''} ${registerResponseText} ${await frame.locator('body').innerText({ timeout: 3000 }).catch(() => '')}`
+  if (registerAppStatusCode >= 400) {
+    throw new MarketplaceApiError('domechango', 500, `도매창고 송장등록 처리에 실패했습니다. (${registerResponseText.slice(0, 500) || registerDialogMessage || '응답 없음'})`)
+  }
   if (/실패|오류|error|잘못|필수|확인해주세요|택배사를 선택|송장번호를 입력/.test(registerCombined) && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다/.test(registerCombined)) {
     throw new MarketplaceApiError('domechango', 500, registerDialogMessage ?? '도매창고 송장등록 후 오류 메시지가 표시되었습니다.')
   }
   if (!registerResponse?.ok() && !/완료|성공|처리되었습니다|등록되었습니다|저장되었습니다/.test(registerCombined)) {
     throw new MarketplaceApiError('domechango', 500, '도매창고 송장등록 완료 여부를 확인하지 못했습니다. 실제 등록을 확인할 수 없어 실패 처리했습니다.')
   }
+}
+
+function uploadedInvoiceRowsAlreadyRegistered(uploadedRows: unknown[], trackingNumber: string): boolean {
+  const normalizedTracking = trackingNumber.replace(/\D/g, '')
+  if (!uploadedRows.length || !normalizedTracking) return false
+  return uploadedRows.every((row) => {
+    if (!row || typeof row !== 'object') return false
+    const record = row as Record<string, unknown>
+    const uploadedTracking = String(record.dcode ?? '').replace(/\D/g, '')
+    const statusText = String(record.status ?? '').replace(/<[^>]*>/g, '')
+    const step = String(record.oistep ?? '')
+    return uploadedTracking === normalizedTracking && (step === '4' || /배송\s*완료|배송\s*중|발송\s*완료/.test(statusText))
+  })
+}
+
+async function registerUploadedInvoiceRows(
+  frame: NonNullable<Awaited<ReturnType<ReturnType<Page['locator']>['contentFrame']>>>,
+  uploadedRows: unknown[],
+): Promise<string> {
+  if (!uploadedRows.length) return ''
+  const rows = uploadedRows.map((row, index) => ({
+    ...(row && typeof row === 'object' ? row as Record<string, unknown> : {}),
+    cpid: row && typeof row === 'object' && 'cpid' in row ? (row as { cpid?: unknown }).cpid : null,
+    rowKey: index,
+    sortKey: index,
+    uniqueKey: `rpa-${Date.now()}-${index}`,
+    _attributes: {
+      rowNum: index + 1,
+      checked: true,
+      disabled: false,
+      checkDisabled: false,
+      className: { row: [], column: {} },
+    },
+    _disabledPriority: {},
+    rowSpanMap: {},
+    _relationListItemMap: {},
+  }))
+  const payload = JSON.stringify(rows)
+  return frame.locator('body').evaluate(`(async () => {
+    const rows = ${payload}
+    if (!window.axios || !window.wms_root) return ''
+    const response = await window.axios.patch(window.wms_root + '/order/list/status/4', rows)
+    return JSON.stringify(response.data ?? { status: response.status })
+  })()`).catch((error) => `direct-register-error:${error instanceof Error ? error.message : 'unknown'}`)
+}
+
+async function selectUploadedInvoiceRows(frame: NonNullable<Awaited<ReturnType<ReturnType<Page['locator']>['contentFrame']>>>): Promise<void> {
+  await frame.locator('body').evaluate(`(() => {
+    const visible = (element) => {
+      const style = window.getComputedStyle(element)
+      return Boolean(element.getClientRects().length) && style.visibility !== 'hidden' && style.display !== 'none'
+    }
+    const clickCheckbox = (checkbox) => {
+      if (checkbox.disabled) return
+      if (!checkbox.checked) checkbox.click()
+      checkbox.checked = true
+      checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }))
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+      if (typeof window.$ === 'function') window.$(checkbox).trigger('change')
+    }
+
+    const allCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'))
+    const visibleCheckboxes = allCheckboxes.filter(visible)
+    const headerCheckbox = visibleCheckboxes
+      .find((checkbox) => visible(checkbox) && /all|check|chk/i.test(String(checkbox.id) + ' ' + String(checkbox.name) + ' ' + String(checkbox.className)))
+    if (headerCheckbox) {
+      clickCheckbox(headerCheckbox)
+      return
+    }
+
+    for (const checkbox of visibleCheckboxes) {
+      clickCheckbox(checkbox)
+    }
+  })()`).catch(() => undefined)
 }
 
 export class DomechangoScraper implements MarketplaceScraper {
@@ -1027,7 +1137,7 @@ export class DomechangoScraper implements MarketplaceScraper {
       tmpFilePath = path.join(INVOICE_UPLOAD_TMP_DIR, `domechango-invoice-${orderId}-${Date.now()}.xlsx`)
       await writeFile(tmpFilePath, workbookBuffer)
 
-      await runStep('invoice: upload workbook', () => uploadInvoiceWorkbook(ctx.page, tmpFilePath!))
+      await runStep('invoice: upload workbook', () => uploadInvoiceWorkbook(ctx.page, tmpFilePath!, invoice.trackingNumber))
       return { success: true }
     } catch (error) {
       return {

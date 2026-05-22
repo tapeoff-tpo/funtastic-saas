@@ -177,13 +177,11 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  void marketplaceId
-  return false
+  return marketplaceId === 'ssgmall'
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
-  if (marketplaceId === 'funtastic-b2b') return 'PREPARING'
-  if (marketplaceId === 'gmarket' || marketplaceId === 'auction') return '2'
+  if (marketplaceId === 'ssgmall') return '140'
   return 'CONFIRMED'
 }
 

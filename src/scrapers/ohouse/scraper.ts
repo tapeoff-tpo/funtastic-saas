@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v35'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v36'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -53,6 +53,16 @@ function previewDownloadedBuffer(buffer: Buffer): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 220)
+}
+
+function isProbablySpreadsheetBuffer(buffer: Buffer): boolean {
+  const signature = buffer.subarray(0, 8)
+  const textStart = buffer.subarray(0, 200).toString('utf8').trimStart().toLowerCase()
+  if (signature[0] === 0x50 && signature[1] === 0x4b) return true
+  if (signature[0] === 0xd0 && signature[1] === 0xcf && signature[2] === 0x11 && signature[3] === 0xe0) return true
+  if (textStart.startsWith('<html') || textStart.startsWith('<table') || textStart.includes('<tr')) return true
+  if (textStart.includes(',') || textStart.includes('\t')) return true
+  return false
 }
 
 function parseNumber(value: string): number {
@@ -1119,13 +1129,14 @@ async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Pro
   const excelResponsePromise = page
     .waitForResponse((response) => {
       const headers = response.headers()
-      const contentType = headers['content-type'] ?? ''
+      const contentType = (headers['content-type'] ?? '').toLowerCase()
       const disposition = headers['content-disposition'] ?? ''
-      return (
-        /attachment|filename/i.test(disposition) ||
-        /excel|spreadsheet|officedocument|octet-stream/i.test(contentType) ||
-        /\.(xlsx?|csv)(?:$|\?)/i.test(response.url())
-      )
+      const url = response.url()
+      if (/font|woff|image|css|javascript|json/i.test(contentType)) return false
+      if (/\.(woff2?|ttf|otf|eot|css|js|png|jpe?g|gif|svg)(?:$|\?)/i.test(url)) return false
+      if (/attachment|filename/i.test(disposition)) return true
+      if (/excel|spreadsheet|officedocument|csv/i.test(contentType)) return true
+      return /(?:excel|xlsx?|csv|download)/i.test(url) && /order|orora|download|excel/i.test(url)
     }, { timeout: DOWNLOAD_TIMEOUT_MS })
     .then((response) => response.body())
 
@@ -1143,8 +1154,32 @@ async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Pro
   const modalMessage = await clickDownloadConfirmIfPresent(page)
 
   try {
-    return await Promise.race([downloadPromise, excelResponsePromise])
+    const directDownload = await Promise.race([
+      downloadPromise.then((buffer) => buffer).catch(() => null),
+      page.waitForTimeout(3000).then(() => null),
+    ])
+    if (directDownload) {
+      if (!isProbablySpreadsheetBuffer(directDownload)) {
+        throw new MarketplaceApiError(
+          'ohouse',
+          500,
+          `${OHOUSE_RPA_VERSION}: 오늘의집 다운로드 파일이 엑셀이 아닙니다. preview=${previewDownloadedBuffer(directDownload)}`,
+        )
+      }
+      return directDownload
+    }
+
+    const buffer = await Promise.any([downloadPromise, excelResponsePromise])
+    if (!isProbablySpreadsheetBuffer(buffer)) {
+      throw new MarketplaceApiError(
+        'ohouse',
+        500,
+        `${OHOUSE_RPA_VERSION}: 오늘의집 다운로드 응답이 엑셀이 아닌 리소스입니다. preview=${previewDownloadedBuffer(buffer)}`,
+      )
+    }
+    return buffer
   } catch (error) {
+    if (error instanceof MarketplaceApiError) throw error
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
     const notice = bodyText.match(/다운로드[^.\n]*|엑셀[^.\n]*|권한[^.\n]*|로그인이 필요합니다\.?|오류[^.\n]*/)?.[0]
     const authNotice = authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''

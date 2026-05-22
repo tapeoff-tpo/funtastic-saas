@@ -132,6 +132,8 @@ export default async function OrdersPage({
   const isConfirmedTab = singleStatus === 'confirmed'
   const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
   const isGeneralStatusTab = Boolean(params.status) && !params.claimType && !params.cancel && !params.held
+  const needsMappingDetails = isNewTab || isConfirmedTab
+  const needsStockDetails = isNewTab || isConfirmedTab || isScanFilterTab
   const shouldExcludeHeld = !params.held && Boolean(params.status || params.claimType || params.cancel)
   const mappingFilter = params.mapping === 'all'
     ? undefined
@@ -168,8 +170,8 @@ export default async function OrdersPage({
         excludeHeld: shouldExcludeHeld,
         cancelTab: params.cancel ?? undefined,
         excludeClaimLikeOrders: isGeneralStatusTab,
-        includeMappingDetails: true,
-        includeStock: true,
+        includeMappingDetails: needsMappingDetails,
+        includeStock: needsStockDetails,
       })
     : { orders: [] as Awaited<ReturnType<typeof getOrders>>['orders'], total: 0 }
   const [connections, { orders: orderList, total }] = await Promise.all([

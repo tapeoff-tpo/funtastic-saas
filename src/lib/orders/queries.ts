@@ -788,7 +788,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       .map((item) => item.sku?.trim())
       .filter((sku): sku is string => Boolean(sku)),
   ))
-  const pageInventoryRows = userId && pageSkus.length > 0
+  const pageInventoryRows = userId && pageSkus.length > 0 && (includeMappingDetails || includeStock)
     ? await db
         .select({
           sku: inventory.sku,

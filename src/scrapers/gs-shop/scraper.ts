@@ -163,6 +163,25 @@ async function clickEmailVerificationButton(page: Page): Promise<boolean> {
 }
 
 async function clickNaverEmailVerificationButton(page: Page): Promise<boolean> {
+  const clickedByFixedOrder = await page.evaluate(() => {
+    const controls = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'))
+      .filter((element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return false
+        const text = element instanceof HTMLInputElement
+          ? element.value || element.getAttribute('aria-label') || ''
+          : element.textContent || element.getAttribute('aria-label') || ''
+        return text.replace(/\s+/g, ' ').trim().length > 0
+      })
+
+    const target = controls[3]
+    if (!(target instanceof HTMLElement)) return false
+    target.click()
+    return true
+  }).catch(() => false)
+
+  if (clickedByFixedOrder) return true
+
   const clickedByCoordinate = await page.evaluate(() => {
     const textOf = (element: Element): string => {
       if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || ''
@@ -179,7 +198,7 @@ async function clickNaverEmailVerificationButton(page: Page): Promise<boolean> {
     if (!emailRect) return false
 
     const emailCenterY = emailRect.top + emailRect.height / 2
-    const buttons = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'))
+    const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'))
       .map((element) => ({ element, rect: element.getBoundingClientRect(), text: textOf(element).replace(/\s+/g, ' ').trim() }))
       .filter(({ rect, text }) => rect.width > 0 && rect.height > 0 && (/인증번호/.test(text) || /verification/i.test(text)))
       .map(({ element, rect }) => ({

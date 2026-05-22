@@ -21,6 +21,15 @@ export interface CarrierTemplateDef {
   isDefault: boolean
 }
 
+/** Built-in export template available to every user without DB seeding. */
+export interface BuiltInCarrierTemplateDef {
+  id: string
+  carrierId: string | null
+  name: string
+  columns: CarrierTemplateColumn[]
+  isDefault: boolean
+}
+
 /**
  * All fields available for order export.
  * Korean labels match the standard Korean e-commerce terminology.
@@ -59,6 +68,7 @@ export const AVAILABLE_ORDER_FIELDS: OrderFieldDef[] = [
   { field: 'costPrice', label: '원가' },
   { field: 'collectedAt', label: '수집일자(yyyy-mm-dd)' },
   { field: 'collectedOption', label: '옵션(수집)' },
+  { field: 'location', label: '로케이션' },
   { field: 'pickingLocation', label: '피킹위치' },
   { field: 'packaging', label: '포장' },
   { field: 'etc1', label: '기타1' },
@@ -71,6 +81,20 @@ export const AVAILABLE_ORDER_FIELDS: OrderFieldDef[] = [
   { field: 'etc8', label: '기타8' },
   { field: 'etc9', label: '기타9' },
   { field: 'etc10', label: '기타10' },
+]
+
+export const BUILT_IN_CARRIER_TEMPLATES: BuiltInCarrierTemplateDef[] = [
+  {
+    id: 'builtin:held-order-filter',
+    carrierId: null,
+    name: '미발송 필터양식',
+    isDefault: true,
+    columns: [
+      { header: '사방넷 주문번호', field: 'internalNo', width: 18, required: true },
+      { header: '상품코드(사방넷)', field: 'productCode', width: 18, required: true },
+      { header: '위치', field: 'location', width: 16, required: false },
+    ],
+  },
 ]
 
 /**

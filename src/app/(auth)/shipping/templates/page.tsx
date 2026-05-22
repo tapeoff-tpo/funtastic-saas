@@ -104,7 +104,9 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
         </div>
       ) : (
         <div className="space-y-4">
-          {templates.map((template) => (
+          {templates.map((template) => {
+            const isBuiltIn = template.id.startsWith('builtin:')
+            return (
             <details
               key={template.id}
               className="group rounded-lg border bg-white open:shadow-sm"
@@ -138,7 +140,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                     {template.columns.length}개 열
                   </span>
                 </div>
-                <div className="flex items-center gap-2">
+                {!isBuiltIn && <div className="flex items-center gap-2">
                   <a
                     href={`/shipping/templates?edit=${template.id}`}
                     className="rounded-md border px-3 py-1 text-xs hover:bg-muted"
@@ -154,7 +156,7 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                       삭제
                     </button>
                   </form>
-                </div>
+                </div>}
               </summary>
 
               {/* Column list */}
@@ -195,7 +197,8 @@ export default async function TemplatesPage({ searchParams }: PageProps) {
                 </table>
               </div>
             </details>
-          ))}
+            )
+          })}
         </div>
       )}
 

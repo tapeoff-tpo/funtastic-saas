@@ -9,7 +9,18 @@ import { db } from '@/lib/db'
 import { carrierTemplates } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import type { CarrierTemplate } from './types'
-import { DEFAULT_CARRIER_TEMPLATES } from './excel/templates'
+import { BUILT_IN_CARRIER_TEMPLATES, DEFAULT_CARRIER_TEMPLATES } from './excel/templates'
+
+function builtInTemplateForUser(template: (typeof BUILT_IN_CARRIER_TEMPLATES)[number], userId = ''): CarrierTemplate {
+  return {
+    id: template.id,
+    userId,
+    carrierId: template.carrierId,
+    name: template.name,
+    columns: template.columns,
+    isDefault: template.isDefault,
+  }
+}
 
 /**
  * Get carrier templates filtered by userId and optional carrierId.
@@ -28,7 +39,16 @@ export async function getCarrierTemplates(
     .from(carrierTemplates)
     .where(and(...conditions))
 
-  return rows as unknown as CarrierTemplate[]
+  const templates = rows as unknown as CarrierTemplate[]
+  if (carrierId) return templates
+
+  const existingNames = new Set(templates.map((template) => template.name))
+  return [
+    ...templates,
+    ...BUILT_IN_CARRIER_TEMPLATES
+      .filter((template) => !existingNames.has(template.name))
+      .map((template) => builtInTemplateForUser(template, userId)),
+  ]
 }
 
 /**
@@ -37,6 +57,9 @@ export async function getCarrierTemplates(
 export async function getCarrierTemplateById(
   templateId: string,
 ): Promise<CarrierTemplate | null> {
+  const builtIn = BUILT_IN_CARRIER_TEMPLATES.find((template) => template.id === templateId)
+  if (builtIn) return builtInTemplateForUser(builtIn)
+
   const [row] = await db
     .select()
     .from(carrierTemplates)

@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v17'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v18'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -173,6 +173,32 @@ function watchOhouseAuthFailures(page: Page): string[] {
   return failures
 }
 
+interface OhouseLoginDiagnostics {
+  secondFactor: string
+  authHeaderRequests: string[]
+}
+
+function createOhouseLoginDiagnostics(): OhouseLoginDiagnostics {
+  return {
+    secondFactor: 'not-checked',
+    authHeaderRequests: [],
+  }
+}
+
+function watchOhouseAuthHeaders(page: Page, diagnostics: OhouseLoginDiagnostics): void {
+  page.on('request', (request) => {
+    const url = request.url()
+    if (!/api\.ohou\.se\/orora/i.test(url)) return
+    const authorization = request.headers().authorization
+    diagnostics.authHeaderRequests.push(`${authorization ? 'auth' : 'no-auth'} ${url}`)
+    if (diagnostics.authHeaderRequests.length > 8) diagnostics.authHeaderRequests.shift()
+  })
+}
+
+function formatLoginDiagnostics(diagnostics: OhouseLoginDiagnostics): string {
+  return ` secondFactor=${diagnostics.secondFactor}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
+}
+
 interface OhouseApiSessionCheck {
   ok: boolean
   status?: number
@@ -265,7 +291,7 @@ async function readOhouseAuthToken(page: Page): Promise<OhouseAuthToken | null> 
         storageKeys: result.storageKeys ?? [],
       }
     })
-    .catch(() => null)
+    .catch(() => ({ value: '', source: '', storageKeys: ['token-scan-failed'] }))
 }
 
 async function checkOhouseApiSession(page: Page): Promise<OhouseApiSessionCheck> {
@@ -324,8 +350,8 @@ async function isSecondFactorPage(page: Page): Promise<boolean> {
   return page.locator('input[name*="otp" i], input[name*="code" i], input[autocomplete="one-time-code"]').first().isVisible({ timeout: 1000 }).catch(() => false)
 }
 
-async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<void> {
-  if (!(await isSecondFactorPage(page))) return
+async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<string> {
+  if (!(await isSecondFactorPage(page))) return 'not-detected'
 
   const method = credentials.extras?.twoFactorMethod
   const naverEmail = credentials.extras?.naverEmail
@@ -353,6 +379,7 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
   await clickByText(page, /확인|인증|로그인|다음|완료/i)
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
   await page.waitForTimeout(1500)
+  return 'code-submitted'
 }
 
 async function submitLogin(page: Page): Promise<void> {
@@ -364,7 +391,11 @@ async function submitLogin(page: Page): Promise<void> {
   await page.waitForTimeout(2500)
 }
 
-async function performOhouseLogin(page: Page, credentials: ScraperCredentials): Promise<string | null> {
+async function performOhouseLogin(
+  page: Page,
+  credentials: ScraperCredentials,
+  diagnostics: OhouseLoginDiagnostics,
+): Promise<string | null> {
   await gotoOhouse(page, LOGIN_URL)
   if (await hasOhouseSession(page)) return null
   await openLoginForm(page)
@@ -380,7 +411,7 @@ async function performOhouseLogin(page: Page, credentials: ScraperCredentials): 
 
   logStep('login: submit credentials')
   await submitLogin(page)
-  await handleEmailSecondFactor(page, credentials)
+  diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
 
   if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
@@ -397,7 +428,11 @@ async function performOhouseLogin(page: Page, credentials: ScraperCredentials): 
   return null
 }
 
-async function completeOhouseAppAuth(page: Page, credentials: ScraperCredentials): Promise<OhouseApiSessionCheck> {
+async function completeOhouseAppAuth(
+  page: Page,
+  credentials: ScraperCredentials,
+  diagnostics: OhouseLoginDiagnostics,
+): Promise<OhouseApiSessionCheck> {
   let check = await checkOhouseApiSession(page)
   if (check.ok) return check
 
@@ -412,7 +447,7 @@ async function completeOhouseAppAuth(page: Page, credentials: ScraperCredentials
   if (appLoginClicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1500)
-    await handleEmailSecondFactor(page, credentials)
+    diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
     await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
     await waitForOhouseAppReady(page).catch(() => false)
     check = await checkOhouseApiSession(page)
@@ -590,10 +625,12 @@ export class OhouseScraper implements MarketplaceScraper {
     const until = new Date()
     const ctx = await openContext()
     const authFailures = watchOhouseAuthFailures(ctx.page)
+    const diagnostics = createOhouseLoginDiagnostics()
+    watchOhouseAuthHeaders(ctx.page, diagnostics)
 
     try {
       await setProgress?.('오늘의집 새 브라우저 세션으로 로그인 중...')
-      const error = await performOhouseLogin(ctx.page, credentials)
+      const error = await performOhouseLogin(ctx.page, credentials, diagnostics)
       if (error) throw new MarketplaceApiError('ohouse', 401, error)
 
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')
@@ -602,12 +639,12 @@ export class OhouseScraper implements MarketplaceScraper {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
       await setProgress?.('오늘의집 주문 API 인증 확인 중...')
-      const apiSession = await completeOhouseAppAuth(ctx.page, credentials)
+      const apiSession = await completeOhouseAppAuth(ctx.page, credentials, diagnostics)
       if (!apiSession.ok) {
         throw new MarketplaceApiError(
           'ohouse',
           401,
-          `${OHOUSE_RPA_VERSION}: 오늘의집 주문 화면은 열렸지만 내부 API 인증이 되지 않았습니다. 2차 인증/판매자 계정 선택이 완료되지 않은 상태입니다.${authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''} ${formatApiSessionCheck(apiSession)} (${await summarizePage(ctx.page)})`,
+          `${OHOUSE_RPA_VERSION}: 오늘의집 주문 화면은 열렸지만 내부 API 인증이 되지 않았습니다. 2차 인증/판매자 계정 선택이 완료되지 않은 상태입니다.${formatLoginDiagnostics(diagnostics)}${authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''} ${formatApiSessionCheck(apiSession)} (${await summarizePage(ctx.page)})`,
         )
       }
       void since

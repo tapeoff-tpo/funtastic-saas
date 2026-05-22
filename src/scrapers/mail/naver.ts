@@ -9,6 +9,7 @@ interface NaverMailCodeOptions {
   pollIntervalMs?: number
   fromHints?: string[]
   subjectHints?: string[]
+  onlyUnread?: boolean
 }
 
 const IMAP_HOST = 'imap.naver.com'
@@ -118,12 +119,13 @@ class SimpleImapClient {
     await this.command('SELECT INBOX')
   }
 
-  async searchRecent(since: Date, fromHints: string[]): Promise<number[]> {
+  async searchRecent(since: Date, fromHints: string[], options: { onlyUnread?: boolean } = {}): Promise<number[]> {
     const sincePart = `SINCE ${formatImapDate(since)}`
+    const unreadPart = options.onlyUnread ? ' UNSEEN' : ''
     const responses: number[] = []
 
     for (const from of fromHints.length > 0 ? fromHints : ['']) {
-      const query = from ? `${sincePart} FROM "${escapeImapString(from)}"` : sincePart
+      const query = from ? `${sincePart}${unreadPart} FROM "${escapeImapString(from)}"` : `${sincePart}${unreadPart}`
       const response = await this.command(`UID SEARCH ${query}`)
       const ids = response
         .split(/\r?\n/)
@@ -186,7 +188,11 @@ export async function readNaverVerificationCode(options: NaverMailCodeOptions): 
       await client.connect()
       await client.login(options.email, options.password)
       await client.selectInbox()
-      const uids = await client.searchRecent(since, options.fromHints ?? ['bucketplace', 'ohou', '오늘의집', ''])
+      const uids = await client.searchRecent(
+        since,
+        options.fromHints ?? ['bucketplace', 'ohou', '오늘의집', ''],
+        { onlyUnread: options.onlyUnread },
+      )
 
       for (const uid of uids) {
         const message = await client.fetchMessage(uid)

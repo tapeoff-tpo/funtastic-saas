@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v28'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v29'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -551,7 +551,6 @@ async function assertOhouseSecondFactorFresh(page: Page, context: string): Promi
 async function handleEmailSecondFactor(
   page: Page,
   credentials: ScraperCredentials,
-  initialCodeRequestedAt?: Date,
 ): Promise<string> {
   if (!(await isSecondFactorPage(page))) return 'not-detected'
 
@@ -562,20 +561,25 @@ async function handleEmailSecondFactor(
     throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증이 필요하지만 네이버 메일 인증 정보가 저장되어 있지 않습니다.')
   }
 
-  let codeRequestedAt = initialCodeRequestedAt ?? new Date(Date.now() - 2 * 60 * 1000)
+  let codeRequestedAt = new Date(Date.now() - 5_000)
 
   if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
-    codeRequestedAt = new Date(Date.now() - 15_000)
+    codeRequestedAt = new Date(Date.now() - 5_000)
     const sent = await sendOhouseSecondFactorFromMethodPage(page)
     if (!sent) throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 메일 발송 후 유효시간이 갱신되지 않았습니다.`)
   } else if (/\/signin\/multi-factor\/auth/.test(new URL(page.url()).pathname)) {
+    codeRequestedAt = new Date(Date.now() - 5_000)
+    const refreshMethod = await refreshOhouseSecondFactorEmail(page)
+    if (refreshMethod === 'failed') {
+      throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 요청 버튼을 눌렀지만 새 인증 시간이 시작되지 않았습니다.`)
+    }
     await page.waitForTimeout(1000)
   }
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     const remainingSeconds = await readOhouseSecondFactorRemainingSeconds(page)
     if (remainingSeconds !== null && remainingSeconds <= 20) {
-      codeRequestedAt = new Date()
+      codeRequestedAt = new Date(Date.now() - 5_000)
       const refreshMethod = await refreshOhouseSecondFactorEmail(page)
       if (refreshMethod === 'failed') {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 재발송 후에도 유효시간이 00:00에서 갱신되지 않았습니다.`)
@@ -594,11 +598,12 @@ async function handleEmailSecondFactor(
       pollIntervalMs: 3_000,
       fromHints: ['bucketplace', 'ohou', '오늘의집', ''],
       subjectHints: ['오늘의집', 'ohou', '인증'],
+      onlyUnread: true,
     })
     if (!code && attempt >= 3) {
       throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 네이버 메일에서 오늘의집 2차 인증번호를 찾지 못했습니다.`)
     } else if (!code) {
-      codeRequestedAt = new Date()
+      codeRequestedAt = new Date(Date.now() - 5_000)
       const refreshMethod = await refreshOhouseSecondFactorEmail(page)
       if (refreshMethod === 'failed') {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 네이버 메일에서 인증번호를 찾지 못했고 오늘의집 인증 재발송도 실패했습니다.`)
@@ -623,7 +628,7 @@ async function handleEmailSecondFactor(
       throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호 입력 후에도 인증 화면에 머물러 있습니다. (${await summarizePage(page)})`)
     }
 
-    codeRequestedAt = new Date()
+    codeRequestedAt = new Date(Date.now() - 5_000)
     const refreshMethod = await refreshOhouseSecondFactorEmail(page)
     if (refreshMethod === 'failed') {
       throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호 입력 실패 후 재발송도 실패했습니다.`)
@@ -670,12 +675,10 @@ async function waitForOhouseLoginResult(
   diagnostics.loginWait = 'timeout'
 }
 
-async function submitLogin(page: Page, diagnostics: OhouseLoginDiagnostics): Promise<Date> {
-  const submittedAt = new Date(Date.now() - 15_000)
+async function submitLogin(page: Page, diagnostics: OhouseLoginDiagnostics): Promise<void> {
   await clickOhouseLoginButton(page)
   await page.waitForLoadState('domcontentloaded', { timeout: 20_000 }).catch(() => undefined)
   await waitForOhouseLoginResult(page, diagnostics)
-  return submittedAt
 }
 
 async function performOhouseLogin(
@@ -697,8 +700,8 @@ async function performOhouseLogin(
   await setInputValue(passwordInput, credentials.password)
 
   logStep('login: submit credentials')
-  const loginSubmittedAt = await submitLogin(page, diagnostics)
-  diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials, loginSubmittedAt)
+  await submitLogin(page, diagnostics)
+  diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
   if (diagnostics.secondFactor.startsWith('code-submitted')) {
     await waitForOhouseLoginResult(page, diagnostics, { stopOnSecondFactor: false })
   }
@@ -726,7 +729,6 @@ async function completeOhouseAppAuth(
   let check = await checkOhouseApiSession(page, diagnostics.observedAuthorization)
   if (check.ok) return check
 
-  const appLoginRequestedAt = new Date(Date.now() - 15_000)
   const appLoginClicked = await page
     .locator('button, a')
     .filter({ hasText: /^로그인$/ })
@@ -738,7 +740,7 @@ async function completeOhouseAppAuth(
   if (appLoginClicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1500)
-    diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials, appLoginRequestedAt)
+    diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
     await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
     await waitForOhouseAppReady(page).catch(() => false)
     check = await checkOhouseApiSession(page, diagnostics.observedAuthorization)

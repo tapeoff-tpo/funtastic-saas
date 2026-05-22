@@ -11,6 +11,7 @@ const RPA_QUEUE_TIMEOUT_MESSAGE =
 const RPA_RUNNING_TIMEOUT_MESSAGE =
   'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
 const RPA_INVOICE_TIMEOUT_SECONDS = 75
+const RPA_SCRAPE_STALE_TIMEOUT_SECONDS = 540
 const withLastProgress = (message: string) =>
   sql<string>`case
     when ${jobLogs.progressMessage} is not null and ${jobLogs.progressMessage} <> ''
@@ -123,7 +124,7 @@ export async function GET(request: NextRequest) {
         inArray(jobLogs.id, ids),
         inArray(jobLogs.status, ['queued']),
         like(jobLogs.jobType, 'scrape-%'),
-        sql`${jobLogs.createdAt} < now() - interval '360 seconds'`,
+        sql`${jobLogs.createdAt} < now() - (${RPA_SCRAPE_STALE_TIMEOUT_SECONDS} * interval '1 second')`,
       ),
     )
 
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest) {
         inArray(jobLogs.id, ids),
         inArray(jobLogs.status, ['running']),
         like(jobLogs.jobType, 'scrape-%'),
-        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '360 seconds'`,
+        sql`coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - (${RPA_SCRAPE_STALE_TIMEOUT_SECONDS} * interval '1 second')`,
       ),
     )
 

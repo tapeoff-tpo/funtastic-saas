@@ -29,7 +29,7 @@ import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@
 // Side-effect import — registers all scraper instances on the registry
 import './register'
 
-const SCRAPE_JOB_TIMEOUT_MS = 300_000
+const SCRAPE_JOB_TIMEOUT_MS = 480_000
 const INVOICE_UPLOAD_TIMEOUT_MS = 75_000
 
 async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {

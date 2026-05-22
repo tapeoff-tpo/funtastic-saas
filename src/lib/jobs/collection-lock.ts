@@ -10,6 +10,7 @@ const COLLECTION_JOB_TYPES = [
   'scrape-inquiries',
   'cs-collection',
 ] as const
+const RPA_SCRAPE_STALE_TIMEOUT_SECONDS = 540
 
 export interface CollectionJobLogInput {
   jobType: string
@@ -49,7 +50,7 @@ async function markStaleCollectionJobsFailed(tx: Tx) {
         inArray(jobLogs.status, ['queued', 'running']),
         inArray(jobLogs.jobType, [...COLLECTION_JOB_TYPES]),
         sql`(
-          (${jobLogs.jobType} like 'scrape-%' and coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '360 seconds')
+          (${jobLogs.jobType} like 'scrape-%' and coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - (${RPA_SCRAPE_STALE_TIMEOUT_SECONDS} * interval '1 second'))
           or (${jobLogs.jobType} not like 'scrape-%' and coalesce(${jobLogs.startedAt}, ${jobLogs.createdAt}) < now() - interval '15 minutes')
         )`,
       ),

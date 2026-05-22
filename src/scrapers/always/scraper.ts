@@ -180,6 +180,32 @@ function readAlwaysOptionText(row: JsonRecord): string {
   return names.join(' / ')
 }
 
+function collectAlwaysOrderRows(payloads: unknown[]): JsonRecord[] {
+  return payloads.flatMap(collectOrderLikeRecords)
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))]
+}
+
+async function markAlwaysPreShippingOrdersExcelDownloaded(
+  token: string,
+  orderIds: string[],
+): Promise<void> {
+  const ids = uniqueStrings(orderIds)
+  if (ids.length === 0) return
+
+  const payload = await requestAlways('/sellers/orders/pre-shipping', {
+    method: 'PUT',
+    token,
+    body: JSON.stringify({ orderIds: ids }),
+  })
+  const status = isRecord(payload) ? readNumber(payload, ['status']) : 0
+  if (status && status !== 200) {
+    throw new MarketplaceApiError('always', status, '올웨이즈 주문 상품준비중 전환 실패')
+  }
+}
+
 function normalizeAlwaysOrder(row: JsonRecord): NormalizedOrder | null {
   const orderId = readString(row, [
     'orderId',
@@ -344,21 +370,53 @@ export class AlwaysScraper implements MarketplaceScraper {
     if (!token) throw new MarketplaceApiError('always', 401, '올웨이즈 로그인 토큰이 없습니다.')
 
     await setProgress?.('올웨이즈 주문 API 조회 중...')
-    const payloads: unknown[] = []
-    const requests: Array<Promise<unknown>> = [
-      requestAlways('/sellers/orders/status-recent', { method: 'GET', token }),
+    const sinceIso = since.toISOString()
+    const initialPayloads: unknown[] = []
+    const preExcelPayloads: unknown[] = []
+    const initialRequests: Array<Promise<unknown>> = [
       requestAlways('/sellers/orders/status/info-request', {
         method: 'POST',
         token,
-        body: JSON.stringify({ status: 'pre-shipping', payedAt: since.toISOString(), preExcel: false }),
+        body: JSON.stringify({ status: 'pre-shipping', payedAt: sinceIso, preExcel: false }),
+      }),
+      requestAlways('/sellers/orders/status/pre-excel/info-request', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ status: 'pre-shipping', payedAt: sinceIso, itemIds: [] }),
+      }),
+      requestAlways('/sellers/orders/status/post-excel/info-request', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ status: 'pre-shipping', payedAt: sinceIso }),
       }),
     ]
-    for (const result of await Promise.allSettled(requests)) {
-      if (result.status === 'fulfilled') payloads.push(result.value)
+    const initialResults = await Promise.allSettled(initialRequests)
+    for (const [index, result] of initialResults.entries()) {
+      if (result.status !== 'fulfilled') continue
+      initialPayloads.push(result.value)
+      if (index === 1) preExcelPayloads.push(result.value)
     }
 
-    const orders = payloads
-      .flatMap(collectOrderLikeRecords)
+    const initialRows = collectAlwaysOrderRows(preExcelPayloads)
+    const preExcelOrderIds = uniqueStrings(
+      initialRows
+        .filter((row) => !readString(row, ['excelDownloadedAt']))
+        .map((row) => readString(row, ['orderId', 'orderNumber', 'orderNo', 'id', '_id', 'merchantOrderId'])),
+    )
+
+    let payloads = initialPayloads
+    if (preExcelOrderIds.length > 0) {
+      await setProgress?.(`올웨이즈 상품준비중 전환 중... (${preExcelOrderIds.length}건)`)
+      await markAlwaysPreShippingOrdersExcelDownloaded(token, preExcelOrderIds)
+      const postExcelPayload = await requestAlways('/sellers/orders/status/post-excel/info-request', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({ status: 'pre-shipping', payedAt: sinceIso }),
+      })
+      payloads = [...initialPayloads, postExcelPayload]
+    }
+
+    const orders = collectAlwaysOrderRows(payloads)
       .map(normalizeAlwaysOrder)
       .filter((order): order is NormalizedOrder => Boolean(order))
       .filter((order) => order.orderedAt >= since)

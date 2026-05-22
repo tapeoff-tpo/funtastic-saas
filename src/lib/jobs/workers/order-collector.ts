@@ -203,10 +203,21 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
   return 'CONFIRMED'
 }
 
-function collectedOrderStatus(status: NormalizedOrder['status']): NormalizedOrder['status'] {
-  // Collection must never put an order directly into the local "확인" bucket.
-  // 확인은 매핑 완료 후 사용자가 확정 버튼을 눌렀을 때만 가능하다.
-  return status === 'confirmed' ? 'new' : status
+function shouldPreserveCollectedConfirmedStatus(marketplaceId: string): boolean {
+  return marketplaceId === 'always'
+}
+
+function collectedOrderStatus(
+  status: NormalizedOrder['status'],
+  marketplaceId: string,
+): NormalizedOrder['status'] {
+  // Most collection paths keep orders in "신규" until local mapping confirmation.
+  // Some RPA portals expose only already-confirmed/product-prep orders; preserve
+  // that state for explicitly allowed marketplaces.
+  if (status === 'confirmed' && !shouldPreserveCollectedConfirmedStatus(marketplaceId)) {
+    return 'new'
+  }
+  return status
 }
 
 function orderStatusRank(value: unknown): SQL<number> {
@@ -223,10 +234,16 @@ function orderStatusRank(value: unknown): SQL<number> {
   END`
 }
 
-function collectedOrderUpdateStatus(status: NormalizedOrder['status']): SQL {
+function collectedOrderUpdateStatus(status: NormalizedOrder['status'], marketplaceId: string): SQL {
   if (status === 'cancelled') return sql`'cancelled'::order_status`
   if (status === 'new') return sql`${orders.status}`
   if (status === 'confirmed') {
+    if (shouldPreserveCollectedConfirmedStatus(marketplaceId)) {
+      return sql`CASE
+        WHEN ${orderStatusRank(orders.status)} >= ${orderStatusRank(status)} THEN ${orders.status}
+        ELSE 'confirmed'::order_status
+      END`
+    }
     return sql`CASE
       WHEN ${orders.status} <> 'new' THEN ${orders.status}
       WHEN ${orders.mappedAt} IS NULL THEN 'new'::order_status
@@ -878,8 +895,8 @@ async function upsertOrder(
   userId: string
 ) {
   const rawData = enrichOrderRawData(order)
-  const insertStatus = collectedOrderStatus(order.status)
-  const updateStatus = collectedOrderUpdateStatus(order.status)
+  const insertStatus = collectedOrderStatus(order.status, order.marketplaceId)
+  const updateStatus = collectedOrderUpdateStatus(order.status, order.marketplaceId)
 
   return db
     .insert(orders)

@@ -211,6 +211,11 @@ function normalizeAlwaysOrder(row: JsonRecord): NormalizedOrder | null {
   const quantity = readNumber(row, ['quantity', 'qty', 'count', 'itemCount', 'orderCount']) || 1
   const unitPrice = readNumber(row, ['unitPrice', 'price', 'salesPrice', 'itemPrice', 'paidPrice'])
   const marketplaceStatus = readString(row, ['status', 'orderStatus', 'shippingStatus', 'displayStatus']) || 'unknown'
+  const normalizedStatus: NormalizedOrder['status'] = /취소|cancel/i.test(marketplaceStatus)
+    ? 'cancelled'
+    : /pre-shipping|상품\s*준비|주문\s*확인/i.test(marketplaceStatus)
+      ? 'confirmed'
+      : 'new'
   const orderedAt = readDate(row, ['payedAt', 'paidAt', 'orderedAt', 'createdAt', 'created_at', 'orderCreatedAt'])
   const address = readString(row, ['address', 'address1', 'shippingAddress', 'receiverAddress', 'roadAddress'])
     || readNestedString(row, ['shippingAddressInfo.address', 'shippingAddressInfo.address1', 'shippingInfo.address'])
@@ -223,7 +228,7 @@ function normalizeAlwaysOrder(row: JsonRecord): NormalizedOrder | null {
     marketplaceOrderId: orderId,
     marketplaceId: 'always',
     marketplaceStatus,
-    status: /취소|cancel/i.test(marketplaceStatus) ? 'cancelled' : 'new',
+    status: normalizedStatus,
     buyerName: readString(row, ['buyerName', 'ordererName', 'userName', 'nickname'])
       || readNestedString(row, ['userInfo.name', 'ordererInfo.name'])
       || '-',

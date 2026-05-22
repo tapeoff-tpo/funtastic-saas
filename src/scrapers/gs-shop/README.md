@@ -1,18 +1,18 @@
 # GS Shop RPA
 
-Base URL: `https://withgs.gsshop.com`
-Login URL: `https://withgs.gsshop.com/cmm/login`
+Base URL: `https://partners.gsshop.com`
+Login URL: `https://partners.gsshop.com/sign-in`
 
 ## Current scope
 
 - Login/session validation is wired through the common scraper worker.
 - Credentials should be saved as RPA login ID/password from marketplace settings.
-- GS Shop phone-based second-factor auth is not stored; API integration should be preferred for reliable automation.
+- The new Partners login exposes phone and email verification choices. Email verification can be automated later only if the mailbox can be read safely; otherwise use an operator-assisted RPA step.
 - Order collection intentionally stops with a clear `501` message until the actual order list or Excel download screen is confirmed.
 
 ## Next implementation target
 
-1. Confirm the order list URL after logging in to WithGS.
+1. Confirm the order list URL after logging in to GS Shop Partners.
 2. Identify the date filters and status filters for new/preparing orders.
 3. Prefer Excel download parsing if WithGS provides an order Excel button.
 4. Add invoice upload RPA after the order detail or bulk invoice upload screen is confirmed.

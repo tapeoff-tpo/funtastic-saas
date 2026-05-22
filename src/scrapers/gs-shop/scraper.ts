@@ -14,8 +14,8 @@ import type {
 } from '../types'
 
 const MARKETPLACE_ID: MarketplaceId = 'gs-shop'
-const BASE_URL = 'https://withgs.gsshop.com'
-const LOGIN_URL = `${BASE_URL}/cmm/login`
+const BASE_URL = 'https://partners.gsshop.com'
+const LOGIN_URL = `${BASE_URL}/sign-in`
 
 async function gotoGs(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: 60_000 })
@@ -85,7 +85,7 @@ async function clickLoginControl(page: Page): Promise<void> {
 }
 
 async function isLoggedIn(page: Page): Promise<boolean> {
-  if (/\/cmm\/login/i.test(page.url())) return false
+  if (/\/(cmm\/login|sign-in)/i.test(page.url())) return false
 
   const logout = page.getByText(/로그아웃|Logout/i).first()
   if (await logout.isVisible().catch(() => false)) return true

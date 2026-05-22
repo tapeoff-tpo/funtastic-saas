@@ -80,6 +80,12 @@ function extractVerificationCode(message: string): string | null {
 }
 
 function extractMessageDate(message: string): Date | null {
+  const internalDate = message.match(/INTERNALDATE\s+"([^"]+)"/i)?.[1]?.trim()
+  if (internalDate) {
+    const date = new Date(internalDate)
+    if (!Number.isNaN(date.getTime())) return date
+  }
+
   const dateHeader = message.match(/^Date:\s*(.+)$/im)?.[1]?.trim()
   if (!dateHeader) return null
   const date = new Date(dateHeader)
@@ -141,7 +147,7 @@ class SimpleImapClient {
   }
 
   async fetchMessage(uid: number): Promise<string> {
-    return this.command(`UID FETCH ${uid} (BODY.PEEK[])`, 20_000)
+    return this.command(`UID FETCH ${uid} (FLAGS INTERNALDATE BODY.PEEK[])`, 20_000)
   }
 
   close(): void {

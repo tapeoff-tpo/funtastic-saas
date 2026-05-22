@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v29'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v30'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -479,6 +479,36 @@ async function clickOhouseText(page: Page, pattern: RegExp): Promise<boolean> {
     .catch(() => false)
 }
 
+async function clickOhouseSecondFactorSubmit(page: Page): Promise<boolean> {
+  const roleClicked = await page
+    .getByRole('button', { name: /^인증하기$/ })
+    .first()
+    .click({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+  if (roleClicked) return true
+
+  const exactClicked = await page
+    .locator('button, input[type="submit"], input[type="button"], a')
+    .evaluateAll((elements) => {
+      const target = elements.find((element) => {
+        const text = element instanceof HTMLInputElement ? element.value : element.textContent || ''
+        const normalized = text.replace(/\s+/g, '')
+        return normalized === '인증하기'
+      }) as HTMLElement | undefined
+      target?.click()
+      return Boolean(target)
+    })
+    .catch(() => false)
+  if (exactClicked) return true
+
+  const input = page
+    .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
+    .first()
+  await input.press('Enter').catch(() => undefined)
+  return true
+}
+
 async function selectOhouseSecondFactorEmailMethod(page: Page): Promise<boolean> {
   const selected = await page
     .evaluate(() => {
@@ -616,7 +646,7 @@ async function handleEmailSecondFactor(
       .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
       .first()
     await setInputValue(codeInput, code)
-    await clickByText(page, /확인|인증|로그인|다음|완료/i)
+    await clickOhouseSecondFactorSubmit(page)
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(2500)
 

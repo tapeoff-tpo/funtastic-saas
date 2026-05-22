@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v31'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v32'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -494,13 +494,48 @@ async function clickOhouseSecondFactorSubmit(page: Page): Promise<boolean> {
       const target = elements.find((element) => {
         const text = element instanceof HTMLInputElement ? element.value : element.textContent || ''
         const normalized = text.replace(/\s+/g, '')
-        return normalized === '인증하기'
+        const ariaDisabled = element.getAttribute('aria-disabled') === 'true'
+        const disabled = element instanceof HTMLButtonElement || element instanceof HTMLInputElement
+          ? element.disabled
+          : false
+        return normalized === '인증하기' && !disabled && !ariaDisabled
       }) as HTMLElement | undefined
       target?.click()
       return Boolean(target)
     })
     .catch(() => false)
   if (exactClicked) return true
+
+  const customClicked = await page
+    .evaluate(() => {
+      const elements = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"], [onclick], div, span'))
+      const target = elements.find((element) => {
+        const text = element instanceof HTMLInputElement ? element.value : element.innerText || element.textContent || ''
+        const normalized = text.replace(/\s+/g, '')
+        if (normalized !== '인증하기') return false
+        const ariaDisabled = element.getAttribute('aria-disabled') === 'true'
+        const disabled = element instanceof HTMLButtonElement || element instanceof HTMLInputElement
+          ? element.disabled
+          : false
+        return !disabled && !ariaDisabled
+      })
+      const clickable = target?.closest<HTMLElement>('button, a, [role="button"], [onclick]') ?? target
+      if (!clickable) return false
+      clickable.click()
+      return true
+    })
+    .catch(() => false)
+  if (customClicked) return true
+
+  const formSubmitted = await page
+    .evaluate(() => {
+      const form = document.querySelector('form')
+      if (!(form instanceof HTMLFormElement)) return false
+      form.requestSubmit()
+      return true
+    })
+    .catch(() => false)
+  if (formSubmitted) return true
 
   const input = page
     .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
@@ -528,22 +563,26 @@ async function fillOhouseSecondFactorCode(page: Page, code: string): Promise<str
           input.name,
           input.id,
           input.autocomplete,
+          input.inputMode,
           input.placeholder,
           input.getAttribute('aria-label') ?? '',
+          input.getAttribute('pattern') ?? '',
+          typeof input.className === 'string' ? input.className : '',
           input.closest('form, section, div')?.textContent ?? '',
         ].join(' ')
         let score = 0
-        if (/one-time-code|otp|code|verification|auth/i.test(text)) score += 4
+        if (/one-time-code|otp|code|verification|auth|mfa/i.test(text)) score += 4
         if (/인증|번호|코드/.test(text)) score += 4
         if (input.maxLength > 0 && input.maxLength <= 6) score += 2
-        if (['tel', 'number'].includes(input.type)) score += 1
+        if (/numeric|decimal/.test(input.inputMode)) score += 2
+        if (['tel', 'number', 'password'].includes(input.type)) score += 1
         return score
       }
       const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
-        .filter((input) => !input.disabled && !input.readOnly && input.type !== 'hidden' && visible(input))
+        .filter((input) => !input.disabled && !input.readOnly && !['hidden', 'button', 'submit', 'checkbox', 'radio'].includes(input.type) && visible(input))
         .map((input) => ({ input, score: scoreInput(input) }))
-        .filter((item) => item.score > 0)
         .sort((a, b) => b.score - a.score)
+      if (inputs.length === 1) inputs[0].score += 3
 
       const digitInputs = inputs
         .filter(({ input }) => input.maxLength === 1 || input.getAttribute('maxlength') === '1')
@@ -555,26 +594,59 @@ async function fillOhouseSecondFactorCode(page: Page, code: string): Promise<str
         return `multi:${digitInputs.length}`
       }
 
-      const target = inputs[0]?.input
-      if (!target) return ''
-      setNativeValue(target, verificationCode)
-      target.focus()
-      return `single:maxLength=${target.maxLength || 'none'}`
+      return ''
     }, code)
     .catch(() => '')
 
   if (filled) return filled
 
-  const input = page
-    .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
-    .first()
-  await setInputValue(input, code)
-  return 'locator'
+  const selectors = [
+    'input[autocomplete="one-time-code"]:visible',
+    'input[inputmode="numeric"]:visible',
+    'input[name*="otp" i]:visible',
+    'input[name*="code" i]:visible',
+    'input[name*="verification" i]:visible',
+    'input[name*="auth" i]:visible',
+    'input[type="tel"]:visible',
+    'input[type="number"]:visible',
+    'input[type="password"]:visible',
+    'input[type="text"]:visible',
+    'input:not([type]):visible',
+  ]
+  for (const selector of selectors) {
+    const input = page.locator(selector).first()
+    if (!(await input.isVisible({ timeout: 500 }).catch(() => false))) continue
+    await input.click({ timeout: 3000 })
+    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+A' : 'Control+A').catch(() => undefined)
+    await page.keyboard.press('Backspace').catch(() => undefined)
+    await input.type(code, { delay: 70 })
+    await page.waitForTimeout(300)
+    const typedValue = await input.inputValue({ timeout: 1000 }).catch(() => '')
+    const filledDigits = await page
+      .evaluate(() => {
+        const visible = (element: HTMLElement) => {
+          const style = window.getComputedStyle(element)
+          const rect = element.getBoundingClientRect()
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+        }
+        return Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+          .filter((input) => !['hidden', 'button', 'submit', 'checkbox', 'radio'].includes(input.type) && visible(input))
+          .map((input) => input.value)
+          .join('')
+          .replace(/\D/g, '').length
+      })
+      .catch(() => typedValue.replace(/\D/g, '').length)
+    if (filledDigits >= code.length) {
+      return `typed:${selector}:valueLength=${typedValue.length}`
+    }
+  }
+
+  throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증번호 입력칸을 찾지 못했습니다. (${await summarizePage(page)})`)
 }
 
 async function readOhouseSecondFactorSubmitReason(page: Page): Promise<string | null> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  return bodyText.match(/인증 요청이 취소되었습니다\.?|다시 인증해 주세요\.?|인증번호[^.\n]*(?:일치|확인|틀|잘못|오류|실패)[^.\n]*|유효시간[^.\n]*(?:만료|00:00)[^.\n]*|인증[^.\n]*(?:만료|실패|취소)[^.\n]*/)?.[0] ?? null
+  return bodyText.match(/인증 요청이 취소되었습니다\.?|다시 인증해 주세요\.?|인증번호[^.\n]*(?:일치|확인|틀|잘못|오류|실패)[^.\n]*|유효시간[^.\n]*(?:만료|00:00)[^.\n]*|인증[^.\n]*(?:만료|실패)[^.\n]*/)?.[0] ?? null
 }
 
 async function waitForOhouseSecondFactorSubmitResult(page: Page, timeoutMs = 18_000): Promise<'passed' | 'stayed'> {

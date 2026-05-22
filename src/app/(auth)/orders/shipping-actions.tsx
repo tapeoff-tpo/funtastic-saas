@@ -14,6 +14,7 @@ import { forceBulkChangeStatusAction } from './actions'
 import type { OrderRow } from './columns'
 import type { OrderStage } from '@/lib/orders/types'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { supportsRpaInvoiceUpload } from '@/lib/marketplace/rpa-invoice-support'
 
 interface UserTemplate {
   id: string
@@ -53,7 +54,7 @@ interface MappingTarget {
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
 const EXACT_OPTION_ID = '__exact__'
 const RPA_INVOICE_POLL_INTERVAL_MS = 1500
-const RPA_INVOICE_POLL_TIMEOUT_MS = 85 * 1000
+const RPA_INVOICE_POLL_TIMEOUT_MS = 210 * 1000
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]
@@ -172,7 +173,9 @@ export function ShippingActions({
   }, [selectedOrderIds, selectedOrderMap])
   const selectedRpaOrders = useMemo(() => {
     return knownSelectedOrders.filter((order) =>
-      order.connectionId && getIntegrationMethod(order.marketplaceId) === 'rpa',
+      order.connectionId &&
+      getIntegrationMethod(order.marketplaceId) === 'rpa' &&
+      supportsRpaInvoiceUpload(order.marketplaceId),
     )
   }, [knownSelectedOrders])
   const selectedApiOrders = useMemo(() => {

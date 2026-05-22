@@ -17,6 +17,7 @@ import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { supportsRpaInvoiceUpload } from '@/lib/marketplace/rpa-invoice-support'
 import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 import { logOrderChange } from '@/lib/orders/change-log'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
@@ -139,6 +140,19 @@ export async function POST(req: NextRequest) {
       .limit(1)
 
     if (getIntegrationMethod(marketplaceId, { authType: conn?.authType, isManual: conn?.isManual }) === 'rpa') {
+      if (!supportsRpaInvoiceUpload(marketplaceId)) {
+        for (const s of groupShipments) {
+          results.push({
+            shipmentId: s.id,
+            trackingNumber: s.trackingNumber,
+            success: false,
+            error: `${marketplaceId} RPA 송장전송은 아직 지원하지 않습니다.`,
+            marketplaceId,
+          })
+        }
+        continue
+      }
+
       for (const s of groupShipments) {
         const ord = orderMap.get(s.orderId)
         if (!ord) {

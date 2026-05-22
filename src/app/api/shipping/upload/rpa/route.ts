@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { jobLogs, marketplaceConnections, orders, shipments } from '@/lib/db/schema'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { supportsRpaInvoiceUpload } from '@/lib/marketplace/rpa-invoice-support'
 import { logOrderChange } from '@/lib/orders/change-log'
 
 export async function POST(req: NextRequest) {
@@ -77,6 +78,10 @@ export async function POST(req: NextRequest) {
     })
     if (integrationMethod !== 'rpa') {
       results.push({ orderId: row.orderId, shipmentId: row.shipmentId, queued: false, error: 'API 연동 주문은 기존 송장 전송 버튼을 사용하세요.' })
+      continue
+    }
+    if (!supportsRpaInvoiceUpload(row.marketplaceId)) {
+      results.push({ orderId: row.orderId, shipmentId: row.shipmentId, queued: false, error: `${row.marketplaceId} RPA 송장전송은 아직 지원하지 않습니다.` })
       continue
     }
 

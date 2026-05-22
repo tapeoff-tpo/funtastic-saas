@@ -298,7 +298,7 @@ async function handleNaverEmailSecondFactor(page: Page, credentials: ScraperCred
   await fillVerificationCode(page, code)
 }
 
-async function isLoggedIn(page: Page): Promise<boolean> {
+async function isLoggedIn(page: Page, options?: { acceptAuthenticatedShell?: boolean }): Promise<boolean> {
   if (/\/(cmm\/login|sign-in)/i.test(page.url())) return false
 
   const logout = page.getByText(/로그아웃|Logout/i).first()
@@ -309,7 +309,27 @@ async function isLoggedIn(page: Page): Promise<boolean> {
     return true
   }
 
+  if (options?.acceptAuthenticatedShell) {
+    const url = new URL(page.url())
+    const isPartnersShell = url.origin === BASE_URL && (url.pathname === '/' || url.pathname === '')
+    if (isPartnersShell) {
+      const passwordInput = await page.locator('input[type="password"]').first().isVisible({ timeout: 1_000 }).catch(() => false)
+      const signInText = /아이디|비밀번호|인증번호 받기/.test(bodyText)
+      if (!passwordInput && !signInText) return true
+    }
+  }
+
   return false
+}
+
+async function waitForLoggedInAfterSubmit(page: Page): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < 15_000) {
+    if (await isLoggedIn(page, { acceptAuthenticatedShell: true })) return true
+    if (await isSecondFactorPage(page)) return false
+    await page.waitForTimeout(500)
+  }
+  return isLoggedIn(page, { acceptAuthenticatedShell: true })
 }
 
 async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Promise<void> {
@@ -359,11 +379,11 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   })
   await page.waitForTimeout(1_500)
 
-  if (!(await isLoggedIn(page)) && await isSecondFactorPage(page)) {
+  if (!(await waitForLoggedInAfterSubmit(page)) && await isSecondFactorPage(page)) {
     await handleNaverEmailSecondFactor(page, credentials)
   }
 
-  if (!(await isLoggedIn(page))) {
+  if (!(await isLoggedIn(page, { acceptAuthenticatedShell: true }))) {
     const bodyText = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '')
     if (/2차|인증|OTP|보안|휴대폰|문자|SMS|이메일/.test(bodyText)) {
       throw new MarketplaceApiError(

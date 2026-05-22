@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v32'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v33'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -938,29 +938,42 @@ async function openLoginForm(page: Page): Promise<void> {
     .catch(() => undefined)
 }
 
-async function openOrdersPage(page: Page): Promise<void> {
-  for (const url of ORDER_URL_CANDIDATES) {
-    await gotoOhouse(page, url).catch(() => undefined)
-    if (isOhouseSignInUrl(page.url())) continue
-    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return
-  }
-
+async function clickOhouseUnconfirmedOrdersCard(page: Page): Promise<boolean> {
   await gotoOhouse(page, PARTNER_BASE_URL)
   const clicked = await page
-    .locator('a, button')
-    .filter({ hasText: /주문\s*관리|주문|배송\s*관리/i })
-    .first()
-    .click({ timeout: 10_000 })
-    .then(() => true)
+    .evaluate(() => {
+      const elements = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"], [onclick], div, span'))
+      const target = elements.find((element) => {
+        const text = (element.innerText || element.textContent || '').replace(/\s+/g, ' ')
+        return /미확인\s*주문/.test(text) && /\d+\s*건/.test(text)
+      })
+      const clickable = target?.closest<HTMLElement>('a, button, [role="button"], [onclick]') ?? target
+      if (!clickable) return false
+      clickable.click()
+      return true
+    })
     .catch(() => false)
 
   if (clicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-    if (!isOhouseSignInUrl(page.url())) return
+    await page.waitForTimeout(1200)
+    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return true
   }
 
-  throw new MarketplaceApiError('ohouse', 500, `오늘의집 주문 관리 화면을 찾지 못했습니다. (${await summarizePage(page)})`)
+  return false
+}
+
+async function openOrdersPage(page: Page): Promise<void> {
+  if (await clickOhouseUnconfirmedOrdersCard(page)) return
+
+  await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
+  if (!isOhouseSignInUrl(page.url())) {
+    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return
+  }
+
+  throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 미확인주문 화면을 찾지 못했습니다. (${await summarizePage(page)})`)
 }
 
 async function applyOrderSearch(page: Page, since: Date, until: Date): Promise<void> {
@@ -1001,6 +1014,13 @@ async function clickDownloadConfirmIfPresent(page: Page): Promise<string | null>
     .catch(() => false)
 
   return clicked ? dialogText.replace(/\s+/g, ' ').trim().slice(0, 160) : null
+}
+
+async function readOhouseOrderListCount(page: Page): Promise<number | null> {
+  const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  const match = bodyText.match(/총\s*([\d,]+)\s*개의\s*주문\s*목록/)
+  if (!match) return null
+  return Number(match[1].replaceAll(',', ''))
 }
 
 async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Promise<Buffer> {
@@ -1059,6 +1079,83 @@ async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Pro
   }
 }
 
+async function selectVisibleOhouseOrders(page: Page): Promise<number> {
+  const selected = await page
+    .evaluate(() => {
+      const visible = (element: HTMLElement) => {
+        const style = window.getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+      }
+      const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+        .filter((input) => !input.disabled && visible(input))
+      if (checkboxes.length === 0) return 0
+
+      const headerCheckbox = checkboxes[0]
+      if (!headerCheckbox.checked) headerCheckbox.click()
+      return checkboxes.length
+    })
+    .catch(() => 0)
+  if (selected > 0) return selected
+
+  const checkbox = page.locator('input[type="checkbox"]').first()
+  if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await checkbox.check({ force: true, timeout: 3000 }).catch(async () => {
+      await checkbox.click({ force: true, timeout: 3000 })
+    })
+    return 1
+  }
+  return 0
+}
+
+async function confirmVisibleOhouseOrders(page: Page): Promise<string> {
+  const count = await readOhouseOrderListCount(page)
+  if (count === 0) return 'no-orders'
+
+  const selected = await selectVisibleOhouseOrders(page)
+  if (selected === 0) {
+    throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 확인할 체크박스를 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
+
+  const dialogPromise = page
+    .waitForEvent('dialog', { timeout: 5000 })
+    .then(async (dialog) => {
+      const message = dialog.message()
+      await dialog.accept().catch(() => undefined)
+      return message
+    })
+    .catch(() => null)
+
+  const clicked = await page
+    .getByRole('button', { name: /^주문\s*확인$/ })
+    .first()
+    .click({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+    || await page
+      .locator('button, input[type="button"], input[type="submit"], a')
+      .filter({ hasText: /^주문\s*확인$/ })
+      .first()
+      .click({ timeout: 5000 })
+      .then(() => true)
+      .catch(() => false)
+
+  if (!clicked) {
+    dialogPromise.catch(() => undefined)
+    throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 확인 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
+
+  const modalMessage = await clickDownloadConfirmIfPresent(page)
+  const dialogMessage = await Promise.race([
+    dialogPromise,
+    page.waitForTimeout(800).then(() => null),
+  ])
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await page.waitForTimeout(1500)
+
+  return `confirmed:${count ?? 'unknown'}${dialogMessage || modalMessage ? ` confirm=${dialogMessage || modalMessage}` : ''}`
+}
+
 export class OhouseScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'ohouse'
   readonly displayName = '오늘의집'
@@ -1115,8 +1212,7 @@ export class OhouseScraper implements MarketplaceScraper {
       }
       void since
       void until
-      await setProgress?.('오늘의집 주문 목록 확인 중...')
-      await setProgress?.('오늘의집 주문 엑셀 다운로드 중...')
+      await setProgress?.('오늘의집 미확인주문 목록 확인 중...')
       if (isOhouseSignInUrl(ctx.page.url())) {
         throw new MarketplaceApiError(
           'ohouse',
@@ -1124,8 +1220,20 @@ export class OhouseScraper implements MarketplaceScraper {
           `${OHOUSE_RPA_VERSION}: 오늘의집 주문 화면이 로그인 화면으로 리다이렉트되었습니다.${authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''} (${await summarizePage(ctx.page)})`,
         )
       }
+      const orderCount = await readOhouseOrderListCount(ctx.page)
+      if (orderCount === 0) {
+        await setProgress?.('오늘의집 미확인주문 0건')
+        return []
+      }
+      await setProgress?.(`오늘의집 미확인주문 ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
       const workbook = await downloadOrdersExcel(ctx.page, authFailures)
-      return this.parseOrdersExcel(workbook, credentials)
+      const orders = await this.parseOrdersExcel(workbook, credentials)
+      if (orders.length > 0) {
+        await setProgress?.(`오늘의집 ${orders.length}건 다운로드 완료, 주문 확인 처리 중...`)
+        const confirmResult = await confirmVisibleOhouseOrders(ctx.page)
+        await setProgress?.(`오늘의집 ${orders.length}건 다운로드 완료, ${confirmResult}`)
+      }
+      return orders
     } finally {
       await ctx.close()
     }

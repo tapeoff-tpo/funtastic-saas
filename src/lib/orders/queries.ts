@@ -650,6 +650,10 @@ export async function getOrders(filters: OrderFilters = {}) {
     && !filters.mapping
     && !filters.stage
     && !filters.isHeld
+    && !filters.excludeHeld
+    && !filters.excludeClaimLikeOrders
+    && !filters.scan
+    && !filters.scanResult
     && !filters.cancelTab
     && !filters.claimType
     && !filters.statuses?.length
@@ -998,7 +1002,11 @@ export async function getOrders(filters: OrderFilters = {}) {
     availableStock: number | null
     mappingCodeId: string
   } | null => {
-    const candidateIds = Array.from(new Set([marketplaceItemId, rawSku].map((id) => id?.trim()).filter(Boolean)))
+    const candidateIds = Array.from(new Set(
+      [marketplaceItemId, rawSku]
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ))
     const mappingCodeId = candidateIds
       .map((candidateId) => lookupMappingRef(mappingIndex, marketplaceId, candidateId, optionText))
       .find((ref): ref is string => !!ref)
@@ -1038,6 +1046,7 @@ export async function getOrders(filters: OrderFilters = {}) {
         displayOptionName: item.lockedOptionName ?? item.displayOptionName,
         quantity: item.lockedQuantity ?? item.quantity,
         sku: item.lockedSku ?? directInternalSku,
+        resolvedMappingCodeId: item.lockedMappingCodeId,
       }
     }
     if (!includeMappingDetails) return { ...item, sku: directInternalSku }
@@ -1069,6 +1078,19 @@ export async function getOrders(filters: OrderFilters = {}) {
     itemsByOrderId.set(item.orderId, existing)
   }
 
+  const getComputedMappingStatus = (order: typeof orders.$inferSelect, orderItemsData: ItemRow[]): MappingStatus => {
+    if (!order.mappedAt || orderItemsData.length === 0) return 'unmapped'
+
+    const resolvedCount = orderItemsData.filter((item) => {
+      const sku = item.sku?.trim()
+      return Boolean(sku || item.resolvedMappingCodeId)
+    }).length
+
+    if (resolvedCount === orderItemsData.length) return 'mapped'
+    if (resolvedCount > 0) return 'partial'
+    return 'unmapped'
+  }
+
   // Combine orders with items, claim, shipment info, and mapping status
   let ordersWithItems = orderRows.map((order) => {
     const shipment = shipmentByOrderId.get(order.id)
@@ -1094,7 +1116,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       // Phase 8 — inquiry indicator source for orders UI (SC-03)
       hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,
-      mappingStatus: order.mappedAt ? 'mapped' : 'unmapped',
+      mappingStatus: getComputedMappingStatus(order, orderItemsData),
       marketplaceDisplayName: getOrderMarketplaceDisplayName(order),
       historicalClaimStatuses: getOrderHistoricalClaimStatuses(order),
     }
@@ -1249,7 +1271,11 @@ export async function getOrderById(id: string, userId?: string) {
   // 확정상품명 fallback chain
   const items = orderItemRows.map((r) => {
     const locked = !!r.lockedAt
-    const candidateIds = Array.from(new Set([r.marketplaceItemId, r.sku].map((id) => id?.trim()).filter(Boolean)))
+    const candidateIds = Array.from(new Set(
+      [r.marketplaceItemId, r.sku]
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ))
     const mappingCodeId = !locked
       ? candidateIds
           .map((candidateId) => lookupMappingRef(detailMappingIndex, order.marketplaceId, candidateId, r.optionText))

@@ -465,8 +465,23 @@ export function ShippingActions({
         toast.error(err.error ?? '매핑 처리 실패')
         return
       }
-      const data = await res.json() as { applied: number }
-      toast.success(`${data.applied}건 매핑 완료`)
+      const data = await res.json() as {
+        applied?: number
+        failed?: number
+        failures?: Array<{ marketplaceOrderId: string; reason: string }>
+        error?: string
+      }
+      if ((data.failed ?? 0) > 0) {
+        const firstFailure = data.failures?.[0]
+        const suffix = firstFailure ? ` (${firstFailure.marketplaceOrderId}: ${firstFailure.reason})` : ''
+        if ((data.applied ?? 0) > 0) {
+          toast.warning(`${data.applied}건 매핑 완료, ${data.failed}건 실패${suffix}`, { duration: 8000 })
+        } else {
+          toast.error(data.error ?? `매핑 실패 ${suffix}`, { duration: 8000 })
+        }
+      } else {
+        toast.success(`${data.applied ?? 0}건 매핑 완료`)
+      }
       router.refresh()
     } finally {
       setApplyingMappings(false)

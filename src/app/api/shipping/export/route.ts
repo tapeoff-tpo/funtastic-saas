@@ -157,6 +157,7 @@ export async function GET(request: NextRequest) {
       const sku: string = primary?.sku ?? rawFirst?.sku ?? ''
       const optionText = primary?.optionText ?? ''
       const marketplaceName = getMarketplaceExportName(order)
+      const collectedDate = order.collectedAt ? new Date(order.collectedAt) : null
 
       return {
         // 사용자 노출용 8자리 내부 주문번호
@@ -170,6 +171,7 @@ export async function GET(request: NextRequest) {
         marketplaceId: marketplaceName,
         marketplaceName,
         marketplaceCode: order.marketplaceId,
+        marketplaceStatus: order.marketplaceStatus ?? order.status,
         buyerName: order.buyerName,
         // 기본 '구매자연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
         buyerPhone: order.buyerPhone2 || order.buyerPhone || '',
@@ -211,7 +213,8 @@ export async function GET(request: NextRequest) {
         // ─ DB 컬럼 미존재 — 사용자가 fixedValue 로 채우거나 비워둠 ─
         supplyPrice: '',
         // 수집일자 — yyyy-mm-dd 포맷
-        collectedAt: order.collectedAt ? new Date(order.collectedAt).toISOString().slice(0, 10) : '',
+        collectedAt: collectedDate ? collectedDate.toISOString().slice(0, 10) : '',
+        collectedDateYmd: collectedDate ? collectedDate.toISOString().slice(0, 10).replaceAll('-', '') : '',
         // 기타1~10 — fixedValue 로 채우는 용도
         etc1: '',
         etc2: '',

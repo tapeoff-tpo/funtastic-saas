@@ -142,7 +142,11 @@ export async function expandOrderItemsWithMapping(
   for (const it of items) {
     const ord = orderById.get(it.orderId)
     const orderQty = it.quantity * (it.skuMultiplier ?? 1)
-    const candidateIds = Array.from(new Set([it.marketplaceItemId, it.sku].map((id) => id?.trim()).filter(Boolean)))
+    const candidateIds = Array.from(new Set(
+      [it.marketplaceItemId, it.sku]
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ))
     const mappingCodeId = ord
       ? candidateIds
           .map((candidateId) => lookupMappingRef(mappingIndex, ord.marketplaceId, candidateId, it.optionText))

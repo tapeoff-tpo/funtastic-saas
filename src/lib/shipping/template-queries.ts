@@ -22,6 +22,8 @@ function builtInTemplateForUser(template: (typeof BUILT_IN_CARRIER_TEMPLATES)[nu
   }
 }
 
+const BUILT_IN_TEMPLATE_NAMES = new Set(BUILT_IN_CARRIER_TEMPLATES.map((template) => template.name))
+
 /**
  * Get carrier templates filtered by userId and optional carrierId.
  */
@@ -42,12 +44,9 @@ export async function getCarrierTemplates(
   const templates = rows as unknown as CarrierTemplate[]
   if (carrierId) return templates
 
-  const existingNames = new Set(templates.map((template) => template.name))
   return [
-    ...templates,
-    ...BUILT_IN_CARRIER_TEMPLATES
-      .filter((template) => !existingNames.has(template.name))
-      .map((template) => builtInTemplateForUser(template, userId)),
+    ...templates.filter((template) => !BUILT_IN_TEMPLATE_NAMES.has(template.name)),
+    ...BUILT_IN_CARRIER_TEMPLATES.map((template) => builtInTemplateForUser(template, userId)),
   ]
 }
 
@@ -64,6 +63,11 @@ export async function getCarrierTemplateById(
     .select()
     .from(carrierTemplates)
     .where(eq(carrierTemplates.id, templateId))
+
+  const builtInByName = row
+    ? BUILT_IN_CARRIER_TEMPLATES.find((template) => template.name === row.name)
+    : null
+  if (builtInByName) return builtInTemplateForUser(builtInByName, row.userId)
 
   return (row as unknown as CarrierTemplate) ?? null
 }

@@ -15,10 +15,137 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { orders } from '@/lib/db/schema'
+import { mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
+import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+
+type ValidationFailure = {
+  orderId: string
+  marketplaceOrderId: string
+  reason: string
+}
+
+async function validateOrdersHaveInternalMappings(
+  userId: string,
+  orderIds: string[],
+): Promise<{ validOrderIds: string[]; failures: ValidationFailure[] }> {
+  const targetRows = await db
+    .select({
+      orderId: orders.id,
+      marketplaceId: orders.marketplaceId,
+      marketplaceOrderId: orders.marketplaceOrderId,
+      itemId: orderItems.id,
+      marketplaceItemId: orderItems.marketplaceItemId,
+      sku: orderItems.sku,
+      optionText: orderItems.optionText,
+    })
+    .from(orders)
+    .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+    .where(and(eq(orders.userId, userId), inArray(orders.id, orderIds)))
+
+  const orderNoById = new Map<string, string>()
+  const rowsByOrderId = new Map<string, typeof targetRows>()
+  for (const row of targetRows) {
+    orderNoById.set(row.orderId, row.marketplaceOrderId)
+    const list = rowsByOrderId.get(row.orderId) ?? []
+    list.push(row)
+    rowsByOrderId.set(row.orderId, list)
+  }
+
+  const [productRows, variantRows, sourceRows, componentRows] = await Promise.all([
+    db
+      .select({ sku: products.internalSku })
+      .from(products)
+      .where(eq(products.userId, userId)),
+    db
+      .select({ sku: productVariants.sku })
+      .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(eq(products.userId, userId)),
+    db
+      .select({
+        mappingCodeId: mappingSources.mappingCodeId,
+        marketplaceId: mappingSources.marketplaceId,
+        marketplaceProductId: mappingSources.marketplaceProductId,
+        marketplaceOptionId: mappingSources.marketplaceOptionId,
+      })
+      .from(mappingSources)
+      .where(eq(mappingSources.userId, userId)),
+    db
+      .select({
+        mappingCodeId: mappingComponents.mappingCodeId,
+        sku: mappingComponents.sku,
+      })
+      .from(mappingComponents)
+      .where(eq(mappingComponents.userId, userId)),
+  ])
+
+  const validSkus = new Set<string>()
+  for (const row of productRows) validSkus.add(row.sku.trim())
+  for (const row of variantRows) validSkus.add(row.sku.trim())
+
+  const mappingIndex = buildMappingIndex(
+    sourceRows.map<MappingSource>((row) => ({
+      marketplaceId: row.marketplaceId,
+      marketplaceProductId: row.marketplaceProductId,
+      marketplaceOptionId: row.marketplaceOptionId,
+      ref: row.mappingCodeId,
+    })),
+  )
+
+  const componentsByCode = new Map<string, string[]>()
+  for (const row of componentRows) {
+    const list = componentsByCode.get(row.mappingCodeId) ?? []
+    list.push(row.sku.trim())
+    componentsByCode.set(row.mappingCodeId, list)
+  }
+
+  const isItemMapped = (item: typeof targetRows[number]): boolean => {
+    const directSku = item.sku?.trim()
+    if (directSku && validSkus.has(directSku)) return true
+
+    const candidateIds = Array.from(new Set(
+      [item.marketplaceItemId, item.sku]
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ))
+    const mappingCodeId = candidateIds
+      .map((candidateId) => lookupMappingRef(mappingIndex, item.marketplaceId, candidateId, item.optionText))
+      .find((ref): ref is string => !!ref)
+    if (!mappingCodeId) return false
+
+    const componentSkus = componentsByCode.get(mappingCodeId) ?? []
+    return componentSkus.length > 0 && componentSkus.every((sku) => validSkus.has(sku))
+  }
+
+  const validOrderIds: string[] = []
+  const failures: ValidationFailure[] = []
+
+  for (const orderId of orderIds) {
+    const items = rowsByOrderId.get(orderId) ?? []
+    const marketplaceOrderId = orderNoById.get(orderId) ?? orderId
+    if (items.length === 0) {
+      failures.push({ orderId, marketplaceOrderId, reason: '주문 품목이 없습니다.' })
+      continue
+    }
+
+    const failedItem = items.find((item) => !isItemMapped(item))
+    if (failedItem) {
+      failures.push({
+        orderId,
+        marketplaceOrderId,
+        reason: `내부 상품코드 매핑 실패: ${failedItem.sku || failedItem.marketplaceItemId || failedItem.itemId}`,
+      })
+      continue
+    }
+
+    validOrderIds.push(orderId)
+  }
+
+  return { validOrderIds, failures }
+}
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -43,6 +170,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'orderIds must be a non-empty array' }, { status: 400 })
   }
 
+  const { validOrderIds, failures } = await validateOrdersHaveInternalMappings(workspaceUserId, orderIds)
+
+  if (validOrderIds.length === 0) {
+    return NextResponse.json({
+      applied: 0,
+      failed: failures.length,
+      failures,
+      error: failures[0]?.reason ?? '내부 상품코드로 매핑된 주문이 없습니다.',
+    }, { status: 409 })
+  }
+
   const result = await db
     .update(orders)
     .set({
@@ -50,7 +188,7 @@ export async function POST(req: NextRequest) {
       mappedByUserId: user.id,
       updatedAt: new Date(),
     })
-    .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, orderIds)))
+    .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, validOrderIds)))
     .returning({ id: orders.id, mappedAt: orders.mappedAt })
 
   await logOrderChanges(result.map((order) => ({
@@ -63,5 +201,5 @@ export async function POST(req: NextRequest) {
     after: { mappedAt: order.mappedAt },
   })))
 
-  return NextResponse.json({ applied: result.length })
+  return NextResponse.json({ applied: result.length, failed: failures.length, failures })
 }

@@ -79,6 +79,8 @@ export interface SsgmallDirectionOrder {
   shppNo?: string
   shppSeq?: number | string
   ordStatCd?: string
+  ordStatNm?: string
+  ordItemStatNm?: string
   shppStatCd?: string
   shppStatNm?: string
   shppTabProgStatCd?: string

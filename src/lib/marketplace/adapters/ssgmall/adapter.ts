@@ -221,6 +221,26 @@ function getSsgShippingIdentity(rawData?: Record<string, unknown>): { shppNo: st
   return { shppNo: String(shppNo), shppSeq: String(shppSeq) }
 }
 
+function isUnpaidSsgOrder(order: SsgmallDirectionOrder): boolean {
+  const statusCode = compactJoin([
+    order.ordItemStatCd,
+    order.ordStatCd,
+    order.shppProgStatDtlCd,
+    order.lastShppProgStatDtlCd,
+    order.shppTabProgStatCd,
+  ], ' ')
+  const statusText = compactJoin([
+    order.ordStatNm,
+    order.ordItemStatNm,
+    order.shppStatNm,
+    order.lastShppProgStatDtlNm,
+  ], ' ')
+
+  if (/\b(100|110)\b/.test(statusCode)) return true
+  if (/입금|미입금|결제대기|결제전|입금대기|무통장/.test(statusText)) return true
+  return false
+}
+
 function mapCarrierId(carrierId: string): string {
   return SSGMALL_CARRIER_CODES[carrierId] ?? carrierId
 }
@@ -256,10 +276,6 @@ export class SsgmallAdapter implements MarketplaceAdapter {
       const warehousePeriodTypes: SsgmallWarehouseOutRequest['requestWarehouseOut']['perdType'][] = ['01', '02', '03', '04']
       const responses = await Promise.all([
         {
-          label: 'order-inquiry-all',
-          response: await this.listOrderInquiries(since, until),
-        },
-        {
           label: 'order-inquiry-120',
           response: await this.listOrderInquiries(since, until, '120'),
         },
@@ -293,7 +309,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
           ...getWarehouseOuts(response),
         ]
         diagnostics.push(summarizeCollectionResponse(label, response, responseOrders.length))
-        orders.push(...responseOrders)
+        orders.push(...responseOrders.filter((order) => !isUnpaidSsgOrder(order)))
       }
 
       if (orders.length === 0) {

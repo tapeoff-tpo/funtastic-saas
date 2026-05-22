@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v21'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v22'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -79,6 +79,10 @@ async function summarizePage(page: Page): Promise<string> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 300)
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
+}
+
+function isOhouseSignInUrl(url: string): boolean {
+  return /^\/signin(?:\/|$)/.test(new URL(url).pathname)
 }
 
 async function gotoOhouse(page: Page, url = PARTNER_BASE_URL): Promise<void> {
@@ -176,6 +180,7 @@ function watchOhouseAuthFailures(page: Page): string[] {
 interface OhouseLoginDiagnostics {
   secondFactor: string
   authHeaderRequests: string[]
+  loginResponses: string[]
   observedAuthorization?: string
   observedAuthorizationShape?: string
   loginWait: string
@@ -185,6 +190,7 @@ function createOhouseLoginDiagnostics(): OhouseLoginDiagnostics {
   return {
     secondFactor: 'not-checked',
     authHeaderRequests: [],
+    loginResponses: [],
     loginWait: 'not-started',
   }
 }
@@ -205,7 +211,35 @@ function watchOhouseAuthHeaders(page: Page, diagnostics: OhouseLoginDiagnostics)
 }
 
 function formatLoginDiagnostics(diagnostics: OhouseLoginDiagnostics): string {
-  return ` secondFactor=${diagnostics.secondFactor} loginWait=${diagnostics.loginWait}${diagnostics.observedAuthorization ? ' observedAuth=jwt' : ` observedAuth=${diagnostics.observedAuthorizationShape ?? 'no'}`}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
+  return ` secondFactor=${diagnostics.secondFactor} loginWait=${diagnostics.loginWait}${diagnostics.observedAuthorization ? ' observedAuth=jwt' : ` observedAuth=${diagnostics.observedAuthorizationShape ?? 'no'}`}${diagnostics.loginResponses.length > 0 ? ` loginResponses=${diagnostics.loginResponses.join(' | ')}` : ''}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
+}
+
+function watchOhouseLoginResponses(page: Page, diagnostics: OhouseLoginDiagnostics): void {
+  page.on('response', async (response) => {
+    const url = response.url()
+    if (!/api\.ohou\.se\/orora\/member\/v1\/auth(?:\/|$)/i.test(url)) return
+
+    const method = response.request().method()
+    const pathname = new URL(url).pathname
+    let brief = ''
+    try {
+      const text = await response.text()
+      const parsed = JSON.parse(text) as Record<string, unknown>
+      const payload = parsed.payload && typeof parsed.payload === 'object' ? parsed.payload as Record<string, unknown> : undefined
+      const safePayloadKeys = payload ? Object.keys(payload).filter((key) => !/token|password|secret/i.test(key)).join(',') : ''
+      brief = JSON.stringify({
+        success: parsed.success,
+        errorCode: parsed.errorCode,
+        message: parsed.message,
+        payloadKeys: safePayloadKeys || undefined,
+      })
+    } catch {
+      brief = ''
+    }
+
+    diagnostics.loginResponses.push(`${method} ${response.status()} ${pathname}${brief ? ` ${brief}` : ''}`)
+    if (diagnostics.loginResponses.length > 8) diagnostics.loginResponses.shift()
+  })
 }
 
 interface OhouseApiSessionCheck {
@@ -366,9 +400,10 @@ function formatApiSessionCheck(check: OhouseApiSessionCheck): string {
 }
 
 async function isSecondFactorPage(page: Page): Promise<boolean> {
+  if (/\/signin\/multi-factor(?:\/|$)/.test(new URL(page.url()).pathname)) return true
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   if (/인증\s*(번호|코드)|2차\s*인증|이메일\s*인증|메일로\s*전송/.test(bodyText)) return true
-  return page.locator('input[name*="otp" i], input[name*="code" i], input[autocomplete="one-time-code"]').first().isVisible({ timeout: 1000 }).catch(() => false)
+  return page.locator('input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[autocomplete="one-time-code"]').first().isVisible({ timeout: 1000 }).catch(() => false)
 }
 
 async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<string> {
@@ -381,7 +416,22 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
     throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증이 필요하지만 네이버 메일 인증 정보가 저장되어 있지 않습니다.')
   }
 
-  await clickByText(page, /인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+  if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
+    await page
+      .evaluate(() => {
+        const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
+        const emailRadio = radios.find((radio) => radio.value !== 'SMS') ?? radios[0]
+        emailRadio?.click()
+      })
+      .catch(() => undefined)
+    await clickByText(page, /인증하기|다음|전송|발송/i)
+    await page.waitForURL(/\/signin\/multi-factor\/auth/, { timeout: 15_000 }).catch(() => undefined)
+    await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+    await page.waitForTimeout(1500)
+  } else {
+    await clickByText(page, /인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)|다시\s*인증하기/i).catch(() => false)
+  }
+
   const code = await readNaverVerificationCode({
     email: naverEmail,
     password: naverPassword,
@@ -394,7 +444,7 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
   }
 
   const codeInput = page
-    .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="auth" i], input[type="tel"], input[type="text"]')
+    .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
     .first()
   await setInputValue(codeInput, code)
   await clickByText(page, /확인|인증|로그인|다음|완료/i)
@@ -403,15 +453,20 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
   return 'code-submitted'
 }
 
-async function waitForOhouseLoginResult(page: Page, diagnostics: OhouseLoginDiagnostics): Promise<void> {
+async function waitForOhouseLoginResult(
+  page: Page,
+  diagnostics: OhouseLoginDiagnostics,
+  options: { stopOnSecondFactor?: boolean } = {},
+): Promise<void> {
   const deadline = Date.now() + 20_000
+  const stopOnSecondFactor = options.stopOnSecondFactor ?? true
   diagnostics.loginWait = 'waiting'
   while (Date.now() < deadline) {
     if (diagnostics.observedAuthorization && isJwtAuthorization(diagnostics.observedAuthorization)) {
       diagnostics.loginWait = 'jwt-observed'
       return
     }
-    if (await isSecondFactorPage(page)) {
+    if (stopOnSecondFactor && await isSecondFactorPage(page)) {
       diagnostics.loginWait = 'second-factor-detected'
       return
     }
@@ -420,7 +475,7 @@ async function waitForOhouseLoginResult(page: Page, diagnostics: OhouseLoginDiag
       diagnostics.loginWait = 'login-error-visible'
       return
     }
-    if (!/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
+    if (!isOhouseSignInUrl(page.url())) {
       const token = await readOhouseAuthToken(page)
       if (token?.value && isJwtAuthorization(token.value)) {
         diagnostics.observedAuthorization = token.value
@@ -462,10 +517,10 @@ async function performOhouseLogin(
   await submitLogin(page, diagnostics)
   diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
   if (diagnostics.secondFactor === 'code-submitted') {
-    await waitForOhouseLoginResult(page, diagnostics)
+    await waitForOhouseLoginResult(page, diagnostics, { stopOnSecondFactor: false })
   }
 
-  if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
+  if (isOhouseSignInUrl(page.url())) {
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
     const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력|계정.*확인|판매자.*확인|인증.*필요/)?.[0]
     return `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후에도 로그인 화면에 머물러 있습니다.${reason ? ` (${reason})` : ' 오늘의집 ID/PW, 판매자 계정 권한, 2차 인증 설정을 확인해주세요.'} (${await summarizePage(page)})`
@@ -528,7 +583,7 @@ async function openLoginForm(page: Page): Promise<void> {
 async function openOrdersPage(page: Page): Promise<void> {
   for (const url of ORDER_URL_CANDIDATES) {
     await gotoOhouse(page, url).catch(() => undefined)
-    if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) continue
+    if (isOhouseSignInUrl(page.url())) continue
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
     if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return
   }
@@ -544,7 +599,7 @@ async function openOrdersPage(page: Page): Promise<void> {
 
   if (clicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-    if (!/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) return
+    if (!isOhouseSignInUrl(page.url())) return
   }
 
   throw new MarketplaceApiError('ohouse', 500, `오늘의집 주문 관리 화면을 찾지 못했습니다. (${await summarizePage(page)})`)
@@ -591,7 +646,7 @@ async function clickDownloadConfirmIfPresent(page: Page): Promise<string | null>
 }
 
 async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Promise<Buffer> {
-  if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
+  if (isOhouseSignInUrl(page.url())) {
     throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 화면이라 엑셀 다운로드를 시도할 수 없습니다. (${await summarizePage(page)})`)
   }
   const dialogPromise = page
@@ -679,6 +734,7 @@ export class OhouseScraper implements MarketplaceScraper {
     const authFailures = watchOhouseAuthFailures(ctx.page)
     const diagnostics = createOhouseLoginDiagnostics()
     watchOhouseAuthHeaders(ctx.page, diagnostics)
+    watchOhouseLoginResponses(ctx.page, diagnostics)
 
     try {
       await setProgress?.('오늘의집 새 브라우저 세션으로 로그인 중...')
@@ -687,7 +743,7 @@ export class OhouseScraper implements MarketplaceScraper {
 
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')
       await openOrdersPage(ctx.page)
-      if (!(await waitForOhouseAppReady(ctx.page)) || /\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
+      if (!(await waitForOhouseAppReady(ctx.page)) || isOhouseSignInUrl(ctx.page.url())) {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
       await setProgress?.('오늘의집 주문 API 인증 확인 중...')
@@ -703,7 +759,7 @@ export class OhouseScraper implements MarketplaceScraper {
       void until
       await setProgress?.('오늘의집 주문 목록 확인 중...')
       await setProgress?.('오늘의집 주문 엑셀 다운로드 중...')
-      if (/\/signin(?:$|\?)/.test(new URL(ctx.page.url()).pathname)) {
+      if (isOhouseSignInUrl(ctx.page.url())) {
         throw new MarketplaceApiError(
           'ohouse',
           401,

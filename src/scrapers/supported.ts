@@ -7,6 +7,7 @@ export const REGISTERED_SCRAPER_MARKETPLACE_IDS = [
   'banana-b2b',
   'domesin',
   'ohouse',
+  'gs-shop',
 ] as const satisfies readonly MarketplaceId[]
 
 const registeredScraperMarketplaceIds = new Set<MarketplaceId>(REGISTERED_SCRAPER_MARKETPLACE_IDS)

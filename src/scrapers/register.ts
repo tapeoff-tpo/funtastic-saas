@@ -17,6 +17,7 @@ import { BananaB2bScraper } from './banana-b2b/scraper'
 import { DomesinScraper } from './domesin/scraper'
 import { REGISTERED_SCRAPER_MARKETPLACE_IDS } from './supported'
 import { OhouseScraper } from './ohouse/scraper'
+import { GsShopScraper } from './gs-shop/scraper'
 // import { AblyScraper } from './ably/scraper'
 
 void REGISTERED_SCRAPER_MARKETPLACE_IDS
@@ -27,4 +28,5 @@ registerScraper(new TobizonScraper())
 registerScraper(new BananaB2bScraper())
 registerScraper(new DomesinScraper())
 registerScraper(new OhouseScraper())
+registerScraper(new GsShopScraper())
 // registerScraper(new AblyScraper())

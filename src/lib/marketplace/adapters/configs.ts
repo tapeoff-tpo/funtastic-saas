@@ -381,9 +381,9 @@ const hyundaiHmallAdapter = createStubAdapter({
 const gsShopAdapter = createStubAdapter({
   id: 'gs-shop',
   name: 'GS샵',
-  authType: 'api_key',
+  authType: 'session',
   rateLimitPerSecond: 20,
-  requiredCredentials: ['api_key', 'seller_id'],
+  requiredCredentials: ['email', 'password'],
 })
 
 const esmAdapter = createStubAdapter({

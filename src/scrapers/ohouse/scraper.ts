@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v18'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v19'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -176,6 +176,7 @@ function watchOhouseAuthFailures(page: Page): string[] {
 interface OhouseLoginDiagnostics {
   secondFactor: string
   authHeaderRequests: string[]
+  observedAuthorization?: string
 }
 
 function createOhouseLoginDiagnostics(): OhouseLoginDiagnostics {
@@ -190,13 +191,14 @@ function watchOhouseAuthHeaders(page: Page, diagnostics: OhouseLoginDiagnostics)
     const url = request.url()
     if (!/api\.ohou\.se\/orora/i.test(url)) return
     const authorization = request.headers().authorization
+    if (authorization) diagnostics.observedAuthorization = authorization
     diagnostics.authHeaderRequests.push(`${authorization ? 'auth' : 'no-auth'} ${url}`)
     if (diagnostics.authHeaderRequests.length > 8) diagnostics.authHeaderRequests.shift()
   })
 }
 
 function formatLoginDiagnostics(diagnostics: OhouseLoginDiagnostics): string {
-  return ` secondFactor=${diagnostics.secondFactor}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
+  return ` secondFactor=${diagnostics.secondFactor}${diagnostics.observedAuthorization ? ' observedAuth=yes' : ' observedAuth=no'}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
 }
 
 interface OhouseApiSessionCheck {
@@ -294,10 +296,11 @@ async function readOhouseAuthToken(page: Page): Promise<OhouseAuthToken | null> 
     .catch(() => ({ value: '', source: '', storageKeys: ['token-scan-failed'] }))
 }
 
-async function checkOhouseApiSession(page: Page): Promise<OhouseApiSessionCheck> {
+async function checkOhouseApiSession(page: Page, observedAuthorization?: string): Promise<OhouseApiSessionCheck> {
   const token = await readOhouseAuthToken(page)
-  if (token?.value) {
-    await page.setExtraHTTPHeaders({ Authorization: token.value }).catch(() => undefined)
+  const authorization = token?.value || observedAuthorization || ''
+  if (authorization) {
+    await page.setExtraHTTPHeaders({ Authorization: authorization }).catch(() => undefined)
   }
 
   return page
@@ -323,17 +326,17 @@ async function checkOhouseApiSession(page: Page): Promise<OhouseApiSessionCheck>
           error: error instanceof Error ? error.message : 'api session check failed',
         }
       }
-    }, { url: OHOUSE_ACCOUNT_API_URL, authorization: token?.value ?? '' })
+    }, { url: OHOUSE_ACCOUNT_API_URL, authorization })
     .then((result) => ({
       ...result,
-      tokenSource: token?.source || undefined,
+      tokenSource: token?.source || (observedAuthorization ? 'observed-request-header' : undefined),
       storageKeys: token?.storageKeys,
     }))
     .catch((error) => ({
       ok: false,
       url: OHOUSE_ACCOUNT_API_URL,
       error: error instanceof Error ? error.message : 'api session check failed',
-      tokenSource: token?.source || undefined,
+      tokenSource: token?.source || (observedAuthorization ? 'observed-request-header' : undefined),
       storageKeys: token?.storageKeys,
     }))
 }
@@ -433,7 +436,7 @@ async function completeOhouseAppAuth(
   credentials: ScraperCredentials,
   diagnostics: OhouseLoginDiagnostics,
 ): Promise<OhouseApiSessionCheck> {
-  let check = await checkOhouseApiSession(page)
+  let check = await checkOhouseApiSession(page, diagnostics.observedAuthorization)
   if (check.ok) return check
 
   const appLoginClicked = await page
@@ -450,7 +453,7 @@ async function completeOhouseAppAuth(
     diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
     await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
     await waitForOhouseAppReady(page).catch(() => false)
-    check = await checkOhouseApiSession(page)
+    check = await checkOhouseApiSession(page, diagnostics.observedAuthorization)
   }
 
   return check

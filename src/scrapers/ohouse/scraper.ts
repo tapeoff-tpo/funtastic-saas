@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v25'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v26'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -413,6 +413,22 @@ async function readOhouseSecondFactorRemainingSeconds(page: Page): Promise<numbe
   return Number(match[1]) * 60 + Number(match[2])
 }
 
+async function hasExpiredOhouseSecondFactorTimer(page: Page): Promise<boolean> {
+  const bodyText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '')
+  return /00:00\s*남음|유효\s*시간.*만료|인증.*만료/.test(bodyText)
+}
+
+async function waitForOhouseSecondFactorFresh(page: Page, timeoutMs = 7000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const remainingSeconds = await readOhouseSecondFactorRemainingSeconds(page)
+    if (remainingSeconds !== null && remainingSeconds > 20) return true
+    if (remainingSeconds === null && !(await hasExpiredOhouseSecondFactorTimer(page))) return true
+    await page.waitForTimeout(500)
+  }
+  return false
+}
+
 async function requestOhouseSecondFactorEmail(page: Page): Promise<boolean> {
   return page
     .evaluate(async () => {
@@ -440,6 +456,26 @@ async function requestOhouseSecondFactorEmail(page: Page): Promise<boolean> {
     .catch(() => false)
 }
 
+async function clickOhouseText(page: Page, pattern: RegExp): Promise<boolean> {
+  const textClicked = await page.getByText(pattern).first().click({ timeout: 4000 }).then(() => true).catch(() => false)
+  if (textClicked) return true
+
+  return page
+    .evaluate((source) => {
+      const pattern = new RegExp(source, 'i')
+      const elements = Array.from(document.querySelectorAll<HTMLElement>('button, a, input, [role="button"], [onclick], div, span'))
+      const target = elements.find((element) => {
+        const text = element instanceof HTMLInputElement ? element.value : element.innerText || element.textContent || ''
+        return pattern.test(text)
+      })
+      const clickable = target?.closest<HTMLElement>('button, a, input, [role="button"], [onclick]')
+      if (!clickable) return false
+      clickable?.click()
+      return true
+    }, pattern.source)
+    .catch(() => false)
+}
+
 async function selectOhouseSecondFactorEmailMethod(page: Page): Promise<boolean> {
   const selected = await page
     .evaluate(() => {
@@ -453,37 +489,46 @@ async function selectOhouseSecondFactorEmailMethod(page: Page): Promise<boolean>
   return selected
 }
 
+async function sendOhouseSecondFactorFromMethodPage(page: Page): Promise<boolean> {
+  await selectOhouseSecondFactorEmailMethod(page)
+  const clicked = await clickByText(page, /인증하기|다음|전송|발송/i)
+  if (!clicked) return false
+  await page.waitForURL(/\/signin\/multi-factor\/auth/, { timeout: 15_000 }).catch(() => undefined)
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  return waitForOhouseSecondFactorFresh(page)
+}
+
 async function clickOhouseSecondFactorResend(page: Page): Promise<boolean> {
-  const resendButton = page
-    .locator('button, input[type="submit"], input[type="button"], a')
-    .filter({ hasText: /다시\s*인증하기/ })
-    .first()
-
-  const clicked = await resendButton.click({ timeout: 4000 }).then(() => true).catch(() => false)
-  const fallbackClicked = clicked ? true : await clickByText(page, /다시\s*인증하기/i).catch(() => false)
-  if (!fallbackClicked) return false
-
+  const clicked = await clickOhouseText(page, /다시\s*인증하기/i)
+  if (!clicked) return false
   await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
   await page.waitForTimeout(1000)
 
   if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
-    await selectOhouseSecondFactorEmailMethod(page)
-    await clickByText(page, /인증하기|다음|전송|발송/i)
-    await page.waitForURL(/\/signin\/multi-factor\/auth/, { timeout: 15_000 }).catch(() => undefined)
-    await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+    return sendOhouseSecondFactorFromMethodPage(page)
   }
 
-  return true
+  return waitForOhouseSecondFactorFresh(page)
 }
 
-async function refreshOhouseSecondFactorEmail(page: Page): Promise<boolean> {
+async function openOhouseSecondFactorMethodPage(page: Page): Promise<boolean> {
+  await gotoOhouse(page, `${PARTNER_BASE_URL}/signin/multi-factor/method`).catch(() => undefined)
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  if (!/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) return false
+  return sendOhouseSecondFactorFromMethodPage(page)
+}
+
+async function refreshOhouseSecondFactorEmail(page: Page): Promise<'clicked' | 'api' | 'method' | 'failed'> {
   const clicked = await clickOhouseSecondFactorResend(page)
-  if (clicked) return true
+  if (clicked) return 'clicked'
 
   const requested = await requestOhouseSecondFactorEmail(page)
-  if (requested) return true
+  if (requested && (await waitForOhouseSecondFactorFresh(page))) return 'api'
 
-  return clickByText(page, /인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+  const methodOpened = await openOhouseSecondFactorMethodPage(page)
+  if (methodOpened) return 'method'
+
+  return 'failed'
 }
 
 async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<string> {
@@ -499,15 +544,15 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
   let codeRequestedAt = new Date(Date.now() - 2 * 60 * 1000)
 
   if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
-    await selectOhouseSecondFactorEmailMethod(page)
     codeRequestedAt = new Date()
-    await clickByText(page, /인증하기|다음|전송|발송/i)
-    await page.waitForURL(/\/signin\/multi-factor\/auth/, { timeout: 15_000 }).catch(() => undefined)
-    await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
-    await page.waitForTimeout(1500)
+    const sent = await sendOhouseSecondFactorFromMethodPage(page)
+    if (!sent) throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증 메일 발송 후 유효시간이 갱신되지 않았습니다.')
   } else if (/\/signin\/multi-factor\/auth/.test(new URL(page.url()).pathname)) {
     codeRequestedAt = new Date()
-    await refreshOhouseSecondFactorEmail(page)
+    const refreshMethod = await refreshOhouseSecondFactorEmail(page)
+    if (refreshMethod === 'failed') {
+      throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증 재발송을 눌렀지만 유효시간이 갱신되지 않았습니다.')
+    }
     await page.waitForTimeout(1500)
   }
 
@@ -515,7 +560,10 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
     const remainingSeconds = await readOhouseSecondFactorRemainingSeconds(page)
     if (remainingSeconds !== null && remainingSeconds <= 20) {
       codeRequestedAt = new Date()
-      await refreshOhouseSecondFactorEmail(page)
+      const refreshMethod = await refreshOhouseSecondFactorEmail(page)
+      if (refreshMethod === 'failed') {
+        throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증 재발송 후에도 유효시간이 00:00에서 갱신되지 않았습니다.')
+      }
       await page.waitForTimeout(1500)
     }
 
@@ -533,7 +581,10 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
       throw new MarketplaceApiError('ohouse', 401, '네이버 메일에서 오늘의집 2차 인증번호를 찾지 못했습니다.')
     } else if (!code) {
       codeRequestedAt = new Date()
-      await refreshOhouseSecondFactorEmail(page)
+      const refreshMethod = await refreshOhouseSecondFactorEmail(page)
+      if (refreshMethod === 'failed') {
+        throw new MarketplaceApiError('ohouse', 401, '네이버 메일에서 인증번호를 찾지 못했고 오늘의집 인증 재발송도 실패했습니다.')
+      }
       await page.waitForTimeout(1500)
       continue
     }
@@ -550,7 +601,8 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
     if (attempt === 3) return 'code-submitted-expired'
 
     codeRequestedAt = new Date()
-    await refreshOhouseSecondFactorEmail(page)
+    const refreshMethod = await refreshOhouseSecondFactorEmail(page)
+    if (refreshMethod === 'failed') return 'code-submitted-resend-failed'
     await page.waitForTimeout(1500)
   }
 

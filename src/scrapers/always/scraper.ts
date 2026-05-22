@@ -5,6 +5,7 @@ import type {
   NormalizedClaim,
   NormalizedOrder,
 } from '@/lib/marketplace/types'
+import { getCarrierName } from '@/lib/shipping/carrier-codes'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -16,6 +17,26 @@ const ALWAYS_API_BASE_URL = 'https://alwayz-seller-back.ilevit.com'
 const TOKEN_STORAGE_KEY = '@alwayz@seller@token@'
 
 type JsonRecord = Record<string, unknown>
+
+type AlwaysShippingCompany = {
+  _id: string
+  shippingCompanyName: string
+  shippingCompanyCode: string
+}
+
+const ALWAYS_CARRIER_CODE_OVERRIDES: Record<string, string> = {
+  CJGLS: '04',
+  HANJIN: '05',
+  HYUNDAI: '08',
+  EPOST: '01',
+  KGB: '06',
+  KDEXP: '23',
+  CHUNIL: '17',
+  DAESIN: '22',
+  ILYANG: '11',
+  HDEXP: '32',
+  HONAM: '45',
+}
 
 function logStep(step: string): void {
   console.log(`[올웨이즈-rpa] ${step}`)
@@ -186,6 +207,74 @@ function collectAlwaysOrderRows(payloads: unknown[]): JsonRecord[] {
 
 function uniqueStrings(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))]
+}
+
+function normalizeComparableText(value: string): string {
+  return value.replace(/\s+/g, '').replace(/택배$/g, '').toLowerCase()
+}
+
+function getAlwaysResponseStatus(payload: unknown): number {
+  if (!isRecord(payload)) return 0
+  return readNumber(payload, ['status', 'code'])
+}
+
+function getAlwaysResponseMessage(payload: unknown): string {
+  if (!isRecord(payload)) return ''
+  return readString(payload, ['message', 'msg', 'e_message', 'error'])
+}
+
+function extractAlwaysShippingCompanies(payload: unknown): AlwaysShippingCompany[] {
+  const data = isRecord(payload) && Array.isArray(payload.data) ? payload.data : []
+  return data
+    .filter(isRecord)
+    .map((row) => ({
+      _id: readString(row, ['_id', 'id']),
+      shippingCompanyName: readString(row, ['shippingCompanyName', 'name']),
+      shippingCompanyCode: readString(row, ['shippingCompanyCode', 'code']),
+    }))
+    .filter((row) => row._id && row.shippingCompanyName && row.shippingCompanyCode)
+}
+
+async function loadAlwaysShippingCompanies(token: string): Promise<AlwaysShippingCompany[]> {
+  const payload = await requestAlways('/sellers/shipping-companies', {
+    method: 'GET',
+    token,
+  })
+  const companies = extractAlwaysShippingCompanies(payload)
+  if (companies.length === 0) {
+    throw new MarketplaceApiError('always', 500, '올웨이즈 택배사 목록을 불러오지 못했습니다.')
+  }
+  return companies
+}
+
+function resolveAlwaysShippingCompany(
+  companies: AlwaysShippingCompany[],
+  carrierId: string,
+): AlwaysShippingCompany | null {
+  const carrierName = getCarrierName(carrierId)
+  const alwaysCode = ALWAYS_CARRIER_CODE_OVERRIDES[carrierId] ?? carrierId
+  const normalizedCarrierName = normalizeComparableText(carrierName)
+
+  return companies.find((company) => company.shippingCompanyCode === alwaysCode)
+    ?? companies.find((company) => normalizeComparableText(company.shippingCompanyName) === normalizedCarrierName)
+    ?? companies.find((company) => normalizeComparableText(company.shippingCompanyName).includes(normalizedCarrierName))
+    ?? null
+}
+
+async function ensureAlwaysToken(
+  scraper: AlwaysScraper,
+  credentials: ScraperCredentials,
+): Promise<string> {
+  let token = tokenFromStorageState(credentials.storageState)
+  if (!token) {
+    const login = await scraper.login(credentials)
+    if (!login.success || !login.storageState) {
+      throw new MarketplaceApiError('always', 401, login.error ?? '올웨이즈 로그인 실패')
+    }
+    token = tokenFromStorageState(login.storageState)
+  }
+  if (!token) throw new MarketplaceApiError('always', 401, '올웨이즈 로그인 토큰이 없습니다.')
+  return token
 }
 
 async function markAlwaysPreShippingOrdersExcelDownloaded(
@@ -359,15 +448,7 @@ export class AlwaysScraper implements MarketplaceScraper {
     since: Date,
     setProgress?: (message: string) => Promise<void>,
   ): Promise<NormalizedOrder[]> {
-    let token = tokenFromStorageState(credentials.storageState)
-    if (!token) {
-      const login = await this.login(credentials)
-      if (!login.success || !login.storageState) {
-        throw new MarketplaceApiError('always', 401, login.error ?? '올웨이즈 로그인 실패')
-      }
-      token = tokenFromStorageState(login.storageState)
-    }
-    if (!token) throw new MarketplaceApiError('always', 401, '올웨이즈 로그인 토큰이 없습니다.')
+    const token = await ensureAlwaysToken(this, credentials)
 
     await setProgress?.('올웨이즈 주문 API 조회 중...')
     const sinceIso = since.toISOString()
@@ -433,12 +514,55 @@ export class AlwaysScraper implements MarketplaceScraper {
     orderId: string,
     invoice: InvoiceData,
   ): Promise<{ success: boolean; error?: string }> {
-    void credentials
-    void orderId
-    void invoice
-    return {
-      success: false,
-      error: '올웨이즈 RPA 송장 전송은 주문수집 안정화 후 별도 구현이 필요합니다.',
+    try {
+      const token = await ensureAlwaysToken(this, credentials)
+      const trackingNumber = invoice.trackingNumber.replace(/[-\s]/g, '').trim()
+      if (!trackingNumber) return { success: false, error: '올웨이즈 송장번호가 비어 있습니다.' }
+
+      const companies = await loadAlwaysShippingCompanies(token)
+      const shippingCompany = resolveAlwaysShippingCompany(companies, invoice.carrierId)
+      if (!shippingCompany) {
+        return {
+          success: false,
+          error: `올웨이즈 택배사 매핑을 찾지 못했습니다. (${getCarrierName(invoice.carrierId)})`,
+        }
+      }
+
+      const payload = await requestAlways('/sellers/shipping-info/bulk', {
+        method: 'POST',
+        token,
+        body: JSON.stringify({
+          status: 'pre-shipping',
+          shippingInfos: [{
+            orderId,
+            shippingInfo: {
+              ...shippingCompany,
+              shippingNumber: trackingNumber,
+            },
+          }],
+        }),
+      })
+
+      const status = getAlwaysResponseStatus(payload)
+      const list = isRecord(payload) && isRecord(payload.data) && Array.isArray(payload.data.list)
+        ? payload.data.list
+        : []
+      const rowResult = list.filter(isRecord).find((row) => readString(row, ['fid', 'orderId', '_id']) === orderId)
+        ?? (list.length === 1 && isRecord(list[0]) ? list[0] : null)
+      const rowSuccess = rowResult ? Boolean(rowResult.success) : [200, 2000, 2001].includes(status)
+
+      if ([200, 2000, 2001].includes(status) && rowSuccess) {
+        return { success: true }
+      }
+
+      const rowMessage = rowResult && isRecord(rowResult) ? getAlwaysResponseMessage(rowResult) : ''
+      const message = rowMessage || getAlwaysResponseMessage(payload) || '올웨이즈 송장 업로드 실패'
+      return { success: false, error: message }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : '올웨이즈 송장 업로드 실패',
+      }
     }
   }
 }

@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v19'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v20'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -177,6 +177,7 @@ interface OhouseLoginDiagnostics {
   secondFactor: string
   authHeaderRequests: string[]
   observedAuthorization?: string
+  observedAuthorizationShape?: string
 }
 
 function createOhouseLoginDiagnostics(): OhouseLoginDiagnostics {
@@ -191,14 +192,18 @@ function watchOhouseAuthHeaders(page: Page, diagnostics: OhouseLoginDiagnostics)
     const url = request.url()
     if (!/api\.ohou\.se\/orora/i.test(url)) return
     const authorization = request.headers().authorization
-    if (authorization) diagnostics.observedAuthorization = authorization
-    diagnostics.authHeaderRequests.push(`${authorization ? 'auth' : 'no-auth'} ${url}`)
+    const shape = describeAuthorizationHeader(authorization)
+    if (authorization) {
+      diagnostics.observedAuthorizationShape = shape
+      if (isJwtAuthorization(authorization)) diagnostics.observedAuthorization = authorization
+    }
+    diagnostics.authHeaderRequests.push(`${authorization ? `auth(${shape})` : 'no-auth'} ${url}`)
     if (diagnostics.authHeaderRequests.length > 8) diagnostics.authHeaderRequests.shift()
   })
 }
 
 function formatLoginDiagnostics(diagnostics: OhouseLoginDiagnostics): string {
-  return ` secondFactor=${diagnostics.secondFactor}${diagnostics.observedAuthorization ? ' observedAuth=yes' : ' observedAuth=no'}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
+  return ` secondFactor=${diagnostics.secondFactor}${diagnostics.observedAuthorization ? ' observedAuth=jwt' : ` observedAuth=${diagnostics.observedAuthorizationShape ?? 'no'}`}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
 }
 
 interface OhouseApiSessionCheck {
@@ -219,6 +224,23 @@ interface OhouseAuthToken {
 
 function normalizeAuthHeader(value: string): string {
   return /^Bearer\s+/i.test(value) ? value : `Bearer ${value}`
+}
+
+function authTokenSegmentCount(value: string): number {
+  const token = value.replace(/^Bearer\s+/i, '').trim()
+  return token ? token.split('.').length : 0
+}
+
+function isJwtAuthorization(value: string): boolean {
+  return authTokenSegmentCount(value) === 3
+}
+
+function describeAuthorizationHeader(value: string | undefined): string {
+  if (!value) return 'none'
+  const scheme = value.match(/^([A-Za-z]+)\s+/)?.[1]?.toLowerCase() ?? 'raw'
+  const token = value.replace(/^([A-Za-z]+)\s+/i, '').trim()
+  const lengthBucket = token.length >= 120 ? 'long' : token.length >= 40 ? 'medium' : token.length > 0 ? 'short' : 'empty'
+  return `${scheme}:segments=${authTokenSegmentCount(value)}:${lengthBucket}`
 }
 
 function findJwtCandidate(value: unknown): string | null {
@@ -242,9 +264,6 @@ async function readOhouseAuthToken(page: Page): Promise<OhouseAuthToken | null> 
               current.match(/Bearer\s+[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/i)?.[0] ??
               current.match(/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/)?.[0]
             if (candidate) return { value: candidate, source: `${source}:${key}`, storageKeys }
-            if (/token|auth|access|jwt|authorization/i.test(key) && current.length > 20) {
-              return { value: current, source: `${source}:${key}`, storageKeys }
-            }
             try {
               queue.push(JSON.parse(current))
             } catch {
@@ -253,9 +272,6 @@ async function readOhouseAuthToken(page: Page): Promise<OhouseAuthToken | null> 
           } else if (current && typeof current === 'object') {
             for (const [childKey, childValue] of Object.entries(current as Record<string, unknown>)) {
               if (!/token|auth|access|jwt|authorization/i.test(childKey)) continue
-              if (typeof childValue === 'string' && childValue.length > 20) {
-                return { value: childValue, source: `${source}:${key}.${childKey}`, storageKeys }
-              }
               queue.push(childValue)
             }
           }
@@ -286,7 +302,7 @@ async function readOhouseAuthToken(page: Page): Promise<OhouseAuthToken | null> 
     .then((result) => {
       if (!result?.value) return result ? { value: '', source: '', storageKeys: result.storageKeys ?? [] } : null
       const candidate = findJwtCandidate(result.value)
-      if (!candidate) return { value: normalizeAuthHeader(result.value), source: result.source || 'unknown', storageKeys: result.storageKeys ?? [] }
+      if (!candidate) return { value: '', source: '', storageKeys: result.storageKeys ?? [] }
       return {
         value: normalizeAuthHeader(candidate),
         source: result.source || 'unknown',
@@ -298,7 +314,7 @@ async function readOhouseAuthToken(page: Page): Promise<OhouseAuthToken | null> 
 
 async function checkOhouseApiSession(page: Page, observedAuthorization?: string): Promise<OhouseApiSessionCheck> {
   const token = await readOhouseAuthToken(page)
-  const authorization = token?.value || observedAuthorization || ''
+  const authorization = token?.value || (observedAuthorization && isJwtAuthorization(observedAuthorization) ? observedAuthorization : '')
   if (authorization) {
     await page.setExtraHTTPHeaders({ Authorization: authorization }).catch(() => undefined)
   }

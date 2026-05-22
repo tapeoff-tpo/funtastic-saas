@@ -576,10 +576,14 @@ async function moveSelectedNewOrdersToShippingTarget(
   return true
 }
 
-async function applyInvoiceOrderSearch(page: Page, orderId: string): Promise<void> {
+async function applyInvoiceOrderSearch(
+  page: Page,
+  orderId: string,
+  status: DomechangoOrderSearchStatus | 'all' = 'shipping-target',
+): Promise<void> {
   const until = new Date()
   const since = new Date(until.getTime() - 1000 * 60 * 60 * 24 * 60)
-  const payload = JSON.stringify({ since: formatDateInput(since), until: formatDateInput(until), orderId })
+  const payload = JSON.stringify({ since: formatDateInput(since), until: formatDateInput(until), orderId, status })
 
   await page.evaluate(`((data) => {
     const setValue = (selector, value) => {
@@ -610,12 +614,15 @@ async function applyInvoiceOrderSearch(page: Page, orderId: string): Promise<voi
     }
 
     const statusInputs = Array.from(document.querySelectorAll('input[name="oistep"], input[name*="status" i]'))
-    const shippingStatus = statusInputs.find((input) => {
+    const findStatus = (patterns, values) => statusInputs.find((input) => {
       const label = input.closest('label')?.textContent ?? document.querySelector('label[for="' + input.id + '"]')?.textContent ?? ''
-      return input.value === '2' || /배송\s*준비|배송준비중|발송\s*대상/.test(label)
+      return values.includes(input.value) || patterns.some((pattern) => pattern.test(label))
     })
-    const allStatus = statusInputs.find((input) => input.value === '' || input.value === '0' || /all|전체/i.test(input.id + input.name))
-    const targetStatus = shippingStatus ?? allStatus
+    const targetStatus = data.status === 'new'
+      ? findStatus([/신규\s*주문/, /주문\s*접수/], ['1'])
+      : data.status === 'shipping-target'
+        ? findStatus([/배송\s*준비|배송준비중|발송\s*대상|주문\s*확인/], ['2'])
+        : statusInputs.find((input) => input.value === '' || input.value === '0' || /all|전체/i.test(input.id + input.name))
     if (targetStatus) {
       targetStatus.checked = true
       targetStatus.dispatchEvent(new Event('click', { bubbles: true }))
@@ -645,6 +652,46 @@ async function applyInvoiceOrderSearch(page: Page, orderId: string): Promise<voi
     .click({ timeout: 10_000 })
     .catch(() => undefined)
   await page.waitForTimeout(2500)
+}
+
+async function findSelectedOrderStatusText(page: Page, orderId: string): Promise<string> {
+  const targetOrderId = JSON.stringify(orderId)
+  return page.evaluate(`(() => {
+    const targetOrderId = ${targetOrderId}
+    const roots = [
+      document.querySelector('#order_list'),
+      document.querySelector('#goods_list'),
+      document,
+    ].filter(Boolean)
+
+    for (const root of roots) {
+      const rows = Array.from(root.querySelectorAll('tr, .tui-grid-row, [role="row"], li'))
+      for (const row of rows) {
+        const text = row.textContent ?? ''
+        if (text.includes(targetOrderId)) return text.replace(/\\s+/g, ' ').trim()
+      }
+    }
+    return ''
+  })()`).catch(() => '')
+}
+
+async function ensureInvoiceOrderReadyForUpload(page: Page, orderId: string): Promise<boolean> {
+  await applyInvoiceOrderSearch(page, orderId, 'shipping-target')
+  if (await selectOrderByText(page, orderId)) return true
+
+  await applyInvoiceOrderSearch(page, orderId, 'new')
+  const foundNewOrder = await selectOrderByText(page, orderId)
+  if (!foundNewOrder) return false
+
+  const rowText = await findSelectedOrderStatusText(page, orderId)
+  const needsMove = !/배송\s*준비|배송준비중|발송\s*대상|주문\s*확인/.test(rowText)
+  if (needsMove) {
+    await moveSelectedNewOrdersToShippingTarget(page)
+    await applyInvoiceOrderSearch(page, orderId, 'shipping-target')
+    return selectOrderByText(page, orderId)
+  }
+
+  return true
 }
 
 async function selectOrderByText(page: Page, orderId: string): Promise<boolean> {
@@ -983,10 +1030,9 @@ export class DomechangoScraper implements MarketplaceScraper {
       }
 
       await runStep('invoice: open order list page', () => openOrderListPage(ctx.page))
-      await runStep('invoice: search order', () => applyInvoiceOrderSearch(ctx.page, orderId))
-      const selected = await runStep('invoice: select order row', () => selectOrderByText(ctx.page, orderId))
-      if (!selected) {
-        throw new MarketplaceApiError('domechango', 404, `도매창고 주문을 찾지 못했습니다. (${orderId}, ${await summarizePage(ctx.page)})`)
+      const readyForUpload = await runStep('invoice: prepare order for invoice upload', () => ensureInvoiceOrderReadyForUpload(ctx.page, orderId))
+      if (!readyForUpload) {
+        throw new MarketplaceApiError('domechango', 404, `도매창고 송장등록 가능한 주문을 찾지 못했습니다. (${orderId}, ${await summarizePage(ctx.page)})`)
       }
 
       const workbookBuffer = await runStep('invoice: build upload workbook', () => buildInvoiceWorkbook(orderId, invoice))

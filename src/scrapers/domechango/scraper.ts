@@ -686,6 +686,20 @@ function findHeaderColumn(worksheet: ExcelJS.Worksheet, aliases: string[]): numb
   return found
 }
 
+function readRawInvoiceText(invoice: InvoiceData, aliases: string[]): string {
+  const rawData = invoice.rawData
+  if (!rawData || typeof rawData !== 'object') return ''
+
+  const record = rawData as Record<string, unknown>
+  for (const alias of aliases) {
+    const value = record[alias]
+    if (value === null || value === undefined) continue
+    const text = String(value).trim()
+    if (text) return text
+  }
+  return ''
+}
+
 async function buildInvoiceWorkbook(
   orderId: string,
   invoice: InvoiceData,
@@ -695,13 +709,25 @@ async function buildInvoiceWorkbook(
   const carrierName = getCarrierName(invoice.carrierId)
   const workbook = new ExcelJS.Workbook()
 
-  if (templateBuffer?.length) {
-    await workbook.xlsx.load(templateBuffer as unknown as ExcelJS.Buffer)
-  } else {
+  if (!templateBuffer?.length) {
+    const receiverName = readRawInvoiceText(invoice, [
+      '수취인명',
+      '수령인명',
+      '받는분',
+      '받는사람',
+      'recipientName',
+      'name_receiver',
+      'receiverName',
+    ])
     const worksheet = workbook.addWorksheet('invoice')
-    worksheet.addRow(['주문번호', '택배업체코드', '택배사', '송장번호'])
-    worksheet.addRow([orderId, carrierCode, carrierName, invoice.trackingNumber])
+    worksheet.addRow(['택배송장등록양식'])
+    worksheet.addRow(['주문번호', '택배업체코드', '송장번호', '수취인명'])
+    worksheet.addRow([orderId, carrierCode, invoice.trackingNumber, receiverName])
+    const raw = await workbook.xlsx.writeBuffer()
+    return Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer)
   }
+
+  await workbook.xlsx.load(templateBuffer as unknown as ExcelJS.Buffer)
 
   const worksheet = workbook.worksheets[0]
   if (!worksheet) throw new MarketplaceApiError('domechango', 500, '도매창고 송장 업로드 엑셀 시트를 만들지 못했습니다.')

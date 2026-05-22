@@ -74,6 +74,20 @@ const MARKETPLACE_CODE_OVERRIDES: Record<string, Record<string, string>> = {
     ILYANG: '10015',
     ETC: '10070',
   },
+  domechango: {
+    CJGLS: '4',
+    HANJIN: '12',
+    HYUNDAI: '13',
+    EPOST: '9',
+    KGB: '5',
+    KDEXP: '39',
+    CHUNIL: '19',
+    DAESIN: '33',
+    ILYANG: '22',
+    HDEXP: '41',
+    HONAM: '102',
+    ETC: '24',
+  },
 }
 
 /**

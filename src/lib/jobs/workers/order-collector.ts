@@ -17,6 +17,9 @@ import { Cafe24Adapter } from '@/lib/marketplace/adapters/cafe24/adapter'
 import { CjOnestyleAdapter } from '@/lib/marketplace/adapters/cjonestyle/adapter'
 import { ElevenstAdapter } from '@/lib/marketplace/adapters/elevenst/adapter'
 import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
+import { OhouseAdapter } from '@/lib/marketplace/adapters/ohouse/adapter'
+import { OnchannelAdapter } from '@/lib/marketplace/adapters/onchannel/adapter'
+import { AblyAdapter } from '@/lib/marketplace/adapters/ably/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
@@ -80,6 +83,20 @@ export function createAdapter(
     case 'elevenst':
       return new ElevenstAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
+      })
+    case 'ohouse':
+      return new OhouseAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+      })
+    case 'onchannel':
+      return new OnchannelAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        shop_id: credentials.shop_id ?? credentials.shopId ?? '',
+      })
+    case 'ably':
+      return new AblyAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        shop_id: credentials.shop_id ?? credentials.shopId ?? '',
       })
     case 'kakao-store':
       return new KakaoStoreAdapter({

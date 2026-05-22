@@ -34,6 +34,7 @@ const RPA_MARKETPLACES = new Set([
 const MULTI_METHOD_MARKETPLACES: Partial<Record<string, IntegrationMethod[]>> = {
   ably: ['api', 'rpa', 'excel'],
   ohouse: ['api', 'rpa', 'excel'],
+  onchannel: ['api', 'rpa', 'excel'],
   tobizon: ['rpa', 'api', 'excel'],
   'banana-b2b': ['rpa', 'api', 'excel'],
 }

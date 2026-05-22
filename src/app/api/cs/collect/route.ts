@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { resolveCsCollectionMethod } from '@/lib/marketplace/cs-capabilities'
 import { createCollectionJobLogsWithLock } from '@/lib/jobs/collection-lock'
 import { collectCsForConnection } from '@/lib/jobs/workers/cs-collector'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
@@ -52,25 +53,25 @@ export async function POST(request: NextRequest) {
 
   const targets = connections
     .map((conn) => {
-      const integrationMethod = getIntegrationMethod(conn.marketplaceId, {
+      const orderIntegrationMethod = getIntegrationMethod(conn.marketplaceId, {
         isManual: conn.isManual,
         authType: conn.authType,
       })
-      return { conn, integrationMethod }
+      const csMethod = resolveCsCollectionMethod({
+        marketplaceId: conn.marketplaceId,
+        orderIntegrationMethod,
+        requestedMethod: method,
+      })
+      return { conn, orderIntegrationMethod, csMethod }
     })
-    .filter(({ integrationMethod }) => integrationMethod !== 'excel')
-    .filter(({ integrationMethod }) => {
-      if (method === 'api') return integrationMethod !== 'rpa'
-      if (method === 'rpa') return integrationMethod === 'rpa'
-      return true
-    })
+    .filter((target): target is typeof target & { csMethod: 'api' | 'rpa' } => target.csMethod !== null)
 
   if (targets.length === 0) {
     return NextResponse.json({ error: 'CS 수집 가능한 마켓 연동이 없습니다.' }, { status: 404 })
   }
 
-  const lockResult = await createCollectionJobLogsWithLock(targets.map(({ conn, integrationMethod }) => ({
-    jobType: integrationMethod === 'rpa'
+  const lockResult = await createCollectionJobLogsWithLock(targets.map(({ conn, csMethod }) => ({
+    jobType: csMethod === 'rpa'
       ? (scope === 'inquiries' ? 'scrape-inquiries' : 'scrape-claims')
       : 'cs-collection',
     marketplaceId: conn.marketplaceId,
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
   for (const [index, target] of targets.entries()) {
     const jobLogId = lockResult.jobLogIds[index]
     if (!jobLogId) continue
-    if (target.integrationMethod === 'rpa') {
+    if (target.csMethod === 'rpa') {
       const rpaJobType = scope === 'inquiries' ? 'scrape-inquiries' : 'scrape-claims'
       await getMarketplaceScrapeQueue().add(
         `manual-cs-${target.conn.marketplaceId}-${Date.now()}`,

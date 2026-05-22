@@ -30,7 +30,7 @@ import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@
 import './register'
 
 const SCRAPE_JOB_TIMEOUT_MS = 300_000
-const INVOICE_UPLOAD_TIMEOUT_MS = 30_000
+const INVOICE_UPLOAD_TIMEOUT_MS = 75_000
 
 async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined

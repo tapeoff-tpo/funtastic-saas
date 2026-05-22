@@ -10,7 +10,7 @@ const RPA_QUEUE_TIMEOUT_MESSAGE =
   'RPA 워커가 작업을 시작하지 못했습니다. scrape-worker 서비스가 실행 중인지 확인해주세요.'
 const RPA_RUNNING_TIMEOUT_MESSAGE =
   'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
-const RPA_INVOICE_TIMEOUT_SECONDS = 30
+const RPA_INVOICE_TIMEOUT_SECONDS = 75
 const withLastProgress = (message: string) =>
   sql<string>`case
     when ${jobLogs.progressMessage} is not null and ${jobLogs.progressMessage} <> ''

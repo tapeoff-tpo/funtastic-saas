@@ -83,6 +83,9 @@ export function OrderTabs() {
     } else if (tab.kind === 'claim') {
       params.set('claimType', tab.id)
     } else if (tab.kind === 'held') {
+      params.delete('dateFrom')
+      params.delete('dateTo')
+      params.set('datePreset', 'all')
       params.set('held', 'true')
     } else if (tab.kind === 'all') {
       // 전체 탭도 명시적으로 ?tab=all 을 붙여서 fetch 트리거

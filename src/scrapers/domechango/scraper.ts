@@ -720,7 +720,6 @@ async function buildInvoiceWorkbook(
       'receiverName',
     ])
     const worksheet = workbook.addWorksheet('invoice')
-    worksheet.addRow(['택배송장등록양식'])
     worksheet.addRow(['주문번호', '택배업체코드', '송장번호', '수취인명'])
     worksheet.addRow([orderId, carrierCode, invoice.trackingNumber, receiverName])
     const raw = await workbook.xlsx.writeBuffer()

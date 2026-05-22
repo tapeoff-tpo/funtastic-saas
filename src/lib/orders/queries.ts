@@ -572,6 +572,42 @@ function getSortColumn(sort?: string) {
   }
 }
 
+function getOrderByExpressions(sort?: string, order?: 'asc' | 'desc') {
+  const direction = order === 'asc' ? asc : desc
+
+  if (!sort || sort === 'ordered_at') {
+    const groupOrderedAt = sql<Date>`COALESCE(
+      (
+        SELECT MAX(o2.ordered_at)
+        FROM orders o2
+        WHERE o2.user_id = ${orders.userId}
+          AND o2.marketplace_id = ${orders.marketplaceId}
+          AND o2.marketplace_order_id IS NOT DISTINCT FROM ${orders.marketplaceOrderId}
+      ),
+      ${orders.orderedAt}
+    )`
+
+    return [
+      direction(groupOrderedAt),
+      asc(orders.marketplaceId),
+      direction(orders.marketplaceOrderId),
+      direction(orders.orderedAt),
+      desc(orders.createdAt),
+      desc(orders.id),
+    ]
+  }
+
+  const sortColumn = getSortColumn(sort)
+  return [
+    direction(sortColumn),
+    asc(orders.marketplaceId),
+    desc(orders.marketplaceOrderId),
+    desc(orders.orderedAt),
+    desc(orders.createdAt),
+    desc(orders.id),
+  ]
+}
+
 /**
  * Get orders with filtering and pagination.
  * Returns orders with their items for the dashboard table.
@@ -595,8 +631,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   })
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined
 
-  const sortColumn = getSortColumn(filters.sort)
-  const sortDir = filters.order === 'asc' ? asc(sortColumn) : desc(sortColumn)
+  const orderByExpressions = getOrderByExpressions(filters.sort, filters.order)
   const needsComputedPagination = !!filters.stage
   const queryLimit = needsComputedPagination ? 10000 : pageSize
   const queryOffset = needsComputedPagination ? 0 : offset
@@ -638,7 +673,7 @@ export async function getOrders(filters: OrderFilters = {}) {
         .select()
         .from(orders)
         .where(whereClause)
-        .orderBy(sortDir)
+        .orderBy(...orderByExpressions)
         .limit(queryLimit)
         .offset(queryOffset),
       totalPromise,

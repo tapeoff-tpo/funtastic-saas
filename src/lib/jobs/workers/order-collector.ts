@@ -177,7 +177,8 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'funtastic-b2b' || marketplaceId === 'gmarket' || marketplaceId === 'auction'
+  void marketplaceId
+  return false
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
@@ -590,8 +591,7 @@ export async function collectOrdersForConnection(params: {
       }
     }
 
-    // 4.5 Auto-confirm is disabled except for marketplaces that require a
-    // source-side transition immediately after collection, such as Funtastic B2B.
+    // 4.5 Auto-confirm is disabled.
     // 수집 → 신규(status='new') → 매핑 → 사용자가 [확정] 클릭 → 확인(status='confirmed').
     if (ordersCollected > 0 && !shouldAutoConfirmOrders()) {
       await setProgress(`${ordersCollected}건 신규/기존 주문 저장 완료`)

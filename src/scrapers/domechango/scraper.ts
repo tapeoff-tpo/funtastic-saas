@@ -22,7 +22,7 @@ const LOGIN_PAGE_URL = `${WMS_BASE_URL}/login`
 const NAVIGATION_TIMEOUT_MS = 20_000
 const LOAD_STATE_TIMEOUT_MS = 8_000
 const ORDER_PAGE_REFERRER = `${WMS_BASE_URL}/order`
-const DOWNLOAD_TIMEOUT_MS = 120_000
+const DOWNLOAD_TIMEOUT_MS = 45_000
 const DOWNLOAD_STREAM_TIMEOUT_MS = 60_000
 type DomechangoOrderSearchStatus = 'new' | 'shipping-target'
 const INVOICE_UPLOAD_TMP_DIR = path.join(process.cwd(), 'tmp', 'rpa-invoices')
@@ -403,21 +403,32 @@ async function triggerSelectedOrderExcelDownload(
   timeoutMs = DOWNLOAD_TIMEOUT_MS,
 ): Promise<Buffer> {
   await setProgress?.('도매창고 엑셀 다운로드 요청 중...')
-  const dialogPromise = page.waitForEvent('dialog', { timeout: 5000 })
+  const dialogPromise = page.waitForEvent('dialog', { timeout: timeoutMs })
     .then(async (dialog) => {
       const message = dialog.message()
       await dialog.accept().catch(() => undefined)
-      return message
+      return { dialogMessage: message }
     })
     .catch(() => null)
 
-  const [download] = await Promise.all([
-    page.waitForEvent('download', { timeout: timeoutMs }),
-    page.evaluate(`(() => {
+  const downloadPromise = page.waitForEvent('download', { timeout: timeoutMs })
+    .then((download) => ({ download }))
+
+  const triggered = await page.evaluate(`(() => {
       const selects = document.querySelectorAll('select')
       let select
       let option
       const visibleSelects = Array.from(selects).filter((candidate) => candidate.offsetParent !== null)
+      const directSelect = document.querySelector('#act_etc')
+      if (directSelect && directSelect.offsetParent !== null) {
+        for (const candidateOption of directSelect.options) {
+          if (/엑셀\s*다운|엑셀.*다운|다운로드/.test(candidateOption.textContent ?? '')) {
+            select = directSelect
+            option = candidateOption
+            break
+          }
+        }
+      }
       const isSelectedOrderSelect = (candidate) => {
         const key = String(candidate.id) + ' ' + String(candidate.name) + ' ' + String(candidate.className) + ' ' + String(candidate.selectedOptions[0]?.textContent ?? '')
         const optionText = Array.from(candidate.options).map((candidateOption) => candidateOption.textContent ?? '').join(' ')
@@ -458,16 +469,40 @@ async function triggerSelectedOrderExcelDownload(
       select.dispatchEvent(new Event('input', { bubbles: true }))
       select.dispatchEvent(new Event('change', { bubbles: true }))
       if (typeof select.onchange === 'function') select.onchange(new Event('change'))
-    })()`),
-  ]).catch(async (error) => {
-    const dialogMessage = await dialogPromise
+      return true
+    })()`)
+  .catch((error) => {
     throw new MarketplaceApiError(
       'domechango',
-      504,
-      `도매창고 주문 엑셀 다운로드가 ${timeoutMs / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''})`,
+      500,
+      `도매창고 선택주문 엑셀 다운로드를 실행하지 못했습니다. (${error instanceof Error ? error.message : 'unknown error'})`,
     )
   })
 
+  if (!triggered) {
+    throw new MarketplaceApiError('domechango', 500, '도매창고 선택주문 엑셀 다운로드 실행 결과를 확인하지 못했습니다.')
+  }
+
+  const result = await Promise.race([
+    downloadPromise,
+    dialogPromise,
+  ]).catch(async (error) => {
+    throw new MarketplaceApiError(
+      'domechango',
+      504,
+      `도매창고 주문 엑셀 다운로드가 ${timeoutMs / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'})`,
+    )
+  })
+
+  if (!result || 'dialogMessage' in result) {
+    throw new MarketplaceApiError(
+      'domechango',
+      400,
+      `도매창고 주문 엑셀 다운로드를 시작하지 못했습니다.${result?.dialogMessage ? ` (${result.dialogMessage})` : ''}`,
+    )
+  }
+
+  const { download } = result
   await setProgress?.('도매창고 엑셀 파일 수신 중...')
   return readDownloadBuffer(download)
 }

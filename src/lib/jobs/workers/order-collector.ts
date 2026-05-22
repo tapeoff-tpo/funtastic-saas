@@ -185,6 +185,12 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
   return 'CONFIRMED'
 }
 
+function collectedOrderStatus(status: NormalizedOrder['status']): NormalizedOrder['status'] {
+  // Collection must never put an order directly into the local "확인" bucket.
+  // 확인은 매핑 완료 후 사용자가 확정 버튼을 눌렀을 때만 가능하다.
+  return status === 'confirmed' ? 'new' : status
+}
+
 const RANGE_AWARE_ORDER_MARKETPLACES = new Set([
   'ownerclan',
   '10x10',
@@ -823,6 +829,10 @@ async function upsertOrder(
   userId: string
 ) {
   const rawData = enrichOrderRawData(order)
+  const insertStatus = collectedOrderStatus(order.status)
+  const updateStatus = order.status === 'confirmed'
+    ? sql`CASE WHEN ${orders.mappedAt} IS NULL THEN 'new'::order_status ELSE ${orders.status} END`
+    : order.status
 
   return db
     .insert(orders)
@@ -832,7 +842,7 @@ async function upsertOrder(
       connectionId,
       marketplaceId: order.marketplaceId,
       marketplaceOrderId: order.marketplaceOrderId,
-      status: order.status,
+      status: insertStatus,
       marketplaceStatus: order.marketplaceStatus,
       buyerName: order.buyerName,
       buyerPhone: order.buyerPhone,
@@ -853,7 +863,7 @@ async function upsertOrder(
       // partial unique index — 복사본은 제외하고 원본끼리만 dedup
       targetWhere: sql`is_copy = false`,
       set: {
-        status: order.status,
+        status: updateStatus,
         marketplaceStatus: order.marketplaceStatus,
         totalAmount: String(order.totalAmount ?? 0),
         shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,

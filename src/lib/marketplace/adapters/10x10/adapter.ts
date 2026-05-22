@@ -161,6 +161,24 @@ function extractOrderMasters(payload: OrdersListPayload | null | undefined): Ord
   return []
 }
 
+function extractInvoiceDetailIdxs(invoice: InvoiceData): string[] {
+  const seen = new Set<string>()
+  const add = (value: unknown) => {
+    if (value == null || value === '') return
+    seen.add(String(value))
+  }
+
+  add((invoice as Record<string, unknown>).detailIdx)
+
+  const rawData = invoice.rawData as Record<string, unknown> | undefined
+  const details = rawData?.details as Array<{ DetailIdx?: string | number }> | undefined
+  for (const detail of details ?? []) {
+    add(detail.DetailIdx)
+  }
+
+  return Array.from(seen)
+}
+
 async function toTenByTenApiError(action: string, error: unknown): Promise<MarketplaceApiError> {
   if (error instanceof Error && 'response' in error) {
     const response = (error as { response: Response }).response
@@ -489,30 +507,29 @@ export class TenByTenAdapter implements MarketplaceAdapter {
   ): Promise<{ success: boolean; error?: string }> {
     const creds = this.getCreds()
     // 10x10 송장입력 requires `detailIdx` (per-line) in addition to orderSerial.
-    // Caller passes it via the loose `[key: string]: unknown` field of InvoiceData.
-    const detailIdx = (invoice as Record<string, unknown>).detailIdx as
-      | string
-      | number
-      | undefined
-    if (!detailIdx) {
+    // It can arrive explicitly from the worker, or via stored rawData on the API upload path.
+    const detailIdxs = extractInvoiceDetailIdxs(invoice)
+    if (detailIdxs.length === 0) {
       return {
         success: false,
-        error: 'detailIdx required for 10x10 — pass via InvoiceData.detailIdx',
+        error: 'detailIdx required for 10x10 — pass InvoiceData.detailIdx or rawData.details[].DetailIdx',
       }
     }
 
     try {
-      const env = await this.client(creds)
-        .post('orders/orderconfirm', {
-          json: {
-            orderSerial: orderId,
-            detailIdx: String(detailIdx),
-            songjangDiv: invoice.carrierId,
-            songjangNo: invoice.trackingNumber,
-          },
-        })
-        .json<TenByTenEnvelope<unknown>>()
-      if (env.hasError) return { success: false, error: env.message || 'uploadInvoice failed' }
+      for (const detailIdx of detailIdxs) {
+        const env = await this.client(creds)
+          .post('orders/orderconfirm', {
+            json: {
+              orderSerial: orderId,
+              detailIdx,
+              songjangDiv: invoice.carrierId,
+              songjangNo: invoice.trackingNumber,
+            },
+          })
+          .json<TenByTenEnvelope<unknown>>()
+        if (env.hasError) return { success: false, error: env.message || 'uploadInvoice failed' }
+      }
       return { success: true }
     } catch (e) {
       return { success: false, error: e instanceof Error ? e.message : 'Unknown error' }

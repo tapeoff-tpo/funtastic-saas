@@ -148,4 +148,36 @@ describe('TenByTenAdapter', () => {
     expect(get).toHaveBeenCalledWith(expect.not.stringContaining('brandId=brand'))
     expect(orders.map((o) => o.marketplaceOrderId)).toEqual(['T-1003'])
   })
+
+  it('uploads invoice using detailIdx from stored rawData', async () => {
+    const post = vi.fn(() => ({
+      json: async () => ({
+        hasError: false,
+        hasAlert: false,
+        message: '',
+        code: 'SUCCESS',
+        outPutValue: {},
+      }),
+    }))
+
+    vi.mocked(ky.create).mockReturnValue({ post } as never)
+
+    const adapter = new TenByTenAdapter({ api_key: 'api-key', shop_id: 'brand' })
+    const result = await adapter.uploadInvoice('T-1001', {
+      trackingNumber: '1234567890',
+      carrierId: 'CJ',
+      rawData: {
+        details: [{ DetailIdx: 1001 }, { DetailIdx: 1002 }],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    expect(post).toHaveBeenCalledTimes(2)
+    expect(post).toHaveBeenNthCalledWith(1, 'orders/orderconfirm', expect.objectContaining({
+      json: expect.objectContaining({ orderSerial: 'T-1001', detailIdx: '1001', songjangNo: '1234567890' }),
+    }))
+    expect(post).toHaveBeenNthCalledWith(2, 'orders/orderconfirm', expect.objectContaining({
+      json: expect.objectContaining({ orderSerial: 'T-1001', detailIdx: '1002', songjangNo: '1234567890' }),
+    }))
+  })
 })

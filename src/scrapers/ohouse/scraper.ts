@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v20'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v21'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -178,12 +178,14 @@ interface OhouseLoginDiagnostics {
   authHeaderRequests: string[]
   observedAuthorization?: string
   observedAuthorizationShape?: string
+  loginWait: string
 }
 
 function createOhouseLoginDiagnostics(): OhouseLoginDiagnostics {
   return {
     secondFactor: 'not-checked',
     authHeaderRequests: [],
+    loginWait: 'not-started',
   }
 }
 
@@ -203,7 +205,7 @@ function watchOhouseAuthHeaders(page: Page, diagnostics: OhouseLoginDiagnostics)
 }
 
 function formatLoginDiagnostics(diagnostics: OhouseLoginDiagnostics): string {
-  return ` secondFactor=${diagnostics.secondFactor}${diagnostics.observedAuthorization ? ' observedAuth=jwt' : ` observedAuth=${diagnostics.observedAuthorizationShape ?? 'no'}`}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
+  return ` secondFactor=${diagnostics.secondFactor} loginWait=${diagnostics.loginWait}${diagnostics.observedAuthorization ? ' observedAuth=jwt' : ` observedAuth=${diagnostics.observedAuthorizationShape ?? 'no'}`}${diagnostics.authHeaderRequests.length > 0 ? ` authHeaders=${diagnostics.authHeaderRequests.join(' | ')}` : ''}`
 }
 
 interface OhouseApiSessionCheck {
@@ -401,13 +403,41 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
   return 'code-submitted'
 }
 
-async function submitLogin(page: Page): Promise<void> {
+async function waitForOhouseLoginResult(page: Page, diagnostics: OhouseLoginDiagnostics): Promise<void> {
+  const deadline = Date.now() + 20_000
+  diagnostics.loginWait = 'waiting'
+  while (Date.now() < deadline) {
+    if (diagnostics.observedAuthorization && isJwtAuthorization(diagnostics.observedAuthorization)) {
+      diagnostics.loginWait = 'jwt-observed'
+      return
+    }
+    if (await isSecondFactorPage(page)) {
+      diagnostics.loginWait = 'second-factor-detected'
+      return
+    }
+    const bodyText = await page.locator('body').innerText({ timeout: 1000 }).catch(() => '')
+    if (/이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력|계정.*확인|판매자.*확인/.test(bodyText)) {
+      diagnostics.loginWait = 'login-error-visible'
+      return
+    }
+    if (!/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
+      const token = await readOhouseAuthToken(page)
+      if (token?.value && isJwtAuthorization(token.value)) {
+        diagnostics.observedAuthorization = token.value
+        diagnostics.observedAuthorizationShape = describeAuthorizationHeader(token.value)
+        diagnostics.loginWait = 'jwt-in-storage'
+        return
+      }
+    }
+    await page.waitForTimeout(500)
+  }
+  diagnostics.loginWait = 'timeout'
+}
+
+async function submitLogin(page: Page, diagnostics: OhouseLoginDiagnostics): Promise<void> {
   await clickOhouseLoginButton(page)
-  await Promise.race([
-    page.waitForURL((url) => !/\/signin(?:$|\?)/.test(url.pathname), { timeout: 20_000 }),
-    page.waitForLoadState('domcontentloaded', { timeout: 20_000 }),
-  ]).catch(() => undefined)
-  await page.waitForTimeout(2500)
+  await page.waitForLoadState('domcontentloaded', { timeout: 20_000 }).catch(() => undefined)
+  await waitForOhouseLoginResult(page, diagnostics)
 }
 
 async function performOhouseLogin(
@@ -429,8 +459,11 @@ async function performOhouseLogin(
   await setInputValue(passwordInput, credentials.password)
 
   logStep('login: submit credentials')
-  await submitLogin(page)
+  await submitLogin(page, diagnostics)
   diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
+  if (diagnostics.secondFactor === 'code-submitted') {
+    await waitForOhouseLoginResult(page, diagnostics)
+  }
 
   if (/\/signin(?:$|\?)/.test(new URL(page.url()).pathname)) {
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')

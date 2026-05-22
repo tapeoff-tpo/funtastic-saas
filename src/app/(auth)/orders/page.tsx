@@ -32,6 +32,7 @@ const searchParamsCache = createSearchParamsCache({
   marketplace: parseAsString,
   search: parseAsString,
   searchField: parseAsString,
+  orderSource: parseAsString,
   dateField: parseAsString,
   dateFrom: parseAsString,
   dateTo: parseAsString,
@@ -157,6 +158,9 @@ export default async function OrdersPage({
         marketplaces: multipleMarketplaces,
         search: params.search ?? undefined,
         searchField: (params.searchField ?? undefined) as OrderFiltersParams['searchField'],
+        orderSource: (params.orderSource === 'saas' || params.orderSource === 'sabangnet')
+          ? params.orderSource
+          : undefined,
         dateField: (params.dateField ?? undefined) as OrderFiltersParams['dateField'],
         dateFrom: params.dateFrom ?? undefined,
         dateTo: params.dateTo ?? undefined,

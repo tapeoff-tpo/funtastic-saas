@@ -369,6 +369,18 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(isNull(orders.mappedAt))
   }
 
+  if (filters.orderSource === 'sabangnet') {
+    conditions.push(sql`(
+      ${orders.rawData}->>'source' = 'sabangnet-current-xlsx'
+      OR ${orders.rawData} ? 'sabangnetSync'
+    )`)
+  } else if (filters.orderSource === 'saas') {
+    conditions.push(sql`NOT (
+      ${orders.rawData}->>'source' = 'sabangnet-current-xlsx'
+      OR ${orders.rawData} ? 'sabangnetSync'
+    )`)
+  }
+
   if (filters.dateFrom) {
     conditions.push(getDateFilterCondition(filters, filters.dateFrom, 'start'))
   }
@@ -648,6 +660,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     && !filters.dateFrom
     && !filters.dateTo
     && !filters.mapping
+    && !filters.orderSource
     && !filters.stage
     && !filters.isHeld
     && !filters.excludeHeld

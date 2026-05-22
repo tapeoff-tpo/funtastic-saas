@@ -31,6 +31,12 @@ const MAPPING_OPTIONS = [
   { value: 'unmapped', label: '매핑안됨' },
 ]
 
+const ORDER_SOURCE_OPTIONS = [
+  { value: '', label: '전체 출처' },
+  { value: 'saas', label: 'SaaS' },
+  { value: 'sabangnet', label: '사방넷' },
+]
+
 const SCAN_OPTIONS = [
   { value: '', label: '전체' },
   { value: 'scanned', label: '스캔함' },
@@ -341,6 +347,7 @@ export function OrderFilters({
     mapping: parseAsString,
     scan: parseAsString,
     scanResult: parseAsString,
+    orderSource: parseAsString,
     marketplace: parseAsString,
     search: parseAsString,
     searchField: parseAsString,
@@ -352,9 +359,34 @@ export function OrderFilters({
     pageSize: parseAsInteger.withDefault(25),
   }, { shallow: false })
 
-  // Local state for search input — only pushed to URL on explicit submit
+  // Local draft state — filters are pushed to URL only on explicit search.
+  const filterSignature = [
+    filters.status,
+    filters.mapping,
+    filters.scan,
+    filters.scanResult,
+    filters.orderSource,
+    filters.marketplace,
+    filters.search,
+    filters.searchField,
+    filters.dateField,
+    filters.dateFrom,
+    filters.dateTo,
+    filters.datePreset,
+    filters.page,
+    filters.pageSize,
+  ].join('|')
+  const [draftFilters, setDraftFilters] = useState(filters)
   const [searchInput, setSearchInput] = useState(filters.search ?? '')
-  const selectedStatuses = useMemo(() => parseSelectedStatuses(filters.status), [filters.status])
+  const [draftSignature, setDraftSignature] = useState(filterSignature)
+
+  if (draftSignature !== filterSignature) {
+    setDraftSignature(filterSignature)
+    setDraftFilters(filters)
+    setSearchInput(filters.search ?? '')
+  }
+
+  const selectedStatuses = useMemo(() => parseSelectedStatuses(draftFilters.status), [draftFilters.status])
   const isNewTab = selectedStatuses.length === 1 && selectedStatuses[0] === 'new'
   const isConfirmedTab = selectedStatuses.length === 1 && selectedStatuses[0] === 'confirmed'
   const showMappingFilter = isNewTab || isConfirmedTab
@@ -366,92 +398,96 @@ export function OrderFilters({
     return `${year}-${month}-${day}`
   }, [])
 
-  const updateFilter = useCallback(
-    (updates: Partial<typeof filters>) => {
-      startTransition(() => {
-        void setFilters({ ...updates, page: 1 })
-      })
-    },
-    [setFilters],
-  )
+  const updateDraftFilter = useCallback((updates: Partial<typeof filters>) => {
+    setDraftFilters((current) => ({ ...current, ...updates, page: 1 }))
+  }, [])
 
-  const submitSearch = useCallback(() => {
+  const applyFilters = useCallback(() => {
     const trimmed = searchInput.trim()
-    updateFilter({ search: trimmed || null })
-  }, [searchInput, updateFilter])
-
-  const handleReset = useCallback(() => {
-    setSearchInput('')
     startTransition(() => {
       void setFilters({
-        status: null,
-        mapping: null,
-        scan: null,
-        scanResult: null,
-        marketplace: null,
-        search: null,
-        searchField: null,
-        dateField: null,
-        dateFrom: null,
-        dateTo: null,
-        datePreset: null,
+        ...draftFilters,
+        search: trimmed || null,
         page: 1,
-        pageSize: filters.pageSize,
       })
+    })
+  }, [draftFilters, searchInput, setFilters])
+
+  const handleReset = useCallback(() => {
+    const resetFilters = {
+      status: null,
+      mapping: null,
+      scan: null,
+      scanResult: null,
+      orderSource: null,
+      marketplace: null,
+      search: null,
+      searchField: null,
+      dateField: null,
+      dateFrom: null,
+      dateTo: null,
+      datePreset: null,
+      page: 1,
+      pageSize: filters.pageSize,
+    }
+    setSearchInput('')
+    setDraftFilters(resetFilters)
+    startTransition(() => {
+      void setFilters(resetFilters)
     })
   }, [filters.pageSize, setFilters])
 
   const setToday = useCallback(() => {
     const today = formatDateInput(new Date())
-    updateFilter({ dateFrom: today, dateTo: today, datePreset: null })
-  }, [formatDateInput, updateFilter])
+    updateDraftFilter({ dateFrom: today, dateTo: today, datePreset: null })
+  }, [formatDateInput, updateDraftFilter])
 
   const setRecent7Days = useCallback(() => {
     const end = new Date()
     const start = new Date()
     start.setDate(start.getDate() - 6)
-    updateFilter({
+    updateDraftFilter({
       dateFrom: formatDateInput(start),
       dateTo: formatDateInput(end),
       datePreset: null,
     })
-  }, [formatDateInput, updateFilter])
+  }, [formatDateInput, updateDraftFilter])
 
   const setAllDates = useCallback(() => {
-    updateFilter({ dateFrom: null, dateTo: null, datePreset: 'all' })
-  }, [updateFilter])
+    updateDraftFilter({ dateFrom: null, dateTo: null, datePreset: 'all' })
+  }, [updateDraftFilter])
 
   const setRecent30Days = useCallback(() => {
     const end = new Date()
     const start = new Date()
     start.setDate(start.getDate() - 29)
-    updateFilter({
+    updateDraftFilter({
       dateFrom: formatDateInput(start),
       dateTo: formatDateInput(end),
       datePreset: null,
     })
-  }, [formatDateInput, updateFilter])
+  }, [formatDateInput, updateDraftFilter])
 
   const setCurrentMonth = useCallback(() => {
     const end = new Date()
     const start = new Date(end.getFullYear(), end.getMonth(), 1)
-    updateFilter({
+    updateDraftFilter({
       dateFrom: formatDateInput(start),
       dateTo: formatDateInput(end),
       datePreset: null,
     })
-  }, [formatDateInput, updateFilter])
+  }, [formatDateInput, updateDraftFilter])
 
   const setRecent2Months = useCallback(() => {
     const end = new Date()
     const start = new Date()
     start.setMonth(start.getMonth() - 2)
-    updateFilter({
+    updateDraftFilter({
       dateFrom: formatDateInput(start),
       dateTo: formatDateInput(end),
       datePreset: null,
     })
-  }, [formatDateInput, updateFilter])
+  }, [formatDateInput, updateDraftFilter])
 
   return (
     <div className="flex flex-wrap items-end gap-3">
@@ -462,8 +498,8 @@ export function OrderFilters({
         </label>
         <MarketplaceMultiSelect
           options={mergedMarketplaceOptions}
-          value={filters.marketplace}
-          onChange={(nextValue) => updateFilter({ marketplace: nextValue })}
+          value={draftFilters.marketplace}
+          onChange={(nextValue) => updateDraftFilter({ marketplace: nextValue })}
         />
       </div>
 
@@ -473,18 +509,36 @@ export function OrderFilters({
           주문 상태
         </label>
         <StatusMultiSelect
-          value={filters.status}
+          value={draftFilters.status}
           onChange={(nextStatus) => {
             const nextStatuses = parseSelectedStatuses(nextStatus)
             const nextShowsMapping = nextStatuses.length === 1 && (nextStatuses[0] === 'new' || nextStatuses[0] === 'confirmed')
-            updateFilter({
+            updateDraftFilter({
               status: nextStatus,
-              mapping: nextShowsMapping ? filters.mapping : null,
-              scan: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? filters.scan : null,
-              scanResult: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? filters.scanResult : null,
+              mapping: nextShowsMapping ? draftFilters.mapping : null,
+              scan: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? draftFilters.scan : null,
+              scanResult: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? draftFilters.scanResult : null,
             })
           }}
         />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-order-source" className="text-xs font-medium text-muted-foreground">
+          주문 출처
+        </label>
+        <select
+          id="filter-order-source"
+          value={draftFilters.orderSource ?? ''}
+          onChange={(e) => updateDraftFilter({ orderSource: e.target.value || null })}
+          className="rounded-md border px-3 py-1.5 text-sm"
+        >
+          {ORDER_SOURCE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       {showMappingFilter && (
@@ -494,8 +548,8 @@ export function OrderFilters({
           </label>
           <select
             id="filter-mapping"
-            value={filters.mapping ?? 'all'}
-            onChange={(e) => updateFilter({ mapping: e.target.value })}
+            value={draftFilters.mapping ?? 'all'}
+            onChange={(e) => updateDraftFilter({ mapping: e.target.value })}
             className="rounded-md border px-3 py-1.5 text-sm"
           >
             {MAPPING_OPTIONS.map((opt) => (
@@ -514,8 +568,8 @@ export function OrderFilters({
           </label>
           <select
             id="filter-scan"
-            value={filters.scan ?? ''}
-            onChange={(e) => updateFilter({ scan: e.target.value || null })}
+            value={draftFilters.scan ?? ''}
+            onChange={(e) => updateDraftFilter({ scan: e.target.value || null })}
             className="rounded-md border px-3 py-1.5 text-sm"
           >
             {SCAN_OPTIONS.map((opt) => (
@@ -534,8 +588,8 @@ export function OrderFilters({
           </label>
           <select
             id="filter-scan-result"
-            value={filters.scanResult ?? ''}
-            onChange={(e) => updateFilter({ scanResult: e.target.value || null })}
+            value={draftFilters.scanResult ?? ''}
+            onChange={(e) => updateDraftFilter({ scanResult: e.target.value || null })}
             className="rounded-md border px-3 py-1.5 text-sm"
           >
             {SCAN_RESULT_OPTIONS.map((opt) => (
@@ -554,8 +608,8 @@ export function OrderFilters({
         </label>
         <select
           id="filter-date-field"
-          value={filters.dateField ?? 'orderedAt'}
-          onChange={(e) => updateFilter({ dateField: e.target.value === 'orderedAt' ? null : e.target.value })}
+          value={draftFilters.dateField ?? 'orderedAt'}
+          onChange={(e) => updateDraftFilter({ dateField: e.target.value === 'orderedAt' ? null : e.target.value })}
           className="rounded-md border px-3 py-1.5 text-sm"
         >
           <option value="orderedAt">주문일자</option>
@@ -570,8 +624,8 @@ export function OrderFilters({
         <input
           id="filter-date-from"
           type="date"
-          value={filters.dateFrom ?? ''}
-          onChange={(e) => updateFilter({ dateFrom: e.target.value || null, datePreset: null })}
+          value={draftFilters.dateFrom ?? ''}
+          onChange={(e) => updateDraftFilter({ dateFrom: e.target.value || null, datePreset: null })}
           className="rounded-md border px-3 py-1.5 text-sm"
         />
       </div>
@@ -582,8 +636,8 @@ export function OrderFilters({
         <input
           id="filter-date-to"
           type="date"
-          value={filters.dateTo ?? ''}
-          onChange={(e) => updateFilter({ dateTo: e.target.value || null, datePreset: null })}
+          value={draftFilters.dateTo ?? ''}
+          onChange={(e) => updateDraftFilter({ dateTo: e.target.value || null, datePreset: null })}
           className="rounded-md border px-3 py-1.5 text-sm"
         />
       </div>
@@ -641,14 +695,14 @@ export function OrderFilters({
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            submitSearch()
+            applyFilters()
           }}
           className="flex items-center gap-1"
         >
           <select
             id="filter-search-field"
-            value={filters.searchField ?? 'all'}
-            onChange={(e) => updateFilter({ searchField: e.target.value === 'all' ? null : e.target.value })}
+            value={draftFilters.searchField ?? 'all'}
+            onChange={(e) => updateDraftFilter({ searchField: e.target.value === 'all' ? null : e.target.value })}
             className="rounded-md border px-3 py-1.5 text-sm"
             aria-label="검색종류"
           >
@@ -666,7 +720,7 @@ export function OrderFilters({
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
                 e.preventDefault()
-                submitSearch()
+                applyFilters()
               }
             }}
             rows={1}

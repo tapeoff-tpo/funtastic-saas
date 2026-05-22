@@ -110,6 +110,7 @@ export interface OrderFilters {
   order?: 'asc' | 'desc'
   claimType?: ClaimType
   mapping?: 'mapped' | 'unmapped' | 'all'
+  orderSource?: 'saas' | 'sabangnet'
   stage?: OrderStage
   /** Filter to only held (미발송) orders */
   isHeld?: boolean

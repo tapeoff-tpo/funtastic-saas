@@ -1,8 +1,8 @@
-import { eq, and, gte, lt, sql } from 'drizzle-orm'
+import { eq, and, gte, lt, sql, desc, inArray } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { orders, products } from '@/lib/db/schema'
-import { ShoppingCart, Calendar, Package, Wallet, TrendingUp, PackageX } from 'lucide-react'
+import { orderMemos, orders, products } from '@/lib/db/schema'
+import { ShoppingCart, Calendar, Package, Wallet, TrendingUp, PackageX, Bell, CheckCircle2, Image as ImageIcon } from 'lucide-react'
 import Link from 'next/link'
 import {
   DailyOrdersChart,
@@ -53,6 +53,7 @@ export default async function DashboardPage() {
     monthSalesResult,
     dailyRows,
     monthlyRows,
+    recentInspectionMemos,
   ] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)::int` })
@@ -102,6 +103,28 @@ export default async function DashboardPage() {
       .from(orders)
       .where(and(eq(orders.userId, workspaceUserId), gte(orders.orderedAt, twelveMonthsAgo)))
       .groupBy(sql`to_char(${orders.orderedAt} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')`),
+    db
+      .select({
+        id: orderMemos.id,
+        orderId: orders.id,
+        marketplaceId: orders.marketplaceId,
+        marketplaceOrderId: orders.marketplaceOrderId,
+        internalNo: orders.internalNo,
+        recipientName: orders.recipientName,
+        content: orderMemos.content,
+        attachments: orderMemos.attachments,
+        createdAt: orderMemos.createdAt,
+      })
+      .from(orderMemos)
+      .innerJoin(orders, eq(orderMemos.orderId, orders.id))
+      .where(
+        and(
+          eq(orders.userId, workspaceUserId),
+          inArray(orderMemos.memoType, ['mobile_return_inspection', 'return_inspection']),
+        ),
+      )
+      .orderBy(desc(orderMemos.createdAt))
+      .limit(5),
   ])
 
   const newOrderCount = newOrdersResult[0]?.count ?? 0
@@ -150,6 +173,57 @@ export default async function DashboardPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">대시보드</h1>
+
+      {recentInspectionMemos.length > 0 && (
+        <section className="rounded-lg border border-blue-200 bg-blue-50">
+          <div className="flex items-center justify-between border-b border-blue-100 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Bell className="h-4 w-4 text-blue-700" />
+              <h2 className="text-sm font-semibold text-blue-950">최근 물류 검수 완료</h2>
+            </div>
+            <Link href="/cs?workstream=marketplace" className="text-xs font-medium text-blue-700 hover:underline">
+              CS 작업함
+            </Link>
+          </div>
+          <div className="divide-y divide-blue-100 bg-white/70">
+            {recentInspectionMemos.map((memo) => {
+              const lines = memo.content.split('\n')
+              const resultLine = lines.find((line) => line.includes('검수결과')) ?? lines[0] ?? '검수 완료'
+              const attachmentCount = memo.attachments.length
+              return (
+                <Link
+                  key={memo.id}
+                  href={`/orders/${memo.orderId}`}
+                  className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-white"
+                >
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono text-xs font-semibold text-gray-900">{memo.marketplaceOrderId}</span>
+                      <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">{memo.marketplaceId}</span>
+                      {attachmentCount > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+                          <ImageIcon className="h-3 w-3" />
+                          {attachmentCount}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 truncate text-sm text-gray-800">{resultLine}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      #{memo.internalNo} · {memo.recipientName} · {new Intl.DateTimeFormat('ko-KR', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }).format(memo.createdAt)}
+                    </p>
+                  </div>
+                </Link>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">

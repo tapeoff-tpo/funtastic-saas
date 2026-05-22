@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { and, desc, eq } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
@@ -21,7 +22,8 @@ interface MemoAttachment {
 }
 
 const MAX_ATTACHMENTS = 5
-const MAX_ATTACHMENT_BYTES = 1024 * 1024
+const MAX_IMAGE_BYTES = 1024 * 1024
+const MAX_VIDEO_BYTES = 20 * 1024 * 1024
 const ATTACHMENT_RETENTION_DAYS = 30
 
 function normalizeAttachments(value: unknown): MemoAttachment[] {
@@ -34,9 +36,12 @@ function normalizeAttachments(value: unknown): MemoAttachment[] {
     const type = typeof source.type === 'string' ? source.type.trim() : ''
     const dataUrl = typeof source.dataUrl === 'string' ? source.dataUrl : ''
     const size = Number(source.size)
-    if (!type.startsWith('image/')) return []
+    const isImage = type.startsWith('image/')
+    const isVideo = type.startsWith('video/')
+    if (!isImage && !isVideo) return []
     if (!dataUrl.startsWith(`data:${type};base64,`)) return []
-    if (!Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_BYTES) return []
+    const maxBytes = isVideo ? MAX_VIDEO_BYTES : MAX_IMAGE_BYTES
+    if (!Number.isFinite(size) || size <= 0 || size > maxBytes) return []
     return [{ name: name || 'image', type, dataUrl, size, expiresAt }]
   })
 }
@@ -91,10 +96,10 @@ export async function POST(
   const content = body.content?.trim() ?? ''
   const attachments = normalizeAttachments(body.attachments)
   if (!content && attachments.length === 0) {
-    return NextResponse.json({ error: '메모 내용 또는 사진을 추가하세요.' }, { status: 400 })
+    return NextResponse.json({ error: '메모 내용 또는 첨부 파일을 추가하세요.' }, { status: 400 })
   }
   if (Array.isArray(body.attachments) && body.attachments.length > 0 && attachments.length === 0) {
-    return NextResponse.json({ error: '첨부 가능한 이미지는 1MB 이하 사진 파일입니다.' }, { status: 400 })
+    return NextResponse.json({ error: '첨부 가능한 파일은 1MB 이하 이미지 또는 20MB 이하 동영상입니다.' }, { status: 400 })
   }
 
   const [created] = await db
@@ -107,6 +112,11 @@ export async function POST(
       attachments,
     })
     .returning()
+
+  if (created.memoType === 'mobile_return_inspection' || created.memoType === 'return_inspection') {
+    revalidatePath('/dashboard')
+    revalidatePath('/cs')
+  }
 
   return NextResponse.json({ memo: created })
 }

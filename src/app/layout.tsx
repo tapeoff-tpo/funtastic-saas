@@ -16,7 +16,13 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Funtastic SaaS",
-  description: "이커머스 통합관리 플랫폼",
+  description: "E-commerce operations platform",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Funtastic",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export default function RootLayout({

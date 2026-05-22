@@ -226,6 +226,15 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
     }
 
+    const hasRows = () => {
+      const bodyText = document.body.textContent ?? ''
+      if (/총\s*[1-9]\d*\s*개/.test(bodyText)) return true
+      return Array.from(document.querySelectorAll('tr, .tui-grid-row, [role="row"]')).some((row) => {
+        const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+        return /\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text)
+      })
+    }
+
     const markCheckbox = (checkbox) => {
       checkbox.scrollIntoView({ block: 'center', inline: 'center' })
       if (!checkbox.checked) checkbox.click()
@@ -236,6 +245,39 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       }
       return checkbox.checked
     }
+
+    const markSelectAll = () => {
+      if (!hasRows()) return false
+      const candidates = Array.from(document.querySelectorAll([
+        'thead input[type="checkbox"]',
+        '.tui-grid-cell-header input[type="checkbox"]',
+        '.tui-grid-header-area input[type="checkbox"]',
+        '#order_list input[type="checkbox"]',
+        'table input[type="checkbox"]',
+      ].join(', '))).filter((checkbox) => !checkbox.disabled)
+
+      for (const checkbox of candidates) {
+        const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
+        const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+        const key = String(checkbox.name) + ' ' + String(checkbox.id) + ' ' + String(checkbox.className)
+        const looksLikeSelectAll = !row || /전체|all|check.?all|header|선택/i.test(key + ' ' + text)
+        if (!looksLikeSelectAll) continue
+        if (!isVisible(checkbox) && row) continue
+        checkbox.click()
+        checkbox.dispatchEvent(new Event('input', { bubbles: true }))
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+        const checkedRows = Array.from(document.querySelectorAll('tbody input[type="checkbox"]:checked, #order_list input[type="checkbox"]:checked'))
+          .filter((item) => {
+            const itemRow = item.closest('tr, .tui-grid-row, [role="row"]')
+            const itemText = itemRow?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+            return /\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(itemText)
+          })
+        if (checkbox.checked || checkedRows.length > 0) return true
+      }
+      return false
+    }
+
+    if (markSelectAll()) return true
 
     const rows = Array.from(document.querySelectorAll('tr, .tui-grid-row, [role="row"]'))
     for (const row of rows) {

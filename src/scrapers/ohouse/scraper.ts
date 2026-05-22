@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v33'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v34'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -184,6 +184,12 @@ interface OhouseLoginDiagnostics {
   observedAuthorization?: string
   observedAuthorizationShape?: string
   loginWait: string
+}
+
+interface OhouseSecondFactorRequest {
+  destination: string
+  type: string
+  partnerId: string
 }
 
 function createOhouseLoginDiagnostics(): OhouseLoginDiagnostics {
@@ -432,6 +438,19 @@ async function waitForOhouseSecondFactorFresh(page: Page, timeoutMs = 7000): Pro
   return false
 }
 
+async function readOhouseSecondFactorRequest(page: Page): Promise<OhouseSecondFactorRequest | null> {
+  return page
+    .evaluate(() => {
+      const url = new URL(window.location.href)
+      const destination = url.searchParams.get('destination')
+      const type = url.searchParams.get('method')
+      const partnerId = url.searchParams.get('accountId')
+      if (!destination || !type || !partnerId) return null
+      return { destination, type, partnerId }
+    })
+    .catch(() => null)
+}
+
 async function requestOhouseSecondFactorEmail(page: Page): Promise<boolean> {
   return page
     .evaluate(async () => {
@@ -456,6 +475,23 @@ async function requestOhouseSecondFactorEmail(page: Page): Promise<boolean> {
       })
       return response.ok
     })
+    .catch(() => false)
+}
+
+async function requestOhouseSecondFactorEmailWithParams(page: Page, request: OhouseSecondFactorRequest): Promise<boolean> {
+  return page
+    .evaluate(async (mfaRequest) => {
+      const response = await fetch('https://api.ohou.se/orora/member/v1/auth/mfa', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(mfaRequest),
+      })
+      return response.ok
+    }, request)
     .catch(() => false)
 }
 
@@ -674,12 +710,45 @@ async function selectOhouseSecondFactorEmailMethod(page: Page): Promise<boolean>
 }
 
 async function sendOhouseSecondFactorFromMethodPage(page: Page): Promise<boolean> {
+  const mfaRequest = await readOhouseSecondFactorRequest(page)
   await selectOhouseSecondFactorEmailMethod(page)
-  const clicked = await clickByText(page, /인증하기|다음|전송|발송/i)
-  if (!clicked) return false
-  await page.waitForURL(/\/signin\/multi-factor\/auth/, { timeout: 15_000 }).catch(() => undefined)
-  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
-  return waitForOhouseSecondFactorFresh(page)
+  const clicked = await page
+    .getByRole('button', { name: /^(인증하기|다음|전송|발송)$/ })
+    .first()
+    .click({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+    || await clickByText(page, /인증하기|다음|전송|발송/i)
+
+  if (!clicked && mfaRequest) {
+    const requested = await requestOhouseSecondFactorEmailWithParams(page, mfaRequest)
+    if (!requested) return false
+    await gotoOhouse(page, `${PARTNER_BASE_URL}/signin/multi-factor/auth`).catch(() => undefined)
+  } else if (!clicked) {
+    return false
+  }
+
+  const deadline = Date.now() + 20_000
+  while (Date.now() < deadline) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => undefined)
+    if (/\/signin\/multi-factor\/auth/.test(new URL(page.url()).pathname)) {
+      const remainingSeconds = await readOhouseSecondFactorRemainingSeconds(page)
+      if (remainingSeconds === null || remainingSeconds > 20) return true
+    }
+    const bodyText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '')
+    if (/인증번호\s*6자리|메일로\s*전송|이메일.*전송|인증\s*유효시간/.test(bodyText)) return true
+    await page.waitForTimeout(500)
+  }
+
+  if (mfaRequest) {
+    const requested = await requestOhouseSecondFactorEmailWithParams(page, mfaRequest)
+    if (requested) {
+      await gotoOhouse(page, `${PARTNER_BASE_URL}/signin/multi-factor/auth`).catch(() => undefined)
+      return true
+    }
+  }
+
+  return false
 }
 
 async function clickOhouseSecondFactorResend(page: Page): Promise<boolean> {
@@ -721,9 +790,7 @@ async function refreshOhouseSecondFactorEmail(page: Page): Promise<'clicked' | '
 
 async function assertOhouseSecondFactorFresh(page: Page, context: string): Promise<void> {
   const remainingSeconds = await readOhouseSecondFactorRemainingSeconds(page)
-  if (remainingSeconds === null) {
-    throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: ${context}: 오늘의집 2차 인증 유효시간을 확인하지 못했습니다. (${await summarizePage(page)})`)
-  }
+  if (remainingSeconds === null) return
   if (remainingSeconds <= 20) {
     throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: ${context}: 오늘의집 2차 인증 유효시간이 ${remainingSeconds}초라 인증번호를 입력하지 않았습니다. (${await summarizePage(page)})`)
   }
@@ -747,7 +814,7 @@ async function handleEmailSecondFactor(
   if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
     codeRequestedAt = new Date()
     const sent = await sendOhouseSecondFactorFromMethodPage(page)
-    if (!sent) throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 메일 발송 후 유효시간이 갱신되지 않았습니다.`)
+    if (!sent) throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 2차 인증 메일 발송 후 인증번호 입력 화면으로 이동하지 못했습니다. (${await summarizePage(page)})`)
   } else if (/\/signin\/multi-factor\/auth/.test(new URL(page.url()).pathname)) {
     codeRequestedAt = new Date()
     const refreshMethod = await refreshOhouseSecondFactorEmail(page)

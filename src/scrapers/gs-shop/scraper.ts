@@ -25,19 +25,28 @@ async function gotoGs(page: Page, url: string): Promise<void> {
 
 async function summarizePage(page: Page): Promise<string> {
   const title = await page.title().catch(() => '')
-  const bodyText = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '')
+  const frameTexts = await Promise.all(
+    page.frames().map((frame) => frame.locator('body').innerText({ timeout: 1_000 }).catch(() => '')),
+  )
+  const bodyText = frameTexts.join(' ')
   const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 240)
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
 }
 
-async function firstVisible(page: Page, selectors: string[]): Promise<Locator | null> {
-  for (const selector of selectors) {
-    const locator = page.locator(selector)
-    const count = await locator.count().catch(() => 0)
-    for (let index = 0; index < count; index += 1) {
-      const item = locator.nth(index)
-      if (await item.isVisible().catch(() => false)) return item
+async function firstVisible(page: Page, selectors: string[], timeoutMs = 30_000): Promise<Locator | null> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    for (const frame of page.frames()) {
+      for (const selector of selectors) {
+        const locator = frame.locator(selector)
+        const count = await locator.count().catch(() => 0)
+        for (let index = 0; index < count; index += 1) {
+          const item = locator.nth(index)
+          if (await item.isVisible().catch(() => false)) return item
+        }
+      }
     }
+    await page.waitForTimeout(500)
   }
   return null
 }
@@ -81,6 +90,37 @@ async function clickLoginControl(page: Page): Promise<void> {
 
   if (!submitted) {
     throw new MarketplaceApiError(MARKETPLACE_ID, 500, 'GS샵 로그인 버튼을 찾지 못했습니다.')
+  }
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+}
+
+async function clickLoginControlRobust(page: Page): Promise<void> {
+  const clicked = await page.evaluate(() => {
+    const candidates = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], a'))
+      .filter((element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return false
+        const text = element instanceof HTMLInputElement
+          ? element.value
+          : element.textContent || element.getAttribute('aria-label') || ''
+        return /로그인|login|sign\s*in/i.test(text) || element.getAttribute('type') === 'submit'
+      })
+
+    const target = candidates[0]
+    if (target instanceof HTMLElement) {
+      target.click()
+      return true
+    }
+
+    const form = document.querySelector('form')
+    if (!(form instanceof HTMLFormElement)) return false
+    form.requestSubmit()
+    return true
+  }).catch(() => false)
+
+  if (!clicked) {
+    await clickLoginControl(page)
+    return
   }
   await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
 }
@@ -226,16 +266,27 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   const idInput = await firstVisible(page, [
     'input[name*="id" i]',
     'input[id*="id" i]',
+    'input[name*="login" i]',
+    'input[id*="login" i]',
+    'input[name*="user" i]',
+    'input[id*="user" i]',
+    'input[type="email"]',
     'input[placeholder*="아이디"]',
     'input[placeholder*="ID" i]',
+    'input[placeholder*="id" i]',
+    'input[autocomplete="username"]',
+    'input:not([type])',
     'input[type="text"]',
   ])
   const passwordInput = await firstVisible(page, [
     'input[type="password"]',
     'input[name*="pw" i]',
     'input[id*="pw" i]',
+    'input[name*="pass" i]',
+    'input[id*="pass" i]',
     'input[placeholder*="비밀번호"]',
     'input[placeholder*="password" i]',
+    'input[autocomplete="current-password"]',
   ])
 
   if (!idInput || !passwordInput) {
@@ -248,7 +299,9 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
 
   await fillInput(idInput, credentials.email)
   await fillInput(passwordInput, credentials.password)
-  await clickLoginControl(page)
+  await clickLoginControlRobust(page).catch(async () => {
+    await passwordInput.press('Enter')
+  })
   await page.waitForTimeout(1_500)
 
   if (!(await isLoggedIn(page)) && await isSecondFactorPage(page)) {

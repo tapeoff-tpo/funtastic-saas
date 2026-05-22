@@ -119,8 +119,6 @@ export function IntegrationForms({ marketplaces, authProfiles }: IntegrationForm
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        <CommonAuthProfilesPanel authProfiles={authProfiles} />
-
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="space-y-2">
             <Label htmlFor="unified-marketplace-select">마켓</Label>
@@ -174,6 +172,8 @@ export function IntegrationForms({ marketplaces, authProfiles }: IntegrationForm
           </div>
         </div>
 
+        <SecondFactorProfilesPanel authProfiles={authProfiles} />
+
         {selectedMarketplace && (
           <p className="rounded-md bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
             {selectedMethodSupported
@@ -202,7 +202,7 @@ export function IntegrationForms({ marketplaces, authProfiles }: IntegrationForm
   )
 }
 
-function CommonAuthProfilesPanel({ authProfiles }: { authProfiles: CommonAuthProfileOption[] }) {
+function SecondFactorProfilesPanel({ authProfiles }: { authProfiles: CommonAuthProfileOption[] }) {
   const [state, formAction, isPending] = useActionState(saveCommonAuthProfile, null)
 
   useEffect(() => {
@@ -213,16 +213,16 @@ function CommonAuthProfilesPanel({ authProfiles }: { authProfiles: CommonAuthPro
   const naverProfiles = authProfiles.filter((profile) => profile.provider === 'naver_email')
 
   return (
-    <section className="rounded-lg border bg-muted/20 p-4">
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
-        <div>
-          <h3 className="text-sm font-semibold">공통 인증수단</h3>
+    <section className="rounded-lg border bg-muted/20 p-3">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold">2차 인증수단</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            RPA 2차 인증에 쓰는 네이버 메일을 한 번 저장하고 여러 몰에서 같이 사용합니다.
+            네이버 메일 인증번호를 읽어야 하는 RPA 몰에서 함께 사용합니다.
           </p>
           <div className="mt-3 space-y-2">
             {naverProfiles.length === 0 ? (
-              <p className="rounded-md border border-dashed bg-background px-3 py-3 text-xs text-muted-foreground">
+              <p className="rounded-md border border-dashed bg-background px-3 py-2 text-xs text-muted-foreground">
                 저장된 네이버 메일 인증수단이 없습니다.
               </p>
             ) : naverProfiles.map((profile) => (
@@ -234,7 +234,7 @@ function CommonAuthProfilesPanel({ authProfiles }: { authProfiles: CommonAuthPro
           </div>
         </div>
 
-        <form action={formAction} className="space-y-3 rounded-md border bg-background p-3">
+        <form action={formAction} className="space-y-2 rounded-md border bg-background p-3">
           <input type="hidden" name="provider" value="naver_email" />
           <div className="space-y-1">
             <Label htmlFor="common-auth-name">인증수단 이름</Label>
@@ -268,7 +268,7 @@ function CommonAuthProfilesPanel({ authProfiles }: { authProfiles: CommonAuthPro
             />
           </div>
           <Button type="submit" disabled={isPending} className="w-full">
-            {isPending ? '저장 중...' : '공통 인증수단 저장'}
+            {isPending ? '저장 중...' : '2차 인증수단 저장'}
           </Button>
           {state?.error && !isPending && (
             <p className="text-sm text-red-600">{state.error}</p>
@@ -455,7 +455,7 @@ function OhouseSecondFactorFields({
           required
           className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
-          <option value="">공통 인증수단을 선택하세요</option>
+          <option value="">2차 인증수단을 선택하세요</option>
           {naverProfiles.map((profile) => (
             <option key={profile.id} value={profile.id}>
               {profile.name} ({profile.accountEmail})
@@ -464,7 +464,7 @@ function OhouseSecondFactorFields({
         </select>
         {naverProfiles.length === 0 && (
           <p className="text-xs text-red-600">
-            먼저 위의 공통 인증수단에 네이버 메일 앱 비밀번호를 저장해주세요.
+            먼저 위의 2차 인증수단에 네이버 메일 앱 비밀번호를 저장해주세요.
           </p>
         )}
       </div>

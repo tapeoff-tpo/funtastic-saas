@@ -30,7 +30,6 @@ import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@
 import './register'
 
 const SCRAPE_JOB_TIMEOUT_MS = 480_000
-const INVOICE_UPLOAD_TIMEOUT_MS = 180_000
 
 async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -189,10 +188,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         .limit(1)
       if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
 
-      const result = await runWithTimeout(
-        scraper.uploadInvoice(credentials, orderId, invoice),
-        INVOICE_UPLOAD_TIMEOUT_MS,
-      )
+      const result = await scraper.uploadInvoice(credentials, orderId, invoice)
       if (!result.success) throw new Error(result.error || 'invoice upload failed')
       await markShipmentUploadedAndOrderShipped(shipmentId, shipment.orderId, shipment.uploadAttempts + 1)
       await db

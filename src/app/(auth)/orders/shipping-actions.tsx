@@ -53,7 +53,6 @@ interface MappingTarget {
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
 const EXACT_OPTION_ID = '__exact__'
 const RPA_INVOICE_POLL_INTERVAL_MS = 1500
-const RPA_INVOICE_POLL_TIMEOUT_MS = 210 * 1000
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]
@@ -117,6 +116,11 @@ export function ShippingActions({
   const [combining, setCombining] = useState(false)
   const [uploadingToMarket, setUploadingToMarket] = useState(false)
   const [uploadingRpaInvoice, setUploadingRpaInvoice] = useState(false)
+  const [rpaInvoiceFailure, setRpaInvoiceFailure] = useState<{
+    title: string
+    message: string
+    details?: string
+  } | null>(null)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [userTemplates, setUserTemplates] = useState<UserTemplate[] | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
@@ -234,6 +238,7 @@ export function ShippingActions({
 
   const handleRpaInvoiceUpload = async () => {
     if (selectedRpaOrders.length === 0 || uploadingRpaInvoice) return
+    setRpaInvoiceFailure(null)
 
     const missingTracking = selectedRpaOrders.filter((order) => !order.trackingNumber)
     if (missingTracking.length > 0) {
@@ -260,7 +265,12 @@ export function ShippingActions({
       }
 
       if (!res.ok) {
-        toast.error(data.error ?? data.message ?? 'RPA 송장 전송 요청에 실패했습니다.')
+        const message = data.error ?? data.message ?? 'RPA 송장 전송 요청에 실패했습니다.'
+        setRpaInvoiceFailure({
+          title: 'RPA 송장 전송 요청 실패',
+          message,
+        })
+        toast.error(message)
         return
       }
 
@@ -272,7 +282,12 @@ export function ShippingActions({
         const firstError = data.results?.find((result) => !result.queued)?.error
         toast.warning(`${queued}건 시작, ${skipped}건 제외${firstError ? `: ${firstError}` : ''}`)
       } else {
-        toast.error(data.message ?? data.results?.find((result) => result.error)?.error ?? 'RPA 전송할 송장이 없습니다.')
+        const message = data.message ?? data.results?.find((result) => result.error)?.error ?? 'RPA 전송할 송장이 없습니다.'
+        setRpaInvoiceFailure({
+          title: 'RPA 송장 전송 실패',
+          message,
+        })
+        toast.error(message)
       }
       if (queued > 0 && data.jobLogIds?.length) {
         keepUploadingUntilPollFinishes = true
@@ -282,7 +297,12 @@ export function ShippingActions({
         router.refresh()
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'RPA 송장 전송 요청에 실패했습니다.')
+      const message = error instanceof Error ? error.message : 'RPA 송장 전송 요청에 실패했습니다.'
+      setRpaInvoiceFailure({
+        title: 'RPA 송장 전송 요청 실패',
+        message,
+      })
+      toast.error(message)
     } finally {
       if (!keepUploadingUntilPollFinishes) {
         setUploadingRpaInvoice(false)
@@ -316,25 +336,31 @@ export function ShippingActions({
         const failedLogs = data.logs.filter((log) => log.status === 'failed' || log.status === 'cancelled')
         const failed = failedLogs.length
         const firstError = failedLogs.find((log) => log.errorMessage)?.errorMessage
+        const details = failedLogs
+          .map((log, index) => `${index + 1}. ${log.errorMessage ?? log.status}`)
+          .join('\n')
 
         finishPolling()
         if (completed > 0 && failed === 0) {
           toast.success(`${completed}건 RPA 송장 전송 완료`)
         } else if (completed > 0) {
+          setRpaInvoiceFailure({
+            title: 'RPA 송장 일부 실패',
+            message: `${completed}건 완료, ${failed}건 실패`,
+            details: details || firstError || undefined,
+          })
           toast.warning(`${completed}건 완료, ${failed}건 실패${firstError ? `: ${firstError}` : ''}`)
         } else {
-          toast.error(firstError ?? 'RPA 송장 전송에 실패했습니다.')
+          const message = firstError ?? 'RPA 송장 전송에 실패했습니다.'
+          setRpaInvoiceFailure({
+            title: 'RPA 송장 전송 실패',
+            message,
+            details: details || undefined,
+          })
+          toast.error(message)
         }
       } catch {
         // 네트워크 오류는 다음 폴링에서 다시 확인
-      }
-
-      if (
-        rpaInvoicePollStartedAtRef.current &&
-        Date.now() - rpaInvoicePollStartedAtRef.current > RPA_INVOICE_POLL_TIMEOUT_MS
-      ) {
-        finishPolling()
-        toast.error('RPA 송장 전송 완료 확인이 지연되고 있습니다. 잠시 후 새로고침해서 확인해주세요.')
       }
     }
 
@@ -894,6 +920,46 @@ export function ShippingActions({
         open={giftRulesOpen}
         onOpenChange={setGiftRulesOpen}
       />
+
+      {rpaInvoiceFailure && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 px-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-lg border bg-white shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b px-5 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-red-700">{rpaInvoiceFailure.title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">아래 사유를 확인한 뒤 닫아주세요.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRpaInvoiceFailure(null)}
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="닫기"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="space-y-3 px-5 py-4">
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-800">
+                {rpaInvoiceFailure.message}
+              </div>
+              {rpaInvoiceFailure.details && (
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md border bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+                  {rpaInvoiceFailure.details}
+                </pre>
+              )}
+            </div>
+            <div className="flex justify-end border-t bg-muted/20 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setRpaInvoiceFailure(null)}
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

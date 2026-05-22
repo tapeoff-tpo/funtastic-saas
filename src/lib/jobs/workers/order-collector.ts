@@ -177,7 +177,8 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'ssgmall'
+  void marketplaceId
+  return false
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {

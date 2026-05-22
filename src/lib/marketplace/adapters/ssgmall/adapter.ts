@@ -67,7 +67,7 @@ function parseDate(value?: string): Date {
   const normalized = value.length === 8
     ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
     : value.replace(' ', 'T')
-  const parsed = new Date(normalized)
+  const parsed = new Date(`${normalized}+09:00`)
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed
 }
 

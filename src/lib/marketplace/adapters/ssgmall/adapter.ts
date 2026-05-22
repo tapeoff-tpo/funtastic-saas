@@ -221,6 +221,20 @@ function getSsgShippingIdentity(rawData?: Record<string, unknown>): { shppNo: st
   return { shppNo: String(shppNo), shppSeq: String(shppSeq) }
 }
 
+function getSsgProcessItemQuantity(rawData?: Record<string, unknown>): number {
+  const candidates = [
+    rawData?.ordQty,
+    rawData?.rlordQty,
+    rawData?.dircQty,
+    rawData?.dircItemQty,
+  ]
+  for (const candidate of candidates) {
+    const quantity = asNumber(candidate)
+    if (quantity > 0) return Math.max(1, Math.floor(quantity))
+  }
+  return 1
+}
+
 function isUnpaidSsgOrder(order: SsgmallDirectionOrder): boolean {
   const statusCode = compactJoin([
     order.ordItemStatCd,
@@ -333,13 +347,14 @@ export class SsgmallAdapter implements MarketplaceAdapter {
 
   async uploadInvoice(_orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     void _orderId
-    const identity = getSsgShippingIdentity(invoice.rawData as Record<string, unknown> | undefined)
+    const rawData = invoice.rawData as Record<string, unknown> | undefined
+    const identity = getSsgShippingIdentity(rawData)
     if (!identity) {
       return { success: false, error: 'SSG 송장등록에 필요한 배송번호/배송순번이 주문 원본 데이터에 없습니다.' }
     }
 
     try {
-      const response = await this.client
+      const waybillResponse = await this.client
         .post('api/pd/1/saveWblNo.ssg', {
           json: {
             requestWhOutCompleteProcess: {
@@ -354,8 +369,24 @@ export class SsgmallAdapter implements MarketplaceAdapter {
         })
         .json<SsgmallApiResponse>()
 
-      if (isSuccessResponse(response)) return { success: true }
-      return { success: false, error: responseMessage(response, 'SSG 송장등록 실패') }
+      if (!isSuccessResponse(waybillResponse)) {
+        return { success: false, error: responseMessage(waybillResponse, 'SSG 송장등록 실패') }
+      }
+
+      const releaseResponse = await this.client
+        .post('api/pd/1/saveWhOutCompleteProcess.ssg', {
+          json: {
+            requestWhOutCompleteProcess: {
+              shppNo: identity.shppNo,
+              shppSeq: identity.shppSeq,
+              procItemQty: getSsgProcessItemQuantity(rawData),
+            },
+          },
+        })
+        .json<SsgmallApiResponse>()
+
+      if (isSuccessResponse(releaseResponse)) return { success: true }
+      return { success: false, error: responseMessage(releaseResponse, 'SSG 출고완료 처리 실패') }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }

@@ -133,7 +133,7 @@ export default async function OrdersPage({
   const isConfirmedTab = singleStatus === 'confirmed'
   const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
   const isGeneralStatusTab = Boolean(params.status) && !params.claimType && !params.cancel && !params.held
-  const needsMappingDetails = isNewTab || isConfirmedTab
+  const needsMappingDetails = true
   const needsStockDetails = isNewTab || isConfirmedTab || isScanFilterTab
   const shouldExcludeHeld = !params.held && Boolean(params.status || params.claimType || params.cancel)
   const mappingFilter = params.mapping === 'all'

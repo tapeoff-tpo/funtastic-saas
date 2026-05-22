@@ -7,6 +7,7 @@ import type {
   NormalizedOrder,
 } from '@/lib/marketplace/types'
 import { dumpStorageState, openContext } from '../browser'
+import { readNaverVerificationCode } from '../mail/naver'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -84,6 +85,120 @@ async function clickLoginControl(page: Page): Promise<void> {
   await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
 }
 
+async function isSecondFactorPage(page: Page): Promise<boolean> {
+  const bodyText = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '')
+  return /인증번호|인증번호 받기|본인 명의|휴대폰번호|이메일 주소|verification|security code/i.test(bodyText)
+}
+
+async function clickEmailVerificationButton(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const visibleText = (element: Element): string => {
+      if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || ''
+      return element.textContent || element.getAttribute('aria-label') || ''
+    }
+
+    const elements = Array.from(document.querySelectorAll('button, a, input[type="button"], input[type="submit"]'))
+      .filter((element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return false
+        const text = visibleText(element).replace(/\s+/g, ' ').trim()
+        return /인증번호|verification/i.test(text)
+      })
+      .map((element) => {
+        const containerText = (element.closest('li, tr, .row, div')?.textContent || '').replace(/\s+/g, ' ')
+        const score = /@|메일|email/i.test(containerText) ? 0 : 1
+        return { element, score }
+      })
+      .sort((a, b) => a.score - b.score)
+
+    const target = elements[0]?.element
+    if (!(target instanceof HTMLElement)) return false
+    target.click()
+    return true
+  }).catch(() => false)
+}
+
+async function fillVerificationCode(page: Page, code: string): Promise<void> {
+  const codeInput = await firstVisible(page, [
+    'input[autocomplete="one-time-code"]',
+    'input[name*="auth" i]',
+    'input[id*="auth" i]',
+    'input[name*="cert" i]',
+    'input[id*="cert" i]',
+    'input[name*="code" i]',
+    'input[id*="code" i]',
+    'input[type="tel"]',
+    'input[type="number"]',
+    'input[type="text"]',
+  ])
+  if (!codeInput) {
+    throw new MarketplaceApiError(MARKETPLACE_ID, 401, `GS SHOP 인증번호 입력칸을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
+
+  await fillInput(codeInput, code)
+
+  const submitted = await page.evaluate(() => {
+    const controls = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], a'))
+    const candidates = controls.filter((element) => {
+      const rect = element.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return false
+      const text = element instanceof HTMLInputElement ? element.value : element.textContent || ''
+      return /확인|인증|로그인|confirm|submit/i.test(text) && !/인증번호\s*받기/.test(text)
+    })
+    const target = candidates[0]
+    if (target instanceof HTMLElement) {
+      target.click()
+      return true
+    }
+    const form = document.querySelector('form')
+    if (form instanceof HTMLFormElement) {
+      form.requestSubmit()
+      return true
+    }
+    return false
+  }).catch(() => false)
+
+  if (!submitted) {
+    throw new MarketplaceApiError(MARKETPLACE_ID, 401, `GS SHOP 인증 확인 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await page.waitForTimeout(1_500)
+}
+
+async function handleNaverEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<void> {
+  const method = credentials.extras?.twoFactorMethod
+  const naverEmail = credentials.extras?.naverEmail
+  const naverPassword = credentials.extras?.naverPassword
+  if (method !== 'naver_email' || !naverEmail || !naverPassword) {
+    throw new MarketplaceApiError(
+      MARKETPLACE_ID,
+      428,
+      `GS SHOP 이메일 인증이 필요하지만 네이버 메일 인증수단이 연결되어 있지 않습니다. 마켓연동에서 GS SHOP RPA 계정에 네이버 메일 인증수단을 선택해 주세요. (${await summarizePage(page)})`,
+    )
+  }
+
+  const requestedAt = new Date()
+  const requested = await clickEmailVerificationButton(page)
+  if (!requested) {
+    throw new MarketplaceApiError(MARKETPLACE_ID, 401, `GS SHOP 이메일 인증번호 받기 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
+
+  const code = await readNaverVerificationCode({
+    email: naverEmail,
+    password: naverPassword,
+    receivedAfter: requestedAt,
+    timeoutMs: 90_000,
+    fromHints: ['gsshop', 'gs', 'partners', ''],
+    subjectHints: ['GS', 'GSSHOP', 'PARTNERS', '인증', 'verification'],
+  })
+
+  if (!code) {
+    throw new MarketplaceApiError(MARKETPLACE_ID, 401, '네이버 메일에서 GS SHOP 인증번호를 찾지 못했습니다.')
+  }
+
+  await fillVerificationCode(page, code)
+}
+
 async function isLoggedIn(page: Page): Promise<boolean> {
   if (/\/(cmm\/login|sign-in)/i.test(page.url())) return false
 
@@ -131,6 +246,10 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   await fillInput(passwordInput, credentials.password)
   await clickLoginControl(page)
   await page.waitForTimeout(1_500)
+
+  if (!(await isLoggedIn(page)) && await isSecondFactorPage(page)) {
+    await handleNaverEmailSecondFactor(page, credentials)
+  }
 
   if (!(await isLoggedIn(page))) {
     const bodyText = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '')

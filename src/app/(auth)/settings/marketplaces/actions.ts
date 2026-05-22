@@ -549,9 +549,10 @@ export async function registerRpaMarketplaceConnection(
   const twoFactorMethod = String(formData.get('two_factor_method') ?? '').trim()
   const twoFactorProfileId = String(formData.get('two_factor_profile_id') ?? '').trim()
   const extras: Record<string, string> = {}
-  if (marketplaceId === 'ohouse') {
+  const requiresNaverEmailSecondFactor = marketplaceId === 'ohouse' || marketplaceId === 'gs-shop'
+  if (requiresNaverEmailSecondFactor) {
     if (twoFactorMethod !== 'naver_email' || !twoFactorProfileId) {
-      return { error: '오늘의집 RPA는 공통 네이버 메일 인증수단 선택이 필요합니다.' }
+      return { error: `${config.name} RPA는 공통 네이버 메일 인증수단 선택이 필요합니다.` }
     }
     await ensureCommonAuthProfilesTable()
     const [profile] = await db

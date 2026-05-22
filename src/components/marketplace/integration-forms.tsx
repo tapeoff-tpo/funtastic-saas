@@ -417,8 +417,8 @@ function RpaConnectionForm({
         />
       </div>
 
-      {marketplace.id === 'ohouse' && (
-        <OhouseSecondFactorFields marketplaceId={marketplace.id} authProfiles={authProfiles} />
+      {(marketplace.id === 'ohouse' || marketplace.id === 'gs-shop') && (
+        <NaverEmailSecondFactorFields marketplaceId={marketplace.id} authProfiles={authProfiles} />
       )}
 
       <Button type="submit" disabled={isPending} className="w-full">
@@ -432,7 +432,7 @@ function RpaConnectionForm({
   )
 }
 
-function OhouseSecondFactorFields({
+function NaverEmailSecondFactorFields({
   marketplaceId,
   authProfiles,
 }: {

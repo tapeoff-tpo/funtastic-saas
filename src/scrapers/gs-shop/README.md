@@ -7,7 +7,7 @@ Login URL: `https://partners.gsshop.com/sign-in`
 
 - Login/session validation is wired through the common scraper worker.
 - Credentials should be saved as RPA login ID/password from marketplace settings.
-- The new Partners login exposes phone and email verification choices. Email verification can be automated later only if the mailbox can be read safely; otherwise use an operator-assisted RPA step.
+- The new Partners login exposes phone and email verification choices. Email verification is wired through the shared Naver mail auth profile.
 - Order collection intentionally stops with a clear `501` message until the actual order list or Excel download screen is confirmed.
 
 ## Next implementation target

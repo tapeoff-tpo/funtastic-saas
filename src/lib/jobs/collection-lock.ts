@@ -2,15 +2,25 @@ import { and, desc, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { jobLogs } from '@/lib/db/schema'
 
-const COLLECTION_JOB_TYPES = [
+const ORDER_COLLECTION_JOB_TYPES = [
   'order-collection',
   'manual-order-collection',
   'scrape-orders',
+] as const
+
+const CS_COLLECTION_JOB_TYPES = [
   'scrape-claims',
   'scrape-inquiries',
   'cs-collection',
 ] as const
 const RPA_SCRAPE_STALE_TIMEOUT_SECONDS = 540
+
+const COLLECTION_JOB_TYPES = [
+  ...ORDER_COLLECTION_JOB_TYPES,
+  ...CS_COLLECTION_JOB_TYPES,
+] as const
+
+type CollectionLane = 'order' | 'cs'
 
 export interface CollectionJobLogInput {
   jobType: string
@@ -37,6 +47,16 @@ export interface CollectionLockResult {
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
+function resolveCollectionLane(jobType: string): CollectionLane {
+  if ((ORDER_COLLECTION_JOB_TYPES as readonly string[]).includes(jobType)) return 'order'
+  if ((CS_COLLECTION_JOB_TYPES as readonly string[]).includes(jobType)) return 'cs'
+  return 'order'
+}
+
+function jobTypesForLane(lane: CollectionLane): readonly string[] {
+  return lane === 'order' ? ORDER_COLLECTION_JOB_TYPES : CS_COLLECTION_JOB_TYPES
+}
+
 async function markStaleCollectionJobsFailed(tx: Tx) {
   await tx
     .update(jobLogs)
@@ -61,6 +81,8 @@ export async function createCollectionJobLogsWithLock(
   inputs: CollectionJobLogInput[],
 ): Promise<CollectionLockResult> {
   if (inputs.length === 0) return { ok: true, jobLogIds: [] }
+  const lane = resolveCollectionLane(inputs[0].jobType)
+  const laneJobTypes = jobTypesForLane(lane)
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('funtastic:collection-lock'))`)
@@ -81,7 +103,7 @@ export async function createCollectionJobLogsWithLock(
       .where(
         and(
           inArray(jobLogs.status, ['queued', 'running']),
-          inArray(jobLogs.jobType, [...COLLECTION_JOB_TYPES]),
+          inArray(jobLogs.jobType, [...laneJobTypes]),
         ),
       )
       .orderBy(desc(jobLogs.createdAt))

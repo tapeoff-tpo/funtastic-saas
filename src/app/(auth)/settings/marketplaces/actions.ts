@@ -548,8 +548,6 @@ export async function registerRpaMarketplaceConnection(
   }
   const twoFactorMethod = String(formData.get('two_factor_method') ?? '').trim()
   const twoFactorProfileId = String(formData.get('two_factor_profile_id') ?? '').trim()
-  const gsSecondFactorMethod = String(formData.get('gs_second_factor_method') ?? '').trim()
-  const gsSecondFactorTarget = String(formData.get('gs_second_factor_target') ?? '').trim()
   const extras: Record<string, string> = {}
   if (marketplaceId === 'ohouse') {
     if (twoFactorMethod !== 'naver_email' || !twoFactorProfileId) {
@@ -572,11 +570,6 @@ export async function registerRpaMarketplaceConnection(
     }
     extras.twoFactorMethod = 'naver_email'
     extras.twoFactorProfileId = twoFactorProfileId
-    extras.accountKey = storeAlias
-  }
-  if (marketplaceId === 'gs-shop') {
-    extras.twoFactorMethod = gsSecondFactorMethod || 'manual'
-    if (gsSecondFactorTarget) extras.twoFactorTarget = gsSecondFactorTarget
     extras.accountKey = storeAlias
   }
 

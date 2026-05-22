@@ -420,7 +420,6 @@ function RpaConnectionForm({
       {marketplace.id === 'ohouse' && (
         <OhouseSecondFactorFields marketplaceId={marketplace.id} authProfiles={authProfiles} />
       )}
-      {marketplace.id === 'gs-shop' && <GsShopSecondFactorFields marketplaceId={marketplace.id} />}
 
       <Button type="submit" disabled={isPending} className="w-full">
         {isPending ? '등록 중...' : 'RPA 연동 저장'}
@@ -468,40 +467,6 @@ function OhouseSecondFactorFields({
             먼저 위의 2차 인증수단에 네이버 메일 앱 비밀번호를 저장해주세요.
           </p>
         )}
-      </div>
-    </div>
-  )
-}
-
-function GsShopSecondFactorFields({ marketplaceId }: { marketplaceId: string }) {
-  return (
-    <div className="space-y-4 border-t pt-4">
-      <div className="space-y-1">
-        <Label htmlFor={`${marketplaceId}-rpa-gs-second-factor-method`}>GS샵 2차 인증수단</Label>
-        <select
-          id={`${marketplaceId}-rpa-gs-second-factor-method`}
-          name="gs_second_factor_method"
-          defaultValue="manual"
-          className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <option value="manual">수동 확인</option>
-          <option value="sms">문자/SMS</option>
-          <option value="email">이메일</option>
-          <option value="app">인증 앱</option>
-        </select>
-      </div>
-
-      <div className="space-y-1">
-        <Label htmlFor={`${marketplaceId}-rpa-gs-second-factor-target`}>인증 수신 정보</Label>
-        <Input
-          id={`${marketplaceId}-rpa-gs-second-factor-target`}
-          name="gs_second_factor_target"
-          placeholder="예: 010-0000-0000 또는 account@example.com"
-          autoComplete="off"
-        />
-        <p className="text-xs text-muted-foreground">
-          실제 인증번호는 저장하지 않습니다. RPA가 어떤 수단으로 인증을 기다릴지 판단하는 용도입니다.
-        </p>
       </div>
     </div>
   )

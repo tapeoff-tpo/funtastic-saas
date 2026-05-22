@@ -4,6 +4,7 @@ interface NaverMailCodeOptions {
   email: string
   password: string
   since?: Date
+  receivedAfter?: Date
   timeoutMs?: number
   pollIntervalMs?: number
   fromHints?: string[]
@@ -77,6 +78,13 @@ function extractVerificationCode(message: string): string | null {
   return candidates.at(-1) ?? null
 }
 
+function extractMessageDate(message: string): Date | null {
+  const dateHeader = message.match(/^Date:\s*(.+)$/im)?.[1]?.trim()
+  if (!dateHeader) return null
+  const date = new Date(dateHeader)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
 class SimpleImapClient {
   private socket: tls.TLSSocket | null = null
   private buffer = ''
@@ -127,7 +135,7 @@ class SimpleImapClient {
       responses.push(...ids)
     }
 
-    return [...new Set(responses)].sort((a, b) => b - a).slice(0, 10)
+    return [...new Set(responses)].sort((a, b) => b - a).slice(0, 20)
   }
 
   async fetchMessage(uid: number): Promise<string> {
@@ -168,6 +176,7 @@ export async function readNaverVerificationCode(options: NaverMailCodeOptions): 
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
   const since = options.since ?? new Date(Date.now() - 10 * 60 * 1000)
+  const receivedAfter = options.receivedAfter?.getTime()
   const subjectHints = options.subjectHints ?? ['오늘의집', 'ohou', '인증']
   const startedAt = Date.now()
 
@@ -181,6 +190,8 @@ export async function readNaverVerificationCode(options: NaverMailCodeOptions): 
 
       for (const uid of uids) {
         const message = await client.fetchMessage(uid)
+        const messageDate = extractMessageDate(message)
+        if (receivedAfter && messageDate && messageDate.getTime() < receivedAfter - 5000) continue
         const decoded = decodeMimeWord(decodeQuotedPrintable(message)).toLowerCase()
         if (!subjectHints.some((hint) => decoded.includes(hint.toLowerCase()))) continue
         const code = extractVerificationCode(message)

@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v22'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v23'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -406,6 +406,11 @@ async function isSecondFactorPage(page: Page): Promise<boolean> {
   return page.locator('input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[autocomplete="one-time-code"]').first().isVisible({ timeout: 1000 }).catch(() => false)
 }
 
+async function isOhouseSecondFactorExpired(page: Page): Promise<boolean> {
+  const bodyText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '')
+  return /00:00\s*남음|유효\s*시간.*만료|인증.*만료|다시\s*인증하기/.test(bodyText)
+}
+
 async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentials): Promise<string> {
   if (!(await isSecondFactorPage(page))) return 'not-detected'
 
@@ -416,6 +421,8 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
     throw new MarketplaceApiError('ohouse', 401, '오늘의집 2차 인증이 필요하지만 네이버 메일 인증 정보가 저장되어 있지 않습니다.')
   }
 
+  let codeRequestedAt = new Date(Date.now() - 2 * 60 * 1000)
+
   if (/\/signin\/multi-factor\/method/.test(new URL(page.url()).pathname)) {
     await page
       .evaluate(() => {
@@ -424,32 +431,46 @@ async function handleEmailSecondFactor(page: Page, credentials: ScraperCredentia
         emailRadio?.click()
       })
       .catch(() => undefined)
+    codeRequestedAt = new Date()
     await clickByText(page, /인증하기|다음|전송|발송/i)
     await page.waitForURL(/\/signin\/multi-factor\/auth/, { timeout: 15_000 }).catch(() => undefined)
     await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
     await page.waitForTimeout(1500)
-  } else {
-    await clickByText(page, /인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)|다시\s*인증하기/i).catch(() => false)
+  } else if (await isOhouseSecondFactorExpired(page)) {
+    codeRequestedAt = new Date()
+    await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+    await page.waitForTimeout(1500)
   }
 
-  const code = await readNaverVerificationCode({
-    email: naverEmail,
-    password: naverPassword,
-    since: new Date(Date.now() - 2 * 60 * 1000),
-    fromHints: ['bucketplace', 'ohou', '오늘의집', ''],
-    subjectHints: ['오늘의집', 'ohou', '인증'],
-  })
-  if (!code) {
-    throw new MarketplaceApiError('ohouse', 401, '네이버 메일에서 오늘의집 2차 인증번호를 찾지 못했습니다.')
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const code = await readNaverVerificationCode({
+      email: naverEmail,
+      password: naverPassword,
+      since: new Date(codeRequestedAt.getTime() - 60_000),
+      receivedAfter: codeRequestedAt,
+      fromHints: ['bucketplace', 'ohou', '오늘의집', ''],
+      subjectHints: ['오늘의집', 'ohou', '인증'],
+    })
+    if (!code) {
+      throw new MarketplaceApiError('ohouse', 401, '네이버 메일에서 오늘의집 2차 인증번호를 찾지 못했습니다.')
+    }
+
+    const codeInput = page
+      .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
+      .first()
+    await setInputValue(codeInput, code)
+    await clickByText(page, /확인|인증|로그인|다음|완료/i)
+    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+    await page.waitForTimeout(2500)
+
+    if (!(await isSecondFactorPage(page))) return attempt === 1 ? 'code-submitted' : 'code-submitted-after-resend'
+    if (attempt === 2) return 'code-submitted-expired'
+
+    codeRequestedAt = new Date()
+    await clickByText(page, /다시\s*인증하기|인증\s*번호.*(발송|전송|받기)|메일.*(발송|전송)|이메일.*(발송|전송)/i).catch(() => false)
+    await page.waitForTimeout(1500)
   }
 
-  const codeInput = page
-    .locator('input[autocomplete="one-time-code"], input[name*="otp" i], input[name*="code" i], input[name*="verification" i], input[name*="auth" i], input[type="number"], input[type="tel"], input[type="text"]')
-    .first()
-  await setInputValue(codeInput, code)
-  await clickByText(page, /확인|인증|로그인|다음|완료/i)
-  await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-  await page.waitForTimeout(1500)
   return 'code-submitted'
 }
 
@@ -516,13 +537,13 @@ async function performOhouseLogin(
   logStep('login: submit credentials')
   await submitLogin(page, diagnostics)
   diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
-  if (diagnostics.secondFactor === 'code-submitted') {
+  if (diagnostics.secondFactor.startsWith('code-submitted')) {
     await waitForOhouseLoginResult(page, diagnostics, { stopOnSecondFactor: false })
   }
 
   if (isOhouseSignInUrl(page.url())) {
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력|계정.*확인|판매자.*확인|인증.*필요/)?.[0]
+    const reason = bodyText.match(/로그인이 필요합니다\.?|이메일.*확인|비밀번호.*확인|일치하지 않습니다|잘못.*입력|계정.*확인|판매자.*확인|인증.*필요|인증\s*유효시간\s*00:00\s*남음|다시\s*인증하기/)?.[0]
     return `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후에도 로그인 화면에 머물러 있습니다.${reason ? ` (${reason})` : ' 오늘의집 ID/PW, 판매자 계정 권한, 2차 인증 설정을 확인해주세요.'} (${await summarizePage(page)})`
   }
 

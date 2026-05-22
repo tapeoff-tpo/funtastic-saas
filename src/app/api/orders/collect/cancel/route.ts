@@ -5,8 +5,9 @@ import { cancelManualJobs } from '@/lib/jobs/queues'
 /**
  * POST /api/orders/collect/cancel
  *
- * Cancel pending manual collection jobs.
- * Already-running jobs will complete normally.
+ * Cancel manual collection jobs.
+ * Queued jobs are removed from the queue; running logs are terminalized so the
+ * UI and collection lock are released.
  *
  * Body: { jobLogIds: string[] }
  */

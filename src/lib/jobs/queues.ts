@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq'
-import { eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { getConnection } from './connection'
 import { db } from '@/lib/db'
 import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
@@ -108,15 +108,18 @@ export async function queueManualCollection(
 }
 
 /**
- * Cancel manual collection jobs that are still waiting in the queue.
- * Already-running jobs cannot be cancelled (they will complete normally).
+ * Cancel manual collection jobs.
+ *
+ * Waiting jobs are removed from the queue. Already-running jobs cannot be
+ * interrupted safely from the API process, but their job log is terminalized so
+ * the UI and collection lock are released immediately.
  */
 export async function cancelManualJobs(jobLogIds: string[]): Promise<{
   cancelled: string[]
   alreadyRunning: string[]
 }> {
   const queues = [getOrderCollectionQueue(), getMarketplaceScrapeQueue()]
-  const cancelled: string[] = []
+  const removedFromQueue: string[] = []
   const alreadyRunning: string[] = []
 
   // Get waiting jobs and match by jobLogId in data. Running scraper jobs
@@ -127,28 +130,34 @@ export async function cancelManualJobs(jobLogIds: string[]): Promise<{
     for (const job of waitingJobs) {
       if (job.data.jobLogId && jobLogIds.includes(job.data.jobLogId)) {
         await job.remove()
-        cancelled.push(job.data.jobLogId)
+        removedFromQueue.push(job.data.jobLogId)
       }
     }
   }
 
-  // Check which requested IDs were not in waiting (already running or done)
-  const cancelledSet = new Set(cancelled)
-  for (const id of jobLogIds) {
-    if (!cancelledSet.has(id)) {
-      alreadyRunning.push(id)
-    }
+  const activeRows = await db
+    .select({ id: jobLogs.id })
+    .from(jobLogs)
+    .where(and(inArray(jobLogs.id, jobLogIds), inArray(jobLogs.status, ['queued', 'running'])))
+
+  const activeIds = activeRows.map((row) => row.id)
+  const removedSet = new Set(removedFromQueue)
+  for (const id of activeIds) {
+    if (!removedSet.has(id)) alreadyRunning.push(id)
   }
 
-  // Update job_logs for cancelled jobs
-  if (cancelled.length > 0) {
+  if (activeIds.length > 0) {
     await db
       .update(jobLogs)
-      .set({ status: 'cancelled', completedAt: new Date() })
-      .where(inArray(jobLogs.id, cancelled))
+      .set({
+        status: 'cancelled',
+        completedAt: new Date(),
+        progressMessage: '사용자 요청으로 강제 종료됨',
+      })
+      .where(inArray(jobLogs.id, activeIds))
   }
 
-  return { cancelled, alreadyRunning }
+  return { cancelled: activeIds, alreadyRunning }
 }
 
 // ─── Invoice Upload Queue ────────────────────────────────────────

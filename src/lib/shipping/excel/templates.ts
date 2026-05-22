@@ -92,7 +92,7 @@ export const BUILT_IN_CARRIER_TEMPLATES: BuiltInCarrierTemplateDef[] = [
     name: '미발송 필터양식',
     isDefault: true,
     columns: [
-      { header: '주문상태', field: 'marketplaceStatus', width: 8, required: false },
+      { header: '주문상태', field: 'status', width: 8, required: false, fixedValue: '미발송' },
       { header: '쇼핑몰', field: 'marketplaceId', width: 18, required: false },
       { header: '사방넷 주문번호', field: 'internalNo', width: 13, required: true },
       { header: '수집일자(YYYYMMDD)', field: 'collectedDateYmd', width: 19, required: false },

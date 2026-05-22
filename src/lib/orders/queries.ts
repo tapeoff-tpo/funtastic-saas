@@ -497,6 +497,17 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     )
   }
 
+  if (filters.claimType) {
+    conditions.push(
+      exists(
+        db
+          .select({ x: sql`1` })
+          .from(claims)
+          .where(and(eq(claims.orderId, orders.id), eq(claims.claimType, filters.claimType))),
+      ),
+    )
+  }
+
   // Phase 8 — 취소 탭 통합 필터: status='cancelled' OR claimType='cancel'
   if (filters.cancelTab) {
     conditions.push(
@@ -615,28 +626,6 @@ export async function getOrders(filters: OrderFilters = {}) {
     orderRows: (typeof orders.$inferSelect)[]
     total: number
   }> = (async () => {
-    if (filters.claimType) {
-      const claimOrderIds = await db
-        .select({ orderId: claims.orderId })
-        .from(claims)
-        .where(eq(claims.claimType, filters.claimType))
-      const ids = claimOrderIds.map((r) => r.orderId)
-      if (ids.length === 0) return { orderRows: [], total: 0 }
-      const claimWhere = conditions.length > 0
-        ? and(...conditions, inArray(orders.id, ids))
-        : inArray(orders.id, ids)
-      const [rows, countRows] = await Promise.all([
-        db
-          .select()
-          .from(orders)
-          .where(claimWhere)
-          .orderBy(sortDir)
-          .limit(queryLimit)
-          .offset(queryOffset),
-        db.select({ value: count(orders.id) }).from(orders).where(claimWhere),
-      ])
-      return { orderRows: rows, total: countRows[0]?.value ?? 0 }
-    }
     const totalPromise = canUseCachedStatsTotal && userId
       ? getOrderStats(userId).then((stats) => {
           if (filters.status) return stats[filters.status] ?? 0
@@ -686,22 +675,7 @@ export async function getOrders(filters: OrderFilters = {}) {
             lockedAt: orderItems.lockedAt,
             // 확정상품명 — SKU가 products에 직접 매칭된 경우만 해석
             productInternalName: products.name,
-            productInternalOptionName: sql<string | null>`(
-              SELECT MAX(${inventory.optionName})
-              FROM ${inventory}
-              WHERE ${inventory.userId} = ${orders.userId}
-                AND ${inventory.sku} = ${orderItems.sku}
-            )`,
             shippingCost: products.shippingCost,
-            // 잔여 재고 — 창고별 inventory 행을 SKU 단위로 합산
-            availableStock: includeStock
-              ? sql<number | null>`(
-                  SELECT COALESCE(SUM(${inventory.availableStock}), 0)::int
-                  FROM ${inventory}
-                  WHERE ${inventory.userId} = ${orders.userId}
-                    AND ${inventory.sku} = ${orderItems.sku}
-                )`
-              : sql<number | null>`NULL`,
             orderMarketplaceId: orders.marketplaceId,
             orderUserId: orders.userId,
           })
@@ -758,9 +732,7 @@ export async function getOrders(filters: OrderFilters = {}) {
           lockedMappingCode: string | null
           lockedAt: Date | null
           productInternalName: string | null
-          productInternalOptionName: string | null
           shippingCost: string | null
-          availableStock: number | null
           orderMarketplaceId: string
           orderUserId: string
         }>,
@@ -775,6 +747,26 @@ export async function getOrders(filters: OrderFilters = {}) {
           scannedAt: Date
         }>,
       ]
+
+  const pageSkus = Array.from(new Set(
+    itemRows
+      .map((item) => item.sku?.trim())
+      .filter((sku): sku is string => Boolean(sku)),
+  ))
+  const pageInventoryRows = userId && pageSkus.length > 0
+    ? await db
+        .select({
+          sku: inventory.sku,
+          optionName: sql<string | null>`MAX(${inventory.optionName})`,
+          availableStock: includeStock
+            ? sql<number | null>`COALESCE(SUM(${inventory.availableStock}), 0)::int`
+            : sql<number | null>`NULL`,
+        })
+        .from(inventory)
+        .where(and(eq(inventory.userId, userId), inArray(inventory.sku, pageSkus)))
+        .groupBy(inventory.sku)
+    : []
+  const pageInventoryBySku = new Map(pageInventoryRows.map((row) => [row.sku, row]))
 
   // Phase 8 — base orderItems shape. displayName is enriched below after mapping index is built.
   const mappingCandidates = includeMappingDetails
@@ -850,9 +842,9 @@ export async function getOrders(filters: OrderFilters = {}) {
     orderMarketplaceId: r.orderMarketplaceId,
     // 직접 SKU 매칭 표시명. 매핑 규칙 표시명은 mappingIndex 생성 후 아래에서 채운다.
     displayName: r.productInternalName ?? null,
-    displayOptionName: r.productInternalOptionName ?? null,
+    displayOptionName: r.sku ? pageInventoryBySku.get(r.sku)?.optionName ?? null : null,
     shippingCost: r.shippingCost,
-    availableStock: r.availableStock,
+    availableStock: r.sku ? pageInventoryBySku.get(r.sku)?.availableStock ?? null : null,
     resolvedMappingCodeId: null as string | null,
   }))
 

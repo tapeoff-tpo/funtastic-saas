@@ -1,4 +1,4 @@
-import ExcelJS from 'exceljs'
+import * as XLSX from 'xlsx'
 import type { Download, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type { InvoiceData, MarketplaceId, NormalizedClaim, NormalizedOrder } from '@/lib/marketplace/types'
@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v34'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v35'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -29,19 +29,30 @@ function formatDateInput(date: Date): string {
   return `${year}-${month}-${day}`
 }
 
-function readCellText(value: ExcelJS.CellValue): string {
+function readCellText(value: unknown): string {
   if (value === null || value === undefined) return ''
   if (value instanceof Date) return value.toISOString()
   if (typeof value === 'object') {
-    if ('richText' in value && Array.isArray(value.richText)) return value.richText.map((part) => part.text).join('').trim()
-    if ('text' in value && typeof value.text === 'string') return value.text.trim()
-    if ('result' in value && value.result !== undefined) return String(value.result).trim()
+    const objectValue = value as { richText?: Array<{ text?: string }>; text?: string; result?: unknown }
+    if (Array.isArray(objectValue.richText)) return objectValue.richText.map((part) => part.text ?? '').join('').trim()
+    if (typeof objectValue.text === 'string') return objectValue.text.trim()
+    if (objectValue.result !== undefined) return String(objectValue.result).trim()
   }
   return String(value).trim()
 }
 
 function normalizeHeader(value: string): string {
   return value.replace(/\s+/g, '').replace(/[()[\]{}]/g, '').trim()
+}
+
+function previewDownloadedBuffer(buffer: Buffer): string {
+  return buffer
+    .subarray(0, 500)
+    .toString('utf8')
+    .replace(/\u0000/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 220)
 }
 
 function parseNumber(value: string): number {
@@ -1325,40 +1336,47 @@ export class OhouseScraper implements MarketplaceScraper {
   }
 
   private async parseOrdersExcel(buffer: Buffer, credentials: ScraperCredentials): Promise<NormalizedOrder[]> {
-    const workbook = new ExcelJS.Workbook()
-    await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
-    const worksheet = workbook.worksheets[0]
-    if (!worksheet) return []
-
-    let headerRow: ExcelJS.Row | null = null
-    for (let rowNumber = 1; rowNumber <= Math.min(20, worksheet.rowCount); rowNumber++) {
-      const row = worksheet.getRow(rowNumber)
-      const headers: string[] = []
-      row.eachCell((cell) => {
-        const value = normalizeHeader(readCellText(cell.value))
-        if (value) headers.push(value)
-      })
-      if (headers.some((header) => /주문번호|주문상세번호|주문ID|주문번호/.test(header)) && headers.some((header) => /상품명|제품명/.test(header))) {
-        headerRow = row
-        break
-      }
+    let rows: string[][]
+    try {
+      const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false })
+      const sheetName = workbook.SheetNames[0]
+      if (!sheetName) return []
+      const sheet = workbook.Sheets[sheetName]
+      if (!sheet) return []
+      rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+        header: 1,
+        defval: '',
+        raw: false,
+        blankrows: false,
+      }).map((row) => row.map((cell) => readCellText(cell)))
+    } catch (error) {
+      throw new MarketplaceApiError(
+        'ohouse',
+        500,
+        `${OHOUSE_RPA_VERSION}: 오늘의집 다운로드 파일을 엑셀로 읽지 못했습니다. 실제 응답이 엑셀 파일이 아닙니다. preview=${previewDownloadedBuffer(buffer)} (${error instanceof Error ? error.message : 'parse failed'})`,
+      )
     }
 
-    if (!headerRow) {
-      throw new MarketplaceApiError('ohouse', 500, '오늘의집 주문 엑셀 헤더를 찾지 못했습니다.')
+    const headerIndex = rows.findIndex((row) => {
+      const headers = row.map((cell) => normalizeHeader(cell)).filter(Boolean)
+      return headers.some((header) => /주문번호|주문상세번호|주문ID/.test(header)) && headers.some((header) => /상품명|제품명/.test(header))
+    })
+
+    if (headerIndex < 0) {
+      throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 엑셀 헤더를 찾지 못했습니다. preview=${previewDownloadedBuffer(buffer)}`)
     }
 
     const columns = new Map<string, number>()
-    headerRow.eachCell((cell, colNumber) => {
-      const value = normalizeHeader(readCellText(cell.value))
-      if (value) columns.set(value, colNumber)
+    rows[headerIndex].forEach((cell, index) => {
+      const value = normalizeHeader(cell)
+      if (value) columns.set(value, index)
     })
 
-    const get = (row: ExcelJS.Row, ...headers: string[]) => {
+    const get = (row: string[], ...headers: string[]) => {
       for (const header of headers) {
         const col = columns.get(normalizeHeader(header))
-        if (!col) continue
-        const value = readCellText(row.getCell(col).value)
+        if (col === undefined) continue
+        const value = readCellText(row[col])
         if (value) return value
       }
       return ''
@@ -1366,9 +1384,8 @@ export class OhouseScraper implements MarketplaceScraper {
 
     const orders: NormalizedOrder[] = []
     const accountKey = normalizeAccountKey(credentials.extras?.accountKey)
-    worksheet.eachRow((row, rowNumber) => {
-      if (rowNumber <= (headerRow?.number ?? 1)) return
-
+    rows.slice(headerIndex + 1).forEach((row, index) => {
+      const rowNumber = headerIndex + index + 2
       const orderNo = get(row, '주문번호', '주문ID', '주문상세번호', '주문상세ID').replace(/^[_']+/, '')
       if (!orderNo) return
       const scopedOrderNo = `${accountKey}:${orderNo}`

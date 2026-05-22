@@ -1,5 +1,5 @@
 import type { Job } from 'bullmq'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql, type SQL } from 'drizzle-orm'
 import type { OrderCollectionJobData } from '../queues'
 import { db } from '@/lib/db'
 import {

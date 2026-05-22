@@ -40,6 +40,7 @@ export async function openContext(
 ): Promise<{ context: BrowserContext; page: Page; close: () => Promise<void> }> {
   const browser = await getBrowser()
   const context = await browser.newContext({
+    acceptDownloads: true,
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     viewport: { width: 1366, height: 768 },

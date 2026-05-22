@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v36'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v37'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -1104,6 +1104,63 @@ async function clickDownloadConfirmIfPresent(page: Page): Promise<string | null>
   return clicked ? dialogText.replace(/\s+/g, ' ').trim().slice(0, 160) : null
 }
 
+async function clickOhouseDownloadPrompts(page: Page, timeoutMs = 10_000): Promise<string[]> {
+  const messages: string[] = []
+  const deadline = Date.now() + timeoutMs
+  const dialogSelector = [
+    '[role="dialog"]',
+    '[aria-modal="true"]',
+    '.modal',
+    '.ant-modal',
+    '.MuiDialog-root',
+    '.ReactModal__Content',
+    '.swal2-popup',
+    '[class*="Modal"]',
+    '[class*="modal"]',
+    '[class*="Dialog"]',
+    '[class*="dialog"]',
+  ].join(', ')
+
+  while (Date.now() < deadline) {
+    const prompt = page
+      .locator(dialogSelector)
+      .filter({ hasText: /다운로드|엑셀|개인정보|암호화|저장|확인|사유/ })
+      .first()
+    const visible = await prompt.isVisible({ timeout: 400 }).catch(() => false)
+    if (!visible) {
+      if (Date.now() > deadline - timeoutMs + 3000) break
+      await page.waitForTimeout(400)
+      continue
+    }
+
+    const clicked = await prompt
+      .evaluate((dialog) => {
+        const text = (dialog.textContent || '').replace(/\s+/g, ' ').trim()
+        const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, [role="button"]'))
+        const target = controls.find((control) => {
+          const label = control instanceof HTMLInputElement ? control.value : control.innerText || control.textContent || ''
+          const normalized = label.replace(/\s+/g, '')
+          if (!/^(확인|다운로드|엑셀다운로드|예|동의|계속|저장)$/.test(normalized)) return false
+          const disabled = control instanceof HTMLButtonElement || control instanceof HTMLInputElement ? control.disabled : false
+          return !disabled && control.getAttribute('aria-disabled') !== 'true'
+        })
+        target?.click()
+        return target ? text.slice(0, 180) : ''
+      }, undefined, { timeout: 1000 })
+      .catch(() => '')
+
+    if (clicked) {
+      messages.push(clicked)
+      await page.waitForTimeout(800)
+      continue
+    }
+
+    await page.waitForTimeout(400)
+  }
+
+  return messages
+}
+
 async function readOhouseOrderListCount(page: Page): Promise<number | null> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   const match = bodyText.match(/총\s*([\d,]+)\s*개의\s*주문\s*목록/)
@@ -1152,6 +1209,7 @@ async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Pro
     page.waitForTimeout(1500).then(() => null),
   ])
   const modalMessage = await clickDownloadConfirmIfPresent(page)
+  const promptMessages = await clickOhouseDownloadPrompts(page)
 
   try {
     const directDownload = await Promise.race([
@@ -1183,11 +1241,12 @@ async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Pro
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
     const notice = bodyText.match(/다운로드[^.\n]*|엑셀[^.\n]*|권한[^.\n]*|로그인이 필요합니다\.?|오류[^.\n]*/)?.[0]
     const authNotice = authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''
+    const promptNotice = promptMessages.length > 0 ? ` prompts=${promptMessages.join(' | ')}` : ''
     const confirmNotice = dialogMessage || modalMessage ? ` confirm=${dialogMessage || modalMessage}` : ''
     throw new MarketplaceApiError(
       'ohouse',
       504,
-      `${OHOUSE_RPA_VERSION}: 오늘의집 엑셀 다운로드 응답을 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 받지 못했습니다.${authNotice}${confirmNotice}${notice ? ` (${notice})` : ''} (${error instanceof Error ? error.message : 'download timeout'})`,
+      `${OHOUSE_RPA_VERSION}: 오늘의집 엑셀 다운로드 응답을 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 받지 못했습니다.${authNotice}${confirmNotice}${promptNotice}${notice ? ` (${notice})` : ''} (${error instanceof Error ? error.message : 'download timeout'})`,
     )
   }
 }

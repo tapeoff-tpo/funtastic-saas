@@ -47,20 +47,20 @@ export async function saveCommonAuthProfile(
   } = await supabase.auth.getUser()
 
   if (authError || !user) {
-    return { error: '인증이 필요합니다.' }
+    return { error: '?�증???�요?�니??' }
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const provider = String(formData.get('provider') ?? 'naver_email').trim()
-  const name = String(formData.get('name') ?? '').trim() || '기본 네이버 메일'
+  const name = String(formData.get('name') ?? '').trim() || '기본 ?�이�?메일'
   const accountEmail = String(formData.get('account_email') ?? '').trim()
   const appPassword = String(formData.get('app_password') ?? '').replace(/\s+/g, '')
 
   if (provider !== 'naver_email') {
-    return { error: '현재는 네이버 메일 인증수단만 지원합니다.' }
+    return { error: '?�재???�이�?메일 ?�증?�단�?지?�합?�다.' }
   }
   if (!accountEmail || !appPassword) {
-    return { error: '네이버 메일 주소와 애플리케이션 비밀번호를 입력해주세요.' }
+    return { error: '?�이�?메일 주소?� ?�플리�??�션 비�?번호�??�력?�주?�요.' }
   }
 
   try {
@@ -101,7 +101,7 @@ export async function saveCommonAuthProfile(
       profileId = created.id
     }
     if (!profileId) {
-      return { error: '공통 인증수단 ID를 생성하지 못했습니다.' }
+      return { error: '공통 ?�증?�단 ID�??�성?��? 못했?�니??' }
     }
 
     const vaultSecretNames = await storeCommonAuthProfileCredentials({
@@ -120,18 +120,18 @@ export async function saveCommonAuthProfile(
       .where(eq(commonAuthProfiles.id, profileId))
   } catch (err) {
     return {
-      error: `공통 인증수단 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `공통 ?�증?�단 ?�???�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
   revalidatePath('/settings/marketplaces')
-  return { success: true, message: `${name} 인증수단이 저장되었습니다.` }
+  return { success: true, message: `${name} ?�증?�단???�?�되?�습?�다.` }
 }
 
 /**
- * 저장된 마켓플레이스 인증정보를 Vault에서 읽어 복호화된 값으로 반환.
- * 수정 화면 pre-fill 용도. 브라우저에 평문으로 노출되므로,
- * 반드시 인증된 소유자 요청만 통과시킨다.
+ * ?�?�된 마켓?�레?�스 ?�증?�보�?Vault?�서 ?�어 복호?�된 값으�?반환.
+ * ?�정 ?�면 pre-fill ?�도. 브라?��????�문?�로 ?�출?��?�?
+ * 반드???�증???�유???�청�??�과?�킨??
  */
 export async function getMarketplaceCredentials(
   connectionId: string,
@@ -151,10 +151,10 @@ export async function getMarketplaceCredentials(
     data: { user },
     error: authError,
   } = await supabase.auth.getUser()
-  if (authError || !user) return { error: '인증이 필요합니다.' }
+  if (authError || !user) return { error: '?�증???�요?�니??' }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  if (!connectionId) return { error: '연결 ID가 필요합니다.' }
+  if (!connectionId) return { error: '?�결 ID가 ?�요?�니??' }
 
   const rows = await db
     .select()
@@ -167,11 +167,11 @@ export async function getMarketplaceCredentials(
     )
     .limit(1)
 
-  if (rows.length === 0) return { error: '연결 정보를 찾을 수 없습니다.' }
+  if (rows.length === 0) return { error: '?�결 ?�보�?찾을 ???�습?�다.' }
 
   const connection = rows[0]
   if (!marketplaceRegistry.has(connection.marketplaceId)) {
-    return { error: '유효하지 않은 마켓플레이스입니다.' }
+    return { error: '?�효?��? ?��? 마켓?�레?�스?�니??' }
   }
 
   const config = marketplaceRegistry.get(connection.marketplaceId).config
@@ -187,7 +187,7 @@ export async function getMarketplaceCredentials(
     }
   } catch (err) {
     return {
-      error: `인증정보 조회 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `?�증?�보 조회 ?�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
@@ -204,8 +204,8 @@ export async function getMarketplaceCredentials(
 }
 
 /**
- * 폼에 입력된 자격증명으로 실제 마켓플레이스 API 호출 시도.
- * 저장 전에 값이 유효한지 검증할 때 사용. Vault에 저장하지 않고 메모리에서만 사용.
+ * ?�에 ?�력???�격증명?�로 ?�제 마켓?�레?�스 API ?�출 ?�도.
+ * ?�???�에 값이 ?�효?��? 검증할 ???�용. Vault???�?�하지 ?�고 메모리에?�만 ?�용.
  */
 export async function testMarketplaceCredentials(
   marketplaceId: string,
@@ -216,7 +216,7 @@ export async function testMarketplaceCredentials(
     data: { user },
     error: authError,
   } = await supabase.auth.getUser()
-  if (authError || !user) return { success: false, error: '인증이 필요합니다.' }
+  if (authError || !user) return { success: false, error: '?�증???�요?�니??' }
 
   try {
     let result: { success: boolean; error?: string }
@@ -260,7 +260,7 @@ export async function testMarketplaceCredentials(
           success: Boolean(credentials.api_key?.trim() && credentials.base_url?.trim()),
           error: credentials.api_key?.trim() && credentials.base_url?.trim()
             ? undefined
-            : 'api_key와 base_url을 입력해주세요.',
+            : 'api_key?� base_url???�력?�주?�요.',
         }
         break
       case 'domesin':
@@ -312,14 +312,14 @@ export async function testMarketplaceCredentials(
       default:
         return {
           success: false,
-          error: `${marketplaceId}는 테스트 연결이 아직 지원되지 않습니다. 저장 후 실제 수집으로 검증하세요.`,
+          error: `${marketplaceId}???�스???�결???�직 지?�되지 ?�습?�다. ?�?????�제 ?�집?�로 검증하?�요.`,
         }
     }
     return result
   } catch (err) {
     return {
       success: false,
-      error: err instanceof Error ? err.message : '알 수 없는 오류',
+      error: err instanceof Error ? err.message : '?????�는 ?�류',
     }
   }
 }
@@ -335,19 +335,19 @@ export async function registerMarketplaceCredentials(
   } = await supabase.auth.getUser()
 
   if (authError || !user) {
-    return { error: '인증이 필요합니다.' }
+    return { error: '?�증???�요?�니??' }
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const marketplaceId = formData.get('marketplace_id') as string
   if (!marketplaceId || !marketplaceRegistry.has(marketplaceId)) {
-    return { error: '유효하지 않은 마켓플레이스입니다.' }
+    return { error: '?�효?��? ?��? 마켓?�레?�스?�니??' }
   }
 
   const connectionId = String(formData.get('connection_id') ?? '').trim()
   const rawStoreAlias = String(formData.get('store_alias') ?? '').trim()
   if (formData.get('store_alias_required') === 'true' && !rawStoreAlias) {
-    return { error: '연결 계정명을 입력해주세요. 예: 쿠팡-본계정, 쿠팡-서브계정' }
+    return { error: '?�결 계정명을 ?�력?�주?�요. ?? 쿠팡-본계?? 쿠팡-?�브계정' }
   }
   const storeAlias = rawStoreAlias || 'default'
   const config = marketplaceRegistry.get(marketplaceId).config
@@ -358,7 +358,7 @@ export async function registerMarketplaceCredentials(
   for (const credKey of config.requiredCredentials) {
     const value = formData.get(credKey) as string
     if (!value || value.trim() === '') {
-      return { error: `${credKey}을(를) 입력해주세요.` }
+      return { error: `${credKey}??�? ?�력?�주?�요.` }
     }
   }
 
@@ -373,7 +373,7 @@ export async function registerMarketplaceCredentials(
     }).testConnection()
     if (!result.success) {
       return {
-        error: `카카오톡스토어 연동 확인 실패: ${result.error ?? '알 수 없는 오류'}`,
+        error: `카카?�톡?�토???�동 ?�인 ?�패: ${result.error ?? '?????�는 ?�류'}`,
       }
     }
   }
@@ -393,7 +393,7 @@ export async function registerMarketplaceCredentials(
         .limit(1)
 
       if (target.length === 0) {
-        return { error: '수정할 연결 정보를 찾을 수 없습니다.' }
+        return { error: '?�정???�결 ?�보�?찾을 ???�습?�다.' }
       }
     } else {
       const existing = await db
@@ -410,13 +410,13 @@ export async function registerMarketplaceCredentials(
 
       if (existing.length > 0) {
         return {
-          error: `${config.name}에 '${storeAlias}' 계정명이 이미 등록되어 있습니다. 기존 계정은 수정 버튼으로 변경하고, 새 계정은 다른 계정명을 입력해주세요.`,
+          error: `${config.name}??'${storeAlias}' 계정명이 ?��? ?�록?�어 ?�습?�다. 기존 계정?� ?�정 버튼?�로 변경하�? ??계정?� ?�른 계정명을 ?�력?�주?�요.`,
         }
       }
     }
   } catch (err) {
     return {
-      error: `연결 정보 확인 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `?�결 ?�보 ?�인 ?�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
@@ -431,7 +431,7 @@ export async function registerMarketplaceCredentials(
     }
   } catch (err) {
     return {
-      error: `인증정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `?�증?�보 ?�???�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
@@ -473,7 +473,7 @@ export async function registerMarketplaceCredentials(
         .limit(1)
 
       if (target.length === 0) {
-        return { error: '수정할 연결 정보를 찾을 수 없습니다.' }
+        return { error: '?�정???�결 ?�보�?찾을 ???�습?�다.' }
       }
 
       await db
@@ -489,7 +489,7 @@ export async function registerMarketplaceCredentials(
     } else {
       if (existing.length > 0) {
         return {
-          error: `${config.name}에 '${storeAlias}' 계정명이 이미 등록되어 있습니다. 기존 계정은 수정 버튼으로 변경하고, 새 계정은 다른 계정명을 입력해주세요.`,
+          error: `${config.name}??'${storeAlias}' 계정명이 ?��? ?�록?�어 ?�습?�다. 기존 계정?� ?�정 버튼?�로 변경하�? ??계정?� ?�른 계정명을 ?�력?�주?�요.`,
         }
       }
 
@@ -506,13 +506,13 @@ export async function registerMarketplaceCredentials(
     }
   } catch (err) {
     return {
-      error: `연결 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `?�결 ?�보 ?�???�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
   revalidatePath('/dashboard')
   revalidatePath('/settings/marketplaces')
-  return { success: true, message: `${displayName} 인증정보가 저장되었습니다.` }
+  return { success: true, message: `${displayName} ?�증?�보가 ?�?�되?�습?�다.` }
 }
 
 export async function registerRpaMarketplaceConnection(
@@ -526,32 +526,34 @@ export async function registerRpaMarketplaceConnection(
   } = await supabase.auth.getUser()
 
   if (authError || !user) {
-    return { error: '인증이 필요합니다.' }
+    return { error: '?�증???�요?�니??' }
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const marketplaceId = String(formData.get('marketplace_id') ?? '').trim()
   if (!marketplaceId || !marketplaceRegistry.has(marketplaceId)) {
-    return { error: '유효하지 않은 RPA 대상입니다.' }
+    return { error: '?�효?��? ?��? RPA ?�?�입?�다.' }
   }
 
   const config = marketplaceRegistry.get(marketplaceId).config
   if (!getSupportedIntegrationMethods(marketplaceId, { authType: config.authType }).includes('rpa')) {
-    return { error: `${config.name}은(는) RPA 연동 대상이 아닙니다.` }
+    return { error: `${config.name}?�(?? RPA ?�동 ?�?�이 ?�닙?�다.` }
   }
 
   const storeAlias = String(formData.get('store_alias') ?? '').trim() || 'default'
   const email = String(formData.get('email') ?? '').trim()
   const password = String(formData.get('password') ?? '').trim()
   if (!email || !password) {
-    return { error: '로그인 ID와 비밀번호를 입력해주세요.' }
+    return { error: '로그??ID?� 비�?번호�??�력?�주?�요.' }
   }
   const twoFactorMethod = String(formData.get('two_factor_method') ?? '').trim()
   const twoFactorProfileId = String(formData.get('two_factor_profile_id') ?? '').trim()
+  const gsSecondFactorMethod = String(formData.get('gs_second_factor_method') ?? '').trim()
+  const gsSecondFactorTarget = String(formData.get('gs_second_factor_target') ?? '').trim()
   const extras: Record<string, string> = {}
   if (marketplaceId === 'ohouse') {
     if (twoFactorMethod !== 'naver_email' || !twoFactorProfileId) {
-      return { error: '오늘의집 RPA는 공통 네이버 메일 인증수단 선택이 필요합니다.' }
+      return { error: '?�늘?�집 RPA??공통 ?�이�?메일 ?�증?�단 ?�택???�요?�니??' }
     }
     await ensureCommonAuthProfilesTable()
     const [profile] = await db
@@ -566,10 +568,15 @@ export async function registerRpaMarketplaceConnection(
       )
       .limit(1)
     if (!profile) {
-      return { error: '선택한 네이버 메일 인증수단을 찾을 수 없습니다.' }
+      return { error: '?�택???�이�?메일 ?�증?�단??찾을 ???�습?�다.' }
     }
     extras.twoFactorMethod = 'naver_email'
     extras.twoFactorProfileId = twoFactorProfileId
+    extras.accountKey = storeAlias
+  }
+  if (marketplaceId === 'gs-shop') {
+    extras.twoFactorMethod = gsSecondFactorMethod || 'manual'
+    if (gsSecondFactorTarget) extras.twoFactorTarget = gsSecondFactorTarget
     extras.accountKey = storeAlias
   }
 
@@ -619,7 +626,7 @@ export async function registerRpaMarketplaceConnection(
     }
   } catch (err) {
     return {
-      error: `RPA 연결 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `RPA ?�결 ?�보 ?�???�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
@@ -644,14 +651,14 @@ export async function registerRpaMarketplaceConnection(
       .where(eq(marketplaceConnections.id, connectionId))
   } catch (err) {
     return {
-      error: `RPA 로그인 정보 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `RPA 로그???�보 ?�???�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
   revalidatePath('/dashboard')
   revalidatePath('/orders/collect')
   revalidatePath('/settings/marketplaces')
-  return { success: true, message: `${displayName} RPA 연결이 등록되었습니다.` }
+  return { success: true, message: `${displayName} RPA ?�결???�록?�었?�니??` }
 }
 
 export async function registerExcelMarketplaceConnection(
@@ -665,7 +672,7 @@ export async function registerExcelMarketplaceConnection(
   } = await supabase.auth.getUser()
 
   if (authError || !user) {
-    return { error: '인증이 필요합니다.' }
+    return { error: '?�증???�요?�니??' }
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
@@ -673,8 +680,8 @@ export async function registerExcelMarketplaceConnection(
   const customName = String(formData.get('display_name') ?? '').trim()
   const storeAlias = String(formData.get('store_alias') ?? '').trim() || 'excel'
 
-  if (rawMarketplaceId === 'domechango' || customName.replace(/\s+/g, '').includes('도매창고')) {
-    return { error: '도매창고는 엑셀 수동이 아니라 RPA 자동화로 등록해주세요.' }
+  if (rawMarketplaceId === 'domechango' || customName.replace(/\s+/g, '').includes('?�매창고')) {
+    return { error: '?�매창고???��? ?�동???�니??RPA ?�동?�로 ?�록?�주?�요.' }
   }
 
   let marketplaceId = rawMarketplaceId
@@ -687,7 +694,7 @@ export async function registerExcelMarketplaceConnection(
   }
 
   if (!displayName) {
-    return { error: '엑셀 업로드몰 이름을 입력해주세요.' }
+    return { error: '?��? ?�로?�몰 ?�름???�력?�주?�요.' }
   }
 
   try {
@@ -728,13 +735,13 @@ export async function registerExcelMarketplaceConnection(
     }
   } catch (err) {
     return {
-      error: `엑셀 업로드몰 등록 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `?��? ?�로?�몰 ?�록 ?�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 
   revalidatePath('/orders/collect')
   revalidatePath('/settings/marketplaces')
-  return { success: true, message: `${displayName} 엑셀 업로드몰이 등록되었습니다.` }
+  return { success: true, message: `${displayName} ?��? ?�로?�몰???�록?�었?�니??` }
 }
 
 export async function deleteMarketplaceConnection(
@@ -748,13 +755,13 @@ export async function deleteMarketplaceConnection(
   } = await supabase.auth.getUser()
 
   if (authError || !user) {
-    return { error: '인증이 필요합니다.' }
+    return { error: '?�증???�요?�니??' }
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const connectionId = formData.get('connection_id') as string
   if (!connectionId) {
-    return { error: '연결 ID가 필요합니다.' }
+    return { error: '?�결 ID가 ?�요?�니??' }
   }
 
   const connections = await db
@@ -769,7 +776,7 @@ export async function deleteMarketplaceConnection(
     .limit(1)
 
   if (connections.length === 0) {
-    return { error: '연결 정보를 찾을 수 없습니다.' }
+    return { error: '?�결 ?�보�?찾을 ???�습?�다.' }
   }
 
   const connection = connections[0]
@@ -787,7 +794,7 @@ export async function deleteMarketplaceConnection(
     }
   } catch (err) {
     return {
-      error: `인증정보 삭제 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `?�증?�보 ??�� ?�패: ${err instanceof Error ? err.message : '?????�는 ?�류'}`,
     }
   }
 

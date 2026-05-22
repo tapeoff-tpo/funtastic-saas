@@ -133,6 +133,16 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   await page.waitForTimeout(1_500)
 
   if (!(await isLoggedIn(page))) {
+    const bodyText = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '')
+    const secondFactorMethod = credentials.extras?.twoFactorMethod ?? 'manual'
+    const secondFactorTarget = credentials.extras?.twoFactorTarget
+    if (/2차|인증|OTP|보안|휴대폰|문자|SMS|이메일/.test(bodyText)) {
+      throw new MarketplaceApiError(
+        MARKETPLACE_ID,
+        428,
+        `GS샵 2차 인증이 필요합니다. 저장된 인증수단=${secondFactorMethod}${secondFactorTarget ? `, 수신정보=${secondFactorTarget}` : ''}. 인증번호 처리 화면 확인 후 RPA 자동화를 이어서 연결해야 합니다. (${await summarizePage(page)})`,
+      )
+    }
     throw new MarketplaceApiError(
       MARKETPLACE_ID,
       401,

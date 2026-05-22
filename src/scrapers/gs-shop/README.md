@@ -7,6 +7,7 @@ Login URL: `https://withgs.gsshop.com/cmm/login`
 
 - Login/session validation is wired through the common scraper worker.
 - Credentials should be saved as RPA login ID/password from marketplace settings.
+- Marketplace settings can store the GS Shop second-factor method as scraper extras.
 - Order collection intentionally stops with a clear `501` message until the actual order list or Excel download screen is confirmed.
 
 ## Next implementation target

@@ -63,20 +63,43 @@ function decodeQuotedPrintable(value: string): string {
     .replace(/=([0-9A-Fa-f]{2})/g, (_match, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)))
 }
 
+function extractMessageBody(message: string): string {
+  const withoutFetchMetadata = message
+    .replace(/^\* \d+ FETCH [\s\S]*?\r?\n/i, '')
+    .replace(/\)\s*$/g, '')
+  const bodyStart = withoutFetchMetadata.search(/\r?\n\r?\n/)
+  const body = bodyStart >= 0 ? withoutFetchMetadata.slice(bodyStart) : withoutFetchMetadata
+  return body
+    .split(/\r?\n/)
+    .filter((line) => !/^(return-path|received|dkim-signature|authentication-results|message-id|date|from|to|subject|content-|mime-version|x-)[\w-]*:/i.test(line))
+    .join('\n')
+}
+
+function normalizeCodeCandidate(value: string): string | null {
+  const digits = value.replace(/\D/g, '')
+  return digits.length >= 4 && digits.length <= 8 ? digits : null
+}
+
 function extractVerificationCode(message: string): string | null {
-  const decoded = decodeMimeWord(stripHtml(decodeQuotedPrintable(message)))
+  const body = extractMessageBody(message)
+  const decoded = decodeMimeWord(stripHtml(decodeQuotedPrintable(body)))
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g, ' ')
   const focusedPatterns = [
-    /(?:인증\s*(?:번호|코드)|verification\s*code|security\s*code)[^\d]{0,40}(\d{4,8})/i,
-    /(\d{4,8})[^\d]{0,20}(?:인증\s*(?:번호|코드)|verification\s*code|security\s*code)/i,
+    /(?:인증\s*(?:번호|코드)|verification\s*code|security\s*code)[\s\S]{0,160}?([0-9][0-9\s-]{2,18}[0-9])/i,
+    /([0-9][0-9\s-]{2,18}[0-9])[\s\S]{0,80}(?:인증\s*(?:번호|코드)|verification\s*code|security\s*code)/i,
   ]
 
   for (const pattern of focusedPatterns) {
     const match = decoded.match(pattern)
-    if (match?.[1]) return match[1]
+    if (match?.[1]) {
+      const code = normalizeCodeCandidate(match[1])
+      if (code) return code
+    }
   }
 
   const candidates = [...decoded.matchAll(/\b(\d{6})\b/g)].map((match) => match[1])
-  return candidates.at(-1) ?? null
+  return candidates[0] ?? null
 }
 
 function extractMessageDate(message: string): Date | null {

@@ -360,12 +360,14 @@ export function ShippingActions({
         queued?: number
         failed?: number
         message?: string
+        jobLogIds?: string[]
         results?: Array<{
           orderId: string
           marketplaceOrderId: string
           trackingNumber: string
           success: boolean
           queued?: boolean
+          jobLogId?: string
           error?: string
         }>
       }
@@ -384,7 +386,9 @@ export function ShippingActions({
       report.entries = report.entries.map((entry) => {
         const result = resultMap.get(entry.orderId)
         if (!result) return { ...entry, status: 'failed', error: '송신 대상에서 확인되지 않았습니다.' }
-        if (result.queued) return { ...entry, status: 'sending', progress: '송신 작업 대기 중' }
+        if (result.queued) {
+          return { ...entry, status: 'sending', jobLogId: result.jobLogId, progress: '송신 작업 대기 중' }
+        }
         return {
           ...entry,
           trackingNumber: result.trackingNumber || entry.trackingNumber,
@@ -392,14 +396,26 @@ export function ShippingActions({
           error: result.success ? undefined : (result.error ?? '송신 실패'),
         }
       })
-      report.completedAt = new Date()
       appendInvoiceTransmissionStep(report, '-> Stage III: 쇼핑몰 응답 결과를 확인했습니다.')
-      appendInvoiceTransmissionStep(report, '[종료] 송장송신 결과 집계를 완료했습니다.')
       updateInvoiceTransmissionWindow(reportWindow, report)
 
       const uploaded = data.uploaded ?? 0
+      const queued = data.queued ?? 0
       const failed = data.failed ?? 0
-      if (uploaded > 0 && failed === 0) {
+      if (queued > 0 && data.jobLogIds?.length) {
+        appendInvoiceTransmissionStep(report, '-> Stage IV: 비동기 송신 작업의 완료 여부를 확인하고 있습니다.')
+        updateInvoiceTransmissionWindow(reportWindow, report)
+        pollRpaInvoiceUpload(data.jobLogIds, report, reportWindow)
+        toast.info(`${queued}건 송장 송신 처리 중`)
+        router.refresh()
+      } else {
+        report.completedAt = new Date()
+        appendInvoiceTransmissionStep(report, '[종료] 송장송신 결과 집계를 완료했습니다.')
+        updateInvoiceTransmissionWindow(reportWindow, report)
+      }
+      if (queued > 0) {
+        return
+      } else if (uploaded > 0 && failed === 0) {
         toast.success(`${uploaded}건 송장 전송 완료`)
         router.refresh()
       } else if (uploaded > 0) {

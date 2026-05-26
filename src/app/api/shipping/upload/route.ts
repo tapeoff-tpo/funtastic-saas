@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
     trackingNumber: string
     success: boolean
     queued?: boolean
+    jobLogId?: string
     error?: string
     marketplaceId?: string
   }> = []
@@ -211,6 +212,7 @@ export async function POST(req: NextRequest) {
           ...resultIdentity(s),
           success: true,
           queued: true,
+          jobLogId: logRow.id,
           marketplaceId,
         })
       }
@@ -275,6 +277,7 @@ export async function POST(req: NextRequest) {
   const queued = results.filter((r) => r.queued).length
   const uploaded = results.filter((r) => r.success && !r.queued).length
   const failed = results.filter((r) => !r.success).length
+  const jobLogIds = results.flatMap((result) => result.jobLogId ? [result.jobLogId] : [])
 
-  return NextResponse.json({ uploaded, queued, failed, total: results.length, results })
+  return NextResponse.json({ uploaded, queued, failed, total: results.length, results, jobLogIds })
 }

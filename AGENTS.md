@@ -5,6 +5,16 @@ This version has breaking changes — APIs, conventions, and file structure may 
 <!-- END:nextjs-agent-rules -->
 ## Project Critical Rules
 
+### Order Data Invariants
+
+- Once an order has been collected, marketplace collection must not re-collect, overwrite, downgrade, or otherwise mutate that existing order. Existing `(marketplace_id, marketplace_order_id)` rows are immutable from collection paths; duplicate collection must skip or no-op.
+- Marketplace order source data and collected order items are the original record. Do not change collected product name, collected option text, raw marketplace payload, order quantity, or marketplace status as a side effect of later collection.
+- Product mapping rules and per-order confirmed item overrides are separate concepts.
+- Mapping rules (`mapping_codes`, `mapping_sources`, `mapping_components`) define how future or unmapped marketplace product/option combinations resolve to internal SKU components. Changing an individual order must not create, edit, delete, or infer mapping rules unless the user explicitly asks for mapping changes.
+- Per-order confirmed item overrides (`order_items.locked_*`) are manual shipping-confirmation values for one specific order only: confirmed product name, confirmed option name, confirmed quantity, and locked SKU snapshot. They must never propagate to other orders and must never be treated as mapping changes.
+- Manual confirmed item overrides may be edited only before shipment is completed: `new`, `confirmed`, `preparing`, and `ready`. From `shipped` onward, confirmed item details are closed for editing.
+- Manual confirmed item overrides must preserve the collected source order and marketplace data. They are an internal outbound/shipping decision, not a marketplace order modification.
+
 ### Collection Responsibility Policy
 
 - All-market order collection must stay fast. `/orders/collect` is responsible only for collecting orders and moving eligible marketplace orders into order-confirmed/shipping-prep status.

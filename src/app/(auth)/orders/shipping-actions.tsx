@@ -94,6 +94,151 @@ async function downloadExcel(url: string, filename: string): Promise<{ success: 
   }
 }
 
+type InvoiceTransmissionStatus = 'waiting' | 'sending' | 'success' | 'failed'
+
+interface InvoiceTransmissionEntry {
+  orderId: string
+  marketplaceOrderId: string
+  trackingNumber: string
+  status: InvoiceTransmissionStatus
+  jobLogId?: string
+  progress?: string | null
+  error?: string
+}
+
+interface InvoiceTransmissionReport {
+  mode: 'API' | 'RPA'
+  startedAt: Date
+  completedAt?: Date
+  entries: InvoiceTransmissionEntry[]
+  steps: string[]
+}
+
+function reportTime(date: Date): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
+function createInvoiceTransmissionReport(mode: 'API' | 'RPA', selected: OrderRow[]): InvoiceTransmissionReport {
+  const startedAt = new Date()
+  return {
+    mode,
+    startedAt,
+    entries: selected.map((order) => ({
+      orderId: order.id,
+      marketplaceOrderId: order.marketplaceOrderId,
+      trackingNumber: order.trackingNumber ?? '',
+      status: 'waiting',
+    })),
+    steps: [
+      `[준비] 송장송신 대상 ${selected.length}건을 확인했습니다.`,
+      '-> Stage I: 송장번호와 주문 연결 정보를 확인 중입니다.',
+    ],
+  }
+}
+
+function appendInvoiceTransmissionStep(report: InvoiceTransmissionReport, message: string): void {
+  if (!report.steps.includes(message)) report.steps.push(message)
+}
+
+function openInvoiceTransmissionWindow(report: InvoiceTransmissionReport): Window | null {
+  const popup = window.open('', '_blank', 'popup=yes,width=820,height=720,scrollbars=yes,resizable=yes')
+  if (!popup) return null
+
+  popup.document.open()
+  popup.document.write(`<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>송장 송신 결과</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px; font-family: Arial, "Malgun Gothic", sans-serif; color: #222; background: #fff; font-size: 13px; }
+    h1 { margin: 0 0 22px; border: 1px solid #cfcfcf; padding: 10px 12px; font-size: 16px; font-weight: 700; }
+    h1::before { content: ""; display: inline-block; width: 5px; height: 17px; margin-right: 9px; vertical-align: -3px; background: #b11e31; }
+    .notice { border: 1px solid #d5d5d5; padding: 12px; color: #555; line-height: 1.75; margin-bottom: 20px; }
+    .log { white-space: pre-wrap; margin: 0 0 18px; line-height: 1.62; font-weight: 600; color: #7b1c23; }
+    .meta { margin-bottom: 10px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0 16px; font-size: 13px; }
+    th { padding: 8px 9px; border-top: 1px solid #bbb; border-bottom: 1px solid #bbb; background: #f5f5f5; text-align: left; }
+    td { padding: 8px 9px; border-bottom: 1px solid #e3e3e3; vertical-align: top; }
+    .status { font-weight: 700; white-space: nowrap; }
+    .waiting { color: #6b7280; }
+    .sending { color: #2563eb; }
+    .success { color: #087443; }
+    .failed { color: #bd1e2c; }
+    .summary { border-top: 1px dashed #8d8d8d; padding-top: 12px; line-height: 1.7; font-weight: 700; }
+    .detail { max-width: 330px; white-space: pre-wrap; color: #555; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h1>송장 송신</h1>
+  <div class="notice">▶ 송장송신은 마켓별 통신 상태에 따라 처리 시간이 달라질 수 있습니다.<br />▶ 결과는 주문번호별로 표시되며, 완료되기 전까지 이 창을 닫지 마세요.</div>
+  <div id="steps" class="log"></div>
+  <div id="start" class="meta"></div>
+  <table>
+    <thead><tr><th>주문번호</th><th>송장번호</th><th>송신결과</th><th>처리 내용</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table>
+  <div id="summary" class="summary"></div>
+</body>
+</html>`)
+  popup.document.close()
+  updateInvoiceTransmissionWindow(popup, report)
+  return popup
+}
+
+function updateInvoiceTransmissionWindow(popup: Window | null, report: InvoiceTransmissionReport): void {
+  if (!popup || popup.closed) return
+  const doc = popup.document
+  const steps = doc.getElementById('steps')
+  const start = doc.getElementById('start')
+  const results = doc.getElementById('results')
+  const summary = doc.getElementById('summary')
+  if (!steps || !start || !results || !summary) return
+
+  steps.textContent = report.steps.join('\n')
+  start.textContent = `[시작] ${report.mode} 송장송신 작업을 시작합니다. (${reportTime(report.startedAt)})`
+  results.replaceChildren()
+
+  const statusLabels: Record<InvoiceTransmissionStatus, string> = {
+    waiting: '대기',
+    sending: '송신중',
+    success: '성공',
+    failed: '실패',
+  }
+  for (const entry of report.entries) {
+    const row = doc.createElement('tr')
+    const orderCell = doc.createElement('td')
+    const trackingCell = doc.createElement('td')
+    const statusCell = doc.createElement('td')
+    const detailCell = doc.createElement('td')
+    orderCell.textContent = entry.marketplaceOrderId
+    trackingCell.textContent = entry.trackingNumber || '-'
+    statusCell.className = `status ${entry.status}`
+    statusCell.textContent = statusLabels[entry.status]
+    detailCell.className = 'detail'
+    detailCell.textContent = entry.error ?? entry.progress ?? (entry.status === 'success' ? '송신 완료' : '')
+    row.append(orderCell, trackingCell, statusCell, detailCell)
+    results.appendChild(row)
+  }
+
+  const success = report.entries.filter((entry) => entry.status === 'success').length
+  const failed = report.entries.filter((entry) => entry.status === 'failed').length
+  const sending = report.entries.filter((entry) => entry.status === 'sending').length
+  const waiting = report.entries.filter((entry) => entry.status === 'waiting').length
+  const finishedLine = report.completedAt
+    ? `[종료] 송장송신 작업이 완료되었습니다. (${reportTime(report.completedAt)})\n`
+    : ''
+  summary.textContent = `${finishedLine}[송신결과] 전체 ${report.entries.length}건, 성공 ${success}건, 실패 ${failed}건, 진행중 ${sending + waiting}건입니다.`
+}
+
 export function ShippingActions({
   selectedOrderIds,
   selectedOrders = [],
@@ -194,6 +339,12 @@ export function ShippingActions({
       return
     }
 
+    const report = createInvoiceTransmissionReport('API', selectedApiOrders)
+    const reportWindow = openInvoiceTransmissionWindow(report)
+    report.entries = report.entries.map((entry) => ({ ...entry, status: 'sending' }))
+    appendInvoiceTransmissionStep(report, '-> Stage II: 마켓별 송장 송신 요청을 진행하고 있습니다.')
+    updateInvoiceTransmissionWindow(reportWindow, report)
+
     setUploadingToMarket(true)
     try {
       if (selectedRpaOrders.length > 0) {
@@ -206,15 +357,45 @@ export function ShippingActions({
       })
       const data = await res.json().catch(() => ({})) as {
         uploaded?: number
+        queued?: number
         failed?: number
         message?: string
-        results?: Array<{ success: boolean; error?: string }>
+        results?: Array<{
+          orderId: string
+          marketplaceOrderId: string
+          trackingNumber: string
+          success: boolean
+          queued?: boolean
+          error?: string
+        }>
       }
 
       if (!res.ok) {
-        toast.error(data.message ?? '송장 전송에 실패했습니다.')
+        const message = data.message ?? '송장 전송에 실패했습니다.'
+        report.entries = report.entries.map((entry) => ({ ...entry, status: 'failed', error: message }))
+        report.completedAt = new Date()
+        appendInvoiceTransmissionStep(report, '-> Stage III: 송장 송신 요청이 실패했습니다.')
+        updateInvoiceTransmissionWindow(reportWindow, report)
+        toast.error(message)
         return
       }
+
+      const resultMap = new Map((data.results ?? []).map((result) => [result.orderId, result]))
+      report.entries = report.entries.map((entry) => {
+        const result = resultMap.get(entry.orderId)
+        if (!result) return { ...entry, status: 'failed', error: '송신 대상에서 확인되지 않았습니다.' }
+        if (result.queued) return { ...entry, status: 'sending', progress: '송신 작업 대기 중' }
+        return {
+          ...entry,
+          trackingNumber: result.trackingNumber || entry.trackingNumber,
+          status: result.success ? 'success' : 'failed',
+          error: result.success ? undefined : (result.error ?? '송신 실패'),
+        }
+      })
+      report.completedAt = new Date()
+      appendInvoiceTransmissionStep(report, '-> Stage III: 쇼핑몰 응답 결과를 확인했습니다.')
+      appendInvoiceTransmissionStep(report, '[종료] 송장송신 결과 집계를 완료했습니다.')
+      updateInvoiceTransmissionWindow(reportWindow, report)
 
       const uploaded = data.uploaded ?? 0
       const failed = data.failed ?? 0
@@ -231,7 +412,12 @@ export function ShippingActions({
         if (!firstError) setInvoiceDialogOpen(true)
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '송장 전송에 실패했습니다.')
+      const message = error instanceof Error ? error.message : '송장 전송에 실패했습니다.'
+      report.entries = report.entries.map((entry) => ({ ...entry, status: 'failed', error: message }))
+      report.completedAt = new Date()
+      appendInvoiceTransmissionStep(report, '-> Stage III: 송장 송신 중 오류가 발생했습니다.')
+      updateInvoiceTransmissionWindow(reportWindow, report)
+      toast.error(message)
     } finally {
       setUploadingToMarket(false)
     }
@@ -240,14 +426,24 @@ export function ShippingActions({
   const handleRpaInvoiceUpload = async () => {
     if (selectedRpaOrders.length === 0 || uploadingRpaInvoice) return
     setRpaInvoiceFailure(null)
+    const report = createInvoiceTransmissionReport('RPA', selectedRpaOrders)
+    const reportWindow = openInvoiceTransmissionWindow(report)
 
     const missingTracking = selectedRpaOrders.filter((order) => !order.trackingNumber)
     if (missingTracking.length > 0) {
+      const message = '송장번호가 없는 주문이 있어 송신을 시작하지 않았습니다.'
+      report.entries = report.entries.map((entry) => ({ ...entry, status: 'failed', error: message }))
+      report.completedAt = new Date()
+      appendInvoiceTransmissionStep(report, '-> Stage II: 송장번호 유효성 확인에 실패했습니다.')
+      updateInvoiceTransmissionWindow(reportWindow, report)
       toast.error(`${missingTracking.length}건은 송장번호가 없습니다. 먼저 송장등록을 해주세요.`)
       setInvoiceDialogOpen(true)
       return
     }
 
+    report.entries = report.entries.map((entry) => ({ ...entry, status: 'sending', progress: '송신 작업 접수 중' }))
+    appendInvoiceTransmissionStep(report, '-> Stage II: 판매자센터 송장 송신 작업을 접수하고 있습니다.')
+    updateInvoiceTransmissionWindow(reportWindow, report)
     setUploadingRpaInvoice(true)
     let keepUploadingUntilPollFinishes = false
     try {
@@ -262,11 +458,22 @@ export function ShippingActions({
         message?: string
         error?: string
         jobLogIds?: string[]
-        results?: Array<{ queued: boolean; error?: string }>
+        results?: Array<{
+          orderId: string
+          marketplaceOrderId: string
+          trackingNumber: string
+          queued: boolean
+          jobLogId?: string
+          error?: string
+        }>
       }
 
       if (!res.ok) {
         const message = data.error ?? data.message ?? 'RPA 송장 전송 요청에 실패했습니다.'
+        report.entries = report.entries.map((entry) => ({ ...entry, status: 'failed', error: message }))
+        report.completedAt = new Date()
+        appendInvoiceTransmissionStep(report, '-> Stage III: RPA 송신 요청이 실패했습니다.')
+        updateInvoiceTransmissionWindow(reportWindow, report)
         setRpaInvoiceFailure({
           title: 'RPA 송장 전송 요청 실패',
           message,
@@ -277,6 +484,21 @@ export function ShippingActions({
 
       const queued = data.queued ?? 0
       const skipped = data.skipped ?? 0
+      const resultMap = new Map((data.results ?? []).map((result) => [result.orderId, result]))
+      report.entries = report.entries.map((entry) => {
+        const result = resultMap.get(entry.orderId)
+        if (!result) return { ...entry, status: 'failed', error: '송신 대상에서 확인되지 않았습니다.' }
+        if (!result.queued) return { ...entry, status: 'failed', error: result.error ?? '송신 접수 실패' }
+        return {
+          ...entry,
+          trackingNumber: result.trackingNumber || entry.trackingNumber,
+          jobLogId: result.jobLogId,
+          status: 'sending',
+          progress: '송신 작업 대기 중',
+        }
+      })
+      appendInvoiceTransmissionStep(report, '-> Stage III: RPA 송신 작업을 접수했습니다. 처리 결과를 확인하고 있습니다.')
+      updateInvoiceTransmissionWindow(reportWindow, report)
       if (queued > 0 && skipped === 0) {
         toast.success(`${queued}건 RPA 송장 전송 시작`)
       } else if (queued > 0) {
@@ -293,12 +515,19 @@ export function ShippingActions({
       if (queued > 0 && data.jobLogIds?.length) {
         keepUploadingUntilPollFinishes = true
         router.refresh()
-        pollRpaInvoiceUpload(data.jobLogIds)
+        pollRpaInvoiceUpload(data.jobLogIds, report, reportWindow)
       } else {
+        report.completedAt = new Date()
+        appendInvoiceTransmissionStep(report, '[종료] 송장송신 결과 집계를 완료했습니다.')
+        updateInvoiceTransmissionWindow(reportWindow, report)
         router.refresh()
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'RPA 송장 전송 요청에 실패했습니다.'
+      report.entries = report.entries.map((entry) => ({ ...entry, status: 'failed', error: message }))
+      report.completedAt = new Date()
+      appendInvoiceTransmissionStep(report, '-> Stage III: RPA 송신 요청 중 오류가 발생했습니다.')
+      updateInvoiceTransmissionWindow(reportWindow, report)
       setRpaInvoiceFailure({
         title: 'RPA 송장 전송 요청 실패',
         message,
@@ -311,7 +540,11 @@ export function ShippingActions({
     }
   }
 
-  const pollRpaInvoiceUpload = (jobLogIds: string[]) => {
+  const pollRpaInvoiceUpload = (
+    jobLogIds: string[],
+    report: InvoiceTransmissionReport,
+    reportWindow: Window | null,
+  ) => {
     stopRpaInvoicePolling()
     rpaInvoicePollStartedAtRef.current = Date.now()
     const idsParam = jobLogIds.join(',')
@@ -329,9 +562,27 @@ export function ShippingActions({
 
         const data = await res.json() as {
           allDone?: boolean
-          logs?: Array<{ status: string; errorMessage?: string | null }>
+          logs?: Array<{ id: string; status: string; errorMessage?: string | null; progressMessage?: string | null }>
         }
-        if (!data.allDone || !data.logs) return
+        if (!data.logs) return
+
+        const logsById = new Map(data.logs.map((log) => [log.id, log]))
+        report.entries = report.entries.map((entry) => {
+          const log = entry.jobLogId ? logsById.get(entry.jobLogId) : undefined
+          if (!log) return entry
+          if (log.status === 'completed') return { ...entry, status: 'success', progress: '송신 완료', error: undefined }
+          if (log.status === 'failed' || log.status === 'cancelled') {
+            return { ...entry, status: 'failed', error: log.errorMessage ?? '송신 실패' }
+          }
+          return { ...entry, status: 'sending', progress: log.progressMessage ?? '송신 작업 진행 중' }
+        })
+        for (const progress of data.logs
+          .map((log) => log.progressMessage)
+          .filter((message): message is string => !!message)) {
+          appendInvoiceTransmissionStep(report, `-> ${progress}`)
+        }
+        updateInvoiceTransmissionWindow(reportWindow, report)
+        if (!data.allDone) return
 
         const completed = data.logs.filter((log) => log.status === 'completed').length
         const failedLogs = data.logs.filter((log) => log.status === 'failed' || log.status === 'cancelled')
@@ -342,6 +593,9 @@ export function ShippingActions({
           .join('\n')
 
         finishPolling()
+        report.completedAt = new Date()
+        appendInvoiceTransmissionStep(report, '[종료] 송장송신 결과 집계를 완료했습니다.')
+        updateInvoiceTransmissionWindow(reportWindow, report)
         if (completed > 0 && failed === 0) {
           toast.success(`${completed}건 RPA 송장 전송 완료`)
         } else if (completed > 0) {

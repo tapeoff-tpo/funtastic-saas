@@ -82,9 +82,17 @@ export async function POST(req: NextRequest) {
     .where(inArray(orders.id, orderIds))
 
   const orderMap = new Map(orderRows.map((o) => [o.id, o]))
+  const resultIdentity = (shipment: (typeof targetShipments)[number]) => ({
+    shipmentId: shipment.id,
+    orderId: shipment.orderId,
+    marketplaceOrderId: orderMap.get(shipment.orderId)?.marketplaceOrderId ?? shipment.orderId,
+    trackingNumber: shipment.trackingNumber,
+  })
 
   const results: Array<{
     shipmentId: string
+    orderId: string
+    marketplaceOrderId: string
     trackingNumber: string
     success: boolean
     queued?: boolean
@@ -113,7 +121,7 @@ export async function POST(req: NextRequest) {
     if (!connectionId) {
       for (const s of groupShipments) {
         await markShipmentUploadedAndOrderShipped(s.id, s.orderId, s.uploadAttempts)
-        results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: true, marketplaceId })
+        results.push({ ...resultIdentity(s), success: true, marketplaceId })
       }
       continue
     }
@@ -122,7 +130,7 @@ export async function POST(req: NextRequest) {
     let adapterConfig: ReturnType<typeof marketplaceRegistry.get> | null = null
     try { adapterConfig = marketplaceRegistry.get(marketplaceId) } catch {
       for (const s of groupShipments) {
-        results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: false, error: `${marketplaceId}: 어댑터 미등록`, marketplaceId })
+        results.push({ ...resultIdentity(s), success: false, error: `${marketplaceId}: 어댑터 미등록`, marketplaceId })
       }
       continue
     }
@@ -143,8 +151,7 @@ export async function POST(req: NextRequest) {
         const ord = orderMap.get(s.orderId)
         if (!ord) {
           results.push({
-            shipmentId: s.id,
-            trackingNumber: s.trackingNumber,
+            ...resultIdentity(s),
             success: false,
             error: '주문 정보를 찾지 못했습니다.',
             marketplaceId,
@@ -201,8 +208,7 @@ export async function POST(req: NextRequest) {
         )
 
         results.push({
-          shipmentId: s.id,
-          trackingNumber: s.trackingNumber,
+          ...resultIdentity(s),
           success: true,
           queued: true,
           marketplaceId,
@@ -222,7 +228,7 @@ export async function POST(req: NextRequest) {
     }
     if (credError) {
       for (const s of groupShipments) {
-        results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: false, error: '인증 정보 없음', marketplaceId })
+        results.push({ ...resultIdentity(s), success: false, error: '인증 정보 없음', marketplaceId })
       }
       continue
     }
@@ -253,15 +259,15 @@ export async function POST(req: NextRequest) {
 
         if (result.success) {
           await markShipmentUploadedAndOrderShipped(s.id, s.orderId, s.uploadAttempts + 1)
-          results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: true, marketplaceId })
+          results.push({ ...resultIdentity(s), success: true, marketplaceId })
         } else {
           await markShipmentUploadFailed(s.id, result.error ?? 'Unknown error', s.uploadAttempts + 1)
-          results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: false, error: result.error, marketplaceId })
+          results.push({ ...resultIdentity(s), success: false, error: result.error, marketplaceId })
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Unknown error'
         await markShipmentUploadFailed(s.id, msg, s.uploadAttempts + 1)
-        results.push({ shipmentId: s.id, trackingNumber: s.trackingNumber, success: false, error: msg, marketplaceId })
+        results.push({ ...resultIdentity(s), success: false, error: msg, marketplaceId })
       }
     }
   }

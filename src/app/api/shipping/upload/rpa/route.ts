@@ -62,12 +62,26 @@ export async function POST(req: NextRequest) {
 
   const queue = getMarketplaceScrapeQueue()
   let queued = 0
-  const results: Array<{ orderId: string; shipmentId: string; queued: boolean; error?: string }> = []
+  const results: Array<{
+    orderId: string
+    marketplaceOrderId: string
+    shipmentId: string
+    trackingNumber: string
+    queued: boolean
+    jobLogId?: string
+    error?: string
+  }> = []
   const jobLogIds: string[] = []
 
   for (const row of targetRows) {
+    const identity = {
+      orderId: row.orderId,
+      marketplaceOrderId: row.marketplaceOrderId,
+      shipmentId: row.shipmentId,
+      trackingNumber: row.trackingNumber,
+    }
     if (!row.connectionId) {
-      results.push({ orderId: row.orderId, shipmentId: row.shipmentId, queued: false, error: '마켓 연동 정보가 없습니다.' })
+      results.push({ ...identity, queued: false, error: '마켓 연동 정보가 없습니다.' })
       continue
     }
 
@@ -76,7 +90,7 @@ export async function POST(req: NextRequest) {
       isManual: row.isManual,
     })
     if (integrationMethod !== 'rpa') {
-      results.push({ orderId: row.orderId, shipmentId: row.shipmentId, queued: false, error: 'API 연동 주문은 기존 송장 전송 버튼을 사용하세요.' })
+      results.push({ ...identity, queued: false, error: 'API 연동 주문은 기존 송장 전송 버튼을 사용하세요.' })
       continue
     }
 
@@ -131,7 +145,7 @@ export async function POST(req: NextRequest) {
     )
 
     queued += 1
-    results.push({ orderId: row.orderId, shipmentId: row.shipmentId, queued: true })
+    results.push({ ...identity, queued: true, jobLogId: logRow.id })
   }
 
   return NextResponse.json({ queued, skipped: results.length - queued, total: results.length, results, jobLogIds })

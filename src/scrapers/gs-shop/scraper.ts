@@ -616,7 +616,7 @@ async function selectVisibleOrderRows(page: Page, setProgress?: (message: string
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   const text = await pageText(page, 2_000)
   if (/검색된\s*자료가\s*없|검색\s*결과가\s*없|조회된\s*자료가\s*없|조회\s*결과가\s*없|주문\s*내역이\s*없|내역이\s*없|데이터가\s*없|자료가\s*없|총\s*0\s*건/.test(text)) {
-    return Buffer.alloc(0)
+    await page.waitForTimeout(0)
   }
 
   const dialogHandler = (dialog: { accept: () => Promise<void> }) => {

@@ -17,6 +17,7 @@ const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
 const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v38'
+const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -1175,7 +1176,7 @@ async function clickOhouseDownloadPrompts(page: Page, timeoutMs = 10_000): Promi
             input.parentElement?.textContent ?? '',
           ].join(' ')
           if (/사유|목적|비밀번호|암호|다운로드|개인정보/.test(labelText)) {
-            setNativeValue(input, /비밀번호|암호/.test(labelText) ? '0000' : '주문 수집')
+            setNativeValue(input, /비밀번호|암호/.test(labelText) ? OHOUSE_DOWNLOAD_PASSWORD : '주문 수집')
           }
         }
 

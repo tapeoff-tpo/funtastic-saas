@@ -576,7 +576,13 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
           )
           OR EXISTS (
             SELECT 1
-            FROM jsonb_array_elements(COALESCE(${orders.rawData}->'rows', '[]'::jsonb)) AS raw_row(value)
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(${orders.rawData}->'rows') = 'array'
+                THEN ${orders.rawData}->'rows'
+                ELSE '[]'::jsonb
+              END
+            ) AS raw_row(value)
             WHERE COALESCE(raw_row.value #>> '{raw,주문상태}', '') ~ ${CLAIM_LIKE_MARKETPLACE_STATUS_PATTERN}
               AND COALESCE(raw_row.value #>> '{raw,주문상태}', '') !~ ${INACTIVE_MARKETPLACE_CLAIM_STATUS_PATTERN}
           )

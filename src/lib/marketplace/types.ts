@@ -61,8 +61,9 @@ export interface MarketplaceCredentials {
 /**
  * Normalized order item from marketplace.
  *
- * marketplaceItemId is the marketplace's line/product-order identifier.
- * If a marketplace only exposes one order identifier, use the order ID here too.
+ * marketplaceItemId is the marketplace's line/product-order identifier for order actions.
+ * It is not automatically a product mapping key: mapping code must reject marketplace
+ * order numbers and use product codes/SKUs only.
  */
 export interface NormalizedOrderItem {
   marketplaceItemId: string

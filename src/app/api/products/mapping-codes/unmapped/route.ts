@@ -37,6 +37,7 @@ export async function GET() {
     WHERE o.user_id = ${workspaceUserId}
       AND oi.marketplace_item_id IS NOT NULL
       AND oi.marketplace_item_id <> ''
+      AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
       AND o.ordered_at > NOW() - INTERVAL '90 days'
       AND NOT EXISTS (
           SELECT 1 FROM mapping_sources ms

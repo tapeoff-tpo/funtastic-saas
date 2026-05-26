@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq, and, sql } from 'drizzle-orm'
+import { isBlockedMappingSource } from '@/lib/orders/mapping-match'
 
 interface SourceInput {
   marketplaceId: string
@@ -33,6 +34,10 @@ interface UpdateBody {
   isActive?: boolean
   sources?: SourceInput[]
   components?: ComponentInput[]
+}
+
+function isBlockedSource(source: SourceInput): boolean {
+  return isBlockedMappingSource(source.marketplaceId, source.marketplaceProductId)
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -104,6 +109,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .where(and(eq(mappingCodes.id, id), eq(mappingCodes.userId, workspaceUserId)))
     .limit(1)
   if (!existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
+  if (body.sources?.some(isBlockedSource)) {
+    return NextResponse.json({ error: '온채널 주문번호(MO_...)는 상품 매핑키로 저장할 수 없습니다. 상품코드 또는 자체코드로 매핑해 주세요.' }, { status: 400 })
+  }
 
   try {
     await db.transaction(async (tx) => {

@@ -16,6 +16,24 @@
 export const MAPPING_SEPARATOR = '-'
 export const EXACT_OPTION_ID = '__exact__'
 
+const ORDER_NUMBER_MAPPING_PATTERNS: Partial<Record<string, RegExp[]>> = {
+  onchannel: [/^MO_\d+$/i],
+}
+
+export function isOrderNumberMappingCandidate(marketplaceId: string, candidateId: string): boolean {
+  const patterns = ORDER_NUMBER_MAPPING_PATTERNS[marketplaceId] ?? []
+  const normalized = candidateId.trim()
+  return normalized.length > 0 && patterns.some((pattern) => pattern.test(normalized))
+}
+
+export function isIgnoredMappingCandidate(marketplaceId: string, candidateId: string): boolean {
+  return isOrderNumberMappingCandidate(marketplaceId, candidateId)
+}
+
+export function isBlockedMappingSource(marketplaceId: string, marketplaceProductId: string): boolean {
+  return isOrderNumberMappingCandidate(marketplaceId, marketplaceProductId)
+}
+
 export type MappingSource = {
   marketplaceId: string
   marketplaceProductId: string
@@ -64,6 +82,8 @@ export function lookupMappingRef(
   marketplaceItemId: string,
   optionText?: string | null,
 ): string | null {
+  if (isIgnoredMappingCandidate(marketplaceId, marketplaceItemId)) return null
+
   const normalizedOptionText = optionText?.trim().slice(0, 100)
 
   // 1) 단품 정확매치

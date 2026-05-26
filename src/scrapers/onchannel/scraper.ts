@@ -646,7 +646,7 @@ export class OnchannelScraper implements MarketplaceScraper {
         },
         items: [
           {
-            marketplaceItemId: productCode || orderCode,
+            marketplaceItemId: productCode || sku,
             productName,
             optionText: get(row, '옵션') || undefined,
             quantity,

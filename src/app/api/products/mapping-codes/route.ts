@@ -12,6 +12,7 @@ import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { isBlockedMappingSource } from '@/lib/orders/mapping-match'
 
 interface SourceInput {
   marketplaceId: string
@@ -40,6 +41,10 @@ function normalizeMappingCode(rawCode: string): string {
   if (sanitized.length <= 40) return sanitized
   const hash = createHash('sha1').update(sanitized).digest('hex').slice(0, 8)
   return `${sanitized.slice(0, 31)}-${hash}`
+}
+
+function isBlockedSource(source: SourceInput): boolean {
+  return isBlockedMappingSource(source.marketplaceId, source.marketplaceProductId)
 }
 
 export async function GET() {
@@ -147,6 +152,10 @@ export async function POST(req: NextRequest) {
   }
   if (body.components.length === 0) {
     return NextResponse.json({ error: '최소 1개 이상의 SKU 구성품이 필요합니다' }, { status: 400 })
+  }
+
+  if (body.sources.some(isBlockedSource)) {
+    return NextResponse.json({ error: '온채널 주문번호(MO_...)는 상품 매핑키로 저장할 수 없습니다. 상품코드 또는 자체코드로 매핑해 주세요.' }, { status: 400 })
   }
 
   try {

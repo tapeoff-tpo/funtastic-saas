@@ -43,6 +43,31 @@ function formatDate(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number') return String(value)
+  }
+  return ''
+}
+
+function onchannelMappingItemId(order: OnchannelOrder): string {
+  const raw = order as unknown as Record<string, unknown>
+  return firstString(
+    order.productId,
+    order.productCode,
+    order.itemId,
+    order.orderProductId,
+    raw.goodsNo,
+    raw.goodsCode,
+    raw.product_no,
+    raw.product_code,
+    raw.item_no,
+    raw.item_id,
+    order.sellerItemCode,
+  )
+}
+
 export class OnchannelAdapter implements MarketplaceAdapter {
   readonly config = ONCHANNEL_CONFIG
 
@@ -229,6 +254,8 @@ export class OnchannelAdapter implements MarketplaceAdapter {
   }
 
   private normalizeOrder(order: OnchannelOrder): NormalizedOrder {
+    const marketplaceItemId = onchannelMappingItemId(order)
+
     return {
       marketplaceOrderId: order.orderId,
       marketplaceId: 'onchannel',
@@ -245,7 +272,7 @@ export class OnchannelAdapter implements MarketplaceAdapter {
       },
       items: [
         {
-          marketplaceItemId: order.orderId,
+          marketplaceItemId,
           productName: order.productName,
           optionText: order.options || undefined,
           quantity: order.quantity,

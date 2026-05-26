@@ -14,6 +14,10 @@ export interface OnchannelApiResponse<T> {
 /** A single order from Onchannel orders API */
 export interface OnchannelOrder {
   orderId: string
+  productId?: string
+  productCode?: string
+  itemId?: string
+  orderProductId?: string
   productName: string
   quantity: number
   buyerName: string

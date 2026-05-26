@@ -144,6 +144,7 @@ export async function GET(req: NextRequest) {
       FROM mapping_sources s
       WHERE s.user_id = o.user_id
         AND s.marketplace_id = o.marketplace_id
+        AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
         AND (
           (s.marketplace_option_id <> ''
             AND (
@@ -201,6 +202,7 @@ export async function GET(req: NextRequest) {
         SELECT 1 FROM mapping_sources s2
         WHERE s2.user_id = o.user_id
           AND s2.marketplace_id = o.marketplace_id
+          AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s2.marketplace_option_id = ''
           AND ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s2.marketplace_product_id
             OR (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s2.marketplace_product_id || '-%')
@@ -209,6 +211,7 @@ export async function GET(req: NextRequest) {
         SELECT 1 FROM mapping_sources s3
         WHERE s3.user_id = o.user_id
           AND s3.marketplace_id = o.marketplace_id
+          AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s3.marketplace_option_id <> ''
           AND (
             (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id || '-' || s3.marketplace_option_id

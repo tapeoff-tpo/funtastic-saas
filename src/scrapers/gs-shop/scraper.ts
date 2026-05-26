@@ -721,10 +721,10 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
   }
 
   await dismissGsTransientPopups(page, setProgress)
-  const clickedSearch = await clickVisibleControl(page, ({ text }) => /^(조회|검색)$/i.test(text), { preferBottomRight: true })
+  const clickedSearch = await clickVisibleControl(page, ({ text }) => /^(조회|검색)(\s*\([^)]*\))?$/i.test(text), { preferBottomRight: true })
   if (!clickedSearch) {
     await dismissGsTransientPopups(page, setProgress)
-    const retriedSearch = await clickVisibleControl(page, ({ text }) => /^(조회|검색)$/i.test(text), { preferBottomRight: true })
+    const retriedSearch = await clickVisibleControl(page, ({ text }) => /^(조회|검색)(\s*\([^)]*\))?$/i.test(text), { preferBottomRight: true })
     if (!retriedSearch) {
       throw new MarketplaceApiError(MARKETPLACE_ID, 500, `GS샵 주문 조회 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
     }

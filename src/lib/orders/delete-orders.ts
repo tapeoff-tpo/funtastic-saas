@@ -14,11 +14,15 @@ import { db } from '@/lib/db'
 import {
   orders,
   orderItems,
+  orderMemos,
+  orderChangeLogs,
   shipments,
   shipmentItems,
   claims,
   shipmentGroupOrders,
   inventoryHistory,
+  inquiries,
+  scanLogs,
 } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 
@@ -49,6 +53,14 @@ export async function deleteOrdersForUser(
       .update(inventoryHistory)
       .set({ orderId: null })
       .where(inArray(inventoryHistory.orderId, owned))
+    await tx
+      .update(inquiries)
+      .set({ orderId: null })
+      .where(inArray(inquiries.orderId, owned))
+    await tx
+      .update(scanLogs)
+      .set({ orderId: null })
+      .where(inArray(scanLogs.orderId, owned))
 
     await tx.delete(shipmentGroupOrders).where(inArray(shipmentGroupOrders.orderId, owned))
 
@@ -68,11 +80,17 @@ export async function deleteOrdersForUser(
     const shipmentIds = linkedShipments.map((shipment) => shipment.id)
     if (shipmentIds.length > 0) {
       await tx.delete(shipmentItems).where(inArray(shipmentItems.shipmentId, shipmentIds))
+      await tx
+        .update(scanLogs)
+        .set({ shipmentId: null })
+        .where(inArray(scanLogs.shipmentId, shipmentIds))
     }
 
     await tx.delete(shipments).where(inArray(shipments.orderId, owned))
     await tx.delete(claims).where(inArray(claims.orderId, owned))
-    // orderItems / orderMemos / inquiries 는 schema FK 정책에 의해 자동 처리
+    await tx.delete(orderMemos).where(inArray(orderMemos.orderId, owned))
+    await tx.delete(orderChangeLogs).where(inArray(orderChangeLogs.orderId, owned))
+    await tx.delete(orderItems).where(inArray(orderItems.orderId, owned))
     await tx.delete(orders).where(inArray(orders.id, owned))
   }).catch((err) => {
     errors.push(err instanceof Error ? err.message : String(err))

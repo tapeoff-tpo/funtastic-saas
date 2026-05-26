@@ -14,6 +14,7 @@ import { db } from '@/lib/db'
 import {
   orders,
   shipments,
+  shipmentItems,
   claims,
   shipmentGroupOrders,
   inventoryHistory,
@@ -49,6 +50,16 @@ export async function deleteOrdersForUser(
       .where(inArray(inventoryHistory.orderId, owned))
 
     await tx.delete(shipmentGroupOrders).where(inArray(shipmentGroupOrders.orderId, owned))
+
+    const linkedShipments = await tx
+      .select({ id: shipments.id })
+      .from(shipments)
+      .where(inArray(shipments.orderId, owned))
+    const shipmentIds = linkedShipments.map((shipment) => shipment.id)
+    if (shipmentIds.length > 0) {
+      await tx.delete(shipmentItems).where(inArray(shipmentItems.shipmentId, shipmentIds))
+    }
+
     await tx.delete(shipments).where(inArray(shipments.orderId, owned))
     await tx.delete(claims).where(inArray(claims.orderId, owned))
     // orderItems / orderMemos / inquiries 는 schema FK 정책에 의해 자동 처리

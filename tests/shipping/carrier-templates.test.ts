@@ -12,27 +12,28 @@ vi.mock('@/lib/db', () => ({
 
 import {
   DEFAULT_CARRIER_TEMPLATES,
+  BUILT_IN_CARRIER_TEMPLATES,
   AVAILABLE_ORDER_FIELDS,
 } from '@/lib/shipping/excel/templates'
 import {
   getCarrierTemplates,
-  getCarrierTemplateById,
   createCarrierTemplate,
   updateCarrierTemplate,
   deleteCarrierTemplate,
-  seedDefaultTemplates,
 } from '@/lib/shipping/template-queries'
 import { db } from '@/lib/db'
 
 describe('DEFAULT_CARRIER_TEMPLATES', () => {
-  it('should have 5 entries for primary carriers', () => {
-    expect(DEFAULT_CARRIER_TEMPLATES).toHaveLength(5)
+  it('includes primary carrier and freight order templates', () => {
+    expect(DEFAULT_CARRIER_TEMPLATES).toHaveLength(7)
     const carrierIds = DEFAULT_CARRIER_TEMPLATES.map((t) => t.carrierId)
     expect(carrierIds).toContain('CJGLS')
     expect(carrierIds).toContain('HANJIN')
     expect(carrierIds).toContain('HYUNDAI')
     expect(carrierIds).toContain('EPOST')
     expect(carrierIds).toContain('KGB')
+    expect(carrierIds).toContain('KYUNGDONG')
+    expect(carrierIds).toContain('DAESIN')
   })
 
   it('each template has required columns: recipientName, recipientPhone, shippingAddress, productName, quantity', () => {
@@ -65,7 +66,7 @@ describe('AVAILABLE_ORDER_FIELDS', () => {
     expect(AVAILABLE_ORDER_FIELDS.length).toBeGreaterThanOrEqual(15)
 
     const fieldNames = AVAILABLE_ORDER_FIELDS.map((f) => f.field)
-    expect(fieldNames).toContain('orderId')
+    expect(fieldNames).toContain('internalNo')
     expect(fieldNames).toContain('marketplaceOrderId')
     expect(fieldNames).toContain('recipientName')
     expect(fieldNames).toContain('recipientPhone')
@@ -79,6 +80,26 @@ describe('AVAILABLE_ORDER_FIELDS', () => {
       expect(field.label).toBeTruthy()
       expect(field.label.length).toBeGreaterThan(0)
     }
+  })
+})
+
+describe('BUILT_IN_CARRIER_TEMPLATES', () => {
+  it('exports sales checking data in Sabangnet column order with confirmed product fields', () => {
+    const template = BUILT_IN_CARRIER_TEMPLATES.find((entry) => entry.id === 'builtin:sales-check')
+
+    expect(template?.name).toBe('매출확인용')
+    expect(template?.columns.map((column) => column.header)).toEqual([
+      '주문상태', '쇼핑몰명', 'ID', '쇼핑몰 상품코드', '주문번호(쇼핑몰)', '주문자명',
+      '수집 상품명', '수집 옵션', '주문수량', '배송비', '판매가', '판매가x수량',
+      '판매자할인금액+수수료', '결제금액', '최종결제금액', '결제금액 수수료',
+      '순이익액', '택배사', '송장번호', '수집일자', '출고완료일자', '사방넷 주문번호',
+      '사방넷 상품코드', '사방넷 상품명', '사방넷 옵션', '실 출고수량', '택배박스 사이즈',
+    ])
+    expect(template?.columns.find((column) => column.header === 'ID')?.field).toBe('marketplaceCode')
+    expect(template?.columns.find((column) => column.header === '사방넷 주문번호')?.field).toBe('internalNo')
+    expect(template?.columns.find((column) => column.header === '사방넷 상품코드')?.field).toBe('productCode')
+    expect(template?.columns.find((column) => column.header === '사방넷 상품명')?.field).toBe('productName')
+    expect(template?.columns.find((column) => column.header === '사방넷 옵션')?.field).toBe('optionText')
   })
 })
 
@@ -118,7 +139,8 @@ describe('Template CRUD queries', () => {
 
     const result = await getCarrierTemplates('user-1')
 
-    expect(result).toEqual(mockTemplates)
+    expect(result).toEqual(expect.arrayContaining(mockTemplates))
+    expect(result.map((template) => template.name)).toEqual(expect.arrayContaining(['미발송 필터양식', '매출확인용']))
     expect(db.select).toHaveBeenCalled()
   })
 

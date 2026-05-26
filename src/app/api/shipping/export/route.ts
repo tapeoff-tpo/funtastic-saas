@@ -39,6 +39,20 @@ function getMarketplaceExportName(order: typeof orders.$inferSelect): string {
   return resolveMarketplaceDisplayName(order.marketplaceId)
 }
 
+function getSalesStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    new: '신규주문',
+    confirmed: '주문확인',
+    preparing: '출고대기',
+    ready: '출고대기',
+    shipped: '출고완료',
+    delivering: '배송중',
+    delivered: '배송완료',
+    cancelled: '취소완료',
+  }
+  return labels[status] ?? status
+}
+
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -139,8 +153,10 @@ export async function GET(request: NextRequest) {
     // 셀러 고정값은 이제 carrier_templates.columns[].fixedValue 로 관리
     // (boxCount, freightType, baseFreight, senderPhone, senderAddress 등)
 
-    // Build flat order records for export
-    const exportData: Record<string, unknown>[] = orderRows.map((order) => {
+    const isSalesCheckTemplate = type !== 'order-list' && templateId === 'builtin:sales-check'
+
+    // Build flat order records for export. 매출확인용은 구성 상품별 실 출고 행을 보존한다.
+    const exportData: Record<string, unknown>[] = orderRows.flatMap((order) => {
       const items = itemRows.filter((item) => item.orderId === order.id)
       const shipment = shipmentRows.find((s) => s.orderId === order.id)
       const expandedRows = expandedByOrder.get(order.id) ?? []
@@ -149,17 +165,22 @@ export async function GET(request: NextRequest) {
       // 매핑 전 원본 (수집상품명/수집옵션명 용)
       const rawFirst = items[0]
 
-      // Phase C: 매핑 확장된 첫 행 기준으로 상품명/SKU/옵션 결정.
-      // 매핑된 행이면 component SKU + inventory.optionName + inventory.productName.
-      // 미매핑이면 expanded helper 가 원본을 fallback 으로 채워줌.
-      const primary = expandedRows[0]
-      const productName = primary?.productName ?? rawFirst?.productName ?? ''
-      const sku: string = primary?.sku ?? rawFirst?.sku ?? ''
-      const optionText = primary?.optionText ?? ''
       const marketplaceName = getMarketplaceExportName(order)
       const collectedDate = order.collectedAt ? new Date(order.collectedAt) : null
+      const shippedDate = shipment?.shippedAt ? new Date(shipment.shippedAt) : null
+      const exportRows = isSalesCheckTemplate && expandedRows.length > 0
+        ? expandedRows
+        : [expandedRows[0]]
 
-      return {
+      return exportRows.map((primary, index) => {
+        // 매핑된 행이면 내부 SKU + 확정 상품명/옵션, 미매핑이면 수집 원본 fallback.
+        const productName = primary?.productName ?? rawFirst?.productName ?? ''
+        const sku: string = primary?.sku ?? rawFirst?.sku ?? ''
+        const optionText = primary?.optionText ?? ''
+        const isAdditionalComponent = isSalesCheckTemplate && index > 0
+        const salesValue = (value: unknown) => isAdditionalComponent ? 0 : value
+
+        return {
         // 사용자 노출용 8자리 내부 주문번호
         orderId: order.internalNo,
         internalNo: order.internalNo,
@@ -181,9 +202,11 @@ export async function GET(request: NextRequest) {
         shippingAddress: order.shippingAddress,
         productName,
         optionText,
-        quantity: expandedRows.length > 0
-          ? expandedRows.reduce((sum, r) => sum + r.quantity, 0)
-          : items.reduce((sum, item) => sum + item.quantity, 0),
+        quantity: isSalesCheckTemplate
+          ? primary?.quantity ?? items.reduce((sum, item) => sum + item.quantity, 0)
+          : expandedRows.length > 0
+            ? expandedRows.reduce((sum, r) => sum + r.quantity, 0)
+            : items.reduce((sum, item) => sum + item.quantity, 0),
         unitPrice: rawFirst?.unitPrice ?? '0',
         totalAmount: order.totalAmount,
         trackingNumber: shipment?.trackingNumber ?? '',
@@ -215,6 +238,18 @@ export async function GET(request: NextRequest) {
         // 수집일자 — yyyy-mm-dd 포맷
         collectedAt: collectedDate ? collectedDate.toISOString().slice(0, 10) : '',
         collectedDateYmd: collectedDate ? collectedDate.toISOString().slice(0, 10).replaceAll('-', '') : '',
+        shippedAt: shippedDate ? shippedDate.toISOString().slice(0, 10) : '',
+        // ─ 매출확인용 열 ─
+        salesStatus: getSalesStatusLabel(order.status),
+        collectedQuantity: rawFirst?.quantity ?? '',
+        salesShippingFee: salesValue(order.shippingFee ?? ''),
+        salesUnitPrice: salesValue(rawFirst?.unitPrice ?? '0'),
+        salesTotalAmount: salesValue(order.totalAmount),
+        salesDiscountAndFee: '',
+        salesPaymentAmount: salesValue(order.totalAmount),
+        salesFinalPaymentAmount: salesValue(order.totalAmount),
+        salesPaymentFee: '',
+        salesProfit: '',
         // 기타1~10 — fixedValue 로 채우는 용도
         etc1: '',
         etc2: '',
@@ -227,6 +262,7 @@ export async function GET(request: NextRequest) {
         etc9: '',
         etc10: '',
       }
+      })
     })
 
     let buffer: Buffer

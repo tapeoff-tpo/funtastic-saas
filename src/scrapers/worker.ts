@@ -29,7 +29,7 @@ import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@
 // Side-effect import — registers all scraper instances on the registry
 import './register'
 
-const SCRAPE_JOB_TIMEOUT_MS = 480_000
+const SCRAPE_JOB_TIMEOUT_MS = 720_000
 const SESSION_CHECK_TIMEOUT_MS = 60_000
 const DEFAULT_LOGIN_TIMEOUT_MS = 90_000
 const EMAIL_SECOND_FACTOR_LOGIN_TIMEOUT_MS = 180_000

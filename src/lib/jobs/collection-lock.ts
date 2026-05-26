@@ -13,7 +13,7 @@ const CS_COLLECTION_JOB_TYPES = [
   'scrape-inquiries',
   'cs-collection',
 ] as const
-const RPA_SCRAPE_STALE_TIMEOUT_SECONDS = 540
+const RPA_SCRAPE_STALE_TIMEOUT_SECONDS = 780
 
 const COLLECTION_JOB_TYPES = [
   ...ORDER_COLLECTION_JOB_TYPES,

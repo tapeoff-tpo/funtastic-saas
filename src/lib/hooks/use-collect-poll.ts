@@ -27,7 +27,7 @@ interface UseCollectPollReturn {
 }
 
 const POLL_INTERVAL = 1500
-const MAX_POLL_DURATION = 8 * 60 * 1000
+const MAX_POLL_DURATION = 13 * 60 * 1000
 const POLL_TIMEOUT_MESSAGE = 'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
 
 function formatActiveCollectionError(error: string, activeJob: unknown): string {

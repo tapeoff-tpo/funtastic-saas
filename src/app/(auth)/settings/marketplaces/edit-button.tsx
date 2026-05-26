@@ -7,6 +7,7 @@ import {
   getMarketplaceCredentials,
   renameRpaMarketplaceConnection,
   registerMarketplaceCredentials,
+  saveSalesExportMarketplaceId,
   testMarketplaceCredentials,
 } from './actions'
 import { DeleteConnectionButton } from './delete-button'
@@ -59,7 +60,6 @@ interface ConnectionRowProps {
 interface LoadedData {
   marketplaceId: string
   storeAlias: string
-  salesExportMarketplaceId: string
   requiredCredentials: string[]
   optionalCredentials?: string[]
   values: Record<string, string>
@@ -77,6 +77,7 @@ export function ConnectionRow({
 }: ConnectionRowProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
+  const [salesIdOpen, setSalesIdOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<LoadedData | null>(null)
   const [reveal, setReveal] = useState<Record<string, boolean>>({})
@@ -89,12 +90,17 @@ export function ConnectionRow({
     renameRpaMarketplaceConnection,
     null,
   )
+  const [salesIdState, salesIdFormAction, isSalesIdPending] = useActionState(
+    saveSalesExportMarketplaceId,
+    null,
+  )
 
   async function handleToggle() {
     if (open) {
       setOpen(false)
       return
     }
+    setSalesIdOpen(false)
     setLoading(true)
     const res = await getMarketplaceCredentials(connectionId)
     setLoading(false)
@@ -107,6 +113,7 @@ export function ConnectionRow({
   }
 
   function handleRpaToggle() {
+    setSalesIdOpen(false)
     setOpen((current) => !current)
   }
 
@@ -132,6 +139,16 @@ export function ConnectionRow({
       toast.error(rpaState.error)
     }
   }, [router, rpaState])
+
+  useEffect(() => {
+    if (salesIdState?.success && salesIdState.message) {
+      toast.success(salesIdState.message)
+      router.refresh()
+      setTimeout(() => setSalesIdOpen(false), 0)
+    } else if (salesIdState?.error) {
+      toast.error(salesIdState.error)
+    }
+  }, [router, salesIdState])
 
   async function handleTest(form: HTMLFormElement) {
     if (!data) return
@@ -173,7 +190,18 @@ export function ConnectionRow({
             {displayName !== marketplaceName ? ` · 표시 이름: ${displayName}` : ''}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setOpen(false)
+              setSalesIdOpen((current) => !current)
+            }}
+          >
+            {salesIdOpen ? '닫기' : '매출 ID 설정'}
+          </Button>
           {(integrationMethod === 'api' || integrationMethod === 'hub') && (
             <Button
               type="button"
@@ -204,6 +232,35 @@ export function ConnectionRow({
         </p>
       )}
 
+      {salesIdOpen && (
+        <form
+          action={salesIdFormAction}
+          className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3"
+        >
+          <input type="hidden" name="connection_id" value={connectionId} />
+          <div className="space-y-1">
+            <Label htmlFor={`sales-export-${connectionId}-marketplace-id`}>매출확인용 마켓 ID</Label>
+            <Input
+              id={`sales-export-${connectionId}-marketplace-id`}
+              name="sales_export_marketplace_id"
+              type="text"
+              defaultValue={salesExportMarketplaceId}
+              maxLength={100}
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">매출확인용 엑셀의 ID열에만 출력됩니다.</p>
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={isSalesIdPending}>
+              {isSalesIdPending ? '저장 중...' : '저장'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setSalesIdOpen(false)}>
+              취소
+            </Button>
+          </div>
+        </form>
+      )}
+
       {open && data && (integrationMethod === 'api' || integrationMethod === 'hub') && (
         <form
           action={formAction}
@@ -228,19 +285,6 @@ export function ConnectionRow({
               계정명을 변경하면 저장된 인증정보도 새 이름으로 함께 이전됩니다.
             </p>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor={`edit-${connectionId}-sales-export-marketplace-id`}>매출확인용 마켓 ID</Label>
-            <Input
-              id={`edit-${connectionId}-sales-export-marketplace-id`}
-              name="sales_export_marketplace_id"
-              type="text"
-              defaultValue={data.salesExportMarketplaceId}
-              maxLength={100}
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">매출확인용 엑셀의 ID열에 출력됩니다.</p>
-          </div>
-
           {data.requiredCredentials.map((credKey) => {
             const isRevealed = reveal[credKey] ?? false
             return (
@@ -345,18 +389,6 @@ export function ConnectionRow({
             <p className="text-xs text-muted-foreground">
               로그인 정보와 기존 주문 연결 기준은 그대로 유지됩니다.
             </p>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor={`edit-${connectionId}-rpa-sales-export-marketplace-id`}>매출확인용 마켓 ID</Label>
-            <Input
-              id={`edit-${connectionId}-rpa-sales-export-marketplace-id`}
-              name="sales_export_marketplace_id"
-              type="text"
-              defaultValue={salesExportMarketplaceId}
-              maxLength={100}
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">매출확인용 엑셀의 ID열에 출력됩니다.</p>
           </div>
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={isRpaPending}>

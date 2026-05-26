@@ -141,7 +141,6 @@ export async function getMarketplaceCredentials(
   data?: {
     marketplaceId: string
     storeAlias: string
-    salesExportMarketplaceId: string
     requiredCredentials: string[]
     optionalCredentials?: string[]
     values: Record<string, string>
@@ -197,9 +196,6 @@ export async function getMarketplaceCredentials(
     data: {
       marketplaceId: connection.marketplaceId,
       storeAlias: connection.storeAlias,
-      salesExportMarketplaceId: typeof connection.metadata?.salesExportMarketplaceId === 'string'
-        ? connection.metadata.salesExportMarketplaceId
-        : '',
       requiredCredentials: [...config.requiredCredentials],
       optionalCredentials,
       values,
@@ -328,6 +324,71 @@ export async function testMarketplaceCredentials(
   }
 }
 
+export async function saveSalesExportMarketplaceId(
+  _prevState: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+
+  if (authError || !user) {
+    return { error: '인증이 필요합니다.' }
+  }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const connectionId = String(formData.get('connection_id') ?? '').trim()
+  const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
+
+  if (!connectionId) return { error: '연결 ID가 필요합니다.' }
+  if (salesExportMarketplaceId.length > 100) {
+    return { error: '매출확인용 마켓 ID는 100자 이내로 입력해주세요.' }
+  }
+
+  try {
+    const [connection] = await db
+      .select({
+        id: marketplaceConnections.id,
+        metadata: marketplaceConnections.metadata,
+      })
+      .from(marketplaceConnections)
+      .where(
+        and(
+          eq(marketplaceConnections.userId, workspaceUserId),
+          eq(marketplaceConnections.id, connectionId),
+        ),
+      )
+      .limit(1)
+
+    if (!connection) {
+      return { error: '연결 정보를 찾을 수 없습니다.' }
+    }
+
+    await db
+      .update(marketplaceConnections)
+      .set({
+        metadata: {
+          ...(connection.metadata ?? {}),
+          salesExportMarketplaceId,
+        },
+      })
+      .where(
+        and(
+          eq(marketplaceConnections.userId, workspaceUserId),
+          eq(marketplaceConnections.id, connectionId),
+        ),
+      )
+  } catch (err) {
+    return {
+      error: `매출확인용 마켓 ID 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+    }
+  }
+
+  revalidatePath('/settings/marketplaces')
+  return { success: true, message: '매출확인용 마켓 ID가 저장되었습니다.' }
+}
+
 export async function registerMarketplaceCredentials(
   _prevState: ActionResult | null,
   formData: FormData
@@ -354,7 +415,6 @@ export async function registerMarketplaceCredentials(
     return { error: '연결 계정명을 입력해주세요. 예: 쿠팡-본계정, 쿠팡-서브계정' }
   }
   const storeAlias = rawStoreAlias || 'default'
-  const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
   const config = marketplaceRegistry.get(marketplaceId).config
   const vaultNames: string[] = []
   const optionalCredentialKeys = OPTIONAL_CREDENTIALS[marketplaceId] ?? []
@@ -484,7 +544,6 @@ export async function registerMarketplaceCredentials(
             : [],
         }
       : {}),
-    salesExportMarketplaceId,
   }
 
   try {
@@ -718,7 +777,6 @@ export async function renameRpaMarketplaceConnection(
 
   const connectionId = String(formData.get('connection_id') ?? '').trim()
   const storeAlias = String(formData.get('store_alias') ?? '').trim()
-  const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
   if (!connectionId) return { error: '연결 ID가 필요합니다.' }
   if (!storeAlias) return { error: '연결 계정명을 입력해주세요.' }
   if (storeAlias.length > 100) return { error: '연결 계정명은 100자 이내로 입력해주세요.' }
@@ -783,10 +841,6 @@ export async function renameRpaMarketplaceConnection(
       .set({
         storeAlias,
         displayName,
-        metadata: {
-          ...(connection.metadata ?? {}),
-          salesExportMarketplaceId,
-        },
         vaultSecretNames: [
           `scrape_${workspaceUserId}_${connection.marketplaceId}_${connectionId}_email`,
           `scrape_${workspaceUserId}_${connection.marketplaceId}_${connectionId}_password`,

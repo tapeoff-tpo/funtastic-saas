@@ -8,10 +8,7 @@ import type { MarketplaceScraper, ScraperCredentials, ScraperLoginResult } from 
 
 const PARTNER_BASE_URL = 'https://orora.ohou.se'
 const LOGIN_URL = `${PARTNER_BASE_URL}/signin?redirectUrl=%2F`
-const ORDER_URL_CANDIDATES = [
-  `${PARTNER_BASE_URL}/orders?customFilters=PAYMENT_COMPLETE&order=PAYMENT_AT_DESC`,
-  `${PARTNER_BASE_URL}/orders?customFilters=READY_FOR_DELIVERY&order=PAYMENT_AT_DESC`,
-]
+const PAYMENT_COMPLETE_ORDER_URL = `${PARTNER_BASE_URL}/orders?customFilters=PAYMENT_COMPLETE&order=PAYMENT_AT_DESC`
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const LOGIN_STAGE_TIMEOUT_MS = 180_000
@@ -794,16 +791,31 @@ async function waitForOhouseSecondFactorSubmitResult(page: Page, timeoutMs = 18_
 }
 
 async function selectOhouseSecondFactorEmailMethod(page: Page): Promise<boolean> {
-  const selected = await page
+  const selectedByLabel = await page
     .evaluate(() => {
       const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
-      const emailRadio = radios.find((radio) => radio.value !== 'SMS') ?? radios[0]
+      const emailRadio = radios.find((radio) => {
+        const labelText = radio.closest('label, div, li, section')?.textContent ?? ''
+        const valueText = `${radio.value} ${radio.name} ${radio.id}`
+        return /이메일|메일|email/i.test(`${labelText} ${valueText}`)
+      })
       emailRadio?.click()
       return Boolean(emailRadio)
     })
     .catch(() => false)
+  if (selectedByLabel) return true
 
-  return selected
+  const clickedByText = await clickOhouseText(page, /이메일|메일|email/i)
+  if (clickedByText) return true
+
+  return page
+    .evaluate(() => {
+      const radios = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
+      const fallback = radios.find((radio) => !/sms|phone|mobile|휴대폰|전화/i.test(`${radio.value} ${radio.name} ${radio.id}`)) ?? radios[0]
+      fallback?.click()
+      return Boolean(fallback)
+    })
+    .catch(() => false)
 }
 
 async function sendOhouseSecondFactorFromMethodPage(page: Page): Promise<boolean> {
@@ -1049,7 +1061,7 @@ async function performOhouseLogin(
   }
 
   await gotoOhouse(page, PARTNER_BASE_URL).catch(() => undefined)
-  await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
+  await gotoOhouse(page, PAYMENT_COMPLETE_ORDER_URL).catch(() => undefined)
   if (!(await waitForOhouseAppReady(page))) {
     return `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 후 주문 앱 인증 상태를 확인하지 못했습니다. (${await summarizePage(page)})`
   }
@@ -1077,7 +1089,7 @@ async function completeOhouseAppAuth(
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1500)
     diagnostics.secondFactor = await handleEmailSecondFactor(page, credentials)
-    await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
+    await gotoOhouse(page, PAYMENT_COMPLETE_ORDER_URL).catch(() => undefined)
     await waitForOhouseAppReady(page).catch(() => false)
     check = await checkOhouseApiSession(page, diagnostics.observedAuthorization)
   }
@@ -1131,20 +1143,13 @@ async function clickOhouseUnconfirmedOrdersCard(page: Page): Promise<boolean> {
 async function openOrdersPage(page: Page): Promise<void> {
   if (await clickOhouseUnconfirmedOrdersCard(page)) return
 
-  let openedAnyOrderPage = false
-  for (const url of ORDER_URL_CANDIDATES) {
-    await gotoOhouse(page, url).catch(() => undefined)
-    if (isOhouseSignInUrl(page.url())) continue
+  await gotoOhouse(page, PAYMENT_COMPLETE_ORDER_URL).catch(() => undefined)
+  if (!isOhouseSignInUrl(page.url())) {
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    if (!/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) || /404|찾을 수 없습니다/.test(bodyText)) {
-      continue
+    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) {
+      return
     }
-    openedAnyOrderPage = true
-    const count = await readOhouseOrderListCount(page)
-    if (count && count > 0) return
   }
-
-  if (openedAnyOrderPage) return
 
   throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 미확인주문 화면을 찾지 못했습니다. (${await summarizePage(page)})`)
 }
@@ -1742,7 +1747,7 @@ async function confirmVisibleOhouseOrders(page: Page): Promise<string> {
 
   if (!clicked) {
     dialogPromise.catch(() => undefined)
-    throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 주문 확인 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+    return 'already-ready:no-confirm-button'
   }
 
   const modalMessage = await clickDownloadConfirmIfPresent(page)

@@ -210,7 +210,7 @@ function isIgnorableConfirmFailure(marketplaceId: string, message: string): bool
 }
 
 function shouldPreserveCollectedConfirmedStatus(marketplaceId: string): boolean {
-  return marketplaceId === 'always' || marketplaceId === 'gs-shop'
+  return marketplaceId === 'always' || marketplaceId === 'gs-shop' || marketplaceId === 'ohouse'
 }
 
 function collectedOrderStatus(

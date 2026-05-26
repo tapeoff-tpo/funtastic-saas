@@ -9,11 +9,12 @@ import type { MarketplaceScraper, ScraperCredentials, ScraperLoginResult } from 
 const PARTNER_BASE_URL = 'https://orora.ohou.se'
 const LOGIN_URL = `${PARTNER_BASE_URL}/signin?redirectUrl=%2F`
 const PAYMENT_COMPLETE_ORDER_URL = `${PARTNER_BASE_URL}/orders?customFilters=PAYMENT_COMPLETE&order=PAYMENT_AT_DESC`
+const READY_FOR_DELIVERY_ORDER_URL = `${PARTNER_BASE_URL}/orders?customFilters=READY_FOR_DELIVERY&order=PAYMENT_AT_DESC`
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const LOGIN_STAGE_TIMEOUT_MS = 180_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v42'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v43'
 const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
 
 type JsonRecord = Record<string, unknown>
@@ -152,6 +153,10 @@ function parseOhouseApiDate(value: string): Date {
     if (!Number.isNaN(parsed.getTime())) return parsed
   }
   return parseKstDate(value)
+}
+
+function isOhouseConfirmedMarketplaceStatus(value: string): boolean {
+  return /배송\s*준비|상품\s*준비|주문\s*확인|READY_FOR_DELIVERY|CONFIRMED/i.test(value)
 }
 
 function normalizeAccountKey(value: string | undefined): string {
@@ -1351,11 +1356,13 @@ function buildOhouseOrderFromValues(
   const sku = get('판매자상품코드', '상품코드', 'SKU', '옵션코드')
   const orderItemNo = get('주문상품번호', '주문옵션번호', '주문상세번호', '상품주문번호') || orderNo
 
+  const marketplaceStatus = get('주문상태', '상태') || '신규주문'
+
   return {
     marketplaceId: 'ohouse',
     marketplaceOrderId: `${accountKey}:${orderNo}`,
-    marketplaceStatus: get('주문상태', '상태') || '신규주문',
-    status: 'new',
+    marketplaceStatus,
+    status: isOhouseConfirmedMarketplaceStatus(marketplaceStatus) ? 'confirmed' : 'new',
     buyerName: get('주문자', '구매자') || recipientName || '-',
     buyerPhone: get('주문자연락처', '구매자연락처') || phone,
     recipientName: recipientName || get('주문자', '구매자') || '-',
@@ -1452,11 +1459,13 @@ function normalizeOhouseApiOrderRecord(
   const buyerPhone = readDeepApiValue(record, ['buyerPhone', 'ordererPhone', 'customerPhone', '주문자연락처', '구매자연락처']) || recipientPhone
   const orderedAtText = readDeepApiValue(record, ['paymentCompletedAt', 'paidAt', 'orderPaymentCompletedAt', 'orderedAt', 'createdAt', 'orderDate', '주문결제완료일', '주문일시'])
 
+  const marketplaceStatus = readDeepApiValue(record, ['orderStatusName', 'orderStatus', 'statusName', 'status', '주문상태']) || '신규주문'
+
   return {
     marketplaceId: 'ohouse',
     marketplaceOrderId: `${accountKey}:${identity}`,
-    marketplaceStatus: readDeepApiValue(record, ['orderStatusName', 'orderStatus', 'statusName', 'status', '주문상태']) || '신규주문',
-    status: 'new',
+    marketplaceStatus,
+    status: isOhouseConfirmedMarketplaceStatus(marketplaceStatus) ? 'confirmed' : 'new',
     buyerName,
     buyerPhone,
     recipientName: recipientName || buyerName,
@@ -1862,14 +1871,14 @@ export class OhouseScraper implements MarketplaceScraper {
           `${OHOUSE_RPA_VERSION}: 오늘의집 주문 화면이 로그인 화면으로 리다이렉트되었습니다.${authFailures.length > 0 ? ` authFailures=${authFailures.join(' | ')}` : ''} (${await summarizePage(ctx.page)})`,
         )
       }
-      const orderCount = await readOhouseOrderListCount(ctx.page)
-      if (orderCount === 0) {
+      const unconfirmedCount = await readOhouseOrderListCount(ctx.page)
+      if (unconfirmedCount === 0) {
         await setProgress?.('오늘의집 미확인주문 0건')
         return []
       }
       const visibleOrders = await readVisibleOhouseOrders(ctx.page, credentials)
       let pageResponseOrders = orderPageResponses.orders()
-      await setProgress?.(`오늘의집 미확인주문 ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
+      await setProgress?.(`오늘의집 미확인주문 ${unconfirmedCount ?? '확인된'}건 엑셀 다운로드 중...`)
       let orders: NormalizedOrder[] = []
       try {
         const workbook = await downloadOrdersExcel(ctx.page, authFailures)
@@ -1897,6 +1906,23 @@ export class OhouseScraper implements MarketplaceScraper {
         } else {
           await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 이미 배송준비 상태로 판단`)
         }
+
+        await setProgress?.('오늘의집 배송준비중 주문 다시 조회 중...')
+        await gotoOhouse(ctx.page, READY_FOR_DELIVERY_ORDER_URL).catch(() => undefined)
+        await waitForOhouseAppReady(ctx.page).catch(() => false)
+        if (!isOhouseSignInUrl(ctx.page.url())) {
+          const readyOrders = (await this.downloadOrdersFromCurrentPage(
+            ctx.page,
+            credentials,
+            authFailures,
+            '배송준비중',
+            setProgress,
+          )).filter((order) => order.orderedAt >= since)
+          if (readyOrders.length > 0) {
+            await setProgress?.(`오늘의집 배송준비중 ${readyOrders.length}건 재수집 완료`)
+            orders = readyOrders
+          }
+        }
       } else if (orders.length > 0) {
         await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 배송준비 화면으로 판단되어 주문 확인 생략`)
       }
@@ -1921,6 +1947,32 @@ export class OhouseScraper implements MarketplaceScraper {
     return {
       success: false,
       error: '오늘의집 RPA 송장 업로드는 주문 수집 화면 확인 후 구현이 필요합니다.',
+    }
+  }
+
+  private async downloadOrdersFromCurrentPage(
+    page: Page,
+    credentials: ScraperCredentials,
+    authFailures: string[],
+    label: string,
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedOrder[]> {
+    const orderCount = await readOhouseOrderListCount(page)
+    if (orderCount === 0) {
+      await setProgress?.(`오늘의집 ${label} 0건`)
+      return []
+    }
+
+    const visibleOrders = await readVisibleOhouseOrders(page, credentials)
+    await setProgress?.(`오늘의집 ${label} ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
+    try {
+      const workbook = await downloadOrdersExcel(page, authFailures)
+      return this.parseOrdersExcel(workbook, credentials)
+    } catch (error) {
+      if (visibleOrders.length === 0) throw error
+      const message = error instanceof Error ? error.message : 'download failed'
+      await setProgress?.(`오늘의집 ${label} 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 진행 (${message.slice(0, 80)})`)
+      return visibleOrders
     }
   }
 
@@ -1987,11 +2039,13 @@ export class OhouseScraper implements MarketplaceScraper {
       const optionText = get(row, '옵션', '옵션명', '상품옵션')
       const sku = get(row, '판매자상품코드', '상품코드', 'SKU', '옵션코드')
 
+      const marketplaceStatus = get(row, '주문상태', '상태') || '신규주문'
+
       orders.push({
         marketplaceId: 'ohouse',
         marketplaceOrderId: scopedOrderNo,
-        marketplaceStatus: get(row, '주문상태', '상태') || '신규주문',
-        status: 'new',
+        marketplaceStatus,
+        status: isOhouseConfirmedMarketplaceStatus(marketplaceStatus) ? 'confirmed' : 'new',
         buyerName: get(row, '주문자', '구매자') || recipientName,
         buyerPhone: get(row, '주문자연락처', '구매자연락처') || phone,
         recipientName,

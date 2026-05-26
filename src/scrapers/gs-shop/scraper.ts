@@ -84,6 +84,31 @@ function hasOrderListContent(text: string): boolean {
   return /조회\s*조건|조회\s*결과|주문번호|주문아이템번호|출하지시일|수취인명|고객명|미처리\s*\(/.test(text)
 }
 
+function isGsOrderListUrl(url: string): boolean {
+  try {
+    return new URL(url).pathname === '/logistics/partner-logistics-mng'
+  } catch {
+    return false
+  }
+}
+
+async function isGsOrderListPage(page: Page): Promise<boolean> {
+  if (!isGsOrderListUrl(page.url())) return false
+  const title = await page.title().catch(() => '')
+  const text = await pageText(page, 1_500)
+  return /협력사\s*배송\s*관리|주문번호|주문아이템번호|조회\s*결과|미처리\s*\(/.test(`${title} ${text}`)
+}
+
+async function waitForGsOrderListPage(page: Page, timeoutMs = 45_000): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await isGsOrderListPage(page)) return true
+    await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => undefined)
+    await page.waitForTimeout(1_000)
+  }
+  return false
+}
+
 async function waitForOrderListContent(page: Page, timeoutMs = 45_000): Promise<boolean> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
@@ -508,12 +533,16 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
   await setProgress?.('GS샵 주문/배송 메뉴 이동 중...')
 
   await gotoGs(page, ORDER_LIST_URL)
-  if (await waitForOrderListContent(page, 45_000)) return
+  if (await waitForGsOrderListPage(page, 45_000)) return
+
+  await gotoGs(page, ORDER_LIST_URL)
+  if (await waitForGsOrderListPage(page, 20_000)) return
 
   const menuClicked = await clickByText(page, /주문\s*\/\s*배송|주문\s*배송|주문/i, 8_000)
   if (menuClicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
     await page.waitForTimeout(1_000)
+    if (await waitForGsOrderListPage(page, 10_000)) return
   }
 
   const candidates = [
@@ -533,11 +562,11 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1_500)
     const text = await pageText(page, 1_500)
-    if (hasOrderListContent(text) || await waitForOrderListContent(page, 15_000)) return
+    if (isGsOrderListUrl(page.url()) && (hasOrderListContent(text) || await waitForGsOrderListPage(page, 15_000))) return
   }
 
   const currentText = await pageText(page, 1_000)
-  if (hasOrderListContent(currentText)) return
+  if (isGsOrderListUrl(page.url()) && hasOrderListContent(currentText)) return
 
   throw new MarketplaceApiError(
     MARKETPLACE_ID,
@@ -626,7 +655,7 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   try {
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-      clickGsDownloadFlow(page),
+      clickGsDownloadFlowKorean(page),
       /* page.evaluate(() => {
         const controls = Array.from(
           document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, area, [role="button"]'),
@@ -670,6 +699,28 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
     )
   } finally {
     page.off('dialog', dialogHandler)
+  }
+}
+
+async function clickGsDownloadFlowKorean(page: Page): Promise<void> {
+  const clickedToolbarDownload = await clickVisibleControl(page, ({ text }) =>
+    /다운로드|download/i.test(text)
+    && !/엑셀업로드|업로드|필수항목보기|양식|샘플/i.test(text),
+  )
+  if (!clickedToolbarDownload) {
+    throw new Error('GS샵 다운로드 버튼을 찾지 못했습니다.')
+  }
+
+  const openedDialog = await waitForText(page, /다운로드\s*방식\s*선택|다운로드시\s*주소\s*표기|도로명주소|지번주소/, 10_000)
+  if (!openedDialog) return
+
+  const clickedModalDownload = await clickVisibleControl(page, ({ text }) =>
+    /다운로드|download/i.test(text)
+    && !/방식\s*선택|주소\s*표기|도로명주소|지번주소|입력기준/i.test(text),
+  { preferBottomRight: true })
+
+  if (!clickedModalDownload) {
+    throw new Error('GS샵 다운로드 모달의 다운로드 버튼을 찾지 못했습니다.')
   }
 }
 
@@ -1243,7 +1294,17 @@ export class GsShopScraper implements MarketplaceScraper {
       await gotoGs(page, BASE_URL)
       await ensureLoggedIn(page, credentials)
       await navigateToOrderList(page, setProgress)
+      if (!(await isGsOrderListPage(page))) {
+        await navigateToOrderList(page, setProgress)
+      }
       await setSearchRangeAndSearch(page, since, setProgress)
+      if (!(await isGsOrderListPage(page))) {
+        throw new MarketplaceApiError(
+          MARKETPLACE_ID,
+          500,
+          `GS샵 주문배송관리 화면이 아니라 다른 화면입니다. 주문 수집을 중단합니다. (${await summarizePage(page)})`,
+        )
+      }
       await selectVisibleOrderRows(page, setProgress)
       const visibleOrders = await parseVisibleOrders(page)
       if (visibleOrders.length > 0) {

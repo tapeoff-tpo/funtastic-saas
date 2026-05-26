@@ -1,6 +1,7 @@
 'use client'
 
 import { useActionState, useEffect, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   getMarketplaceCredentials,
@@ -70,6 +71,7 @@ export function ConnectionRow({
   integrationMethod,
   linkedMarketplaces = [],
 }: ConnectionRowProps) {
+  const router = useRouter()
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<LoadedData | null>(null)
@@ -99,6 +101,7 @@ export function ConnectionRow({
   useEffect(() => {
     if (state?.success && state.message) {
       toast.success(state.message)
+      router.refresh()
       setTimeout(() => {
         setOpen(false)
         setReveal({})
@@ -106,7 +109,7 @@ export function ConnectionRow({
     } else if (state?.error) {
       toast.error(state.error)
     }
-  }, [state])
+  }, [router, state])
 
   async function handleTest(form: HTMLFormElement) {
     if (!data) return
@@ -175,13 +178,24 @@ export function ConnectionRow({
           className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3"
         >
           <input type="hidden" name="marketplace_id" value={data.marketplaceId} />
-          <input type="hidden" name="store_alias" value={data.storeAlias} />
+          <input type="hidden" name="store_alias_required" value="true" />
           <input type="hidden" name="connection_id" value={connectionId} />
 
-          <p className="text-xs text-muted-foreground">
-            연결 계정명: <span className="font-mono">{data.storeAlias}</span>
-            {' · '}저장하면 기존 값이 덮어써집니다.
-          </p>
+          <div className="space-y-1">
+            <Label htmlFor={`edit-${connectionId}-store-alias`}>연결 계정명</Label>
+            <Input
+              id={`edit-${connectionId}-store-alias`}
+              name="store_alias"
+              type="text"
+              defaultValue={data.storeAlias}
+              maxLength={100}
+              required
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              계정명을 변경하면 저장된 인증정보도 새 이름으로 함께 이전됩니다.
+            </p>
+          </div>
 
           {data.requiredCredentials.map((credKey) => {
             const isRevealed = reveal[credKey] ?? false

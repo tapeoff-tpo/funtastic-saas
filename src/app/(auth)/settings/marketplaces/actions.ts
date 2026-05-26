@@ -353,6 +353,8 @@ export async function registerMarketplaceCredentials(
   const config = marketplaceRegistry.get(marketplaceId).config
   const vaultNames: string[] = []
   const optionalCredentialKeys = OPTIONAL_CREDENTIALS[marketplaceId] ?? []
+  const hiddenCredentialKeys = marketplaceId === 'cafe24' ? ['refresh_token'] : []
+  let previousStoreAlias: string | null = null
 
   // Validate all required credentials are provided
   for (const credKey of config.requiredCredentials) {
@@ -395,6 +397,23 @@ export async function registerMarketplaceCredentials(
       if (target.length === 0) {
         return { error: '수정할 연결 정보를 찾을 수 없습니다.' }
       }
+      previousStoreAlias = target[0].storeAlias
+      if (previousStoreAlias !== storeAlias) {
+        const conflicts = await db
+          .select()
+          .from(marketplaceConnections)
+          .where(
+            and(
+              eq(marketplaceConnections.userId, workspaceUserId),
+              eq(marketplaceConnections.marketplaceId, marketplaceId),
+              eq(marketplaceConnections.storeAlias, storeAlias),
+            ),
+          )
+          .limit(1)
+        if (conflicts.length > 0 && conflicts[0].id !== connectionId) {
+          return { error: `${config.name}에 '${storeAlias}' 계정명이 이미 등록되어 있습니다. 다른 이름을 입력해주세요.` }
+        }
+      }
     } else {
       const existing = await db
         .select()
@@ -428,6 +447,15 @@ export async function registerMarketplaceCredentials(
       const name = `mkt_${workspaceUserId}_${marketplaceId}_${vaultKey}`
       await storeCredential(marketplaceId, workspaceUserId, vaultKey, value.trim())
       vaultNames.push(name)
+    }
+    if (connectionId && previousStoreAlias && previousStoreAlias !== storeAlias) {
+      const previousAliasTag = previousStoreAlias === 'default' ? '' : `_${previousStoreAlias}`
+      for (const credKey of hiddenCredentialKeys) {
+        const previousValue = await readCredential(marketplaceId, workspaceUserId, `${credKey}${previousAliasTag}`)
+        if (!previousValue) continue
+        await storeCredential(marketplaceId, workspaceUserId, `${credKey}${aliasTag}`, previousValue)
+        vaultNames.push(`mkt_${workspaceUserId}_${marketplaceId}_${credKey}${aliasTag}`)
+      }
     }
   } catch (err) {
     return {
@@ -479,6 +507,7 @@ export async function registerMarketplaceCredentials(
       await db
         .update(marketplaceConnections)
         .set({
+          storeAlias,
           displayName,
           vaultSecretNames: vaultNames,
           ...(metadata ? { metadata } : {}),
@@ -486,6 +515,13 @@ export async function registerMarketplaceCredentials(
           updatedAt: new Date(),
         })
         .where(eq(marketplaceConnections.id, connectionId))
+      if (previousStoreAlias && previousStoreAlias !== storeAlias) {
+        const previousAliasTag = previousStoreAlias === 'default' ? '' : `_${previousStoreAlias}`
+        await Promise.all(
+          [...config.requiredCredentials, ...optionalCredentialKeys, ...hiddenCredentialKeys]
+            .map((credKey) => deleteCredential(marketplaceId, workspaceUserId, `${credKey}${previousAliasTag}`).catch(() => undefined)),
+        )
+      }
     } else {
       if (existing.length > 0) {
         return {

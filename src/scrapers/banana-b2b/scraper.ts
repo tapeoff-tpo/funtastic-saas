@@ -25,11 +25,6 @@ type BananaOrderCollectionTarget = {
   collectionStatus: MarketplaceCollectionStatus
 }
 
-type BananaOrderListItem = {
-  id?: string | number
-  orderNo?: string | number
-}
-
 const ORDER_COLLECTION_TARGETS: BananaOrderCollectionTarget[] = [
   { state: '1', label: '결제완료', collectionStatus: 'new' },
   { state: '2', label: '배송준비', collectionStatus: 'ready' },
@@ -354,15 +349,28 @@ async function movePaymentCompleteOrdersToReady(
   )
   if (orderNos.length === 0 && collectedItemIds.length === 0) return 0
 
-  return page.evaluate(async ({ orderNos: nextOrderNos, collectedItemIds: nextItemIds }) => {
-    const normalize = (value: unknown) => String(value ?? '').trim()
-    const orderNoSet = new Set(nextOrderNos.map(normalize).filter(Boolean))
-    const itemIdSet = new Set(nextItemIds.map(normalize).filter(Boolean))
+  return page.evaluate(async function ({ orderNos: nextOrderNos, collectedItemIds: nextItemIds }) {
+    function normalize(value: unknown) {
+      return String(value ?? '').trim()
+    }
+
+    const orderNoSet = new Set<string>()
+    for (const orderNo of nextOrderNos) {
+      const normalized = normalize(orderNo)
+      if (normalized) orderNoSet.add(normalized)
+    }
+
+    const itemIdSet = new Set<string>()
+    for (const itemId of nextItemIds) {
+      const normalized = normalize(itemId)
+      if (normalized) itemIdSet.add(normalized)
+    }
+
     const urls = [
       '/api/v1/order/list?state=1&viewcount=500',
       '/api/v1/order/list?state=1',
     ]
-    let rows: BananaOrderListItem[] = []
+    let rows: Array<{ id?: string | number; orderNo?: string | number }> = []
 
     for (const url of urls) {
       const response = await fetch(url, {
@@ -370,30 +378,42 @@ async function movePaymentCompleteOrdersToReady(
         headers: { accept: 'application/json' },
       })
       if (!response.ok) continue
-      const payload = await response.json().catch(() => null)
-      const nextRows = Array.isArray(payload)
-        ? payload
-        : Array.isArray(payload?.list)
-          ? payload.list
-          : Array.isArray(payload?.data)
-            ? payload.data
-            : Array.isArray(payload?.rows)
-              ? payload.rows
-              : []
+      let payload: unknown = null
+      try {
+        payload = await response.json()
+      } catch {
+        payload = null
+      }
+
+      let nextRows: Array<{ id?: string | number; orderNo?: string | number }> = []
+      if (Array.isArray(payload)) {
+        nextRows = payload
+      } else if (payload && typeof payload === 'object') {
+        const maybePayload = payload as {
+          list?: Array<{ id?: string | number; orderNo?: string | number }>
+          data?: Array<{ id?: string | number; orderNo?: string | number }>
+          rows?: Array<{ id?: string | number; orderNo?: string | number }>
+        }
+        if (Array.isArray(maybePayload.list)) nextRows = maybePayload.list
+        else if (Array.isArray(maybePayload.data)) nextRows = maybePayload.data
+        else if (Array.isArray(maybePayload.rows)) nextRows = maybePayload.rows
+      }
+
       if (nextRows.length > 0) {
         rows = nextRows
         break
       }
     }
 
-    const orderProductId = rows
-      .filter((row) => {
-        const id = normalize(row.id)
-        const orderNo = normalize(row.orderNo)
-        return (id && itemIdSet.has(id)) || (orderNo && orderNoSet.has(orderNo))
-      })
-      .map((row) => normalize(row.id))
-      .filter(Boolean)
+    const orderProductId: string[] = []
+    for (const row of rows) {
+      const id = normalize(row.id)
+      const orderNo = normalize(row.orderNo)
+      if (!id) continue
+      if (itemIdSet.has(id) || (orderNo && orderNoSet.has(orderNo))) {
+        orderProductId.push(id)
+      }
+    }
 
     if (orderProductId.length === 0) return 0
 
@@ -404,8 +424,16 @@ async function movePaymentCompleteOrdersToReady(
       body: JSON.stringify({ orderProductId }),
     })
     if (!response.ok) {
-      const payload = await response.json().catch(async () => ({ message: await response.text().catch(() => '') }))
-      throw new Error(payload?.message || `배송준비 전환 실패: ${response.status}`)
+      let message = ''
+      try {
+        const payload = await response.json()
+        if (payload && typeof payload === 'object' && 'message' in payload) {
+          message = String(payload.message ?? '')
+        }
+      } catch {
+        message = await response.text().catch(() => '')
+      }
+      throw new Error(message || `배송준비 전환 실패: ${response.status}`)
     }
     return orderProductId.length
   }, { orderNos, collectedItemIds })

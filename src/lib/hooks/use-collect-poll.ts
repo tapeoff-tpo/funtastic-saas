@@ -67,6 +67,7 @@ export function useCollectPoll(): UseCollectPollReturn {
   }, [])
 
   const clearResults = useCallback(() => {
+    setCollecting(false)
     setLogs(null)
     setJobLogIds([])
     stopPolling()

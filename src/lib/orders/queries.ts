@@ -1007,12 +1007,14 @@ export async function getOrders(filters: OrderFilters = {}) {
   }
 
   const resolveSameComponentMappingCode = (
+    marketplaceId: string,
     candidateIds: string[],
     optionText: string | null,
   ): string | null => {
     const normalizedOptionText = optionText?.trim().slice(0, 100)
     const candidateSet = new Set(candidateIds)
     const matchedSources = mappingSourceRows.filter((source) => {
+      if (source.marketplaceId !== marketplaceId) return false
       if (!candidateSet.has(source.marketplaceProductId)) return false
       if (normalizedOptionText) {
         return source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === ''
@@ -1050,7 +1052,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     const mappingCodeId = candidateIds
       .map((candidateId) => lookupMappingRef(mappingIndex, marketplaceId, candidateId, optionText))
       .find((ref): ref is string => !!ref)
-      ?? resolveSameComponentMappingCode(candidateIds, optionText)
+      ?? resolveSameComponentMappingCode(marketplaceId, candidateIds, optionText)
     if (!mappingCodeId) return null
     const components = componentsByCode.get(mappingCodeId) ?? []
     if (components.length === 0) return null

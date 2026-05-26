@@ -31,60 +31,27 @@ export type MappingIndex = {
   exactProductMap: Map<string, string>
   /** key = `${marketplaceId}:${productId}` */
   productMap: Map<string, string>
-  /** key = `${productId}${SEP}${optionId}`; only kept when it points to one mapping ref */
-  globalOptionMap: Map<string, string>
-  /** key = productId; only matches orders without option text and only when unique */
-  globalExactProductMap: Map<string, string>
-  /** key = productId; only kept when it points to one mapping ref */
-  globalProductMap: Map<string, string>
 }
 
 export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
   const optionMap = new Map<string, string>()
   const exactProductMap = new Map<string, string>()
   const productMap = new Map<string, string>()
-  const globalOptionCandidates = new Map<string, Set<string>>()
-  const globalExactProductCandidates = new Map<string, Set<string>>()
-  const globalProductCandidates = new Map<string, Set<string>>()
-
-  const addCandidate = (map: Map<string, Set<string>>, key: string, ref: string) => {
-    const refs = map.get(key) ?? new Set<string>()
-    refs.add(ref)
-    map.set(key, refs)
-  }
 
   for (const s of sources) {
     if (s.marketplaceOptionId) {
       const sourceKey = `${s.marketplaceProductId}${MAPPING_SEPARATOR}${s.marketplaceOptionId}`
       optionMap.set(`${s.marketplaceId}:${sourceKey}`, s.ref)
-      addCandidate(globalOptionCandidates, sourceKey, s.ref)
       if (s.marketplaceOptionId === EXACT_OPTION_ID) {
         exactProductMap.set(`${s.marketplaceId}:${s.marketplaceProductId}`, s.ref)
-        addCandidate(globalExactProductCandidates, s.marketplaceProductId, s.ref)
       }
     } else {
       const key = `${s.marketplaceId}:${s.marketplaceProductId}`
       productMap.set(key, s.ref)
-      addCandidate(globalProductCandidates, s.marketplaceProductId, s.ref)
     }
   }
 
-  const globalOptionMap = new Map<string, string>()
-  for (const [key, refs] of globalOptionCandidates) {
-    if (refs.size === 1) globalOptionMap.set(key, Array.from(refs)[0])
-  }
-
-  const globalExactProductMap = new Map<string, string>()
-  for (const [key, refs] of globalExactProductCandidates) {
-    if (refs.size === 1) globalExactProductMap.set(key, Array.from(refs)[0])
-  }
-
-  const globalProductMap = new Map<string, string>()
-  for (const [key, refs] of globalProductCandidates) {
-    if (refs.size === 1) globalProductMap.set(key, Array.from(refs)[0])
-  }
-
-  return { optionMap, exactProductMap, productMap, globalOptionMap, globalExactProductMap, globalProductMap }
+  return { optionMap, exactProductMap, productMap }
 }
 
 /**
@@ -108,38 +75,22 @@ export function lookupMappingRef(
     const optionTextKey = `${marketplaceItemId}${MAPPING_SEPARATOR}${normalizedOptionText}`
     const optionTextHit = index.optionMap.get(`${marketplaceId}:${optionTextKey}`)
     if (optionTextHit) return optionTextHit
-
-    const globalOptionTextHit = index.globalOptionMap.get(optionTextKey)
-    if (globalOptionTextHit) return globalOptionTextHit
   } else {
     const exactProductHit = index.exactProductMap.get(`${marketplaceId}:${marketplaceItemId}`)
     if (exactProductHit) return exactProductHit
-
-    const globalExactProductHit = index.globalExactProductMap.get(marketplaceItemId)
-    if (globalExactProductHit) return globalExactProductHit
   }
 
   // 2) 품번 매치 — marketplaceItemId 자체가 productId 인 경우
   const fullProdHit = index.productMap.get(`${marketplaceId}:${marketplaceItemId}`)
   if (fullProdHit) return fullProdHit
 
-  // 3) 쇼핑몰 ID가 다른 수동/사방넷 채널 fallback — 상품코드가 전역에서 유일한 경우만 허용
-  const globalOptHit = index.globalOptionMap.get(marketplaceItemId)
-  if (globalOptHit) return globalOptHit
-
-  const globalProdHit = index.globalProductMap.get(marketplaceItemId)
-  if (globalProdHit) return globalProdHit
-
-  // 4) 품번 매치 — `{productId}{SEP}...` prefix
+  // 3) 품번 매치 - `{productId}{SEP}...` prefix, within the same marketplace only.
   const sepIdx = marketplaceItemId.indexOf(MAPPING_SEPARATOR)
   if (sepIdx > 0) {
     const productId = marketplaceItemId.slice(0, sepIdx)
     const prodKey = `${marketplaceId}:${productId}`
     const prodHit = index.productMap.get(prodKey)
     if (prodHit) return prodHit
-
-    const globalPrefixHit = index.globalProductMap.get(productId)
-    if (globalPrefixHit) return globalPrefixHit
   }
 
   return null

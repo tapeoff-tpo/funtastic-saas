@@ -54,8 +54,8 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
   const router = useRouter()
   const [pendingStatus, setPendingStatus] = useState<ClaimStatus | null>(null)
   const [returnItems, setReturnItems] = useState<Array<{ sku: string; quantity: number }> | null>(null)
-  const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({})
-  const [returnDisposition, setReturnDisposition] = useState<'available' | 'defective'>('available')
+  const [availableQuantities, setAvailableQuantities] = useState<Record<string, number>>({})
+  const [defectiveQuantities, setDefectiveQuantities] = useState<Record<string, number>>({})
   const [returnModalOpen, setReturnModalOpen] = useState(false)
   const [, startTransition] = useTransition()
 
@@ -99,8 +99,8 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
         const data = await res.json() as { items?: Array<{ sku: string; quantity: number }> }
         const items = data.items ?? []
         setReturnItems(items)
-        setReturnQuantities(Object.fromEntries(items.map((item) => [item.sku, item.quantity])))
-        setReturnDisposition('available')
+        setAvailableQuantities(Object.fromEntries(items.map((item) => [item.sku, item.quantity])))
+        setDefectiveQuantities(Object.fromEntries(items.map((item) => [item.sku, 0])))
         setReturnModalOpen(true)
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '회수 상품 조회 실패')
@@ -121,10 +121,10 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
           body: JSON.stringify({
             claimStatus: 'completed',
             returnCompletion: {
-              disposition: returnDisposition,
               quantities: items.map((item) => ({
                 sku: item.sku,
-                quantity: Number(returnQuantities[item.sku] ?? 0),
+                availableQuantity: Number(availableQuantities[item.sku] ?? 0),
+                defectiveQuantity: Number(defectiveQuantities[item.sku] ?? 0),
               })),
             },
           }),
@@ -205,43 +205,44 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
             <div className="mb-3">
               <h3 className="text-base font-semibold">{claimType === 'exchange' ? '교환회수완료 처리' : '반품회수완료 처리'}</h3>
             </div>
-            <div className="mb-3 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setReturnDisposition('available')}
-                className={`rounded border px-3 py-1 text-sm ${returnDisposition === 'available' ? 'border-green-500 bg-green-50 text-green-700' : ''}`}
-              >
-                가용
-              </button>
-              <button
-                type="button"
-                onClick={() => setReturnDisposition('defective')}
-                className={`rounded border px-3 py-1 text-sm ${returnDisposition === 'defective' ? 'border-red-500 bg-red-50 text-red-700' : ''}`}
-              >
-                불용
-              </button>
-            </div>
             <div className="max-h-64 overflow-auto rounded border">
               {(returnItems ?? []).length === 0 ? (
                 <div className="p-3 text-sm text-muted-foreground">회수 처리할 매핑 상품이 없습니다.</div>
               ) : (
                 (returnItems ?? []).map((item) => (
-                  <div key={item.sku} className="grid grid-cols-[1fr_88px] items-center gap-2 border-b p-2 last:border-b-0">
+                  <div key={item.sku} className="grid grid-cols-[1fr_78px_78px] items-end gap-2 border-b p-2 last:border-b-0">
                     <div>
                       <div className="font-mono text-xs">{item.sku}</div>
                       <div className="text-[11px] text-muted-foreground">최대 {item.quantity}개</div>
                     </div>
-                    <input
-                      type="number"
-                      min={0}
-                      max={item.quantity}
-                      value={returnQuantities[item.sku] ?? 0}
-                      onChange={(event) => setReturnQuantities((prev) => ({
-                        ...prev,
-                        [item.sku]: Number(event.target.value),
-                      }))}
-                      className="h-8 rounded border px-2 text-right text-sm"
-                    />
+                    <label className="text-[11px] font-medium text-green-700">
+                      가용
+                      <input
+                        type="number"
+                        min={0}
+                        max={item.quantity}
+                        value={availableQuantities[item.sku] ?? 0}
+                        onChange={(event) => setAvailableQuantities((prev) => ({
+                          ...prev,
+                          [item.sku]: Number(event.target.value),
+                        }))}
+                        className="mt-1 h-8 w-full rounded border px-2 text-right text-sm text-foreground"
+                      />
+                    </label>
+                    <label className="text-[11px] font-medium text-red-700">
+                      불용
+                      <input
+                        type="number"
+                        min={0}
+                        max={item.quantity}
+                        value={defectiveQuantities[item.sku] ?? 0}
+                        onChange={(event) => setDefectiveQuantities((prev) => ({
+                          ...prev,
+                          [item.sku]: Number(event.target.value),
+                        }))}
+                        className="mt-1 h-8 w-full rounded border px-2 text-right text-sm text-foreground"
+                      />
+                    </label>
                   </div>
                 ))
               )}

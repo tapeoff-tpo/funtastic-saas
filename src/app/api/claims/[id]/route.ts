@@ -41,8 +41,7 @@ export async function PATCH(
   const body = (await req.json()) as {
     claimStatus?: ClaimStatus
     returnCompletion?: {
-      disposition?: 'available' | 'defective'
-      quantities?: Array<{ sku: string; quantity: number }>
+      quantities?: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number }>
     }
   }
   if (!body.claimStatus || !VALID_STATUSES.includes(body.claimStatus)) {
@@ -53,13 +52,12 @@ export async function PATCH(
   }
 
   if (body.claimStatus === 'completed' && body.returnCompletion) {
-    const disposition = body.returnCompletion.disposition
     const quantities = body.returnCompletion.quantities
-    if ((disposition !== 'available' && disposition !== 'defective') || !Array.isArray(quantities)) {
+    if (!Array.isArray(quantities)) {
       return NextResponse.json({ error: '반품완료 처리 정보가 올바르지 않습니다.' }, { status: 400 })
     }
 
-    const result = await completeReturnClaim(workspaceUserId, id, disposition, quantities)
+    const result = await completeReturnClaim(workspaceUserId, id, quantities)
     if (!result.success) {
       return NextResponse.json({ error: result.error ?? '반품완료 처리 실패' }, { status: 400 })
     }

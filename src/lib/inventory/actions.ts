@@ -402,8 +402,7 @@ export async function getReturnableItemsForClaim(
 export async function completeReturnClaim(
   userId: string,
   claimId: string,
-  disposition: 'available' | 'defective',
-  quantities: Array<{ sku: string; quantity: number }>,
+  quantities: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number }>,
 ): Promise<ActionResult> {
   return db.transaction(async (tx) => {
     const processingClaimId = await resolveReturnProcessingClaimId(tx, userId, claimId)
@@ -427,21 +426,44 @@ export async function completeReturnClaim(
 
     const maxItems = await expandOrderItemsForDeduction(tx, userId, claim.orderId)
     const maxBySku = new Map(maxItems.map((item) => [item.sku, item.quantity]))
-    const requested = new Map<string, number>()
+    const requested = new Map<string, { availableQuantity: number; defectiveQuantity: number }>()
 
     for (const item of quantities) {
       const sku = item.sku?.trim()
-      const quantity = Number(item.quantity)
-      if (!sku || !Number.isInteger(quantity) || quantity < 0) {
+      const availableQuantity = Number(item.availableQuantity)
+      const defectiveQuantity = Number(item.defectiveQuantity)
+      if (
+        !sku
+        || !Number.isInteger(availableQuantity)
+        || !Number.isInteger(defectiveQuantity)
+        || availableQuantity < 0
+        || defectiveQuantity < 0
+      ) {
         return { success: false, error: '반품 수량이 올바르지 않습니다.' }
       }
-      requested.set(sku, (requested.get(sku) ?? 0) + quantity)
+      const existing = requested.get(sku) ?? { availableQuantity: 0, defectiveQuantity: 0 }
+      requested.set(sku, {
+        availableQuantity: existing.availableQuantity + availableQuantity,
+        defectiveQuantity: existing.defectiveQuantity + defectiveQuantity,
+      })
     }
 
-    for (const [sku, quantity] of requested) {
+    const totalQuantity = Array.from(requested.values()).reduce(
+      (sum, item) => sum + item.availableQuantity + item.defectiveQuantity,
+      0,
+    )
+    if (totalQuantity === 0) {
+      return { success: false, error: '가용 또는 불용 입고 수량을 1개 이상 입력해주세요.' }
+    }
+
+    const completionLabel = claim.claimType === 'exchange' ? '교환회수완료' : '반품회수완료'
+
+    for (const [sku, quantitiesByDisposition] of requested) {
+      const { availableQuantity, defectiveQuantity } = quantitiesByDisposition
+      const quantity = availableQuantity + defectiveQuantity
       const max = maxBySku.get(sku)
       if (max == null) return { success: false, error: `반품 대상 SKU가 아닙니다: ${sku}` }
-      if (quantity > max) return { success: false, error: `${sku} 수량은 최대 ${max}개까지 처리할 수 있습니다.` }
+      if (quantity > max) return { success: false, error: `${sku} 가용/불용 합계는 최대 ${max}개까지 처리할 수 있습니다.` }
       if (quantity === 0) continue
 
       const [record] = await tx
@@ -462,29 +484,36 @@ export async function completeReturnClaim(
 
       const previousTotal = record.totalStock
       const newTotal = previousTotal + quantity
-      const patch = disposition === 'available'
-        ? {
-            totalStock: newTotal,
-            availableStock: record.availableStock + quantity,
-            updatedAt: new Date(),
-          }
-        : {
-            totalStock: newTotal,
-            defectiveStock: record.defectiveStock + quantity,
-            updatedAt: new Date(),
-          }
-
-      await tx.update(inventory).set(patch).where(eq(inventory.id, record.id))
-      await tx.insert(inventoryHistory).values({
-        inventoryId: record.id,
-        userId,
-        adjustmentReason: disposition === 'available' ? 'return' : 'defective',
-        delta: quantity,
-        previousTotal,
-        newTotal,
-        note: disposition === 'available' ? '반품완료 가용재고 입고' : '반품완료 불용재고 입고',
-        orderId: claim.orderId,
-      })
+      await tx.update(inventory).set({
+        totalStock: newTotal,
+        availableStock: record.availableStock + availableQuantity,
+        defectiveStock: record.defectiveStock + defectiveQuantity,
+        updatedAt: new Date(),
+      }).where(eq(inventory.id, record.id))
+      if (availableQuantity > 0) {
+        await tx.insert(inventoryHistory).values({
+          inventoryId: record.id,
+          userId,
+          adjustmentReason: 'return',
+          delta: availableQuantity,
+          previousTotal,
+          newTotal: previousTotal + availableQuantity,
+          note: `${completionLabel} 가용재고 입고`,
+          orderId: claim.orderId,
+        })
+      }
+      if (defectiveQuantity > 0) {
+        await tx.insert(inventoryHistory).values({
+          inventoryId: record.id,
+          userId,
+          adjustmentReason: 'defective',
+          delta: defectiveQuantity,
+          previousTotal: previousTotal + availableQuantity,
+          newTotal,
+          note: `${completionLabel} 불용재고 입고`,
+          orderId: claim.orderId,
+        })
+      }
     }
 
     await tx

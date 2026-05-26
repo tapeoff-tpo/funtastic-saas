@@ -30,6 +30,16 @@ import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@
 import './register'
 
 const SCRAPE_JOB_TIMEOUT_MS = 480_000
+const SESSION_CHECK_TIMEOUT_MS = 60_000
+const DEFAULT_LOGIN_TIMEOUT_MS = 90_000
+const EMAIL_SECOND_FACTOR_LOGIN_TIMEOUT_MS = 180_000
+
+function loginTimeoutForMarketplace(marketplaceId: string): number {
+  if (marketplaceId === 'gs-shop' || marketplaceId === 'ohouse') {
+    return EMAIL_SECOND_FACTOR_LOGIN_TIMEOUT_MS
+  }
+  return DEFAULT_LOGIN_TIMEOUT_MS
+}
 
 async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -99,11 +109,11 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   if (jobType !== 'upload-invoice') {
     await setProgress('RPA 세션 확인 중...')
     const session = credentials.storageState
-      ? await runWithTimeout(scraper.testSession(credentials), 60_000)
+      ? await runWithTimeout(scraper.testSession(credentials), SESSION_CHECK_TIMEOUT_MS)
       : { ok: false }
     if (!session.ok) {
       await setProgress('RPA 로그인 중...')
-      const login = await runWithTimeout(scraper.login(credentials), 90_000)
+      const login = await runWithTimeout(scraper.login(credentials), loginTimeoutForMarketplace(marketplaceId))
       if (!login.success) throw new Error(login.error ?? `${marketplaceId} login failed`)
       if (login.storageState) {
         await setProgress('RPA 세션 저장 중...')

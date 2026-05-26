@@ -793,10 +793,100 @@ function getRowValue(row: OrderRow, ...candidates: string[]): string {
   return ''
 }
 
+function parseGsExcelRows(rows: unknown[][]): NormalizedOrder[] {
+  let headerIndex = -1
+  let headerMap = new Map<string, number>()
+
+  for (let index = 0; index < Math.min(rows.length, 50); index += 1) {
+    const map = new Map<string, number>()
+    ;(rows[index] ?? []).forEach((value, columnIndex) => {
+      const header = normalizeHeader(readCellText(value))
+      if (header) map.set(header, columnIndex)
+    })
+    const joined = Array.from(map.keys()).join(' ')
+    if (/주문번호/.test(joined) && /(주문아이템번호|수취인|상품명|출하지시|주문일자)/.test(joined)) {
+      headerIndex = index
+      headerMap = map
+      break
+    }
+  }
+
+  if (headerIndex < 0) return []
+
+  const get = (row: unknown[], ...headers: string[]) => {
+    for (const header of headers) {
+      const columnIndex = headerMap.get(normalizeHeader(header))
+      if (columnIndex == null) continue
+      const value = readCellText(row[columnIndex])
+      if (value) return value
+    }
+    return ''
+  }
+
+  const orders: NormalizedOrder[] = []
+  for (let index = headerIndex + 1; index < rows.length; index += 1) {
+    const rawRow = rows[index] ?? []
+    const orderNo = get(rawRow, '주문번호', '원주문번호').replace(/^_/, '')
+    if (!/^\d{6,}$/.test(orderNo)) continue
+
+    const itemNo = get(rawRow, '주문아이템번호')
+    const statusText = get(rawRow, '상태', '주문확인') || '미처리'
+    const orderConfirm = get(rawRow, '주문확인')
+    const collectionStatus = /취소/.test(statusText)
+      ? 'cancelled'
+      : /확인|미처리|출고|배송|상품준비/.test(`${statusText} ${orderConfirm}`)
+        ? 'ready'
+        : 'new'
+    const recipientName = get(rawRow, '수취인', '수취인명', '고객명')
+    const dateText = [
+      get(rawRow, '주문일자', '출하지시일자', '출하지시일'),
+      get(rawRow, '시간'),
+    ].filter(Boolean).join(' ')
+    const record = Object.fromEntries(Array.from(headerMap, ([header, columnIndex]) => [header, readCellText(rawRow[columnIndex])]))
+    const marketplaceItemId = itemNo && itemNo !== orderNo ? `${orderNo}-${itemNo}` : orderNo
+
+    orders.push({
+      marketplaceId: MARKETPLACE_ID,
+      marketplaceOrderId: orderNo,
+      marketplaceStatus: statusText,
+      marketplaceCollectionStatus: collectionStatus,
+      status: collectionStatus === 'ready' ? 'confirmed' : collectionStatus === 'cancelled' ? 'cancelled' : 'new',
+      buyerName: get(rawRow, '주문자', '주문자명', '고객명') || recipientName || 'GS샵 고객',
+      buyerPhone: get(rawRow, '주문자핸드폰', '주문자전화번호') || undefined,
+      recipientName: recipientName || 'GS샵 수취인',
+      recipientPhone: get(rawRow, '수취인핸드폰', '수취인전화번호') || undefined,
+      shippingAddress: {
+        zipCode: get(rawRow, '우편번호', '수취인우편번호'),
+        address1: get(rawRow, '수취인주소', '배송주소', '주소'),
+      },
+      orderedAt: parseKstDate(dateText),
+      totalAmount: parseNumber(get(rawRow, '고객결제액', '판매가', '협력사지급금액')),
+      shippingFee: parseNumber(get(rawRow, '배송비')),
+      deliveryMessage: get(rawRow, '배송메세지', '배송메시지', '고객요청사항') || null,
+      rawData: { source: 'gs-shop-rpa-excel', row: record },
+      items: [{
+        marketplaceItemId,
+        productName: get(rawRow, '상품명(송장)', '상품명송장', '상품명(인터넷)', '상품명인터넷', '상품명') || `GS샵 주문 ${orderNo}`,
+        optionText: get(rawRow, '주문옵션', '옵션', '옵션명') || undefined,
+        quantity: Math.max(parseNumber(get(rawRow, '수량')), 1),
+        unitPrice: parseNumber(get(rawRow, '판매가', '고객결제액')),
+      }],
+    })
+  }
+
+  return orders
+}
+
 function parseOrdersWorkbook(buffer: Buffer): NormalizedOrder[] {
   if (buffer.length === 0) return []
 
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false })
+  for (const candidateSheetName of workbook.SheetNames) {
+    const candidateRows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[candidateSheetName], { header: 1, defval: '' })
+    const parsed = parseGsExcelRows(candidateRows)
+    if (parsed.length > 0) return parsed
+  }
+
   const sheetName = workbook.SheetNames[0]
   if (!sheetName) return []
 

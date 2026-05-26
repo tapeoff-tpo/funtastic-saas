@@ -80,6 +80,21 @@ async function summarizePage(page: Page): Promise<string> {
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
 }
 
+function hasOrderListContent(text: string): boolean {
+  return /조회\s*조건|조회\s*결과|주문번호|주문아이템번호|출하지시일|수취인명|고객명|미처리\s*\(/.test(text)
+}
+
+async function waitForOrderListContent(page: Page, timeoutMs = 45_000): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    const text = await pageText(page, 2_000)
+    if (hasOrderListContent(text)) return true
+    await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => undefined)
+    await page.waitForTimeout(1_000)
+  }
+  return false
+}
+
 async function pageText(page: Page, timeoutMs = 3_000): Promise<string> {
   const frameTexts = await Promise.all(
     page.frames().map((frame) => frame.locator('body').innerText({ timeout: timeoutMs }).catch(() => '')),
@@ -493,8 +508,7 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
   await setProgress?.('GS샵 주문/배송 메뉴 이동 중...')
 
   await gotoGs(page, ORDER_LIST_URL)
-  const directText = await pageText(page, 5_000)
-  if (/협력사\s*배송\s*관리|주문번호|조회\s*결과|출하지시일/.test(directText)) return
+  if (await waitForOrderListContent(page, 45_000)) return
 
   const menuClicked = await clickByText(page, /주문\s*\/\s*배송|주문\s*배송|주문/i, 8_000)
   if (menuClicked) {
@@ -519,11 +533,11 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1_500)
     const text = await pageText(page, 1_500)
-    if (/수취인명|고객명|주문번호|상품명|엑셀|조회|검색|출고/.test(text)) return
+    if (hasOrderListContent(text) || await waitForOrderListContent(page, 15_000)) return
   }
 
   const currentText = await pageText(page, 1_000)
-  if (/수취인명|고객명|주문번호|상품명|엑셀|조회|검색|출고/.test(currentText)) return
+  if (hasOrderListContent(currentText)) return
 
   throw new MarketplaceApiError(
     MARKETPLACE_ID,
@@ -569,7 +583,7 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
 
   await clickByText(page, /조회|검색/i, 8_000).catch(() => false)
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-  await page.waitForTimeout(2_000)
+  await waitForOrderListContent(page, 30_000)
 }
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
@@ -1000,13 +1014,14 @@ export class GsShopScraper implements MarketplaceScraper {
         return visibleOrders
       }
       await setProgress?.('GS샵 주문 엑셀 다운로드 중...')
+      let downloadError: unknown
       try {
         const workbook = await downloadOrdersExcel(page)
         await setProgress?.('GS샵 주문 엑셀 파싱 중...')
         const excelOrders = parseOrdersWorkbook(workbook)
         if (excelOrders.length > 0) return excelOrders
       } catch (error) {
-        if (visibleOrders.length === 0) throw error
+        downloadError = error
         await setProgress?.(`GS샵 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집`)
       }
       if (await hasVisibleNonZeroResults(page)) {
@@ -1023,6 +1038,7 @@ export class GsShopScraper implements MarketplaceScraper {
           `GS샵 주문 화면 확인은 됐지만 주문행/엑셀을 읽지 못했습니다. 0건으로 완료 처리하지 않습니다. (${await summarizePage(page)})`,
         )
       }
+      if (downloadError instanceof Error) throw downloadError
       return visibleOrders
     } finally {
       await close()

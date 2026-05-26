@@ -666,7 +666,7 @@ function parseOrdersWorkbook(buffer: Buffer): NormalizedOrder[] {
       if (header) map.set(header, columnIndex)
     })
     const joined = Array.from(map.keys()).join(' ')
-    if (/(주문번호|주문ID|주문상세|접수번호)/.test(joined) && /(상품명|상품|품명)/.test(joined)) {
+    if (/(주문번호|주문ID|주문상세|주문아이템번호|원주문번호|접수번호)/.test(joined)) {
       headerIndex = index
       headerMap = map
       break
@@ -674,62 +674,63 @@ function parseOrdersWorkbook(buffer: Buffer): NormalizedOrder[] {
   }
 
   if (headerIndex < 0) {
+    const looseRecords = rowsToLooseOrderRecords(rows)
+    const looseOrders = rowsToNormalizedOrders(looseRecords)
+    if (looseOrders.length > 0) return looseOrders
+
     throw new MarketplaceApiError(MARKETPLACE_ID, 500, `GS샵 주문 엑셀 헤더를 찾지 못했습니다. 첫 행=${JSON.stringify(rows[0] ?? []).slice(0, 300)}`)
   }
 
-  const orderRows: OrderRow[] = []
+  const orderRecords: Array<Record<string, string>> = []
   for (let index = headerIndex + 1; index < rows.length; index += 1) {
     const rawRow = rows[index] ?? []
-    const values = new Map<string, string>()
+    const values: Record<string, string> = {}
     for (const [header, columnIndex] of headerMap) {
-      values.set(header, readCellText(rawRow[columnIndex]))
+      values[header] = readCellText(rawRow[columnIndex])
     }
-    if (Array.from(values.values()).some(Boolean)) orderRows.push({ values })
+    if (Object.values(values).some(Boolean)) orderRecords.push(values)
   }
 
-  const orders: NormalizedOrder[] = []
-  for (const row of orderRows) {
-    const orderNo = getRowValue(row, '주문번호', '주문ID', '주문번호주문순번', '접수번호', '주문상세번호', '상품주문번호').replace(/^_/, '')
-    const productName = getRowValue(row, '상품명', '상품', '품명', '상품명옵션')
-    if (!orderNo || !productName) continue
+  const parsed = rowsToNormalizedOrders(orderRecords.map((row) => ({ ...row, source: 'gs-shop-rpa-excel' })))
+  if (parsed.length > 0) return parsed
 
-    const quantity = Math.max(parseNumber(getRowValue(row, '수량', '주문수량', '구매수량')), 1)
-    const totalAmount = parseNumber(getRowValue(row, '결제금액', '주문금액', '판매금액', '상품금액', '총금액'))
-    const unitPrice = parseNumber(getRowValue(row, '판매가', '단가', '상품금액')) || (totalAmount ? Math.round(totalAmount / quantity) : 0)
-    const recipientName = getRowValue(row, '수취인명', '수취인', '받는분', '받는사람', '고객명')
-    const recipientPhone = getRowValue(row, '수취인전화번호', '수취인연락처', '전화번호', '휴대폰번호', '휴대폰')
-    const buyerName = getRowValue(row, '주문자명', '주문자', '구매자명', '고객명') || recipientName
+  return rowsToNormalizedOrders(rowsToLooseOrderRecords(rows))
+}
 
-    orders.push({
-      marketplaceId: MARKETPLACE_ID,
-      marketplaceOrderId: orderNo,
-      marketplaceStatus: getRowValue(row, '주문상태', '상태', '처리상태', '진행상태') || 'GS샵',
-      status: 'new',
-      buyerName,
-      buyerPhone: getRowValue(row, '주문자전화번호', '주문자연락처', '구매자전화번호') || recipientPhone || undefined,
-      recipientName,
-      recipientPhone: recipientPhone || undefined,
-      shippingAddress: {
-        zipCode: getRowValue(row, '우편번호', '수취인우편번호'),
-        address1: getRowValue(row, '주소', '배송주소', '수취인주소', '기본주소'),
-        address2: getRowValue(row, '상세주소', '나머지주소') || undefined,
-      },
-      orderedAt: parseKstDate(getRowValue(row, '주문일시', '주문일', '주문일자', '접수일', '결제일')),
-      totalAmount: totalAmount || unitPrice * quantity,
-      shippingFee: parseNumber(getRowValue(row, '배송비', '배송료')),
-      deliveryMessage: getRowValue(row, '배송메시지', '배송메세지', '배송시요청사항', '요청사항') || null,
-      rawData: { source: 'gs-shop-rpa-excel', row: Object.fromEntries(row.values) },
-      items: [{
-        marketplaceItemId: getRowValue(row, '상품코드', '상품번호', '품번', '협력사상품코드') || orderNo,
-        productName,
-        optionText: getRowValue(row, '옵션', '옵션명', '규격', '단품명') || undefined,
-        quantity,
-        unitPrice,
-      }],
+function rowsToLooseOrderRecords(rows: unknown[][]): Array<Record<string, string>> {
+  const records: Array<Record<string, string>> = []
+  const seen = new Set<string>()
+
+  for (const rawRow of rows) {
+    const cells = rawRow.map(readCellText).filter(Boolean)
+    const joined = cells.join(' ')
+    const orderNo = cells.find((cell) => /^\d{9,12}$/.test(cell))
+    if (!orderNo || seen.has(orderNo)) continue
+    seen.add(orderNo)
+
+    const itemIndex = cells.findIndex((cell) => cell === orderNo)
+    const itemNo = itemIndex >= 0 && /^\d+$/.test(cells[itemIndex + 1] || '') ? cells[itemIndex + 1] : ''
+    const dates = cells.filter((cell) => /^\d{4}-\d{2}-\d{2}$/.test(cell))
+    const recipient = cells.find((cell) => /^[가-힣][*＊][가-힣]$/.test(cell)) || ''
+    const status = /취소/.test(joined)
+      ? '취소'
+      : /미처리|확인|출고|배송준비|상품준비/.test(joined)
+        ? '배송준비'
+        : '신규'
+
+    records.push({
+      주문번호: orderNo,
+      주문아이템번호: itemNo ? `${orderNo}-${itemNo}` : orderNo,
+      수취인: recipient,
+      상태: status,
+      출하지시일: dates[0] || '',
+      상품명: `GS샵 주문 ${orderNo}`,
+      화면행: joined,
+      source: 'gs-shop-rpa-excel-loose',
     })
   }
 
-  return orders
+  return records
 }
 
 async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
@@ -869,6 +870,21 @@ async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
   return []
 }
 
+async function hasVisibleNonZeroResults(page: Page): Promise<boolean> {
+  const text = await pageText(page, 2_000)
+  const normalized = text.replace(/\s+/g, ' ')
+  return /조회\s*결과\s*총\s*[1-9]\d*\s*건/.test(normalized)
+    || /총주문\s*\(\s*[1-9]\d*\s*\)/.test(normalized)
+    || /미처리\s*\(\s*[1-9]\d*\s*\)/.test(normalized)
+}
+
+async function hasVisibleZeroResults(page: Page): Promise<boolean> {
+  const text = await pageText(page, 2_000)
+  const normalized = text.replace(/\s+/g, ' ')
+  return /조회\s*결과\s*총\s*0\s*건/.test(normalized)
+    || /조회된\s*데이터가\s*없습니다/.test(normalized)
+}
+
 function rowsToNormalizedOrders(rows: Array<Record<string, string>>): NormalizedOrder[] {
   const normalizedRows = rows.map((row) => ({
     values: new Map(Object.entries(row).map(([key, value]) => [normalizeHeader(key), value])),
@@ -992,6 +1008,20 @@ export class GsShopScraper implements MarketplaceScraper {
       } catch (error) {
         if (visibleOrders.length === 0) throw error
         await setProgress?.(`GS샵 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집`)
+      }
+      if (await hasVisibleNonZeroResults(page)) {
+        throw new MarketplaceApiError(
+          MARKETPLACE_ID,
+          500,
+          `GS샵 화면에는 주문 건수가 보이지만 RPA가 행을 읽지 못했습니다. (${await summarizePage(page)})`,
+        )
+      }
+      if (!(await hasVisibleZeroResults(page))) {
+        throw new MarketplaceApiError(
+          MARKETPLACE_ID,
+          500,
+          `GS샵 주문 화면 확인은 됐지만 주문행/엑셀을 읽지 못했습니다. 0건으로 완료 처리하지 않습니다. (${await summarizePage(page)})`,
+        )
       }
       return visibleOrders
     } finally {

@@ -13,7 +13,7 @@ const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const LOGIN_STAGE_TIMEOUT_MS = 180_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v41'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v42'
 const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
 
 type JsonRecord = Record<string, unknown>
@@ -1141,13 +1141,31 @@ async function clickOhouseUnconfirmedOrdersCard(page: Page): Promise<boolean> {
 }
 
 async function openOrdersPage(page: Page): Promise<void> {
-  if (await clickOhouseUnconfirmedOrdersCard(page)) return
-
   await gotoOhouse(page, PAYMENT_COMPLETE_ORDER_URL).catch(() => undefined)
   if (!isOhouseSignInUrl(page.url())) {
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) {
+    if (
+      page.url().includes('customFilters=PAYMENT_COMPLETE')
+      && /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText)
+      && !/404|찾을 수 없습니다/.test(bodyText)
+    ) {
       return
+    }
+  }
+
+  if (await clickOhouseUnconfirmedOrdersCard(page)) {
+    if (!page.url().includes('customFilters=PAYMENT_COMPLETE')) {
+      await gotoOhouse(page, PAYMENT_COMPLETE_ORDER_URL).catch(() => undefined)
+    }
+    if (!isOhouseSignInUrl(page.url())) {
+      const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+      if (
+        page.url().includes('customFilters=PAYMENT_COMPLETE')
+        && /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText)
+        && !/404|찾을 수 없습니다/.test(bodyText)
+      ) {
+        return
+      }
     }
   }
 
@@ -1871,7 +1889,7 @@ export class OhouseScraper implements MarketplaceScraper {
         orders = visibleOrders
       }
       orders = orders.filter((order) => order.orderedAt >= since)
-      if (orders.length > 0) {
+      if (orders.length > 0 && ctx.page.url().includes('customFilters=PAYMENT_COMPLETE')) {
         if (await hasVisibleOhouseOrderConfirmButton(ctx.page)) {
           await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 주문 확인 처리 중...`)
           const confirmResult = await confirmVisibleOhouseOrders(ctx.page)
@@ -1879,6 +1897,8 @@ export class OhouseScraper implements MarketplaceScraper {
         } else {
           await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 이미 배송준비 상태로 판단`)
         }
+      } else if (orders.length > 0) {
+        await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 배송준비 화면으로 판단되어 주문 확인 생략`)
       }
       return orders
     } finally {

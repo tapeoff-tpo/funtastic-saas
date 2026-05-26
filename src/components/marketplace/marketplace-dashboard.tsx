@@ -85,11 +85,26 @@ function formatLatestJobLog(log: NonNullable<Connection['latestJobLog']>): strin
   if (log.status === 'cancelled') return '수집 취소됨'
 
   if (log.status === 'completed') {
-    return log.progressMessage
-      ?? `주문 ${log.ordersCollected ?? 0}건 수집/갱신`
+    return formatCollectionSummary(log)
   }
 
   return log.progressMessage ?? '수집 진행 중'
+}
+
+function formatCollectionSummary(log: Pick<NonNullable<Connection['latestJobLog']>, 'ordersCollected' | 'claimsCollected'>): string {
+  const orders = log.ordersCollected ?? 0
+  const claims = log.claimsCollected ?? 0
+  return claims > 0
+    ? `주문 ${orders}건 · 클레임 ${claims}건 수집/갱신`
+    : `주문 ${orders}건 수집/갱신`
+}
+
+function formatCollectionCount(log: Pick<NonNullable<Connection['latestJobLog']>, 'ordersCollected' | 'claimsCollected'>): string {
+  const parts = [`주문 ${log.ordersCollected ?? 0}건`]
+  if ((log.claimsCollected ?? 0) > 0) {
+    parts.push(`클레임 ${log.claimsCollected}건`)
+  }
+  return parts.join(' · ')
 }
 
 /**
@@ -774,6 +789,9 @@ function ConnRow({
   const expiringSoon = !!conn.expiresAt && isExpiringSoon(conn.expiresAt)
   const errorMsg = conn.status === 'error' ? conn.lastErrorMessage : null
   const latestJobMessage = conn.latestJobLog ? formatLatestJobLog(conn.latestJobLog) : null
+  const latestJobCount = conn.latestJobLog?.status === 'completed'
+    ? formatCollectionCount(conn.latestJobLog)
+    : null
   const latestJobAt = conn.latestJobLog
     ? new Date(conn.latestJobLog.completedAt ?? conn.latestJobLog.createdAt)
     : null
@@ -860,6 +878,7 @@ function ConnRow({
             {latestJobAt && (
               <div className="mt-0.5 text-[11px] text-muted-foreground">
                 마지막 수집 이력 {formatDateTime(latestJobAt)}
+                {latestJobCount ? ` · ${latestJobCount}` : ''}
               </div>
             )}
           </div>

@@ -205,7 +205,7 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
 }
 
 function shouldPreserveCollectedConfirmedStatus(marketplaceId: string): boolean {
-  return marketplaceId === 'always'
+  return marketplaceId === 'always' || marketplaceId === 'gs-shop'
 }
 
 function collectedOrderStatus(

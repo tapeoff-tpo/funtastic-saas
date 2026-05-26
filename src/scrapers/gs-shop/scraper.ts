@@ -1,4 +1,4 @@
-import type { Locator, Page } from 'playwright'
+import type { Frame, Locator, Page } from 'playwright'
 import * as XLSX from 'xlsx'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
@@ -18,6 +18,7 @@ import type {
 const MARKETPLACE_ID: MarketplaceId = 'gs-shop'
 const BASE_URL = 'https://partners.gsshop.com'
 const LOGIN_URL = `${BASE_URL}/sign-in`
+const ORDER_LIST_URL = `${BASE_URL}/logistics/partner-logistics-mng?tab=1&openSet=10`
 const DOWNLOAD_TIMEOUT_MS = 120_000
 
 function readCellText(value: unknown): string {
@@ -491,6 +492,10 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
 async function navigateToOrderList(page: Page, setProgress?: (message: string) => Promise<void>): Promise<void> {
   await setProgress?.('GS샵 주문/배송 메뉴 이동 중...')
 
+  await gotoGs(page, ORDER_LIST_URL)
+  const directText = await pageText(page, 5_000)
+  if (/협력사\s*배송\s*관리|주문번호|조회\s*결과|출하지시일/.test(directText)) return
+
   const menuClicked = await clickByText(page, /주문\s*\/\s*배송|주문\s*배송|주문/i, 8_000)
   if (menuClicked) {
     await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
@@ -532,7 +537,7 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
   const sinceText = ymdKst(since)
   const untilText = ymdKst(new Date())
 
-  await page.evaluate(({ sinceValue, untilValue }) => {
+  const setRangeInFrame = async (targetPage: Page | Frame) => targetPage.evaluate(({ sinceValue, untilValue }: { sinceValue: string; untilValue: string }) => {
     const visibleInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
       .filter((input) => input.getBoundingClientRect().width > 0 && input.getBoundingClientRect().height > 0 && !input.disabled)
 
@@ -556,6 +561,11 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
     setInput(dateInputs[0], sinceValue)
     setInput(dateInputs[1], untilValue)
   }, { sinceValue: sinceText, untilValue: untilText }).catch(() => undefined)
+
+  await setRangeInFrame(page)
+  for (const frame of page.frames()) {
+    await setRangeInFrame(frame)
+  }
 
   await clickByText(page, /조회|검색/i, 8_000).catch(() => false)
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
@@ -755,6 +765,105 @@ async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
 
     const orders = rowsToNormalizedOrders(rows)
     if (orders.length > 0) return orders
+
+    const layoutOrders = rowsToNormalizedOrders(await frame.evaluate(() => {
+      type VisibleToken = {
+        text: string
+        x: number
+        y: number
+        right: number
+        bottom: number
+        width: number
+        height: number
+      }
+
+      const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim()
+      const isVisible = (element: Element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return false
+        const style = window.getComputedStyle(element)
+        return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || '1') > 0
+      }
+      const hasVisibleTextChild = (element: Element) => Array.from(element.children).some((child) => {
+        if (!isVisible(child)) return false
+        const text = normalizeText(child.textContent || '')
+        return text.length > 0
+      })
+
+      const tokens: VisibleToken[] = Array.from(document.querySelectorAll('body *'))
+        .filter(isVisible)
+        .map((element) => {
+          const text = normalizeText(element.textContent || '')
+          const rect = element.getBoundingClientRect()
+          return { element, text, rect }
+        })
+        .filter(({ element, text, rect }) => {
+          if (!text || text.length > 80) return false
+          if (hasVisibleTextChild(element) && !/^\d{9,12}$/.test(text)) return false
+          return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight + 200
+        })
+        .map(({ text, rect }) => ({
+          text,
+          x: rect.left,
+          y: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        }))
+
+      const orderNumberTokens = tokens
+        .filter((token) => /^\d{9,12}$/.test(token.text))
+        .filter((token, index, all) => all.findIndex((other) => other.text === token.text) === index)
+        .sort((a, b) => a.y - b.y || a.x - b.x)
+
+      const rows: Array<Record<string, string>> = []
+      for (const orderToken of orderNumberTokens) {
+        const centerY = orderToken.y + orderToken.height / 2
+        const rowTokens = tokens
+          .filter((token) => {
+            const tokenCenterY = token.y + token.height / 2
+            const overlaps = token.y <= orderToken.bottom + 8 && token.bottom >= orderToken.y - 8
+            return overlaps || Math.abs(tokenCenterY - centerY) <= 14
+          })
+          .sort((a, b) => a.x - b.x || a.y - b.y)
+
+        const seen = new Set<string>()
+        const cells = rowTokens
+          .map((token) => token.text)
+          .filter((text) => {
+            const key = text
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+
+        const rowText = cells.join(' ')
+        if (!rowText.includes(orderToken.text)) continue
+
+        const dates = cells.filter((cell) => /^\d{4}-\d{2}-\d{2}$/.test(cell))
+        const itemNoIndex = cells.findIndex((cell, index) => cell === orderToken.text && /^\d+$/.test(cells[index + 1] || ''))
+        const itemNo = itemNoIndex >= 0 ? cells[itemNoIndex + 1] : ''
+        const recipient = cells.find((cell) => /^[가-힣][*＊][가-힣]$/.test(cell)) || ''
+        const isConfirmed = /\b확인\b/.test(rowText) && !/미확인/.test(rowText)
+        const isCancelled = /주문취소|취소/.test(rowText)
+        const isReady = isConfirmed || /미처리|출고|배송준비|상품준비/.test(rowText)
+
+        rows.push({
+          주문번호: orderToken.text,
+          주문아이템번호: itemNo ? `${orderToken.text}-${itemNo}` : orderToken.text,
+          수취인: recipient,
+          상태: isCancelled ? '취소' : isReady ? '배송준비' : '신규',
+          출하지시일: dates[0] || '',
+          시간: cells.find((cell) => /^\d{1,2}$/.test(cell)) || '',
+          상품명: `GS샵 주문 ${orderToken.text}`,
+          화면행: rowText,
+        })
+      }
+
+      return rows
+    }).catch(() => []))
+    if (layoutOrders.length > 0) return layoutOrders
   }
 
   return []
@@ -773,6 +882,11 @@ function rowsToNormalizedOrders(rows: Array<Record<string, string>>): Normalized
     const itemNo = getRowValue(row, '주문아이템번호', '상품주문번호', '주문상세번호') || orderNo
     const recipientName = getRowValue(row, '수취인', '수취인명', '고객명')
     const status = getRowValue(row, '상태', '주문상태', '처리상태') || '미처리'
+    const collectionStatus = /취소/.test(status)
+      ? 'cancelled'
+      : /배송준비|상품준비|출고|미처리|확인/.test(status)
+        ? 'ready'
+        : 'new'
     const dateText = [
       getRowValue(row, '출하지시일', '주문일', '주문일자', '접수일'),
       getRowValue(row, '시간'),
@@ -783,7 +897,8 @@ function rowsToNormalizedOrders(rows: Array<Record<string, string>>): Normalized
       marketplaceId: MARKETPLACE_ID,
       marketplaceOrderId: orderNo,
       marketplaceStatus: status,
-      status: 'new',
+      marketplaceCollectionStatus: collectionStatus,
+      status: collectionStatus === 'ready' ? 'confirmed' : collectionStatus === 'cancelled' ? 'cancelled' : 'new',
       buyerName: getRowValue(row, '주문자명', '주문자', '고객명') || recipientName || 'GS샵 고객',
       buyerPhone: getRowValue(row, '주문자전화번호', '주문자연락처') || undefined,
       recipientName: recipientName || 'GS샵 수취인',
@@ -864,6 +979,10 @@ export class GsShopScraper implements MarketplaceScraper {
       await navigateToOrderList(page, setProgress)
       await setSearchRangeAndSearch(page, since, setProgress)
       const visibleOrders = await parseVisibleOrders(page)
+      if (visibleOrders.length > 0) {
+        await setProgress?.(`GS샵 화면 주문 ${visibleOrders.length}건 수집`)
+        return visibleOrders
+      }
       await setProgress?.('GS샵 주문 엑셀 다운로드 중...')
       try {
         const workbook = await downloadOrdersExcel(page)

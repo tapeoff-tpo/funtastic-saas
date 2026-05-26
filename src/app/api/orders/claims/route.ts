@@ -8,7 +8,12 @@ import { copyOrder } from '@/lib/orders/copy-order'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { logOrderChange } from '@/lib/orders/change-log'
 
-const VALID_TYPES = ['return', 'exchange'] as const
+const VALID_TYPES = ['cancel', 'return', 'exchange'] as const
+const CLAIM_LABELS: Record<ClaimType, string> = {
+  cancel: '취소',
+  return: '반품',
+  exchange: '교환',
+}
 const REASON_LABELS = {
   change_of_mind: '변심',
   wrong_delivery: '오배송',
@@ -40,7 +45,7 @@ export async function POST(req: NextRequest) {
 
   if (!body.orderId) return NextResponse.json({ error: 'orderId is required' }, { status: 400 })
   if (!body.claimType || !VALID_TYPES.includes(body.claimType as (typeof VALID_TYPES)[number])) {
-    return NextResponse.json({ error: '반품 또는 교환만 접수할 수 있습니다.' }, { status: 400 })
+    return NextResponse.json({ error: '취소, 반품 또는 교환만 접수할 수 있습니다.' }, { status: 400 })
   }
   if (!body.reasonCode || !(body.reasonCode in REASON_LABELS)) {
     return NextResponse.json({ error: '클레임 사유를 선택해주세요.' }, { status: 400 })
@@ -73,6 +78,8 @@ export async function POST(req: NextRequest) {
   const reasonLabel = REASON_LABELS[body.reasonCode]
   const detail = body.reasonDetail?.trim()
   const reason = detail ? `${reasonLabel} - ${detail}` : reasonLabel
+  const claimLabel = CLAIM_LABELS[body.claimType]
+  const claimRequestedStatus = `${claimLabel}접수`
   const marketplaceClaimId = `manual-${body.claimType}-${order.id}-${Date.now()}`
 
   const [existingClaim] = await db
@@ -98,7 +105,7 @@ export async function POST(req: NextRequest) {
       marketplaceClaimId,
       claimType: body.claimType,
       claimStatus: 'requested',
-      reason: body.claimType === 'return' ? '반품접수' : '교환접수',
+      reason: claimRequestedStatus,
       rawData: {
         source: 'manual',
         marketplaceOrderId: order.marketplaceOrderId,
@@ -114,7 +121,7 @@ export async function POST(req: NextRequest) {
   await db
     .update(orders)
     .set({
-      marketplaceStatus: body.claimType === 'return' ? '반품접수' : '교환접수',
+      marketplaceStatus: claimRequestedStatus,
       logisticsMessage: null,
       isHeld: false,
       holdReason: null,
@@ -128,12 +135,12 @@ export async function POST(req: NextRequest) {
     userId: workspaceUserId,
     actorId: user.id,
     action: 'claim.created',
-    title: `${body.claimType === 'return' ? '반품' : '교환'} 접수`,
+    title: `${claimLabel} 접수`,
     description: reason,
     after: {
       claimType: body.claimType,
       claimStatus: 'requested',
-      marketplaceStatus: body.claimType === 'return' ? '반품접수' : '교환접수',
+      marketplaceStatus: claimRequestedStatus,
     },
     metadata: { claimId: created.id, quantities: claimQuantities },
   })

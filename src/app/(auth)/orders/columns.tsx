@@ -21,9 +21,9 @@ function getRefresh(table: Table<OrderRow>): (() => void) | undefined {
   return meta?.refresh
 }
 
-function getMoveToProcessingTab(table: Table<OrderRow>): ((tab: 'return' | 'exchange') => void) | undefined {
+function getMoveToProcessingTab(table: Table<OrderRow>): ((tab: ClaimType) => void) | undefined {
   const meta = table.options.meta as {
-    moveToProcessingTab?: (tab: 'return' | 'exchange') => void
+    moveToProcessingTab?: (tab: ClaimType) => void
   } | undefined
   return meta?.moveToProcessingTab
 }
@@ -62,9 +62,15 @@ const CLAIM_REASON_OPTIONS = [
 
 type ClaimReasonCode = (typeof CLAIM_REASON_OPTIONS)[number]['value']
 
+const CLAIM_CREATE_LABELS: Record<ClaimType, string> = {
+  cancel: '취소',
+  return: '반품',
+  exchange: '교환',
+}
+
 function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<OrderRow> }) {
   const [open, setOpen] = useState(false)
-  const [modalType, setModalType] = useState<'return' | 'exchange' | null>(null)
+  const [modalType, setModalType] = useState<ClaimType | null>(null)
   const [reasonCode, setReasonCode] = useState<ClaimReasonCode>('change_of_mind')
   const [reasonDetail, setReasonDetail] = useState('')
   const [quantities, setQuantities] = useState<Record<string, number>>({})
@@ -72,7 +78,7 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
   const refresh = getRefresh(table)
   const moveToProcessingTab = getMoveToProcessingTab(table)
 
-  function openClaimModal(claimType: 'return' | 'exchange') {
+  function openClaimModal(claimType: ClaimType) {
     setModalType(claimType)
     setReasonCode('change_of_mind')
     setReasonDetail('')
@@ -83,7 +89,7 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
   function createClaim() {
     if (!modalType) return
     const claimType = modalType
-    const label = claimType === 'return' ? '반품' : '교환'
+    const label = CLAIM_CREATE_LABELS[claimType]
     const claimItems = order.items.map((item) => ({
       orderItemId: item.id,
       quantity: Number(quantities[item.id] ?? 0),
@@ -131,21 +137,34 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
       >
         <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
-      {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 min-w-[92px] rounded-md border bg-white py-1 shadow-lg">
-          <button type="button" onClick={() => openClaimModal('return')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
-            반품 접수
-          </button>
-          <button type="button" onClick={() => openClaimModal('exchange')} className="block w-full px-3 py-1.5 text-left text-xs hover:bg-muted">
-            교환 접수
-          </button>
+      {open && !modalType && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setOpen(false)}>
+          <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold">클레임 접수</h3>
+              <button type="button" onClick={() => setOpen(false)} className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted">
+                닫기
+              </button>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <button type="button" onClick={() => openClaimModal('cancel')} className="rounded border border-red-200 px-3 py-3 text-sm font-medium text-red-700 hover:bg-red-50">
+                취소 접수
+              </button>
+              <button type="button" onClick={() => openClaimModal('return')} className="rounded border border-orange-200 px-3 py-3 text-sm font-medium text-orange-700 hover:bg-orange-50">
+                반품 접수
+              </button>
+              <button type="button" onClick={() => openClaimModal('exchange')} className="rounded border border-blue-200 px-3 py-3 text-sm font-medium text-blue-700 hover:bg-blue-50">
+                교환 접수
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {modalType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="w-full max-w-lg rounded-lg bg-white p-4 shadow-xl">
             <div className="mb-3">
-              <h3 className="text-base font-semibold">{modalType === 'return' ? '반품 접수' : '교환 접수'}</h3>
+              <h3 className="text-base font-semibold">{CLAIM_CREATE_LABELS[modalType]} 접수</h3>
             </div>
             <div className="mb-3 grid grid-cols-2 gap-2">
               {CLAIM_REASON_OPTIONS.map((option) => (

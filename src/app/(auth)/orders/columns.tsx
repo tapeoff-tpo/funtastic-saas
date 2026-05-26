@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import { Copy, ExternalLink, MessageSquare, RotateCcw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
+import { MARKETPLACE_COLLECTION_STATUS_LABELS, type MarketplaceCollectionStatus } from '@/lib/marketplace/collection-status'
 import { ClaimStatusActions } from './claim-status-actions'
 import { useState, useTransition } from 'react'
 import { copyOrderAction } from './actions'
@@ -243,6 +244,7 @@ export interface OrderRow {
   marketplaceName?: string | null
   connectionId?: string | null
   marketplaceOrderId: string
+  marketplaceCollectionStatus?: MarketplaceCollectionStatus | null
   buyerName: string
   buyerPhone?: string | null
   buyerPhone2?: string | null
@@ -623,6 +625,9 @@ export const columns: ColumnDef<OrderRow>[] = [
         .filter((status) => status !== primaryLabel)
       const showScanStatus = order.status === 'preparing' || order.status === 'ready'
       const scanMeta = scanStatusMeta(order.scanStatus)
+      const collectionLabel = order.marketplaceCollectionStatus
+        ? MARKETPLACE_COLLECTION_STATUS_LABELS[order.marketplaceCollectionStatus]
+        : null
       return (
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex min-w-0 items-center gap-1">
@@ -658,6 +663,14 @@ export const columns: ColumnDef<OrderRow>[] = [
               title={scanStatusTitle(order)}
             >
               {scanMeta.label}
+            </span>
+          )}
+          {collectionLabel && (
+            <span
+              className="inline-flex h-5 w-fit max-w-full items-center truncate rounded border border-cyan-200 bg-cyan-50 px-1.5 text-[10px] font-medium text-cyan-700"
+              title={`몰 수집 위치: ${collectionLabel}`}
+            >
+              몰 {collectionLabel}
             </span>
           )}
           <div className="flex items-center gap-1">

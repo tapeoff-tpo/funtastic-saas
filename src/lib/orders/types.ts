@@ -19,6 +19,15 @@ export type ClaimType = 'cancel' | 'return' | 'exchange'
 
 export type ClaimStatus = 'requested' | 'processing' | 'completed' | 'rejected' | 'withdrawn'
 
+export type MarketplaceCollectionStatus =
+  | 'new'
+  | 'ready'
+  | 'shipping'
+  | 'delivered'
+  | 'cancelled'
+  | 'claim'
+  | 'unknown'
+
 /** Korean labels for order statuses (per D-07) */
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   new: '신규',
@@ -183,6 +192,7 @@ export interface OrderListItem {
   id: string
   marketplaceId: string
   marketplaceOrderId: string
+  marketplaceCollectionStatus?: MarketplaceCollectionStatus | null
   buyerName: string
   buyerPhone?: string | null
   recipientName?: string | null

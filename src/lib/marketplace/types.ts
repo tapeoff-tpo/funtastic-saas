@@ -90,6 +90,8 @@ export interface NormalizedOrder {
   marketplaceOrderId: string
   marketplaceId: MarketplaceId
   marketplaceStatus: string
+  /** 몰에서 주문을 수집한 원본 탭/상태 그룹. 사방넷 병행 기간 중 중복 판단용 표시 값. */
+  marketplaceCollectionStatus?: import('./collection-status').MarketplaceCollectionStatus | null
   status: OrderStatus
   buyerName: string
   /** 구매자 전화번호1 — 일반전화/집전화 */

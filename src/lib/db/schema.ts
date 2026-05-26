@@ -145,6 +145,7 @@ export const orders = pgTable(
     deliveryMessage: varchar('delivery_message', { length: 500 }),
     rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
     marketplaceStatus: varchar('marketplace_status', { length: 100 }),
+    marketplaceCollectionStatus: varchar('marketplace_collection_status', { length: 50 }),
     collectedAt: timestamp('collected_at', { withTimezone: true }),
     /** 배송구분 (prepaid/cod/free/unknown) — 마켓에서 수집 (Phase 8 / migration 011) */
     shippingType: varchar('shipping_type', { length: 50 }),

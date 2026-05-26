@@ -33,6 +33,7 @@ import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
 import { PlayautoEmpAdapter } from '@/lib/marketplace/adapters/playauto-emp/adapter'
 import { HyundaiHmallAdapter } from '@/lib/marketplace/adapters/hyundai-hmall/adapter'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
+import { normalizeMarketplaceCollectionStatus } from '@/lib/marketplace/collection-status'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import '@/lib/marketplace/adapters/configs'
 import type {
@@ -897,6 +898,7 @@ async function upsertOrder(
   const rawData = enrichOrderRawData(order)
   const insertStatus = collectedOrderStatus(order.status, order.marketplaceId)
   const updateStatus = collectedOrderUpdateStatus(order.status, order.marketplaceId)
+  const marketplaceCollectionStatus = getMarketplaceCollectionStatus(order)
 
   return db
     .insert(orders)
@@ -908,6 +910,7 @@ async function upsertOrder(
       marketplaceOrderId: order.marketplaceOrderId,
       status: insertStatus,
       marketplaceStatus: order.marketplaceStatus,
+      marketplaceCollectionStatus,
       buyerName: order.buyerName,
       buyerPhone: order.buyerPhone,
       buyerPhone2: order.buyerPhone2,
@@ -929,6 +932,7 @@ async function upsertOrder(
       set: {
         status: updateStatus,
         marketplaceStatus: order.marketplaceStatus,
+        marketplaceCollectionStatus,
         totalAmount: String(order.totalAmount ?? 0),
         shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
         buyerName: order.buyerName,
@@ -959,7 +963,7 @@ function mergeNormalizedOrdersByOrderId(ordersToMerge: NormalizedOrder[]): Norma
   return Array.from(grouped.values()).map((group) => {
     if (group.length === 1) return group[0]
 
-    const first = group[0]
+    const first = [...group].sort((a, b) => collectionStatusPriority(b) - collectionStatusPriority(a))[0]
     const items = dedupeNormalizedOrderItems(group.flatMap((order) => order.items))
     return {
       ...first,
@@ -970,6 +974,17 @@ function mergeNormalizedOrdersByOrderId(ordersToMerge: NormalizedOrder[]): Norma
       },
     }
   })
+}
+
+function collectionStatusPriority(order: NormalizedOrder): number {
+  switch (getMarketplaceCollectionStatus(order)) {
+    case 'ready':
+      return 20
+    case 'new':
+      return 10
+    default:
+      return 0
+  }
 }
 
 function dedupeNormalizedOrderItems(items: NormalizedOrderItem[]): NormalizedOrderItem[] {
@@ -1057,6 +1072,7 @@ async function createSplitOrderCopies(
         marketplaceOrderId: order.marketplaceOrderId,
         status: order.status,
         marketplaceStatus: order.marketplaceStatus,
+        marketplaceCollectionStatus: getMarketplaceCollectionStatus(order),
         buyerName: order.buyerName,
         buyerPhone: order.buyerPhone,
         buyerPhone2: order.buyerPhone2,
@@ -1172,6 +1188,11 @@ function enrichOrderRawData(order: NormalizedOrder): Record<string, unknown> {
     ...(order.rawData ?? {}),
     orderIdentity,
   }
+}
+
+function getMarketplaceCollectionStatus(order: NormalizedOrder): string | null {
+  return order.marketplaceCollectionStatus
+    ?? normalizeMarketplaceCollectionStatus(order.marketplaceStatus)
 }
 
 /**

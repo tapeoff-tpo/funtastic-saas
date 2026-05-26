@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs'
 import type { Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
+import type { MarketplaceCollectionStatus } from '@/lib/marketplace/collection-status'
 import type {
   InvoiceData,
   MarketplaceId,
@@ -17,6 +18,17 @@ import type {
 const BANANA_B2B_BASE_URL = 'https://store.bananab2b.shop'
 const BANANA_B2B_LOGIN_URL = `${BANANA_B2B_BASE_URL}/login`
 const DOWNLOAD_TIMEOUT_MS = 60_000
+
+type BananaOrderCollectionTarget = {
+  state: string
+  label: string
+  collectionStatus: MarketplaceCollectionStatus
+}
+
+const ORDER_COLLECTION_TARGETS: BananaOrderCollectionTarget[] = [
+  { state: '1', label: '결제완료', collectionStatus: 'new' },
+  { state: '2', label: '배송준비', collectionStatus: 'ready' },
+]
 
 const ORDER_PAGE_CANDIDATES = [
   `${BANANA_B2B_BASE_URL}/order-delivery/order`,
@@ -385,8 +397,12 @@ export class BananaB2bScraper implements MarketplaceScraper {
   }
 
   async getOrders(credentials: ScraperCredentials, since: Date): Promise<NormalizedOrder[]> {
-    const buffer = await this.downloadOrdersExcel(credentials, since)
-    return this.parseOrdersExcel(buffer)
+    const orders: NormalizedOrder[] = []
+    for (const target of ORDER_COLLECTION_TARGETS) {
+      const buffer = await this.downloadOrdersExcel(credentials, since, target)
+      orders.push(...await this.parseOrdersExcel(buffer, target))
+    }
+    return orders
   }
 
   async getClaimsOrders(): Promise<NormalizedClaim[]> {
@@ -410,6 +426,7 @@ export class BananaB2bScraper implements MarketplaceScraper {
   private async downloadOrdersExcel(
     credentials: ScraperCredentials,
     since: Date,
+    target: BananaOrderCollectionTarget,
   ): Promise<Buffer> {
     let sessionState = credentials.storageState
     let ctx = await openContext(sessionState)
@@ -442,15 +459,21 @@ export class BananaB2bScraper implements MarketplaceScraper {
         await runStep('orders: reopen home after login', () => gotoBanana(ctx.page))
       }
 
-      await runStep('orders: open order management', () => openOrderManagementPage(ctx.page))
-      await runStep('orders: apply order search', () => applyOrderSearch(ctx.page, since))
-      return await runStep('orders: download order excel', () => downloadOrdersExcel(ctx.page))
+      await runStep(`orders: open order management (${target.label})`, async () => {
+        await gotoBanana(ctx.page, `${BANANA_B2B_BASE_URL}/order-delivery/order?state=${target.state}`)
+        if (!(await hasOrderPage(ctx.page))) {
+          await openOrderManagementPage(ctx.page)
+          await gotoBanana(ctx.page, `${BANANA_B2B_BASE_URL}/order-delivery/order?state=${target.state}`)
+        }
+      })
+      await runStep(`orders: apply order search (${target.label})`, () => applyOrderSearch(ctx.page, since))
+      return await runStep(`orders: download order excel (${target.label})`, () => downloadOrdersExcel(ctx.page))
     } finally {
       await ctx.close()
     }
   }
 
-  private async parseOrdersExcel(buffer: Buffer): Promise<NormalizedOrder[]> {
+  private async parseOrdersExcel(buffer: Buffer, target: BananaOrderCollectionTarget): Promise<NormalizedOrder[]> {
     const workbook = new ExcelJS.Workbook()
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     const worksheet = workbook.worksheets[0]
@@ -507,7 +530,8 @@ export class BananaB2bScraper implements MarketplaceScraper {
       orders.push({
         marketplaceId: 'banana-b2b',
         marketplaceOrderId: orderNo,
-        marketplaceStatus: get(row, '주문상태', '상태') || '주문',
+        marketplaceStatus: get(row, '주문상태', '상태') || target.label,
+        marketplaceCollectionStatus: target.collectionStatus,
         status: 'new',
         buyerName,
         buyerPhone,
@@ -525,6 +549,8 @@ export class BananaB2bScraper implements MarketplaceScraper {
         deliveryMessage: get(row, '배송메세지', '배송메시지', '요청사항', '배송시요청사항') || null,
         rawData: {
           source: 'rpa-excel',
+          collectionStatus: target.collectionStatus,
+          collectionStatusLabel: target.label,
           rowNumber,
           productCode,
           carrierName: get(row, '택배사', '배송사') || null,

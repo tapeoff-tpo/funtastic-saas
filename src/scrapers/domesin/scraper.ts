@@ -10,7 +10,7 @@ import type {
 import type { InvoiceData, NormalizedClaim, NormalizedOrder } from '@/lib/marketplace/types'
 
 const DOMESIN_HOME_URL = 'https://domesin.com/'
-const DOMESIN_LOGIN_URL = 'https://domesin.com/index.html?p=member/login_form.html'
+const DOMESIN_LOGIN_URL = 'https://domesin.com/scm/login.html'
 const DOMESIN_ORDER_LIST_URL = 'https://domesin.com/scm/M_order/list.html'
 const DOWNLOAD_TIMEOUT_MS = 60_000
 
@@ -499,11 +499,12 @@ export class DomesinScraper implements MarketplaceScraper {
 
       logStep('login: submit')
       await Promise.all([
-        page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined),
+        page.waitForURL((url) => !/\/scm\/login\.html|login_form/i.test(url.href), { timeout: 15_000 }).catch(() => undefined),
         page.locator('form[name="loginfrm"] button, form[name="loginfrm"] input[type="submit"], button.login-btn, input[type="submit"]').first().click({ timeout: 10_000 }).catch(async () => {
           await page.keyboard.press('Enter')
         }),
       ])
+      await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
       await closePopups(page)
       await gotoDomesin(page, DOMESIN_HOME_URL)
 

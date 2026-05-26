@@ -195,12 +195,12 @@ function shouldAutoConfirmOrders(): boolean {
 }
 
 function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  void marketplaceId
-  return false
+  return marketplaceId === 'ssgmall' || marketplaceId === 'specialoffer'
 }
 
 function confirmedMarketplaceStatus(marketplaceId: string): string {
   if (marketplaceId === 'ssgmall') return '140'
+  if (marketplaceId === 'specialoffer') return '4'
   return 'CONFIRMED'
 }
 
@@ -614,7 +614,11 @@ export async function collectOrdersForConnection(params: {
       }
       ordersCollected++
 
-      if (shouldConfirmOnCollect(marketplaceId) && upsertedOrder.status === 'new') {
+      if (
+        shouldConfirmOnCollect(marketplaceId)
+        && order.status === 'new'
+        && upsertedOrder.marketplaceStatus !== confirmedMarketplaceStatus(marketplaceId)
+      ) {
         confirmTargets.push({
           ids: [upsertedOrder.id, ...splitCopyIds],
           marketplaceOrderId: order.marketplaceOrderId,

@@ -15,8 +15,10 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v39'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v40'
 const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
+
+type JsonRecord = Record<string, unknown>
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -39,6 +41,55 @@ function readCellText(value: unknown): string {
     if (objectValue.result !== undefined) return String(objectValue.result).trim()
   }
   return String(value).trim()
+}
+
+function isJsonRecord(value: unknown): value is JsonRecord {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function apiValueToString(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
+}
+
+function normalizeApiKey(value: string): string {
+  return value.replace(/[^0-9a-z가-힣]/gi, '').toLowerCase()
+}
+
+function readDeepApiValue(record: JsonRecord, aliases: string[], maxDepth = 4): string {
+  const normalizedAliases = new Set(aliases.map(normalizeApiKey))
+  const seen = new Set<unknown>()
+
+  const walk = (value: unknown, depth: number): string => {
+    if (!value || depth < 0 || seen.has(value)) return ''
+    if (isJsonRecord(value)) {
+      seen.add(value)
+      for (const [key, child] of Object.entries(value)) {
+        if (normalizedAliases.has(normalizeApiKey(key))) {
+          const direct = apiValueToString(child)
+          if (direct) return direct
+        }
+      }
+      for (const child of Object.values(value)) {
+        const nested = walk(child, depth - 1)
+        if (nested) return nested
+      }
+      return ''
+    }
+    if (Array.isArray(value)) {
+      seen.add(value)
+      for (const child of value) {
+        const nested = walk(child, depth - 1)
+        if (nested) return nested
+      }
+    }
+    return ''
+  }
+
+  return walk(record, maxDepth)
 }
 
 function normalizeHeader(value: string): string {
@@ -80,6 +131,15 @@ function parseKstDate(value: string): Date {
     .replace(/-(\d)(?=T|$)/g, '-0$1')
   const date = new Date(`${normalized}+09:00`)
   return Number.isNaN(date.getTime()) ? new Date(value) : date
+}
+
+function parseOhouseApiDate(value: string): Date {
+  if (!value) return new Date()
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(value.trim())) {
+    const parsed = new Date(value)
+    if (!Number.isNaN(parsed.getTime())) return parsed
+  }
+  return parseKstDate(value)
 }
 
 function normalizeAccountKey(value: string | undefined): string {
@@ -1290,6 +1350,141 @@ function buildOhouseOrderFromValues(
   }
 }
 
+function looksLikeOhouseApiOrderRecord(record: JsonRecord): boolean {
+  const orderNo = readDeepApiValue(record, ['orderNo', 'orderNumber', 'orderId', 'orderOptionNo', '주문번호'])
+  const productName = readDeepApiValue(record, ['productName', 'productionName', 'goodsName', 'itemName', 'orderProductName', 'name', '상품명'])
+  const paidAt = readDeepApiValue(record, ['paymentCompletedAt', 'paidAt', 'orderPaymentCompletedAt', 'orderedAt', 'createdAt', '주문결제완료일'])
+  return Boolean(orderNo && (productName || paidAt))
+}
+
+function collectOhouseApiOrderRecords(payload: unknown): JsonRecord[] {
+  const records: JsonRecord[] = []
+  const seen = new Set<unknown>()
+
+  const walk = (value: unknown): void => {
+    if (!value || seen.has(value)) return
+    if (Array.isArray(value)) {
+      seen.add(value)
+      for (const item of value) walk(item)
+      return
+    }
+    if (!isJsonRecord(value)) return
+
+    seen.add(value)
+    if (looksLikeOhouseApiOrderRecord(value)) records.push(value)
+    for (const child of Object.values(value)) walk(child)
+  }
+
+  walk(payload)
+  return records
+}
+
+function normalizeOhouseApiOrderRecord(
+  record: JsonRecord,
+  credentials: ScraperCredentials,
+  index: number,
+): NormalizedOrder | null {
+  const accountKey = normalizeAccountKey(credentials.extras?.accountKey)
+  const orderNo = readDeepApiValue(record, [
+    'orderNo',
+    'orderNumber',
+    'orderId',
+    '주문번호',
+  ]).replace(/^[_']+/, '')
+  const orderOptionNo = readDeepApiValue(record, [
+    'orderOptionNo',
+    'orderOptionId',
+    'orderProductNo',
+    'orderProductId',
+    'productOrderId',
+    'itemId',
+    '주문옵션번호',
+    '주문상품번호',
+  ]).replace(/^[_']+/, '')
+  const identity = orderNo || orderOptionNo
+  if (!identity) return null
+
+  const quantity = Math.max(parseNumber(readDeepApiValue(record, ['quantity', 'qty', 'orderQuantity', 'count', '수량'])), 1)
+  const itemTotal = parseNumber(readDeepApiValue(record, ['totalPrice', 'paymentAmount', 'productPrice', 'salePrice', 'price', '상품금액', '결제금액']))
+  const productName = readDeepApiValue(record, ['productName', 'productionName', 'goodsName', 'itemName', 'orderProductName', 'name', '상품명']) || '오늘의집 상품'
+  const optionText = readDeepApiValue(record, ['optionName', 'optionText', 'option', 'optionValue', '옵션', '상품옵션'])
+  const recipientName = readDeepApiValue(record, ['receiverName', 'recipientName', 'recipient', '수취인', '수령인'])
+  const recipientPhone = readDeepApiValue(record, ['receiverPhone', 'receiverPhoneNumber', 'recipientPhone', 'phone', '수취인연락처', '수령인연락처'])
+  const buyerName = readDeepApiValue(record, ['buyerName', 'ordererName', 'customerName', '주문자', '구매자']) || recipientName || '-'
+  const buyerPhone = readDeepApiValue(record, ['buyerPhone', 'ordererPhone', 'customerPhone', '주문자연락처', '구매자연락처']) || recipientPhone
+  const orderedAtText = readDeepApiValue(record, ['paymentCompletedAt', 'paidAt', 'orderPaymentCompletedAt', 'orderedAt', 'createdAt', 'orderDate', '주문결제완료일', '주문일시'])
+
+  return {
+    marketplaceId: 'ohouse',
+    marketplaceOrderId: `${accountKey}:${identity}`,
+    marketplaceStatus: readDeepApiValue(record, ['orderStatusName', 'orderStatus', 'statusName', 'status', '주문상태']) || '신규주문',
+    status: 'new',
+    buyerName,
+    buyerPhone,
+    recipientName: recipientName || buyerName,
+    recipientPhone,
+    shippingAddress: {
+      zipCode: readDeepApiValue(record, ['zipCode', 'zipcode', 'postalCode', '우편번호']),
+      address1: readDeepApiValue(record, ['address1', 'baseAddress', 'address', 'shippingAddress', '배송지주소']),
+      address2: readDeepApiValue(record, ['address2', 'detailAddress', '배송지상세주소']) || undefined,
+    },
+    orderedAt: orderedAtText ? parseOhouseApiDate(orderedAtText) : new Date(),
+    totalAmount: itemTotal,
+    rawData: {
+      source: 'orora-orders-api',
+      accountKey,
+      rowNumber: index + 1,
+      originalMarketplaceOrderId: identity,
+      record,
+    },
+    items: [
+      {
+        marketplaceItemId: `${accountKey}:${orderOptionNo || identity}`,
+        productName,
+        ...(optionText ? { optionText } : {}),
+        quantity,
+        unitPrice: quantity > 0 ? itemTotal / quantity : itemTotal,
+      },
+    ],
+  }
+}
+
+function dedupeOhouseOrders(orders: NormalizedOrder[]): NormalizedOrder[] {
+  const seen = new Set<string>()
+  const result: NormalizedOrder[] = []
+  for (const order of orders) {
+    const key = `${order.marketplaceOrderId}:${order.items?.[0]?.marketplaceItemId ?? ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    result.push(order)
+  }
+  return result
+}
+
+function watchOhouseOrderApiResponses(page: Page, credentials: ScraperCredentials): { orders: () => NormalizedOrder[] } {
+  const orders: NormalizedOrder[] = []
+
+  page.on('response', async (response) => {
+    const url = response.url()
+    if (!/api\.ohou\.se\/orora\/order\/v1\/orora\/orders/i.test(url)) return
+    if (response.status() < 200 || response.status() >= 300) return
+    try {
+      const payload = await response.json()
+      const records = collectOhouseApiOrderRecords(payload)
+      records.forEach((record, index) => {
+        const order = normalizeOhouseApiOrderRecord(record, credentials, index)
+        if (order) orders.push(order)
+      })
+    } catch {
+      // Some Orora responses are streaming/empty. The Excel and DOM fallbacks stay active.
+    }
+  })
+
+  return {
+    orders: () => dedupeOhouseOrders(orders),
+  }
+}
+
 async function readVisibleOhouseOrders(page: Page, credentials: ScraperCredentials): Promise<NormalizedOrder[]> {
   const rows = await page
     .evaluate(() => {
@@ -1594,6 +1789,7 @@ export class OhouseScraper implements MarketplaceScraper {
     const diagnostics = createOhouseLoginDiagnostics()
     watchOhouseAuthHeaders(ctx.page, diagnostics)
     watchOhouseLoginResponses(ctx.page, diagnostics)
+    const orderApiResponses = watchOhouseOrderApiResponses(ctx.page, credentials)
 
     try {
       await setProgress?.('오늘의집 새 브라우저 세션으로 로그인 중...')
@@ -1630,17 +1826,23 @@ export class OhouseScraper implements MarketplaceScraper {
         return []
       }
       const visibleOrders = await readVisibleOhouseOrders(ctx.page, credentials)
+      let apiOrders = orderApiResponses.orders()
       await setProgress?.(`오늘의집 미확인주문 ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
       let orders: NormalizedOrder[] = []
       try {
         const workbook = await downloadOrdersExcel(ctx.page, authFailures)
         orders = await this.parseOrdersExcel(workbook, credentials)
       } catch (error) {
-        if (visibleOrders.length === 0) throw error
+        apiOrders = orderApiResponses.orders()
+        if (apiOrders.length === 0 && visibleOrders.length === 0) throw error
         const message = error instanceof Error ? error.message : 'download failed'
-        await setProgress?.(`오늘의집 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집 진행 (${message.slice(0, 80)})`)
+        await setProgress?.(`오늘의집 엑셀 다운로드 실패, 대체 수집 ${apiOrders.length || visibleOrders.length}건으로 진행 (${message.slice(0, 80)})`)
       }
-      if (orders.length === 0 && visibleOrders.length > 0) {
+      apiOrders = orderApiResponses.orders()
+      if (orders.length === 0 && apiOrders.length > 0) {
+        await setProgress?.(`오늘의집 엑셀 주문 0건, 주문 API ${apiOrders.length}건으로 수집 진행`)
+        orders = apiOrders
+      } else if (orders.length === 0 && visibleOrders.length > 0) {
         await setProgress?.(`오늘의집 엑셀 주문 0건, 화면 주문 ${visibleOrders.length}건으로 수집 진행`)
         orders = visibleOrders
       }

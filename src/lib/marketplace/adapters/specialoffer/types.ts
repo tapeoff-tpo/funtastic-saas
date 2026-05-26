@@ -159,7 +159,13 @@ export interface SpecialofferBuyerOrder {
   receiver_cellphone?: string
   receiver_zip?: string
   receiver_addr?: string
+  receiver_addr1?: string
   receiver_addr2?: string
+  receiver_addr3?: string
+  option?: string
+  option_name?: string
+  option_text?: string
+  option_values?: unknown
   memo?: string
   order_date?: string
   updated_at?: string

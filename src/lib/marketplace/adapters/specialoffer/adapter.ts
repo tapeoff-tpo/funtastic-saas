@@ -220,6 +220,14 @@ function specialofferOrderIdFromInvoice(orderId: string, invoice: InvoiceData): 
   return orderId
 }
 
+function specialofferOrderIdFromRawData(orderId: string, rawData?: Record<string, unknown>): string {
+  return specialofferOrderIdFromInvoice(orderId, {
+    trackingNumber: '',
+    carrierId: '',
+    rawData,
+  })
+}
+
 function productPayloadFromNormalized(product: NormalizedProduct): SpecialofferProductPayload {
   const metadata = product.metadata ?? {}
   const specialoffer = metadata.specialoffer
@@ -347,8 +355,26 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     }
   }
 
-  async confirmOrder(_marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
-    return { success: true }
+  async confirmOrder(marketplaceOrderId: string, rawData?: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const specialofferOrderId = specialofferOrderIdFromRawData(marketplaceOrderId, rawData)
+      const response = await this.client.post(`api/v2/seller/orders/${encodeURIComponent(specialofferOrderId)}`, {
+        searchParams: {
+          _method: 'PATCH',
+        },
+        json: {
+          order_state: 4,
+          state: 4,
+        },
+      }).json<SpecialofferMutationResponse>()
+
+      if (response.error || response.success === false || response.result === false) {
+        return { success: false, error: response.error ?? response.message ?? '스페셜오퍼 주문확인 실패' }
+      }
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: await toApiMessage('Specialoffer order confirm', error) }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {
@@ -451,6 +477,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     const totalAmount = asNumber(order.total_price || goodsPrice)
     const orderedAt = parseSpecialofferDate(order.order_date) ?? parseSpecialofferDate(order.updated_at) ?? new Date()
     const optionText = orderOptionText(order)
+    const address1 = asString(order.receiver_addr ?? order.receiver_addr1)
     const address2 = [order.receiver_addr2, order.receiver_addr3]
       .map(asString)
       .filter(Boolean)
@@ -469,13 +496,14 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
       recipientPhone2: order.receiver_cellphone,
       shippingAddress: {
         zipCode: order.receiver_zip ?? '',
-        address1: order.receiver_addr ?? '',
+        address1,
         address2: address2 || undefined,
       },
       items: [
         {
           marketplaceItemId: orderId,
           productName: order.goods_name ?? '스페셜오퍼 상품',
+          ...(optionText ? { optionText } : {}),
           quantity,
           unitPrice: quantity > 0 ? Math.round(goodsPrice / quantity) : goodsPrice,
           optionText,

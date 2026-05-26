@@ -45,8 +45,6 @@ describe('SpecialofferAdapter', () => {
             order_id: '571610',
             order_no: '26051415470129',
             order_state: 3,
-            options: 'Color: Navy',
-            add_supply: ['Gift wrap'],
             goods_name: '휴대용 캠핑 취사용품 스텐 키친툴 조리도구 5종 세트',
             sum_qty: 1,
             goods_price: 8000,
@@ -56,8 +54,10 @@ describe('SpecialofferAdapter', () => {
             receiver_telephone: '02-0000-0000',
             receiver_cellphone: '010-0000-0000',
             receiver_zip: '06000',
-            receiver_addr: '서울시 강남구',
+            receiver_addr1: '서울시 강남구',
             receiver_addr2: '101호',
+            receiver_addr3: '상세',
+            option_name: '블랙 / L',
             memo: '문 앞에 놓아주세요.',
             order_date: '2026-05-14 15:47:01',
             updated_at: '2026-05-14 15:47:01',
@@ -90,7 +90,7 @@ describe('SpecialofferAdapter', () => {
       shippingAddress: {
         zipCode: '06000',
         address1: '서울시 강남구',
-        address2: '101호',
+        address2: '101호 상세',
       },
       totalAmount: 11000,
       shippingFee: 3000,
@@ -101,14 +101,39 @@ describe('SpecialofferAdapter', () => {
       {
         marketplaceItemId: '571610',
         productName: '휴대용 캠핑 취사용품 스텐 키친툴 조리도구 5종 세트',
+        optionText: '블랙 / L',
         quantity: 1,
         unitPrice: 8000,
-        optionText: 'Color: Navy / Gift wrap',
       },
     ])
     expect(orders[0].rawData.marketplaceOrderIdentity).toEqual({
       orderId: '26051415470129',
       itemIds: ['571610'],
+    })
+  })
+
+  it('confirms collected orders with the seller order PATCH endpoint', async () => {
+    const post = vi.fn(() => ({
+      json: async () => ({ success: true }),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ post } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const result = await adapter.confirmOrder('26051415470129', {
+      order_id: '571610',
+      marketplaceOrderIdentity: {
+        orderId: '26051415470129',
+        itemIds: ['571610'],
+      },
+    })
+
+    expect(result.success).toBe(true)
+    expect(post).toHaveBeenCalledWith('api/v2/seller/orders/571610', {
+      searchParams: { _method: 'PATCH' },
+      json: {
+        order_state: 4,
+        state: 4,
+      },
     })
   })
 

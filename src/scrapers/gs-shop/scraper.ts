@@ -25,12 +25,16 @@ async function gotoGs(page: Page, url: string): Promise<void> {
 
 async function summarizePage(page: Page): Promise<string> {
   const title = await page.title().catch(() => '')
-  const frameTexts = await Promise.all(
-    page.frames().map((frame) => frame.locator('body').innerText({ timeout: 1_000 }).catch(() => '')),
-  )
-  const bodyText = frameTexts.join(' ')
+  const bodyText = await pageText(page, 1_000)
   const compactText = bodyText.replace(/\s+/g, ' ').trim().slice(0, 240)
   return `url=${page.url()} title=${title || '-'} text=${compactText || '-'}`
+}
+
+async function pageText(page: Page, timeoutMs = 3_000): Promise<string> {
+  const frameTexts = await Promise.all(
+    page.frames().map((frame) => frame.locator('body').innerText({ timeout: timeoutMs }).catch(() => '')),
+  )
+  return frameTexts.join(' ')
 }
 
 async function firstVisible(page: Page, selectors: string[], timeoutMs = 30_000): Promise<Locator | null> {
@@ -126,7 +130,7 @@ async function clickLoginControlRobust(page: Page): Promise<void> {
 }
 
 async function isSecondFactorPage(page: Page): Promise<boolean> {
-  const bodyText = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '')
+  const bodyText = await pageText(page)
   return /인증번호|인증번호 받기|본인 명의|휴대폰번호|이메일 주소|verification|security code/i.test(bodyText)
 }
 
@@ -304,8 +308,8 @@ async function isLoggedIn(page: Page, options?: { acceptAuthenticatedShell?: boo
   const logout = page.getByText(/로그아웃|Logout/i).first()
   if (await logout.isVisible().catch(() => false)) return true
 
-  const bodyText = await page.locator('body').innerText({ timeout: 3_000 }).catch(() => '')
-  if (/협력사|주문|배송|상품|정산|출고|회수/.test(bodyText) && !/아이디|비밀번호/.test(bodyText)) {
+  const bodyText = await pageText(page)
+  if (/(테이포프주식회사|협력사\s*관리|주문\s*\/\s*배송|상품\s*관리|정산\s*관리|고객\s*문의\s*관리)/.test(bodyText) && !/아이디|비밀번호/.test(bodyText)) {
     return true
   }
 
@@ -336,7 +340,7 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   if (await isLoggedIn(page)) return
 
   await gotoGs(page, LOGIN_URL)
-  if (await isLoggedIn(page)) return
+  if (await isLoggedIn(page, { acceptAuthenticatedShell: true })) return
 
   const idInput = await firstVisible(page, [
     'input[name*="id" i]',
@@ -365,6 +369,7 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   ])
 
   if (!idInput || !passwordInput) {
+    if (await isLoggedIn(page, { acceptAuthenticatedShell: true })) return
     throw new MarketplaceApiError(
       MARKETPLACE_ID,
       500,

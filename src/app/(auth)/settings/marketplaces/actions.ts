@@ -22,9 +22,9 @@ import { HyundaiHmallAdapter } from '@/lib/marketplace/adapters/hyundai-hmall/ad
 import { eq, and } from 'drizzle-orm'
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { getSupportedIntegrationMethods } from '@/lib/marketplace/integration-methods'
+import { getIntegrationMethod, getSupportedIntegrationMethods } from '@/lib/marketplace/integration-methods'
 import { nanoid } from 'nanoid'
-import { storeScrapeCredentials } from '@/scrapers/credentials'
+import { readScrapeCredentials, storeScrapeCredentials } from '@/scrapers/credentials'
 
 interface ActionResult {
   success?: boolean
@@ -689,6 +689,104 @@ export async function registerRpaMarketplaceConnection(
   revalidatePath('/orders/collect')
   revalidatePath('/settings/marketplaces')
   return { success: true, message: `${displayName} RPA 연결이 등록되었습니다.` }
+}
+
+export async function renameRpaMarketplaceConnection(
+  _prevState: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser()
+  if (authError || !user) return { error: '인증이 필요합니다.' }
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
+  const connectionId = String(formData.get('connection_id') ?? '').trim()
+  const storeAlias = String(formData.get('store_alias') ?? '').trim()
+  if (!connectionId) return { error: '연결 ID가 필요합니다.' }
+  if (!storeAlias) return { error: '연결 계정명을 입력해주세요.' }
+  if (storeAlias.length > 100) return { error: '연결 계정명은 100자 이내로 입력해주세요.' }
+
+  try {
+    const [connection] = await db
+      .select()
+      .from(marketplaceConnections)
+      .where(
+        and(
+          eq(marketplaceConnections.id, connectionId),
+          eq(marketplaceConnections.userId, workspaceUserId),
+        ),
+      )
+      .limit(1)
+    if (!connection) return { error: '수정할 연결 정보를 찾을 수 없습니다.' }
+    if (getIntegrationMethod(connection.marketplaceId, {
+      authType: connection.authType,
+      isManual: connection.isManual,
+    }) !== 'rpa') {
+      return { error: 'RPA 연결만 이 화면에서 수정할 수 있습니다.' }
+    }
+    if (!marketplaceRegistry.has(connection.marketplaceId)) {
+      return { error: '유효하지 않은 마켓플레이스입니다.' }
+    }
+
+    const duplicate = await db
+      .select({ id: marketplaceConnections.id })
+      .from(marketplaceConnections)
+      .where(
+        and(
+          eq(marketplaceConnections.userId, workspaceUserId),
+          eq(marketplaceConnections.marketplaceId, connection.marketplaceId),
+          eq(marketplaceConnections.storeAlias, storeAlias),
+        ),
+      )
+      .limit(1)
+    if (duplicate.length > 0 && duplicate[0].id !== connectionId) {
+      return { error: `'${storeAlias}' 계정명이 이미 등록되어 있습니다. 다른 이름을 입력해주세요.` }
+    }
+
+    const config = marketplaceRegistry.get(connection.marketplaceId).config
+    const displayName = storeAlias === 'default' ? config.name : `${config.name} (${storeAlias})`
+    const credentials = await readScrapeCredentials(connection.marketplaceId, workspaceUserId, connectionId)
+    if (!credentials) {
+      return { error: '기존 RPA 로그인 정보를 찾을 수 없어 계정명을 변경하지 않았습니다.' }
+    }
+    const preservedExtras = credentials.extras
+      ? Object.fromEntries(
+          Object.entries(credentials.extras).filter(([key]) => key !== 'naverEmail' && key !== 'naverPassword'),
+        )
+      : undefined
+
+    // Preserve extras.accountKey: Ohouse uses it to keep collected order identities stable.
+    await storeScrapeCredentials(workspaceUserId, connection.marketplaceId, connectionId, {
+      email: credentials.email,
+      password: credentials.password,
+      extras: preservedExtras && Object.keys(preservedExtras).length > 0 ? preservedExtras : undefined,
+    })
+    await db
+      .update(marketplaceConnections)
+      .set({
+        storeAlias,
+        displayName,
+        vaultSecretNames: [
+          `scrape_${workspaceUserId}_${connection.marketplaceId}_${connectionId}_email`,
+          `scrape_${workspaceUserId}_${connection.marketplaceId}_${connectionId}_password`,
+          ...(preservedExtras && Object.keys(preservedExtras).length > 0
+            ? [`scrape_${workspaceUserId}_${connection.marketplaceId}_${connectionId}_extras`]
+            : []),
+        ],
+        updatedAt: new Date(),
+      })
+      .where(eq(marketplaceConnections.id, connectionId))
+
+    revalidatePath('/dashboard')
+    revalidatePath('/orders/collect')
+    revalidatePath('/settings/marketplaces')
+    return { success: true, message: `${displayName} 연결 계정명이 변경되었습니다.` }
+  } catch (err) {
+    return { error: `RPA 연결 계정명 변경 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}` }
+  }
 }
 
 export async function registerExcelMarketplaceConnection(

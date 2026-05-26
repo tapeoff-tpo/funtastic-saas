@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
   getMarketplaceCredentials,
+  renameRpaMarketplaceConnection,
   registerMarketplaceCredentials,
   testMarketplaceCredentials,
 } from './actions'
@@ -81,6 +82,10 @@ export function ConnectionRow({
     registerMarketplaceCredentials,
     null,
   )
+  const [rpaState, rpaFormAction, isRpaPending] = useActionState(
+    renameRpaMarketplaceConnection,
+    null,
+  )
 
   async function handleToggle() {
     if (open) {
@@ -98,6 +103,10 @@ export function ConnectionRow({
     setOpen(true)
   }
 
+  function handleRpaToggle() {
+    setOpen((current) => !current)
+  }
+
   useEffect(() => {
     if (state?.success && state.message) {
       toast.success(state.message)
@@ -110,6 +119,16 @@ export function ConnectionRow({
       toast.error(state.error)
     }
   }, [router, state])
+
+  useEffect(() => {
+    if (rpaState?.success && rpaState.message) {
+      toast.success(rpaState.message)
+      router.refresh()
+      setTimeout(() => setOpen(false), 0)
+    } else if (rpaState?.error) {
+      toast.error(rpaState.error)
+    }
+  }, [router, rpaState])
 
   async function handleTest(form: HTMLFormElement) {
     if (!data) return
@@ -161,6 +180,16 @@ export function ConnectionRow({
               disabled={loading}
             >
               {loading ? '불러오는 중...' : open ? '닫기' : '수정'}
+            </Button>
+          )}
+          {integrationMethod === 'rpa' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleRpaToggle}
+            >
+              {open ? '닫기' : '수정'}
             </Button>
           )}
           <DeleteConnectionButton connectionId={connectionId} />
@@ -276,6 +305,37 @@ export function ConnectionRow({
                 setReveal({})
               }}
             >
+              취소
+            </Button>
+          </div>
+        </form>
+      )}
+      {open && integrationMethod === 'rpa' && (
+        <form
+          action={rpaFormAction}
+          className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3"
+        >
+          <input type="hidden" name="connection_id" value={connectionId} />
+          <div className="space-y-1">
+            <Label htmlFor={`edit-${connectionId}-rpa-store-alias`}>연결 계정명</Label>
+            <Input
+              id={`edit-${connectionId}-rpa-store-alias`}
+              name="store_alias"
+              type="text"
+              defaultValue={storeAlias}
+              maxLength={100}
+              required
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              로그인 정보와 기존 주문 연결 기준은 그대로 유지됩니다.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" size="sm" disabled={isRpaPending}>
+              {isRpaPending ? '저장 중...' : '저장'}
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
               취소
             </Button>
           </div>

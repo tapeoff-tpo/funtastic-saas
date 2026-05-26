@@ -1431,7 +1431,7 @@ function normalizeOhouseApiOrderRecord(
     orderedAt: orderedAtText ? parseOhouseApiDate(orderedAtText) : new Date(),
     totalAmount: itemTotal,
     rawData: {
-      source: 'orora-orders-api',
+      source: 'orora-rpa-network',
       accountKey,
       rowNumber: index + 1,
       originalMarketplaceOrderId: identity,
@@ -1461,7 +1461,7 @@ function dedupeOhouseOrders(orders: NormalizedOrder[]): NormalizedOrder[] {
   return result
 }
 
-function watchOhouseOrderApiResponses(page: Page, credentials: ScraperCredentials): { orders: () => NormalizedOrder[] } {
+function watchOhouseOrderPageResponses(page: Page, credentials: ScraperCredentials): { orders: () => NormalizedOrder[] } {
   const orders: NormalizedOrder[] = []
 
   page.on('response', async (response) => {
@@ -1789,7 +1789,7 @@ export class OhouseScraper implements MarketplaceScraper {
     const diagnostics = createOhouseLoginDiagnostics()
     watchOhouseAuthHeaders(ctx.page, diagnostics)
     watchOhouseLoginResponses(ctx.page, diagnostics)
-    const orderApiResponses = watchOhouseOrderApiResponses(ctx.page, credentials)
+    const orderPageResponses = watchOhouseOrderPageResponses(ctx.page, credentials)
 
     try {
       await setProgress?.('오늘의집 새 브라우저 세션으로 로그인 중...')
@@ -1801,7 +1801,7 @@ export class OhouseScraper implements MarketplaceScraper {
       if (!(await waitForOhouseAppReady(ctx.page)) || isOhouseSignInUrl(ctx.page.url())) {
         throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인이 유지되지 않아 주문 화면에 진입하지 못했습니다. (${await summarizePage(ctx.page)})`)
       }
-      await setProgress?.('오늘의집 주문 API 인증 확인 중...')
+      await setProgress?.('오늘의집 RPA 주문 화면 인증 확인 중...')
       const apiSession = await completeOhouseAppAuth(ctx.page, credentials, diagnostics)
       if (!apiSession.ok) {
         throw new MarketplaceApiError(
@@ -1826,22 +1826,22 @@ export class OhouseScraper implements MarketplaceScraper {
         return []
       }
       const visibleOrders = await readVisibleOhouseOrders(ctx.page, credentials)
-      let apiOrders = orderApiResponses.orders()
+      let pageResponseOrders = orderPageResponses.orders()
       await setProgress?.(`오늘의집 미확인주문 ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
       let orders: NormalizedOrder[] = []
       try {
         const workbook = await downloadOrdersExcel(ctx.page, authFailures)
         orders = await this.parseOrdersExcel(workbook, credentials)
       } catch (error) {
-        apiOrders = orderApiResponses.orders()
-        if (apiOrders.length === 0 && visibleOrders.length === 0) throw error
+        pageResponseOrders = orderPageResponses.orders()
+        if (pageResponseOrders.length === 0 && visibleOrders.length === 0) throw error
         const message = error instanceof Error ? error.message : 'download failed'
-        await setProgress?.(`오늘의집 엑셀 다운로드 실패, 대체 수집 ${apiOrders.length || visibleOrders.length}건으로 진행 (${message.slice(0, 80)})`)
+        await setProgress?.(`오늘의집 엑셀 다운로드 실패, RPA 화면 응답 ${pageResponseOrders.length || visibleOrders.length}건으로 진행 (${message.slice(0, 80)})`)
       }
-      apiOrders = orderApiResponses.orders()
-      if (orders.length === 0 && apiOrders.length > 0) {
-        await setProgress?.(`오늘의집 엑셀 주문 0건, 주문 API ${apiOrders.length}건으로 수집 진행`)
-        orders = apiOrders
+      pageResponseOrders = orderPageResponses.orders()
+      if (orders.length === 0 && pageResponseOrders.length > 0) {
+        await setProgress?.(`오늘의집 엑셀 주문 0건, RPA 화면 응답 ${pageResponseOrders.length}건으로 수집 진행`)
+        orders = pageResponseOrders
       } else if (orders.length === 0 && visibleOrders.length > 0) {
         await setProgress?.(`오늘의집 엑셀 주문 0건, 화면 주문 ${visibleOrders.length}건으로 수집 진행`)
         orders = visibleOrders

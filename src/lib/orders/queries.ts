@@ -959,6 +959,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     claimStatus: string
     reason: string | null
     requestReason: string | null
+    requestReasonRegisteredAt: Date | string | null
   }
   const claimByOrderId = new Map<string, ClaimSummary>()
   for (const claim of claimRows) {
@@ -973,12 +974,19 @@ export async function getOrders(filters: OrderFilters = {}) {
       const requestReason = typeof rawReason === 'string' && rawReason.trim()
         ? rawReason.trim()
         : claim.reason
+      const rawRegisteredAt = claim.rawData && typeof claim.rawData === 'object'
+        ? (claim.rawData as { reasonRegisteredAt?: unknown }).reasonRegisteredAt
+        : null
+      const requestReasonRegisteredAt = typeof rawRegisteredAt === 'string' && rawRegisteredAt
+        ? rawRegisteredAt
+        : claim.requestedAt
       claimByOrderId.set(claim.orderId, {
         id: claim.id,
         claimType: claim.claimType,
         claimStatus: claim.claimStatus,
         reason: claim.reason,
         requestReason,
+        requestReasonRegisteredAt,
       })
     }
   }
@@ -1161,6 +1169,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       claimStatus: claim?.claimStatus ?? null,
       claimReason: claim?.reason ?? null,
       claimRequestReason: claim?.requestReason ?? null,
+      claimRequestReasonRegisteredAt: claim?.requestReasonRegisteredAt ?? null,
       invoiceStatus: shipment?.uploadStatus ?? null,
       trackingNumber: shipment?.trackingNumber ?? null,
       carrierName: shipment?.carrierName ?? null,

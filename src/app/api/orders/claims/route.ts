@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
   const reasonLabel = REASON_LABELS[body.reasonCode]
   const detail = body.reasonDetail?.trim()
   const reason = detail ? `${reasonLabel} - ${detail}` : reasonLabel
+  const reasonRegisteredAt = new Date().toISOString()
   const claimLabel = CLAIM_LABELS[body.claimType]
   const claimRequestedStatus = `${claimLabel}접수`
   const marketplaceClaimId = `manual-${body.claimType}-${order.id}-${Date.now()}`
@@ -110,6 +111,7 @@ export async function POST(req: NextRequest) {
         source: 'manual',
         marketplaceOrderId: order.marketplaceOrderId,
         originalReason: reason,
+        reasonRegisteredAt,
         reasonCode: body.reasonCode,
         reasonDetail: detail ?? null,
         quantities: claimQuantities,
@@ -157,6 +159,7 @@ export async function POST(req: NextRequest) {
         originalOrderId: order.id,
         claimId: created.id,
         originalReason: reason,
+        reasonRegisteredAt,
         reasonCode: body.reasonCode,
       },
     })
@@ -176,6 +179,7 @@ export async function POST(req: NextRequest) {
         originalOrderId: order.id,
         originalClaimId: created.id,
         originalReason: reason,
+        reasonRegisteredAt,
         reasonCode: body.reasonCode,
         quantities: claimQuantities,
       },
@@ -195,6 +199,7 @@ export async function POST(req: NextRequest) {
         originalOrderId: order.id,
         claimId: created.id,
         originalReason: reason,
+        reasonRegisteredAt,
         reasonCode: body.reasonCode,
       },
     })
@@ -214,6 +219,7 @@ export async function POST(req: NextRequest) {
         originalOrderId: order.id,
         originalClaimId: created.id,
         originalReason: reason,
+        reasonRegisteredAt,
         reasonCode: body.reasonCode,
         quantities: claimQuantities,
       },
@@ -231,6 +237,7 @@ export async function POST(req: NextRequest) {
         originalOrderId: order.id,
         claimId: created.id,
         originalReason: reason,
+        reasonRegisteredAt,
         reasonCode: body.reasonCode,
       },
     })
@@ -250,6 +257,7 @@ export async function POST(req: NextRequest) {
         originalOrderId: order.id,
         originalClaimId: created.id,
         originalReason: reason,
+        reasonRegisteredAt,
         reasonCode: body.reasonCode,
         quantities: claimQuantities,
       },

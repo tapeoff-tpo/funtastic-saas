@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, or, sql } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
@@ -40,10 +40,51 @@ export async function PATCH(
 
   const body = (await req.json()) as {
     claimStatus?: ClaimStatus
+    requestReason?: string
     returnCompletion?: {
       quantities?: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number }>
     }
   }
+
+  if (typeof body.requestReason === 'string') {
+    const requestReason = body.requestReason.trim()
+    if (!requestReason) {
+      return NextResponse.json({ error: '접수 사유를 입력해주세요.' }, { status: 400 })
+    }
+
+    const [claim] = await db
+      .select({ id: claims.id, rawData: claims.rawData })
+      .from(claims)
+      .where(and(eq(claims.id, id), eq(claims.userId, workspaceUserId)))
+      .limit(1)
+    if (!claim) {
+      return NextResponse.json({ error: '클레임을 찾을 수 없습니다.' }, { status: 404 })
+    }
+
+    const linkedOriginalClaimId = claim.rawData && typeof claim.rawData === 'object'
+      ? (claim.rawData as { originalClaimId?: unknown }).originalClaimId
+      : null
+    const originalClaimId = typeof linkedOriginalClaimId === 'string' ? linkedOriginalClaimId : claim.id
+    const reasonRegisteredAt = new Date().toISOString()
+    const reasonData = JSON.stringify({ originalReason: requestReason, reasonRegisteredAt })
+
+    await db
+      .update(claims)
+      .set({
+        rawData: sql`COALESCE(${claims.rawData}, '{}'::jsonb) || ${reasonData}::jsonb`,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(claims.userId, workspaceUserId),
+        or(
+          eq(claims.id, originalClaimId),
+          sql`${claims.rawData}->>'originalClaimId' = ${originalClaimId}`,
+        ),
+      ))
+
+    return NextResponse.json({ success: true, requestReason, reasonRegisteredAt })
+  }
+
   if (!body.claimStatus || !VALID_STATUSES.includes(body.claimStatus)) {
     return NextResponse.json(
       { error: `유효한 상태: ${VALID_STATUSES.join(', ')}` },

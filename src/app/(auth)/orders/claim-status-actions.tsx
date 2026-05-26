@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { format } from 'date-fns'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import type { ClaimType, ClaimStatus } from '@/lib/orders/types'
@@ -12,6 +13,7 @@ interface Props {
   claimStatus: ClaimStatus
   reason: string | null
   requestReason: string | null
+  requestReasonRegisteredAt: string | null
 }
 
 const TYPE_LABELS: Record<ClaimType, string> = {
@@ -50,19 +52,57 @@ const NEXT_STATES: Record<ClaimStatus, ClaimStatus[]> = {
   withdrawn: [],
 }
 
-export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, requestReason }: Props) {
+export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, requestReason, requestReasonRegisteredAt }: Props) {
   const router = useRouter()
   const [pendingStatus, setPendingStatus] = useState<ClaimStatus | null>(null)
   const [returnItems, setReturnItems] = useState<Array<{ sku: string; quantity: number }> | null>(null)
   const [availableQuantities, setAvailableQuantities] = useState<Record<string, number>>({})
   const [defectiveQuantities, setDefectiveQuantities] = useState<Record<string, number>>({})
   const [returnItemsLoading, setReturnItemsLoading] = useState(false)
+  const [requestReasonInput, setRequestReasonInput] = useState(requestReason ?? '')
+  const [savedRequestReason, setSavedRequestReason] = useState(requestReason)
+  const [savedRequestReasonRegisteredAt, setSavedRequestReasonRegisteredAt] = useState(requestReasonRegisteredAt)
+  const [reasonSaving, setReasonSaving] = useState(false)
   const [, startTransition] = useTransition()
 
   const nextStates = NEXT_STATES[claimStatus]
   const canWithdraw = claimStatus === 'requested' || claimStatus === 'processing'
   const canCompletePickup = claimStatus !== 'completed'
     && (claimType === 'return' || (claimType === 'exchange' && (reason?.includes('회수준비') || reason?.includes('접수'))))
+
+  function formatRegisteredAt(value: string | null): string | null {
+    if (!value) return null
+    return format(new Date(value), 'yyyy-MM-dd HH:mm:ss')
+  }
+
+  async function saveRequestReason() {
+    const nextReason = requestReasonInput.trim()
+    if (!nextReason) {
+      toast.error('접수 사유를 입력해주세요.')
+      return
+    }
+    setReasonSaving(true)
+    try {
+      const res = await fetch(`/api/claims/${claimId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestReason: nextReason }),
+      })
+      if (!res.ok) {
+        const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+        throw new Error(error ?? '접수 사유 저장 실패')
+      }
+      const data = await res.json() as { requestReason: string; reasonRegisteredAt: string }
+      setSavedRequestReason(data.requestReason)
+      setSavedRequestReasonRegisteredAt(data.reasonRegisteredAt)
+      toast.success('접수 사유가 저장되었습니다.')
+      router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '접수 사유 저장 실패')
+    } finally {
+      setReasonSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!canCompletePickup) {
@@ -168,9 +208,32 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
         </span>
       </div>
       <div className="mt-2 rounded-md border bg-muted/30 px-3 py-2">
-        <div className="mb-1 text-[11px] font-medium text-muted-foreground">접수 사유</div>
+        <div className="mb-1 flex items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
+          <span>접수 사유</span>
+          {savedRequestReason && savedRequestReasonRegisteredAt && (
+            <span>{formatRegisteredAt(savedRequestReasonRegisteredAt)}</span>
+          )}
+        </div>
         <div className="whitespace-pre-wrap break-words text-sm text-foreground">
-          {requestReason || '등록된 접수 사유가 없습니다.'}
+          {savedRequestReason || '등록된 접수 사유가 없습니다.'}
+        </div>
+      </div>
+      <div className="mt-2 space-y-2">
+        <textarea
+          value={requestReasonInput}
+          onChange={(event) => setRequestReasonInput(event.target.value)}
+          placeholder="접수 사유를 입력하세요."
+          className="h-20 w-full resize-none rounded-md border px-3 py-2 text-sm"
+        />
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={saveRequestReason}
+            disabled={reasonSaving}
+            className="rounded border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          >
+            {reasonSaving ? '저장 중' : '접수 사유 저장'}
+          </button>
         </div>
       </div>
       {(nextStates.length > 0 || canWithdraw) && (

@@ -332,12 +332,15 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
-async function movePaymentCompleteOrdersToReady(
-  page: Page,
-  collectedOrders: NormalizedOrder[],
-): Promise<number> {
-  if (collectedOrders.length === 0) return 0
+async function readVisibleOrderNos(page: Page): Promise<Set<string>> {
+  const rowTexts = await page.locator('tbody tr, [role="row"]').allTextContents().catch(() => [])
+  const source = rowTexts.length > 0
+    ? rowTexts.join('\n')
+    : await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  return new Set(source.match(/\b\d{8}-\d{7}\b/g) ?? [])
+}
 
+async function confirmPaymentCompleteOrders(page: Page): Promise<number> {
   const firstCheckbox = page.getByRole('checkbox').first()
   if (!(await firstCheckbox.isVisible({ timeout: 5000 }).catch(() => false))) {
     throw new Error(`바나나B2B 결제완료 주문 전체선택 체크박스를 찾지 못했습니다. (${await summarizePage(page)})`)
@@ -355,7 +358,7 @@ async function movePaymentCompleteOrdersToReady(
 
   await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
   await page.waitForTimeout(2000)
-  return collectedOrders.length
+  return await readVisibleOrderNos(page).then((orderNos) => orderNos.size).catch(() => 0)
 }
 
 export class BananaB2bScraper implements MarketplaceScraper {
@@ -428,9 +431,15 @@ export class BananaB2bScraper implements MarketplaceScraper {
     setProgress?: (message: string) => Promise<void>,
   ): Promise<NormalizedOrder[]> {
     const orders: NormalizedOrder[] = []
+    const paymentCompleteOrderNos = new Set<string>()
     for (const target of ORDER_COLLECTION_TARGETS) {
       const targetOrders = await this.collectTargetOrders(credentials, since, target, setProgress)
-      orders.push(...targetOrders)
+      if (target.collectionStatus === 'new') {
+        targetOrders.forEach((order) => paymentCompleteOrderNos.add(order.marketplaceOrderId))
+        orders.push(...targetOrders)
+      } else {
+        orders.push(...targetOrders.filter((order) => !paymentCompleteOrderNos.has(order.marketplaceOrderId)))
+      }
     }
     return orders
   }
@@ -498,14 +507,30 @@ export class BananaB2bScraper implements MarketplaceScraper {
         }
       })
       await runStep(`orders: apply order search (${target.label})`, () => applyOrderSearch(ctx.page, since))
-      const buffer = await runStep(`orders: download order excel (${target.label})`, () => downloadOrdersExcel(ctx.page))
-      const targetOrders = await this.parseOrdersExcel(buffer, target)
-      if (target.collectionStatus === 'new' && targetOrders.length > 0) {
-        await setProgress?.(`바나나B2B ${target.label} 주문을 배송준비로 전환 중...`).catch(() => {})
-        const moved = await runStep(`orders: move ${target.label} to 배송준비`, () => movePaymentCompleteOrdersToReady(ctx.page, targetOrders))
-        await setProgress?.(`바나나B2B ${target.label} ${moved}개 상품을 배송준비로 전환했습니다.`).catch(() => {})
+
+      if (target.collectionStatus === 'new') {
+        const paymentCompleteOrderNos = await runStep('orders: read 결제완료 order numbers', () => readVisibleOrderNos(ctx.page))
+        if (paymentCompleteOrderNos.size === 0) return []
+
+        await setProgress?.(`바나나B2B 결제완료 ${paymentCompleteOrderNos.size}건을 발주확인 중...`).catch(() => {})
+        await runStep('orders: confirm 결제완료 to 배송준비', () => confirmPaymentCompleteOrders(ctx.page))
+        await setProgress?.('바나나B2B 배송준비 화면에서 발주서 다운로드 중...').catch(() => {})
+
+        await runStep('orders: open 배송준비 after 발주확인', async () => {
+          await gotoBanana(ctx.page, `${BANANA_B2B_BASE_URL}/order-delivery/order?state=2`)
+          if (!(await hasOrderPage(ctx.page))) {
+            await openOrderManagementPage(ctx.page)
+            await gotoBanana(ctx.page, `${BANANA_B2B_BASE_URL}/order-delivery/order?state=2`)
+          }
+        })
+        await runStep('orders: apply order search (배송준비 after 발주확인)', () => applyOrderSearch(ctx.page, since))
+        const buffer = await runStep('orders: download order excel (배송준비 after 발주확인)', () => downloadOrdersExcel(ctx.page))
+        const parsedOrders = await this.parseOrdersExcel(buffer, target)
+        return parsedOrders.filter((order) => paymentCompleteOrderNos.has(order.marketplaceOrderId))
       }
-      return targetOrders
+
+      const buffer = await runStep(`orders: download order excel (${target.label})`, () => downloadOrdersExcel(ctx.page))
+      return await this.parseOrdersExcel(buffer, target)
     } finally {
       await ctx.close()
     }

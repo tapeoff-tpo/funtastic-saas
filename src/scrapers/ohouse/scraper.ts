@@ -74,7 +74,8 @@ function parseNumber(value: string): number {
 function parseKstDate(value: string): Date {
   if (!value) return new Date()
   const normalized = value
-    .replaceAll('.', '-')
+    .replace(/\.\s*/g, '-')
+    .replace(/-\s+/g, '-')
     .replace(/\s+/, 'T')
     .replace(/-(\d)(?=-)/g, '-0$1')
     .replace(/-(\d)(?=T|$)/g, '-0$1')
@@ -1056,11 +1057,20 @@ async function clickOhouseUnconfirmedOrdersCard(page: Page): Promise<boolean> {
 async function openOrdersPage(page: Page): Promise<void> {
   if (await clickOhouseUnconfirmedOrdersCard(page)) return
 
-  await gotoOhouse(page, ORDER_URL_CANDIDATES[0]).catch(() => undefined)
-  if (!isOhouseSignInUrl(page.url())) {
+  let openedAnyOrderPage = false
+  for (const url of ORDER_URL_CANDIDATES) {
+    await gotoOhouse(page, url).catch(() => undefined)
+    if (isOhouseSignInUrl(page.url())) continue
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return
+    if (!/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) || /404|찾을 수 없습니다/.test(bodyText)) {
+      continue
+    }
+    openedAnyOrderPage = true
+    const count = await readOhouseOrderListCount(page)
+    if (count && count > 0) return
   }
+
+  if (openedAnyOrderPage) return
 
   throw new MarketplaceApiError('ohouse', 500, `${OHOUSE_RPA_VERSION}: 오늘의집 미확인주문 화면을 찾지 못했습니다. (${await summarizePage(page)})`)
 }
@@ -1210,6 +1220,131 @@ async function readOhouseOrderListCount(page: Page): Promise<number | null> {
   const match = bodyText.match(/총\s*([\d,]+)\s*개의\s*주문\s*목록/)
   if (!match) return null
   return Number(match[1].replaceAll(',', ''))
+}
+
+function buildOhouseOrderFromValues(
+  values: Record<string, string>,
+  credentials: ScraperCredentials,
+  source: string,
+  rowNumber: number,
+): NormalizedOrder | null {
+  const normalizedValues = new Map<string, string>()
+  for (const [key, value] of Object.entries(values)) {
+    const normalized = normalizeHeader(key)
+    if (normalized && value) normalizedValues.set(normalized, value)
+  }
+
+  const get = (...headers: string[]) => {
+    for (const header of headers) {
+      const value = normalizedValues.get(normalizeHeader(header))
+      if (value) return value
+    }
+    return ''
+  }
+
+  const orderNo = get('주문번호', '주문ID', '주문상세번호', '주문상세ID').replace(/^[_']+/, '')
+  if (!orderNo) return null
+  const accountKey = normalizeAccountKey(credentials.extras?.accountKey)
+  const quantity = Math.max(parseNumber(get('수량', '구매수량', '주문수량')), 1)
+  const itemTotal = parseNumber(get('상품금액', '판매금액', '결제금액', '주문금액'))
+  const recipientName = get('수취인', '수령인', '받는분', '받는사람')
+  const phone = get('수취인연락처', '수령인연락처', '휴대폰', '전화번호')
+  const productName = get('상품명', '제품명') || '오늘의집 상품'
+  const optionText = get('옵션', '옵션명', '상품옵션')
+  const sku = get('판매자상품코드', '상품코드', 'SKU', '옵션코드')
+  const orderItemNo = get('주문상품번호', '주문옵션번호', '주문상세번호', '상품주문번호') || orderNo
+
+  return {
+    marketplaceId: 'ohouse',
+    marketplaceOrderId: `${accountKey}:${orderNo}`,
+    marketplaceStatus: get('주문상태', '상태') || '신규주문',
+    status: 'new',
+    buyerName: get('주문자', '구매자') || recipientName || '-',
+    buyerPhone: get('주문자연락처', '구매자연락처') || phone,
+    recipientName: recipientName || get('주문자', '구매자') || '-',
+    recipientPhone: phone || get('주문자연락처', '구매자연락처'),
+    shippingAddress: {
+      zipCode: get('우편번호', '배송지우편번호'),
+      address1: get('주소', '배송지주소'),
+      address2: get('상세주소', '배송지상세주소') || undefined,
+    },
+    orderedAt: parseKstDate(get('주문일시', '주문일', '결제일시', '결제일', '주문결제완료일')),
+    totalAmount: itemTotal,
+    deliveryMessage: get('배송메시지', '배송메세지', '요청사항') || null,
+    rawData: {
+      source,
+      rowNumber,
+      accountKey,
+      originalMarketplaceOrderId: orderNo,
+      values,
+    },
+    items: [
+      {
+        marketplaceItemId: `${accountKey}:${orderItemNo}`,
+        productName,
+        optionText: optionText || undefined,
+        quantity,
+        unitPrice: quantity > 0 ? itemTotal / quantity : itemTotal,
+        sku: sku || undefined,
+      },
+    ],
+  }
+}
+
+async function readVisibleOhouseOrders(page: Page, credentials: ScraperCredentials): Promise<NormalizedOrder[]> {
+  const rows = await page
+    .evaluate(() => {
+      const normalize = (value: string) => value.replace(/\s+/g, '').replace(/[()[\]{}]/g, '').trim()
+      const visible = (element: HTMLElement) => {
+        const style = window.getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+      }
+      const cellText = (element: Element) => (element.textContent || '').replace(/\s+/g, ' ').trim()
+      const result: Array<Record<string, string>> = []
+      const containers = Array.from(document.querySelectorAll<HTMLElement>('table, [role="table"], [class*="table"], [class*="Table"]'))
+
+      for (const container of containers) {
+        if (!visible(container)) continue
+        const rowElements = Array.from(container.querySelectorAll<HTMLElement>('tr, [role="row"]')).filter(visible)
+        let headers: string[] = []
+        let headerIndex = -1
+        for (let index = 0; index < rowElements.length; index++) {
+          const cells = Array.from(rowElements[index].querySelectorAll('th, td, [role="columnheader"], [role="cell"]'))
+          const labels = cells.map(cellText).filter(Boolean)
+          const normalizedLabels = labels.map(normalize)
+          if (normalizedLabels.some((label) => /주문번호|주문옵션번호|주문상품번호/.test(label)) && normalizedLabels.some((label) => /상품명|제품명|주문상태/.test(label))) {
+            headers = labels
+            headerIndex = index
+            break
+          }
+        }
+        if (headers.length === 0) continue
+
+        for (const rowElement of rowElements.slice(headerIndex + 1)) {
+          const cells = Array.from(rowElement.querySelectorAll('td, [role="cell"]'))
+          const values = cells.map(cellText)
+          if (values.length < 2) continue
+          const row: Record<string, string> = {}
+          headers.forEach((header, index) => {
+            const value = values[index] ?? ''
+            if (header && value) row[header] = value
+          })
+          const joined = Object.values(row).join(' ')
+          if (/주문번호|주문상태/.test(joined)) continue
+          if (Object.keys(row).length > 0) result.push(row)
+        }
+      }
+      return result
+    })
+    .catch(() => [])
+
+  const orders = rows
+    .map((row, index) => buildOhouseOrderFromValues(row, credentials, 'rpa-visible-table', index + 1))
+    .filter((order): order is NormalizedOrder => Boolean(order))
+  const byId = new Map<string, NormalizedOrder>()
+  for (const order of orders) byId.set(order.marketplaceOrderId, order)
+  return [...byId.values()]
 }
 
 async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Promise<Buffer> {
@@ -1372,6 +1507,20 @@ async function confirmVisibleOhouseOrders(page: Page): Promise<string> {
   return `confirmed:${count ?? 'unknown'}${dialogMessage || modalMessage ? ` confirm=${dialogMessage || modalMessage}` : ''}`
 }
 
+async function hasVisibleOhouseOrderConfirmButton(page: Page): Promise<boolean> {
+  return page
+    .getByRole('button', { name: /^주문\s*확인$/ })
+    .first()
+    .isVisible({ timeout: 1000 })
+    .catch(() => false)
+    || page
+      .locator('button, input[type="button"], input[type="submit"], a')
+      .filter({ hasText: /^주문\s*확인$/ })
+      .first()
+      .isVisible({ timeout: 1000 })
+      .catch(() => false)
+}
+
 export class OhouseScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'ohouse'
   readonly displayName = '오늘의집'
@@ -1441,13 +1590,29 @@ export class OhouseScraper implements MarketplaceScraper {
         await setProgress?.('오늘의집 미확인주문 0건')
         return []
       }
+      const visibleOrders = await readVisibleOhouseOrders(ctx.page, credentials)
       await setProgress?.(`오늘의집 미확인주문 ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
-      const workbook = await downloadOrdersExcel(ctx.page, authFailures)
-      const orders = await this.parseOrdersExcel(workbook, credentials)
+      let orders: NormalizedOrder[] = []
+      try {
+        const workbook = await downloadOrdersExcel(ctx.page, authFailures)
+        orders = await this.parseOrdersExcel(workbook, credentials)
+      } catch (error) {
+        if (visibleOrders.length === 0) throw error
+        const message = error instanceof Error ? error.message : 'download failed'
+        await setProgress?.(`오늘의집 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집 진행 (${message.slice(0, 80)})`)
+      }
+      if (orders.length === 0 && visibleOrders.length > 0) {
+        await setProgress?.(`오늘의집 엑셀 주문 0건, 화면 주문 ${visibleOrders.length}건으로 수집 진행`)
+        orders = visibleOrders
+      }
       if (orders.length > 0) {
-        await setProgress?.(`오늘의집 ${orders.length}건 다운로드 완료, 주문 확인 처리 중...`)
-        const confirmResult = await confirmVisibleOhouseOrders(ctx.page)
-        await setProgress?.(`오늘의집 ${orders.length}건 다운로드 완료, ${confirmResult}`)
+        if (await hasVisibleOhouseOrderConfirmButton(ctx.page)) {
+          await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 주문 확인 처리 중...`)
+          const confirmResult = await confirmVisibleOhouseOrders(ctx.page)
+          await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, ${confirmResult}`)
+        } else {
+          await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 이미 배송준비 상태로 판단`)
+        }
       }
       return orders
     } finally {

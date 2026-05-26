@@ -1,4 +1,5 @@
 import type { Locator, Page } from 'playwright'
+import * as XLSX from 'xlsx'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type {
   InvoiceData,
@@ -17,6 +18,45 @@ import type {
 const MARKETPLACE_ID: MarketplaceId = 'gs-shop'
 const BASE_URL = 'https://partners.gsshop.com'
 const LOGIN_URL = `${BASE_URL}/sign-in`
+const DOWNLOAD_TIMEOUT_MS = 120_000
+
+function readCellText(value: unknown): string {
+  if (value == null) return ''
+  if (value instanceof Date) return value.toISOString()
+  if (typeof value === 'object') {
+    const record = value as { text?: unknown; result?: unknown; richText?: Array<{ text?: unknown }> }
+    if (record.text != null) return String(record.text).trim()
+    if (record.result != null) return String(record.result).trim()
+    if (Array.isArray(record.richText)) return record.richText.map((part) => String(part.text ?? '')).join('').trim()
+  }
+  return String(value).trim()
+}
+
+function normalizeHeader(value: string): string {
+  return value.replace(/\s+/g, '').replace(/[()[\]{}·ㆍ:：/_-]/g, '').trim()
+}
+
+function parseNumber(value: string): number {
+  const normalized = value.replace(/[^\d.-]/g, '')
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function parseKstDate(value: string): Date {
+  const trimmed = value.trim()
+  if (!trimmed) return new Date()
+  const normalized = trimmed
+    .replace(/\./g, '-')
+    .replace(/\//g, '-')
+    .replace(/\s+/g, ' ')
+  const date = new Date(normalized.includes('T') ? normalized : `${normalized}+09:00`)
+  return Number.isNaN(date.getTime()) ? new Date() : date
+}
+
+function ymdKst(date: Date): string {
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000)
+  return kst.toISOString().slice(0, 10)
+}
 
 function isPartnersRootUrl(value: string): boolean {
   try {
@@ -74,6 +114,41 @@ async function fillInput(input: Locator, value: string): Promise<void> {
       element.dispatchEvent(new Event('change', { bubbles: true }))
     }, value)
   })
+}
+
+async function clickByText(page: Page, pattern: RegExp, timeout = 10_000): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeout) {
+    for (const frame of page.frames()) {
+      const roleButton = frame.getByRole('button', { name: pattern }).first()
+      if (await roleButton.isVisible().catch(() => false)) {
+        await roleButton.click({ timeout: 3_000 }).catch(async () => {
+          await roleButton.click({ force: true, timeout: 3_000 })
+        })
+        return true
+      }
+
+      const roleLink = frame.getByRole('link', { name: pattern }).first()
+      if (await roleLink.isVisible().catch(() => false)) {
+        await roleLink.click({ timeout: 3_000 }).catch(async () => {
+          await roleLink.click({ force: true, timeout: 3_000 })
+        })
+        return true
+      }
+
+      const fallback = frame.locator('button, input[type="button"], input[type="submit"], a, [role="button"], li, span, div')
+        .filter({ hasText: pattern })
+        .first()
+      if (await fallback.isVisible().catch(() => false)) {
+        await fallback.click({ timeout: 3_000 }).catch(async () => {
+          await fallback.click({ force: true, timeout: 3_000 })
+        })
+        return true
+      }
+    }
+    await page.waitForTimeout(500)
+  }
+  return false
 }
 
 async function clickLoginControl(page: Page): Promise<void> {
@@ -413,6 +488,240 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   }
 }
 
+async function navigateToOrderList(page: Page, setProgress?: (message: string) => Promise<void>): Promise<void> {
+  await setProgress?.('GS샵 주문/배송 메뉴 이동 중...')
+
+  const menuClicked = await clickByText(page, /주문\s*\/\s*배송|주문\s*배송|주문/i, 8_000)
+  if (menuClicked) {
+    await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+    await page.waitForTimeout(1_000)
+  }
+
+  const candidates = [
+    /출고\s*\/\s*회수\s*리스트/i,
+    /출고\s*리스트/i,
+    /주문\s*\/\s*배송\s*현황/i,
+    /주문\s*배송\s*현황/i,
+    /주문\s*목록/i,
+    /주문\s*조회/i,
+    /주문\s*관리/i,
+    /배송\s*관리/i,
+  ]
+
+  for (const candidate of candidates) {
+    const clicked = await clickByText(page, candidate, 4_000)
+    if (!clicked) continue
+    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+    await page.waitForTimeout(1_500)
+    const text = await pageText(page, 1_500)
+    if (/수취인명|고객명|주문번호|상품명|엑셀|조회|검색|출고/.test(text)) return
+  }
+
+  const currentText = await pageText(page, 1_000)
+  if (/수취인명|고객명|주문번호|상품명|엑셀|조회|검색|출고/.test(currentText)) return
+
+  throw new MarketplaceApiError(
+    MARKETPLACE_ID,
+    501,
+    `GS샵 주문목록 메뉴를 찾지 못했습니다. 주문/배송 메뉴는 보이나 실제 주문목록 하위 메뉴 확인이 필요합니다. (${await summarizePage(page)})`,
+  )
+}
+
+async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (message: string) => Promise<void>): Promise<void> {
+  await setProgress?.('GS샵 주문 검색 조건 설정 중...')
+  const sinceText = ymdKst(since)
+  const untilText = ymdKst(new Date())
+
+  await page.evaluate(({ sinceValue, untilValue }) => {
+    const visibleInputs = Array.from(document.querySelectorAll<HTMLInputElement>('input'))
+      .filter((input) => input.getBoundingClientRect().width > 0 && input.getBoundingClientRect().height > 0 && !input.disabled)
+
+    const dateInputs = visibleInputs.filter((input) => {
+      const meta = `${input.type} ${input.name} ${input.id} ${input.placeholder} ${input.className}`.toLowerCase()
+      const value = input.value || ''
+      return input.type === 'date'
+        || /date|dt|ymd|from|to|start|end|시작|종료|기간/.test(meta)
+        || /^\d{4}[-./]\d{2}[-./]\d{2}/.test(value)
+    })
+
+    const setInput = (input: HTMLInputElement | undefined, value: string) => {
+      if (!input) return
+      input.removeAttribute('readonly')
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+      input.dispatchEvent(new Event('blur', { bubbles: true }))
+    }
+
+    setInput(dateInputs[0], sinceValue)
+    setInput(dateInputs[1], untilValue)
+  }, { sinceValue: sinceText, untilValue: untilText }).catch(() => undefined)
+
+  await clickByText(page, /조회|검색/i, 8_000).catch(() => false)
+  await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+  await page.waitForTimeout(2_000)
+}
+
+async function downloadOrdersExcel(page: Page): Promise<Buffer> {
+  const text = await pageText(page, 2_000)
+  if (/검색된\s*자료가\s*없|검색\s*결과가\s*없|조회된\s*자료가\s*없|조회\s*결과가\s*없|주문\s*내역이\s*없|내역이\s*없|데이터가\s*없|자료가\s*없|총\s*0\s*건/.test(text)) {
+    return Buffer.alloc(0)
+  }
+
+  const dialogHandler = (dialog: { accept: () => Promise<void> }) => {
+    void dialog.accept().catch(() => undefined)
+  }
+  page.on('dialog', dialogHandler)
+  try {
+    const [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
+      page.evaluate(() => {
+        const controls = Array.from(
+          document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, area, [role="button"]'),
+        )
+        const candidates = controls
+          .map((control) => {
+            const rect = control.getBoundingClientRect()
+            const inputValue = control instanceof HTMLInputElement ? control.value : ''
+            const href = control instanceof HTMLAnchorElement ? control.href : ''
+            const text = `${control.innerText || ''} ${inputValue} ${control.getAttribute('alt') || ''} ${control.getAttribute('title') || ''} ${control.getAttribute('aria-label') || ''}`.replace(/\s+/g, ' ').trim()
+            let score = 100
+            if (/엑셀\s*다운|엑셀\s*저장|Excel\s*Download/i.test(text)) score = 0
+            else if (/주문.*엑셀|엑셀.*주문|출고.*엑셀|엑셀.*출고/i.test(text)) score = 10
+            else if (/엑셀|excel|xlsx?|download/i.test(`${text} ${href}`)) score = 30
+            if (/상품|광고|정산|통계|양식|샘플|도움말/.test(text)) score += 80
+            return { control, score, visible: rect.width > 0 && rect.height > 0, text }
+          })
+          .filter((candidate) => candidate.visible && candidate.score < 100)
+          .sort((a, b) => a.score - b.score)
+
+        const target = candidates[0]?.control
+        if (!(target instanceof HTMLElement)) {
+          throw new Error(`엑셀 다운로드 버튼을 찾지 못했습니다. candidates=${candidates.slice(0, 5).map((item) => item.text).join(' / ')}`)
+        }
+        target.click()
+      }),
+    ])
+
+    const stream = await download.createReadStream()
+    if (!stream) throw new MarketplaceApiError(MARKETPLACE_ID, 500, 'GS샵 엑셀 다운로드 스트림을 열 수 없습니다.')
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+    }
+    return Buffer.concat(chunks)
+  } catch (error) {
+    throw new MarketplaceApiError(
+      MARKETPLACE_ID,
+      504,
+      `GS샵 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}; ${await summarizePage(page)})`,
+    )
+  } finally {
+    page.off('dialog', dialogHandler)
+  }
+}
+
+type OrderRow = {
+  values: Map<string, string>
+}
+
+function getRowValue(row: OrderRow, ...candidates: string[]): string {
+  for (const candidate of candidates) {
+    const exact = row.values.get(normalizeHeader(candidate))
+    if (exact) return exact
+  }
+  for (const [header, value] of row.values) {
+    if (!value) continue
+    if (candidates.some((candidate) => header.includes(normalizeHeader(candidate)))) return value
+  }
+  return ''
+}
+
+function parseOrdersWorkbook(buffer: Buffer): NormalizedOrder[] {
+  if (buffer.length === 0) return []
+
+  const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false })
+  const sheetName = workbook.SheetNames[0]
+  if (!sheetName) return []
+
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: '' })
+  let headerIndex = -1
+  let headerMap = new Map<string, number>()
+
+  for (let index = 0; index < Math.min(rows.length, 20); index += 1) {
+    const row = rows[index] ?? []
+    const map = new Map<string, number>()
+    row.forEach((value, columnIndex) => {
+      const header = normalizeHeader(readCellText(value))
+      if (header) map.set(header, columnIndex)
+    })
+    const joined = Array.from(map.keys()).join(' ')
+    if (/(주문번호|주문ID|주문상세|접수번호)/.test(joined) && /(상품명|상품|품명)/.test(joined)) {
+      headerIndex = index
+      headerMap = map
+      break
+    }
+  }
+
+  if (headerIndex < 0) {
+    throw new MarketplaceApiError(MARKETPLACE_ID, 500, `GS샵 주문 엑셀 헤더를 찾지 못했습니다. 첫 행=${JSON.stringify(rows[0] ?? []).slice(0, 300)}`)
+  }
+
+  const orderRows: OrderRow[] = []
+  for (let index = headerIndex + 1; index < rows.length; index += 1) {
+    const rawRow = rows[index] ?? []
+    const values = new Map<string, string>()
+    for (const [header, columnIndex] of headerMap) {
+      values.set(header, readCellText(rawRow[columnIndex]))
+    }
+    if (Array.from(values.values()).some(Boolean)) orderRows.push({ values })
+  }
+
+  const orders: NormalizedOrder[] = []
+  for (const row of orderRows) {
+    const orderNo = getRowValue(row, '주문번호', '주문ID', '주문번호주문순번', '접수번호', '주문상세번호', '상품주문번호').replace(/^_/, '')
+    const productName = getRowValue(row, '상품명', '상품', '품명', '상품명옵션')
+    if (!orderNo || !productName) continue
+
+    const quantity = Math.max(parseNumber(getRowValue(row, '수량', '주문수량', '구매수량')), 1)
+    const totalAmount = parseNumber(getRowValue(row, '결제금액', '주문금액', '판매금액', '상품금액', '총금액'))
+    const unitPrice = parseNumber(getRowValue(row, '판매가', '단가', '상품금액')) || (totalAmount ? Math.round(totalAmount / quantity) : 0)
+    const recipientName = getRowValue(row, '수취인명', '수취인', '받는분', '받는사람', '고객명')
+    const recipientPhone = getRowValue(row, '수취인전화번호', '수취인연락처', '전화번호', '휴대폰번호', '휴대폰')
+    const buyerName = getRowValue(row, '주문자명', '주문자', '구매자명', '고객명') || recipientName
+
+    orders.push({
+      marketplaceId: MARKETPLACE_ID,
+      marketplaceOrderId: orderNo,
+      marketplaceStatus: getRowValue(row, '주문상태', '상태', '처리상태', '진행상태') || 'GS샵',
+      status: 'new',
+      buyerName,
+      buyerPhone: getRowValue(row, '주문자전화번호', '주문자연락처', '구매자전화번호') || recipientPhone || undefined,
+      recipientName,
+      recipientPhone: recipientPhone || undefined,
+      shippingAddress: {
+        zipCode: getRowValue(row, '우편번호', '수취인우편번호'),
+        address1: getRowValue(row, '주소', '배송주소', '수취인주소', '기본주소'),
+        address2: getRowValue(row, '상세주소', '나머지주소') || undefined,
+      },
+      orderedAt: parseKstDate(getRowValue(row, '주문일시', '주문일', '주문일자', '접수일', '결제일')),
+      totalAmount: totalAmount || unitPrice * quantity,
+      shippingFee: parseNumber(getRowValue(row, '배송비', '배송료')),
+      deliveryMessage: getRowValue(row, '배송메시지', '배송메세지', '배송시요청사항', '요청사항') || null,
+      rawData: { source: 'gs-shop-rpa-excel', row: Object.fromEntries(row.values) },
+      items: [{
+        marketplaceItemId: getRowValue(row, '상품코드', '상품번호', '품번', '협력사상품코드') || orderNo,
+        productName,
+        optionText: getRowValue(row, '옵션', '옵션명', '규격', '단품명') || undefined,
+        quantity,
+        unitPrice,
+      }],
+    })
+  }
+
+  return orders
+}
+
 export class GsShopScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = MARKETPLACE_ID
   readonly displayName = 'GS샵'
@@ -454,7 +763,7 @@ export class GsShopScraper implements MarketplaceScraper {
 
   async getOrders(
     credentials: ScraperCredentials,
-    _since: Date,
+    since: Date,
     setProgress?: (message: string) => Promise<void>,
   ): Promise<NormalizedOrder[]> {
     const { page, close } = await openContext(credentials.storageState)
@@ -463,12 +772,12 @@ export class GsShopScraper implements MarketplaceScraper {
       await setProgress?.('GS샵 로그인 확인 중...')
       await gotoGs(page, BASE_URL)
       await ensureLoggedIn(page, credentials)
-      await setProgress?.('GS샵 주문 화면 확인 필요')
-      throw new MarketplaceApiError(
-        MARKETPLACE_ID,
-        501,
-        `GS샵 RPA는 로그인/세션 연결까지 준비되었습니다. 주문목록 또는 엑셀 다운로드 화면 URL과 버튼 구조 확인 후 주문수집을 완성할 수 있습니다. (${await summarizePage(page)})`,
-      )
+      await navigateToOrderList(page, setProgress)
+      await setSearchRangeAndSearch(page, since, setProgress)
+      await setProgress?.('GS샵 주문 엑셀 다운로드 중...')
+      const workbook = await downloadOrdersExcel(page)
+      await setProgress?.('GS샵 주문 엑셀 파싱 중...')
+      return parseOrdersWorkbook(workbook)
     } finally {
       await close()
     }

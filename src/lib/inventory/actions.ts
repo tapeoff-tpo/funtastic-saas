@@ -340,15 +340,58 @@ export async function restoreForClaim(
   })
 }
 
+async function resolveReturnProcessingClaimId(
+  tx: DrizzleTransaction,
+  userId: string,
+  claimId: string,
+): Promise<string | null> {
+  const [requestedClaim] = await tx
+    .select({
+      id: claims.id,
+      claimType: claims.claimType,
+      rawData: claims.rawData,
+    })
+    .from(claims)
+    .where(and(eq(claims.id, claimId), eq(claims.userId, userId), inArray(claims.claimType, ['return', 'exchange'])))
+    .limit(1)
+
+  if (!requestedClaim) return null
+
+  const source = requestedClaim.rawData && typeof requestedClaim.rawData === 'object'
+    ? (requestedClaim.rawData as { source?: unknown }).source
+    : null
+  if (source !== 'manual') return requestedClaim.id
+
+  const pickupSource = requestedClaim.claimType === 'exchange'
+    ? 'manual-exchange-pickup'
+    : 'manual-return-pickup'
+  const [pickupClaim] = await tx
+    .select({ id: claims.id })
+    .from(claims)
+    .where(and(
+      eq(claims.userId, userId),
+      eq(claims.claimType, requestedClaim.claimType),
+      sql`${claims.rawData}->>'source' = ${pickupSource}`,
+      sql`${claims.rawData}->>'originalClaimId' = ${requestedClaim.id}`,
+    ))
+    .orderBy(desc(claims.requestedAt))
+    .limit(1)
+
+  return pickupClaim?.id ?? requestedClaim.id
+}
+
 export async function getReturnableItemsForClaim(
   userId: string,
   claimId: string,
 ): Promise<Array<{ sku: string; quantity: number }>> {
   return db.transaction(async (tx) => {
+    const processingClaimId = await resolveReturnProcessingClaimId(tx, userId, claimId)
+    if (!processingClaimId) return []
+
     const [claim] = await tx
       .select({ orderId: claims.orderId })
       .from(claims)
-      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), inArray(claims.claimType, ['return', 'exchange'])))
+      .where(and(eq(claims.id, processingClaimId), eq(claims.userId, userId), inArray(claims.claimType, ['return', 'exchange'])))
       .limit(1)
 
     if (!claim) return []
@@ -363,6 +406,9 @@ export async function completeReturnClaim(
   quantities: Array<{ sku: string; quantity: number }>,
 ): Promise<ActionResult> {
   return db.transaction(async (tx) => {
+    const processingClaimId = await resolveReturnProcessingClaimId(tx, userId, claimId)
+    if (!processingClaimId) return { success: false, error: '반품/교환 클레임을 찾을 수 없습니다.' }
+
     const [claim] = await tx
       .select({
         id: claims.id,
@@ -372,7 +418,7 @@ export async function completeReturnClaim(
         rawData: claims.rawData,
       })
       .from(claims)
-      .where(and(eq(claims.id, claimId), eq(claims.userId, userId), inArray(claims.claimType, ['return', 'exchange'])))
+      .where(and(eq(claims.id, processingClaimId), eq(claims.userId, userId), inArray(claims.claimType, ['return', 'exchange'])))
       .for('update')
       .limit(1)
 

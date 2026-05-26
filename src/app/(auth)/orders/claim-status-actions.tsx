@@ -61,6 +61,8 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
 
   const nextStates = NEXT_STATES[claimStatus]
   const canWithdraw = claimStatus === 'requested' || claimStatus === 'processing'
+  const canCompletePickup = claimStatus !== 'completed'
+    && (claimType === 'return' || (claimType === 'exchange' && (reason?.includes('회수준비') || reason?.includes('접수'))))
 
   function changeStatus(next: ClaimStatus) {
     setPendingStatus(next)
@@ -175,7 +177,7 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
               → {STATUS_LABELS[next]}
             </button>
           ))}
-          {(claimType === 'return' || (claimType === 'exchange' && reason?.includes('회수준비'))) && claimStatus !== 'completed' && (
+          {canCompletePickup && (
             <button
               type="button"
               onClick={openReturnComplete}

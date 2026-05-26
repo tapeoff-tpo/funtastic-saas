@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useTransition, useEffect } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { bulkDeleteOrdersAction } from './actions'
 import {
   useReactTable,
@@ -51,6 +51,7 @@ export function DataTable({
   const [detailOrderId, setDetailOrderId] = useState<string | null>(null)
   const [deletePending, startDelete] = useTransition()
   const router = useRouter()
+  const pathname = usePathname()
   const searchParams = useSearchParams()
 
   useEffect(() => {
@@ -75,6 +76,24 @@ export function DataTable({
     setRowSelection({})
   }, [dataKey, searchParams])
 
+  const moveToProcessingTab = (tab: 'cancel' | 'return' | 'exchange') => {
+    const params = new URLSearchParams(searchParams.toString())
+    for (const key of ['status', 'claimType', 'cancel', 'held', 'tab', 'page', 'mapping', 'scan', 'scanResult']) {
+      params.delete(key)
+    }
+    params.delete('dateField')
+    params.delete('dateFrom')
+    params.delete('dateTo')
+    params.set('datePreset', 'all')
+    if (tab === 'cancel') {
+      params.set('cancel', 'true')
+    } else {
+      params.set('claimType', tab)
+    }
+    setRowSelection({})
+    router.push(`${pathname}?${params.toString()}`)
+  }
+
   const table = useReactTable({
     data,
     columns,
@@ -98,6 +117,7 @@ export function DataTable({
     meta: {
       openDetail: (id: string) => setDetailOrderId(id),
       refresh: () => router.refresh(),
+      moveToProcessingTab,
     },
   })
 
@@ -204,6 +224,7 @@ export function DataTable({
             setRowSelection({})
             router.refresh()
           }}
+          onMovedToProcessingTab={moveToProcessingTab}
         />
         <ManualInvoiceButton
           selectedOrders={selectedOrders}

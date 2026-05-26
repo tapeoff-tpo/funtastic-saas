@@ -87,6 +87,7 @@ interface ManualStatusChangeButtonProps {
   selectedOrders: OrderRow[]
   canUnlockOrderSnapshots?: boolean
   onChanged?: () => void
+  onMovedToProcessingTab?: (tab: 'cancel' | 'return' | 'exchange') => void
 }
 
 interface ManualInvoiceButtonProps {
@@ -291,6 +292,7 @@ export function ManualStatusChangeButton({
   selectedOrders,
   canUnlockOrderSnapshots = false,
   onChanged,
+  onMovedToProcessingTab,
 }: ManualStatusChangeButtonProps) {
   const [open, setOpen] = useState(false)
   const [claimModalType, setClaimModalType] = useState<'return' | 'exchange' | null>(null)
@@ -339,7 +341,11 @@ export function ManualStatusChangeButton({
           toast.error(failure.error, { duration: 7000 })
         }
       }
-      onChanged?.()
+      if (newStatus === 'cancelled' && result.updated > 0 && onMovedToProcessingTab) {
+        onMovedToProcessingTab('cancel')
+      } else {
+        onChanged?.()
+      }
     })
   }
 
@@ -381,7 +387,8 @@ export function ManualStatusChangeButton({
 
   const submitClaimStatusChange = () => {
     if (!claimModalType) return
-    const label = claimModalType === 'return' ? '반품' : '교환'
+    const submittedClaimType = claimModalType
+    const label = submittedClaimType === 'return' ? '반품' : '교환'
     const payloadByOrder = selectedOrders.map((order) => ({
       order,
       quantities: order.items
@@ -408,7 +415,7 @@ export function ManualStatusChangeButton({
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({
               orderId: entry.order.id,
-              claimType: claimModalType,
+              claimType: submittedClaimType,
               reasonCode: claimReasonCode,
               reasonDetail: claimReasonDetail,
               quantities: entry.quantities,
@@ -427,14 +434,20 @@ export function ManualStatusChangeButton({
 
       if (errors.length === 0) {
         toast.success(`${success}건 ${label} 접수 완료`)
-        setClaimModalType(null)
       } else {
         toast.warning(`${success}건 접수, ${errors.length}건 실패`)
         for (const error of errors.slice(0, 3)) {
           toast.error(error, { duration: 8000 })
         }
       }
-      onChanged?.()
+      if (success > 0) {
+        setClaimModalType(null)
+      }
+      if (success > 0 && onMovedToProcessingTab) {
+        onMovedToProcessingTab(submittedClaimType)
+      } else {
+        onChanged?.()
+      }
     })
   }
 

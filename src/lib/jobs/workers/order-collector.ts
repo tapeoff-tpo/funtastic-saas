@@ -609,6 +609,8 @@ export async function collectOrdersForConnection(params: {
       if (!isExistingOrder && items.length > 0) {
         await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
         splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+      } else if (isExistingOrder && marketplaceId === 'specialoffer') {
+        await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
       }
       ordersCollected++
 
@@ -785,6 +787,8 @@ export async function saveNormalizedOrdersForConnection(params: {
 
     if (!isExistingOrder && items.length > 0) {
       await db.insert(orderItems).values(items.map((item) => orderItemInsertValue(upsertedOrder.id, item)))
+    } else if (isExistingOrder && marketplaceId === 'specialoffer') {
+      await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
     }
     ordersCollected++
   }
@@ -1025,6 +1029,21 @@ function orderItemInsertValue(orderId: string, item: NormalizedOrderItem) {
     unitPrice: String(item.unitPrice),
     sku: item.sku ?? null,
   }
+}
+
+async function fillMissingSpecialofferOptionText(orderId: string, item?: NormalizedOrderItem): Promise<void> {
+  const optionText = item?.optionText?.trim()
+  if (!optionText) return
+
+  await db
+    .update(orderItems)
+    .set({ optionText })
+    .where(
+      and(
+        eq(orderItems.orderId, orderId),
+        sql`COALESCE(${orderItems.optionText}, '') = ''`,
+      ),
+    )
 }
 
 async function createSplitOrderCopies(

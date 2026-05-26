@@ -50,6 +50,73 @@ function asNumber(value: unknown): number {
   return 0
 }
 
+function collectOptionParts(value: unknown, parts: string[]): void {
+  if (value == null) return
+
+  if (typeof value === 'string') {
+    const text = value.trim()
+    if (!text) return
+
+    if (
+      (text.startsWith('[') && text.endsWith(']'))
+      || (text.startsWith('{') && text.endsWith('}'))
+    ) {
+      try {
+        collectOptionParts(JSON.parse(text), parts)
+        return
+      } catch {
+        // Some APIs return display text that happens to contain brackets.
+      }
+    }
+
+    parts.push(text)
+    return
+  }
+
+  if (typeof value === 'number') {
+    parts.push(String(value))
+    return
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectOptionParts(entry, parts))
+    return
+  }
+
+  if (typeof value !== 'object') return
+
+  const option = value as Record<string, unknown>
+  const displayValues = [
+    option.option_name,
+    option.option_value,
+    option.name,
+    option.value,
+    option.values,
+    option.label,
+    option.title,
+    option.text,
+    option.supply_name,
+  ]
+  displayValues.forEach((entry) => collectOptionParts(entry, parts))
+}
+
+function orderOptionText(order: SpecialofferBuyerOrder): string | undefined {
+  const parts: string[] = []
+  const optionValues = [
+    order.options,
+    order.option,
+    order.option_name,
+    order.option_text,
+    order.option_values,
+    order.add_supply,
+    order.add_supply_values,
+  ]
+  optionValues.forEach((value) => collectOptionParts(value, parts))
+
+  const values = Array.from(new Set(parts))
+  return values.length > 0 ? values.join(' / ') : undefined
+}
+
 function parseSpecialofferDate(value: unknown): Date | null {
   if (typeof value !== 'string' || value.trim().length === 0) return null
   const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}+09:00`
@@ -361,6 +428,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     const goodsPrice = asNumber(order.goods_price)
     const totalAmount = asNumber(order.total_price || goodsPrice)
     const orderedAt = parseSpecialofferDate(order.order_date) ?? parseSpecialofferDate(order.updated_at) ?? new Date()
+    const optionText = orderOptionText(order)
     const address2 = [order.receiver_addr2, order.receiver_addr3]
       .map(asString)
       .filter(Boolean)
@@ -388,6 +456,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
           productName: order.goods_name ?? '스페셜오퍼 상품',
           quantity,
           unitPrice: quantity > 0 ? Math.round(goodsPrice / quantity) : goodsPrice,
+          optionText,
         },
       ],
       orderedAt,

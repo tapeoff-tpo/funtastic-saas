@@ -137,6 +137,13 @@ export interface SpecialofferBuyerOrder {
   order_no?: string
   order_state?: string | number
   goods_name?: string
+  options?: unknown
+  option?: unknown
+  option_name?: unknown
+  option_text?: unknown
+  option_values?: unknown
+  add_supply?: unknown
+  add_supply_values?: unknown
   delivery_company?: string
   delivery_no?: string
   delivery_date?: string | null

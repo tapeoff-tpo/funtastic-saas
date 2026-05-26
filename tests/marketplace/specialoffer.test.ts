@@ -45,6 +45,8 @@ describe('SpecialofferAdapter', () => {
             order_id: '571610',
             order_no: '26051415470129',
             order_state: 3,
+            options: 'Color: Navy',
+            add_supply: ['Gift wrap'],
             goods_name: '휴대용 캠핑 취사용품 스텐 키친툴 조리도구 5종 세트',
             sum_qty: 1,
             goods_price: 8000,
@@ -101,6 +103,7 @@ describe('SpecialofferAdapter', () => {
         productName: '휴대용 캠핑 취사용품 스텐 키친툴 조리도구 5종 세트',
         quantity: 1,
         unitPrice: 8000,
+        optionText: 'Color: Navy / Gift wrap',
       },
     ])
     expect(orders[0].rawData.marketplaceOrderIdentity).toEqual({

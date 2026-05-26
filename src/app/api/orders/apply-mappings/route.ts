@@ -17,7 +17,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
@@ -27,10 +27,21 @@ type ValidationFailure = {
   reason: string
 }
 
+type MappingAlias = {
+  mappingCodeId: string
+  marketplaceId: string
+  marketplaceProductId: string
+  marketplaceOptionId: string
+  productNameSnapshot: string | null
+  optionNameSnapshot: string | null
+}
+
+type HistoricalAliasRow = Pick<MappingAlias, 'mappingCodeId' | 'marketplaceId' | 'marketplaceProductId' | 'marketplaceOptionId'>
+
 async function validateOrdersHaveInternalMappings(
   userId: string,
   orderIds: string[],
-): Promise<{ validOrderIds: string[]; failures: ValidationFailure[] }> {
+): Promise<{ validOrderIds: string[]; failures: ValidationFailure[]; aliases: MappingAlias[] }> {
   const targetRows = await db
     .select({
       orderId: orders.id,
@@ -39,6 +50,7 @@ async function validateOrdersHaveInternalMappings(
       itemId: orderItems.id,
       marketplaceItemId: orderItems.marketplaceItemId,
       sku: orderItems.sku,
+      productName: orderItems.productName,
       optionText: orderItems.optionText,
     })
     .from(orders)
@@ -54,7 +66,7 @@ async function validateOrdersHaveInternalMappings(
     rowsByOrderId.set(row.orderId, list)
   }
 
-  const [productRows, variantRows, sourceRows, componentRows] = await Promise.all([
+  const [productRows, variantRows, sourceRows, componentRows, historicalAliasResult] = await Promise.all([
     db
       .select({ sku: products.internalSku })
       .from(products)
@@ -80,14 +92,32 @@ async function validateOrdersHaveInternalMappings(
       })
       .from(mappingComponents)
       .where(eq(mappingComponents.userId, userId)),
+    db.execute<HistoricalAliasRow>(sql`
+      SELECT DISTINCT
+        ms.mapping_code_id AS "mappingCodeId",
+        ms.marketplace_id AS "marketplaceId",
+        oi.sku AS "marketplaceProductId",
+        ms.marketplace_option_id AS "marketplaceOptionId"
+      FROM mapping_sources ms
+      INNER JOIN order_items oi ON oi.marketplace_item_id = ms.marketplace_product_id
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE ms.user_id = ${userId}
+        AND ms.marketplace_id = 'funtastic-b2b'
+        AND o.user_id = ms.user_id
+        AND o.marketplace_id = ms.marketplace_id
+        AND NULLIF(oi.sku, '') IS NOT NULL
+    `),
   ])
+  const historicalAliasRows = Array.isArray(historicalAliasResult)
+    ? historicalAliasResult as HistoricalAliasRow[]
+    : (historicalAliasResult as unknown as { rows?: HistoricalAliasRow[] }).rows ?? []
 
   const validSkus = new Set<string>()
   for (const row of productRows) validSkus.add(row.sku.trim())
   for (const row of variantRows) validSkus.add(row.sku.trim())
 
   const mappingIndex = buildMappingIndex(
-    sourceRows.map<MappingSource>((row) => ({
+    [...sourceRows, ...historicalAliasRows].map<MappingSource>((row) => ({
       marketplaceId: row.marketplaceId,
       marketplaceProductId: row.marketplaceProductId,
       marketplaceOptionId: row.marketplaceOptionId,
@@ -102,9 +132,9 @@ async function validateOrdersHaveInternalMappings(
     componentsByCode.set(row.mappingCodeId, list)
   }
 
-  const isItemMapped = (item: typeof targetRows[number]): boolean => {
+  const findItemMappingCode = (item: typeof targetRows[number]): string | null => {
     const directSku = item.sku?.trim()
-    if (directSku && validSkus.has(directSku)) return true
+    if (directSku && validSkus.has(directSku)) return '__direct_sku__'
 
     const candidateIds = Array.from(new Set(
       [item.marketplaceItemId, item.sku]
@@ -114,14 +144,17 @@ async function validateOrdersHaveInternalMappings(
     const mappingCodeId = candidateIds
       .map((candidateId) => lookupMappingRef(mappingIndex, item.marketplaceId, candidateId, item.optionText))
       .find((ref): ref is string => !!ref)
-    if (!mappingCodeId) return false
+    if (!mappingCodeId) return null
 
     const componentSkus = componentsByCode.get(mappingCodeId) ?? []
     return componentSkus.length > 0 && componentSkus.every((sku) => validSkus.has(sku))
+      ? mappingCodeId
+      : null
   }
 
   const validOrderIds: string[] = []
   const failures: ValidationFailure[] = []
+  const aliasesByKey = new Map<string, MappingAlias>()
 
   for (const orderId of orderIds) {
     const items = rowsByOrderId.get(orderId) ?? []
@@ -131,7 +164,8 @@ async function validateOrdersHaveInternalMappings(
       continue
     }
 
-    const failedItem = items.find((item) => !isItemMapped(item))
+    const itemMatches = items.map((item) => ({ item, mappingCodeId: findItemMappingCode(item) }))
+    const failedItem = itemMatches.find((match) => !match.mappingCodeId)?.item
     if (failedItem) {
       failures.push({
         orderId,
@@ -141,10 +175,26 @@ async function validateOrdersHaveInternalMappings(
       continue
     }
 
+    for (const { item, mappingCodeId } of itemMatches) {
+      const stableProductId = item.sku?.trim()
+      if (item.marketplaceId !== 'funtastic-b2b' || !stableProductId || !mappingCodeId || mappingCodeId === '__direct_sku__') {
+        continue
+      }
+      const stableOptionId = item.optionText?.trim().slice(0, 100) || '__exact__'
+      const key = `${item.marketplaceId}:${stableProductId}:${stableOptionId}`
+      aliasesByKey.set(key, {
+        mappingCodeId,
+        marketplaceId: item.marketplaceId,
+        marketplaceProductId: stableProductId,
+        marketplaceOptionId: stableOptionId,
+        productNameSnapshot: item.productName,
+        optionNameSnapshot: item.optionText,
+      })
+    }
     validOrderIds.push(orderId)
   }
 
-  return { validOrderIds, failures }
+  return { validOrderIds, failures, aliases: [...aliasesByKey.values()] }
 }
 
 export async function POST(req: NextRequest) {
@@ -170,7 +220,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'orderIds must be a non-empty array' }, { status: 400 })
   }
 
-  const { validOrderIds, failures } = await validateOrdersHaveInternalMappings(workspaceUserId, orderIds)
+  const { validOrderIds, failures, aliases } = await validateOrdersHaveInternalMappings(workspaceUserId, orderIds)
 
   if (validOrderIds.length === 0) {
     return NextResponse.json({
@@ -179,6 +229,16 @@ export async function POST(req: NextRequest) {
       failures,
       error: failures[0]?.reason ?? '내부 상품코드로 매핑된 주문이 없습니다.',
     }, { status: 409 })
+  }
+
+  if (aliases.length > 0) {
+    await db
+      .insert(mappingSources)
+      .values(aliases.map((alias) => ({
+        ...alias,
+        userId: workspaceUserId,
+      })))
+      .onConflictDoNothing()
   }
 
   const result = await db

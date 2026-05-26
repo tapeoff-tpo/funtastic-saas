@@ -38,6 +38,7 @@ interface OrderRow {
   marketplaceOrderId: string
   orderedAt: string
   marketplaceItemId: string
+  sku: string | null
   productName: string
   optionText: string | null
   quantity: number
@@ -389,9 +390,12 @@ export function OrderRowsBoard() {
     }
     const sources = bulkTarget.rows.map((r) => {
       const split = splitProductOption(r.marketplaceItemId)
+      const marketplaceProductId = r.marketplaceId === 'funtastic-b2b' && r.sku?.trim()
+        ? r.sku.trim()
+        : split.product
       return {
         marketplaceId: r.marketplaceId,
-        marketplaceProductId: split.product,
+        marketplaceProductId,
         marketplaceOptionId: bulkTarget.mode === 'option'
           ? (split.option || r.optionText?.trim().slice(0, 100) || EXACT_OPTION_ID)
           : '',

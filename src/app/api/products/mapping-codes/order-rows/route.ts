@@ -31,6 +31,7 @@ interface OrderRow {
   marketplaceOrderId: string
   orderedAt: string
   marketplaceItemId: string
+  sku: string | null
   productName: string
   optionText: string | null
   quantity: number
@@ -146,15 +147,15 @@ export async function GET(req: NextRequest) {
         AND (
           (s.marketplace_option_id <> ''
             AND (
-              oi.marketplace_item_id = s.marketplace_product_id || '-' || s.marketplace_option_id
+              (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id || '-' || s.marketplace_option_id
               OR (s.marketplace_option_id = ${exactOptionId}
-                AND oi.marketplace_item_id = s.marketplace_product_id)
-              OR (oi.marketplace_item_id = s.marketplace_product_id
+                AND (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id)
+              OR ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
                 AND LEFT(COALESCE(oi.option_text, ''), 100) = s.marketplace_option_id)
             ))
           OR (s.marketplace_option_id = ''
-            AND (oi.marketplace_item_id = s.marketplace_product_id
-              OR oi.marketplace_item_id LIKE s.marketplace_product_id || '-%'))
+            AND ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
+              OR (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s.marketplace_product_id || '-%'))
         )
       ORDER BY (s.marketplace_option_id <> '') DESC
       LIMIT 1
@@ -182,6 +183,7 @@ export async function GET(req: NextRequest) {
       o.marketplace_order_id          AS "marketplaceOrderId",
       o.ordered_at                    AS "orderedAt",
       oi.marketplace_item_id          AS "marketplaceItemId",
+      oi.sku                          AS "sku",
       oi.product_name                 AS "productName",
       oi.option_text                  AS "optionText",
       oi.quantity                     AS "quantity",
@@ -200,8 +202,8 @@ export async function GET(req: NextRequest) {
         WHERE s2.user_id = o.user_id
           AND s2.marketplace_id = o.marketplace_id
           AND s2.marketplace_option_id = ''
-          AND (oi.marketplace_item_id = s2.marketplace_product_id
-            OR oi.marketplace_item_id LIKE s2.marketplace_product_id || '-%')
+          AND ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s2.marketplace_product_id
+            OR (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s2.marketplace_product_id || '-%')
       )                               AS "hasProductMapping",
       EXISTS (
         SELECT 1 FROM mapping_sources s3
@@ -209,10 +211,10 @@ export async function GET(req: NextRequest) {
           AND s3.marketplace_id = o.marketplace_id
           AND s3.marketplace_option_id <> ''
           AND (
-            oi.marketplace_item_id = s3.marketplace_product_id || '-' || s3.marketplace_option_id
+            (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id || '-' || s3.marketplace_option_id
             OR (s3.marketplace_option_id = ${exactOptionId}
-              AND oi.marketplace_item_id = s3.marketplace_product_id)
-            OR (oi.marketplace_item_id = s3.marketplace_product_id
+              AND (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id)
+            OR ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id
               AND LEFT(COALESCE(oi.option_text, ''), 100) = s3.marketplace_option_id)
           )
       )                               AS "hasOptionMapping",
@@ -287,6 +289,7 @@ export async function GET(req: NextRequest) {
       marketplaceOrderId: String(r.marketplaceOrderId ?? ''),
       orderedAt,
       marketplaceItemId: String(r.marketplaceItemId ?? ''),
+      sku: (r.sku as string | null) ?? null,
       productName: String(r.productName ?? ''),
       optionText: (r.optionText as string | null) ?? null,
       quantity: Number(r.quantity ?? 0),

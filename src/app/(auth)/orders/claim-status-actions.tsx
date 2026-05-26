@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -56,13 +56,50 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
   const [returnItems, setReturnItems] = useState<Array<{ sku: string; quantity: number }> | null>(null)
   const [availableQuantities, setAvailableQuantities] = useState<Record<string, number>>({})
   const [defectiveQuantities, setDefectiveQuantities] = useState<Record<string, number>>({})
-  const [returnModalOpen, setReturnModalOpen] = useState(false)
+  const [returnItemsLoading, setReturnItemsLoading] = useState(false)
   const [, startTransition] = useTransition()
 
   const nextStates = NEXT_STATES[claimStatus]
   const canWithdraw = claimStatus === 'requested' || claimStatus === 'processing'
   const canCompletePickup = claimStatus !== 'completed'
     && (claimType === 'return' || (claimType === 'exchange' && (reason?.includes('회수준비') || reason?.includes('접수'))))
+
+  useEffect(() => {
+    if (!canCompletePickup) {
+      setReturnItems(null)
+      return
+    }
+
+    let cancelled = false
+    setReturnItemsLoading(true)
+    fetch(`/api/claims/${claimId}`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
+          throw new Error(error ?? '회수 상품 조회 실패')
+        }
+        return res.json() as Promise<{ items?: Array<{ sku: string; quantity: number }> }>
+      })
+      .then((data) => {
+        if (cancelled) return
+        const items = data.items ?? []
+        setReturnItems(items)
+        setAvailableQuantities(Object.fromEntries(items.map((item) => [item.sku, item.quantity])))
+        setDefectiveQuantities(Object.fromEntries(items.map((item) => [item.sku, 0])))
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : '회수 상품 조회 실패')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReturnItemsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [canCompletePickup, claimId])
 
   function changeStatus(next: ClaimStatus) {
     setPendingStatus(next)
@@ -81,29 +118,6 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
         router.refresh()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '상태 변경 실패')
-      } finally {
-        setPendingStatus(null)
-      }
-    })
-  }
-
-  function openReturnComplete() {
-    setPendingStatus('completed')
-    startTransition(async () => {
-      try {
-        const res = await fetch(`/api/claims/${claimId}`)
-        if (!res.ok) {
-          const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
-          throw new Error(error ?? '회수 상품 조회 실패')
-        }
-        const data = await res.json() as { items?: Array<{ sku: string; quantity: number }> }
-        const items = data.items ?? []
-        setReturnItems(items)
-        setAvailableQuantities(Object.fromEntries(items.map((item) => [item.sku, item.quantity])))
-        setDefectiveQuantities(Object.fromEntries(items.map((item) => [item.sku, 0])))
-        setReturnModalOpen(true)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : '회수 상품 조회 실패')
       } finally {
         setPendingStatus(null)
       }
@@ -134,7 +148,6 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
           throw new Error(error ?? '회수완료 실패')
         }
         toast.success(claimType === 'exchange' ? '교환회수완료 처리됨' : '반품회수완료 처리됨')
-        setReturnModalOpen(false)
         router.refresh()
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '회수완료 실패')
@@ -177,16 +190,6 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
               → {STATUS_LABELS[next]}
             </button>
           ))}
-          {canCompletePickup && (
-            <button
-              type="button"
-              onClick={openReturnComplete}
-              disabled={pendingStatus !== null}
-              className="rounded border border-green-300 px-1.5 py-0.5 text-[10px] font-medium text-green-700 transition-colors hover:bg-green-50 disabled:opacity-50"
-            >
-              {claimType === 'exchange' ? '교환회수완료' : '반품회수완료'}
-            </button>
-          )}
           {canWithdraw && (
             <button
               type="button"
@@ -199,71 +202,62 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
           )}
         </div>
       )}
-      {returnModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
-            <div className="mb-3">
-              <h3 className="text-base font-semibold">{claimType === 'exchange' ? '교환회수완료 처리' : '반품회수완료 처리'}</h3>
-            </div>
-            <div className="max-h-64 overflow-auto rounded border">
-              {(returnItems ?? []).length === 0 ? (
-                <div className="p-3 text-sm text-muted-foreground">회수 처리할 매핑 상품이 없습니다.</div>
-              ) : (
-                (returnItems ?? []).map((item) => (
-                  <div key={item.sku} className="grid grid-cols-[1fr_78px_78px] items-end gap-2 border-b p-2 last:border-b-0">
-                    <div>
-                      <div className="font-mono text-xs">{item.sku}</div>
-                      <div className="text-[11px] text-muted-foreground">최대 {item.quantity}개</div>
-                    </div>
-                    <label className="text-[11px] font-medium text-green-700">
-                      가용
-                      <input
-                        type="number"
-                        min={0}
-                        max={item.quantity}
-                        value={availableQuantities[item.sku] ?? 0}
-                        onChange={(event) => setAvailableQuantities((prev) => ({
-                          ...prev,
-                          [item.sku]: Number(event.target.value),
-                        }))}
-                        className="mt-1 h-8 w-full rounded border px-2 text-right text-sm text-foreground"
-                      />
-                    </label>
-                    <label className="text-[11px] font-medium text-red-700">
-                      불용
-                      <input
-                        type="number"
-                        min={0}
-                        max={item.quantity}
-                        value={defectiveQuantities[item.sku] ?? 0}
-                        onChange={(event) => setDefectiveQuantities((prev) => ({
-                          ...prev,
-                          [item.sku]: Number(event.target.value),
-                        }))}
-                        className="mt-1 h-8 w-full rounded border px-2 text-right text-sm text-foreground"
-                      />
-                    </label>
+      {canCompletePickup && (
+        <div className="mt-3 rounded-md border p-3">
+          <h4 className="mb-2 text-sm font-semibold">{claimType === 'exchange' ? '교환회수완료 처리' : '반품회수완료 처리'}</h4>
+          <div className="max-h-64 overflow-auto rounded border">
+            {returnItemsLoading ? (
+              <div className="p-3 text-sm text-muted-foreground">회수 상품을 불러오는 중입니다.</div>
+            ) : (returnItems ?? []).length === 0 ? (
+              <div className="p-3 text-sm text-muted-foreground">회수 처리할 매핑 상품이 없습니다.</div>
+            ) : (
+              (returnItems ?? []).map((item) => (
+                <div key={item.sku} className="grid grid-cols-[1fr_78px_78px] items-end gap-2 border-b p-2 last:border-b-0">
+                  <div>
+                    <div className="font-mono text-xs">{item.sku}</div>
+                    <div className="text-[11px] text-muted-foreground">최대 {item.quantity}개</div>
                   </div>
-                ))
-              )}
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setReturnModalOpen(false)}
-                className="rounded border px-3 py-1.5 text-sm"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={completeReturn}
-                disabled={pendingStatus !== null || (returnItems ?? []).length === 0}
-                className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
-              >
-                완료
-              </button>
-            </div>
+                  <label className="text-[11px] font-medium text-green-700">
+                    가용
+                    <input
+                      type="number"
+                      min={0}
+                      max={item.quantity}
+                      value={availableQuantities[item.sku] ?? 0}
+                      onChange={(event) => setAvailableQuantities((prev) => ({
+                        ...prev,
+                        [item.sku]: Number(event.target.value),
+                      }))}
+                      className="mt-1 h-8 w-full rounded border px-2 text-right text-sm text-foreground"
+                    />
+                  </label>
+                  <label className="text-[11px] font-medium text-red-700">
+                    불용
+                    <input
+                      type="number"
+                      min={0}
+                      max={item.quantity}
+                      value={defectiveQuantities[item.sku] ?? 0}
+                      onChange={(event) => setDefectiveQuantities((prev) => ({
+                        ...prev,
+                        [item.sku]: Number(event.target.value),
+                      }))}
+                      className="mt-1 h-8 w-full rounded border px-2 text-right text-sm text-foreground"
+                    />
+                  </label>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              onClick={completeReturn}
+              disabled={pendingStatus !== null || returnItemsLoading || (returnItems ?? []).length === 0}
+              className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+            >
+              회수완료 처리
+            </button>
           </div>
         </div>
       )}

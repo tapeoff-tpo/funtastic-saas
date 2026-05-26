@@ -676,7 +676,7 @@ export const columns: ColumnDef<OrderRow>[] = [
         .filter((status) => status !== primaryLabel)
       const showScanStatus = order.status === 'preparing' || order.status === 'ready'
       const scanMeta = scanStatusMeta(order.scanStatus)
-      const collectionLabel = order.marketplaceCollectionStatus
+      const collectionLabel = order.status === 'new' && order.marketplaceCollectionStatus
         ? MARKETPLACE_COLLECTION_STATUS_LABELS[order.marketplaceCollectionStatus]
         : null
       return (

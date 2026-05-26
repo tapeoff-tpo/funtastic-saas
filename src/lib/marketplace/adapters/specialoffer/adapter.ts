@@ -264,6 +264,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
   readonly config = SPECIALOFFER_CONFIG
 
   private readonly client: ReturnType<typeof createSpecialofferClient>
+  private readonly singleProductOptionCache = new Map<string, string | null>()
 
   constructor(credentials: { api_key: string }) {
     this.client = createSpecialofferClient(credentials)
@@ -310,7 +311,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
           if (!isCollectableSellerOrder(order)) continue
           const activityDate = orderActivityDate(order)
           if (activityDate && (activityDate < since || activityDate > until)) continue
-          orders.push(this.normalizeOrder(order))
+          orders.push(this.normalizeOrder(await this.enrichOrderDetailIfNeeded(order)))
         }
 
         const lastPage = response.meta?.last_page
@@ -469,6 +470,59 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     }).json<SpecialofferMutationResponse>()
   }
 
+  private async enrichOrderDetailIfNeeded(order: SpecialofferBuyerOrder): Promise<SpecialofferBuyerOrder> {
+    if (orderOptionText(order)) return order
+
+    const orderId = asString(order.order_id)
+    let enriched = order
+    if (orderId) {
+      try {
+        const response = await this.client
+          .get(`api/v2/seller/orders/${encodeURIComponent(orderId)}`)
+          .json<SpecialofferItemResponse<SpecialofferBuyerOrder>>()
+        if (response.data && typeof response.data === 'object') {
+          enriched = { ...order, ...response.data }
+        }
+      } catch {
+        enriched = order
+      }
+    }
+
+    if (orderOptionText(enriched)) return enriched
+
+    const singleProductOption = await this.singleProductOptionText(enriched)
+    return singleProductOption ? { ...enriched, option_text: singleProductOption } : enriched
+  }
+
+  private async singleProductOptionText(order: SpecialofferBuyerOrder): Promise<string | null> {
+    const goodsNo = asString(order.goods_no)
+    if (!goodsNo) return null
+    if (this.singleProductOptionCache.has(goodsNo)) return this.singleProductOptionCache.get(goodsNo) ?? null
+
+    try {
+      const response = await this.client
+        .get(`api/goods/${encodeURIComponent(goodsNo)}`)
+        .json<SpecialofferItemResponse<SpecialofferProduct>>()
+      const options = response.data?.option_values ?? []
+      if (options.length !== 1) {
+        this.singleProductOptionCache.set(goodsNo, null)
+        return null
+      }
+      const values = options[0]?.values?.map(asString).filter(Boolean) ?? []
+      if (values.length === 0) {
+        this.singleProductOptionCache.set(goodsNo, null)
+        return null
+      }
+      const title = response.data?.option_titles?.map(asString).find(Boolean)
+      const optionText = title ? `${title}: ${values.join(' / ')}` : values.join(' / ')
+      this.singleProductOptionCache.set(goodsNo, optionText)
+      return optionText
+    } catch {
+      this.singleProductOptionCache.set(goodsNo, null)
+      return null
+    }
+  }
+
   private normalizeOrder(order: SpecialofferBuyerOrder): NormalizedOrder {
     const orderId = asString(order.order_id || order.order_no)
     const orderNo = asString(order.order_no || order.order_id)
@@ -506,7 +560,6 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
           ...(optionText ? { optionText } : {}),
           quantity,
           unitPrice: quantity > 0 ? Math.round(goodsPrice / quantity) : goodsPrice,
-          optionText,
         },
       ],
       orderedAt,

@@ -136,6 +136,7 @@ export interface SpecialofferBuyerOrder {
   order_id?: string | number
   order_no?: string
   order_state?: string | number
+  goods_no?: string | number
   goods_name?: string
   options?: unknown
   option?: unknown
@@ -162,10 +163,6 @@ export interface SpecialofferBuyerOrder {
   receiver_addr1?: string
   receiver_addr2?: string
   receiver_addr3?: string
-  option?: string
-  option_name?: string
-  option_text?: string
-  option_values?: unknown
   memo?: string
   order_date?: string
   updated_at?: string

@@ -194,6 +194,87 @@ describe('SpecialofferAdapter', () => {
     expect(orders[0].items[0].optionText).toBe('선택: Navy')
   })
 
+  it('loads seller order detail when the list response omits selected options', async () => {
+    const get = vi.fn((path: string) => ({
+      json: async () => {
+        if (path === 'api/v2/seller/orders/573502') {
+          return {
+            data: {
+              order_id: '573502',
+              option_name: '화이트',
+            },
+          }
+        }
+        return {
+          data: [
+            {
+              order_id: '573502',
+              order_no: '26052608062403',
+              order_state: 3,
+              goods_name: '멀티 야채 쌀씻는도구 믹싱볼 스텐 타공 채반 세척볼',
+              sum_qty: 1,
+              goods_price: 8000,
+              total_price: 8000,
+              order_date: '2026-05-26 08:06:24',
+              updated_at: '2026-05-26 08:06:24',
+            },
+          ],
+          meta: { current_page: 1, last_page: 1, total: 1 },
+        }
+      },
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-26T00:00:00+09:00'))
+
+    expect(get).toHaveBeenCalledWith('api/v2/seller/orders/573502')
+    expect(orders[0].items[0].optionText).toBe('화이트')
+  })
+
+  it('uses a single product option when order responses omit option fields', async () => {
+    const get = vi.fn((path: string) => ({
+      json: async () => {
+        if (path === 'api/v2/seller/orders/573489') {
+          return { data: { order_id: '573489' } }
+        }
+        if (path === 'api/goods/831678') {
+          return {
+            data: {
+              goods_no: '831678',
+              option_titles: ['선택'],
+              option_values: [{ values: ['화이트'], option_price: 0, stock_quantity: 9992 }],
+            },
+          }
+        }
+        return {
+          data: [
+            {
+              order_id: '573489',
+              order_no: '26052608061586',
+              order_state: 3,
+              goods_no: '831678',
+              goods_name: '무선 탁상용 리모컨 선풍기 휴대용 접이식 핸디선풍기',
+              sum_qty: 1,
+              goods_price: 15400,
+              total_price: 18400,
+              order_date: '2026-05-26 08:06:15',
+              updated_at: '2026-05-26 08:06:15',
+            },
+          ],
+          meta: { current_page: 1, last_page: 1, total: 1 },
+        }
+      },
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-26T00:00:00+09:00'))
+
+    expect(get).toHaveBeenCalledWith('api/goods/831678')
+    expect(orders[0].items[0].optionText).toBe('선택: 화이트')
+  })
+
   it('stops paging when a seller order page reaches older records', async () => {
     const get = vi.fn(() => ({
       json: async () => ({
@@ -230,7 +311,8 @@ describe('SpecialofferAdapter', () => {
     const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
     const orders = await adapter.getOrders(new Date('2026-05-13T00:00:00+09:00'))
 
-    expect(get).toHaveBeenCalledTimes(1)
+    expect(get).toHaveBeenCalledTimes(2)
+    expect(get).toHaveBeenNthCalledWith(2, 'api/v2/seller/orders/571610')
     expect(orders).toHaveLength(1)
     expect(orders[0].marketplaceOrderId).toBe('26051415470129')
   })

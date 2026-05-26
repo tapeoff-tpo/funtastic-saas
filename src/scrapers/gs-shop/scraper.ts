@@ -584,6 +584,14 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
 
 async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (message: string) => Promise<void>): Promise<void> {
   await setProgress?.('GS샵 주문 검색 조건 설정 중...')
+  if (!(await isGsOrderListPage(page))) {
+    throw new MarketplaceApiError(
+      MARKETPLACE_ID,
+      500,
+      `GS샵 주문배송관리 화면이 아니라 검색을 시작할 수 없습니다. (${await summarizePage(page)})`,
+    )
+  }
+
   const sinceText = ymdKst(since)
   const untilText = ymdKst(new Date())
 
@@ -617,9 +625,12 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
     await setRangeInFrame(frame)
   }
 
-  await clickByText(page, /조회|검색/i, 8_000).catch(() => false)
+  const clickedSearch = await clickVisibleControl(page, ({ text }) => /^(조회|검색)$/i.test(text), { preferBottomRight: true })
+  if (!clickedSearch) {
+    throw new MarketplaceApiError(MARKETPLACE_ID, 500, `GS샵 주문 조회 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
-  await waitForOrderListContent(page, 30_000)
+  await waitForGsOrderListPage(page, 30_000)
 }
 
 async function selectVisibleOrderRows(page: Page, setProgress?: (message: string) => Promise<void>): Promise<void> {
@@ -1303,6 +1314,13 @@ export class GsShopScraper implements MarketplaceScraper {
       await navigateToOrderList(page, setProgress)
       if (!(await isGsOrderListPage(page))) {
         await navigateToOrderList(page, setProgress)
+      }
+      if (!(await isGsOrderListPage(page))) {
+        throw new MarketplaceApiError(
+          MARKETPLACE_ID,
+          500,
+          `GS샵 주문배송관리 화면으로 이동하지 못했습니다. (${await summarizePage(page)})`,
+        )
       }
       await setSearchRangeAndSearch(page, since, setProgress)
       if (!(await isGsOrderListPage(page))) {

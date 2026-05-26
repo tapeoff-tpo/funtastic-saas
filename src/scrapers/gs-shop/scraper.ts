@@ -8,6 +8,7 @@ import type {
   NormalizedOrder,
 } from '@/lib/marketplace/types'
 import { dumpStorageState, openContext } from '../browser'
+import { dismissRpaPopups } from '../popups'
 import { readNaverVerificationCode } from '../mail/naver'
 import type {
   MarketplaceScraper,
@@ -71,6 +72,7 @@ function isPartnersRootUrl(value: string): boolean {
 async function gotoGs(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: 60_000 })
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+  await dismissGsTransientPopups(page)
 }
 
 async function summarizePage(page: Page): Promise<string> {
@@ -193,93 +195,7 @@ async function clickByText(page: Page, pattern: RegExp, timeout = 10_000): Promi
 }
 
 async function dismissGsTransientPopups(page: Page, setProgress?: (message: string) => Promise<void>): Promise<boolean> {
-  let dismissed = false
-
-  for (const popupPage of page.context().pages()) {
-    if (popupPage === page || popupPage.isClosed()) continue
-    dismissed = true
-    await setProgress?.('GS샵 임시 팝업 창 닫는 중...')
-    await popupPage.close().catch(() => undefined)
-  }
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    let clicked = false
-    for (const frame of page.frames()) {
-      const closedInFrame = await frame.evaluate(() => {
-        const visible = (element: HTMLElement) => {
-          const rect = element.getBoundingClientRect()
-          const style = window.getComputedStyle(element)
-          return rect.width > 0
-            && rect.height > 0
-            && style.visibility !== 'hidden'
-            && style.display !== 'none'
-            && style.opacity !== '0'
-        }
-        const textOf = (element: HTMLElement) => {
-          if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || ''
-          return `${element.innerText || element.textContent || ''} ${element.getAttribute('title') || ''} ${element.getAttribute('aria-label') || ''}`.replace(/\s+/g, ' ').trim()
-        }
-        const modalContainerOf = (element: HTMLElement) => {
-          let current: HTMLElement | null = element
-          while (current && current !== document.body) {
-            const attrs = `${current.id} ${current.className} ${current.getAttribute('role') || ''} ${current.getAttribute('aria-modal') || ''}`.toLowerCase()
-            const style = window.getComputedStyle(current)
-            const zIndex = Number.parseInt(style.zIndex || '0', 10)
-            if (
-              /dialog|modal|popup|pop|layer|notice|toast|alert|banner/.test(attrs)
-              || current.getAttribute('aria-modal') === 'true'
-              || current.getAttribute('role') === 'dialog'
-              || (Number.isFinite(zIndex) && zIndex >= 100)
-            ) {
-              return current
-            }
-            current = current.parentElement
-          }
-          return null
-        }
-        const controls = Array.from(document.querySelectorAll<HTMLElement>(
-          'button, input[type="button"], input[type="submit"], a, [role="button"], [onclick]',
-        ))
-          .filter((element) => visible(element))
-          .map((element) => {
-            const text = textOf(element)
-            const rect = element.getBoundingClientRect()
-            const container = modalContainerOf(element)
-            const containerText = container?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-            let score = 100
-            if (/^(닫기|창닫기|확인|취소|close|ok|x|×)$/i.test(text)) score = 10
-            if (/오늘\s*(하루)?\s*(그만|보지\s*않기|닫기)|다시\s*보지\s*않기|일주일\s*보지\s*않기|하루\s*동안\s*보지\s*않기/i.test(text)) score = 0
-            if (/닫기|close/i.test(text)) score = Math.min(score, 5)
-            if (!container && !/^(x|×)$/i.test(text)) score += 80
-            if (/조회|검색|다운로드|주문확인|저장|로그인|메뉴|관리/i.test(text)) score += 100
-            if (containerText && !/공지|알림|안내|notice|popup|확인|닫기|오늘|다시/i.test(containerText)) score += 30
-            return { element, score, x: rect.left, y: rect.top }
-          })
-          .filter((candidate) => candidate.score < 100)
-          .sort((a, b) => a.score - b.score || (b.y + b.x) - (a.y + a.x))
-
-        const target = controls[0]?.element
-        if (!(target instanceof HTMLElement)) return false
-        target.click()
-        return true
-      }).catch(() => false)
-
-      if (closedInFrame) {
-        clicked = true
-        dismissed = true
-        await setProgress?.('GS샵 임시 팝업 닫는 중...')
-        await page.waitForTimeout(500)
-      }
-    }
-
-    if (!clicked) break
-  }
-
-  if (!dismissed) {
-    await page.keyboard.press('Escape').catch(() => undefined)
-  }
-
-  return dismissed
+  return dismissRpaPopups(page, { marketplaceName: 'GS샵', setProgress, maxPasses: 6 })
 }
 
 async function clickLoginControl(page: Page): Promise<void> {

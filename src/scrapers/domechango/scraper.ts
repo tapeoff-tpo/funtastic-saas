@@ -11,6 +11,7 @@ import type {
 } from '@/lib/marketplace/types'
 import { getCarrierName, mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import { dumpStorageState, openContext } from '../browser'
+import { dismissRpaPopups } from '../popups'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -107,6 +108,7 @@ async function gotoDomechango(page: Page, url = WMS_BASE_URL): Promise<void> {
     )
   })
   await page.waitForLoadState('domcontentloaded', { timeout: LOAD_STATE_TIMEOUT_MS }).catch(() => undefined)
+  await dismissRpaPopups(page, { marketplaceName: '도매창고', maxPasses: 6 })
 }
 
 async function submitLoginForm(page: Page): Promise<void> {

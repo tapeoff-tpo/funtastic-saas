@@ -9,6 +9,7 @@ import type {
 } from '@/lib/marketplace/types'
 import { getCarrierName, mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import { dumpStorageState, openContext } from '../browser'
+import { dismissRpaPopups } from '../popups'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -61,9 +62,12 @@ async function summarizePage(page: Page): Promise<string> {
 async function gotoOnchannel(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: 60000 })
   await page.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => undefined)
+  await dismissOnchannelPopups(page)
 }
 
 async function dismissOnchannelPopups(page: Page): Promise<void> {
+  await dismissRpaPopups(page, { marketplaceName: '온채널', maxPasses: 6 })
+
   await page.evaluate(() => {
     const selectors = [
       '.layer_popup',

@@ -9,6 +9,7 @@ import type {
   NormalizedOrder,
 } from '@/lib/marketplace/types'
 import { dumpStorageState, openContext } from '../browser'
+import { dismissRpaPopups } from '../popups'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -192,6 +193,7 @@ async function summarizePage(page: Page): Promise<string> {
 async function gotoTobizon(page: Page, url = TOBIZON_BASE_URL): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: 30_000 })
   await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await dismissRpaPopups(page, { marketplaceName: '투비즈온', maxPasses: 6 })
 }
 
 async function clickByText(root: Locator | Page, pattern: RegExp, timeout = 10_000): Promise<boolean> {
@@ -254,6 +256,7 @@ async function ensureOrderListContent(page: Page): Promise<void> {
 
   await page.goto(TOBIZON_ORDER_LIST_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined)
+  await dismissRpaPopups(page, { marketplaceName: '투비즈온', maxPasses: 6 })
   for (const delay of [1500, 3000, 5000]) {
     await page.waitForTimeout(delay)
     if (await hasOrderListContent(page)) return

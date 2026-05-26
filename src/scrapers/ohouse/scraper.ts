@@ -4,6 +4,7 @@ import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import type { InvoiceData, MarketplaceId, NormalizedClaim, NormalizedOrder } from '@/lib/marketplace/types'
 import { openContext } from '../browser'
 import { readNaverVerificationCode } from '../mail/naver'
+import { dismissRpaPopups } from '../popups'
 import type { MarketplaceScraper, ScraperCredentials, ScraperLoginResult } from '../types'
 
 const PARTNER_BASE_URL = 'https://orora.ohou.se'
@@ -194,6 +195,7 @@ async function gotoOhouse(page: Page, url = PARTNER_BASE_URL): Promise<void> {
     )
   })
   await page.waitForLoadState('domcontentloaded', { timeout: 12_000 }).catch(() => undefined)
+  await dismissRpaPopups(page, { marketplaceName: '오늘의집', maxPasses: 6 })
 }
 
 async function setInputValue(locator: Locator, value: string): Promise<void> {

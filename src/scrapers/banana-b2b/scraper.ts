@@ -9,6 +9,7 @@ import type {
   NormalizedOrder,
 } from '@/lib/marketplace/types'
 import { dumpStorageState, openContext } from '../browser'
+import { dismissRpaPopups } from '../popups'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -96,6 +97,7 @@ async function summarizePage(page: Page): Promise<string> {
 async function gotoBanana(page: Page, url = BANANA_B2B_BASE_URL): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: 60_000 })
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+  await dismissRpaPopups(page, { marketplaceName: '바나나B2B', maxPasses: 6 })
 }
 
 async function tryClick(locator: Locator, timeout: number): Promise<boolean> {

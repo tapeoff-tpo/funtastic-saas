@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs'
 import type { Dialog, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import { dumpStorageState, openContext } from '../browser'
+import { dismissRpaPopups } from '../popups'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -91,9 +92,12 @@ async function summarizePage(page: Page): Promise<string> {
 async function gotoDomesin(page: Page, url = DOMESIN_HOME_URL): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: 60_000 })
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+  await closePopups(page)
 }
 
 async function closePopups(page: Page): Promise<void> {
+  await dismissRpaPopups(page, { marketplaceName: '도매의신', maxPasses: 6 })
+
   const selectors = [
     'text=창닫기',
     'text=오늘 더이상',

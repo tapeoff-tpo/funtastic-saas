@@ -564,6 +564,7 @@ export function ShippingActions({
     stopRpaInvoicePolling()
     rpaInvoicePollStartedAtRef.current = Date.now()
     const idsParam = jobLogIds.join(',')
+    const orderIdsParam = report.entries.map((entry) => entry.orderId).join(',')
 
     const finishPolling = () => {
       stopRpaInvoicePolling()
@@ -573,17 +574,26 @@ export function ShippingActions({
 
     const poll = async () => {
       try {
-        const res = await fetch(`/api/orders/collect/status?ids=${idsParam}`)
+        const res = await fetch(`/api/orders/collect/status?ids=${encodeURIComponent(idsParam)}&orderIds=${encodeURIComponent(orderIdsParam)}`)
         if (!res.ok) return
 
         const data = await res.json() as {
           allDone?: boolean
           logs?: Array<{ id: string; status: string; errorMessage?: string | null; progressMessage?: string | null }>
+          shipmentStatuses?: Array<{ orderId: string; uploadStatus: string; errorMessage?: string | null }>
         }
         if (!data.logs) return
 
         const logsById = new Map(data.logs.map((log) => [log.id, log]))
+        const shipmentsByOrderId = new Map((data.shipmentStatuses ?? []).map((shipment) => [shipment.orderId, shipment]))
         report.entries = report.entries.map((entry) => {
+          const shipment = shipmentsByOrderId.get(entry.orderId)
+          if (shipment?.uploadStatus === 'uploaded') {
+            return { ...entry, status: 'success', progress: '송신 완료', error: undefined }
+          }
+          if (shipment?.uploadStatus === 'failed') {
+            return { ...entry, status: 'failed', error: shipment.errorMessage ?? '송신 실패' }
+          }
           const log = entry.jobLogId ? logsById.get(entry.jobLogId) : undefined
           if (!log) return entry
           if (log.status === 'completed') return { ...entry, status: 'success', progress: '송신 완료', error: undefined }
@@ -598,14 +608,14 @@ export function ShippingActions({
           appendInvoiceTransmissionStep(report, `-> ${progress}`)
         }
         updateInvoiceTransmissionWindow(reportWindow, report)
-        if (!data.allDone) return
+        if (!report.entries.every((entry) => entry.status === 'success' || entry.status === 'failed')) return
 
-        const completed = data.logs.filter((log) => log.status === 'completed').length
-        const failedLogs = data.logs.filter((log) => log.status === 'failed' || log.status === 'cancelled')
-        const failed = failedLogs.length
-        const firstError = failedLogs.find((log) => log.errorMessage)?.errorMessage
-        const details = failedLogs
-          .map((log, index) => `${index + 1}. ${log.errorMessage ?? log.status}`)
+        const completed = report.entries.filter((entry) => entry.status === 'success').length
+        const failedEntries = report.entries.filter((entry) => entry.status === 'failed')
+        const failed = failedEntries.length
+        const firstError = failedEntries.find((entry) => entry.error)?.error
+        const details = failedEntries
+          .map((entry, index) => `${index + 1}. ${entry.marketplaceOrderId}: ${entry.error ?? '송신 실패'}`)
           .join('\n')
 
         finishPolling()
@@ -613,18 +623,18 @@ export function ShippingActions({
         appendInvoiceTransmissionStep(report, '[종료] 송장송신 결과 집계를 완료했습니다.')
         updateInvoiceTransmissionWindow(reportWindow, report)
         if (completed > 0 && failed === 0) {
-          toast.success(`${completed}건 RPA 송장 전송 완료`)
+          toast.success(`${completed}건 ${report.mode} 송장 전송 완료`)
         } else if (completed > 0) {
           setRpaInvoiceFailure({
-            title: 'RPA 송장 일부 실패',
+            title: `${report.mode} 송장 일부 실패`,
             message: `${completed}건 완료, ${failed}건 실패`,
             details: details || firstError || undefined,
           })
           toast.warning(`${completed}건 완료, ${failed}건 실패${firstError ? `: ${firstError}` : ''}`)
         } else {
-          const message = firstError ?? 'RPA 송장 전송에 실패했습니다.'
+          const message = firstError ?? `${report.mode} 송장 전송에 실패했습니다.`
           setRpaInvoiceFailure({
-            title: 'RPA 송장 전송 실패',
+            title: `${report.mode} 송장 전송 실패`,
             message,
             details: details || undefined,
           })

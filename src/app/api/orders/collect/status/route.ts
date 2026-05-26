@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { jobLogs } from '@/lib/db/schema'
-import { and, inArray, like, sql } from 'drizzle-orm'
+import { jobLogs, shipments } from '@/lib/db/schema'
+import { and, eq, inArray, like, sql } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 const RPA_QUEUE_TIMEOUT_MESSAGE =
   'RPA 워커가 작업을 시작하지 못했습니다. scrape-worker 서비스가 실행 중인지 확인해주세요.'
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
   if (ids.length === 0) {
     return NextResponse.json({ error: 'ids must not be empty' }, { status: 400 })
   }
+  const orderIds = request.nextUrl.searchParams.get('orderIds')?.split(',').filter(Boolean) ?? []
 
   await db
     .update(jobLogs)
@@ -111,10 +113,22 @@ export async function GET(request: NextRequest) {
     .from(jobLogs)
     .where(inArray(jobLogs.id, ids))
 
+  const workspaceUserId = orderIds.length > 0 ? await getWorkspaceUserId(user.id) : null
+  const shipmentStatuses = workspaceUserId
+    ? await db
+        .select({
+          orderId: shipments.orderId,
+          uploadStatus: shipments.uploadStatus,
+          errorMessage: shipments.marketplaceUploadError,
+        })
+        .from(shipments)
+        .where(and(eq(shipments.userId, workspaceUserId), inArray(shipments.orderId, orderIds)))
+    : []
+
   // Check if all jobs are done (completed, failed, or cancelled)
   const allDone = logs.length > 0 && logs.every(
     (l) => l.status === 'completed' || l.status === 'failed' || l.status === 'cancelled'
   )
 
-  return NextResponse.json({ logs, allDone })
+  return NextResponse.json({ logs, shipmentStatuses, allDone })
 }

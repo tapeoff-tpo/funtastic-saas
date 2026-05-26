@@ -192,11 +192,23 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
       await setProgress('RPA 브라우저로 송장 전송 준비 중...')
       if (!orderId || !shipmentId || !invoice) throw new Error('orderId/shipmentId/invoice required for upload-invoice')
       const [shipment] = await db
-        .select({ orderId: shipments.orderId, uploadAttempts: shipments.uploadAttempts })
+        .select({
+          orderId: shipments.orderId,
+          uploadAttempts: shipments.uploadAttempts,
+          uploadStatus: shipments.uploadStatus,
+        })
         .from(shipments)
         .where(eq(shipments.id, shipmentId))
         .limit(1)
       if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
+      if (shipment.uploadStatus === 'uploaded') {
+        await setProgress('이미 송신 완료된 송장입니다.')
+        await db
+          .update(jobLogs)
+          .set({ status: 'completed', completedAt: new Date() })
+          .where(eq(jobLogs.id, logRow.id))
+        return
+      }
 
       const result = await scraper.uploadInvoice(credentials, orderId, invoice)
       if (!result.success) throw new Error(result.error || 'invoice upload failed')

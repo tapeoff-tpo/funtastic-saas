@@ -226,12 +226,12 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
     }
 
+    const isOrderRowText = (text) => /\d{10,}/.test(text)
+
     const hasRows = () => {
-      const bodyText = document.body.textContent ?? ''
-      if (/총\s*[1-9]\d*\s*개/.test(bodyText)) return true
       return Array.from(document.querySelectorAll('tr, .tui-grid-row, [role="row"]')).some((row) => {
         const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-        return /\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text)
+        return isOrderRowText(text)
       })
     }
 
@@ -270,7 +270,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
           .filter((item) => {
             const itemRow = item.closest('tr, .tui-grid-row, [role="row"]')
             const itemText = itemRow?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-            return /\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(itemText)
+            return isOrderRowText(itemText)
           })
         if (checkbox.checked || checkedRows.length > 0) return true
       }
@@ -284,7 +284,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
       const checkbox = row.querySelector('input[type="checkbox"]')
       if (!checkbox || checkbox.disabled) continue
-      if (!/\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text)) continue
+      if (!isOrderRowText(text)) continue
       if (markCheckbox(checkbox)) return true
     }
 
@@ -294,23 +294,11 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
       const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
       const key = String(checkbox.name) + ' ' + String(checkbox.id) + ' ' + String(checkbox.className)
-      if (!isVisible(checkbox) && !/\d{10,}|배송준비중|배송중|배송완료/.test(text)) continue
-      if (/전체|all|header/i.test(key) && !/\d{10,}|배송준비중|배송중|배송완료/.test(text)) continue
-      if (/보류주문|검색어|기간|주문상태/.test(text) && !/\d{10,}/.test(text)) continue
+      if (!isOrderRowText(text)) continue
+      if (!isVisible(checkbox)) continue
+      if (/전체|all|header/i.test(key)) continue
+      if (/보류주문|검색어|기간|주문상태/.test(text) && !isOrderRowText(text)) continue
       if (markCheckbox(checkbox)) return true
-    }
-
-    const bodyText = document.body.textContent ?? ''
-    const hasResultCount = /총\s*[1-9]\d*\s*개/.test(bodyText)
-    if (hasResultCount) {
-      const allCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'))
-        .filter((checkbox) => !checkbox.disabled)
-      const dataCheckbox = allCheckboxes.find((checkbox) => {
-        const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
-        const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-        return /\d{10,}|배송준비중|배송중|배송완료/.test(text)
-      }) ?? tableCheckboxes.at(-1) ?? allCheckboxes.at(-1)
-      if (dataCheckbox) return markCheckbox(dataCheckbox)
     }
 
     return false
@@ -328,7 +316,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       const row = element.closest('tr, .tui-grid-row, [role="row"]')
       const text = row?.textContent ?? ''
       if (/전체|선택|checkbox/i.test(`${element.name} ${element.id}`) && !row) return false
-      return /\d{6,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text) || index > 0
+      return /\d{10,}/.test(text) && index >= 0
     }, checkboxLocators.indexOf(checkbox)).catch(() => false)
     if (!candidate) continue
 
@@ -363,12 +351,11 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       let rowCheckbox
       for (const checkbox of selectableCheckboxes) {
         const row = checkbox.closest('tr, .tui-grid-row, [role="row"]')
-        if (row && /\d{6,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(row.textContent ?? '')) {
+        if (row && /\d{10,}/.test(row.textContent ?? '')) {
           rowCheckbox = checkbox
           break
         }
       }
-      rowCheckbox = rowCheckbox ?? selectableCheckboxes.at(-1)
 
       if (!rowCheckbox) return false
       if (!rowCheckbox.checked) rowCheckbox.click()
@@ -390,11 +377,22 @@ async function summarizeOrderSearchState(page: Page): Promise<string> {
     const counts = text.match(/(?:총\s*\d+\s*개|신규주문\s*\d+\s*건|발송대상\s*\d+\s*건|보류주문\s*\d+\s*건)/g) ?? []
     const rows = Array.from(document.querySelectorAll('tr, .tui-grid-row, [role="row"]'))
       .map((row) => row.textContent?.replace(/\s+/g, ' ').trim() ?? '')
-      .filter((rowText) => /\d{10,}|신규주문|발송대상|배송준비중/.test(rowText))
+      .filter((rowText) => /\d{10,}/.test(rowText))
       .slice(0, 3)
     const checkboxCount = document.querySelectorAll('input[type="checkbox"]').length
     return `counts=${counts.join(', ') || '-'} checkboxes=${checkboxCount} rows=${rows.join(' / ') || '-'}`
   }).catch(async () => summarizePage(page))
+}
+
+async function hasSelectableOrderRows(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    return Array.from(document.querySelectorAll('tr, .tui-grid-row, [role="row"]')).some((row) => {
+      const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+      if (!/\d{10,}/.test(text)) return false
+      const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      return Boolean(checkbox && !checkbox.disabled)
+    })
+  }).catch(() => false)
 }
 
 async function triggerSelectedOrderExcelDownload(
@@ -1225,7 +1223,7 @@ export class DomechangoScraper implements MarketplaceScraper {
 
       if (!workbook || !matchedStatus) {
         const state = await summarizeOrderSearchState(ctx.page)
-        if (/총\s*[1-9]\d*\s*개|신규주문\s*[1-9]\d*\s*건|발송대상\s*[1-9]\d*\s*건/.test(state)) {
+        if (await hasSelectableOrderRows(ctx.page)) {
           throw new MarketplaceApiError('domechango', 500, `도매창고 주문은 보이지만 선택할 주문을 잡지 못했습니다. (${state})`)
         }
         await setProgress?.(`도매창고 수집 대상 주문 0건 (${state})`)

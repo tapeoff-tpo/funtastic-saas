@@ -720,14 +720,8 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
     await setRangeInFrame(frame)
   }
 
-  await dismissGsTransientPopups(page, setProgress)
-  const clickedSearch = await clickVisibleControl(page, ({ text }) => /^(조회|검색)(\s*\([^)]*\))?$/i.test(text), { preferBottomRight: true })
-  if (!clickedSearch) {
-    await dismissGsTransientPopups(page, setProgress)
-    const retriedSearch = await clickVisibleControl(page, ({ text }) => /^(조회|검색)(\s*\([^)]*\))?$/i.test(text), { preferBottomRight: true })
-    if (!retriedSearch) {
-      throw new MarketplaceApiError(MARKETPLACE_ID, 500, `GS샵 주문 조회 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
-    }
+  if (!(await clickGsSearchButton(page, setProgress))) {
+    throw new MarketplaceApiError(MARKETPLACE_ID, 500, `GS샵 주문 조회 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
   }
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
   await dismissGsTransientPopups(page, setProgress)
@@ -735,6 +729,30 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
   if (!orderListReady) {
     await waitForOrderListContent(page, 5_000)
   }
+}
+
+async function clickGsSearchButton(page: Page, setProgress?: (message: string) => Promise<void>): Promise<boolean> {
+  const searchTextPattern = /^(조회|검색)(\s*\([^)]*\))?$/i
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await dismissGsTransientPopups(page, setProgress)
+    const clicked = await clickVisibleControl(page, ({ text }) => searchTextPattern.test(text), { preferBottomRight: true })
+    if (clicked) return true
+
+    const clickedAnyElement = await clickVisibleTextElement(page, searchTextPattern, { preferBottomRight: true })
+    if (clickedAnyElement) return true
+  }
+
+  await setProgress?.('GS샵 조회 버튼을 찾지 못해 F4 단축키로 조회 중...')
+  await dismissGsTransientPopups(page, setProgress)
+  await page.keyboard.press('F4').catch(() => undefined)
+  await page.waitForTimeout(1_000)
+
+  const hasResult = await Promise.race([
+    waitForOrderListContent(page, 5_000).then(() => true),
+    page.waitForFunction(() => /조회\s*결과|총\s*\d+\s*건|주문번호|주문아이템번호/.test(document.body?.innerText || ''), undefined, { timeout: 5_000 }).then(() => true).catch(() => false),
+  ]).catch(() => false)
+  return Boolean(hasResult)
 }
 
 async function selectVisibleOrderRows(page: Page, setProgress?: (message: string) => Promise<void>): Promise<void> {
@@ -919,6 +937,65 @@ async function clickVisibleControl(
       const targetControl = controls[index]
       if (!targetControl) return false
       targetControl.click()
+      return true
+    }, target.index).catch(() => false)
+    if (clicked) return true
+  }
+  return false
+}
+
+async function clickVisibleTextElement(
+  page: Page,
+  pattern: RegExp,
+  options?: { preferBottomRight?: boolean },
+): Promise<boolean> {
+  for (const frame of page.frames()) {
+    const candidates = await frame.evaluate((source) => {
+      const pattern = new RegExp(source, 'i')
+      const textOf = (element: Element): string => {
+        if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || ''
+        return `${(element as HTMLElement).innerText || element.textContent || ''} ${element.getAttribute('title') || ''} ${element.getAttribute('aria-label') || ''}`
+          .replace(/\s+/g, ' ')
+          .trim()
+      }
+      const isVisible = (element: Element) => {
+        const rect = element.getBoundingClientRect()
+        if (rect.width <= 0 || rect.height <= 0) return false
+        const style = window.getComputedStyle(element)
+        return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || '1') > 0
+      }
+      return Array.from(document.querySelectorAll<HTMLElement>('button, input, a, span, div, [role="button"]'))
+        .map((element, index) => {
+          const rect = element.getBoundingClientRect()
+          return {
+            index,
+            text: textOf(element),
+            x: rect.left,
+            y: rect.top,
+            width: rect.width,
+            height: rect.height,
+            visible: isVisible(element),
+          }
+        })
+        .filter((item) => item.visible && item.width > 0 && item.height > 0 && pattern.test(item.text))
+    }, pattern.source).catch(() => [])
+
+    const target = candidates
+      .sort((a, b) => {
+        if (!options?.preferBottomRight) return a.y - b.y || a.x - b.x
+        return (b.y + b.x) - (a.y + a.x)
+      })[0]
+    if (!target) continue
+
+    const clicked = await frame.evaluate((index) => {
+      const controls = Array.from(document.querySelectorAll<HTMLElement>('button, input, a, span, div, [role="button"]'))
+      const element = controls[index]
+      if (!element) return false
+      element.scrollIntoView({ block: 'center', inline: 'center' })
+      element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+      element.click()
       return true
     }, target.index).catch(() => false)
     if (clicked) return true

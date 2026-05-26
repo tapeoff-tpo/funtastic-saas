@@ -332,111 +332,30 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
-function uniqueStrings(values: Array<string | number | null | undefined>): string[] {
-  return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))]
-}
-
 async function movePaymentCompleteOrdersToReady(
   page: Page,
   collectedOrders: NormalizedOrder[],
 ): Promise<number> {
-  const orderNos = uniqueStrings(collectedOrders.map((order) => order.marketplaceOrderId))
-  const collectedItemIds = uniqueStrings(
-    collectedOrders.flatMap((order) => [
-      order.rawData?.orderProductId as string | number | null | undefined,
-      ...order.items.map((item) => item.marketplaceItemId),
-    ]),
-  )
-  if (orderNos.length === 0 && collectedItemIds.length === 0) return 0
+  if (collectedOrders.length === 0) return 0
 
-  return page.evaluate(async function ({ orderNos: nextOrderNos, collectedItemIds: nextItemIds }) {
-    function normalize(value: unknown) {
-      return String(value ?? '').trim()
-    }
+  const firstCheckbox = page.getByRole('checkbox').first()
+  if (!(await firstCheckbox.isVisible({ timeout: 5000 }).catch(() => false))) {
+    throw new Error(`바나나B2B 결제완료 주문 전체선택 체크박스를 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
 
-    const orderNoSet = new Set<string>()
-    for (const orderNo of nextOrderNos) {
-      const normalized = normalize(orderNo)
-      if (normalized) orderNoSet.add(normalized)
-    }
+  await firstCheckbox.check({ timeout: 5000, force: true }).catch(async () => {
+    await firstCheckbox.click({ timeout: 5000, force: true })
+  })
+  await page.waitForTimeout(500)
 
-    const itemIdSet = new Set<string>()
-    for (const itemId of nextItemIds) {
-      const normalized = normalize(itemId)
-      if (normalized) itemIdSet.add(normalized)
-    }
+  const clicked = await clickByText(page, /^발주확인$/, 10_000)
+  if (!clicked) {
+    throw new Error(`바나나B2B 발주확인 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+  }
 
-    const urls = [
-      '/api/v1/order/list?state=1&viewcount=500',
-      '/api/v1/order/list?state=1',
-    ]
-    let rows: Array<{ id?: string | number; orderNo?: string | number }> = []
-
-    for (const url of urls) {
-      const response = await fetch(url, {
-        credentials: 'include',
-        headers: { accept: 'application/json' },
-      })
-      if (!response.ok) continue
-      let payload: unknown = null
-      try {
-        payload = await response.json()
-      } catch {
-        payload = null
-      }
-
-      let nextRows: Array<{ id?: string | number; orderNo?: string | number }> = []
-      if (Array.isArray(payload)) {
-        nextRows = payload
-      } else if (payload && typeof payload === 'object') {
-        const maybePayload = payload as {
-          list?: Array<{ id?: string | number; orderNo?: string | number }>
-          data?: Array<{ id?: string | number; orderNo?: string | number }>
-          rows?: Array<{ id?: string | number; orderNo?: string | number }>
-        }
-        if (Array.isArray(maybePayload.list)) nextRows = maybePayload.list
-        else if (Array.isArray(maybePayload.data)) nextRows = maybePayload.data
-        else if (Array.isArray(maybePayload.rows)) nextRows = maybePayload.rows
-      }
-
-      if (nextRows.length > 0) {
-        rows = nextRows
-        break
-      }
-    }
-
-    const orderProductId: string[] = []
-    for (const row of rows) {
-      const id = normalize(row.id)
-      const orderNo = normalize(row.orderNo)
-      if (!id) continue
-      if (itemIdSet.has(id) || (orderNo && orderNoSet.has(orderNo))) {
-        orderProductId.push(id)
-      }
-    }
-
-    if (orderProductId.length === 0) return 0
-
-    const response = await fetch('/api/v1/order/delivery/ready', {
-      method: 'PUT',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orderProductId }),
-    })
-    if (!response.ok) {
-      let message = ''
-      try {
-        const payload = await response.json()
-        if (payload && typeof payload === 'object' && 'message' in payload) {
-          message = String(payload.message ?? '')
-        }
-      } catch {
-        message = await response.text().catch(() => '')
-      }
-      throw new Error(message || `배송준비 전환 실패: ${response.status}`)
-    }
-    return orderProductId.length
-  }, { orderNos, collectedItemIds })
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await page.waitForTimeout(2000)
+  return collectedOrders.length
 }
 
 export class BananaB2bScraper implements MarketplaceScraper {

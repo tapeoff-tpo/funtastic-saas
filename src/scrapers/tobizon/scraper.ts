@@ -10,6 +10,7 @@ import type {
 } from '@/lib/marketplace/types'
 import { dumpStorageState, openContext } from '../browser'
 import { dismissRpaPopups } from '../popups'
+import { withRpaDownloadRetry } from '../rpa-downloads'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -387,10 +388,15 @@ async function selectOrderRows(page: Page): Promise<boolean> {
 }
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
+  return withRpaDownloadRetry(page, {
+    marketplaceName: '투비즈온',
+    actionName: 'orders-excel-download',
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+  }, async () => {
   if (await hasNoOrders(page)) return Buffer.alloc(0)
 
   const dialogHandler = (dialog: Dialog) => {
-    void dialog.accept().catch(() => undefined)
+    void dialog.accept(process.env.EXCEL_PASSWORD).catch(() => undefined)
   }
   page.on('dialog', dialogHandler)
 
@@ -420,6 +426,7 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   }
   return Buffer.concat(chunks)
+  })
 }
 
 async function readVisibleOrderRows(page: Page): Promise<TobizonVisibleOrderRow[]> {

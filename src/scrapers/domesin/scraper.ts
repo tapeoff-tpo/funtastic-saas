@@ -3,6 +3,7 @@ import type { Dialog, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import { dumpStorageState, openContext } from '../browser'
 import { dismissRpaPopups } from '../popups'
+import { withRpaDownloadRetry } from '../rpa-downloads'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -287,13 +288,18 @@ async function selectOrderRows(page: Page): Promise<boolean> {
 }
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
+  return withRpaDownloadRetry(page, {
+    marketplaceName: '도매의신',
+    actionName: 'orders-excel-download',
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+  }, async () => {
   const text = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
   if (/검색된\s*자료가\s*없|검색\s*결과가\s*없|조회된\s*자료가\s*없|조회\s*결과가\s*없|주문\s*내역이\s*없|내역이\s*없|데이터가\s*없|자료가\s*없|총\s*0\s*건/.test(text)) {
     return Buffer.alloc(0)
   }
 
   const dialogHandler = (dialog: Dialog) => {
-    void dialog.accept().catch(() => undefined)
+    void dialog.accept(process.env.EXCEL_PASSWORD).catch(() => undefined)
   }
   page.on('dialog', dialogHandler)
 
@@ -334,6 +340,7 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   }
   return Buffer.concat(chunks)
+  })
 }
 
 async function confirmSelectedOrders(page: Page): Promise<void> {

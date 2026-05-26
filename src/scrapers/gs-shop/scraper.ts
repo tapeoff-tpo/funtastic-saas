@@ -10,6 +10,7 @@ import type {
 import { dumpStorageState, openContext } from '../browser'
 import { dismissRpaPopups } from '../popups'
 import { readNaverVerificationCode } from '../mail/naver'
+import { withRpaDownloadRetry } from '../rpa-downloads'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -699,13 +700,18 @@ async function selectVisibleOrderRows(page: Page, setProgress?: (message: string
 }
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
+  return withRpaDownloadRetry(page, {
+    marketplaceName: 'GS샵',
+    actionName: 'orders-excel-download',
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+  }, async () => {
   const text = await pageText(page, 2_000)
   if (/검색된\s*자료가\s*없|검색\s*결과가\s*없|조회된\s*자료가\s*없|조회\s*결과가\s*없|주문\s*내역이\s*없|내역이\s*없|데이터가\s*없|자료가\s*없|총\s*0\s*건/.test(text)) {
     await page.waitForTimeout(0)
   }
 
-  const dialogHandler = (dialog: { accept: () => Promise<void> }) => {
-    void dialog.accept().catch(() => undefined)
+  const dialogHandler = (dialog: { accept: (promptText?: string) => Promise<void> }) => {
+    void dialog.accept(process.env.EXCEL_PASSWORD).catch(() => undefined)
   }
   page.on('dialog', dialogHandler)
   try {
@@ -756,6 +762,7 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   } finally {
     page.off('dialog', dialogHandler)
   }
+  })
 }
 
 async function clickGsDownloadFlowKorean(page: Page): Promise<void> {

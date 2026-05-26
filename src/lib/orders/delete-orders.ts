@@ -13,6 +13,7 @@
 import { db } from '@/lib/db'
 import {
   orders,
+  orderItems,
   shipments,
   shipmentItems,
   claims,
@@ -50,6 +51,15 @@ export async function deleteOrdersForUser(
       .where(inArray(inventoryHistory.orderId, owned))
 
     await tx.delete(shipmentGroupOrders).where(inArray(shipmentGroupOrders.orderId, owned))
+
+    const linkedOrderItems = await tx
+      .select({ id: orderItems.id })
+      .from(orderItems)
+      .where(inArray(orderItems.orderId, owned))
+    const orderItemIds = linkedOrderItems.map((item) => item.id)
+    if (orderItemIds.length > 0) {
+      await tx.delete(shipmentItems).where(inArray(shipmentItems.orderItemId, orderItemIds))
+    }
 
     const linkedShipments = await tx
       .select({ id: shipments.id })

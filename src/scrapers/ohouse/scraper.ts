@@ -11,12 +11,11 @@ const LOGIN_URL = `${PARTNER_BASE_URL}/signin?redirectUrl=%2F`
 const ORDER_URL_CANDIDATES = [
   `${PARTNER_BASE_URL}/orders?customFilters=PAYMENT_COMPLETE&order=PAYMENT_AT_DESC`,
   `${PARTNER_BASE_URL}/orders?customFilters=READY_FOR_DELIVERY&order=PAYMENT_AT_DESC`,
-  `${PARTNER_BASE_URL}/orders?order=PAYMENT_AT_DESC`,
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v38'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v39'
 const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
 
 function logStep(step: string): void {
@@ -1335,6 +1334,46 @@ async function readVisibleOhouseOrders(page: Page, credentials: ScraperCredentia
           if (Object.keys(row).length > 0) result.push(row)
         }
       }
+
+      if (result.length === 0) {
+        const lines = (document.body?.innerText ?? '')
+          .split('\n')
+          .map((line) => line.replace(/\s+/g, ' ').trim())
+          .filter((line) => line && !/^(가림 해제|이전|다음|검색|초기화)$/.test(line))
+        const headers = [
+          '주문옵션번호',
+          '주문상태',
+          '주문번호',
+          '주문상품번호',
+          '주문결제완료일',
+          '배송정보',
+          '배송추적',
+          '주문자',
+          '주문자 연락처',
+          '수취인',
+          '수취인 연락처',
+          '상품명',
+        ]
+        const firstHeaderIndex = lines.findIndex((line) => normalize(line) === normalize(headers[0]))
+        const lastHeaderIndex = lines.findIndex((line, index) => index > firstHeaderIndex && normalize(line) === normalize(headers.at(-1) ?? ''))
+        if (firstHeaderIndex >= 0 && lastHeaderIndex > firstHeaderIndex) {
+          let cursor = lastHeaderIndex + 1
+          while (cursor + headers.length <= lines.length) {
+            const values = lines.slice(cursor, cursor + headers.length)
+            if (!/^\d{6,}$/.test(values[2] ?? '')) {
+              cursor += 1
+              continue
+            }
+            const row: Record<string, string> = {}
+            headers.forEach((header, index) => {
+              const value = values[index] ?? ''
+              if (value) row[header] = value
+            })
+            result.push(row)
+            cursor += headers.length
+          }
+        }
+      }
       return result
     })
     .catch(() => [])
@@ -1605,6 +1644,7 @@ export class OhouseScraper implements MarketplaceScraper {
         await setProgress?.(`오늘의집 엑셀 주문 0건, 화면 주문 ${visibleOrders.length}건으로 수집 진행`)
         orders = visibleOrders
       }
+      orders = orders.filter((order) => order.orderedAt >= since)
       if (orders.length > 0) {
         if (await hasVisibleOhouseOrderConfirmButton(ctx.page)) {
           await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 주문 확인 처리 중...`)

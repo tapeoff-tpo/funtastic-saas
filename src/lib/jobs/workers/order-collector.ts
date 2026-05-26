@@ -204,6 +204,11 @@ function confirmedMarketplaceStatus(marketplaceId: string): string {
   return 'CONFIRMED'
 }
 
+function isIgnorableConfirmFailure(marketplaceId: string, message: string): boolean {
+  if (marketplaceId !== 'ssgmall') return false
+  return /배송지시\s*상태에서만\s*주문확인|해당\s*데이터가\s*없습니다|이미\s*주문확인|이미\s*처리/.test(message)
+}
+
 function shouldPreserveCollectedConfirmedStatus(marketplaceId: string): boolean {
   return marketplaceId === 'always' || marketplaceId === 'gs-shop'
 }
@@ -651,11 +656,32 @@ export async function collectOrdersForConnection(params: {
                 updatedAt: new Date(),
               })
               .where(inArray(orders.id, target.ids))
+          } else if (isIgnorableConfirmFailure(marketplaceId, result.error ?? '')) {
+            await db
+              .update(orders)
+              .set({
+                status: 'confirmed',
+                marketplaceStatus: confirmedMarketplaceStatus(marketplaceId),
+                updatedAt: new Date(),
+              })
+              .where(inArray(orders.id, target.ids))
           } else {
             confirmFailures.push(`${target.marketplaceOrderId}: ${result.error ?? 'unknown error'}`)
           }
         } catch (err) {
-          confirmFailures.push(`${target.marketplaceOrderId}: ${err instanceof Error ? err.message : String(err)}`)
+          const message = err instanceof Error ? err.message : String(err)
+          if (isIgnorableConfirmFailure(marketplaceId, message)) {
+            await db
+              .update(orders)
+              .set({
+                status: 'confirmed',
+                marketplaceStatus: confirmedMarketplaceStatus(marketplaceId),
+                updatedAt: new Date(),
+              })
+              .where(inArray(orders.id, target.ids))
+          } else {
+            confirmFailures.push(`${target.marketplaceOrderId}: ${message}`)
+          }
         }
 
         if (confirmIdx === confirmTargets.length || confirmIdx % 5 === 0) {

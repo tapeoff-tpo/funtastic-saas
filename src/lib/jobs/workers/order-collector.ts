@@ -773,10 +773,7 @@ export async function saveNormalizedOrdersForConnection(params: {
 
   for (const order of normalizedOrders) {
     const items = dedupeNormalizedOrderItems(order.items)
-    const firstItem = items[0]
-    const orderForSave = firstItem && items.length > 1
-      ? { ...order, items: [firstItem], totalAmount: lineTotalAmount(firstItem) }
-      : { ...order, items }
+    const orderForSave = { ...order, items }
     const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
     if (existingOrderMatches.skipKeys.has(orderKey)) {
       ordersSkipped++
@@ -787,8 +784,7 @@ export async function saveNormalizedOrdersForConnection(params: {
     const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
 
     if (!isExistingOrder && items.length > 0) {
-      await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
-      await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+      await db.insert(orderItems).values(items.map((item) => orderItemInsertValue(upsertedOrder.id, item)))
     }
     ordersCollected++
   }

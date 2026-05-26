@@ -191,6 +191,7 @@ export default async function OrdersPage({
     marketplaceName: (o as { marketplaceDisplayName?: string | null }).marketplaceDisplayName ?? null,
     connectionId: o.connectionId,
     marketplaceOrderId: o.marketplaceOrderId,
+    marketplaceCollectionStatus: (o as { marketplaceCollectionStatus?: OrderRow['marketplaceCollectionStatus'] }).marketplaceCollectionStatus ?? null,
     buyerName: o.buyerName,
     buyerPhone: o.buyerPhone,
     buyerPhone2: (o as { buyerPhone2?: string | null }).buyerPhone2 ?? null,

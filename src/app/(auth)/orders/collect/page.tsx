@@ -1,7 +1,7 @@
-import { eq } from 'drizzle-orm'
+import { desc, eq, inArray } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { excelImportTemplates, marketplaceConnections } from '@/lib/db/schema'
+import { excelImportTemplates, jobLogs, marketplaceConnections } from '@/lib/db/schema'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { DEFAULT_ORDER_IMPORT_TEMPLATES } from '@/lib/orders/default-import-templates'
 import { MarketplaceDashboard } from '@/components/marketplace/marketplace-dashboard'
@@ -76,10 +76,53 @@ export default async function OrdersCollectPage() {
       linkedMarketplaces: linkedMarketplacesFromMetadata(c.metadata),
     }))
 
+  const connectionIds = dashboardConnections.map((connection) => connection.id)
+  const recentJobLogs = connectionIds.length > 0
+    ? await db
+        .select({
+          connectionId: jobLogs.connectionId,
+          status: jobLogs.status,
+          ordersCollected: jobLogs.ordersCollected,
+          claimsCollected: jobLogs.claimsCollected,
+          errorMessage: jobLogs.errorMessage,
+          progressMessage: jobLogs.progressMessage,
+          completedAt: jobLogs.completedAt,
+          createdAt: jobLogs.createdAt,
+        })
+        .from(jobLogs)
+        .where(inArray(jobLogs.connectionId, connectionIds))
+        .orderBy(desc(jobLogs.createdAt))
+        .limit(connectionIds.length * 5)
+    : []
+
+  const latestLogByConnection = new Map<string, (typeof recentJobLogs)[number]>()
+  for (const log of recentJobLogs) {
+    if (!log.connectionId || latestLogByConnection.has(log.connectionId)) continue
+    latestLogByConnection.set(log.connectionId, log)
+  }
+
+  const dashboardConnectionsWithLogs = dashboardConnections.map((connection) => {
+    const latestJobLog = latestLogByConnection.get(connection.id)
+    return {
+      ...connection,
+      latestJobLog: latestJobLog
+        ? {
+            status: latestJobLog.status,
+            ordersCollected: latestJobLog.ordersCollected,
+            claimsCollected: latestJobLog.claimsCollected,
+            errorMessage: latestJobLog.errorMessage,
+            progressMessage: latestJobLog.progressMessage,
+            completedAt: latestJobLog.completedAt,
+            createdAt: latestJobLog.createdAt,
+          }
+        : null,
+    }
+  })
+
   return (
     <div>
       <MarketplaceDashboard
-        connections={dashboardConnections}
+        connections={dashboardConnectionsWithLogs}
         importTemplates={importTemplates}
       />
     </div>

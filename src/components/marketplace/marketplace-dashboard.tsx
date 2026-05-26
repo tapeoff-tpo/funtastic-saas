@@ -32,6 +32,15 @@ interface Connection {
   isManual: boolean
   integrationMethod: IntegrationMethod
   linkedMarketplaces?: string[]
+  latestJobLog?: {
+    status: string
+    ordersCollected: number | null
+    claimsCollected: number | null
+    errorMessage: string | null
+    progressMessage: string | null
+    completedAt: Date | null
+    createdAt: Date
+  } | null
 }
 
 interface MarketplaceDashboardProps {
@@ -55,6 +64,21 @@ function isExpiringSoon(expiresAt: Date): boolean {
   const now = new Date()
   const sevenDays = 7 * 24 * 60 * 60 * 1000
   return expiresAt.getTime() - now.getTime() < sevenDays
+}
+
+function formatLatestJobLog(log: NonNullable<Connection['latestJobLog']>): string {
+  if (log.status === 'failed') {
+    return log.errorMessage ?? log.progressMessage ?? '수집 실패'
+  }
+
+  if (log.status === 'cancelled') return '수집 취소됨'
+
+  if (log.status === 'completed') {
+    return log.progressMessage
+      ?? `주문 ${log.ordersCollected ?? 0}건 수집/갱신`
+  }
+
+  return log.progressMessage ?? '수집 진행 중'
 }
 
 /**
@@ -738,6 +762,7 @@ function ConnRow({
   const eligibleForCollect = conn.integrationMethod !== 'excel' && !isDisconnected
   const expiringSoon = !!conn.expiresAt && isExpiringSoon(conn.expiresAt)
   const errorMsg = conn.status === 'error' ? conn.lastErrorMessage : null
+  const latestJobMessage = conn.latestJobLog ? formatLatestJobLog(conn.latestJobLog) : null
 
   return (
     <tr
@@ -805,6 +830,19 @@ function ConnRow({
         {errorMsg ? (
           <span className="line-clamp-2 text-red-600" title={errorMsg}>
             {errorMsg}
+          </span>
+        ) : latestJobMessage ? (
+          <span
+            className={`line-clamp-2 ${
+              conn.latestJobLog?.status === 'failed'
+                ? 'text-red-600'
+                : conn.latestJobLog?.status === 'completed'
+                  ? 'text-emerald-700'
+                  : 'text-muted-foreground'
+            }`}
+            title={latestJobMessage}
+          >
+            {latestJobMessage}
           </span>
         ) : expiringSoon ? (
           <span className="text-amber-600">인증 만료 임박</span>

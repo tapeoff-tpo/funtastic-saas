@@ -12,9 +12,10 @@ const PAYMENT_COMPLETE_ORDER_URL = `${PARTNER_BASE_URL}/orders?customFilters=PAY
 const READY_FOR_DELIVERY_ORDER_URL = `${PARTNER_BASE_URL}/orders?customFilters=READY_FOR_DELIVERY&order=PAYMENT_AT_DESC`
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
+const DOWNLOAD_READ_TIMEOUT_MS = 30_000
 const LOGIN_STAGE_TIMEOUT_MS = 180_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v43'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v44'
 const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
 
 type JsonRecord = Record<string, unknown>
@@ -235,6 +236,14 @@ async function clickOhouseLoginButton(page: Page): Promise<void> {
 }
 
 async function readDownloadBuffer(download: Download): Promise<Buffer> {
+  return withOhouseTimeout(
+    readDownloadBufferStream(download),
+    DOWNLOAD_READ_TIMEOUT_MS,
+    `${OHOUSE_RPA_VERSION}: 오늘의집 다운로드 파일 읽기가 ${DOWNLOAD_READ_TIMEOUT_MS / 1000}초 안에 끝나지 않았습니다.`,
+  )
+}
+
+async function readDownloadBufferStream(download: Download): Promise<Buffer> {
   const stream = await download.createReadStream()
   if (!stream) throw new MarketplaceApiError('ohouse', 500, '오늘의집 엑셀 다운로드 스트림을 열 수 없습니다.')
   const chunks: Buffer[] = []

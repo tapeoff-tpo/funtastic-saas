@@ -586,6 +586,33 @@ async function setSearchRangeAndSearch(page: Page, since: Date, setProgress?: (m
   await waitForOrderListContent(page, 30_000)
 }
 
+async function selectVisibleOrderRows(page: Page, setProgress?: (message: string) => Promise<void>): Promise<void> {
+  await setProgress?.('GS샵 주문행 선택 중...')
+  for (const frame of page.frames()) {
+    const selected = await frame.evaluate(() => {
+      const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+        .filter((input) => {
+          const rect = input.getBoundingClientRect()
+          return rect.width > 0 && rect.height > 0 && !input.disabled
+        })
+
+      let changed = 0
+      for (const checkbox of checkboxes) {
+        if (checkbox.checked) continue
+        checkbox.click()
+        changed += 1
+      }
+      return { total: checkboxes.length, changed }
+    }).catch(() => ({ total: 0, changed: 0 }))
+
+    if (selected.total > 0) {
+      await page.waitForTimeout(500)
+      await setProgress?.(`GS샵 주문행 ${selected.total}개 선택 확인`)
+      return
+    }
+  }
+}
+
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   const text = await pageText(page, 2_000)
   if (/검색된\s*자료가\s*없|검색\s*결과가\s*없|조회된\s*자료가\s*없|조회\s*결과가\s*없|주문\s*내역이\s*없|내역이\s*없|데이터가\s*없|자료가\s*없|총\s*0\s*건/.test(text)) {
@@ -852,6 +879,20 @@ function rowsToLooseOrderRecords(rows: unknown[][]): Array<Record<string, string
   return records
 }
 
+function workbookDiagnostics(buffer: Buffer): string {
+  if (buffer.length === 0) return 'buffer=0'
+  try {
+    const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false, raw: false })
+    return workbook.SheetNames.map((sheetName) => {
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: '' })
+      const firstRows = rows.slice(0, 3).map((row) => row.map(readCellText).filter(Boolean).join(' | ')).join(' / ')
+      return `${sheetName}:rows=${rows.length}:head=${firstRows.slice(0, 500)}`
+    }).join(' ; ')
+  } catch (error) {
+    return `parse-error=${error instanceof Error ? error.message : String(error)} size=${buffer.length}`
+  }
+}
+
 async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
   for (const frame of page.frames()) {
     const rows = await frame.evaluate(() => {
@@ -1113,6 +1154,7 @@ export class GsShopScraper implements MarketplaceScraper {
       await ensureLoggedIn(page, credentials)
       await navigateToOrderList(page, setProgress)
       await setSearchRangeAndSearch(page, since, setProgress)
+      await selectVisibleOrderRows(page, setProgress)
       const visibleOrders = await parseVisibleOrders(page)
       if (visibleOrders.length > 0) {
         await setProgress?.(`GS샵 화면 주문 ${visibleOrders.length}건 수집`)
@@ -1123,12 +1165,18 @@ export class GsShopScraper implements MarketplaceScraper {
       let downloadError: unknown
       try {
         const workbook = await downloadOrdersExcel(page)
+        await setProgress?.(`GS샵 엑셀 다운로드 완료 (${workbook.length} bytes)`)
         await setProgress?.('GS샵 주문 엑셀 파싱 중...')
         const excelOrders = parseOrdersWorkbook(workbook)
         if (excelOrders.length > 0) {
           await confirmGsSelectedOrders(page, setProgress)
           return excelOrders
         }
+        throw new MarketplaceApiError(
+          MARKETPLACE_ID,
+          500,
+          `GS샵 엑셀을 받았지만 주문행을 찾지 못했습니다. ${workbookDiagnostics(workbook)}`,
+        )
       } catch (error) {
         downloadError = error
         await setProgress?.(`GS샵 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집`)

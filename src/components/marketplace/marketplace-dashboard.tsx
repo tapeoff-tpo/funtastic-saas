@@ -647,7 +647,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
                     onClick={cancelCollect}
                     className="rounded-md border border-red-300 px-3 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
-                    중지
+                    강제 종료
                   </button>
                 )}
                 <button

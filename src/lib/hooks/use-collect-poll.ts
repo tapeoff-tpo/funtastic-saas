@@ -161,6 +161,42 @@ export function useCollectPoll(): UseCollectPollReturn {
         const data = await res.json()
 
         if (!res.ok) {
+          const activeJob = data.activeJob && typeof data.activeJob === 'object'
+            ? data.activeJob as {
+                id?: string | null
+                marketplaceId?: string | null
+                connectionId?: string | null
+                jobType?: string | null
+                status?: string | null
+                progressMessage?: string | null
+              }
+            : null
+          const activeJobId = typeof activeJob?.id === 'string' ? activeJob.id : null
+          const activeJobStatus = activeJob?.status === 'queued' || activeJob?.status === 'running'
+            ? activeJob.status
+            : null
+
+          if (activeJobId && activeJobStatus) {
+            const activeMessage = formatActiveCollectionError(data.error || '주문 수집 요청 실패', activeJob)
+            setJobLogIds([activeJobId])
+            setLogs([
+              {
+                id: activeJobId,
+                marketplaceId: activeJob.marketplaceId ?? null,
+                connectionId: activeJob.connectionId ?? null,
+                jobType: activeJob.jobType ?? null,
+                status: activeJobStatus,
+                ordersCollected: null,
+                claimsCollected: null,
+                errorMessage: activeMessage,
+                progressMessage: activeJob.progressMessage ?? activeMessage,
+                completedAt: null,
+              },
+            ])
+            pollStatus([activeJobId])
+            return
+          }
+
           setLogs([
             {
               id: '__error__',

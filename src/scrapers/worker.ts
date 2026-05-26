@@ -19,7 +19,7 @@ import { closeBrowser } from './browser'
 import { readScrapeCredentials, saveStorageState } from './credentials'
 import { db } from '@/lib/db'
 import { jobLogs, shipments } from '@/lib/db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import type { ScrapeJobData } from './types'
 import type { MarketplaceId } from '@/lib/marketplace/types'
 import { saveNormalizedOrdersForConnection, upsertClaim } from '@/lib/jobs/workers/order-collector'
@@ -149,7 +149,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
           ordersCollected: result.ordersCollected,
           progressMessage: summary,
         })
-        .where(eq(jobLogs.id, logRow.id))
+        .where(and(eq(jobLogs.id, logRow.id), sql`${jobLogs.status} <> 'cancelled'`))
     } else if (jobType === 'scrape-claims') {
       await setProgress('RPA 브라우저로 클레임 페이지 접속 중...')
       const sinceDate = since ? new Date(since) : new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
@@ -167,7 +167,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
           claimsCollected,
           progressMessage: `CS ${claimsCollected}건 수집/갱신`,
         })
-        .where(eq(jobLogs.id, logRow.id))
+        .where(and(eq(jobLogs.id, logRow.id), sql`${jobLogs.status} <> 'cancelled'`))
     } else if (jobType === 'scrape-inquiries') {
       if (!scraper.getInquiries) {
         throw new Error(`${marketplaceId} RPA 문의수집은 아직 지원하지 않습니다.`)
@@ -187,7 +187,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
           claimsCollected: inquiriesCollected,
           progressMessage: `문의 ${inquiriesCollected}건 수집/갱신`,
         })
-        .where(eq(jobLogs.id, logRow.id))
+        .where(and(eq(jobLogs.id, logRow.id), sql`${jobLogs.status} <> 'cancelled'`))
     } else if (jobType === 'upload-invoice') {
       await setProgress('RPA 브라우저로 송장 전송 준비 중...')
       if (!orderId || !shipmentId || !invoice) throw new Error('orderId/shipmentId/invoice required for upload-invoice')
@@ -206,7 +206,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         await db
           .update(jobLogs)
           .set({ status: 'completed', completedAt: new Date() })
-          .where(eq(jobLogs.id, logRow.id))
+          .where(and(eq(jobLogs.id, logRow.id), sql`${jobLogs.status} <> 'cancelled'`))
         return
       }
 
@@ -216,7 +216,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
       await db
         .update(jobLogs)
         .set({ status: 'completed', completedAt: new Date() })
-        .where(eq(jobLogs.id, logRow.id))
+        .where(and(eq(jobLogs.id, logRow.id), sql`${jobLogs.status} <> 'cancelled'`))
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error'
@@ -224,7 +224,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
     await db
       .update(jobLogs)
       .set({ status: 'failed', completedAt: new Date(), errorMessage: msg })
-      .where(eq(jobLogs.id, logRow.id))
+      .where(and(eq(jobLogs.id, logRow.id), sql`${jobLogs.status} <> 'cancelled'`))
       .catch(() => {})
     if (jobType === 'upload-invoice' && shipmentId) {
       const [shipment] = await db

@@ -18,6 +18,15 @@ const MARKETPLACE_ID: MarketplaceId = 'gs-shop'
 const BASE_URL = 'https://partners.gsshop.com'
 const LOGIN_URL = `${BASE_URL}/sign-in`
 
+function isPartnersRootUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.origin === BASE_URL && (url.pathname === '/' || url.pathname === '')
+  } catch {
+    return false
+  }
+}
+
 async function gotoGs(page: Page, url: string): Promise<void> {
   await page.goto(url, { waitUntil: 'commit', timeout: 60_000 })
   await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
@@ -314,9 +323,7 @@ async function isLoggedIn(page: Page, options?: { acceptAuthenticatedShell?: boo
   }
 
   if (options?.acceptAuthenticatedShell) {
-    const url = new URL(page.url())
-    const isPartnersShell = url.origin === BASE_URL && (url.pathname === '/' || url.pathname === '')
-    if (isPartnersShell) {
+    if (isPartnersRootUrl(page.url())) {
       const passwordInput = await page.locator('input[type="password"]').first().isVisible({ timeout: 1_000 }).catch(() => false)
       const signInText = /아이디|비밀번호|인증번호 받기/.test(bodyText)
       if (!passwordInput && !signInText) return true
@@ -369,6 +376,7 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   ])
 
   if (!idInput || !passwordInput) {
+    if (isPartnersRootUrl(page.url())) return
     if (await isLoggedIn(page, { acceptAuthenticatedShell: true })) return
     throw new MarketplaceApiError(
       MARKETPLACE_ID,
@@ -435,7 +443,7 @@ export class GsShopScraper implements MarketplaceScraper {
 
     try {
       await gotoGs(page, BASE_URL)
-      if (await isLoggedIn(page)) return { ok: true }
+      if (await isLoggedIn(page, { acceptAuthenticatedShell: true })) return { ok: true }
       return { ok: false, error: 'GS샵 세션이 만료되었습니다.' }
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : 'GS샵 세션 확인 오류' }

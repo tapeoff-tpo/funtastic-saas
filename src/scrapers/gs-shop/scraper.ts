@@ -492,6 +492,10 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   ])
 
   if (!idInput || !passwordInput) {
+    if (await isSecondFactorPage(page)) {
+      await handleNaverEmailSecondFactor(page, credentials)
+      return
+    }
     if (isPartnersRootUrl(page.url())) return
     if (await isLoggedIn(page, { acceptAuthenticatedShell: true })) return
     throw new MarketplaceApiError(
@@ -508,7 +512,10 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
   })
   await page.waitForTimeout(1_500)
 
-  if (!(await waitForLoggedInAfterSubmit(page)) && await isSecondFactorPage(page)) {
+  const loggedInAfterSubmit = await waitForLoggedInAfterSubmit(page)
+  if (await isSecondFactorPage(page)) {
+    await handleNaverEmailSecondFactor(page, credentials)
+  } else if (!loggedInAfterSubmit && await isSecondFactorPage(page)) {
     await handleNaverEmailSecondFactor(page, credentials)
   }
 
@@ -518,7 +525,7 @@ async function ensureLoggedIn(page: Page, credentials: ScraperCredentials): Prom
       throw new MarketplaceApiError(
         MARKETPLACE_ID,
         428,
-        `GS샵 2차 인증이 필요합니다. 휴대폰 인증은 서버 RPA에서 안정적으로 자동 처리하기 어려워 API 연동을 우선 검토해야 합니다. (${await summarizePage(page)})`,
+        `GS샵 2차 인증 화면에 머물러 있습니다. 영업담당자 네이버 이메일 인증 버튼을 자동으로 눌러야 하므로 마켓연동의 GS SHOP RPA 계정에 네이버 메일 인증정보가 저장되어 있는지 확인해주세요. (${await summarizePage(page)})`,
       )
     }
     throw new MarketplaceApiError(

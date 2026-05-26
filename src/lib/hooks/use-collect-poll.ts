@@ -10,6 +10,8 @@ export interface JobLogResult {
   claimsCollected: number | null
   errorMessage: string | null
   progressMessage: string | null
+  startedAt?: string | null
+  createdAt?: string | null
   completedAt: string | null
 }
 
@@ -89,6 +91,8 @@ export function useCollectPoll(): UseCollectPollReturn {
                     ...log,
                     status: 'failed',
                     errorMessage: log.errorMessage || POLL_TIMEOUT_MESSAGE,
+                    startedAt: log.startedAt ?? log.createdAt ?? null,
+                    createdAt: log.createdAt ?? null,
                     completedAt: new Date().toISOString(),
                   }
                 : log,
@@ -104,6 +108,8 @@ export function useCollectPoll(): UseCollectPollReturn {
             claimsCollected: null,
             errorMessage: POLL_TIMEOUT_MESSAGE,
             progressMessage: null,
+            startedAt: null,
+            createdAt: null,
             completedAt: new Date().toISOString(),
           }))
         })
@@ -169,6 +175,8 @@ export function useCollectPoll(): UseCollectPollReturn {
                 jobType?: string | null
                 status?: string | null
                 progressMessage?: string | null
+                startedAt?: string | null
+                createdAt?: string | null
               }
             : null
           const activeJobId = typeof activeJob?.id === 'string' ? activeJob.id : null
@@ -190,6 +198,8 @@ export function useCollectPoll(): UseCollectPollReturn {
                 claimsCollected: null,
                 errorMessage: activeMessage,
                 progressMessage: activeJob.progressMessage ?? activeMessage,
+                startedAt: activeJob.startedAt ?? null,
+                createdAt: activeJob.createdAt ?? null,
                 completedAt: null,
               },
             ])
@@ -208,6 +218,8 @@ export function useCollectPoll(): UseCollectPollReturn {
               claimsCollected: null,
               errorMessage: formatActiveCollectionError(data.error || '주문 수집 요청 실패', data.activeJob),
               progressMessage: data.activeJob?.progressMessage ?? null,
+              startedAt: null,
+              createdAt: null,
               completedAt: null,
             },
           ])
@@ -228,6 +240,8 @@ export function useCollectPoll(): UseCollectPollReturn {
             claimsCollected: null,
             errorMessage: '네트워크 오류',
             progressMessage: null,
+            startedAt: null,
+            createdAt: null,
             completedAt: null,
           },
         ])

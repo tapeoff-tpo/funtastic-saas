@@ -108,6 +108,8 @@ export async function GET(request: NextRequest) {
       claimsCollected: jobLogs.claimsCollected,
       errorMessage: jobLogs.errorMessage,
       progressMessage: jobLogs.progressMessage,
+      startedAt: jobLogs.startedAt,
+      createdAt: jobLogs.createdAt,
       completedAt: jobLogs.completedAt,
     })
     .from(jobLogs)

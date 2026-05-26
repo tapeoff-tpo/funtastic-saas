@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useTransition, useMemo, useCallback } from 'react'
+import { useState, useRef, useTransition, useMemo, useCallback, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useCollectPoll, type JobLogResult } from '@/lib/hooks/use-collect-poll'
@@ -69,6 +69,16 @@ function formatDateTime(date: Date): string {
     minute: '2-digit',
     hour12: false,
   }).format(date)
+}
+
+function formatElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  if (minutes < 60) return `${minutes}분 ${String(seconds).padStart(2, '0')}초`
+  const hours = Math.floor(minutes / 60)
+  const restMinutes = minutes % 60
+  return `${hours}시간 ${restMinutes}분`
 }
 
 function isExpiringSoon(expiresAt: Date): boolean {
@@ -192,6 +202,13 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
   const [filter, setFilter] = useState<FilterKey>('all')
   const [search, setSearch] = useState('')
   const { collecting, logs, startCollect, cancelCollect, clearResults } = useCollectPoll()
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!logs?.some((log) => log.status === 'queued' || log.status === 'running')) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [logs])
 
   const connectedMarkets = useMemo(
     () => connections.filter((c) => c.status !== 'disconnected' && !c.isManual),
@@ -327,6 +344,12 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
   const successCount = enrichedLogs?.filter((r) => r.status === 'completed').length ?? 0
   const failCount = enrichedLogs?.filter((r) => r.status === 'failed').length ?? 0
   const cancelledCount = enrichedLogs?.filter((r) => r.status === 'cancelled').length ?? 0
+  const activeLog = enrichedLogs?.find((r) => r.status === 'running')
+    ?? enrichedLogs?.find((r) => r.status === 'queued')
+  const activeStartedAt = activeLog?.startedAt || activeLog?.createdAt
+    ? new Date(activeLog.startedAt ?? activeLog.createdAt!)
+    : null
+  const activeElapsed = activeStartedAt ? formatElapsed(now - activeStartedAt.getTime()) : null
 
   // 컬럼 너비 — localStorage 에 저장
   const [columnSizing, setColumnSizing] = useColumnSizing('marketplace-dashboard')
@@ -663,9 +686,25 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
               </div>
             </div>
 
+            {!allDone && activeLog && (
+              <div className="shrink-0 border-b bg-blue-50 px-5 py-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-blue-900">{activeLog.displayName}</span>
+                  {activeElapsed && (
+                    <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-blue-700">
+                      경과 {activeElapsed}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 break-words text-xs text-blue-800">
+                  현재 단계: {activeLog.progressMessage ?? (activeLog.status === 'queued' ? '대기 중...' : '수집 중...')}
+                </p>
+              </div>
+            )}
+
             <div className="min-h-0 flex-1 divide-y overflow-y-auto px-5">
               {enrichedLogs!.map((r, i) => (
-                <ResultRow key={i} log={r} />
+                <ResultRow key={i} log={r} now={now} />
               ))}
             </div>
 
@@ -1434,12 +1473,14 @@ function ExcelImportTemplateModal({
   )
 }
 
-function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
+function ResultRow({ log, now }: { log: JobLogResult & { displayName: string }, now: number }) {
   const isCompleted = log.status === 'completed'
   const isFailed = log.status === 'failed'
   const isCancelled = log.status === 'cancelled'
   const isRunning = log.status === 'running'
   const isQueued = log.status === 'queued' || (!isCompleted && !isFailed && !isCancelled && !isRunning)
+  const startedAt = log.startedAt ?? log.createdAt
+  const elapsed = startedAt ? formatElapsed(now - new Date(startedAt).getTime()) : null
 
   return (
     <div className="flex items-start gap-3 py-3">
@@ -1452,7 +1493,14 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
         )}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{log.displayName}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium">{log.displayName}</p>
+          {(isRunning || isQueued) && elapsed && (
+            <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {elapsed}
+            </span>
+          )}
+        </div>
         {isCompleted && (
           <>
             <p className="text-sm text-muted-foreground">
@@ -1471,11 +1519,19 @@ function ResultRow({ log }: { log: JobLogResult & { displayName: string } }) {
         )}
         {isCancelled && <p className="text-sm text-muted-foreground">취소됨</p>}
         {isRunning && (
-          <p className="text-sm text-muted-foreground">
-            {log.progressMessage ?? '수집 중...'}
-          </p>
+          <div className="space-y-0.5">
+            <p className="text-sm text-muted-foreground">
+              현재 단계: {log.progressMessage ?? '수집 중...'}
+            </p>
+            {elapsed && <p className="text-xs text-muted-foreground">경과 시간 {elapsed}</p>}
+          </div>
         )}
-        {isQueued && <p className="text-sm text-muted-foreground">대기 중...</p>}
+        {isQueued && (
+          <div className="space-y-0.5">
+            <p className="text-sm text-muted-foreground">현재 단계: 대기 중...</p>
+            {elapsed && <p className="text-xs text-muted-foreground">경과 시간 {elapsed}</p>}
+          </div>
+        )}
       </div>
     </div>
   )

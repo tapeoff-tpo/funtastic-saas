@@ -142,6 +142,7 @@ export async function GET(req: NextRequest) {
       SELECT s.*
       FROM mapping_sources s
       WHERE s.user_id = o.user_id
+        AND s.marketplace_id = o.marketplace_id
         AND (
           (s.marketplace_option_id <> ''
             AND (
@@ -155,28 +156,7 @@ export async function GET(req: NextRequest) {
             AND (oi.marketplace_item_id = s.marketplace_product_id
               OR oi.marketplace_item_id LIKE s.marketplace_product_id || '-%'))
         )
-        AND (
-          s.marketplace_id = o.marketplace_id
-          OR (
-            SELECT COUNT(DISTINCT sx.mapping_code_id)::int
-            FROM mapping_sources sx
-            WHERE sx.user_id = o.user_id
-              AND (
-                (sx.marketplace_option_id <> ''
-                  AND (
-                    oi.marketplace_item_id = sx.marketplace_product_id || '-' || sx.marketplace_option_id
-                    OR (sx.marketplace_option_id = ${exactOptionId}
-                      AND oi.marketplace_item_id = sx.marketplace_product_id)
-                    OR (oi.marketplace_item_id = sx.marketplace_product_id
-                      AND LEFT(COALESCE(oi.option_text, ''), 100) = sx.marketplace_option_id)
-                  ))
-                OR (sx.marketplace_option_id = ''
-                  AND (oi.marketplace_item_id = sx.marketplace_product_id
-                    OR oi.marketplace_item_id LIKE sx.marketplace_product_id || '-%'))
-              )
-          ) = 1
-        )
-      ORDER BY (s.marketplace_id = o.marketplace_id) DESC, (s.marketplace_option_id <> '') DESC
+      ORDER BY (s.marketplace_option_id <> '') DESC
       LIMIT 1
     ) ms ON TRUE
   `
@@ -218,24 +198,15 @@ export async function GET(req: NextRequest) {
       EXISTS (
         SELECT 1 FROM mapping_sources s2
         WHERE s2.user_id = o.user_id
+          AND s2.marketplace_id = o.marketplace_id
           AND s2.marketplace_option_id = ''
           AND (oi.marketplace_item_id = s2.marketplace_product_id
             OR oi.marketplace_item_id LIKE s2.marketplace_product_id || '-%')
-          AND (
-            s2.marketplace_id = o.marketplace_id
-            OR (
-              SELECT COUNT(DISTINCT sx.mapping_code_id)::int
-              FROM mapping_sources sx
-              WHERE sx.user_id = o.user_id
-                AND sx.marketplace_option_id = ''
-                AND (oi.marketplace_item_id = sx.marketplace_product_id
-                  OR oi.marketplace_item_id LIKE sx.marketplace_product_id || '-%')
-            ) = 1
-          )
       )                               AS "hasProductMapping",
       EXISTS (
         SELECT 1 FROM mapping_sources s3
         WHERE s3.user_id = o.user_id
+          AND s3.marketplace_id = o.marketplace_id
           AND s3.marketplace_option_id <> ''
           AND (
             oi.marketplace_item_id = s3.marketplace_product_id || '-' || s3.marketplace_option_id
@@ -243,22 +214,6 @@ export async function GET(req: NextRequest) {
               AND oi.marketplace_item_id = s3.marketplace_product_id)
             OR (oi.marketplace_item_id = s3.marketplace_product_id
               AND LEFT(COALESCE(oi.option_text, ''), 100) = s3.marketplace_option_id)
-          )
-          AND (
-            s3.marketplace_id = o.marketplace_id
-            OR (
-              SELECT COUNT(DISTINCT sx.mapping_code_id)::int
-              FROM mapping_sources sx
-              WHERE sx.user_id = o.user_id
-                AND sx.marketplace_option_id <> ''
-                AND (
-                  oi.marketplace_item_id = sx.marketplace_product_id || '-' || sx.marketplace_option_id
-                  OR (sx.marketplace_option_id = ${exactOptionId}
-                    AND oi.marketplace_item_id = sx.marketplace_product_id)
-                  OR (oi.marketplace_item_id = sx.marketplace_product_id
-                    AND LEFT(COALESCE(oi.option_text, ''), 100) = sx.marketplace_option_id)
-                )
-            ) = 1
           )
       )                               AS "hasOptionMapping",
       COALESCE(

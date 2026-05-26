@@ -38,8 +38,7 @@ export async function GET() {
       AND oi.marketplace_item_id IS NOT NULL
       AND oi.marketplace_item_id <> ''
       AND o.ordered_at > NOW() - INTERVAL '90 days'
-      AND NOT (
-        EXISTS (
+      AND NOT EXISTS (
           SELECT 1 FROM mapping_sources ms
           WHERE ms.user_id = o.user_id
             AND ms.marketplace_id = o.marketplace_id
@@ -59,26 +58,6 @@ export async function GET() {
                   OR oi.marketplace_item_id LIKE ms.marketplace_product_id || '-%'))
             )
         )
-        OR (
-          SELECT COUNT(DISTINCT ms.mapping_code_id)::int
-          FROM mapping_sources ms
-          WHERE ms.user_id = o.user_id
-            AND (
-              -- 쇼핑몰 ID fallback: 단품/품번 코드가 전역에서 한 매핑코드로만 귀결될 때만 매핑 처리
-              (ms.marketplace_option_id <> ''
-                AND (
-                  oi.marketplace_item_id = ms.marketplace_product_id || '-' || ms.marketplace_option_id
-                  OR (ms.marketplace_option_id = ${exactOptionId}
-                    AND oi.marketplace_item_id = ms.marketplace_product_id)
-                  OR (oi.marketplace_item_id = ms.marketplace_product_id
-                    AND LEFT(COALESCE(oi.option_text, ''), 100) = ms.marketplace_option_id)
-                ))
-              OR (ms.marketplace_option_id = ''
-                AND (oi.marketplace_item_id = ms.marketplace_product_id
-                  OR oi.marketplace_item_id LIKE ms.marketplace_product_id || '-%'))
-            )
-        ) = 1
-      )
     GROUP BY o.marketplace_id, oi.marketplace_item_id
     ORDER BY occurrences DESC
     LIMIT 500

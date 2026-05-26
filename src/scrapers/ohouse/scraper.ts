@@ -16,7 +16,7 @@ const ORDER_URL_CANDIDATES = [
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v37'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v38'
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
@@ -1136,6 +1136,49 @@ async function clickOhouseDownloadPrompts(page: Page, timeoutMs = 10_000): Promi
     const clicked = await prompt
       .evaluate((dialog) => {
         const text = (dialog.textContent || '').replace(/\s+/g, ' ').trim()
+        const visible = (element: HTMLElement) => {
+          const style = window.getComputedStyle(element)
+          const rect = element.getBoundingClientRect()
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+        }
+        const setNativeValue = (input: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+          const prototype = input instanceof HTMLTextAreaElement
+            ? window.HTMLTextAreaElement.prototype
+            : window.HTMLInputElement.prototype
+          const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+          setter?.call(input, value)
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          input.dispatchEvent(new Event('change', { bubbles: true }))
+        }
+
+        const checks = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"], input[type="radio"]'))
+          .filter((input) => !input.disabled && visible(input))
+        for (const input of checks) {
+          const labelText = [
+            input.labels ? Array.from(input.labels).map((label) => label.textContent ?? '').join(' ') : '',
+            input.closest('label')?.textContent ?? '',
+            input.parentElement?.textContent ?? '',
+          ].join(' ')
+          if (/암호화|개인정보|동의|확인|다운로드/.test(labelText) && !input.checked) {
+            input.click()
+          }
+        }
+
+        const reasonInputs = Array.from(dialog.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('textarea, input[type="text"], input:not([type])'))
+          .filter((input) => !input.disabled && !input.readOnly && visible(input))
+        for (const input of reasonInputs) {
+          if (input.value.trim()) continue
+          const labelText = [
+            input.getAttribute('placeholder') ?? '',
+            input.getAttribute('aria-label') ?? '',
+            input.closest('label')?.textContent ?? '',
+            input.parentElement?.textContent ?? '',
+          ].join(' ')
+          if (/사유|목적|비밀번호|암호|다운로드|개인정보/.test(labelText)) {
+            setNativeValue(input, /비밀번호|암호/.test(labelText) ? '0000' : '주문 수집')
+          }
+        }
+
         const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, [role="button"]'))
         const target = controls.find((control) => {
           const label = control instanceof HTMLInputElement ? control.value : control.innerText || control.textContent || ''

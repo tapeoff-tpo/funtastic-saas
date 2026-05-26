@@ -14,6 +14,7 @@ interface Props {
   reason: string | null
   requestReason: string | null
   requestReasonRegisteredAt: string | null
+  requestReasonHistory: Array<{ reason: string; registeredAt: string }>
 }
 
 const TYPE_LABELS: Record<ClaimType, string> = {
@@ -52,16 +53,28 @@ const NEXT_STATES: Record<ClaimStatus, ClaimStatus[]> = {
   withdrawn: [],
 }
 
-export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, requestReason, requestReasonRegisteredAt }: Props) {
+export function ClaimStatusActions({
+  claimId,
+  claimType,
+  claimStatus,
+  reason,
+  requestReason,
+  requestReasonRegisteredAt,
+  requestReasonHistory,
+}: Props) {
   const router = useRouter()
   const [pendingStatus, setPendingStatus] = useState<ClaimStatus | null>(null)
   const [returnItems, setReturnItems] = useState<Array<{ sku: string; quantity: number }> | null>(null)
   const [availableQuantities, setAvailableQuantities] = useState<Record<string, number>>({})
   const [defectiveQuantities, setDefectiveQuantities] = useState<Record<string, number>>({})
   const [returnItemsLoading, setReturnItemsLoading] = useState(false)
-  const [requestReasonInput, setRequestReasonInput] = useState(requestReason ?? '')
-  const [savedRequestReason, setSavedRequestReason] = useState(requestReason)
-  const [savedRequestReasonRegisteredAt, setSavedRequestReasonRegisteredAt] = useState(requestReasonRegisteredAt)
+  const initialReasonHistory = requestReasonHistory.length > 0
+    ? requestReasonHistory
+    : requestReason && requestReasonRegisteredAt
+      ? [{ reason: requestReason, registeredAt: requestReasonRegisteredAt }]
+      : []
+  const [requestReasonInput, setRequestReasonInput] = useState('')
+  const [savedRequestReasonHistory, setSavedRequestReasonHistory] = useState(initialReasonHistory)
   const [reasonSaving, setReasonSaving] = useState(false)
   const [, startTransition] = useTransition()
 
@@ -92,9 +105,9 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
         const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
         throw new Error(error ?? '접수 사유 저장 실패')
       }
-      const data = await res.json() as { requestReason: string; reasonRegisteredAt: string }
-      setSavedRequestReason(data.requestReason)
-      setSavedRequestReasonRegisteredAt(data.reasonRegisteredAt)
+      const data = await res.json() as { reasonHistory: Array<{ reason: string; registeredAt: string }> }
+      setSavedRequestReasonHistory(data.reasonHistory)
+      setRequestReasonInput('')
       toast.success('접수 사유가 저장되었습니다.')
       router.refresh()
     } catch (error) {
@@ -208,15 +221,21 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, re
         </span>
       </div>
       <div className="mt-2 rounded-md border bg-muted/30 px-3 py-2">
-        <div className="mb-1 flex items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
-          <span>접수 사유</span>
-          {savedRequestReason && savedRequestReasonRegisteredAt && (
-            <span>{formatRegisteredAt(savedRequestReasonRegisteredAt)}</span>
-          )}
-        </div>
-        <div className="whitespace-pre-wrap break-words text-sm text-foreground">
-          {savedRequestReason || '등록된 접수 사유가 없습니다.'}
-        </div>
+        <div className="mb-2 text-[11px] font-medium text-muted-foreground">접수 사유 이력</div>
+        {savedRequestReasonHistory.length === 0 ? (
+          <div className="text-sm text-foreground">등록된 접수 사유가 없습니다.</div>
+        ) : (
+          <div className="space-y-2">
+            {savedRequestReasonHistory.map((entry, index) => (
+              <div key={`${entry.registeredAt}-${index}`} className="rounded border bg-white px-2.5 py-2">
+                <div className="mb-1 text-[11px] text-muted-foreground">
+                  {formatRegisteredAt(entry.registeredAt)}
+                </div>
+                <div className="whitespace-pre-wrap break-words text-sm text-foreground">{entry.reason}</div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="mt-2 space-y-2">
         <textarea

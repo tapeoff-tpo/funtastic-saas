@@ -216,6 +216,12 @@ export default async function OrdersPage({
     claimRequestReasonRegisteredAt: (o as { claimRequestReasonRegisteredAt?: Date | string | null }).claimRequestReasonRegisteredAt
       ? new Date((o as { claimRequestReasonRegisteredAt: Date | string }).claimRequestReasonRegisteredAt).toISOString()
       : null,
+    claimRequestReasonHistory: ((o as {
+      claimRequestReasonHistory?: Array<{ reason: string; registeredAt: Date | string }>
+    }).claimRequestReasonHistory ?? []).map((entry) => ({
+      reason: entry.reason,
+      registeredAt: new Date(entry.registeredAt).toISOString(),
+    })),
     historicalClaimStatuses: (o as { historicalClaimStatuses?: string[] }).historicalClaimStatuses ?? [],
     invoiceStatus: o.invoiceStatus as OrderRow['invoiceStatus'],
     trackingNumber: o.trackingNumber,

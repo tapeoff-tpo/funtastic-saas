@@ -960,6 +960,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     reason: string | null
     requestReason: string | null
     requestReasonRegisteredAt: Date | string | null
+    requestReasonHistory: Array<{ reason: string; registeredAt: Date | string }>
   }
   const claimByOrderId = new Map<string, ClaimSummary>()
   for (const claim of claimRows) {
@@ -980,13 +981,31 @@ export async function getOrders(filters: OrderFilters = {}) {
       const requestReasonRegisteredAt = typeof rawRegisteredAt === 'string' && rawRegisteredAt
         ? rawRegisteredAt
         : claim.requestedAt
+      const rawHistory = claim.rawData && typeof claim.rawData === 'object'
+        ? (claim.rawData as { reasonHistory?: unknown }).reasonHistory
+        : null
+      const parsedHistory = Array.isArray(rawHistory)
+        ? rawHistory.flatMap((entry) => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+            const row = entry as { reason?: unknown; registeredAt?: unknown }
+            if (typeof row.reason !== 'string' || !row.reason.trim() || typeof row.registeredAt !== 'string') return []
+            return [{ reason: row.reason.trim(), registeredAt: row.registeredAt }]
+          })
+        : []
+      const requestReasonHistory = parsedHistory.length > 0
+        ? parsedHistory
+        : requestReason
+          ? [{ reason: requestReason, registeredAt: requestReasonRegisteredAt }]
+          : []
+      const latestReason = requestReasonHistory.at(-1)
       claimByOrderId.set(claim.orderId, {
         id: claim.id,
         claimType: claim.claimType,
         claimStatus: claim.claimStatus,
         reason: claim.reason,
-        requestReason,
-        requestReasonRegisteredAt,
+        requestReason: latestReason?.reason ?? requestReason,
+        requestReasonRegisteredAt: latestReason?.registeredAt ?? requestReasonRegisteredAt,
+        requestReasonHistory,
       })
     }
   }
@@ -1170,6 +1189,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       claimReason: claim?.reason ?? null,
       claimRequestReason: claim?.requestReason ?? null,
       claimRequestReasonRegisteredAt: claim?.requestReasonRegisteredAt ?? null,
+      claimRequestReasonHistory: claim?.requestReasonHistory ?? [],
       invoiceStatus: shipment?.uploadStatus ?? null,
       trackingNumber: shipment?.trackingNumber ?? null,
       carrierName: shipment?.carrierName ?? null,

@@ -13,6 +13,27 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 const VALID_STATUSES = ['requested', 'processing', 'completed', 'rejected', 'withdrawn'] as const
 type ClaimStatus = (typeof VALID_STATUSES)[number]
+type ReasonHistoryEntry = { reason: string; registeredAt: string }
+
+function getReasonHistory(rawData: Record<string, unknown> | null, requestedAt: Date): ReasonHistoryEntry[] {
+  const stored = rawData?.reasonHistory
+  if (Array.isArray(stored)) {
+    const parsed = stored.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const row = entry as { reason?: unknown; registeredAt?: unknown }
+      if (typeof row.reason !== 'string' || !row.reason.trim() || typeof row.registeredAt !== 'string') return []
+      return [{ reason: row.reason.trim(), registeredAt: row.registeredAt }]
+    })
+    if (parsed.length > 0) return parsed
+  }
+
+  const originalReason = rawData?.originalReason
+  if (typeof originalReason !== 'string' || !originalReason.trim()) return []
+  const registeredAt = typeof rawData?.reasonRegisteredAt === 'string'
+    ? rawData.reasonRegisteredAt
+    : requestedAt.toISOString()
+  return [{ reason: originalReason.trim(), registeredAt }]
+}
 
 export async function GET(
   _req: NextRequest,
@@ -53,7 +74,7 @@ export async function PATCH(
     }
 
     const [claim] = await db
-      .select({ id: claims.id, rawData: claims.rawData })
+      .select({ id: claims.id, rawData: claims.rawData, requestedAt: claims.requestedAt })
       .from(claims)
       .where(and(eq(claims.id, id), eq(claims.userId, workspaceUserId)))
       .limit(1)
@@ -66,7 +87,11 @@ export async function PATCH(
       : null
     const originalClaimId = typeof linkedOriginalClaimId === 'string' ? linkedOriginalClaimId : claim.id
     const reasonRegisteredAt = new Date().toISOString()
-    const reasonData = JSON.stringify({ originalReason: requestReason, reasonRegisteredAt })
+    const reasonHistory = [
+      ...getReasonHistory(claim.rawData, claim.requestedAt),
+      { reason: requestReason, registeredAt: reasonRegisteredAt },
+    ]
+    const reasonData = JSON.stringify({ reasonHistory })
 
     await db
       .update(claims)
@@ -82,7 +107,7 @@ export async function PATCH(
         ),
       ))
 
-    return NextResponse.json({ success: true, requestReason, reasonRegisteredAt })
+    return NextResponse.json({ success: true, reasonHistory })
   }
 
   if (!body.claimStatus || !VALID_STATUSES.includes(body.claimStatus)) {

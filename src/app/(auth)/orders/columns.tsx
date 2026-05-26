@@ -301,6 +301,7 @@ export interface OrderRow {
   claimReason?: string | null
   claimRequestReason?: string | null
   claimRequestReasonRegisteredAt?: string | null
+  claimRequestReasonHistory?: Array<{ reason: string; registeredAt: string }>
   historicalClaimStatuses?: string[]
   invoiceStatus?: InvoiceUploadStatus | null
   trackingNumber?: string | null
@@ -579,6 +580,7 @@ function ClaimActionDropdown({
   reason,
   requestReason,
   requestReasonRegisteredAt,
+  requestReasonHistory,
 }: {
   claimId: string
   claimType: ClaimType
@@ -586,6 +588,7 @@ function ClaimActionDropdown({
   reason: string | null
   requestReason: string | null
   requestReasonRegisteredAt: string | null
+  requestReasonHistory: Array<{ reason: string; registeredAt: string }>
 }) {
   const [open, setOpen] = useState(false)
 
@@ -616,6 +619,7 @@ function ClaimActionDropdown({
               reason={reason}
               requestReason={requestReason}
               requestReasonRegisteredAt={requestReasonRegisteredAt}
+              requestReasonHistory={requestReasonHistory}
             />
           </div>
         </div>
@@ -729,6 +733,7 @@ export const columns: ColumnDef<OrderRow>[] = [
                 reason={order.claimReason ?? null}
                 requestReason={order.claimRequestReason ?? null}
                 requestReasonRegisteredAt={order.claimRequestReasonRegisteredAt ?? null}
+                requestReasonHistory={order.claimRequestReasonHistory ?? []}
               />
             ) : (
               <ClaimCreateButton order={order} table={table} />

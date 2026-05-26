@@ -206,6 +206,7 @@ export function MappingManager() {
     const form = emptyForm()
     if (prefillSource) {
       form.name = prefillSource.productName ?? ''
+      const capturedOption = prefillSource.optionText?.trim().slice(0, 100) ?? ''
       // marketplaceItemId 가 `{prod}-{opt}` 형태면 split, 아니면 그대로 productId 로 사용
       const id = prefillSource.marketplaceItemId
       const sepIdx = id.indexOf('-')
@@ -213,7 +214,7 @@ export function MappingManager() {
         ? { product: id.slice(0, sepIdx), option: id.slice(sepIdx + 1) }
         : prefillMode === 'product' && sepIdx > 0
           ? { product: id.slice(0, sepIdx), option: '' }
-          : { product: id, option: prefillMode === 'option' ? EXACT_OPTION_ID : '' }
+          : { product: id, option: prefillMode === 'option' ? (capturedOption || EXACT_OPTION_ID) : '' }
       form.sources.push({
         mode: split.option ? 'option' : 'product',
         marketplaceId: prefillSource.marketplaceId,

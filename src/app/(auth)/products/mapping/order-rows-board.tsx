@@ -392,7 +392,9 @@ export function OrderRowsBoard() {
       return {
         marketplaceId: r.marketplaceId,
         marketplaceProductId: split.product,
-        marketplaceOptionId: bulkTarget.mode === 'option' ? (split.option || EXACT_OPTION_ID) : '',
+        marketplaceOptionId: bulkTarget.mode === 'option'
+          ? (split.option || r.optionText?.trim().slice(0, 100) || EXACT_OPTION_ID)
+          : '',
         productNameSnapshot: r.productName || null,
         optionNameSnapshot: r.optionText || null,
       }

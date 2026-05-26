@@ -722,6 +722,95 @@ function parseOrdersWorkbook(buffer: Buffer): NormalizedOrder[] {
   return orders
 }
 
+async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
+  for (const frame of page.frames()) {
+    const rows = await frame.evaluate(() => {
+      const normalize = (value: string) => value.replace(/\s+/g, '').replace(/[()[\]{}·ㆍ:：/_-]/g, '').trim()
+      const text = (element: Element | null | undefined) => (element?.textContent || '').replace(/\s+/g, ' ').trim()
+
+      for (const table of Array.from(document.querySelectorAll('table'))) {
+        const tableRows = Array.from(table.querySelectorAll('tr'))
+        if (tableRows.length < 2) continue
+
+        let headerCells = Array.from(table.querySelectorAll('thead tr:last-child th, thead tr:last-child td'))
+        if (headerCells.length === 0) headerCells = Array.from(tableRows[0].querySelectorAll('th,td'))
+        const headers = headerCells.map((cell) => normalize(text(cell)))
+        const joinedHeaders = headers.join(' ')
+        if (!/주문번호/.test(joinedHeaders) || !/(수취인|고객명|주문아이템번호|출하지시일)/.test(joinedHeaders)) continue
+
+        const bodyRows = Array.from(table.querySelectorAll('tbody tr'))
+        const dataRows = bodyRows.length > 0 ? bodyRows : tableRows.slice(1)
+        return dataRows.map((row) => {
+          const cells = Array.from(row.querySelectorAll('td,th')).map((cell) => text(cell))
+          const values: Record<string, string> = {}
+          headers.forEach((header, index) => {
+            if (header) values[header] = cells[index] || ''
+          })
+          return values
+        }).filter((row) => Object.values(row).some(Boolean))
+      }
+
+      return []
+    }).catch(() => [])
+
+    const orders = rowsToNormalizedOrders(rows)
+    if (orders.length > 0) return orders
+  }
+
+  return []
+}
+
+function rowsToNormalizedOrders(rows: Array<Record<string, string>>): NormalizedOrder[] {
+  const normalizedRows = rows.map((row) => ({
+    values: new Map(Object.entries(row).map(([key, value]) => [normalizeHeader(key), value])),
+  }))
+  const orders: NormalizedOrder[] = []
+
+  for (const row of normalizedRows) {
+    const orderNo = getRowValue(row, '주문번호', '주문ID', '접수번호').replace(/^_/, '')
+    if (!/^\d{6,}/.test(orderNo)) continue
+
+    const itemNo = getRowValue(row, '주문아이템번호', '상품주문번호', '주문상세번호') || orderNo
+    const recipientName = getRowValue(row, '수취인', '수취인명', '고객명')
+    const status = getRowValue(row, '상태', '주문상태', '처리상태') || '미처리'
+    const dateText = [
+      getRowValue(row, '출하지시일', '주문일', '주문일자', '접수일'),
+      getRowValue(row, '시간'),
+    ].filter(Boolean).join(' ')
+    const productName = getRowValue(row, '상품명', '상품', '품명') || `GS샵 주문 ${orderNo}`
+
+    orders.push({
+      marketplaceId: MARKETPLACE_ID,
+      marketplaceOrderId: orderNo,
+      marketplaceStatus: status,
+      status: 'new',
+      buyerName: getRowValue(row, '주문자명', '주문자', '고객명') || recipientName || 'GS샵 고객',
+      buyerPhone: getRowValue(row, '주문자전화번호', '주문자연락처') || undefined,
+      recipientName: recipientName || 'GS샵 수취인',
+      recipientPhone: getRowValue(row, '수취인전화번호', '수취인연락처', '휴대폰번호') || undefined,
+      shippingAddress: {
+        zipCode: getRowValue(row, '우편번호', '수취인우편번호'),
+        address1: getRowValue(row, '주소', '배송주소', '수취인주소'),
+        address2: getRowValue(row, '상세주소') || undefined,
+      },
+      orderedAt: parseKstDate(dateText),
+      totalAmount: parseNumber(getRowValue(row, '결제금액', '주문금액', '판매금액', '상품금액')),
+      shippingFee: parseNumber(getRowValue(row, '배송비', '배송료')),
+      deliveryMessage: getRowValue(row, '배송메시지', '배송메세지', '배송시요청사항') || null,
+      rawData: { source: 'gs-shop-rpa-visible-table', row: Object.fromEntries(row.values) },
+      items: [{
+        marketplaceItemId: itemNo,
+        productName,
+        optionText: getRowValue(row, '옵션', '옵션명', '규격') || undefined,
+        quantity: Math.max(parseNumber(getRowValue(row, '수량', '주문수량', '구매수량')), 1),
+        unitPrice: parseNumber(getRowValue(row, '판매가', '단가', '상품금액')),
+      }],
+    })
+  }
+
+  return orders
+}
+
 export class GsShopScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = MARKETPLACE_ID
   readonly displayName = 'GS샵'
@@ -774,10 +863,18 @@ export class GsShopScraper implements MarketplaceScraper {
       await ensureLoggedIn(page, credentials)
       await navigateToOrderList(page, setProgress)
       await setSearchRangeAndSearch(page, since, setProgress)
+      const visibleOrders = await parseVisibleOrders(page)
       await setProgress?.('GS샵 주문 엑셀 다운로드 중...')
-      const workbook = await downloadOrdersExcel(page)
-      await setProgress?.('GS샵 주문 엑셀 파싱 중...')
-      return parseOrdersWorkbook(workbook)
+      try {
+        const workbook = await downloadOrdersExcel(page)
+        await setProgress?.('GS샵 주문 엑셀 파싱 중...')
+        const excelOrders = parseOrdersWorkbook(workbook)
+        if (excelOrders.length > 0) return excelOrders
+      } catch (error) {
+        if (visibleOrders.length === 0) throw error
+        await setProgress?.(`GS샵 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집`)
+      }
+      return visibleOrders
     } finally {
       await close()
     }

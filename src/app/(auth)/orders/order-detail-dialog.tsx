@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation'
 import { ClaimList, MemoPanel } from './[id]/client'
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
 
+const EDITABLE_CONFIRMED_ITEM_STATUSES = new Set<OrderStatus>(['new', 'confirmed', 'preparing', 'ready'])
+
 const CLAIM_TYPE_LABELS: Record<string, string> = {
   cancel: '취소',
   return: '반품',
@@ -85,6 +87,7 @@ interface OrderDetail {
     quantity: number
     unitPrice: string
     sku: string | null
+    lockedAt?: string | null
   }>
   claims: Array<{
     id: string
@@ -170,6 +173,13 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
   const [order, setOrder] = useState<OrderDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [editingItems, setEditingItems] = useState(false)
+  const [savingItems, setSavingItems] = useState(false)
+  const [itemDrafts, setItemDrafts] = useState<Record<string, {
+    productName: string
+    optionName: string
+    quantity: number
+  }>>({})
   const router = useRouter()
 
   useEffect(() => {
@@ -188,6 +198,72 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
       })
       .finally(() => setLoading(false))
   }, [open, orderId, onOpenChange])
+
+  useEffect(() => {
+    if (!order) return
+    setItemDrafts(Object.fromEntries(order.items.map((item) => [
+      item.id,
+      {
+        productName: item.displayName ?? item.productName,
+        optionName: item.displayOptionName ?? item.optionText ?? '',
+        quantity: item.quantity,
+      },
+    ])))
+    setEditingItems(false)
+    setSavingItems(false)
+  }, [order])
+
+  const updateItemDraft = (
+    itemId: string,
+    patch: Partial<{ productName: string; optionName: string; quantity: number }>,
+  ) => {
+    setItemDrafts((prev) => ({
+      ...prev,
+      [itemId]: {
+        ...prev[itemId],
+        ...patch,
+      },
+    }))
+  }
+
+  const saveItemDrafts = async () => {
+    if (!order) return
+    const payload = order.items.map((item) => {
+      const draft = itemDrafts[item.id]
+      return {
+        id: item.id,
+        productName: draft?.productName ?? item.displayName ?? item.productName,
+        optionName: draft?.optionName ?? item.displayOptionName ?? item.optionText ?? '',
+        quantity: draft?.quantity ?? item.quantity,
+        sku: item.sku ?? '',
+      }
+    })
+    const invalid = payload.find((item) => !item.productName.trim() || !Number.isInteger(item.quantity) || item.quantity < 1)
+    if (invalid) {
+      toast.error('확정상품명과 1 이상의 정수 수량을 입력해주세요.')
+      return
+    }
+
+    setSavingItems(true)
+    try {
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: payload }),
+      })
+      const data = await res.json().catch(() => ({})) as { order?: OrderDetail; error?: string }
+      if (!res.ok || !data.order) {
+        toast.error(data.error ?? '확정상품 수정에 실패했습니다.')
+        return
+      }
+      setOrder(data.order)
+      setEditingItems(false)
+      toast.success('확정상품 정보를 저장했습니다.')
+      router.refresh()
+    } finally {
+      setSavingItems(false)
+    }
+  }
 
   if (!open) return null
 
@@ -223,6 +299,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
         return c > p ? cur : prev
       })
     : null
+  const canEditConfirmedItems = order ? EDITABLE_CONFIRMED_ITEM_STATUSES.has(order.status) : false
 
   return (
     <div
@@ -353,6 +430,48 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                   <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
                     주문 상품 ({order.items.length}건)
                   </h3>
+                  {canEditConfirmedItems && (
+                  <div className="mb-2 flex justify-end">
+                    {editingItems ? (
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingItems(false)
+                            setItemDrafts(Object.fromEntries(order.items.map((item) => [
+                              item.id,
+                              {
+                                productName: item.displayName ?? item.productName,
+                                optionName: item.displayOptionName ?? item.optionText ?? '',
+                                quantity: item.quantity,
+                              },
+                            ])))
+                          }}
+                          disabled={savingItems}
+                          className="rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+                        >
+                          취소
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void saveItemDrafts()}
+                          disabled={savingItems}
+                          className="rounded bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                        >
+                          {savingItems ? '저장 중...' : '저장'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditingItems(true)}
+                        className="rounded border px-2 py-1 text-xs hover:bg-muted"
+                      >
+                        확정정보 수정
+                      </button>
+                    )}
+                  </div>
+                  )}
                   <ul className="divide-y text-sm">
                     {order.items.map((item) => (
                       <li key={item.id} className="flex justify-between gap-3 py-2">
@@ -367,7 +486,31 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                             <span className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">
                               확정상품명
                             </span>
-                            {item.displayName ? (
+                            {editingItems ? (
+                              <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_80px]">
+                                <input
+                                  value={itemDrafts[item.id]?.productName ?? ''}
+                                  onChange={(event) => updateItemDraft(item.id, { productName: event.target.value })}
+                                  className="h-8 rounded border px-2 text-sm"
+                                  placeholder="확정상품"
+                                />
+                                <input
+                                  value={itemDrafts[item.id]?.optionName ?? ''}
+                                  onChange={(event) => updateItemDraft(item.id, { optionName: event.target.value })}
+                                  className="h-8 rounded border px-2 text-sm"
+                                  placeholder="확정옵션"
+                                />
+                                <input
+                                  type="number"
+                                  min={1}
+                                  step={1}
+                                  value={itemDrafts[item.id]?.quantity ?? 1}
+                                  onChange={(event) => updateItemDraft(item.id, { quantity: Math.max(1, Number(event.target.value) || 1) })}
+                                  className="h-8 rounded border px-2 text-sm"
+                                  placeholder="수량"
+                                />
+                              </div>
+                            ) : item.displayName ? (
                               <span className="text-sm font-medium">
                                 {item.sku && (
                                   <span className="mr-2 font-mono text-[10px] text-muted-foreground">
@@ -379,7 +522,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                             ) : (
                               <span className="text-sm italic text-muted-foreground">미매핑</span>
                             )}
-                            {(item.displayOptionName ?? item.optionText) && (
+                            {!editingItems && (item.displayOptionName ?? item.optionText) && (
                               <span className="text-xs text-muted-foreground">
                                 · 옵션: {item.displayOptionName ?? item.optionText}
                               </span>

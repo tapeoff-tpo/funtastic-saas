@@ -51,6 +51,11 @@ type OrderItemInput = {
   quantity: number
   skuMultiplier: number | null
   unitPrice: string | null
+  lockedSku?: string | null
+  lockedProductName?: string | null
+  lockedOptionName?: string | null
+  lockedQuantity?: number | null
+  lockedAt?: Date | string | null
 }
 
 type OrderInput = {
@@ -140,6 +145,29 @@ export async function expandOrderItemsWithMapping(
   const result: ExpandedRow[] = []
 
   for (const it of items) {
+    if (it.lockedAt) {
+      const lockedQuantity = it.lockedQuantity ?? it.quantity * (it.skuMultiplier ?? 1)
+      result.push({
+        orderItemId: it.id,
+        orderId: it.orderId,
+        sku: it.lockedSku ?? it.sku ?? '',
+        quantity: lockedQuantity,
+        optionText: it.lockedOptionName ?? it.optionText ?? '',
+        productName: it.lockedProductName ?? it.productName ?? '',
+        source: {
+          productName: it.productName,
+          optionText: it.optionText,
+          sku: it.sku,
+          quantity: it.quantity,
+          marketplaceItemId: it.marketplaceItemId,
+          skuMultiplier: it.skuMultiplier,
+          unitPrice: it.unitPrice,
+        },
+        fromMapping: false,
+      })
+      continue
+    }
+
     const ord = orderById.get(it.orderId)
     const orderQty = it.quantity * (it.skuMultiplier ?? 1)
     const candidateIds = Array.from(new Set(

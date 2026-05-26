@@ -33,12 +33,18 @@ const SCRAPE_JOB_TIMEOUT_MS = 480_000
 const SESSION_CHECK_TIMEOUT_MS = 60_000
 const DEFAULT_LOGIN_TIMEOUT_MS = 90_000
 const EMAIL_SECOND_FACTOR_LOGIN_TIMEOUT_MS = 180_000
+const SELF_MANAGED_LOGIN_MARKETPLACES = new Set<string>(['ohouse'])
 
 function loginTimeoutForMarketplace(marketplaceId: string): number {
   if (marketplaceId === 'gs-shop' || marketplaceId === 'ohouse') {
     return EMAIL_SECOND_FACTOR_LOGIN_TIMEOUT_MS
   }
   return DEFAULT_LOGIN_TIMEOUT_MS
+}
+
+function shouldRunWorkerLogin(marketplaceId: string, jobType: ScrapeJobData['jobType']): boolean {
+  if (jobType === 'upload-invoice') return false
+  return !SELF_MANAGED_LOGIN_MARKETPLACES.has(marketplaceId)
 }
 
 async function runWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -106,7 +112,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
   const credentials = await readScrapeCredentials(marketplaceId, userId, connectionId)
   if (!credentials) throw new Error(`No credentials for ${marketplaceId}/${connectionId}`)
 
-  if (jobType !== 'upload-invoice') {
+  if (shouldRunWorkerLogin(marketplaceId, jobType)) {
     await setProgress('RPA 세션 확인 중...')
     const session = credentials.storageState
       ? await runWithTimeout(scraper.testSession(credentials), SESSION_CHECK_TIMEOUT_MS)
@@ -121,6 +127,8 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         credentials.storageState = login.storageState
       }
     }
+  } else if (jobType !== 'upload-invoice') {
+    await setProgress(`${scraper.displayName} 전용 RPA 세션으로 수집 준비 중...`)
   }
 
     if (jobType === 'scrape-orders') {

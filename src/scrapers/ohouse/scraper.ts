@@ -14,14 +14,29 @@ const ORDER_URL_CANDIDATES = [
 ]
 const NAVIGATION_TIMEOUT_MS = 30_000
 const DOWNLOAD_TIMEOUT_MS = 45_000
+const LOGIN_STAGE_TIMEOUT_MS = 180_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
-const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v40'
+const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v41'
 const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
 
 type JsonRecord = Record<string, unknown>
 
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
+}
+
+async function withOhouseTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new MarketplaceApiError('ohouse', 504, message)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 function formatDateInput(date: Date): string {
@@ -1793,7 +1808,11 @@ export class OhouseScraper implements MarketplaceScraper {
 
     try {
       await setProgress?.('오늘의집 새 브라우저 세션으로 로그인 중...')
-      const error = await performOhouseLogin(ctx.page, credentials, diagnostics)
+      const error = await withOhouseTimeout(
+        performOhouseLogin(ctx.page, credentials, diagnostics),
+        LOGIN_STAGE_TIMEOUT_MS,
+        `${OHOUSE_RPA_VERSION}: 오늘의집 로그인/2차 인증을 ${LOGIN_STAGE_TIMEOUT_MS / 1000}초 안에 완료하지 못했습니다. 네이버 인증메일 수신 또는 오늘의집 로그인 화면에서 멈춘 상태입니다.`,
+      )
       if (error) throw new MarketplaceApiError('ohouse', 401, error)
 
       await setProgress?.('오늘의집 주문 관리 화면 여는 중...')

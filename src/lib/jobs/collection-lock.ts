@@ -20,6 +20,13 @@ const COLLECTION_JOB_TYPES = [
   ...CS_COLLECTION_JOB_TYPES,
 ] as const
 
+const withLastProgress = (message: string) =>
+  sql<string>`case
+    when ${jobLogs.progressMessage} is not null and ${jobLogs.progressMessage} <> ''
+      then ${message} || ' 마지막 단계: ' || ${jobLogs.progressMessage}
+    else ${message}
+  end`
+
 type CollectionLane = 'order' | 'cs'
 
 export interface CollectionJobLogInput {
@@ -63,7 +70,7 @@ async function markStaleCollectionJobsFailed(tx: Tx) {
     .set({
       status: 'failed',
       completedAt: new Date(),
-      errorMessage: '수집 작업이 제한시간을 초과해 자동 종료되었습니다.',
+      errorMessage: withLastProgress('수집 작업이 제한시간을 초과해 자동 종료되었습니다.'),
     })
     .where(
       and(

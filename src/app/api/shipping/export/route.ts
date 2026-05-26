@@ -95,11 +95,21 @@ export async function GET(request: NextRequest) {
     const connectionIds = [...new Set(orderRows.map((o) => o.connectionId).filter(Boolean) as string[])]
     const connectionRows = connectionIds.length > 0
       ? await db
-          .select({ id: marketplaceConnections.id, displayName: marketplaceConnections.displayName })
+          .select({
+            id: marketplaceConnections.id,
+            displayName: marketplaceConnections.displayName,
+            metadata: marketplaceConnections.metadata,
+          })
           .from(marketplaceConnections)
           .where(inArray(marketplaceConnections.id, connectionIds))
       : []
     const connectionMap = new Map(connectionRows.map((c) => [c.id, c.displayName]))
+    const salesExportMarketplaceIdMap = new Map(connectionRows.map((connection) => [
+      connection.id,
+      typeof connection.metadata?.salesExportMarketplaceId === 'string'
+        ? connection.metadata.salesExportMarketplaceId
+        : '',
+    ]))
 
     // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
     // 매핑 없으면 orderItems.sku 를 그대로 사용 (fallback).
@@ -192,6 +202,7 @@ export async function GET(request: NextRequest) {
         marketplaceId: marketplaceName,
         marketplaceName,
         marketplaceCode: order.marketplaceId,
+        salesExportMarketplaceId: order.connectionId ? salesExportMarketplaceIdMap.get(order.connectionId) ?? '' : '',
         marketplaceStatus: order.marketplaceStatus ?? order.status,
         buyerName: order.buyerName,
         // 기본 '구매자연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)

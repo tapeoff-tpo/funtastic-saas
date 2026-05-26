@@ -117,7 +117,7 @@ export const BUILT_IN_CARRIER_TEMPLATES: BuiltInCarrierTemplateDef[] = [
     columns: [
       { header: '주문상태', field: 'salesStatus', width: 12, required: false },
       { header: '쇼핑몰명', field: 'marketplaceId', width: 20, required: false },
-      { header: 'ID', field: 'marketplaceCode', width: 14, required: false },
+      { header: 'ID', field: 'salesExportMarketplaceId', width: 14, required: false },
       { header: '쇼핑몰 상품코드', field: 'marketplaceItemId', width: 18, required: false },
       { header: '주문번호(쇼핑몰)', field: 'marketplaceOrderId', width: 24, required: false },
       { header: '주문자명', field: 'buyerName', width: 16, required: false },

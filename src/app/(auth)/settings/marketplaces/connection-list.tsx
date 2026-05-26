@@ -12,6 +12,7 @@ interface ConnectionListItem {
   marketplaceName: string
   storeAlias: string
   displayName: string
+  salesExportMarketplaceId: string
   status: string
   integrationMethod: IntegrationMethod
   linkedMarketplaces: string[]
@@ -175,6 +176,7 @@ export function ConnectionList({ connections, pageSize = 10 }: ConnectionListPro
                 marketplaceName={connection.marketplaceName}
                 storeAlias={connection.storeAlias}
                 displayName={connection.displayName}
+                salesExportMarketplaceId={connection.salesExportMarketplaceId}
                 status={connection.status as ConnectionStatus}
                 integrationMethod={connection.integrationMethod}
                 linkedMarketplaces={connection.linkedMarketplaces}

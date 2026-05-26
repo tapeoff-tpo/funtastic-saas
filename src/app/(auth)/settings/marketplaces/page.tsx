@@ -83,6 +83,9 @@ export default async function MarketplaceSettingsPage() {
     marketplaceName: marketplaceNames.get(connection.marketplaceId) ?? connection.displayName,
     storeAlias: connection.storeAlias,
     displayName: connection.displayName,
+    salesExportMarketplaceId: typeof connection.metadata?.salesExportMarketplaceId === 'string'
+      ? connection.metadata.salesExportMarketplaceId
+      : '',
     status: connection.status,
     integrationMethod: getIntegrationMethod(connection.marketplaceId, {
       isManual: connection.isManual,

@@ -95,7 +95,7 @@ describe('BUILT_IN_CARRIER_TEMPLATES', () => {
       '순이익액', '택배사', '송장번호', '수집일자', '출고완료일자', '사방넷 주문번호',
       '사방넷 상품코드', '사방넷 상품명', '사방넷 옵션', '실 출고수량', '택배박스 사이즈',
     ])
-    expect(template?.columns.find((column) => column.header === 'ID')?.field).toBe('marketplaceCode')
+    expect(template?.columns.find((column) => column.header === 'ID')?.field).toBe('salesExportMarketplaceId')
     expect(template?.columns.find((column) => column.header === '사방넷 주문번호')?.field).toBe('internalNo')
     expect(template?.columns.find((column) => column.header === '사방넷 상품코드')?.field).toBe('productCode')
     expect(template?.columns.find((column) => column.header === '사방넷 상품명')?.field).toBe('productName')

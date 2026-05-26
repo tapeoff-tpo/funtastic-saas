@@ -50,6 +50,7 @@ interface ConnectionRowProps {
   marketplaceName: string
   storeAlias: string
   displayName: string
+  salesExportMarketplaceId: string
   status: ConnectionStatus
   integrationMethod: IntegrationMethod
   linkedMarketplaces?: string[]
@@ -58,6 +59,7 @@ interface ConnectionRowProps {
 interface LoadedData {
   marketplaceId: string
   storeAlias: string
+  salesExportMarketplaceId: string
   requiredCredentials: string[]
   optionalCredentials?: string[]
   values: Record<string, string>
@@ -68,6 +70,7 @@ export function ConnectionRow({
   marketplaceName,
   storeAlias,
   displayName,
+  salesExportMarketplaceId,
   status,
   integrationMethod,
   linkedMarketplaces = [],
@@ -225,6 +228,18 @@ export function ConnectionRow({
               계정명을 변경하면 저장된 인증정보도 새 이름으로 함께 이전됩니다.
             </p>
           </div>
+          <div className="space-y-1">
+            <Label htmlFor={`edit-${connectionId}-sales-export-marketplace-id`}>매출확인용 마켓 ID</Label>
+            <Input
+              id={`edit-${connectionId}-sales-export-marketplace-id`}
+              name="sales_export_marketplace_id"
+              type="text"
+              defaultValue={data.salesExportMarketplaceId}
+              maxLength={100}
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">매출확인용 엑셀의 ID열에 출력됩니다.</p>
+          </div>
 
           {data.requiredCredentials.map((credKey) => {
             const isRevealed = reveal[credKey] ?? false
@@ -330,6 +345,18 @@ export function ConnectionRow({
             <p className="text-xs text-muted-foreground">
               로그인 정보와 기존 주문 연결 기준은 그대로 유지됩니다.
             </p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`edit-${connectionId}-rpa-sales-export-marketplace-id`}>매출확인용 마켓 ID</Label>
+            <Input
+              id={`edit-${connectionId}-rpa-sales-export-marketplace-id`}
+              name="sales_export_marketplace_id"
+              type="text"
+              defaultValue={salesExportMarketplaceId}
+              maxLength={100}
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">매출확인용 엑셀의 ID열에 출력됩니다.</p>
           </div>
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={isRpaPending}>

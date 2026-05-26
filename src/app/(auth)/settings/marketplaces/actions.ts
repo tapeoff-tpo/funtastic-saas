@@ -141,6 +141,7 @@ export async function getMarketplaceCredentials(
   data?: {
     marketplaceId: string
     storeAlias: string
+    salesExportMarketplaceId: string
     requiredCredentials: string[]
     optionalCredentials?: string[]
     values: Record<string, string>
@@ -196,6 +197,9 @@ export async function getMarketplaceCredentials(
     data: {
       marketplaceId: connection.marketplaceId,
       storeAlias: connection.storeAlias,
+      salesExportMarketplaceId: typeof connection.metadata?.salesExportMarketplaceId === 'string'
+        ? connection.metadata.salesExportMarketplaceId
+        : '',
       requiredCredentials: [...config.requiredCredentials],
       optionalCredentials,
       values,
@@ -350,11 +354,13 @@ export async function registerMarketplaceCredentials(
     return { error: '연결 계정명을 입력해주세요. 예: 쿠팡-본계정, 쿠팡-서브계정' }
   }
   const storeAlias = rawStoreAlias || 'default'
+  const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
   const config = marketplaceRegistry.get(marketplaceId).config
   const vaultNames: string[] = []
   const optionalCredentialKeys = OPTIONAL_CREDENTIALS[marketplaceId] ?? []
   const hiddenCredentialKeys = marketplaceId === 'cafe24' ? ['refresh_token'] : []
   let previousStoreAlias: string | null = null
+  let previousMetadata: Record<string, unknown> | null = null
 
   // Validate all required credentials are provided
   for (const credKey of config.requiredCredentials) {
@@ -398,6 +404,7 @@ export async function registerMarketplaceCredentials(
         return { error: '수정할 연결 정보를 찾을 수 없습니다.' }
       }
       previousStoreAlias = target[0].storeAlias
+      previousMetadata = target[0].metadata ?? null
       if (previousStoreAlias !== storeAlias) {
         const conflicts = await db
           .select()
@@ -467,12 +474,18 @@ export async function registerMarketplaceCredentials(
   const displayName = storeAlias === 'default'
     ? config.name
     : `${config.name} (${storeAlias})`
-  const metadata = marketplaceId === 'playauto-emp'
-    ? {
-        integrationMethod: 'hub',
-        linkedMarketplaces: [],
-      }
-    : undefined
+  const metadata = {
+    ...(previousMetadata ?? {}),
+    ...(marketplaceId === 'playauto-emp'
+      ? {
+          integrationMethod: 'hub',
+          linkedMarketplaces: Array.isArray(previousMetadata?.linkedMarketplaces)
+            ? previousMetadata.linkedMarketplaces
+            : [],
+        }
+      : {}),
+    salesExportMarketplaceId,
+  }
 
   try {
     const existing = await db
@@ -510,7 +523,7 @@ export async function registerMarketplaceCredentials(
           storeAlias,
           displayName,
           vaultSecretNames: vaultNames,
-          ...(metadata ? { metadata } : {}),
+          metadata,
           status: 'connected',
           updatedAt: new Date(),
         })
@@ -537,7 +550,7 @@ export async function registerMarketplaceCredentials(
         authType: config.authType,
         status: 'connected',
         vaultSecretNames: vaultNames,
-        ...(metadata ? { metadata } : {}),
+        metadata,
       })
     }
   } catch (err) {
@@ -705,6 +718,7 @@ export async function renameRpaMarketplaceConnection(
 
   const connectionId = String(formData.get('connection_id') ?? '').trim()
   const storeAlias = String(formData.get('store_alias') ?? '').trim()
+  const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
   if (!connectionId) return { error: '연결 ID가 필요합니다.' }
   if (!storeAlias) return { error: '연결 계정명을 입력해주세요.' }
   if (storeAlias.length > 100) return { error: '연결 계정명은 100자 이내로 입력해주세요.' }
@@ -769,6 +783,10 @@ export async function renameRpaMarketplaceConnection(
       .set({
         storeAlias,
         displayName,
+        metadata: {
+          ...(connection.metadata ?? {}),
+          salesExportMarketplaceId,
+        },
         vaultSecretNames: [
           `scrape_${workspaceUserId}_${connection.marketplaceId}_${connectionId}_email`,
           `scrape_${workspaceUserId}_${connection.marketplaceId}_${connectionId}_password`,

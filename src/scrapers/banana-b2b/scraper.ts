@@ -25,6 +25,11 @@ type BananaOrderCollectionTarget = {
   collectionStatus: MarketplaceCollectionStatus
 }
 
+type BananaOrderListItem = {
+  id?: string | number
+  orderNo?: string | number
+}
+
 const ORDER_COLLECTION_TARGETS: BananaOrderCollectionTarget[] = [
   { state: '1', label: '결제완료', collectionStatus: 'new' },
   { state: '2', label: '배송준비', collectionStatus: 'ready' },
@@ -332,6 +337,80 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   return Buffer.concat(chunks)
 }
 
+function uniqueStrings(values: Array<string | number | null | undefined>): string[] {
+  return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))]
+}
+
+async function movePaymentCompleteOrdersToReady(
+  page: Page,
+  collectedOrders: NormalizedOrder[],
+): Promise<number> {
+  const orderNos = uniqueStrings(collectedOrders.map((order) => order.marketplaceOrderId))
+  const collectedItemIds = uniqueStrings(
+    collectedOrders.flatMap((order) => [
+      order.rawData?.orderProductId as string | number | null | undefined,
+      ...order.items.map((item) => item.marketplaceItemId),
+    ]),
+  )
+  if (orderNos.length === 0 && collectedItemIds.length === 0) return 0
+
+  return page.evaluate(async ({ orderNos: nextOrderNos, collectedItemIds: nextItemIds }) => {
+    const normalize = (value: unknown) => String(value ?? '').trim()
+    const orderNoSet = new Set(nextOrderNos.map(normalize).filter(Boolean))
+    const itemIdSet = new Set(nextItemIds.map(normalize).filter(Boolean))
+    const urls = [
+      '/api/v1/order/list?state=1&viewcount=500',
+      '/api/v1/order/list?state=1',
+    ]
+    let rows: BananaOrderListItem[] = []
+
+    for (const url of urls) {
+      const response = await fetch(url, {
+        credentials: 'include',
+        headers: { accept: 'application/json' },
+      })
+      if (!response.ok) continue
+      const payload = await response.json().catch(() => null)
+      const nextRows = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.list)
+          ? payload.list
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.rows)
+              ? payload.rows
+              : []
+      if (nextRows.length > 0) {
+        rows = nextRows
+        break
+      }
+    }
+
+    const orderProductId = rows
+      .filter((row) => {
+        const id = normalize(row.id)
+        const orderNo = normalize(row.orderNo)
+        return (id && itemIdSet.has(id)) || (orderNo && orderNoSet.has(orderNo))
+      })
+      .map((row) => normalize(row.id))
+      .filter(Boolean)
+
+    if (orderProductId.length === 0) return 0
+
+    const response = await fetch('/api/v1/order/delivery/ready', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderProductId }),
+    })
+    if (!response.ok) {
+      const payload = await response.json().catch(async () => ({ message: await response.text().catch(() => '') }))
+      throw new Error(payload?.message || `배송준비 전환 실패: ${response.status}`)
+    }
+    return orderProductId.length
+  }, { orderNos, collectedItemIds })
+}
+
 export class BananaB2bScraper implements MarketplaceScraper {
   readonly marketplaceId: MarketplaceId = 'banana-b2b'
   readonly displayName = '바나나B2B'
@@ -396,11 +475,15 @@ export class BananaB2bScraper implements MarketplaceScraper {
     }
   }
 
-  async getOrders(credentials: ScraperCredentials, since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(
+    credentials: ScraperCredentials,
+    since: Date,
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedOrder[]> {
     const orders: NormalizedOrder[] = []
     for (const target of ORDER_COLLECTION_TARGETS) {
-      const buffer = await this.downloadOrdersExcel(credentials, since, target)
-      orders.push(...await this.parseOrdersExcel(buffer, target))
+      const targetOrders = await this.collectTargetOrders(credentials, since, target, setProgress)
+      orders.push(...targetOrders)
     }
     return orders
   }
@@ -423,11 +506,12 @@ export class BananaB2bScraper implements MarketplaceScraper {
     }
   }
 
-  private async downloadOrdersExcel(
+  private async collectTargetOrders(
     credentials: ScraperCredentials,
     since: Date,
     target: BananaOrderCollectionTarget,
-  ): Promise<Buffer> {
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedOrder[]> {
     let sessionState = credentials.storageState
     let ctx = await openContext(sessionState)
 
@@ -467,7 +551,14 @@ export class BananaB2bScraper implements MarketplaceScraper {
         }
       })
       await runStep(`orders: apply order search (${target.label})`, () => applyOrderSearch(ctx.page, since))
-      return await runStep(`orders: download order excel (${target.label})`, () => downloadOrdersExcel(ctx.page))
+      const buffer = await runStep(`orders: download order excel (${target.label})`, () => downloadOrdersExcel(ctx.page))
+      const targetOrders = await this.parseOrdersExcel(buffer, target)
+      if (target.collectionStatus === 'new' && targetOrders.length > 0) {
+        await setProgress?.(`바나나B2B ${target.label} 주문을 배송준비로 전환 중...`).catch(() => {})
+        const moved = await runStep(`orders: move ${target.label} to 배송준비`, () => movePaymentCompleteOrdersToReady(ctx.page, targetOrders))
+        await setProgress?.(`바나나B2B ${target.label} ${moved}개 상품을 배송준비로 전환했습니다.`).catch(() => {})
+      }
+      return targetOrders
     } finally {
       await ctx.close()
     }
@@ -524,6 +615,7 @@ export class BananaB2bScraper implements MarketplaceScraper {
       const buyerName = get(row, '주문자', '주문자명', '구매자') || recipientName
       const buyerPhone = get(row, '주문자전화번호', '주문자연락처') || recipientPhone
       const productCode = get(row, '상품코드', '상품번호', '제품코드')
+      const orderProductId = get(row, '고유번호', '상품고유번호', '주문상품고유번호', '주문상품번호')
       const sku = get(row, '자체상품코드', '판매자상품코드', '업체상품코드') || productCode
       const optionText = get(row, '옵션', '옵션명', '선택옵션')
 
@@ -552,13 +644,14 @@ export class BananaB2bScraper implements MarketplaceScraper {
           collectionStatus: target.collectionStatus,
           collectionStatusLabel: target.label,
           rowNumber,
+          orderProductId: orderProductId || null,
           productCode,
           carrierName: get(row, '택배사', '배송사') || null,
           trackingNumber: get(row, '송장번호') || null,
         },
         items: [
           {
-            marketplaceItemId: get(row, '주문상품번호', '상품주문번호') || productCode || orderNo,
+            marketplaceItemId: orderProductId || get(row, '상품주문번호') || productCode || orderNo,
             productName,
             optionText: optionText || undefined,
             quantity,

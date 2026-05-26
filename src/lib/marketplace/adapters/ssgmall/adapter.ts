@@ -221,6 +221,19 @@ function getSsgShippingIdentity(rawData?: Record<string, unknown>): { shppNo: st
   return { shppNo: String(shppNo), shppSeq: String(shppSeq) }
 }
 
+function getSsgRawStatusCode(rawData?: Record<string, unknown>): string {
+  return [
+    rawData?.ordItemStatCd,
+    rawData?.ordStatCd,
+    rawData?.shppProgStatDtlCd,
+    rawData?.lastShppProgStatDtlCd,
+    rawData?.shppTabProgStatCd,
+  ]
+    .map((value) => (value == null ? '' : String(value).trim()))
+    .filter(Boolean)
+    .join(' ')
+}
+
 function getSsgProcessItemQuantity(rawData?: Record<string, unknown>): number {
   const candidates = [
     rawData?.ordQty,
@@ -394,6 +407,11 @@ export class SsgmallAdapter implements MarketplaceAdapter {
 
   async confirmOrder(_marketplaceOrderId: string, rawData?: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
     void _marketplaceOrderId
+    const rawStatusCode = getSsgRawStatusCode(rawData)
+    if (/\b140\b/.test(rawStatusCode)) {
+      return { success: true }
+    }
+
     const identity = getSsgShippingIdentity(rawData)
     if (!identity) {
       return { success: false, error: 'SSG 주문확인에 필요한 배송번호/배송순번이 주문 원본 데이터에 없습니다.' }

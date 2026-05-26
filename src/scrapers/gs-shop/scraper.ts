@@ -599,7 +599,8 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   try {
     const [download] = await Promise.all([
       page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-      page.evaluate(() => {
+      clickGsDownloadFlow(page),
+      /* page.evaluate(() => {
         const controls = Array.from(
           document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, area, [role="button"]'),
         )
@@ -624,7 +625,7 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
           throw new Error(`엑셀 다운로드 버튼을 찾지 못했습니다. candidates=${candidates.slice(0, 5).map((item) => item.text).join(' / ')}`)
         }
         target.click()
-      }),
+      }), */
     ])
 
     const stream = await download.createReadStream()
@@ -640,6 +641,110 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
       504,
       `GS샵 주문 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}; ${await summarizePage(page)})`,
     )
+  } finally {
+    page.off('dialog', dialogHandler)
+  }
+}
+
+async function clickGsDownloadFlow(page: Page): Promise<void> {
+  const clickedToolbarDownload = await clickVisibleControl(page, ({ text }) => {
+    if (!/다운로드|download/i.test(text)) return false
+    if (/엑셀업로드|업로드|필수항목보기|양식|샘플/i.test(text)) return false
+    return true
+  })
+  if (!clickedToolbarDownload) {
+    throw new Error('GS샵 다운로드 버튼을 찾지 못했습니다.')
+  }
+
+  const openedDialog = await waitForText(page, /다운로드\s*방식\s*선택|다운로드시\s*주소\s*표기|도로명주소|지번주소/, 10_000)
+  if (!openedDialog) return
+
+  const clickedModalDownload = await clickVisibleControl(page, ({ text }) => {
+    if (!/다운로드|download/i.test(text)) return false
+    if (/방식\s*선택|주소\s*표기|도로명주소|지번주소|입력기준/.test(text)) return false
+    return true
+  }, { preferBottomRight: true })
+
+  if (!clickedModalDownload) {
+    throw new Error('GS샵 다운로드 모달의 다운로드 버튼을 찾지 못했습니다.')
+  }
+}
+
+async function waitForText(page: Page, pattern: RegExp, timeoutMs: number): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    const text = await pageText(page, 1_000)
+    if (pattern.test(text)) return true
+    await page.waitForTimeout(300)
+  }
+  return false
+}
+
+async function clickVisibleControl(
+  page: Page,
+  predicate: (candidate: { text: string; x: number; y: number }) => boolean,
+  options?: { preferBottomRight?: boolean },
+): Promise<boolean> {
+  for (const frame of page.frames()) {
+    const candidates = await frame.evaluate(() => {
+      const textOf = (element: Element): string => {
+        if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || ''
+        return `${(element as HTMLElement).innerText || element.textContent || ''} ${element.getAttribute('title') || ''} ${element.getAttribute('aria-label') || ''}`
+      }
+      return Array.from(document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, [role="button"]'))
+        .map((control, index) => {
+          const rect = control.getBoundingClientRect()
+          return {
+            index,
+            text: textOf(control).replace(/\s+/g, ' ').trim(),
+            x: rect.left,
+            y: rect.top,
+            width: rect.width,
+            height: rect.height,
+          }
+        })
+        .filter((item) => item.width > 0 && item.height > 0 && item.text.length > 0)
+    }).catch(() => [])
+
+    const target = candidates
+      .filter((candidate) => predicate(candidate))
+      .sort((a, b) => {
+        if (!options?.preferBottomRight) return a.y - b.y || a.x - b.x
+        return (b.y + b.x) - (a.y + a.x)
+      })[0]
+    if (!target) continue
+
+    const clicked = await frame.evaluate((index) => {
+      const controls = Array.from(document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, [role="button"]'))
+      const targetControl = controls[index]
+      if (!targetControl) return false
+      targetControl.click()
+      return true
+    }, target.index).catch(() => false)
+    if (clicked) return true
+  }
+  return false
+}
+
+async function confirmGsSelectedOrders(page: Page, setProgress?: (message: string) => Promise<void>): Promise<void> {
+  await clickVisibleControl(page, ({ text }) => /^닫기$/.test(text), { preferBottomRight: true }).catch(() => false)
+  await page.waitForTimeout(500)
+
+  await setProgress?.('GS샵 주문확인 처리 중...')
+  const dialogHandler = (dialog: { accept: () => Promise<void> }) => {
+    void dialog.accept().catch(() => undefined)
+  }
+  page.on('dialog', dialogHandler)
+  try {
+    const clicked = await clickVisibleControl(page, ({ text }) => /^주문확인$/.test(text), { preferBottomRight: true })
+    if (!clicked) {
+      throw new MarketplaceApiError(MARKETPLACE_ID, 500, `GS샵 주문확인 버튼을 찾지 못했습니다. (${await summarizePage(page)})`)
+    }
+
+    await page.waitForTimeout(1_000)
+    await clickVisibleControl(page, ({ text }) => /^확인$/.test(text), { preferBottomRight: true }).catch(() => false)
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined)
+    await page.waitForTimeout(1_500)
   } finally {
     page.off('dialog', dialogHandler)
   }
@@ -1011,6 +1116,7 @@ export class GsShopScraper implements MarketplaceScraper {
       const visibleOrders = await parseVisibleOrders(page)
       if (visibleOrders.length > 0) {
         await setProgress?.(`GS샵 화면 주문 ${visibleOrders.length}건 수집`)
+        await confirmGsSelectedOrders(page, setProgress)
         return visibleOrders
       }
       await setProgress?.('GS샵 주문 엑셀 다운로드 중...')
@@ -1019,7 +1125,10 @@ export class GsShopScraper implements MarketplaceScraper {
         const workbook = await downloadOrdersExcel(page)
         await setProgress?.('GS샵 주문 엑셀 파싱 중...')
         const excelOrders = parseOrdersWorkbook(workbook)
-        if (excelOrders.length > 0) return excelOrders
+        if (excelOrders.length > 0) {
+          await confirmGsSelectedOrders(page, setProgress)
+          return excelOrders
+        }
       } catch (error) {
         downloadError = error
         await setProgress?.(`GS샵 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집`)

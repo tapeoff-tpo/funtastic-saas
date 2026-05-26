@@ -48,6 +48,22 @@ export async function deleteOrdersForUser(
   const errors: string[] = []
 
   await db.transaction(async (tx) => {
+    // 출고완료 주문상품은 스냅샷 보호 트리거가 DELETE 를 막는다.
+    // 사용자가 주문 삭제를 명시한 경우에는 먼저 잠금 스냅샷을 해제한 뒤 cascade 삭제한다.
+    await tx
+      .update(orderItems)
+      .set({
+        lockedSku: null,
+        lockedProductName: null,
+        lockedOptionName: null,
+        lockedQuantity: null,
+        lockedMappingCodeId: null,
+        lockedMappingCode: null,
+        lockedAt: null,
+        lockedByUserId: null,
+      })
+      .where(inArray(orderItems.orderId, owned))
+
     // 재고 변동 이력은 보존 — orderId 만 NULL 처리
     await tx
       .update(inventoryHistory)

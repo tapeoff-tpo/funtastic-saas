@@ -60,6 +60,17 @@ function formatRelativeTime(date: Date): string {
   return `${diffDays}일 전`
 }
 
+function formatDateTime(date: Date): string {
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date)
+}
+
 function isExpiringSoon(expiresAt: Date): boolean {
   const now = new Date()
   const sevenDays = 7 * 24 * 60 * 60 * 1000
@@ -763,6 +774,9 @@ function ConnRow({
   const expiringSoon = !!conn.expiresAt && isExpiringSoon(conn.expiresAt)
   const errorMsg = conn.status === 'error' ? conn.lastErrorMessage : null
   const latestJobMessage = conn.latestJobLog ? formatLatestJobLog(conn.latestJobLog) : null
+  const latestJobAt = conn.latestJobLog
+    ? new Date(conn.latestJobLog.completedAt ?? conn.latestJobLog.createdAt)
+    : null
 
   return (
     <tr
@@ -832,18 +846,23 @@ function ConnRow({
             {errorMsg}
           </span>
         ) : latestJobMessage ? (
-          <span
-            className={`line-clamp-2 ${
+          <div
+            className={
               conn.latestJobLog?.status === 'failed'
                 ? 'text-red-600'
                 : conn.latestJobLog?.status === 'completed'
                   ? 'text-emerald-700'
                   : 'text-muted-foreground'
-            }`}
-            title={latestJobMessage}
+            }
+            title={`${latestJobMessage}${latestJobAt ? ` · ${formatDateTime(latestJobAt)}` : ''}`}
           >
-            {latestJobMessage}
-          </span>
+            <div className="line-clamp-1">{latestJobMessage}</div>
+            {latestJobAt && (
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                마지막 수집 이력 {formatDateTime(latestJobAt)}
+              </div>
+            )}
+          </div>
         ) : expiringSoon ? (
           <span className="text-amber-600">인증 만료 임박</span>
         ) : conn.integrationMethod === 'excel' ? (

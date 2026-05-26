@@ -100,6 +100,16 @@ function collectOptionParts(value: unknown, parts: string[]): void {
   displayValues.forEach((entry) => collectOptionParts(entry, parts))
 }
 
+function collectLabeledSelection(value: unknown, parts: string[]): void {
+  if (typeof value !== 'string') return
+
+  for (const match of value.matchAll(/(?:^|[\s|[(])((?:추가\s*)?선택)\s*:\s*([^|\r\n\]]+)/g)) {
+    const label = match[1].replace(/\s+/g, ' ').trim()
+    const selected = match[2].trim()
+    if (selected) parts.push(`${label}: ${selected}`)
+  }
+}
+
 function orderOptionText(order: SpecialofferBuyerOrder): string | undefined {
   const parts: string[] = []
   const optionValues = [
@@ -112,6 +122,18 @@ function orderOptionText(order: SpecialofferBuyerOrder): string | undefined {
     order.add_supply_values,
   ]
   optionValues.forEach((value) => collectOptionParts(value, parts))
+
+  const optionKeyPattern = /^(?:선택|추가\s*선택|options?|option(?:_|$)|selected[_ ]?option|selection|select(?:ed)?[_ ]?value|opt(?:_|$)|goods[_ ]?option|add[_ ]?supply)/i
+  for (const [key, value] of Object.entries(order)) {
+    if (!optionKeyPattern.test(key)) continue
+    if (/^(?:선택|추가\s*선택)$/.test(key) && typeof value === 'string') {
+      const selected = value.trim()
+      if (selected) parts.push(`${key}: ${selected}`)
+      continue
+    }
+    collectOptionParts(value, parts)
+  }
+  collectLabeledSelection(order.goods_name, parts)
 
   const values = Array.from(new Set(parts))
   return values.length > 0 ? values.join(' / ') : undefined

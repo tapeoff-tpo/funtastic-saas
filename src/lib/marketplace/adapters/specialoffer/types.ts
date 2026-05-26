@@ -144,6 +144,8 @@ export interface SpecialofferBuyerOrder {
   option_values?: unknown
   add_supply?: unknown
   add_supply_values?: unknown
+  선택?: unknown
+  '추가 선택'?: unknown
   delivery_company?: string
   delivery_no?: string
   delivery_date?: string | null

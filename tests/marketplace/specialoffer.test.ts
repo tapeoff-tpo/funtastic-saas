@@ -141,6 +141,34 @@ describe('SpecialofferAdapter', () => {
     expect(orders).toEqual([])
   })
 
+  it('captures selection-labelled order options', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ({
+        data: [
+          {
+            order_id: '571611',
+            order_no: '26052608062403',
+            order_state: 3,
+            goods_name: 'Sample product 선택: Navy',
+            선택: 'Navy',
+            sum_qty: 1,
+            goods_price: 8000,
+            total_price: 8000,
+            order_date: '2026-05-26 08:06:24',
+            updated_at: '2026-05-26 08:06:24',
+          },
+        ],
+        meta: { current_page: 1, last_page: 1, total: 1 },
+      }),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-26T00:00:00+09:00'))
+
+    expect(orders[0].items[0].optionText).toBe('선택: Navy')
+  })
+
   it('stops paging when a seller order page reaches older records', async () => {
     const get = vi.fn(() => ({
       json: async () => ({

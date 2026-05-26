@@ -11,6 +11,7 @@ interface Props {
   claimType: ClaimType
   claimStatus: ClaimStatus
   reason: string | null
+  requestReason: string | null
 }
 
 const TYPE_LABELS: Record<ClaimType, string> = {
@@ -49,7 +50,7 @@ const NEXT_STATES: Record<ClaimStatus, ClaimStatus[]> = {
   withdrawn: [],
 }
 
-export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: Props) {
+export function ClaimStatusActions({ claimId, claimType, claimStatus, reason, requestReason }: Props) {
   const router = useRouter()
   const [pendingStatus, setPendingStatus] = useState<ClaimStatus | null>(null)
   const [returnItems, setReturnItems] = useState<Array<{ sku: string; quantity: number }> | null>(null)
@@ -151,11 +152,12 @@ export function ClaimStatusActions({ claimId, claimType, claimStatus, reason }: 
           {STATUS_LABELS[claimStatus]}
         </span>
       </div>
-      {reason && (
-        <span className="max-w-[180px] truncate text-xs text-muted-foreground" title={reason}>
-          {reason}
-        </span>
-      )}
+      <div className="mt-2 rounded-md border bg-muted/30 px-3 py-2">
+        <div className="mb-1 text-[11px] font-medium text-muted-foreground">접수 사유</div>
+        <div className="whitespace-pre-wrap break-words text-sm text-foreground">
+          {requestReason || '등록된 접수 사유가 없습니다.'}
+        </div>
+      </div>
       {(nextStates.length > 0 || canWithdraw) && (
         <div className="flex gap-1">
           {nextStates.map((next) => (

@@ -953,7 +953,13 @@ export async function getOrders(filters: OrderFilters = {}) {
   }
 
   // Map first claim (most recent by requestedAt) per order — need id/status for inline CS actions
-  type ClaimSummary = { id: string; claimType: string; claimStatus: string; reason: string | null }
+  type ClaimSummary = {
+    id: string
+    claimType: string
+    claimStatus: string
+    reason: string | null
+    requestReason: string | null
+  }
   const claimByOrderId = new Map<string, ClaimSummary>()
   for (const claim of claimRows) {
     if (INACTIVE_CLAIM_STATUSES.includes(claim.claimStatus as (typeof INACTIVE_CLAIM_STATUSES)[number])) {
@@ -961,11 +967,18 @@ export async function getOrders(filters: OrderFilters = {}) {
     }
     const existing = claimByOrderId.get(claim.orderId)
     if (!existing || claim.requestedAt > (claimRows.find((c) => c.id === existing.id)?.requestedAt ?? new Date(0))) {
+      const rawReason = claim.rawData && typeof claim.rawData === 'object'
+        ? (claim.rawData as { originalReason?: unknown }).originalReason
+        : null
+      const requestReason = typeof rawReason === 'string' && rawReason.trim()
+        ? rawReason.trim()
+        : claim.reason
       claimByOrderId.set(claim.orderId, {
         id: claim.id,
         claimType: claim.claimType,
         claimStatus: claim.claimStatus,
         reason: claim.reason,
+        requestReason,
       })
     }
   }
@@ -1147,6 +1160,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       claimId: claim?.id ?? null,
       claimStatus: claim?.claimStatus ?? null,
       claimReason: claim?.reason ?? null,
+      claimRequestReason: claim?.requestReason ?? null,
       invoiceStatus: shipment?.uploadStatus ?? null,
       trackingNumber: shipment?.trackingNumber ?? null,
       carrierName: shipment?.carrierName ?? null,

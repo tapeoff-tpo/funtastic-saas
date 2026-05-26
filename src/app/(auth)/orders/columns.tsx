@@ -299,6 +299,7 @@ export interface OrderRow {
   claimId?: string | null
   claimStatus?: ClaimStatus | null
   claimReason?: string | null
+  claimRequestReason?: string | null
   historicalClaimStatuses?: string[]
   invoiceStatus?: InvoiceUploadStatus | null
   trackingNumber?: string | null
@@ -575,11 +576,13 @@ function ClaimActionDropdown({
   claimType,
   claimStatus,
   reason,
+  requestReason,
 }: {
   claimId: string
   claimType: ClaimType
   claimStatus: ClaimStatus
   reason: string | null
+  requestReason: string | null
 }) {
   const [open, setOpen] = useState(false)
 
@@ -595,13 +598,22 @@ function ClaimActionDropdown({
         <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-md border bg-white p-2 shadow-lg">
-          <ClaimStatusActions
-            claimId={claimId}
-            claimType={claimType}
-            claimStatus={claimStatus}
-            reason={reason}
-          />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setOpen(false)}>
+          <div className="w-full max-w-md rounded-lg bg-white p-4 shadow-xl" onClick={(event) => event.stopPropagation()}>
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-semibold">클레임 처리</h3>
+              <button type="button" onClick={() => setOpen(false)} className="rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted">
+                닫기
+              </button>
+            </div>
+            <ClaimStatusActions
+              claimId={claimId}
+              claimType={claimType}
+              claimStatus={claimStatus}
+              reason={reason}
+              requestReason={requestReason}
+            />
+          </div>
         </div>
       )}
     </div>
@@ -711,6 +723,7 @@ export const columns: ColumnDef<OrderRow>[] = [
                 claimType={order.claimType}
                 claimStatus={order.claimStatus}
                 reason={order.claimReason ?? null}
+                requestReason={order.claimRequestReason ?? null}
               />
             ) : (
               <ClaimCreateButton order={order} table={table} />

@@ -17,6 +17,10 @@ import { eq, and, gte, count, isNull, or, inArray } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
+function normalizeTrackingNumber(value: string) {
+  return value.trim().replace(/[\s-]/g, '')
+}
+
 export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -74,7 +78,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const trackingNumber = body.trackingNumber?.trim()
+  const trackingNumber = normalizeTrackingNumber(body.trackingNumber ?? '')
   if (!trackingNumber) {
     return NextResponse.json({ error: '운송장번호 없음' }, { status: 400 })
   }

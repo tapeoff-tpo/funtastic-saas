@@ -45,6 +45,10 @@ const STATUS_LABEL: Record<ScanStatus, string> = {
   not_found: '❌ 비정상',
 }
 
+function normalizeTrackingNumber(value: string) {
+  return value.trim().replace(/[\s-]/g, '')
+}
+
 function speak(text: string) {
   if (typeof window === 'undefined') return
   window.speechSynthesis.cancel()
@@ -98,8 +102,9 @@ export default function ScanPage() {
         const next = new Map<string, ScanCacheEntry>()
         scannedRef.current = new Set()
         for (const shipment of data.shipments ?? []) {
-          next.set(shipment.trackingNumber, shipment)
-          if (shipment.shippedToday) scannedRef.current.add(shipment.trackingNumber)
+          const normalizedTrackingNumber = normalizeTrackingNumber(shipment.trackingNumber)
+          next.set(normalizedTrackingNumber, { ...shipment, trackingNumber: normalizedTrackingNumber })
+          if (shipment.shippedToday) scannedRef.current.add(normalizedTrackingNumber)
         }
         cacheRef.current = next
         setCacheCount(next.size)
@@ -158,6 +163,7 @@ export default function ScanPage() {
         body: JSON.stringify({ trackingNumber, includeTodayCount: false }),
       })
       const data: ScanResult = await res.json()
+      const currentItem = queueRef.current.find((item) => item.id === optimisticId)
 
       if (data.status === 'not_found') {
         const abnormal: ScanQueueItem = {
@@ -171,6 +177,36 @@ export default function ScanPage() {
         speak(data.tts ?? '비정상입니다')
         pausedRef.current = true
         setPaused(true)
+        return
+      }
+
+      if (data.status === 'ok' || data.status === 'duplicate') {
+        const corrected: ScanQueueItem = {
+          id: optimisticId,
+          trackingNumber,
+          status: data.status,
+          message: data.message,
+          recipientName: data.order?.recipientName,
+        }
+        const nextResult: ScanResult = {
+          ...data,
+          trackingNumber,
+        }
+        if (data.status === 'ok') {
+          scannedRef.current.add(trackingNumber)
+          const cached = cacheRef.current.get(trackingNumber)
+          if (cached) cacheRef.current.set(trackingNumber, { ...cached, shippedToday: true })
+        }
+        syncQueue([corrected, ...queueRef.current.filter((item) => item.id !== optimisticId)].slice(0, 80))
+        setResult(nextResult)
+
+        if (currentItem?.status === 'not_found' || currentItem?.status !== data.status) {
+          speak(data.tts ?? data.message)
+        }
+        if (pausedRef.current && currentItem?.status === 'not_found') {
+          pausedRef.current = false
+          setPaused(false)
+        }
       }
     } catch {
       const errorResult: ScanResult = {
@@ -194,7 +230,7 @@ export default function ScanPage() {
   }, [refocus, syncQueue])
 
   const enqueueScan = useCallback((trackingNumber: string) => {
-    const normalized = trackingNumber.trim()
+    const normalized = normalizeTrackingNumber(trackingNumber)
     if (!normalized || pausedRef.current || !cacheReady) return
 
     const id = nextIdRef.current

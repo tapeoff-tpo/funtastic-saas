@@ -349,6 +349,12 @@ function getDateFilterCondition(
  */
 export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   const conditions: SQL[] = []
+  const isSabangnetOrderSource = sql`(
+    COALESCE(${orders.rawData}->>'source', '') LIKE 'sabangnet-%'
+    OR ${orders.marketplaceId} LIKE 'sabangnet-%'
+    OR ${orders.rawData} ? 'sabangnetSync'
+    OR ${orders.rawData} ? 'sabangnetRaw'
+  )`
 
   if (filters.userId) {
     conditions.push(eq(orders.userId, filters.userId))
@@ -373,15 +379,9 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   }
 
   if (filters.orderSource === 'sabangnet') {
-    conditions.push(sql`(
-      ${orders.rawData}->>'source' = 'sabangnet-current-xlsx'
-      OR ${orders.rawData} ? 'sabangnetSync'
-    )`)
+    conditions.push(isSabangnetOrderSource)
   } else if (filters.orderSource === 'saas') {
-    conditions.push(sql`NOT (
-      ${orders.rawData}->>'source' = 'sabangnet-current-xlsx'
-      OR ${orders.rawData} ? 'sabangnetSync'
-    )`)
+    conditions.push(sql`NOT ${isSabangnetOrderSource}`)
   }
 
   if (filters.dateFrom) {

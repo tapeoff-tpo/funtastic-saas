@@ -134,9 +134,10 @@ async function clickGsShipmentInstruction(page: Page, setProgress?: (message: st
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await dismissGsTransientPopups(page, setProgress)
 
-    const clicked = await clickVisibleTextElement(page, /출하\s*\(\s*배송\s*\)\s*지시|출하\s*배송\s*지시|출하\s*지시/i, {
-      preferBottomRight: true,
-    })
+    const clicked = await clickGsShipmentInstructionCard(page)
+      || await clickVisibleTextElement(page, /출하\s*\(\s*배송\s*\)\s*지시|출하\s*배송\s*지시|출하\s*지시/i, {
+        preferBottomRight: true,
+      })
     if (!clicked) {
       await page.waitForTimeout(800)
       continue
@@ -149,6 +150,58 @@ async function clickGsShipmentInstruction(page: Page, setProgress?: (message: st
     if (await waitForGsOrderListPage(page, 12_000)) return true
   }
 
+  return false
+}
+
+async function clickGsShipmentInstructionCard(page: Page): Promise<boolean> {
+  for (const frame of page.frames()) {
+    const clicked = await frame.evaluate(() => {
+      const visible = (element: Element) => {
+        const rect = element.getBoundingClientRect()
+        const style = window.getComputedStyle(element)
+        return rect.width > 0
+          && rect.height > 0
+          && style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && Number(style.opacity || '1') > 0
+      }
+      const textOf = (element: Element) => (element.textContent || '').replace(/\s+/g, ' ').trim()
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"], [onclick], div, span'))
+        .filter(visible)
+        .map((element) => {
+          const ownText = textOf(element)
+          const card = element.closest<HTMLElement>('a, button, [role="button"], [onclick], li, tr, section, article, div')
+          const cardText = card ? textOf(card) : ownText
+          const rect = element.getBoundingClientRect()
+          const cardRect = card?.getBoundingClientRect()
+          let score = 1000
+          if (/출하\s*\(\s*배송\s*\)\s*지시|출하\s*배송\s*지시|출하\s*지시/.test(ownText)) score = 20
+          if (/출하\s*\(\s*배송\s*\)\s*지시|출하\s*배송\s*지시|출하\s*지시/.test(cardText)) score = Math.min(score, 30)
+          if (/^\d+$/.test(ownText) && /출하\s*\(\s*배송\s*\)\s*지시|출하\s*배송\s*지시|출하\s*지시/.test(cardText)) score = 0
+          if (/배송완료|출고완료|교환배송/.test(cardText)) score += 100
+          return {
+            element,
+            card,
+            score,
+            x: cardRect?.left ?? rect.left,
+            y: cardRect?.top ?? rect.top,
+          }
+        })
+        .filter((candidate) => candidate.score < 100)
+        .sort((a, b) => a.score - b.score || a.y - b.y || a.x - b.x)
+
+      const target = candidates[0]
+      const element = target?.card ?? target?.element
+      if (!element) return false
+      element.scrollIntoView({ block: 'center', inline: 'center' })
+      element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      element.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      element.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+      element.click()
+      return true
+    }).catch(() => false)
+    if (clicked) return true
+  }
   return false
 }
 
@@ -1416,8 +1469,7 @@ async function hasVisibleNonZeroResults(page: Page): Promise<boolean> {
   const text = await pageText(page, 2_000)
   const normalized = text.replace(/\s+/g, ' ')
   return /조회\s*결과\s*총\s*[1-9]\d*\s*건/.test(normalized)
-    || /총주문\s*\(\s*[1-9]\d*\s*\)/.test(normalized)
-    || /미처리\s*\(\s*[1-9]\d*\s*\)/.test(normalized)
+    || /조회\s*결과[^0-9]{0,20}[1-9]\d*\s*건/.test(normalized)
 }
 
 async function hasVisibleZeroResults(page: Page): Promise<boolean> {

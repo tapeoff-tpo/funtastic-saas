@@ -63,6 +63,23 @@ function normalizeHeader(value: string): string {
   return value.replace(/\s+/g, '').replace(/[()[\]{}]/g, '').trim()
 }
 
+function isProductNameHeader(value: string): boolean {
+  const header = normalizeHeader(value)
+  return /(주문상품|상품명|상품|품명|제품명)/.test(header)
+    && !/(번호|코드|ID|아이디|식별자)/i.test(header)
+}
+
+function looksLikeProductName(value: string, orderNo?: string): boolean {
+  const text = value.replace(/\s+/g, ' ').trim()
+  if (!text) return false
+  if (orderNo && text.includes(orderNo)) return false
+  if (/^\d+$/.test(text.replaceAll(',', ''))) return false
+  if (/^[A-Z]{1,5}\d{4,}$/i.test(text)) return false
+  if (/주문번호|주문상품번호|상품번호|상품코드|수취인|배송|상태|선택|엑셀/.test(text)) return false
+  if (/입금완료|배송준비|배송완료|신규|과세|free/i.test(text)) return false
+  return /[가-힣A-Za-z]/.test(text)
+}
+
 function decodeWorkbookText(buffer: Buffer): string {
   const utf8 = new TextDecoder('utf-8').decode(buffer)
   if (!utf8.includes('\uFFFD')) return utf8
@@ -449,12 +466,27 @@ async function readVisibleOrderRowsFromFrame(frame: Frame): Promise<TobizonVisib
     const orderIdPattern = /[A-Z0-9]*\d{12,}[A-Z0-9]*/i
     const allOrderIds = (text: string) => Array.from(text.matchAll(new RegExp(orderIdPattern, 'gi'))).map((match) => match[0])
     const extractOrderNo = (text: string) => allOrderIds(text)[0] ?? ''
+    const isProductNameHeader = (value: string) => {
+      const header = value.replace(/\s+/g, '').trim()
+      return /(주문상품|상품명|상품|품명|제품명)/.test(header)
+        && !/(번호|코드|ID|아이디|식별자)/i.test(header)
+    }
+    const looksLikeProductName = (value: string) => {
+      const text = normalize(value)
+      if (!text) return false
+      if (orderIdPattern.test(text)) return false
+      if (/^\d+$/.test(text.replaceAll(',', ''))) return false
+      if (/^[A-Z]{1,5}\d{4,}$/i.test(text)) return false
+      if (/주문번호|주문상품번호|상품번호|상품코드|수취인|배송|상태|선택|엑셀/.test(text)) return false
+      if (/입금완료|배송준비|배송완료|신규|과세|free/i.test(text)) return false
+      return /[가-힣A-Za-z]/.test(text)
+    }
     const deriveProductName = (row: HTMLElement, rowText: string, preferredCell?: string) => {
-      if (preferredCell && !/선택상품|주문상품/.test(preferredCell)) return preferredCell
+      if (preferredCell && looksLikeProductName(preferredCell)) return preferredCell
 
       const links = Array.from(row.querySelectorAll('a'))
         .map((link) => normalize(link.textContent))
-        .filter((text) => text && !orderIdPattern.test(text) && !/과세|free|1:1문의/.test(text))
+        .filter((text) => looksLikeProductName(text) && !/1:1문의/.test(text))
         .sort((a, b) => b.length - a.length)
       if (links[0]) return links[0]
 
@@ -484,7 +516,7 @@ async function readVisibleOrderRowsFromFrame(frame: Frame): Promise<TobizonVisib
 
     const orderNoIndex = findColumn(/주문번호/)
     const recipientIndex = findColumn(/수취인|받는사람|수령인/)
-    const productIndex = findColumn(/주문상품|상품명|상품/)
+    const productIndex = headers.findIndex(isProductNameHeader)
     const quantityIndex = findColumn(/구매수량|주문수량|수량/)
     const totalIndex = findColumn(/상품합계|총금액|결제금액|상품금액/)
     const statusIndex = findColumn(/주문상태|상태/)
@@ -802,13 +834,25 @@ export class TobizonScraper implements MarketplaceScraper {
       }
       return ''
     }
+    const getProductName = (row: ExcelJS.Row, orderNo: string) => {
+      for (const [header, columnIndex] of columns.entries()) {
+        if (!isProductNameHeader(header)) continue
+        const value = readCellText(row.getCell(columnIndex).value)
+        if (looksLikeProductName(value, orderNo)) return value
+      }
+      for (const header of ['상품명', '품명', '제품명']) {
+        const value = get(row, header)
+        if (looksLikeProductName(value, orderNo)) return value
+      }
+      return ''
+    }
 
     const orders: NormalizedOrder[] = []
     worksheet.eachRow((row, rowNumber) => {
       if (rowNumber <= headerRowNumber) return
 
       const orderNo = extractOrderNumber(get(row, '주문번호', '주문번호주문일자', '주문코드'))
-      const productName = get(row, '주문상품', '상품명', '상품', '품명', '제품명')
+      const productName = getProductName(row, orderNo)
       if (!orderNo || !productName) return
 
       const quantity = Math.max(parseNumber(get(row, '수량', '구매수량', '주문수량')), 1)
@@ -923,12 +967,23 @@ export class TobizonScraper implements MarketplaceScraper {
       }
       return ''
     }
+    const getProductName = (row: { cells: string[] }, orderNo: string) => {
+      const productIndex = columns.findIndex(isProductNameHeader)
+      if (productIndex >= 0 && looksLikeProductName(row.cells[productIndex] ?? '', orderNo)) {
+        return row.cells[productIndex] ?? ''
+      }
+      for (const header of ['상품명', '품명', '제품명']) {
+        const value = get(row, header)
+        if (looksLikeProductName(value, orderNo)) return value
+      }
+      return ''
+    }
 
     const orders: NormalizedOrder[] = []
     for (const row of tableRows) {
       if (row.rowNumber <= header.rowNumber) continue
       const orderNo = extractOrderNumber(get(row, '주문번호', '주문코드'))
-      const productName = get(row, '주문상품', '상품명', '상품', '품명', '제품명')
+      const productName = getProductName(row, orderNo)
       if (!orderNo || !productName) continue
 
       const quantity = Math.max(parseNumber(get(row, '수량', '구매수량', '주문수량')), 1)
@@ -1039,12 +1094,23 @@ export class TobizonScraper implements MarketplaceScraper {
       }
       return ''
     }
+    const getProductName = (row: string[], orderNo: string) => {
+      const productIndex = columns.findIndex(isProductNameHeader)
+      if (productIndex >= 0 && looksLikeProductName(row[productIndex] ?? '', orderNo)) {
+        return row[productIndex] ?? ''
+      }
+      for (const header of ['상품명', '품명', '제품명']) {
+        const value = get(row, header)
+        if (looksLikeProductName(value, orderNo)) return value
+      }
+      return ''
+    }
 
     const orders: NormalizedOrder[] = []
     for (const [index, row] of normalizedRows.entries()) {
       if (index <= headerIndex) continue
       const orderNo = extractOrderNumber(get(row, '주문번호', '주문번호주문일자', '주문코드'))
-      const productName = get(row, '주문상품', '상품명', '상품', '품명', '제품명')
+      const productName = getProductName(row, orderNo)
       if (!orderNo || !productName) {
         const looseOrder = this.normalizeLooseRowOrder(row, index + 1, `${source}-loose`)
         if (looseOrder) orders.push(looseOrder)
@@ -1117,12 +1183,8 @@ export class TobizonScraper implements MarketplaceScraper {
     const productName = cells
       .map((cell) => cell.replace(/\s+/g, ' ').trim())
       .filter((cell) => {
-        if (!cell || cell.includes(orderNo)) return false
-        if (/주문번호|주문상품|상품명|수취인|배송|상태|번호|선택|엑셀/.test(cell)) return false
-        if (/^\d+$/.test(cell.replaceAll(',', ''))) return false
         if (/^\d{4}[.-]\d{1,2}[.-]\d{1,2}/.test(cell)) return false
-        if (/입금완료|배송준비|배송완료|신규|과세|free/i.test(cell)) return false
-        return /[가-힣A-Za-z]/.test(cell)
+        return looksLikeProductName(cell, orderNo)
       })
       .sort((a, b) => b.length - a.length)[0]
       ?? `투비즈온 주문 ${orderNo}`

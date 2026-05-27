@@ -319,28 +319,49 @@ function getDateFilterCondition(
   boundary: 'start' | 'end',
 ): SQL {
   const date = parseKstDateBoundary(value, boundary)
-  if (filters.dateField === 'shippedAt') {
-    const shippedAtExpr = sql<Date | null>`COALESCE(
-      (
-        SELECT MAX(${shipments.shippedAt})
-        FROM ${shipments}
-        WHERE ${shipments.orderId} = ${orders.id}
-      ),
-      CASE
-        WHEN ${orders.status} IN ('shipped', 'delivering', 'delivered')
-        THEN ${orders.updatedAt}
-        ELSE NULL
-      END
-    )`
-    return boundary === 'start'
-      ? sql`${shippedAtExpr} >= ${date}`
-      : sql`${shippedAtExpr} <= ${date}`
-  }
 
   const dateColumn = filters.dateField === 'collectedAt' ? orders.collectedAt : orders.orderedAt
   return boundary === 'start'
     ? gte(dateColumn, date)
     : lte(dateColumn, date)
+}
+
+function getShippedAtDateRangeCondition(filters: OrderFilters): SQL | null {
+  const rangeConditions: SQL[] = [eq(shipments.orderId, orders.id), isNotNull(shipments.shippedAt)]
+  const fallbackConditions: SQL[] = [inArray(orders.status, ['shipped', 'delivering', 'delivered'])]
+
+  if (filters.dateFrom) {
+    const from = parseKstDateBoundary(filters.dateFrom, 'start')
+    rangeConditions.push(gte(shipments.shippedAt, from))
+    fallbackConditions.push(gte(orders.updatedAt, from))
+  }
+
+  if (filters.dateTo) {
+    const to = parseKstDateBoundary(filters.dateTo, 'end')
+    rangeConditions.push(lte(shipments.shippedAt, to))
+    fallbackConditions.push(lte(orders.updatedAt, to))
+  }
+
+  if (!filters.dateFrom && !filters.dateTo) return null
+
+  const shipmentInRange = exists(
+    db
+      .select({ x: sql`1` })
+      .from(shipments)
+      .where(and(...rangeConditions)),
+  )
+
+  const noShippedShipment = sql`NOT EXISTS (
+    SELECT 1
+    FROM ${shipments}
+    WHERE ${shipments.orderId} = ${orders.id}
+      AND ${shipments.shippedAt} IS NOT NULL
+  )`
+
+  return or(
+    shipmentInRange,
+    and(...fallbackConditions, noShippedShipment),
+  )!
 }
 
 /**
@@ -354,6 +375,11 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     OR ${orders.marketplaceId} LIKE 'sabangnet-%'
     OR ${orders.rawData} ? 'sabangnetSync'
     OR ${orders.rawData} ? 'sabangnetRaw'
+    OR LOWER(COALESCE(${orders.rawData}->>'mallName', '')) IN ('sabangnet', '사방넷')
+    OR LOWER(COALESCE(${orders.rawData}->>'sourceFileName', '')) LIKE '%sabangnet%'
+    OR COALESCE(${orders.rawData}->>'sourceFileName', '') LIKE '%사방넷%'
+    OR LOWER(COALESCE(${orders.rawData}->>'importTemplateId', '')) LIKE '%sabangnet%'
+    OR COALESCE(${orders.rawData}->>'importTemplateId', '') LIKE '%사방넷%'
   )`
 
   if (filters.userId) {
@@ -384,12 +410,17 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(sql`NOT ${isSabangnetOrderSource}`)
   }
 
-  if (filters.dateFrom) {
-    conditions.push(getDateFilterCondition(filters, filters.dateFrom, 'start'))
-  }
+  if (filters.dateField === 'shippedAt') {
+    const shippedAtCondition = getShippedAtDateRangeCondition(filters)
+    if (shippedAtCondition) conditions.push(shippedAtCondition)
+  } else {
+    if (filters.dateFrom) {
+      conditions.push(getDateFilterCondition(filters, filters.dateFrom, 'start'))
+    }
 
-  if (filters.dateTo) {
-    conditions.push(getDateFilterCondition(filters, filters.dateTo, 'end'))
+    if (filters.dateTo) {
+      conditions.push(getDateFilterCondition(filters, filters.dateTo, 'end'))
+    }
   }
 
   if (filters.search) {

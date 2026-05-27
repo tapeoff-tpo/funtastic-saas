@@ -31,6 +31,13 @@ function itemSplitRawData(rawData: Record<string, unknown>, meta: Record<string,
   }
 }
 
+function isSabangnetImportSource(...values: Array<string | null | undefined>): boolean {
+  return values.some((value) => {
+    const normalized = value?.trim().toLowerCase()
+    return !!normalized && (normalized.includes('sabangnet') || normalized.includes('사방넷'))
+  })
+}
+
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
   const {
@@ -152,7 +159,9 @@ export async function POST(request: NextRequest) {
 
         const normalizedItems = items.map((item) => normalizeImportedOrderItem(item, marketplaceId))
         const firstNormalized = normalizedItems[0]
+        const isSabangnetImport = isSabangnetImportSource(marketplaceId, marketplaceName, file.name, templateId)
         const baseRawData = {
+          ...(isSabangnetImport ? { source: 'sabangnet-import-xlsx' } : {}),
           importTemplateId: templateId ?? null,
           sourceFileName: file.name,
           mallName: marketplaceName || marketplaceId,

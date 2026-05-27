@@ -165,9 +165,30 @@ function mapOrderStatus(order: SpecialofferBuyerOrder): NormalizedOrder['status'
   return 'new'
 }
 
+function mapMarketplaceCollectionStatus(
+  order: SpecialofferBuyerOrder,
+): NormalizedOrder['marketplaceCollectionStatus'] {
+  const state = asString(order.order_state).replace(/\s+/g, '').trim()
+  const stateText = state.toLowerCase()
+
+  if (stateText.includes('cancel') || state.includes('취소') || state === '0' || state === '9') return 'cancelled'
+  if (state.includes('반품') || state.includes('교환') || stateText.includes('claim')) return 'claim'
+  if (state.includes('배송완료') || state.includes('구매확정') || state === '6' || state === '7') return 'delivered'
+  if (order.delivery_no || order.delivery_date || state.includes('배송중') || state === '5') return 'shipping'
+  if (state.includes('배송준비') || state.includes('상품준비') || state.includes('주문확인') || state === '3' || state === '4') return 'ready'
+  if (state.includes('신규') || state.includes('결제완료') || state.includes('주문접수') || state === '2') return 'new'
+
+  return 'unknown'
+}
+
 function isCollectableSellerOrder(order: SpecialofferBuyerOrder): boolean {
   const state = asString(order.order_state).trim()
-  return COLLECTABLE_ORDER_STATES.has(state) && !order.delivery_no && !order.delivery_date
+  const collectionStatus = mapMarketplaceCollectionStatus(order)
+  return (
+    (COLLECTABLE_ORDER_STATES.has(state) || collectionStatus === 'new' || collectionStatus === 'ready')
+    && !order.delivery_no
+    && !order.delivery_date
+  )
 }
 
 function imagesFromProduct(product: SpecialofferProduct): Array<{ url: string; sortOrder: number }> {
@@ -541,6 +562,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
       marketplaceOrderId: orderNo,
       marketplaceId: 'specialoffer',
       marketplaceStatus: asString(order.order_state),
+      marketplaceCollectionStatus: mapMarketplaceCollectionStatus(order),
       status: mapOrderStatus(order),
       buyerName: order.receiver_name ?? '',
       buyerPhone: order.receiver_telephone,

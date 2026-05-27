@@ -82,6 +82,7 @@ describe('SpecialofferAdapter', () => {
       marketplaceOrderId: '26051415470129',
       marketplaceId: 'specialoffer',
       marketplaceStatus: '3',
+      marketplaceCollectionStatus: 'ready',
       status: 'new',
       buyerName: '홍길동',
       buyerPhone: '02-0000-0000',
@@ -109,6 +110,40 @@ describe('SpecialofferAdapter', () => {
     expect(orders[0].rawData.marketplaceOrderIdentity).toEqual({
       orderId: '26051415470129',
       itemIds: ['571610'],
+    })
+  })
+
+  it('maps Specialoffer 배송준비 wording to marketplace shipping preparation', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ({
+        data: [
+          {
+            order_id: '571611',
+            order_no: '26051415470130',
+            order_state: '배송준비',
+            goods_name: '테스트 상품',
+            sum_qty: 1,
+            goods_price: 8000,
+            total_price: 8000,
+            receiver_name: '홍길동',
+            receiver_zip: '06000',
+            receiver_addr1: '서울시 강남구',
+            order_date: '2026-05-14 15:47:01',
+            updated_at: '2026-05-14 15:47:01',
+          },
+        ],
+        meta: { current_page: 1, last_page: 1, total: 1 },
+      }),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-14T00:00:00+09:00'))
+
+    expect(orders).toHaveLength(1)
+    expect(orders[0]).toMatchObject({
+      marketplaceStatus: '배송준비',
+      marketplaceCollectionStatus: 'ready',
     })
   })
 

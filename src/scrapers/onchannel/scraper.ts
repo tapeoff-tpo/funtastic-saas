@@ -202,11 +202,11 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
 
 async function clickOrderExcelDownloadButton(page: Page, root: Locator | Page): Promise<void> {
   const roleButton = root.getByRole('button', { name: /^다운로드$/ }).first()
-  const clickedByRole = await roleButton.click({ timeout: 5000 }).then(() => true).catch(() => false)
+  const clickedByRole = await roleButton.click({ force: true, timeout: 3000 }).then(() => true).catch(() => false)
   if (clickedByRole) return
 
   const clickedById = await page
-    .locator('#btn-order-excel-down:visible, button[target="supplier"]:visible')
+    .locator('#btn-order-excel-down:visible, button[target="supplier"]:visible, input[target="supplier"]:visible')
     .last()
     .click({ force: true, timeout: 5000 })
     .then(() => true)
@@ -220,7 +220,7 @@ async function clickOrderExcelDownloadButton(page: Page, root: Locator | Page): 
       return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
     }
     const candidates = Array.from(
-      document.querySelectorAll<HTMLElement>('#btn-order-excel-down, button[target="supplier"], button, input[type="button"], input[type="submit"]'),
+      document.querySelectorAll<HTMLElement>('#btn-order-excel-down, button[target="supplier"], input[target="supplier"], button, input[type="button"], input[type="submit"]'),
     ).filter((element) => {
       const text = element instanceof HTMLInputElement ? element.value : element.innerText || element.textContent || ''
       return /다운로드/.test(text)
@@ -280,9 +280,22 @@ async function waitForOrderDownloadDialog(page: Page): Promise<void> {
   throw new MarketplaceApiError('onchannel', 500, `온채널 주문내역 다운로드 모달이 열리지 않았습니다. buttons=${buttons.join(' | ')}`)
 }
 
+async function getOrderDownloadRoot(page: Page): Promise<Locator | Page> {
+  const dialogSelector = '.modal:visible, [role="dialog"]:visible, .swal2-popup:visible'
+  const dialogWithDownload = page.locator(dialogSelector).filter({
+    has: page.locator('#btn-order-excel-down, button[target="supplier"], input[target="supplier"]'),
+  }).last()
+  if (await dialogWithDownload.isVisible().catch(() => false)) return dialogWithDownload
+
+  const likelyDialog = page.locator(dialogSelector).filter({ hasText: /다운로드|주문내역|엑셀/ }).last()
+  if (await likelyDialog.isVisible().catch(() => false)) return likelyDialog
+
+  return page
+}
+
 async function prepareOrderDownloadForm(page: Page, since: Date, until: Date): Promise<void> {
   const prepared = await page.evaluate(({ sinceValue, untilValue }) => {
-    const button = document.querySelector<HTMLElement>('#btn-order-excel-down, button[target="supplier"]')
+    const button = document.querySelector<HTMLElement>('#btn-order-excel-down, button[target="supplier"], input[target="supplier"]')
     const container = button?.closest<HTMLElement>('.modal, [role="dialog"], .swal2-popup, form') ?? document.body
     if (!button || !container) return { ok: false, reason: 'download-button-missing' }
 
@@ -684,10 +697,12 @@ export class OnchannelScraper implements MarketplaceScraper {
       await setProgress?.('온채널 주문내역 다운로드 모달 여는 중...')
       await clickOrderHistoryDownloadButton(ctx.page)
       await waitForOrderDownloadDialog(ctx.page)
-      const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').first()
+      const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').filter({
+        has: ctx.page.locator('#btn-order-excel-down, button[target="supplier"], input[target="supplier"]'),
+      }).last()
       await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
       await dismissOnchannelPopups(ctx.page)
-      const downloadRoot: Locator | Page = (await dialog.isVisible().catch(() => false)) ? dialog : ctx.page
+      const downloadRoot = await getOrderDownloadRoot(ctx.page)
 
       await setProgress?.('온채널 주문내역 다운로드 조건 입력 중...')
       await prepareOrderDownloadForm(ctx.page, since, until)

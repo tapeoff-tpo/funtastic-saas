@@ -301,7 +301,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
       if (!isVisible(checkbox)) continue
       if (/전체|all|header/i.test(key)) continue
       if (/보류주문|검색어|기간|주문상태/.test(text) && !isOrderRowText(text)) continue
-      if (markCheckbox(checkbox) && selectedOrderCount() > 0) return true
+      if (markCheckbox(checkbox)) return true
     }
 
     const bodyText = document.body.textContent ?? ''
@@ -314,7 +314,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
         const text = row?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
         return /\d{10,}|배송준비중|배송중|배송완료/.test(text)
       }) ?? tableCheckboxes.at(-1) ?? allCheckboxes.at(-1)
-      if (dataCheckbox) return markCheckbox(dataCheckbox) && selectedOrderCount() > 0
+      if (dataCheckbox) return markCheckbox(dataCheckbox)
     }
 
     return false
@@ -351,6 +351,8 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
         element.dispatchEvent(new Event('change', { bubbles: true }))
       }
     }).catch(() => undefined)
+    selected = await checkbox.isChecked().catch(() => false)
+    if (selected) break
     selected = await page.evaluate(() => {
       const isOrderRowText = (text: string) => /\d{10,}|신규주문|발송대상|배송준비중|배송중|배송완료/.test(text)
       return Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked'))
@@ -388,6 +390,7 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
         rowCheckbox.dispatchEvent(new Event('input', { bubbles: true }))
         rowCheckbox.dispatchEvent(new Event('change', { bubbles: true }))
       }
+      if (rowCheckbox.checked) return true
       return Array.from(document.querySelectorAll('input[type="checkbox"]:checked')).some((checkbox) => {
         const row = checkbox.closest('tbody tr, .tui-grid-row, [role="row"]')
         const text = row?.textContent?.replace(/\\s+/g, ' ').trim() ?? ''

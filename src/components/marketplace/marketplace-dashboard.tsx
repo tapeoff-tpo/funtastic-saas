@@ -8,6 +8,7 @@ import { StatusBadge } from './status-badge'
 import { SyncedScrollContainer } from '@/components/ui/synced-scroll'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import { getIntegrationInfo, type IntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { getMarketplacePortalLink } from '@/lib/marketplace/portal-links'
 import type { ConnectionStatus } from '@/lib/marketplace/types'
 import {
   createExcelImportTemplate,
@@ -363,7 +364,7 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
     { id: 'lastCheck', label: '마지막수집', size: 110 },
     { id: 'expires', label: '만료', size: 90 },
     { id: 'note', label: '알림', size: 260 },
-    { id: 'actions', label: '액션', size: 220 },
+    { id: 'actions', label: '액션', size: 260 },
   ]
   const flexibleColumnId = 'note'
   const minTableWidth = cols.reduce((s, c) => s + (columnSizing[c.id] ?? c.size), 0)
@@ -834,6 +835,7 @@ function ConnRow({
   const latestJobAt = conn.latestJobLog
     ? new Date(conn.latestJobLog.completedAt ?? conn.latestJobLog.createdAt)
     : null
+  const portalLink = getMarketplacePortalLink(conn.marketplaceId)
 
   return (
     <tr
@@ -968,6 +970,17 @@ function ConnRow({
           >
             양식
           </button>
+          {portalLink && (
+            <a
+              href={portalLink.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+              title={`${conn.displayName} 판매자센터 열기`}
+            >
+              이동
+            </a>
+          )}
         </div>
       </td>
     </tr>

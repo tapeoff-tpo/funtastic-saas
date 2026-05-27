@@ -81,6 +81,17 @@ function toDomeggookOrderNo(marketplaceOrderId: string): string {
   return marketplaceOrderId.replace(/^OR/i, '')
 }
 
+function formatDomeggookApiError(
+  errorCode: string | number | undefined,
+  errorMessage: string | undefined,
+  operation: string,
+): string {
+  const base = `${errorCode != null ? `[${errorCode}] ` : ''}${errorMessage ?? `도매꾹 ${operation} API 오류`}`
+  if (String(errorCode) !== '113') return base
+
+  return `${base} 도매꾹 Private API 권한(${operation}) 승인 여부와 저장된 회원 ID/로그인 비밀번호를 확인해주세요.`
+}
+
 export class DomeggookAdapter implements MarketplaceAdapter {
   readonly config = DOMEGGOOK_CONFIG
 
@@ -161,7 +172,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
 
       const { errorCode, errorMessage } = this.getApiError(response)
       if (errorMessage || (errorCode != null && String(errorCode) !== '0')) {
-        return { success: false, error: `${errorCode ? `[${errorCode}] ` : ''}${errorMessage ?? '도매꾹 발주확인 API 오류'}` }
+        return { success: false, error: formatDomeggookApiError(errorCode, errorMessage, '발주처리') }
       }
 
       const result = response.domeggook?.result ?? response.result
@@ -232,7 +243,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
 
     const { errorCode, errorMessage } = this.getApiError(response)
     if (errorMessage || (errorCode != null && String(errorCode) !== '0')) {
-      throw new MarketplaceApiError('domeggook', 400, `${errorCode ? `[${errorCode}] ` : ''}${errorMessage ?? '도매꾹 API 오류'}`)
+      throw new MarketplaceApiError('domeggook', 400, formatDomeggookApiError(errorCode, errorMessage, '판매 주문서 조회'))
     }
 
     return response
@@ -278,7 +289,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     }
 
     if (errorMessage || errorCode != null) {
-      throw new MarketplaceAuthError('domeggook', `${errorCode ? `[${errorCode}] ` : ''}${errorMessage ?? '도매꾹 로그인 API에서 sId를 받지 못했습니다.'}`)
+      throw new MarketplaceAuthError('domeggook', formatDomeggookApiError(errorCode, errorMessage, '로그인'))
     }
 
     throw new MarketplaceAuthError('domeggook', '도매꾹 로그인 API에서 sId를 받지 못했습니다.')

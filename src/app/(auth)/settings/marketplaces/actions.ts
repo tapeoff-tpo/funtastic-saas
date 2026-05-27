@@ -12,6 +12,7 @@ import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
+import { DomeggookAdapter } from '@/lib/marketplace/adapters/domeggook/adapter'
 import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
 import { SpecialofferAdapter } from '@/lib/marketplace/adapters/specialoffer/adapter'
 import { DomechangoAdapter } from '@/lib/marketplace/adapters/domechango/adapter'
@@ -262,6 +263,13 @@ export async function testMarketplaceCredentials(
             ? undefined
             : 'api_key와 base_url을 입력해주세요.',
         }
+        break
+      case 'domeggook':
+        result = await new DomeggookAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
+          seller_id: credentials.seller_id?.trim() ?? '',
+          session_id: credentials.session_id?.trim() ?? '',
+        }).testConnection()
         break
       case 'domesin':
         result = await new DomesinAdapter({

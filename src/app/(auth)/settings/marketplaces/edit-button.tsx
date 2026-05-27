@@ -31,6 +31,7 @@ const credentialLabels: Record<string, string> = {
   access_token: '액세스 토큰',
   store_id: '스토어 ID',
   seller_id: '셀러 ID',
+  session_id: '도매꾹 로그인 비밀번호',
   username: '오너클랜 판매회원 ID',
   password: '오너클랜 판매회원 PW',
   admin_app_key: '연동대행사 Admin 키',
@@ -304,6 +305,11 @@ export function ConnectionRow({
               계정명을 변경하면 저장된 인증정보도 새 이름으로 함께 이전됩니다.
             </p>
           </div>
+          {data.marketplaceId === 'domeggook' && (
+            <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              이 칸에는 API 세션값이 아닌 도매꾹 로그인 비밀번호를 저장해야 합니다. Private API 로그인 및 판매 주문서 조회 승인도 확인하세요.
+            </p>
+          )}
           {data.requiredCredentials.map((credKey) => {
             const isRevealed = reveal[credKey] ?? false
             return (

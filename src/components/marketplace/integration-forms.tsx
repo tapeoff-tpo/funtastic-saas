@@ -56,6 +56,7 @@ const credentialLabels: Record<string, string> = {
   mall_id: '몰 ID (예: mymall)',
   access_token: '액세스 토큰',
   seller_id: '판매자 ID',
+  session_id: '도매꾹 로그인 비밀번호',
   admin_app_key: '연동대행사 Admin 키',
   seller_app_key: '판매자 API 인증키',
   username: '오너클랜 판매회원 ID',
@@ -330,6 +331,12 @@ function ApiConnectionForm({
       {marketplace.connectedAliases.length > 0 && (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
           이미 등록된 계정명: {marketplace.connectedAliases.join(', ')}. 새 계정을 추가하려면 다른 계정명을 입력하세요.
+        </p>
+      )}
+
+      {marketplace.id === 'domeggook' && (
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          도매꾹 회원 ID와 로그인 비밀번호를 입력하세요. 도매꾹 Private API에서 로그인 및 판매 주문서 조회 권한 승인이 필요합니다.
         </p>
       )}
 

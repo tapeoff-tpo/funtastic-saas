@@ -10,7 +10,6 @@ import type {
 import { getCarrierName, mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import { dumpStorageState, openContext } from '../browser'
 import { dismissRpaPopups } from '../popups'
-import { withRpaDownloadRetry } from '../rpa-downloads'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -547,39 +546,33 @@ export class OnchannelScraper implements MarketplaceScraper {
       const checkbox = downloadRoot.locator('input[type="checkbox"]').first()
       await ensureCheckboxChecked(downloadRoot, checkbox)
 
-      return await withRpaDownloadRetry(ctx.page, {
-        marketplaceName: '온채널',
-        actionName: 'orders-excel-download',
-        timeoutMs: DOWNLOAD_TIMEOUT_MS,
-      }, async () => {
-        await dismissOnchannelPopups(ctx.page)
-        const dialogPromise = ctx.page.waitForEvent('dialog', { timeout: 5000 })
-          .then(async (dialogEvent) => {
-            const message = dialogEvent.message()
-            await dialogEvent.accept(process.env.EXCEL_PASSWORD).catch(() => undefined)
-            return message
-          })
-          .catch(() => null)
-        const [download] = await Promise.all([
-          ctx.page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-          downloadRoot.getByRole('button', { name: /^다운로드$/ }).click({ timeout: 15_000 }),
-        ]).catch(async (error) => {
-          const dialogMessage = await dialogPromise
-          throw new MarketplaceApiError(
-            'onchannel',
-            504,
-            `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
-          )
+      await dismissOnchannelPopups(ctx.page)
+      const dialogPromise = ctx.page.waitForEvent('dialog', { timeout: 5000 })
+        .then(async (dialogEvent) => {
+          const message = dialogEvent.message()
+          await dialogEvent.accept().catch(() => undefined)
+          return message
         })
-        const stream = await download.createReadStream()
-        if (!stream) throw new MarketplaceApiError('onchannel', 500, '온채널 엑셀 다운로드 스트림을 열 수 없습니다.')
-
-        const chunks: Buffer[] = []
-        for await (const chunk of stream) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-        }
-        return Buffer.concat(chunks)
+        .catch(() => null)
+      const [download] = await Promise.all([
+        ctx.page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
+        downloadRoot.getByRole('button', { name: /^다운로드$/ }).click({ timeout: 15_000 }),
+      ]).catch(async (error) => {
+        const dialogMessage = await dialogPromise
+        throw new MarketplaceApiError(
+          'onchannel',
+          504,
+          `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
+        )
       })
+      const stream = await download.createReadStream()
+      if (!stream) throw new MarketplaceApiError('onchannel', 500, '온채널 엑셀 다운로드 스트림을 열 수 없습니다.')
+
+      const chunks: Buffer[] = []
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      }
+      return Buffer.concat(chunks)
     } finally {
       await ctx.close()
     }

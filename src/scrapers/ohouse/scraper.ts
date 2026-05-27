@@ -5,7 +5,6 @@ import type { InvoiceData, MarketplaceId, NormalizedClaim, NormalizedOrder } fro
 import { openContext } from '../browser'
 import { readNaverVerificationCode } from '../mail/naver'
 import { dismissRpaPopups } from '../popups'
-import { withRpaDownloadRetry } from '../rpa-downloads'
 import type { MarketplaceScraper, ScraperCredentials, ScraperLoginResult } from '../types'
 
 const PARTNER_BASE_URL = 'https://orora.ohou.se'
@@ -1641,11 +1640,6 @@ async function readVisibleOhouseOrders(page: Page, credentials: ScraperCredentia
 }
 
 async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Promise<Buffer> {
-  return withRpaDownloadRetry(page, {
-    marketplaceName: '오늘의집',
-    actionName: 'orders-excel-download',
-    timeoutMs: DOWNLOAD_TIMEOUT_MS,
-  }, async () => {
   if (isOhouseSignInUrl(page.url())) {
     throw new MarketplaceApiError('ohouse', 401, `${OHOUSE_RPA_VERSION}: 오늘의집 로그인 화면이라 엑셀 다운로드를 시도할 수 없습니다. (${await summarizePage(page)})`)
   }
@@ -1653,7 +1647,7 @@ async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Pro
     .waitForEvent('dialog', { timeout: 8000 })
     .then(async (dialog) => {
       const message = dialog.message()
-      await dialog.accept(process.env.EXCEL_PASSWORD).catch(() => undefined)
+      await dialog.accept().catch(() => undefined)
       return message
     })
     .catch(() => null)
@@ -1726,7 +1720,6 @@ async function downloadOrdersExcel(page: Page, authFailures: string[] = []): Pro
       `${OHOUSE_RPA_VERSION}: 오늘의집 엑셀 다운로드 응답을 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 받지 못했습니다.${authNotice}${confirmNotice}${promptNotice}${notice ? ` (${notice})` : ''} (${error instanceof Error ? error.message : 'download timeout'})`,
     )
   }
-  })
 }
 
 async function selectVisibleOhouseOrders(page: Page): Promise<number> {

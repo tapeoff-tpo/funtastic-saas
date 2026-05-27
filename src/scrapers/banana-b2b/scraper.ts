@@ -10,7 +10,6 @@ import type {
 } from '@/lib/marketplace/types'
 import { dumpStorageState, openContext } from '../browser'
 import { dismissRpaPopups } from '../popups'
-import { withRpaDownloadRetry } from '../rpa-downloads'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -300,11 +299,6 @@ async function applyOrderSearch(page: Page, since: Date): Promise<void> {
 }
 
 async function downloadOrdersExcel(page: Page): Promise<Buffer> {
-  return withRpaDownloadRetry(page, {
-    marketplaceName: '바나나B2B',
-    actionName: 'orders-excel-download',
-    timeoutMs: DOWNLOAD_TIMEOUT_MS,
-  }, async () => {
   const directBuffer = await page.evaluate(async () => {
     const response = await fetch('/api/v1/order/delivery/excel', {
       credentials: 'include',
@@ -338,7 +332,6 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
   }
   return Buffer.concat(chunks)
-  })
 }
 
 async function readVisibleOrderNos(page: Page): Promise<Set<string>> {

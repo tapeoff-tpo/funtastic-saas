@@ -12,7 +12,6 @@ import type {
 import { getCarrierName, mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import { dumpStorageState, openContext } from '../browser'
 import { dismissRpaPopups } from '../popups'
-import { withRpaDownloadRetry } from '../rpa-downloads'
 import type {
   MarketplaceScraper,
   ScraperCredentials,
@@ -429,17 +428,11 @@ async function triggerSelectedOrderExcelDownload(
   setProgress?: (message: string) => Promise<void>,
   timeoutMs = DOWNLOAD_TIMEOUT_MS,
 ): Promise<Buffer> {
-  return withRpaDownloadRetry(page, {
-    marketplaceName: '도매창고',
-    actionName: 'selected-orders-excel-download',
-    timeoutMs,
-    setProgress,
-  }, async () => {
   await setProgress?.('도매창고 엑셀 다운로드 요청 중...')
   const dialogPromise = page.waitForEvent('dialog', { timeout: timeoutMs })
     .then(async (dialog) => {
       const message = dialog.message()
-      await dialog.accept(process.env.EXCEL_PASSWORD).catch(() => undefined)
+      await dialog.accept().catch(() => undefined)
       return { dialogMessage: message }
     })
     .catch(() => null)
@@ -538,7 +531,6 @@ async function triggerSelectedOrderExcelDownload(
   const { download } = result
   await setProgress?.('도매창고 엑셀 파일 수신 중...')
   return readDownloadBuffer(download)
-  })
 }
 
 async function moveSelectedNewOrdersToShippingTarget(

@@ -39,7 +39,6 @@ const CARRIER_REQUIRED_HEADERS: Record<ActualShippingCostCarrier, string[]> = {
 }
 
 export async function ensureActualShippingCostsTable(): Promise<void> {
-  await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pgcrypto`)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS actual_shipping_costs (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

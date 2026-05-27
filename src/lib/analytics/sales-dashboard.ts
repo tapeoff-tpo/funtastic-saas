@@ -50,7 +50,7 @@ type DetailRow = {
   actualShippingFee: string | number | null
 }
 
-const ACTIVE_ORDER_STATUSES = ['new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered']
+const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
 
 export async function getSalesDashboardData(userId: string, now = new Date()): Promise<SalesDashboardData> {
   await ensureActualShippingCostsTable()
@@ -73,7 +73,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+        AND o.status::text IN ${STATUS_FILTER}
     ),
     current_costs AS (
       SELECT
@@ -86,7 +86,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+        AND o.status::text IN ${STATUS_FILTER}
     ),
     shipped_orders AS (
       SELECT DISTINCT o.id, o.total_amount::numeric AS total_amount
@@ -95,7 +95,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE o.user_id = ${userId}
         AND s.shipped_at >= ${monthStart}
         AND s.shipped_at < ${nextMonthStart}
-        AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+        AND o.status::text IN ${STATUS_FILTER}
     ),
     previous_months AS (
       SELECT
@@ -105,7 +105,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${previousThreeMonthStart}
         AND o.ordered_at < ${monthStart}
-        AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+        AND o.status::text IN ${STATUS_FILTER}
       GROUP BY to_char(o.ordered_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')
     )
     SELECT
@@ -122,7 +122,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         WHERE o.user_id = ${userId}
           AND o.ordered_at >= ${lastMonthStart}
           AND o.ordered_at < ${lastMonthSameDayEnd}
-          AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+          AND o.status::text IN ${STATUS_FILTER}
       ), 0)::text AS "lastMonthSamePeriodSales",
       COALESCE((SELECT AVG(sales) FROM previous_months), 0)::text AS "previousThreeMonthAverageSales"
   `)
@@ -142,7 +142,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+        AND o.status::text IN ${STATUS_FILTER}
     ),
     product_costs AS (
       SELECT
@@ -156,7 +156,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+        AND o.status::text IN ${STATUS_FILTER}
       GROUP BY o.marketplace_id
     ),
     actual_costs AS (
@@ -169,7 +169,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE ascost.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text = ANY(${ACTIVE_ORDER_STATUSES})
+        AND o.status::text IN ${STATUS_FILTER}
       GROUP BY o.marketplace_id
     )
     SELECT
@@ -194,7 +194,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
   const previousThreeAverage = toNumber(metric?.previousThreeMonthAverageSales)
 
   return {
-    currentMonthLabel: `${now.getFullYear()}년 ${now.getMonth() + 1}월`,
+    currentMonthLabel: monthLabel(now),
     cards: [
       {
         key: 'month-sales',
@@ -231,6 +231,21 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     ],
     rows,
     totals,
+  }
+}
+
+export function emptySalesDashboardData(now = new Date()): SalesDashboardData {
+  return {
+    currentMonthLabel: monthLabel(now),
+    cards: [
+      { key: 'month-sales', label: '당월매출', value: 0, subLabel: '주문일 기준 실시간' },
+      { key: 'shipped-expected', label: '당월 출고완료 매출예상금액', value: 0, subLabel: '출고일 기준' },
+      { key: 'profit-excluding-shipping', label: '배송비 제외 현 이익금', value: 0, subLabel: '매출 - 수수료 - 상품원가 - 결제배송비' },
+      { key: 'last-month-same-period', label: '지난달 동기간 대비', value: 0, suffix: '%', subLabel: '지난달 동기간 0원' },
+      { key: 'three-month-average', label: '직전 3개월 평균 대비', value: 0, suffix: '%', subLabel: '3개월 평균 0원' },
+    ],
+    rows: [],
+    totals: buildTotals([]),
   }
 }
 
@@ -302,4 +317,8 @@ function percentChange(current: number, base: number): number {
 
 function formatWon(value: number): string {
   return `${Math.round(value).toLocaleString('ko-KR')}원`
+}
+
+function monthLabel(date: Date): string {
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월`
 }

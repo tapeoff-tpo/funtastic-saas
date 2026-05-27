@@ -3,7 +3,11 @@ import Link from 'next/link'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getActualShippingCostRecentImports } from '@/lib/shipping/actual-costs'
-import { getSalesDashboardData, type MarketplaceSalesRow } from '@/lib/analytics/sales-dashboard'
+import {
+  emptySalesDashboardData,
+  getSalesDashboardData,
+  type MarketplaceSalesRow,
+} from '@/lib/analytics/sales-dashboard'
 import { ActualShippingCostUpload } from './actual-shipping-cost-upload'
 
 export const metadata: Metadata = {
@@ -26,10 +30,16 @@ export default async function AnalyticsPage({
 
   const tab = (await searchParams)?.tab === 'uploads' ? 'uploads' : 'dashboard'
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [dashboard, recent] = await Promise.all([
-    getSalesDashboardData(workspaceUserId),
-    getActualShippingCostRecentImports(workspaceUserId),
-  ])
+  const dashboard = await getSalesDashboardData(workspaceUserId).catch((error) => {
+    console.error('sales analytics dashboard error:', error)
+    return emptySalesDashboardData()
+  })
+  const recent = tab === 'uploads'
+    ? await getActualShippingCostRecentImports(workspaceUserId).catch((error) => {
+      console.error('actual shipping cost recent import error:', error)
+      return []
+    })
+    : []
 
   return (
     <div className="space-y-4">

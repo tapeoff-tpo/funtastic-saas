@@ -19,6 +19,7 @@ import type {
 const ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=preparing'
 const ALL_ORDER_PAGE_URL = 'https://www.onch3.co.kr/supplier/orders.php?state=all&orderDate=all&orderBy=obd.id%7Cdesc'
 const DOWNLOAD_TIMEOUT_MS = 120_000
+const DOWNLOAD_READ_TIMEOUT_MS = 30_000
 
 function formatDateInput(date: Date): string {
   const year = date.getFullYear()
@@ -182,6 +183,72 @@ async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise
   if (!clicked) {
     throw new MarketplaceApiError('onchannel', 500, `온채널 버튼을 찾지 못했습니다. (${pattern.source})`)
   }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new MarketplaceApiError('onchannel', 504, message)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
+async function clickOrderExcelDownloadButton(page: Page, root: Locator | Page): Promise<void> {
+  const roleButton = root.getByRole('button', { name: /^다운로드$/ }).first()
+  const clickedByRole = await roleButton.click({ timeout: 5000 }).then(() => true).catch(() => false)
+  if (clickedByRole) return
+
+  const clickedById = await page
+    .locator('#btn-order-excel-down:visible, button[target="supplier"]:visible')
+    .last()
+    .click({ force: true, timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+  if (clickedById) return
+
+  const clickedByDom = await page.evaluate(() => {
+    const isVisible = (element: HTMLElement) => {
+      const style = window.getComputedStyle(element)
+      const rect = element.getBoundingClientRect()
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+    }
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLElement>('#btn-order-excel-down, button[target="supplier"], button, input[type="button"], input[type="submit"]'),
+    ).filter((element) => {
+      const text = element instanceof HTMLInputElement ? element.value : element.innerText || element.textContent || ''
+      return /다운로드/.test(text)
+    })
+    const target = candidates.find(isVisible) ?? candidates.at(-1)
+    if (!target) return false
+    target.click()
+    return true
+  }).catch(() => false)
+
+  if (!clickedByDom) {
+    throw new MarketplaceApiError('onchannel', 500, '온채널 주문 엑셀 다운로드 버튼을 클릭하지 못했습니다.')
+  }
+}
+
+async function readDownloadBuffer(download: { createReadStream: () => Promise<NodeJS.ReadableStream | null> }): Promise<Buffer> {
+  return withTimeout(
+    (async () => {
+      const stream = await download.createReadStream()
+      if (!stream) throw new MarketplaceApiError('onchannel', 500, '온채널 엑셀 다운로드 스트림을 열 수 없습니다.')
+      const chunks: Buffer[] = []
+      for await (const chunk of stream) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      }
+      return Buffer.concat(chunks)
+    })(),
+    DOWNLOAD_READ_TIMEOUT_MS,
+    `온채널 엑셀 다운로드 파일 읽기가 ${DOWNLOAD_READ_TIMEOUT_MS / 1000}초 안에 끝나지 않았습니다.`,
+  )
 }
 
 async function selectSearchTypeForOrderCode(page: Page): Promise<void> {
@@ -556,7 +623,7 @@ export class OnchannelScraper implements MarketplaceScraper {
         .catch(() => null)
       const [download] = await Promise.all([
         ctx.page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-        downloadRoot.getByRole('button', { name: /^다운로드$/ }).click({ timeout: 15_000 }),
+        clickOrderExcelDownloadButton(ctx.page, downloadRoot),
       ]).catch(async (error) => {
         const dialogMessage = await dialogPromise
         throw new MarketplaceApiError(
@@ -565,14 +632,7 @@ export class OnchannelScraper implements MarketplaceScraper {
           `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
         )
       })
-      const stream = await download.createReadStream()
-      if (!stream) throw new MarketplaceApiError('onchannel', 500, '온채널 엑셀 다운로드 스트림을 열 수 없습니다.')
-
-      const chunks: Buffer[] = []
-      for await (const chunk of stream) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-      }
-      return Buffer.concat(chunks)
+      return readDownloadBuffer(download)
     } finally {
       await ctx.close()
     }

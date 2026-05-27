@@ -237,24 +237,60 @@ async function clickOrderExcelDownloadButton(page: Page, root: Locator | Page): 
 }
 
 async function clickOrderHistoryDownloadButton(page: Page): Promise<void> {
-  const clickedByRole = await page
-    .getByRole('button', { name: /주문내역\s*다운로드/ })
-    .click({ timeout: 5000 })
-    .then(() => true)
-    .catch(() => false)
-  if (clickedByRole) return
+  const rolePatterns = [
+    /주문내역\s*다운로드/,
+    /주문.*다운로드/,
+    /엑셀\s*다운로드/,
+    /엑셀\s*파일\s*신청(?!\s*목록)/,
+  ]
+  for (const pattern of rolePatterns) {
+    const clicked = await page
+      .getByRole('button', { name: pattern })
+      .last()
+      .click({ force: true, timeout: 3000 })
+      .then(() => true)
+      .catch(() => false)
+    if (clicked) return
+  }
 
-  const clickedByDom = await page.evaluate(() => {
-    const controls = Array.from(
-      document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a.btn, a'),
-    )
-    const target = controls.find((control) => {
-      const text = control instanceof HTMLInputElement ? control.value : control.innerText || control.textContent || ''
-      return /주문내역\s*다운로드/.test(text)
-    })
-    target?.click()
-    return Boolean(target)
-  }).catch(() => false)
+  const clickedByDom = await page.evaluate(`(() => {
+    const visible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    };
+    const scoreControl = (control) => {
+      const text = (control instanceof HTMLInputElement ? control.value : control.innerText || control.textContent || '').replace(/\\s+/g, ' ').trim();
+      const attrs = [
+        control.id || '',
+        control.getAttribute('name') || '',
+        control.getAttribute('class') || '',
+        control.getAttribute('href') || '',
+        control.getAttribute('onclick') || '',
+        control.getAttribute('data-target') || '',
+        control.getAttribute('target') || '',
+      ].join(' ');
+      const source = text + ' ' + attrs;
+      if (/목록|이용가이드|공지사항/.test(text)) return 0;
+      if (/주문내역\\s*다운로드/.test(text)) return 100;
+      if (/주문.*다운로드|다운로드.*주문/.test(text)) return 90;
+      if (/엑셀\\s*다운로드|다운로드.*엑셀/.test(text)) return 80;
+      if (/엑셀\\s*파일\\s*신청/.test(text) && !/목록/.test(text)) return 70;
+      if (/order.*excel|excel.*order|order.*download|download.*order/i.test(source)) return 65;
+      if (/excel|xlsx|download|down/i.test(source) && /order|supplier/i.test(source)) return 55;
+      return 0;
+    };
+    const controls = Array.prototype.slice.call(document.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn, a, [role="button"]'));
+    const candidates = controls
+      .filter((control) => visible(control))
+      .map((control) => ({ control, score: scoreControl(control) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score);
+    const target = candidates[0] && candidates[0].control;
+    if (!target) return false;
+    target.click();
+    return true;
+  })()`).catch(() => false)
 
   if (!clickedByDom) {
     throw new MarketplaceApiError('onchannel', 500, '온채널 주문내역 다운로드 버튼을 클릭하지 못했습니다.')

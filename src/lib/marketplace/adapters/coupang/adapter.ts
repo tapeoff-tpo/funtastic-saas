@@ -29,7 +29,7 @@ import type {
   CoupangSellerProductsResponse,
 } from './types'
 
-const COUPANG_ORDER_STATUSES = ['ACCEPT', 'INSTRUCT', 'DEPARTURE', 'DELIVERING', 'FINAL_DELIVERY']
+const COUPANG_COLLECTABLE_STATUS = 'ACCEPT'
 
 const COUPANG_CONFIG: MarketplaceConfig = {
   id: 'coupang',
@@ -109,20 +109,18 @@ export class CoupangAdapter implements MarketplaceAdapter {
     }
 
     try {
-      const orders: CoupangOrderSheet[] = []
-      for (const status of COUPANG_ORDER_STATUSES) {
-        const qs = `createdAtFrom=${encodeURIComponent(fmt(since))}&createdAtTo=${encodeURIComponent(fmt(until))}&status=${status}&maxPerPage=50`
-        const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
-        const response = await this.client.get(path).json<CoupangOrderSheetsResponse>()
+      const qs = `createdAtFrom=${encodeURIComponent(fmt(since))}&createdAtTo=${encodeURIComponent(fmt(until))}&status=${COUPANG_COLLECTABLE_STATUS}&maxPerPage=50`
+      const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
+      const response = await this.client.get(path).json<CoupangOrderSheetsResponse>()
 
-        const codeStr = String(response.code)
-        if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
-          throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
-        }
-        orders.push(...(response.data || []))
+      const codeStr = String(response.code)
+      if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
+        throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
       }
 
-      return orders.map((sheet) => this.normalizeOrder(sheet))
+      return (response.data || [])
+        .filter((sheet) => sheet.status === COUPANG_COLLECTABLE_STATUS)
+        .map((sheet) => this.normalizeOrder(sheet))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       // Extract actual API response for debugging

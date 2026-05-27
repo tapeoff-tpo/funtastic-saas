@@ -126,7 +126,7 @@ describe('CoupangAdapter', () => {
       const since = new Date('2026-04-02T00:00:00Z')
       const orders = await adapter.getOrders(since)
 
-      expect(orders).toHaveLength(MOCK_COUPANG_ORDER_SHEETS.length)
+      expect(orders).toHaveLength(1)
 
       // Check first order normalization
       const first = orders[0]
@@ -145,10 +145,7 @@ describe('CoupangAdapter', () => {
       expect(first.totalAmount).toBe(29800)
       expect(first.rawData).toBeDefined()
 
-      // Check second order has different status mapping
-      const second = orders[1]
-      expect(second.status).toBe('delivering')
-      expect(second.marketplaceStatus).toBe('DELIVERING')
+      expect(orders.map((order) => order.marketplaceStatus)).toEqual(['ACCEPT'])
     })
   })
 

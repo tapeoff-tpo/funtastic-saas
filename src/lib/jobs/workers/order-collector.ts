@@ -187,11 +187,22 @@ export function createAdapter(
   }
 }
 
-function shouldAutoConfirmOrders(): boolean {
-  // Absolute workflow rule: collection never confirms orders automatically.
-  // 수집 → 신규 → 매핑 → 사용자가 [확정] 클릭 → 확인.
-  // Do not re-enable without an explicit product decision and regression check.
-  return false
+function shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId: string): boolean {
+  // The SaaS order stays in 신규 until mapping is complete, while marketplaces
+  // that require prompt receipt acknowledgement move to their shipping-prep state.
+  return marketplaceId === 'ownerclan'
+}
+
+function marketplaceShippingPrepStatus(marketplaceId: string): string {
+  if (marketplaceId === 'ownerclan') return 'preparing'
+  return 'CONFIRMED'
+}
+
+function isMarketplaceOrderReadyForShippingPrep(order: NormalizedOrder): boolean {
+  if (order.marketplaceId === 'ownerclan') {
+    return /^(placed|paid)$/i.test(order.marketplaceStatus?.trim() ?? '')
+  }
+  return getMarketplaceCollectionStatus(order) === 'new'
 }
 
 function shouldPreserveCollectedConfirmedStatus(marketplaceId: string): boolean {
@@ -582,6 +593,8 @@ export async function collectOrdersForConnection(params: {
       `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` - 저장/갱신 ${ordersToSave.length}건, 기존 ${skippedExistingCount}건 포함` : ''}`,
     )
 
+    type ShippingPrepTarget = { ids: string[]; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
+    const shippingPrepTargets: ShippingPrepTarget[] = []
     const totalOrders = ordersToSave.length
     let idx = 0
     for (const order of ordersToSave) {
@@ -594,14 +607,26 @@ export async function collectOrdersForConnection(params: {
       const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
       const isExistingOrder = existingOrderMatches.upsertKeys.has(orderKey)
       const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
+      let splitCopyIds: string[] = []
 
       if (!isExistingOrder && items.length > 0) {
         await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
-        await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+        splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
       } else if (isExistingOrder && marketplaceId === 'specialoffer') {
         await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
       }
       ordersCollected++
+
+      if (
+        shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId)
+        && isMarketplaceOrderReadyForShippingPrep(order)
+      ) {
+        shippingPrepTargets.push({
+          ids: [upsertedOrder.id, ...splitCopyIds],
+          marketplaceOrderId: order.marketplaceOrderId,
+          rawData: enrichOrderRawData(orderForSave),
+        })
+      }
 
       // 진행률 표시(많은 주문 시): 5건마다 또는 마지막 1건에서 갱신
       if (totalOrders >= 5 && (idx % 5 === 0 || idx === totalOrders)) {
@@ -610,9 +635,31 @@ export async function collectOrdersForConnection(params: {
 
     }
 
-    // 4.5 Auto-confirm is disabled.
-    // 수집 → 신규(status='new') → 매핑 → 사용자가 [확정] 클릭 → 확인(status='confirmed').
-    if (ordersCollected > 0 && !shouldAutoConfirmOrders()) {
+    if (shippingPrepTargets.length > 0 && typeof adapter.confirmOrder === 'function') {
+      await setProgress(`오너클랜 배송준비 전환 중... (0/${shippingPrepTargets.length})`)
+      for (let index = 0; index < shippingPrepTargets.length; index += 1) {
+        const target = shippingPrepTargets[index]
+        const result = await adapter.confirmOrder(target.marketplaceOrderId, target.rawData ?? undefined)
+        if (!result.success) {
+          throw new Error(`오너클랜 배송준비 전환 실패 (${target.marketplaceOrderId}): ${result.error ?? '알 수 없는 오류'}`)
+        }
+
+        await db
+          .update(orders)
+          .set({
+            marketplaceStatus: marketplaceShippingPrepStatus(marketplaceId),
+            marketplaceCollectionStatus: 'ready',
+            updatedAt: new Date(),
+          })
+          .where(inArray(orders.id, target.ids))
+
+        await setProgress(`오너클랜 배송준비 전환 중... (${index + 1}/${shippingPrepTargets.length})`)
+      }
+    }
+
+    // Local workflow remains: 신규 -> 매핑 -> 사용자 확인. Marketplace shipping
+    // prep acknowledgement above is intentionally tracked separately.
+    if (ordersCollected > 0) {
       await setProgress(`${ordersCollected}건 신규/기존 주문 저장 완료`)
     }
 

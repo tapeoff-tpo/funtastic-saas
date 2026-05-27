@@ -120,6 +120,24 @@ vi.mock('@/lib/marketplace/adapters/coupang/adapter', () => ({
   }),
 }))
 
+vi.mock('@/lib/marketplace/adapters/ownerclan/adapter', () => ({
+  OwnerclanAdapter: vi.fn().mockImplementation(function MockOwnerclanAdapter() {
+    return {
+      config: {
+        id: 'ownerclan',
+        name: '오너클랜',
+        authType: 'api_key',
+        rateLimitPerSecond: 20,
+        requiredCredentials: ['username', 'password', 'vendor_id', 'vendor_password'],
+      },
+      getOrders: adapterMocks.getOrders,
+      getClaimsOrders: adapterMocks.getClaimsOrders,
+      confirmOrder: adapterMocks.confirmOrder,
+      uploadInvoice: vi.fn(),
+    }
+  }),
+}))
+
 const sampleOrder: NormalizedOrder = {
   marketplaceOrderId: 'CP-2024-001',
   marketplaceId: 'coupang',
@@ -289,5 +307,38 @@ describe('processOrderCollection', () => {
     const result = await processOrderCollection(job)
 
     expect(result.ordersCollected).toBe(1)
+  })
+
+  it('moves newly collected Ownerclan orders to marketplace shipping preparation', async () => {
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'ownerclan',
+      marketplaceOrderId: 'OC-2026-001',
+      marketplaceStatus: 'paid',
+      marketplaceCollectionStatus: 'new',
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const job = createMockJob({
+      marketplaceId: 'ownerclan',
+      connectionId: 'conn-ownerclan',
+      userId: 'user-1',
+    })
+
+    const result = await processOrderCollection(job)
+
+    expect(result.ordersCollected).toBe(1)
+    expect(mockConfirmOrder).toHaveBeenCalledWith(
+      'OC-2026-001',
+      expect.objectContaining({ orderIdentity: expect.objectContaining({ orderId: 'OC-2026-001' }) }),
+    )
+    const updatePayloads = mockUpdate.mock.results.flatMap(({ value }) => value.set.mock.calls.map((call: unknown[]) => call[0]))
+    expect(updatePayloads).toContainEqual(expect.objectContaining({
+      marketplaceStatus: 'preparing',
+      marketplaceCollectionStatus: 'ready',
+    }))
   })
 })

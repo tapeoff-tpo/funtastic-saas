@@ -213,23 +213,23 @@ async function clickOrderExcelDownloadButton(page: Page, root: Locator | Page): 
     .catch(() => false)
   if (clickedById) return
 
-  const clickedByDom = await page.evaluate(() => {
-    const isVisible = (element: HTMLElement) => {
-      const style = window.getComputedStyle(element)
-      const rect = element.getBoundingClientRect()
-      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
-    }
-    const candidates = Array.from(
-      document.querySelectorAll<HTMLElement>('#btn-order-excel-down, button[target="supplier"], input[target="supplier"], button, input[type="button"], input[type="submit"]'),
+  const clickedByDom = await page.evaluate(`(() => {
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    };
+    const candidates = Array.prototype.slice.call(
+      document.querySelectorAll('#btn-order-excel-down, button[target="supplier"], input[target="supplier"], button, input[type="button"], input[type="submit"]')
     ).filter((element) => {
-      const text = element instanceof HTMLInputElement ? element.value : element.innerText || element.textContent || ''
-      return /다운로드/.test(text)
-    })
-    const target = candidates.find(isVisible) ?? candidates.at(-1)
-    if (!target) return false
-    target.click()
-    return true
-  }).catch(() => false)
+      const text = element instanceof HTMLInputElement ? element.value : element.innerText || element.textContent || '';
+      return /다운로드/.test(text);
+    });
+    const target = candidates.find(isVisible) || candidates[candidates.length - 1];
+    if (!target) return false;
+    target.click();
+    return true;
+  })()`).catch(() => false)
 
   if (!clickedByDom) {
     throw new MarketplaceApiError('onchannel', 500, '온채널 주문 엑셀 다운로드 버튼을 클릭하지 못했습니다.')
@@ -373,7 +373,7 @@ async function prepareOrderDownloadForm(page: Page, since: Date, until: Date): P
   })()`).catch((error) => ({
     ok: false,
     reason: error instanceof Error ? error.message : 'prepare-failed',
-  }))
+  })) as { ok: boolean; reason: string }
 
   if (!prepared.ok) {
     throw new MarketplaceApiError('onchannel', 500, `온채널 주문내역 다운로드 조건 입력에 실패했습니다. (${prepared.reason})`)
@@ -394,6 +394,17 @@ async function readDownloadBuffer(download: { createReadStream: () => Promise<No
     DOWNLOAD_READ_TIMEOUT_MS,
     `온채널 엑셀 다운로드 파일 읽기가 ${DOWNLOAD_READ_TIMEOUT_MS / 1000}초 안에 끝나지 않았습니다.`,
   )
+}
+
+function isExcelDownloadResponse(response: { url: () => string; headers: () => Record<string, string>; status: () => number }): boolean {
+  if (response.status() >= 400) return false
+  const headers = response.headers()
+  const contentType = headers['content-type'] ?? ''
+  const disposition = headers['content-disposition'] ?? ''
+  const url = response.url()
+  return /attachment|filename=/i.test(disposition)
+    || /spreadsheet|excel|octet-stream|ms-excel|openxmlformats/i.test(contentType)
+    || (/excel|xlsx?|download|down/i.test(url) && /order|supplier|excel|down/i.test(url))
 }
 
 async function selectSearchTypeForOrderCode(page: Page): Promise<void> {
@@ -773,10 +784,23 @@ export class OnchannelScraper implements MarketplaceScraper {
           return message
         })
         .catch(() => null)
-      const [download] = await Promise.all([
-        ctx.page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-        clickOrderExcelDownloadButton(ctx.page, downloadRoot),
-      ]).catch(async (error) => {
+      const downloadBufferPromise = ctx.page
+        .waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
+        .then((download) => readDownloadBuffer(download))
+      const responseBufferPromise = ctx.page
+        .waitForResponse((response) => isExcelDownloadResponse(response), { timeout: DOWNLOAD_TIMEOUT_MS })
+        .then((response) => response.body())
+
+      await clickOrderExcelDownloadButton(ctx.page, downloadRoot).catch(async (error) => {
+        const dialogMessage = await dialogPromise
+        throw new MarketplaceApiError(
+          'onchannel',
+          500,
+          `온채널 주문내역 다운로드 버튼을 클릭하지 못했습니다. (${error instanceof Error ? error.message : 'click failed'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
+        )
+      })
+
+      return await Promise.any([downloadBufferPromise, responseBufferPromise]).catch(async (error) => {
         const dialogMessage = await dialogPromise
         throw new MarketplaceApiError(
           'onchannel',
@@ -784,7 +808,6 @@ export class OnchannelScraper implements MarketplaceScraper {
           `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
         )
       })
-      return readDownloadBuffer(download)
     } finally {
       await ctx.close()
     }

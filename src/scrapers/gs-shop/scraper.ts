@@ -796,44 +796,23 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   }
   page.on('dialog', dialogHandler)
   try {
-    const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS }),
-      clickGsDownloadFlowKorean(page),
-      /* page.evaluate(() => {
-        const controls = Array.from(
-          document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, area, [role="button"]'),
-        )
-        const candidates = controls
-          .map((control) => {
-            const rect = control.getBoundingClientRect()
-            const inputValue = control instanceof HTMLInputElement ? control.value : ''
-            const href = control instanceof HTMLAnchorElement ? control.href : ''
-            const text = `${control.innerText || ''} ${inputValue} ${control.getAttribute('alt') || ''} ${control.getAttribute('title') || ''} ${control.getAttribute('aria-label') || ''}`.replace(/\s+/g, ' ').trim()
-            let score = 100
-            if (/엑셀\s*다운|엑셀\s*저장|Excel\s*Download/i.test(text)) score = 0
-            else if (/주문.*엑셀|엑셀.*주문|출고.*엑셀|엑셀.*출고/i.test(text)) score = 10
-            else if (/엑셀|excel|xlsx?|download/i.test(`${text} ${href}`)) score = 30
-            if (/상품|광고|정산|통계|양식|샘플|도움말/.test(text)) score += 80
-            return { control, score, visible: rect.width > 0 && rect.height > 0, text }
-          })
-          .filter((candidate) => candidate.visible && candidate.score < 100)
-          .sort((a, b) => a.score - b.score)
-
-        const target = candidates[0]?.control
-        if (!(target instanceof HTMLElement)) {
-          throw new Error(`엑셀 다운로드 버튼을 찾지 못했습니다. candidates=${candidates.slice(0, 5).map((item) => item.text).join(' / ')}`)
+    const downloadBufferPromise = page
+      .waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
+      .then(async (download) => {
+        const stream = await download.createReadStream()
+        if (!stream) throw new MarketplaceApiError(MARKETPLACE_ID, 500, 'GS샵 엑셀 다운로드 스트림을 열 수 없습니다.')
+        const chunks: Buffer[] = []
+        for await (const chunk of stream) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
         }
-        target.click()
-      }), */
-    ])
+        return Buffer.concat(chunks)
+      })
+    const responseBufferPromise = page
+      .waitForResponse((response) => isExcelDownloadResponse(response), { timeout: DOWNLOAD_TIMEOUT_MS })
+      .then((response) => response.body())
 
-    const stream = await download.createReadStream()
-    if (!stream) throw new MarketplaceApiError(MARKETPLACE_ID, 500, 'GS샵 엑셀 다운로드 스트림을 열 수 없습니다.')
-    const chunks: Buffer[] = []
-    for await (const chunk of stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-    }
-    return Buffer.concat(chunks)
+    await clickGsDownloadFlowKorean(page)
+    return await Promise.any([downloadBufferPromise, responseBufferPromise])
   } catch (error) {
     throw new MarketplaceApiError(
       MARKETPLACE_ID,
@@ -843,6 +822,17 @@ async function downloadOrdersExcel(page: Page): Promise<Buffer> {
   } finally {
     page.off('dialog', dialogHandler)
   }
+}
+
+function isExcelDownloadResponse(response: { url: () => string; headers: () => Record<string, string>; status: () => number }): boolean {
+  if (response.status() >= 400) return false
+  const headers = response.headers()
+  const contentType = headers['content-type'] ?? ''
+  const disposition = headers['content-disposition'] ?? ''
+  const url = response.url()
+  return /attachment|filename=/i.test(disposition)
+    || /spreadsheet|excel|octet-stream|ms-excel|openxmlformats/i.test(contentType)
+    || (/excel|xlsx?|download|down/i.test(url) && /logistics|order|delivery|excel|down/i.test(url))
 }
 
 async function clickGsDownloadFlowKorean(page: Page): Promise<void> {
@@ -909,8 +899,18 @@ async function clickVisibleControl(
   for (const frame of page.frames()) {
     const candidates = await frame.evaluate(() => {
       const textOf = (element: Element): string => {
-        if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || ''
-        return `${(element as HTMLElement).innerText || element.textContent || ''} ${element.getAttribute('title') || ''} ${element.getAttribute('aria-label') || ''}`
+        const attrs = [
+          element.getAttribute('id') || '',
+          element.getAttribute('name') || '',
+          element.getAttribute('class') || '',
+          element.getAttribute('title') || '',
+          element.getAttribute('aria-label') || '',
+          element.getAttribute('data-testid') || '',
+          element.getAttribute('data-cy') || '',
+          element instanceof HTMLAnchorElement ? element.href : '',
+        ].join(' ')
+        if (element instanceof HTMLInputElement) return `${element.value || ''} ${attrs}`
+        return `${(element as HTMLElement).innerText || element.textContent || ''} ${attrs}`
       }
       return Array.from(document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a, [role="button"]'))
         .map((control, index) => {
@@ -1240,7 +1240,16 @@ async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
   for (const frame of page.frames()) {
     const rows = await frame.evaluate(() => {
       const normalize = (value: string) => value.replace(/\s+/g, '').replace(/[()[\]{}·ㆍ:：/_-]/g, '').trim()
-      const text = (element: Element | null | undefined) => (element?.textContent || '').replace(/\s+/g, ' ').trim()
+      const text = (element: Element | null | undefined) => {
+        if (!element) return ''
+        const attrs = [
+          element.getAttribute('title') || '',
+          element.getAttribute('aria-label') || '',
+          element.getAttribute('data-value') || '',
+          element.getAttribute('value') || '',
+        ].join(' ')
+        return `${element.textContent || ''} ${attrs}`.replace(/\s+/g, ' ').trim()
+      }
 
       for (const table of Array.from(document.querySelectorAll('table'))) {
         const tableRows = Array.from(table.querySelectorAll('tr'))
@@ -1282,6 +1291,13 @@ async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
       }
 
       const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim()
+      const elementText = (element: Element) => [
+        element.textContent || '',
+        element.getAttribute('title') || '',
+        element.getAttribute('aria-label') || '',
+        element.getAttribute('data-value') || '',
+        element.getAttribute('value') || '',
+      ].join(' ')
       const isVisible = (element: Element) => {
         const rect = element.getBoundingClientRect()
         if (rect.width <= 0 || rect.height <= 0) return false
@@ -1290,14 +1306,14 @@ async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
       }
       const hasVisibleTextChild = (element: Element) => Array.from(element.children).some((child) => {
         if (!isVisible(child)) return false
-        const text = normalizeText(child.textContent || '')
-        return text.length > 0
+          const text = normalizeText(elementText(child))
+          return text.length > 0
       })
 
       const tokens: VisibleToken[] = Array.from(document.querySelectorAll('body *'))
         .filter(isVisible)
         .map((element) => {
-          const text = normalizeText(element.textContent || '')
+          const text = normalizeText(elementText(element))
           const rect = element.getBoundingClientRect()
           return { element, text, rect }
         })
@@ -1380,7 +1396,13 @@ async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
           && style.visibility !== 'hidden'
           && Number(style.opacity || '1') > 0
       }
-      const textOf = (element: Element) => normalizeText(element.textContent || '')
+      const textOf = (element: Element) => normalizeText([
+        element.textContent || '',
+        element.getAttribute('title') || '',
+        element.getAttribute('aria-label') || '',
+        element.getAttribute('data-value') || '',
+        element.getAttribute('value') || '',
+      ].join(' '))
       const rowElements = Array.from(document.querySelectorAll<HTMLElement>(
         '[role="row"], .ag-row, .tui-grid-row, .MuiDataGrid-row, [class*="grid-row"], [class*="GridRow"], [class*="table-row"]',
       )).filter(visible)

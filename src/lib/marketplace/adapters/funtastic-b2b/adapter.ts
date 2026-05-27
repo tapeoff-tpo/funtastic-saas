@@ -264,7 +264,10 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
     const items = rawItems.length > 0
       ? rawItems.map((item) => this.normalizeItem(item, orderId))
       : [this.normalizeItem({}, orderId)]
-    const totalAmount = asNumber(order.totalAmount ?? order.amount ?? order.paymentAmount)
+    const paidAmount = asNumber(order.totalAmount ?? order.amount ?? order.paymentAmount)
+    const shippingFee = asNumber(order.shippingFee)
+    const itemsTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+    const totalAmount = itemsTotal > 0 ? itemsTotal : Math.max(0, paidAmount - shippingFee)
     const buyerName = order.buyerName || order.buyer?.companyName || order.buyer?.ownerName || order.buyer?.loginId || '-'
     const recipientName = order.recipientName || order.receiverName || order.shipping?.name || buyerName
     const recipientPhone = order.recipientPhone || order.receiverPhone || order.shipping?.phone || undefined
@@ -288,10 +291,7 @@ export class FuntasticB2bAdapter implements MarketplaceAdapter {
       items,
       orderedAt: parseDate(order.orderedAt ?? order.orderDate ?? order.createdAt),
       totalAmount,
-      // Funtastic B2B's totalAmount is the paid amount including shipping.
-      // Keep the original shippingFee in rawData, but do not expose it as a
-      // separate SaaS order fee to avoid treating it as an extra charge.
-      shippingFee: null,
+      shippingFee: shippingFee || null,
       deliveryMessage: order.deliveryMessage ?? order.memo ?? order.shipping?.memo ?? null,
       rawData: order as unknown as Record<string, unknown>,
     }

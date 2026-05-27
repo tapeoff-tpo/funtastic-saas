@@ -20,7 +20,13 @@ const MARKETPLACE_ID: MarketplaceId = 'gs-shop'
 const BASE_URL = 'https://partners.gsshop.com'
 const LOGIN_URL = `${BASE_URL}/sign-in`
 const ORDER_LIST_URL = `${BASE_URL}/logistics/partner-logistics-mng?tab=1&openSet=10`
-const DOWNLOAD_TIMEOUT_MS = 120_000
+const DOWNLOAD_TIMEOUT_MS = 45_000
+
+type GsOrderListApiResponse = {
+  list?: Array<Record<string, unknown>> | null
+  totalCount?: number | string | null
+  pageIdx?: number | string | null
+}
 
 function readCellText(value: unknown): string {
   if (value == null) return ''
@@ -58,6 +64,59 @@ function parseKstDate(value: string): Date {
 function ymdKst(date: Date): string {
   const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000)
   return kst.toISOString().slice(0, 10)
+}
+
+function buildGsOrderListPayload(since: Date, pageIdx = 1): Record<string, unknown> {
+  return {
+    qryTerm: 'B',
+    fromSearchDtm: ymdKst(since),
+    toSearchDtm: ymdKst(new Date()),
+    srchCond: 'A',
+    prdNmSrchText: '',
+    prdCdType: 'A',
+    searchPrdCd: '',
+    ordTyp: '0',
+    dlvGbn: '0',
+    ordSt: '1,2',
+    ordCnfYn: '0',
+    undeliveredOrderCheck: true,
+    ecDirdlvOboxYn: ' ',
+    dirdlvRelsInfoImprovTgtYn: 'N',
+    dirdlvPoCntAdjstPsblYn: 'N',
+    mobilCpnAutoRfnSupYn: 'N',
+    instlPrdYn: '',
+    apntDtDlvYn: '',
+    pageIdx,
+    pageRange: 10,
+    rowsPerPage: 500,
+    totalCount: 0,
+    supCd: '',
+    supTyp: '',
+    subSupCd: '',
+    srchText: '',
+    relsSchdDtEntYn: '0',
+    dittoPrd: '',
+    prdCd: '',
+    itemCd: '',
+    relsSchdDtExtndLimitYn: '',
+    fileDownGbn: '',
+    fileDownGbnDtl: '',
+    lotteDeptTestYn: '',
+    ordItemId: '',
+    prdCds: [],
+    prdClsCheckList: [],
+    saleAwareCk: null,
+    apntDtDlvTyp: '',
+    hopeDlvDt: '',
+    summaryFromDt: '',
+    summaryToDt: '',
+    flag: '',
+    downPsblYn: '',
+    intgSrchLinkOrdNo: '',
+    dateTime: '',
+    soldOut: '',
+    todayDeliveryYn: 'N',
+  }
 }
 
 function isPartnersRootUrl(value: string): boolean {
@@ -1046,6 +1105,72 @@ function getRowValue(row: OrderRow, ...candidates: string[]): string {
   return ''
 }
 
+function readApiField(row: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = row[key]
+    if (value == null || value === '') continue
+    return String(value).trim()
+  }
+  return ''
+}
+
+function gsApiRowToRecord(row: Record<string, unknown>): Record<string, string> {
+  const orderNo = readApiField(row, 'ordNo', 'orgOrdNo', 'hisOrdNo', 'intgSrchLinkOrdNo')
+  const itemNo = readApiField(row, 'ordItemId', 'ordItemNo', 'sordItemNo', 'currSordItemNo')
+  const status = readApiField(row, 'ordSt', 'ordStNm', 'sordStNm', 'osdStNm') || '미처리'
+  const receiver = readApiField(row, 'recvrNm', 'acptNm', 'rcvrNm', 'custNm', 'buyerNm')
+  const orderDate = readApiField(row, 'ordDtm', 'ordDt', 'relsIndDt', 'relsSchdDt', 'dlvObeyDt')
+
+  return {
+    주문번호: orderNo,
+    주문아이템번호: itemNo || orderNo,
+    상태: status,
+    주문상태: status,
+    수취인: receiver,
+    수취인명: receiver,
+    주문자명: readApiField(row, 'ordrNm', 'ordNm', 'custNm', 'buyerNm') || receiver,
+    주문자전화번호: readApiField(row, 'ordrCelNo', 'ordrTelNo', 'custCelNo', 'custTelNo'),
+    수취인전화번호: readApiField(row, 'recvrCelNo', 'recvrTelNo', 'rcvrCelNo', 'rcvrTelNo'),
+    우편번호: readApiField(row, 'zipCd', 'recvrZipCd', 'rcvrZipCd'),
+    주소: [
+      readApiField(row, 'addr', 'baseAddr', 'recvrAddr', 'rcvrAddr', 'roadNmAddr'),
+      readApiField(row, 'dtlAddr', 'detailAddr', 'recvrDtlAddr', 'rcvrDtlAddr'),
+    ].filter(Boolean).join(' '),
+    출하지시일: orderDate,
+    시간: readApiField(row, 'ordTime', 'relsIndTime'),
+    상품명: readApiField(row, 'prdNm', 'goodsName', 'itemNm', 'invoicePrdNm', 'shtprdNm') || (orderNo ? `GS샵 주문 ${orderNo}` : ''),
+    옵션: readApiField(row, 'ordOptNm', 'optNm', 'attrPrdNm', 'itemNm'),
+    수량: readApiField(row, 'ordQty', 'qty', 'ordCnt') || '1',
+    판매가: readApiField(row, 'salePrc', 'ordAmt', 'payAmt', 'prdPrc'),
+    배송비: readApiField(row, 'dlvFee', 'shipFee'),
+    배송메시지: readApiField(row, 'dlvMsg', 'memo', 'custMemo'),
+    source: 'gs-shop-rpa-api',
+    raw: JSON.stringify(row),
+  }
+}
+
+async function fetchGsOrderListApi(page: Page, since: Date): Promise<{ orders: NormalizedOrder[]; totalCount: number }> {
+  const payload = buildGsOrderListPayload(since)
+  const result = await page.evaluate(`(async () => {
+    const response = await fetch('/bff/logistics/dirdlv-ord-mng/query/list', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: ${JSON.stringify(JSON.stringify(payload))}
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error('GS order list API failed: ' + response.status + ' ' + text.slice(0, 300));
+    }
+    return JSON.parse(text);
+  })()`) as GsOrderListApiResponse
+
+  const rows = Array.isArray(result.list) ? result.list : []
+  const totalCount = Number(result.totalCount ?? rows.length)
+  const orders = rowsToNormalizedOrders(rows.map(gsApiRowToRecord))
+  return { orders, totalCount: Number.isFinite(totalCount) ? totalCount : rows.length }
+}
+
 function parseGsExcelRows(rows: unknown[][]): NormalizedOrder[] {
   let headerIndex = -1
   let headerMap = new Map<string, number>()
@@ -1627,6 +1752,26 @@ export class GsShopScraper implements MarketplaceScraper {
           `GS샵 주문배송관리 화면이 아니라 다른 화면입니다. 주문 수집을 중단합니다. (${await summarizePage(page)})`,
         )
       }
+
+      await setProgress?.('GS샵 수집 대상 주문 API 확인 중...')
+      try {
+        const apiResult = await fetchGsOrderListApi(page, since)
+        if (apiResult.totalCount <= 0 && apiResult.orders.length === 0) {
+          await setProgress?.('GS샵 수집 대상 주문 0건')
+          return []
+        }
+        if (apiResult.orders.length > 0) {
+          await setProgress?.(`GS샵 주문 ${apiResult.orders.length}건 수집`)
+          await selectVisibleOrderRows(page, setProgress)
+          await confirmGsSelectedOrders(page, setProgress).catch(async () => {
+            await setProgress?.('GS샵 주문확인은 화면에서 처리하지 못해 수집만 완료')
+          })
+          return apiResult.orders
+        }
+      } catch (error) {
+        await setProgress?.(`GS샵 주문 API 확인 실패, 화면/엑셀 방식으로 재시도 (${error instanceof Error ? error.message : 'unknown'})`)
+      }
+
       await selectVisibleOrderRows(page, setProgress)
       const visibleOrders = await parseVisibleOrders(page)
       if (visibleOrders.length > 0) {
@@ -1635,7 +1780,6 @@ export class GsShopScraper implements MarketplaceScraper {
         return visibleOrders
       }
       await setProgress?.('GS샵 주문 엑셀 다운로드 중...')
-      let downloadError: unknown
       try {
         const workbook = await downloadOrdersExcel(page)
         await setProgress?.(`GS샵 엑셀 다운로드 완료 (${workbook.length} bytes)`)
@@ -1650,8 +1794,7 @@ export class GsShopScraper implements MarketplaceScraper {
           500,
           `GS샵 엑셀을 받았지만 주문행을 찾지 못했습니다. ${workbookDiagnostics(workbook)}`,
         )
-      } catch (error) {
-        downloadError = error
+      } catch {
         await setProgress?.(`GS샵 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 수집`)
       }
       if (await hasVisibleNonZeroResults(page)) {
@@ -1668,7 +1811,6 @@ export class GsShopScraper implements MarketplaceScraper {
           `GS샵 주문 화면 확인은 됐지만 주문행/엑셀을 읽지 못했습니다. 0건으로 완료 처리하지 않습니다. (${await summarizePage(page)})`,
         )
       }
-      if (downloadError instanceof Error) throw downloadError
       return visibleOrders
     } finally {
       await close()

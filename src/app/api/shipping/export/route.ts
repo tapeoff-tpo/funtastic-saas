@@ -18,6 +18,82 @@ import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
+import { getOrderIds } from '@/lib/orders/queries'
+import { ORDER_STATUS_LABELS, type ClaimType, type OrderFilters, type OrderStatus } from '@/lib/orders/types'
+
+const FILTERED_EXPORT_LIMIT = 50000
+
+function parseCommaFilter(value: string | null): string[] {
+  if (!value) return []
+  return Array.from(new Set(
+    value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ))
+}
+
+function parseStatusFilter(value: string | null): OrderStatus[] {
+  if (!value) return []
+  const validStatuses = new Set(Object.keys(ORDER_STATUS_LABELS))
+  return value
+    .split(',')
+    .map((status) => status.trim())
+    .filter((status): status is OrderStatus => validStatuses.has(status))
+}
+
+function parseBooleanParam(value: string | null): boolean {
+  return value === 'true' || value === '1'
+}
+
+function buildFilteredExportFilters(searchParams: URLSearchParams, userId: string): OrderFilters {
+  const selectedStatuses = parseStatusFilter(searchParams.get('status'))
+  const singleStatus = selectedStatuses.length === 1 ? selectedStatuses[0] : undefined
+  const multipleStatuses = selectedStatuses.length > 1 ? selectedStatuses : undefined
+  const selectedMarketplaces = parseCommaFilter(searchParams.get('marketplace'))
+  const singleMarketplace = selectedMarketplaces.length === 1 ? selectedMarketplaces[0] : undefined
+  const multipleMarketplaces = selectedMarketplaces.length > 1 ? selectedMarketplaces : undefined
+  const claimTypeParam = searchParams.get('claimType')
+  const claimType = claimTypeParam === 'cancel' || claimTypeParam === 'return' || claimTypeParam === 'exchange'
+    ? claimTypeParam as ClaimType
+    : undefined
+  const mappingParam = searchParams.get('mapping')
+  const scanParam = searchParams.get('scan')
+  const scanResultParam = searchParams.get('scanResult')
+  const cancelTab = parseBooleanParam(searchParams.get('cancel'))
+  const held = parseBooleanParam(searchParams.get('held'))
+  const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
+
+  return {
+    page: 1,
+    pageSize: FILTERED_EXPORT_LIMIT,
+    userId,
+    status: singleStatus,
+    statuses: multipleStatuses,
+    marketplace: singleMarketplace,
+    marketplaces: multipleMarketplaces,
+    search: searchParams.get('search') ?? undefined,
+    searchField: searchParams.get('searchField') as OrderFilters['searchField'] ?? undefined,
+    orderSource: (searchParams.get('orderSource') === 'saas' || searchParams.get('orderSource') === 'sabangnet')
+      ? searchParams.get('orderSource') as OrderFilters['orderSource']
+      : undefined,
+    dateField: searchParams.get('dateField') as OrderFilters['dateField'] ?? undefined,
+    dateFrom: searchParams.get('dateFrom') ?? undefined,
+    dateTo: searchParams.get('dateTo') ?? undefined,
+    sort: searchParams.get('sort') ?? undefined,
+    order: searchParams.get('order') === 'asc' || searchParams.get('order') === 'desc'
+      ? searchParams.get('order') as 'asc' | 'desc'
+      : undefined,
+    claimType,
+    mapping: mappingParam === 'mapped' || mappingParam === 'unmapped' ? mappingParam : undefined,
+    scan: isScanFilterTab && (scanParam === 'scanned' || scanParam === 'unscanned') ? scanParam : undefined,
+    scanResult: isScanFilterTab && (scanResultParam === 'ok' || scanResultParam === 'duplicate' || scanResultParam === 'not_found') ? scanResultParam : undefined,
+    isHeld: held || undefined,
+    excludeHeld: !held && Boolean(searchParams.get('status') || claimType || cancelTab),
+    cancelTab: cancelTab || undefined,
+    excludeClaimLikeOrders: Boolean(searchParams.get('status')) && !claimType && !cancelTab && !held,
+  }
+}
 
 function getMarketplaceExportName(order: typeof orders.$inferSelect): string {
   const rawData = order.rawData
@@ -63,26 +139,31 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams
   const orderIdsParam = searchParams.get('orderIds')
+  const scope = searchParams.get('scope')
   const type = searchParams.get('type') ?? 'carrier'
   const templateId = searchParams.get('templateId')
   const columnsParam = searchParams.get('columns')
 
-  if (!orderIdsParam) {
-    return NextResponse.json(
-      { error: 'orderIds parameter is required' },
-      { status: 400 },
-    )
-  }
-
-  const orderIds = orderIdsParam.split(',').filter(Boolean)
-  if (orderIds.length === 0) {
-    return NextResponse.json(
-      { error: 'At least one order ID is required' },
-      { status: 400 },
-    )
-  }
-
   try {
+    let orderIds = orderIdsParam?.split(',').filter(Boolean) ?? []
+    if (scope === 'filtered') {
+      const filtered = await getOrderIds(buildFilteredExportFilters(searchParams, workspaceUserId), FILTERED_EXPORT_LIMIT)
+      if (filtered.total > FILTERED_EXPORT_LIMIT) {
+        return NextResponse.json(
+          { error: `검색 결과가 ${FILTERED_EXPORT_LIMIT.toLocaleString('ko-KR')}건을 초과합니다. 조건을 더 좁혀서 다운로드해 주세요.` },
+          { status: 400 },
+        )
+      }
+      orderIds = filtered.ids
+    }
+
+    if (orderIds.length === 0) {
+      return NextResponse.json(
+        { error: '다운로드할 주문이 없습니다.' },
+        { status: 400 },
+      )
+    }
+
     // Fetch orders with items and shipment data
     const [orderRows, itemRows, shipmentRows, groupIdByOrder] = await Promise.all([
       db.select().from(orders).where(and(inArray(orders.id, orderIds), eq(orders.userId, workspaceUserId))),

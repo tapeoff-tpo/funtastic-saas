@@ -1716,3 +1716,38 @@ export async function getOrderCount(
 
   return result?.value ?? 0
 }
+
+export async function getOrderIds(
+  filters: OrderFilters = {},
+  limit = 50000,
+): Promise<{ ids: string[]; total: number }> {
+  const shouldResolveConfirmedProductSearch =
+    filters.searchField == null ||
+    filters.searchField === 'all' ||
+    filters.searchField === 'confirmedProductName'
+  const confirmedProductSearchSkus = filters.userId && filters.search && shouldResolveConfirmedProductSearch
+    ? await getConfirmedProductSearchSkus(filters.userId, filters.search)
+    : undefined
+
+  const conditions = buildOrderWhereClause({
+    ...filters,
+    confirmedProductSearchSkus,
+  })
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined
+  const orderByExpressions = getOrderByExpressions(filters.sort, filters.order)
+
+  const [rows, countRows] = await Promise.all([
+    db
+      .select({ id: orders.id })
+      .from(orders)
+      .where(whereClause)
+      .orderBy(...orderByExpressions)
+      .limit(limit),
+    db.select({ value: count() }).from(orders).where(whereClause),
+  ])
+
+  return {
+    ids: rows.map((row) => row.id),
+    total: countRows[0]?.value ?? 0,
+  }
+}

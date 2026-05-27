@@ -52,8 +52,10 @@ interface MappingTarget {
 }
 
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
+const EXPORT_SCOPE_KEY = 'orders.export.scope'
 const EXACT_OPTION_ID = '__exact__'
 const RPA_INVOICE_POLL_INTERVAL_MS = 1500
+type ExportScope = 'filtered' | 'selected'
 
 interface ShippingActionsProps {
   selectedOrderIds: string[]
@@ -270,6 +272,7 @@ export function ShippingActions({
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [userTemplates, setUserTemplates] = useState<UserTemplate[] | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
+  const [exportScope, setExportScope] = useState<ExportScope>('filtered')
   const exportMenuRef = useRef<HTMLDivElement>(null)
   const rpaInvoicePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const rpaInvoicePollStartedAtRef = useRef<number | null>(null)
@@ -286,6 +289,8 @@ export function ShippingActions({
   useEffect(() => {
     const saved = typeof window !== 'undefined' ? window.localStorage.getItem(SELECTED_TEMPLATE_KEY) : null
     if (saved) setSelectedTemplateId(saved)
+    const savedScope = typeof window !== 'undefined' ? window.localStorage.getItem(EXPORT_SCOPE_KEY) : null
+    if (savedScope === 'filtered' || savedScope === 'selected') setExportScope(savedScope)
   }, [])
 
   // 컴포넌트 mount 시 양식 목록 1회 fetch (메인 버튼 라벨 표시용)
@@ -665,6 +670,11 @@ export function ShippingActions({
     }
   }
 
+  const pickExportScope = (scope: ExportScope) => {
+    setExportScope(scope)
+    if (typeof window !== 'undefined') window.localStorage.setItem(EXPORT_SCOPE_KEY, scope)
+  }
+
   // For 일괄 매핑: 선택된 주문이 있으면 그 중 미매핑만, 없으면 전체 미매핑 카운트
   const ordersForMapping = selectedOrders.length > 0 ? selectedOrders : allOrders
   const existingMappedOrders = useMemo(() => {
@@ -692,24 +702,38 @@ export function ShippingActions({
 
   // 선택된 양식으로 주문 일괄 다운로드 — 단일 Excel 파일
   const handleExport = async (template: UserTemplate) => {
-    const scope = selectedOrderIds.length > 0 ? selectedOrderIds : allOrders.map((o) => o.id)
-    if (scope.length === 0) {
-      toast.error('대상 주문이 없습니다.')
+    const selectedScope = selectedOrderIds.length > 0 ? selectedOrderIds : []
+    if (exportScope === 'selected' && selectedScope.length === 0) {
+      toast.error('선택된 주문이 없습니다.')
+      return
+    }
+    if (exportScope === 'filtered' && allOrders.length === 0) {
+      toast.error('다운로드할 검색 결과가 없습니다.')
       return
     }
     setClassifying(true)
     try {
       const p = new URLSearchParams()
-      p.set('orderIds', scope.join(','))
+      if (exportScope === 'selected') {
+        p.set('orderIds', selectedScope.join(','))
+      } else {
+        p.set('scope', 'filtered')
+        searchParams.forEach((value, key) => {
+          if (key === 'page' || key === 'pageSize') return
+          p.set(key, value)
+        })
+      }
       p.set('type', 'carrier')
       p.set('templateId', template.id)
       const date = new Date().toISOString().slice(0, 10)
+      const filenameScope = exportScope === 'selected' ? '선택자료' : '전체자료'
       const result = await downloadExcel(
         `/api/shipping/export?${p.toString()}`,
-        `${template.name}_${date}.xlsx`,
+        `${template.name}_${filenameScope}_${date}.xlsx`,
       )
       if (result.success) {
-        toast.success(`${template.name} ${scope.length}건 다운로드`)
+        const countText = exportScope === 'selected' ? ` ${selectedScope.length}건` : ''
+        toast.success(`${template.name} ${filenameScope}${countText} 다운로드`)
       } else {
         toast.error(`다운로드 실패: ${result.error}`)
       }
@@ -1047,13 +1071,13 @@ export function ShippingActions({
                 title={
                   !activeTemplate
                     ? '먼저 우측 [엑셀양식등록] 에서 양식을 만드세요'
-                    : `양식: ${activeTemplate.name} — ${hasSelection ? '선택한 주문만' : '현재 페이지 전체'}`
+                    : `양식: ${activeTemplate.name} — ${exportScope === 'selected' ? '선택자료' : '검색된 전체자료'}`
                 }
               >
                 {classifying
                   ? '다운로드 중...'
                   : activeTemplate
-                    ? `${activeTemplate.name} 다운로드${hasSelection ? ` (${selectedOrderIds.length}건)` : ''}`
+                    ? `${activeTemplate.name} 다운로드 · ${exportScope === 'selected' ? `선택자료${hasSelection ? ` (${selectedOrderIds.length}건)` : ''}` : '전체자료'}`
                     : '엑셀 다운로드 (양식 없음)'}
               </button>
               <button
@@ -1068,7 +1092,32 @@ export function ShippingActions({
               </button>
 
               {exportMenuOpen && (
-                <div className="absolute left-0 top-full z-20 mt-1 w-64 overflow-hidden rounded-md border bg-white shadow-lg">
+                <div className="absolute left-0 top-full z-20 mt-1 w-72 overflow-hidden rounded-md border bg-white shadow-lg">
+                  <div className="border-b px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    다운로드 자료 선택
+                  </div>
+                  <div className="border-b p-2">
+                    {[
+                      { value: 'filtered' as const, label: '검색된 전체자료', description: '현재 검색/필터 조건 전체' },
+                      { value: 'selected' as const, label: '선택자료', description: selectedOrderIds.length > 0 ? `체크한 ${selectedOrderIds.length}건` : '체크한 주문 없음' },
+                    ].map((option) => {
+                      const active = exportScope === option.value
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => pickExportScope(option.value)}
+                          className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${active ? 'font-semibold text-blue-700' : ''}`}
+                        >
+                          <span className="w-3 text-center">{active ? '●' : ''}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{option.label}</span>
+                            <span className="block truncate text-[11px] font-normal text-muted-foreground">{option.description}</span>
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
                   <div className="border-b px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                     다운로드 양식 선택
                   </div>

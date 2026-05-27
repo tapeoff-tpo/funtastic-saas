@@ -296,7 +296,13 @@ export async function GET(request: NextRequest) {
         // 매핑된 행이면 내부 SKU + 확정 상품명/옵션, 미매핑이면 수집 원본 fallback.
         const productName = primary?.productName ?? rawFirst?.productName ?? ''
         const sku: string = primary?.sku ?? rawFirst?.sku ?? ''
-        const optionText = primary?.optionText ?? ''
+        const isConfirmedInternalRow = Boolean(
+          primary?.fromMapping || (sku && (inventoryMap.has(sku) || productMap.has(sku))),
+        )
+        const confirmedValue = (value: string) => (
+          isSalesCheckTemplate && !isConfirmedInternalRow ? '' : value
+        )
+        const optionText = confirmedValue(primary?.optionText ?? '')
         const isAdditionalComponent = isSalesCheckTemplate && index > 0
         const salesValue = (value: unknown) => isAdditionalComponent ? 0 : value
 
@@ -321,7 +327,7 @@ export async function GET(request: NextRequest) {
         // 기본 '수령인연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
         recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
         shippingAddress: order.shippingAddress,
-        productName,
+        productName: confirmedValue(productName),
         optionText,
         quantity: isSalesCheckTemplate
           ? primary?.quantity ?? items.reduce((sum, item) => sum + item.quantity, 0)
@@ -336,8 +342,8 @@ export async function GET(request: NextRequest) {
         status: order.status,
         // ─ 발주서 양식용 확장 필드 ─
         logisticsMessage: order.logisticsMessage ?? '',
-        productCode: sku,
-        productPlusOption: optionText ? `${productName} [${optionText}]` : productName,
+        productCode: confirmedValue(sku),
+        productPlusOption: optionText ? `${confirmedValue(productName)} [${optionText}]` : confirmedValue(productName),
         collectedProductName: rawFirst?.productName ?? '',
         collectedOption: rawFirst?.optionText ?? '',
         stock: sku ? inventoryMap.get(sku)?.stock ?? '' : '',

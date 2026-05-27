@@ -104,6 +104,17 @@ export async function expandOrderItemsWithMapping(
     componentsByCode.set(m.mappingCodeId, list)
   }
 
+  const componentSignatureByCode = new Map<string, string>()
+  for (const [mappingCodeId, components] of componentsByCode) {
+    componentSignatureByCode.set(
+      mappingCodeId,
+      components
+        .map((component) => `${component.sku}:${component.quantity}`)
+        .sort()
+        .join('|'),
+    )
+  }
+
   // sources index (단품/품번 매칭)
   const sourcesForIndex: MappingSource[] = []
   const seenSrc = new Set<string>()
@@ -119,6 +130,30 @@ export async function expandOrderItemsWithMapping(
     })
   }
   const mappingIndex = buildMappingIndex(sourcesForIndex)
+
+  const resolveSameComponentMappingCode = (
+    marketplaceId: string,
+    candidateIds: string[],
+    optionText: string | null,
+  ): string | null => {
+    const normalizedOptionText = optionText?.trim().slice(0, 100)
+    const candidateSet = new Set(candidateIds)
+    const matchedSources = sourcesForIndex.filter((source) => {
+      if (source.marketplaceId !== marketplaceId) return false
+      if (!candidateSet.has(source.marketplaceProductId)) return false
+      if (normalizedOptionText) {
+        return source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === ''
+      }
+      return source.marketplaceOptionId === ''
+    })
+    const signatures = new Map<string, string>()
+    for (const source of matchedSources) {
+      const signature = componentSignatureByCode.get(source.ref)
+      if (!signature) continue
+      signatures.set(signature, source.ref)
+    }
+    return signatures.size === 1 ? Array.from(signatures.values())[0] : null
+  }
 
   // 출력 SKU 모두 모아서 inventory 메타 한번에 lookup
   const allSkus = new Set<string>()
@@ -163,7 +198,7 @@ export async function expandOrderItemsWithMapping(
           skuMultiplier: it.skuMultiplier,
           unitPrice: it.unitPrice,
         },
-        fromMapping: false,
+        fromMapping: Boolean(it.lockedSku),
       })
       continue
     }
@@ -180,7 +215,9 @@ export async function expandOrderItemsWithMapping(
           .map((candidateId) => lookupMappingRef(mappingIndex, ord.marketplaceId, candidateId, it.optionText))
           .find((ref): ref is string => !!ref) ?? null
       : null
-    const components = mappingCodeId ? componentsByCode.get(mappingCodeId) : null
+    const resolvedMappingCodeId = mappingCodeId
+      ?? (ord ? resolveSameComponentMappingCode(ord.marketplaceId, candidateIds, it.optionText) : null)
+    const components = resolvedMappingCodeId ? componentsByCode.get(resolvedMappingCodeId) : null
 
     if (components && components.length > 0) {
       for (const c of components) {

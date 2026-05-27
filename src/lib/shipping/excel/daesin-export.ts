@@ -9,6 +9,7 @@ import ExcelJS from 'exceljs'
 export interface DaesinOrderRow {
   orderId: string
   marketplaceOrderId: string
+  shipmentGroupId?: string
   recipientName: string
   recipientPhone: string
   recipientAltPhone?: string
@@ -71,6 +72,18 @@ const COLUMN_WIDTHS = [
   20,  // 물류메시지
 ]
 
+const COMBINED_SHIPMENT_FILL: ExcelJS.FillPattern = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFD8E4BC' },
+}
+
+function fillWholeRow(row: ExcelJS.Row, columnCount: number): void {
+  for (let index = 1; index <= columnCount; index += 1) {
+    row.getCell(index).fill = COMBINED_SHIPMENT_FILL
+  }
+}
+
 export async function generateDaesinExcel(rows: DaesinOrderRow[]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet('대신택배')
@@ -97,7 +110,7 @@ export async function generateDaesinExcel(rows: DaesinOrderRow[]): Promise<Buffe
       ? `(${row.pickingLocation}) ${row.productName}`
       : row.productName
 
-    ws.addRow([
+    const dataRow = ws.addRow([
       row.recipientPhone,              // 수화주전화1
       row.recipientAltPhone ?? '',      // 수화주전화2
       row.recipientName,                // 수화주명
@@ -117,6 +130,9 @@ export async function generateDaesinExcel(rows: DaesinOrderRow[]): Promise<Buffe
       row.marketplaceOrderId,           // 쇼핑몰 주문번호
       row.deliveryMessage ?? '',        // 물류메시지
     ])
+    if (row.shipmentGroupId) {
+      fillWholeRow(dataRow, HEADERS.length)
+    }
   }
 
   const buf = await wb.xlsx.writeBuffer()

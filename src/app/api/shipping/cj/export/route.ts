@@ -83,6 +83,7 @@ export async function GET(req: NextRequest) {
   const cjRows: CjOrderRow[] = []
   for (const order of orderRows) {
     const rows = expandedByOrder.get(order.id) ?? []
+    const shipmentGroupId = groupIdByOrder.get(order.id)
 
     const addr = order.shippingAddress
     const fullAddress = addr && typeof addr === 'object'
@@ -97,7 +98,8 @@ export async function GET(req: NextRequest) {
       cjRows.push({
         orderId: order.id,
         marketplaceOrderId: order.marketplaceOrderId,
-        shipmentGroupId: groupIdByOrder.get(order.id),
+        shipmentGroupId,
+        isCombinedShipment: Boolean(shipmentGroupId),
         recipientName: order.recipientName ?? '',
         // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
         recipientPhone: order.recipientPhone2 || order.recipientPhone || '',

@@ -251,7 +251,8 @@ export async function GET(request: NextRequest) {
       const items = itemRows.filter((item) => item.orderId === order.id)
       const shipment = shipmentRows.find((s) => s.orderId === order.id)
       const expandedRows = expandedByOrder.get(order.id) ?? []
-      const shipmentGroupId = groupIdByOrder.get(order.id)
+      const shipmentGroupId = groupIdByOrder.get(order.id) ?? null
+      const isCombinedShipment = shipmentGroupId !== null
 
       // 매핑 전 원본 (수집상품명/수집옵션명 용)
       const rawFirst = items[0]
@@ -276,8 +277,8 @@ export async function GET(request: NextRequest) {
         orderId: order.internalNo,
         internalNo: order.internalNo,
         marketplaceOrderId: order.marketplaceOrderId,
-        shipmentGroupId: shipmentGroupId ?? '',
-        isCombinedShipment: Boolean(shipmentGroupId),
+        shipmentGroupId,
+        isCombinedShipment,
         // 마켓 상품코드 — 쿠팡 vendorItemId / 네이버 productOrderId / Cafe24 item_no 등
         marketplaceItemId: rawFirst?.marketplaceItemId ?? '',
         marketplaceId: marketplaceName,

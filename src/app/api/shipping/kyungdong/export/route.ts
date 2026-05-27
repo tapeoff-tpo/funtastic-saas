@@ -12,6 +12,7 @@ import { inArray, and, eq } from 'drizzle-orm'
 import { generateKyungdongExcel, type KyungdongOrderRow } from '@/lib/shipping/excel/kyungdong-export'
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -31,11 +32,12 @@ export async function GET(req: NextRequest) {
     .where(eq(companySettings.userId, workspaceUserId))
     .limit(1)
 
-  const [orderRows, itemRows] = await Promise.all([
+  const [orderRows, itemRows, groupIdByOrder] = await Promise.all([
     db.select().from(orders).where(
       and(inArray(orders.id, orderIds), eq(orders.userId, workspaceUserId))
     ),
     db.select().from(orderItems).where(inArray(orderItems.orderId, orderIds)),
+    getCombinedShipmentGroupIds(workspaceUserId, orderIds),
   ])
 
   // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
@@ -61,6 +63,7 @@ export async function GET(req: NextRequest) {
     for (const row of rows) {
       exportRows.push({
         orderId: order.id,
+        shipmentGroupId: groupIdByOrder.get(order.id),
         recipientName: order.recipientName,
         // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
         recipientPhone: order.recipientPhone2 || order.recipientPhone || '',

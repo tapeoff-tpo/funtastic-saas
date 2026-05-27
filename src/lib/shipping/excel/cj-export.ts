@@ -26,6 +26,7 @@ export interface CjOrderRow {
   originalProductName?: string  // 수집상품명 (마켓 원본)
   pickingLocation?: string      // 피킹위치 (e.g. '1창고 A-01-03')
   shipmentGroupId?: string
+  isCombinedShipment?: boolean
 }
 
 const HEADERS = [
@@ -122,7 +123,7 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
     ])
 
     // 합포장 행은 실제 shipment group 기준으로 표시한다.
-    if (row.shipmentGroupId) {
+    if (row.shipmentGroupId || row.isCombinedShipment) {
       for (let index = 1; index <= HEADERS.length; index += 1) {
         dataRow.getCell(index).fill = COMBINED_FILL
       }

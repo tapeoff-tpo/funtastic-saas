@@ -9,6 +9,7 @@ import ExcelJS from 'exceljs'
 
 export interface KyungdongOrderRow {
   orderId: string
+  shipmentGroupId?: string
   recipientName: string
   recipientPhone: string
   recipientAltPhone?: string
@@ -79,6 +80,18 @@ const COLUMN_WIDTHS = [
   15,  // 상품코드
 ]
 
+const COMBINED_SHIPMENT_FILL: ExcelJS.FillPattern = {
+  type: 'pattern',
+  pattern: 'solid',
+  fgColor: { argb: 'FFD8E4BC' },
+}
+
+function fillWholeRow(row: ExcelJS.Row, columnCount: number): void {
+  for (let index = 1; index <= columnCount; index += 1) {
+    row.getCell(index).fill = COMBINED_SHIPMENT_FILL
+  }
+}
+
 export async function generateKyungdongExcel(rows: KyungdongOrderRow[]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook()
   const ws = wb.addWorksheet('경동택배')
@@ -105,7 +118,7 @@ export async function generateKyungdongExcel(rows: KyungdongOrderRow[]): Promise
       ? `(${row.pickingLocation}) ${row.productName}`
       : row.productName
 
-    ws.addRow([
+    const dataRow = ws.addRow([
       idx + 1,                          // No
       row.recipientName,                // 받는분
       row.recipientAddress,             // 주소
@@ -125,6 +138,9 @@ export async function generateKyungdongExcel(rows: KyungdongOrderRow[]): Promise
       row.deliveryMessage ?? '',        // 메모
       row.internalSku ?? '',            // 상품코드
     ])
+    if (row.shipmentGroupId) {
+      fillWholeRow(dataRow, HEADERS.length)
+    }
   })
 
   const buf = await wb.xlsx.writeBuffer()

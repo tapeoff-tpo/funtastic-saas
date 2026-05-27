@@ -129,6 +129,7 @@ async function setInputValue(input: Locator, value: string): Promise<void> {
 }
 
 async function ensureCheckboxChecked(root: Locator | Page, checkbox: Locator): Promise<void> {
+  if ((await checkbox.count().catch(() => 0)) === 0) return
   if (await checkbox.isChecked().catch(() => false)) return
 
   await checkbox.check({ force: true, timeout: 3000 }).catch(async () => {
@@ -232,6 +233,93 @@ async function clickOrderExcelDownloadButton(page: Page, root: Locator | Page): 
 
   if (!clickedByDom) {
     throw new MarketplaceApiError('onchannel', 500, '온채널 주문 엑셀 다운로드 버튼을 클릭하지 못했습니다.')
+  }
+}
+
+async function clickOrderHistoryDownloadButton(page: Page): Promise<void> {
+  const clickedByRole = await page
+    .getByRole('button', { name: /주문내역\s*다운로드/ })
+    .click({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+  if (clickedByRole) return
+
+  const clickedByDom = await page.evaluate(() => {
+    const controls = Array.from(
+      document.querySelectorAll<HTMLElement>('button, input[type="button"], input[type="submit"], a.btn, a'),
+    )
+    const target = controls.find((control) => {
+      const text = control instanceof HTMLInputElement ? control.value : control.innerText || control.textContent || ''
+      return /주문내역\s*다운로드/.test(text)
+    })
+    target?.click()
+    return Boolean(target)
+  }).catch(() => false)
+
+  if (!clickedByDom) {
+    throw new MarketplaceApiError('onchannel', 500, '온채널 주문내역 다운로드 버튼을 클릭하지 못했습니다.')
+  }
+}
+
+async function waitForOrderDownloadDialog(page: Page): Promise<void> {
+  const opened = await page
+    .waitForFunction(() => Boolean(document.querySelector('#btn-order-excel-down, button[target="supplier"]')), null, { timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false)
+  if (opened) return
+
+  const buttons = await page
+    .locator('button, input[type="button"], input[type="submit"], a.btn')
+    .evaluateAll((elements) => elements
+      .map((element) => element instanceof HTMLInputElement ? element.value : element.textContent || '')
+      .map((text) => text.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 30))
+    .catch(() => [])
+
+  throw new MarketplaceApiError('onchannel', 500, `온채널 주문내역 다운로드 모달이 열리지 않았습니다. buttons=${buttons.join(' | ')}`)
+}
+
+async function prepareOrderDownloadForm(page: Page, since: Date, until: Date): Promise<void> {
+  const prepared = await page.evaluate(({ sinceValue, untilValue }) => {
+    const button = document.querySelector<HTMLElement>('#btn-order-excel-down, button[target="supplier"]')
+    const container = button?.closest<HTMLElement>('.modal, [role="dialog"], .swal2-popup, form') ?? document.body
+    if (!button || !container) return { ok: false, reason: 'download-button-missing' }
+
+    const setNativeValue = (input: HTMLInputElement, value: string) => {
+      input.removeAttribute('readonly')
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+      setter?.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input'))
+      .filter((input) => {
+        const type = (input.getAttribute('type') || 'text').toLowerCase()
+        return !['hidden', 'checkbox', 'radio', 'submit', 'button'].includes(type) && !input.disabled
+      })
+    if (inputs.length < 2) return { ok: false, reason: `date-inputs-${inputs.length}` }
+    setNativeValue(inputs[0], sinceValue)
+    setNativeValue(inputs[1], untilValue)
+
+    const checkbox = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      .find((input) => !input.disabled)
+    if (checkbox && !checkbox.checked) {
+      checkbox.click()
+      checkbox.checked = true
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }))
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    return { ok: true, reason: '' }
+  }, { sinceValue: formatDateInput(since), untilValue: formatDateInput(until) }).catch((error) => ({
+    ok: false,
+    reason: error instanceof Error ? error.message : 'prepare-failed',
+  }))
+
+  if (!prepared.ok) {
+    throw new MarketplaceApiError('onchannel', 500, `온채널 주문내역 다운로드 조건 입력에 실패했습니다. (${prepared.reason})`)
   }
 }
 
@@ -495,9 +583,13 @@ export class OnchannelScraper implements MarketplaceScraper {
     }
   }
 
-  async getOrders(credentials: ScraperCredentials, since: Date): Promise<NormalizedOrder[]> {
+  async getOrders(
+    credentials: ScraperCredentials,
+    since: Date,
+    setProgress?: (message: string) => Promise<void>,
+  ): Promise<NormalizedOrder[]> {
     const until = new Date()
-    const workbookBuffer = await this.downloadOrdersExcel(credentials, since, until)
+    const workbookBuffer = await this.downloadOrdersExcel(credentials, since, until, setProgress)
     return this.parseOrdersExcel(workbookBuffer)
   }
 
@@ -568,6 +660,7 @@ export class OnchannelScraper implements MarketplaceScraper {
     credentials: ScraperCredentials,
     since: Date,
     until: Date,
+    setProgress?: (message: string) => Promise<void>,
   ): Promise<Buffer> {
     let sessionState = credentials.storageState
     let ctx = await openContext(sessionState)
@@ -588,32 +681,32 @@ export class OnchannelScraper implements MarketplaceScraper {
       }
 
       await dismissOnchannelPopups(ctx.page)
-      await ctx.page.getByRole('button', { name: /주문내역\s*다운로드/ }).click({ timeout: 15_000 })
+      await setProgress?.('온채널 주문내역 다운로드 모달 여는 중...')
+      await clickOrderHistoryDownloadButton(ctx.page)
+      await waitForOrderDownloadDialog(ctx.page)
       const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').first()
       await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
       await dismissOnchannelPopups(ctx.page)
       const downloadRoot: Locator | Page = (await dialog.isVisible().catch(() => false)) ? dialog : ctx.page
+
+      await setProgress?.('온채널 주문내역 다운로드 조건 입력 중...')
+      await prepareOrderDownloadForm(ctx.page, since, until)
 
       const inputSelector =
         'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])'
       const scopedInputs = await visibleLocators(downloadRoot, inputSelector)
       const dateInputs = scopedInputs.length >= 2 ? scopedInputs : await visibleLocators(ctx.page, inputSelector)
 
-      if (dateInputs.length < 2) {
-        throw new MarketplaceApiError(
-          'onchannel',
-          500,
-          `온채널 주문내역 다운로드 기간 입력칸을 찾지 못했습니다. (${await summarizePage(ctx.page)})`,
-        )
+      if (dateInputs.length >= 2) {
+        await setInputValue(dateInputs[0], formatDateInput(since))
+        await setInputValue(dateInputs[1], formatDateInput(until))
       }
-
-      await setInputValue(dateInputs[0], formatDateInput(since))
-      await setInputValue(dateInputs[1], formatDateInput(until))
 
       const checkbox = downloadRoot.locator('input[type="checkbox"]').first()
       await ensureCheckboxChecked(downloadRoot, checkbox)
 
       await dismissOnchannelPopups(ctx.page)
+      await setProgress?.('온채널 주문내역 다운로드 버튼 클릭 중...')
       const dialogPromise = ctx.page.waitForEvent('dialog', { timeout: 5000 })
         .then(async (dialogEvent) => {
           const message = dialogEvent.message()

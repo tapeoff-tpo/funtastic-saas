@@ -367,6 +367,12 @@ function ProductNameCell({ order }: { order: OrderRow }) {
               {item.sku ?? '-'}
             </span>
             <span
+              className="block min-w-0 truncate text-[10px] text-muted-foreground"
+              title={`수집상품명: ${item.productName}`}
+            >
+              {item.productName}
+            </span>
+            <span
               className="block min-w-0 overflow-hidden font-medium leading-tight [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]"
               title={line}
             >
@@ -862,7 +868,12 @@ export const columns: ColumnDef<OrderRow>[] = [
   // 신규 탭에서만 원본(수집상품명) 보조 표시, 그 외 탭은 확정상품명만 표시
   {
     id: 'productInfo',
-    header: '상품명',
+    header: () => (
+      <div className="flex flex-col leading-tight">
+        <span className="text-[10px] font-normal text-muted-foreground">수집상품명</span>
+        <span>상품명</span>
+      </div>
+    ),
     cell: ({ row }) => <ProductNameCell order={row.original} />,
     size: 320,
     minSize: 240,

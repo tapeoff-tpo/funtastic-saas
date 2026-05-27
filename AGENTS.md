@@ -17,7 +17,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### Collection Responsibility Policy
 
-- All-market order collection must stay fast. `/orders/collect` is responsible only for collecting orders and moving eligible marketplace orders into order-confirmed/shipping-prep status.
+- All-market order collection must stay fast. `/orders/collect` is responsible only for collecting new marketplace order source data. It must never move an order into `confirmed`; 확인 is reached only after local mapping is applied and the user confirms the order.
 - Marketplace order collection must stay isolated per marketplace and per integration path. Do not make one API/RPA agent collect every mall in a single browser/session/task. Each marketplace should have its own adapter/scraper/worker path so failures, timeouts, logins, and DOM changes do not affect other marketplaces.
 - Keep API, RPA, Excel, and connected-mall collection paths independent. Shared orchestration may enqueue or summarize work, but the actual collection logic must run through the marketplace-specific agent.
 - Independent RPA marketplaces currently include 도매창고(`domechango`), 바나나B2B(`banana-b2b`), 온채널(`onchannel`), 투비즈온(`tobizon`), 도매의신(`domesin`), and 올웨이즈(`always`). Keep each one on its own scraper path.

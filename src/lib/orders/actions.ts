@@ -209,18 +209,29 @@ export async function forceBulkUpdateStatus(
   if (uniqueIds.length === 0) return { updated: 0, errors: [] }
 
   const ownedOrders = await db
-    .select({ id: orders.id, status: orders.status })
+    .select({ id: orders.id, status: orders.status, mappedAt: orders.mappedAt })
     .from(orders)
     .where(and(eq(orders.userId, userId), inArray(orders.id, uniqueIds)))
 
   const ownedIds = new Set(ownedOrders.map((order) => order.id))
-  const errors = uniqueIds
+  const errors: Array<{ orderId: string; error: string }> = uniqueIds
     .filter((id) => !ownedIds.has(id))
     .map((orderId) => ({ orderId, error: 'Order not found' }))
+  if (newStatus === 'confirmed') {
+    errors.push(
+      ...ownedOrders
+        .filter((order) => !order.mappedAt)
+        .map((order) => ({ orderId: order.id, error: '매핑 완료 전에는 확인으로 이동할 수 없습니다.' })),
+    )
+  }
 
   if (ownedOrders.length === 0) return { updated: 0, errors }
 
-  const orderIdsToUpdate = ownedOrders.map((order) => order.id)
+  const blockedIds = new Set(errors.map((error) => error.orderId).filter(Boolean))
+  const orderIdsToUpdate = ownedOrders
+    .filter((order) => !blockedIds.has(order.id))
+    .map((order) => order.id)
+  if (orderIdsToUpdate.length === 0) return { updated: 0, errors }
   const result = await db.transaction(async (tx) => {
     const updatedOrders = await tx
       .update(orders)

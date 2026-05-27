@@ -165,6 +165,28 @@ const DEFAULT_PAGE_SIZE = 50
 const INACTIVE_CLAIM_STATUSES = ['rejected', 'withdrawn'] as const
 const CLAIM_LIKE_MARKETPLACE_STATUS_PATTERN = '^(\uCDE8\uC18C|\uBC18\uD488|\uAD50\uD658)'
 const INACTIVE_MARKETPLACE_CLAIM_STATUS_PATTERN = '(\uAC70\uC808|\uAC70\uBD80|\uBC18\uB824|\uCCA0\uD68C)'
+const orderInvariantRepairAtByUser = new Map<string, number>()
+const ORDER_INVARIANT_REPAIR_INTERVAL_MS = 60_000
+
+async function repairUnmappedConfirmedOrders(userId: string | undefined): Promise<void> {
+  if (!userId) return
+  const now = Date.now()
+  const lastRepairAt = orderInvariantRepairAtByUser.get(userId) ?? 0
+  if (now - lastRepairAt < ORDER_INVARIANT_REPAIR_INTERVAL_MS) return
+  orderInvariantRepairAtByUser.set(userId, now)
+
+  await db
+    .update(orders)
+    .set({
+      status: 'new',
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(orders.userId, userId),
+      eq(orders.status, 'confirmed'),
+      isNull(orders.mappedAt),
+    ))
+}
 
 function expandSkuSearchTerms(skus: string[]): string[] {
   const terms = new Set<string>()
@@ -686,6 +708,8 @@ function getOrderByExpressions(sort?: string, order?: 'asc' | 'desc') {
  * Returns orders with their items for the dashboard table.
  */
 export async function getOrders(filters: OrderFilters = {}) {
+  await repairUnmappedConfirmedOrders(filters.userId)
+
   const page = filters.page ?? 1
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
   const offset = (page - 1) * pageSize

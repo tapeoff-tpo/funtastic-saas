@@ -194,23 +194,10 @@ function shouldAutoConfirmOrders(): boolean {
   return false
 }
 
-function shouldConfirmOnCollect(marketplaceId: string): boolean {
-  return marketplaceId === 'ssgmall' || marketplaceId === 'specialoffer'
-}
-
-function confirmedMarketplaceStatus(marketplaceId: string): string {
-  if (marketplaceId === 'ssgmall') return '140'
-  if (marketplaceId === 'specialoffer') return '4'
-  return 'CONFIRMED'
-}
-
-function isIgnorableConfirmFailure(marketplaceId: string, message: string): boolean {
-  if (marketplaceId !== 'ssgmall') return false
-  return /배송지시\s*상태에서만\s*주문확인|해당\s*데이터가\s*없습니다|이미\s*주문확인|이미\s*처리/.test(message)
-}
-
 function shouldPreserveCollectedConfirmedStatus(marketplaceId: string): boolean {
-  return marketplaceId === 'always' || marketplaceId === 'gs-shop' || marketplaceId === 'ohouse'
+  void marketplaceId
+  // 확인 탭은 로컬 매핑 확정 후 사용자 확인으로만 진입한다.
+  return false
 }
 
 function collectedOrderStatus(
@@ -595,8 +582,6 @@ export async function collectOrdersForConnection(params: {
       `${normalizedOrders.length}건 발견${normalizedOrders.length > 0 ? ` - 저장/갱신 ${ordersToSave.length}건, 기존 ${skippedExistingCount}건 포함` : ''}`,
     )
 
-    type ConfirmTarget = { ids: string[]; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
-    const confirmTargets: ConfirmTarget[] = []
     const totalOrders = ordersToSave.length
     let idx = 0
     for (const order of ordersToSave) {
@@ -609,89 +594,20 @@ export async function collectOrdersForConnection(params: {
       const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
       const isExistingOrder = existingOrderMatches.upsertKeys.has(orderKey)
       const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
-      let splitCopyIds: string[] = []
 
       if (!isExistingOrder && items.length > 0) {
         await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
-        splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+        await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
       } else if (isExistingOrder && marketplaceId === 'specialoffer') {
         await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
       }
       ordersCollected++
-
-      if (
-        shouldConfirmOnCollect(marketplaceId)
-        && order.status === 'new'
-        && upsertedOrder.marketplaceStatus !== confirmedMarketplaceStatus(marketplaceId)
-      ) {
-        confirmTargets.push({
-          ids: [upsertedOrder.id, ...splitCopyIds],
-          marketplaceOrderId: order.marketplaceOrderId,
-          rawData: enrichOrderRawData(orderForSave),
-        })
-      }
 
       // 진행률 표시(많은 주문 시): 5건마다 또는 마지막 1건에서 갱신
       if (totalOrders >= 5 && (idx % 5 === 0 || idx === totalOrders)) {
         await setProgress(`주문 저장 중 (${idx}/${totalOrders})`)
       }
 
-    }
-
-    if (confirmTargets.length > 0 && typeof adapter.confirmOrder === 'function') {
-      await setProgress(`수집 주문 상태 전환 중... (0/${confirmTargets.length})`)
-      let confirmIdx = 0
-      const confirmFailures: string[] = []
-
-      for (const target of confirmTargets) {
-        confirmIdx++
-        try {
-          const result = await adapter.confirmOrder(target.marketplaceOrderId, target.rawData ?? undefined)
-          if (result.success) {
-            await db
-              .update(orders)
-              .set({
-                status: 'confirmed',
-                marketplaceStatus: confirmedMarketplaceStatus(marketplaceId),
-                updatedAt: new Date(),
-              })
-              .where(inArray(orders.id, target.ids))
-          } else if (isIgnorableConfirmFailure(marketplaceId, result.error ?? '')) {
-            await db
-              .update(orders)
-              .set({
-                status: 'confirmed',
-                marketplaceStatus: confirmedMarketplaceStatus(marketplaceId),
-                updatedAt: new Date(),
-              })
-              .where(inArray(orders.id, target.ids))
-          } else {
-            confirmFailures.push(`${target.marketplaceOrderId}: ${result.error ?? 'unknown error'}`)
-          }
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err)
-          if (isIgnorableConfirmFailure(marketplaceId, message)) {
-            await db
-              .update(orders)
-              .set({
-                status: 'confirmed',
-                marketplaceStatus: confirmedMarketplaceStatus(marketplaceId),
-                updatedAt: new Date(),
-              })
-              .where(inArray(orders.id, target.ids))
-          } else {
-            confirmFailures.push(`${target.marketplaceOrderId}: ${message}`)
-          }
-        }
-
-        if (confirmIdx === confirmTargets.length || confirmIdx % 5 === 0) {
-          await setProgress(`수집 주문 상태 전환 중... (${confirmIdx}/${confirmTargets.length})`)
-        }
-      }
-
-      if (confirmFailures.length > 0) {
-        throw new Error(`${marketplaceId} 주문 상태 전환 실패: ${confirmFailures.slice(0, 3).join(' / ')}`)
-      }
     }
 
     // 4.5 Auto-confirm is disabled.

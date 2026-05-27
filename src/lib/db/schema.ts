@@ -374,6 +374,40 @@ export const shipmentItems = pgTable('shipment_items', {
   quantity: integer('quantity').notNull().default(1),
 })
 
+export const actualShippingCosts = pgTable(
+  'actual_shipping_costs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    carrierId: varchar('carrier_id', { length: 50 }).notNull(),
+    trackingNumber: varchar('tracking_number', { length: 100 }).notNull(),
+    normalizedTrackingNumber: varchar('normalized_tracking_number', { length: 100 }).notNull(),
+    shipmentId: uuid('shipment_id').references(() => shipments.id, { onDelete: 'set null' }),
+    orderNumber: varchar('order_number', { length: 200 }),
+    acceptedAt: date('accepted_at'),
+    deliveredAt: date('delivered_at'),
+    actualFee: numeric('actual_fee', { precision: 12, scale: 2 }).notNull(),
+    packageType: varchar('package_type', { length: 100 }),
+    quantity: integer('quantity').notNull().default(1),
+    paymentType: varchar('payment_type', { length: 100 }),
+    shipmentType: varchar('shipment_type', { length: 100 }),
+    sourceFileName: varchar('source_file_name', { length: 255 }),
+    rowNumber: integer('row_number').notNull(),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull().default({}),
+    importedAt: timestamp('imported_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('actual_shipping_costs_user_carrier_tracking_unique').on(
+      table.userId,
+      table.carrierId,
+      table.normalizedTrackingNumber,
+    ),
+    index('actual_shipping_costs_user_imported_idx').on(table.userId, table.importedAt),
+    index('actual_shipping_costs_shipment_idx').on(table.shipmentId),
+  ],
+)
+
 export const shipmentGroups = pgTable('shipment_groups', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull(),

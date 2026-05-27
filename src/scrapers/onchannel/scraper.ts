@@ -407,6 +407,66 @@ function isExcelDownloadResponse(response: { url: () => string; headers: () => R
     || (/excel|xlsx?|download|down/i.test(url) && /order|supplier|excel|down/i.test(url))
 }
 
+async function fetchOrderExcelDirect(page: Page, since: Date, until: Date): Promise<Buffer> {
+  const startDate = encodeURIComponent(formatDateInput(since))
+  const endDate = encodeURIComponent(formatDateInput(until))
+  const downType = encodeURIComponent('배송준비중')
+  const path = `/PHPExcel_1.8.0_doc/onch_admin_order/excel_onch_order.php?down_type=${downType}&start_date=${startDate}&end_date=${endDate}`
+  const result = await page.evaluate(`(async () => {
+    const response = await fetch(${JSON.stringify(path)}, { credentials: 'include' });
+    const contentType = response.headers.get('content-type') || '';
+    const disposition = response.headers.get('content-disposition') || '';
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = Array.from(new Uint8Array(arrayBuffer));
+    let preview = '';
+    try {
+      preview = new TextDecoder().decode(arrayBuffer.slice(0, 300)).replace(/\\s+/g, ' ').slice(0, 200);
+    } catch (error) {
+      preview = '';
+    }
+    return { ok: response.ok, status: response.status, contentType, disposition, bytes, preview };
+  })()`).catch((error) => ({
+    ok: false,
+    status: 0,
+    contentType: '',
+    disposition: '',
+    bytes: [] as number[],
+    preview: error instanceof Error ? error.message : 'fetch failed',
+  })) as {
+    ok: boolean
+    status: number
+    contentType: string
+    disposition: string
+    bytes: number[]
+    preview: string
+  }
+
+  if (!result.ok) {
+    throw new MarketplaceApiError(
+      'onchannel',
+      result.status || 500,
+      `온채널 주문 엑셀 직접 다운로드 실패 (${result.status || 'no-status'} ${result.preview || result.contentType || '-'})`,
+    )
+  }
+
+  const buffer = Buffer.from(result.bytes)
+  if (buffer.length === 0) {
+    throw new MarketplaceApiError('onchannel', 500, '온채널 주문 엑셀 직접 다운로드 파일이 비어 있습니다.')
+  }
+
+  const looksLikeExcel = buffer.subarray(0, 2).toString('utf8') === 'PK'
+    || /spreadsheet|excel|octet-stream|ms-excel|openxmlformats/i.test(`${result.contentType} ${result.disposition}`)
+  if (!looksLikeExcel) {
+    throw new MarketplaceApiError(
+      'onchannel',
+      500,
+      `온채널 주문 엑셀 직접 다운로드 응답이 엑셀이 아닙니다. (${result.contentType || '-'} ${result.preview || '-'})`,
+    )
+  }
+
+  return buffer
+}
+
 async function selectSearchTypeForOrderCode(page: Page): Promise<void> {
   const selects = await visibleLocators(page, 'select')
   for (const select of selects) {
@@ -749,65 +809,12 @@ export class OnchannelScraper implements MarketplaceScraper {
       }
 
       await dismissOnchannelPopups(ctx.page)
-      await setProgress?.('온채널 주문내역 다운로드 모달 여는 중...')
-      await clickOrderHistoryDownloadButton(ctx.page)
-      await waitForOrderDownloadDialog(ctx.page)
-      const dialog = ctx.page.locator('.modal:visible, [role="dialog"]:visible, .swal2-popup:visible').filter({
-        has: ctx.page.locator('#btn-order-excel-down, button[target="supplier"], input[target="supplier"]'),
-      }).last()
-      await dialog.waitFor({ state: 'visible', timeout: 10000 }).catch(() => undefined)
-      await dismissOnchannelPopups(ctx.page)
-      const downloadRoot = await getOrderDownloadRoot(ctx.page)
-
-      await setProgress?.('온채널 주문내역 다운로드 조건 입력 중...')
-      await prepareOrderDownloadForm(ctx.page, since, until)
-
-      const inputSelector =
-        'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])'
-      const scopedInputs = await visibleLocators(downloadRoot, inputSelector)
-      const dateInputs = scopedInputs.length >= 2 ? scopedInputs : await visibleLocators(ctx.page, inputSelector)
-
-      if (dateInputs.length >= 2) {
-        await setInputValue(dateInputs[0], formatDateInput(since))
-        await setInputValue(dateInputs[1], formatDateInput(until))
-      }
-
-      const checkbox = downloadRoot.locator('input[type="checkbox"]').first()
-      await ensureCheckboxChecked(downloadRoot, checkbox)
-
-      await dismissOnchannelPopups(ctx.page)
-      await setProgress?.('온채널 주문내역 다운로드 버튼 클릭 중...')
-      const dialogPromise = ctx.page.waitForEvent('dialog', { timeout: 5000 })
-        .then(async (dialogEvent) => {
-          const message = dialogEvent.message()
-          await dialogEvent.accept().catch(() => undefined)
-          return message
-        })
-        .catch(() => null)
-      const downloadBufferPromise = ctx.page
-        .waitForEvent('download', { timeout: DOWNLOAD_TIMEOUT_MS })
-        .then((download) => readDownloadBuffer(download))
-      const responseBufferPromise = ctx.page
-        .waitForResponse((response) => isExcelDownloadResponse(response), { timeout: DOWNLOAD_TIMEOUT_MS })
-        .then((response) => response.body())
-
-      await clickOrderExcelDownloadButton(ctx.page, downloadRoot).catch(async (error) => {
-        const dialogMessage = await dialogPromise
-        throw new MarketplaceApiError(
-          'onchannel',
-          500,
-          `온채널 주문내역 다운로드 버튼을 클릭하지 못했습니다. (${error instanceof Error ? error.message : 'click failed'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
-        )
-      })
-
-      return await Promise.any([downloadBufferPromise, responseBufferPromise]).catch(async (error) => {
-        const dialogMessage = await dialogPromise
-        throw new MarketplaceApiError(
-          'onchannel',
-          504,
-          `온채널 엑셀 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 시작되지 않았습니다. (${error instanceof Error ? error.message : 'download timeout'}${dialogMessage ? ` dialog=${dialogMessage}` : ''}; ${await summarizePage(ctx.page)})`,
-        )
-      })
+      await setProgress?.('온채널 주문내역 엑셀 직접 다운로드 중...')
+      return await withTimeout(
+        fetchOrderExcelDirect(ctx.page, since, until),
+        DOWNLOAD_TIMEOUT_MS,
+        `온채널 엑셀 직접 다운로드가 ${DOWNLOAD_TIMEOUT_MS / 1000}초 안에 끝나지 않았습니다.`,
+      )
     } finally {
       await ctx.close()
     }

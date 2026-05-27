@@ -1281,6 +1281,98 @@ async function parseVisibleOrders(page: Page): Promise<NormalizedOrder[]> {
       return rows
     }).catch(() => []))
     if (layoutOrders.length > 0) return layoutOrders
+
+    const gridOrders = rowsToNormalizedOrders(await frame.evaluate(() => {
+      const normalizeText = (value: string) => value.replace(/\s+/g, ' ').trim()
+      const visible = (element: Element) => {
+        const rect = element.getBoundingClientRect()
+        const style = window.getComputedStyle(element)
+        return rect.width > 0
+          && rect.height > 0
+          && style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && Number(style.opacity || '1') > 0
+      }
+      const textOf = (element: Element) => normalizeText(element.textContent || '')
+      const rowElements = Array.from(document.querySelectorAll<HTMLElement>(
+        '[role="row"], .ag-row, .tui-grid-row, .MuiDataGrid-row, [class*="grid-row"], [class*="GridRow"], [class*="table-row"]',
+      )).filter(visible)
+
+      const rows: Array<Record<string, string>> = []
+      const seen = new Set<string>()
+      for (const row of rowElements) {
+        const cells = Array.from(row.querySelectorAll<HTMLElement>(
+          '[role="gridcell"], [role="cell"], .ag-cell, .tui-grid-cell, .MuiDataGrid-cell, td, th',
+        ))
+          .filter(visible)
+          .map(textOf)
+          .filter(Boolean)
+
+        const rowText = cells.length > 0 ? cells.join(' ') : textOf(row)
+        const orderNo = rowText.match(/\b\d{8,13}\b/)?.[0]
+        if (!orderNo || seen.has(orderNo)) continue
+        seen.add(orderNo)
+
+        const dates = rowText.match(/\d{4}[-./]\d{2}[-./]\d{2}/g) ?? []
+        const itemNo = rowText.match(new RegExp(`${orderNo}\\s+(\\d{3,})`))?.[1] ?? ''
+        const status = /취소/.test(rowText)
+          ? '취소'
+          : /확인|미처리|출고|배송준비|상품준비/.test(rowText)
+            ? '배송준비'
+            : '신규'
+        const product = cells.find((cell) => /[가-힣]/.test(cell) && cell.length >= 6 && !/조회|주문|배송|관리|수취인|고객명/.test(cell))
+
+        rows.push({
+          주문번호: orderNo,
+          주문아이템번호: itemNo ? `${orderNo}-${itemNo}` : orderNo,
+          상태: status,
+          출하지시일: dates[0] || '',
+          상품명: product || `GS샵 주문 ${orderNo}`,
+          화면행: rowText,
+        })
+      }
+      return rows
+    }).catch(() => []))
+    if (gridOrders.length > 0) return gridOrders
+
+    const textOrders = rowsToNormalizedOrders(await frame.evaluate(() => {
+      const lines = (document.body?.innerText || '')
+        .split(/\n+/)
+        .map((line) => line.replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+      const rows: Array<Record<string, string>> = []
+      const seen = new Set<string>()
+
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index]
+        const orderNo = line.match(/\b\d{8,13}\b/)?.[0]
+        if (!orderNo || seen.has(orderNo)) continue
+        seen.add(orderNo)
+
+        const context = lines.slice(Math.max(0, index - 3), index + 8).join(' ')
+        const dates = context.match(/\d{4}[-./]\d{2}[-./]\d{2}/g) ?? []
+        const itemNo = context.match(new RegExp(`${orderNo}\\s+(\\d{3,})`))?.[1] ?? ''
+        const status = /취소/.test(context)
+          ? '취소'
+          : /확인|미처리|출고|배송준비|상품준비/.test(context)
+            ? '배송준비'
+            : '신규'
+        const product = lines
+          .slice(index, index + 8)
+          .find((entry) => /[가-힣]/.test(entry) && entry.length >= 6 && !/조회|주문번호|주문아이템|수취인명|고객명|배송|관리/.test(entry))
+
+        rows.push({
+          주문번호: orderNo,
+          주문아이템번호: itemNo ? `${orderNo}-${itemNo}` : orderNo,
+          상태: status,
+          출하지시일: dates[0] || '',
+          상품명: product || `GS샵 주문 ${orderNo}`,
+          화면행: context,
+        })
+      }
+      return rows
+    }).catch(() => []))
+    if (textOrders.length > 0) return textOrders
   }
 
   return []

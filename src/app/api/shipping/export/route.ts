@@ -46,6 +46,26 @@ function parseBooleanParam(value: string | null): boolean {
   return value === 'true' || value === '1'
 }
 
+function parseSalesFeePercent(value: unknown): number | null {
+  const percent = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value.trim())
+      : NaN
+  return Number.isFinite(percent) && percent >= 0 && percent <= 100 ? percent : null
+}
+
+function calculateSalesFeeAmount(amount: unknown, percent: number | null): number | '' {
+  if (percent === null) return ''
+  const numericAmount = typeof amount === 'number'
+    ? amount
+    : typeof amount === 'string'
+      ? Number(amount.replace(/,/g, '').trim())
+      : NaN
+  if (!Number.isFinite(numericAmount)) return ''
+  return Math.round(numericAmount * (percent / 100))
+}
+
 function buildFilteredExportFilters(searchParams: URLSearchParams, userId: string): OrderFilters {
   const selectedStatuses = parseStatusFilter(searchParams.get('status'))
   const singleStatus = selectedStatuses.length === 1 ? selectedStatuses[0] : undefined
@@ -191,6 +211,10 @@ export async function GET(request: NextRequest) {
         ? connection.metadata.salesExportMarketplaceId
         : '',
     ]))
+    const salesFeePercentMap = new Map(connectionRows.map((connection) => [
+      connection.id,
+      parseSalesFeePercent(connection.metadata?.salesFeePercent),
+    ]))
 
     // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
     // 매핑 없으면 orderItems.sku 를 그대로 사용 (fallback).
@@ -256,6 +280,10 @@ export async function GET(request: NextRequest) {
 
       // 매핑 전 원본 (수집상품명/수집옵션명 용)
       const rawFirst = items[0]
+      const salesFeePercent = order.connectionId
+        ? salesFeePercentMap.get(order.connectionId) ?? null
+        : null
+      const salesDiscountAndFee = calculateSalesFeeAmount(order.totalAmount, salesFeePercent)
 
       const marketplaceName = getMarketplaceExportName(order)
       const collectedDate = order.collectedAt ? new Date(order.collectedAt) : null
@@ -338,7 +366,7 @@ export async function GET(request: NextRequest) {
         salesShippingFee: salesValue(order.shippingFee ?? ''),
         salesUnitPrice: salesValue(rawFirst?.unitPrice ?? '0'),
         salesTotalAmount: salesValue(order.totalAmount),
-        salesDiscountAndFee: '',
+        salesDiscountAndFee: salesValue(salesDiscountAndFee),
         salesPaymentAmount: salesValue(order.totalAmount),
         salesFinalPaymentAmount: salesValue(order.totalAmount),
         salesPaymentFee: '',

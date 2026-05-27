@@ -324,7 +324,7 @@ export async function testMarketplaceCredentials(
   }
 }
 
-export async function saveSalesExportMarketplaceId(
+export async function saveSalesExportSettings(
   _prevState: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
@@ -340,10 +340,15 @@ export async function saveSalesExportMarketplaceId(
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const connectionId = String(formData.get('connection_id') ?? '').trim()
   const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
+  const rawSalesFeePercent = String(formData.get('sales_fee_percent') ?? '').trim()
+  const salesFeePercent = rawSalesFeePercent === '' ? null : Number(rawSalesFeePercent)
 
   if (!connectionId) return { error: '연결 ID가 필요합니다.' }
   if (salesExportMarketplaceId.length > 100) {
     return { error: '매출확인용 마켓 ID는 100자 이내로 입력해주세요.' }
+  }
+  if (salesFeePercent !== null && (!Number.isFinite(salesFeePercent) || salesFeePercent < 0 || salesFeePercent > 100)) {
+    return { error: '수수료율은 0부터 100 사이 숫자로 입력해주세요.' }
   }
 
   try {
@@ -365,13 +370,20 @@ export async function saveSalesExportMarketplaceId(
       return { error: '연결 정보를 찾을 수 없습니다.' }
     }
 
+    const metadata: Record<string, unknown> = {
+      ...(connection.metadata ?? {}),
+      salesExportMarketplaceId,
+    }
+    if (salesFeePercent === null) {
+      delete metadata.salesFeePercent
+    } else {
+      metadata.salesFeePercent = salesFeePercent
+    }
+
     await db
       .update(marketplaceConnections)
       .set({
-        metadata: {
-          ...(connection.metadata ?? {}),
-          salesExportMarketplaceId,
-        },
+        metadata,
       })
       .where(
         and(
@@ -381,12 +393,12 @@ export async function saveSalesExportMarketplaceId(
       )
   } catch (err) {
     return {
-      error: `매출확인용 마켓 ID 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
+      error: `매출확인용 설정 저장 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`,
     }
   }
 
   revalidatePath('/settings/marketplaces')
-  return { success: true, message: '매출확인용 마켓 ID가 저장되었습니다.' }
+  return { success: true, message: '매출확인용 설정이 저장되었습니다.' }
 }
 
 export async function registerMarketplaceCredentials(

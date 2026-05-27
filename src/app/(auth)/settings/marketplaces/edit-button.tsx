@@ -7,7 +7,7 @@ import {
   getMarketplaceCredentials,
   renameRpaMarketplaceConnection,
   registerMarketplaceCredentials,
-  saveSalesExportMarketplaceId,
+  saveSalesExportSettings,
   testMarketplaceCredentials,
 } from './actions'
 import { DeleteConnectionButton } from './delete-button'
@@ -52,6 +52,7 @@ interface ConnectionRowProps {
   storeAlias: string
   displayName: string
   salesExportMarketplaceId: string
+  salesFeePercent: string
   status: ConnectionStatus
   integrationMethod: IntegrationMethod
   linkedMarketplaces?: string[]
@@ -71,6 +72,7 @@ export function ConnectionRow({
   storeAlias,
   displayName,
   salesExportMarketplaceId,
+  salesFeePercent,
   status,
   integrationMethod,
   linkedMarketplaces = [],
@@ -91,7 +93,7 @@ export function ConnectionRow({
     null,
   )
   const [salesIdState, salesIdFormAction, isSalesIdPending] = useActionState(
-    saveSalesExportMarketplaceId,
+    saveSalesExportSettings,
     null,
   )
 
@@ -200,7 +202,7 @@ export function ConnectionRow({
               setSalesIdOpen((current) => !current)
             }}
           >
-            {salesIdOpen ? '닫기' : '매출 ID 설정'}
+            {salesIdOpen ? '닫기' : '매출 설정'}
           </Button>
           {(integrationMethod === 'api' || integrationMethod === 'hub') && (
             <Button
@@ -249,6 +251,23 @@ export function ConnectionRow({
               autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">매출확인용 엑셀의 ID열에만 출력됩니다.</p>
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor={`sales-export-${connectionId}-fee-percent`}>수수료율(%)</Label>
+            <Input
+              id={`sales-export-${connectionId}-fee-percent`}
+              name="sales_fee_percent"
+              type="number"
+              defaultValue={salesFeePercent}
+              min="0"
+              max="100"
+              step="0.01"
+              inputMode="decimal"
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              매출확인용 엑셀의 판매자할인금액+수수료 열에만 계산되어 출력됩니다.
+            </p>
           </div>
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={isSalesIdPending}>

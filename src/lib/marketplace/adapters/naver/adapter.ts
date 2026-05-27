@@ -41,11 +41,10 @@ const NAVER_API_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 0 : 1_000
 const NAVER_RATE_LIMIT_BACKOFF_MS = 30_000
 const NAVER_MAX_RATE_LIMIT_RETRIES = 2
 
-/** Order-related lastChangedType values */
-const ORDER_CHANGED_TYPES = ['PAYED', 'DELIVERING', 'DELIVERED', 'PURCHASE_DECIDED']
-
 /** Claim-related lastChangedType values */
 const CLAIM_CHANGED_TYPES = ['CLAIM_REQUESTED', 'CLAIM_COMPLETED', 'COLLECT_DONE']
+const NAVER_LOOKUP_PAGE_SIZE = 300
+const NAVER_CONFIRM_BATCH_SIZE = 30
 
 export class NaverAdapter implements MarketplaceAdapter {
   readonly config = NAVER_CONFIG
@@ -90,16 +89,15 @@ export class NaverAdapter implements MarketplaceAdapter {
 
   async getOrders(since: Date, until: Date = new Date()): Promise<NormalizedOrder[]> {
     try {
-      // Step 1: Get changed product order IDs
-      const changedIds = await this.fetchChangedIds(since, ORDER_CHANGED_TYPES, until)
+      // Read every change type in the selected window so historical orders that
+      // already progressed past PAYED are still imported once.
+      const changedIds = await this.fetchChangedIds(since, [], until)
       if (changedIds.length === 0) return []
 
-      // Step 2: Fetch full product order details
       const productOrders = await this.fetchProductOrderDetails(changedIds)
+      if (productOrders.length === 0) return []
 
-      // Step 3: Group by Naver's general order ID.
-      // lastChangedStatuses works in product-order IDs, but our order table should
-      // represent the customer-facing order number once with multiple items.
+      // Group by Naver's general order ID so a customer order is stored once.
       const groups = new Map<string, NaverProductOrder[]>()
       for (const po of productOrders) {
         const orderId = this.getNaverOrder(po).orderId
@@ -133,17 +131,27 @@ export class NaverAdapter implements MarketplaceAdapter {
     rawData?: Record<string, unknown>,
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const productOrderIds = this.extractProductOrderIds(rawData) ?? [marketplaceOrderId]
-      const response = await this.naverPost<{
-        data: { successProductOrderIds: string[]; failProductOrderIds: string[] }
-      }>(
-        'external/v1/pay-order/seller/product-orders/confirm',
-        { productOrderIds },
-      )
+      const productOrderIds = this.extractPayedProductOrderIds(rawData)
+        ?? this.extractProductOrderIds(rawData)
+        ?? [marketplaceOrderId]
+      for (let start = 0; start < productOrderIds.length; start += NAVER_CONFIRM_BATCH_SIZE) {
+        const batch = productOrderIds.slice(start, start + NAVER_CONFIRM_BATCH_SIZE)
+        const response = await this.naverPost<{
+          data: {
+            successProductOrderIds?: string[]
+            failProductOrderIds?: string[]
+            failProductOrderInfos?: Array<{ productOrderId?: string; message?: string }>
+          }
+        }>(
+          'external/v1/pay-order/seller/product-orders/confirm',
+          { productOrderIds: batch },
+        )
 
-      const failed = response.data.failProductOrderIds?.filter((id) => productOrderIds.includes(id)) ?? []
-      if (failed.length > 0) {
-        return { success: false, error: `발주확인 실패: ${failed.join(', ')}` }
+        const failedIds = response.data.failProductOrderIds ?? response.data.failProductOrderInfos?.map((info) => info.productOrderId ?? '') ?? []
+        const failed = failedIds.filter((id) => batch.includes(id))
+        if (failed.length > 0) {
+          return { success: false, error: `발주확인 실패: ${failed.join(', ')}` }
+        }
       }
 
       return { success: true }
@@ -395,34 +403,37 @@ export class NaverAdapter implements MarketplaceAdapter {
    * Fetch changed product order IDs from the lastChangedStatuses endpoint.
    */
   private async fetchChangedIds(since: Date, lastChangedTypes: string[], until: Date = new Date()): Promise<string[]> {
-    // Naver API max window is 1 hour — split into 1-hour chunks
-    const HOUR_MS = 60 * 60 * 1000
+    // Naver allows up to a 24-hour query window and returns at most 300 rows
+    // per call, continued with moreFrom/moreSequence.
+    const DAY_MS = 24 * 60 * 60 * 1000
     const allIds: string[] = []
     let chunkStart = since
 
     while (chunkStart < until) {
-      const chunkEnd = new Date(Math.min(chunkStart.getTime() + HOUR_MS, until.getTime()))
+      const chunkEnd = new Date(Math.min(chunkStart.getTime() + DAY_MS, until.getTime()))
+      const typeFilters: Array<string | undefined> = lastChangedTypes.length > 0 ? lastChangedTypes : [undefined]
 
-      const params = new URLSearchParams({
-        lastChangedFrom: chunkStart.toISOString(),
-        lastChangedTo: chunkEnd.toISOString(),
-      })
-      for (const t of lastChangedTypes) {
-        params.append('lastChangedType', t)
-      }
+      for (const typeFilter of typeFilters) {
+        let moreFrom: string | undefined
+        let moreSequence: string | undefined
+        do {
+          const params = new URLSearchParams({
+            lastChangedFrom: moreFrom ?? chunkStart.toISOString(),
+            lastChangedTo: chunkEnd.toISOString(),
+            limitCount: String(NAVER_LOOKUP_PAGE_SIZE),
+          })
+          if (typeFilter) params.set('lastChangedType', typeFilter)
+          if (moreSequence) params.set('moreSequence', moreSequence)
 
-      try {
-        const response = await this.naverGet<NaverLastChangedStatusesResponse>(
-          `external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`
-        )
-        const ids = (response.data?.lastChangeStatuses || []).map((s) => s.productOrderId)
-        allIds.push(...ids)
-      } catch (err: unknown) {
-        if (err && typeof err === 'object' && 'response' in err) {
-          const body = await (err as { response: Response }).response.text()
-          throw new Error(`Naver API error: ${body}`)
-        }
-        throw err
+          const response = await this.naverGet<NaverLastChangedStatusesResponse>(
+            `external/v1/pay-order/seller/product-orders/last-changed-statuses?${params.toString()}`
+          )
+          const ids = (response.data?.lastChangeStatuses || []).map((s) => s.productOrderId)
+          allIds.push(...ids)
+          const more = response.data?.more ?? response.more
+          moreFrom = more?.moreFrom
+          moreSequence = more?.moreSequence
+        } while (moreFrom && moreSequence)
       }
 
       chunkStart = chunkEnd
@@ -435,12 +446,16 @@ export class NaverAdapter implements MarketplaceAdapter {
    * Fetch full product order details by IDs in batch.
    */
   private async fetchProductOrderDetails(productOrderIds: string[]): Promise<NaverProductOrder[]> {
-    const response = await this.naverPost<NaverProductOrderDetailResponse>(
-      'external/v1/pay-order/seller/product-orders/query',
-      { productOrderIds },
-    )
+    const productOrders: NaverProductOrder[] = []
+    for (let start = 0; start < productOrderIds.length; start += NAVER_LOOKUP_PAGE_SIZE) {
+      const response = await this.naverPost<NaverProductOrderDetailResponse>(
+        'external/v1/pay-order/seller/product-orders/query',
+        { productOrderIds: productOrderIds.slice(start, start + NAVER_LOOKUP_PAGE_SIZE) },
+      )
+      productOrders.push(...(response.data || []))
+    }
 
-    return response.data || []
+    return productOrders
   }
 
   private async naverGet<T>(url: string, attempt = 0): Promise<T> {
@@ -484,7 +499,8 @@ export class NaverAdapter implements MarketplaceAdapter {
         productOrders.map((po) => [this.getNaverProductOrder(po).productOrderId, po]),
       ).values(),
     )
-    const first = uniqueProductOrders[0]
+    const first = uniqueProductOrders.find((po) => this.getNaverProductOrder(po).productOrderStatus === 'PAYED')
+      ?? uniqueProductOrders[0]
     const order = this.getNaverOrder(first)
     const firstProductOrder = this.getNaverProductOrder(first)
     const addr = firstProductOrder.shippingAddress
@@ -612,6 +628,17 @@ export class NaverAdapter implements MarketplaceAdapter {
     }
 
     return null
+  }
+
+  private extractPayedProductOrderIds(rawData?: Record<string, unknown>): string[] | null {
+    const productOrders = rawData?.productOrders
+    if (!Array.isArray(productOrders)) return null
+
+    const ids = productOrders
+      .filter((po) => po && typeof po === 'object' && (po as Record<string, unknown>).productOrderStatus === 'PAYED')
+      .map((po) => String((po as Record<string, unknown>).productOrderId ?? ''))
+      .filter(Boolean)
+    return ids.length > 0 ? ids : null
   }
 }
 

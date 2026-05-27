@@ -50,6 +50,14 @@ export interface NaverLastChangedStatusesResponse {
       lastChangedType: string
       lastChangedDate: string
     }>
+    more?: {
+      moreFrom?: string
+      moreSequence?: string
+    }
+  }
+  more?: {
+    moreFrom?: string
+    moreSequence?: string
   }
 }
 

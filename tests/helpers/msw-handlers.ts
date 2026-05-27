@@ -392,6 +392,16 @@ const naverHandlers = [
 
     return HttpResponse.json(MOCK_NAVER_PRODUCT_ORDERS)
   }),
+
+  http.post('https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/confirm', async ({ request }) => {
+    const body = await request.json() as { productOrderIds?: string[] }
+    return HttpResponse.json({
+      data: {
+        successProductOrderIds: body.productOrderIds ?? [],
+        failProductOrderIds: [],
+      },
+    })
+  }),
 ]
 
 // ============================================================================

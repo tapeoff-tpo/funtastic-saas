@@ -190,17 +190,21 @@ export function createAdapter(
 function shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId: string): boolean {
   // The SaaS order stays in 신규 until mapping is complete, while marketplaces
   // that require prompt receipt acknowledgement move to their shipping-prep state.
-  return marketplaceId === 'ownerclan'
+  return marketplaceId === 'ownerclan' || marketplaceId === 'naver'
 }
 
 function marketplaceShippingPrepStatus(marketplaceId: string): string {
   if (marketplaceId === 'ownerclan') return 'preparing'
+  if (marketplaceId === 'naver') return '발주확인'
   return 'CONFIRMED'
 }
 
 function isMarketplaceOrderReadyForShippingPrep(order: NormalizedOrder): boolean {
   if (order.marketplaceId === 'ownerclan') {
     return /^(placed|paid)$/i.test(order.marketplaceStatus?.trim() ?? '')
+  }
+  if (order.marketplaceId === 'naver') {
+    return order.marketplaceStatus === 'PAYED'
   }
   return getMarketplaceCollectionStatus(order) === 'new'
 }
@@ -636,12 +640,13 @@ export async function collectOrdersForConnection(params: {
     }
 
     if (shippingPrepTargets.length > 0 && typeof adapter.confirmOrder === 'function') {
-      await setProgress(`오너클랜 배송준비 전환 중... (0/${shippingPrepTargets.length})`)
+      const shippingPrepName = marketplaceId === 'naver' ? '네이버 발주확인' : '오너클랜 배송준비'
+      await setProgress(`${shippingPrepName} 전환 중... (0/${shippingPrepTargets.length})`)
       for (let index = 0; index < shippingPrepTargets.length; index += 1) {
         const target = shippingPrepTargets[index]
         const result = await adapter.confirmOrder(target.marketplaceOrderId, target.rawData ?? undefined)
         if (!result.success) {
-          throw new Error(`오너클랜 배송준비 전환 실패 (${target.marketplaceOrderId}): ${result.error ?? '알 수 없는 오류'}`)
+          throw new Error(`${shippingPrepName} 전환 실패 (${target.marketplaceOrderId}): ${result.error ?? '알 수 없는 오류'}`)
         }
 
         await db
@@ -653,7 +658,7 @@ export async function collectOrdersForConnection(params: {
           })
           .where(inArray(orders.id, target.ids))
 
-        await setProgress(`오너클랜 배송준비 전환 중... (${index + 1}/${shippingPrepTargets.length})`)
+        await setProgress(`${shippingPrepName} 전환 중... (${index + 1}/${shippingPrepTargets.length})`)
       }
     }
 

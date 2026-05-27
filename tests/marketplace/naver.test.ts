@@ -11,6 +11,7 @@ import { http, HttpResponse } from 'msw'
 import {
   naverHandlers,
   MOCK_NAVER_TOKEN_RESPONSE,
+  MOCK_NAVER_LAST_CHANGED_STATUSES,
   MOCK_NAVER_PRODUCT_ORDERS,
   MOCK_NAVER_CLAIM_PRODUCT_ORDERS,
 } from '../helpers/msw-handlers'
@@ -163,7 +164,7 @@ describe('NaverAdapter', () => {
   describe('getOrders', () => {
     it('fetches and normalizes Naver orders using two-step pattern', async () => {
       const since = new Date('2026-04-02T00:00:00Z')
-      const orders = await adapter.getOrders(since)
+      const orders = await adapter.getOrders(since, new Date('2026-04-02T23:59:00Z'))
 
       expect(orders).toHaveLength(MOCK_NAVER_PRODUCT_ORDERS.data.length)
 
@@ -189,6 +190,44 @@ describe('NaverAdapter', () => {
       expect(second.status).toBe('delivering')
       expect(second.marketplaceStatus).toBe('DELIVERING')
     })
+
+    it('reads all change statuses and follows continuation for historical collection', async () => {
+      let statusCalls = 0
+      let queriedIds: string[] = []
+      server.use(
+        http.get('https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/last-changed-statuses', ({ request }) => {
+          const url = new URL(request.url)
+          expect(url.searchParams.has('lastChangedType')).toBe(false)
+          statusCalls += 1
+          if (statusCalls === 1) {
+            return HttpResponse.json({
+              data: {
+                lastChangeStatuses: [MOCK_NAVER_LAST_CHANGED_STATUSES.data.lastChangeStatuses[0]],
+                more: { moreFrom: '2026-04-02T11:00:00.000+09:00', moreSequence: 'PO-2026040201001' },
+              },
+            })
+          }
+          expect(url.searchParams.get('moreSequence')).toBe('PO-2026040201001')
+          return HttpResponse.json({
+            data: { lastChangeStatuses: [MOCK_NAVER_LAST_CHANGED_STATUSES.data.lastChangeStatuses[1]] },
+          })
+        }),
+        http.post('https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/query', async ({ request }) => {
+          const body = await request.json() as { productOrderIds: string[] }
+          queriedIds = body.productOrderIds
+          return HttpResponse.json(MOCK_NAVER_PRODUCT_ORDERS)
+        })
+      )
+
+      const orders = await adapter.getOrders(
+        new Date('2026-04-02T00:00:00Z'),
+        new Date('2026-04-02T23:59:00Z'),
+      )
+
+      expect(orders).toHaveLength(2)
+      expect(statusCalls).toBe(2)
+      expect(queriedIds).toEqual(['PO-2026040201001', 'PO-2026040201002'])
+    })
   })
 
   describe('getClaimsOrders', () => {
@@ -206,6 +245,26 @@ describe('NaverAdapter', () => {
       expect(claim.claimStatus).toBe('completed')
       expect(claim.reason).toBe('단순변심')
       expect(claim.rawData).toBeDefined()
+    })
+  })
+
+  describe('confirmOrder', () => {
+    it('confirms only product orders that are still paid', async () => {
+      let confirmedIds: string[] = []
+      server.use(
+        http.post('https://api.commerce.naver.com/external/v1/pay-order/seller/product-orders/confirm', async ({ request }) => {
+          const body = await request.json() as { productOrderIds: string[] }
+          confirmedIds = body.productOrderIds
+          return HttpResponse.json({ data: { successProductOrderIds: confirmedIds, failProductOrderIds: [] } })
+        })
+      )
+
+      const result = await adapter.confirmOrder('NO-2026040201001', {
+        productOrders: MOCK_NAVER_PRODUCT_ORDERS.data.map((entry) => entry.productOrder),
+      })
+
+      expect(result.success).toBe(true)
+      expect(confirmedIds).toEqual(['PO-2026040201001'])
     })
   })
 })

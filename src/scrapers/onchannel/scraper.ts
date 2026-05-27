@@ -294,39 +294,47 @@ async function getOrderDownloadRoot(page: Page): Promise<Locator | Page> {
 }
 
 async function prepareOrderDownloadForm(page: Page, since: Date, until: Date): Promise<void> {
-  const prepared = await page.evaluate(({ sinceValue, untilValue }) => {
-    const button = document.querySelector<HTMLElement>('#btn-order-excel-down, button[target="supplier"], input[target="supplier"]')
-    const container = button?.closest<HTMLElement>('.modal, [role="dialog"], .swal2-popup, form') ?? document.body
-    if (!button || !container) return { ok: false, reason: 'download-button-missing' }
+  const sinceValue = JSON.stringify(formatDateInput(since))
+  const untilValue = JSON.stringify(formatDateInput(until))
+  const prepared = await page.evaluate(`(() => {
+    const sinceValue = ${sinceValue};
+    const untilValue = ${untilValue};
+    const button = document.querySelector('#btn-order-excel-down, button[target="supplier"], input[target="supplier"]');
+    const container = button && button.closest('.modal, [role="dialog"], .swal2-popup, form') || document.body;
+    if (!button || !container) return { ok: false, reason: 'download-button-missing' };
 
-    const setNativeValue = (input: HTMLInputElement, value: string) => {
-      input.removeAttribute('readonly')
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-      setter?.call(input, value)
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-      input.dispatchEvent(new Event('change', { bubbles: true }))
+    const inputs = Array.prototype.slice.call(container.querySelectorAll('input')).filter((input) => {
+      const type = (input.getAttribute('type') || 'text').toLowerCase();
+      return ['hidden', 'checkbox', 'radio', 'submit', 'button'].indexOf(type) === -1 && !input.disabled;
+    });
+    if (inputs.length < 2) return { ok: false, reason: 'date-inputs-' + inputs.length };
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+    inputs[0].removeAttribute('readonly');
+    inputs[1].removeAttribute('readonly');
+    if (setter) {
+      setter.call(inputs[0], sinceValue);
+      setter.call(inputs[1], untilValue);
+    } else {
+      inputs[0].value = sinceValue;
+      inputs[1].value = untilValue;
     }
+    inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+    inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
+    inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+    inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
 
-    const inputs = Array.from(container.querySelectorAll<HTMLInputElement>('input'))
-      .filter((input) => {
-        const type = (input.getAttribute('type') || 'text').toLowerCase()
-        return !['hidden', 'checkbox', 'radio', 'submit', 'button'].includes(type) && !input.disabled
-      })
-    if (inputs.length < 2) return { ok: false, reason: `date-inputs-${inputs.length}` }
-    setNativeValue(inputs[0], sinceValue)
-    setNativeValue(inputs[1], untilValue)
-
-    const checkbox = Array.from(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-      .find((input) => !input.disabled)
+    const checkboxes = Array.prototype.slice.call(container.querySelectorAll('input[type="checkbox"]'));
+    const checkbox = checkboxes.find((input) => !input.disabled);
     if (checkbox && !checkbox.checked) {
-      checkbox.click()
-      checkbox.checked = true
-      checkbox.dispatchEvent(new Event('input', { bubbles: true }))
-      checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+      checkbox.click();
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    return { ok: true, reason: '' }
-  }, { sinceValue: formatDateInput(since), untilValue: formatDateInput(until) }).catch((error) => ({
+    return { ok: true, reason: '' };
+  })()`).catch((error) => ({
     ok: false,
     reason: error instanceof Error ? error.message : 'prepare-failed',
   }))

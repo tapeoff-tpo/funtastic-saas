@@ -30,38 +30,40 @@ export function tabPathname(tab: { href: string }): string {
  * we fall back to a generic label or the segment.
  */
 const ROUTE_LABELS: Record<string, string> = {
-  '/dashboard': 'Dashboard',
-  '/orders': 'Orders',
-  '/orders/collect': 'Order Collection',
-  '/orders/import': 'Order Import',
-  '/orders/claims': 'Claims',
-  '/cs': 'Product Inspection',
-  '/cs/inquiries': 'Inquiries',
-  '/shipping': 'Shipping',
-  '/shipping/held': 'Held Orders',
-  '/shipping/scan': 'Barcode Scan',
-  '/shipping/invoice': 'Invoice Uploads',
-  '/shipping/combined': 'Combined Shipping',
-  '/shipping/templates': 'Invoice Templates',
-  '/shipping/print': 'Invoice Print',
-  '/products': 'Products',
-  '/products/new': 'New Product',
-  '/products/mapping': 'Mapping',
-  '/products/categories': 'Categories',
-  '/products/marketplace-categories': 'Marketplace Categories',
-  '/inventory': 'Inventory',
-  '/inventory/adjustments': 'Inventory Adjustments',
-  '/analytics': 'Analytics',
-  '/settings': 'Settings',
-  '/settings/company': 'Company Settings',
-  '/settings/marketplaces': 'Market Connections',
+  '/dashboard': '대시보드',
+  '/orders': '주문 관리',
+  '/orders/collect': '주문 수집',
+  '/orders/import': '주문 가져오기',
+  '/orders/claims': '클레임 관리',
+  '/cs': 'CS 작업함',
+  '/cs/inquiries': '문의',
+  '/shipping': '출고 작업',
+  '/shipping/held': '미발송 관리',
+  '/shipping/scan': '바코드 스캔',
+  '/shipping/invoice': '송장 업로드',
+  '/shipping/combined': '합포장 관리',
+  '/shipping/templates': '엑셀 양식 관리',
+  '/shipping/print': '배송 라벨 인쇄',
+  '/products': '상품 관리',
+  '/products/new': '상품 등록',
+  '/products/mapping': '매핑관리',
+  '/products/mapping-codes': '매핑코드 마스터',
+  '/products/categories': '카테고리',
+  '/products/marketplace-categories': '마켓 카테고리 매핑',
+  '/inventory': '재고관리',
+  '/inventory/adjustments': '입출고관리',
+  '/analytics': '매출분석',
+  '/settings': '설정',
+  '/settings/account': '계정 설정',
+  '/settings/company': '회사 설정',
+  '/settings/marketplaces': '마켓연동',
 }
 
 export function getRouteLabel(pathname: string): string {
   if (ROUTE_LABELS[pathname]) return ROUTE_LABELS[pathname]
   // Dynamic detail pages
-  if (/^\/orders\/[^/]+$/.test(pathname)) return 'Order Detail'
-  if (/^\/products\/[^/]+$/.test(pathname)) return 'Product Detail'
+  if (/^\/orders\/[^/]+$/.test(pathname)) return '주문 상세'
+  if (/^\/products\/[^/]+$/.test(pathname)) return '상품 상세'
   const seg = pathname.split('/').filter(Boolean).pop()
   return seg ?? pathname
 }
@@ -130,14 +132,15 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTabs((prev) => {
       const idx = prev.findIndex((t) => stripQuery(t.href) === pathname)
+      const label = getRouteLabel(pathname)
       if (idx >= 0) {
         // Existing tab ??refresh its href to the latest URL so the next reopen restores state.
-        if (prev[idx].href === fullHref) return prev
+        if (prev[idx].href === fullHref && prev[idx].label === label) return prev
         const updated = prev.slice()
-        updated[idx] = { ...prev[idx], href: fullHref }
+        updated[idx] = { ...prev[idx], href: fullHref, label }
         return updated
       }
-      const next: OpenTab = { href: fullHref, label: getRouteLabel(pathname) }
+      const next: OpenTab = { href: fullHref, label }
       const updated = [...prev, next]
       return updated.length > MAX_TABS ? updated.slice(-MAX_TABS) : updated
     })

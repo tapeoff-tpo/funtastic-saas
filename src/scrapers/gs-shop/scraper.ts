@@ -83,7 +83,13 @@ async function summarizePage(page: Page): Promise<string> {
 }
 
 function hasOrderListContent(text: string): boolean {
-  return /조회\s*조건|조회\s*결과|주문번호|주문아이템번호|출하지시일|수취인명|고객명|미처리\s*\(/.test(text)
+  return /조회\s*결과|주문번호|주문아이템번호|출하지시일|다운로드/.test(text)
+    && !isGsLogisticsDashboardText(text)
+}
+
+function isGsLogisticsDashboardText(text: string): boolean {
+  return /판매상태|승인\/합의|취소\/반품|공지사항|출하\s*\(\s*배송\s*\)\s*지시/.test(text)
+    && !/조회\s*결과|주문번호|주문아이템번호|다운로드/.test(text)
 }
 
 function isGsOrderListUrl(url: string): boolean {
@@ -98,7 +104,7 @@ async function isGsOrderListPage(page: Page): Promise<boolean> {
   if (!isGsOrderListUrl(page.url())) return false
   const title = await page.title().catch(() => '')
   const text = await pageText(page, 1_500)
-  return /협력사\s*배송\s*관리|주문번호|주문아이템번호|조회\s*결과|미처리\s*\(/.test(`${title} ${text}`)
+  return hasOrderListContent(`${title} ${text}`)
 }
 
 async function waitForGsOrderListPage(page: Page, timeoutMs = 45_000): Promise<boolean> {
@@ -119,6 +125,30 @@ async function waitForOrderListContent(page: Page, timeoutMs = 45_000): Promise<
     await page.waitForLoadState('networkidle', { timeout: 3_000 }).catch(() => undefined)
     await page.waitForTimeout(1_000)
   }
+  return false
+}
+
+async function clickGsShipmentInstruction(page: Page, setProgress?: (message: string) => Promise<void>): Promise<boolean> {
+  await setProgress?.('GS샵 출하(배송)지시 목록 이동 중...')
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await dismissGsTransientPopups(page, setProgress)
+
+    const clicked = await clickVisibleTextElement(page, /출하\s*\(\s*배송\s*\)\s*지시|출하\s*배송\s*지시|출하\s*지시/i, {
+      preferBottomRight: true,
+    })
+    if (!clicked) {
+      await page.waitForTimeout(800)
+      continue
+    }
+
+    await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
+    await page.waitForTimeout(1_500)
+    await dismissGsTransientPopups(page, setProgress)
+
+    if (await waitForGsOrderListPage(page, 12_000)) return true
+  }
+
   return false
 }
 
@@ -548,10 +578,12 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
   await gotoGs(page, ORDER_LIST_URL)
   await dismissGsTransientPopups(page, setProgress)
   if (await waitForGsOrderListPage(page, 45_000)) return
+  if (await clickGsShipmentInstruction(page, setProgress)) return
 
   await gotoGs(page, ORDER_LIST_URL)
   await dismissGsTransientPopups(page, setProgress)
   if (await waitForGsOrderListPage(page, 20_000)) return
+  if (await clickGsShipmentInstruction(page, setProgress)) return
 
   const menuClicked = await clickByText(page, /주문\s*\/\s*배송|주문\s*배송|주문/i, 8_000)
   if (menuClicked) {
@@ -559,6 +591,7 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
     await page.waitForTimeout(1_000)
     await dismissGsTransientPopups(page, setProgress)
     if (await waitForGsOrderListPage(page, 10_000)) return
+    if (await clickGsShipmentInstruction(page, setProgress)) return
   }
 
   const candidates = [
@@ -584,6 +617,7 @@ async function navigateToOrderList(page: Page, setProgress?: (message: string) =
 
   const currentText = await pageText(page, 1_000)
   if (isGsOrderListUrl(page.url()) && hasOrderListContent(currentText)) return
+  if (isGsOrderListUrl(page.url()) && await clickGsShipmentInstruction(page, setProgress)) return
 
   throw new MarketplaceApiError(
     MARKETPLACE_ID,

@@ -100,6 +100,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
   private readonly sellerId: string
   private readonly sessionSecret: string
   private resolvedSessionId?: string
+  private resolvingSessionId?: Promise<string>
   private resolvedLoginIp?: string
 
   constructor(credentials: { api_key: string; seller_id: string; session_id?: string; password?: string }) {
@@ -257,42 +258,51 @@ export class DomeggookAdapter implements MarketplaceAdapter {
 
   private async getSessionId(): Promise<string> {
     if (this.resolvedSessionId) return this.resolvedSessionId
+    if (this.resolvingSessionId) return this.resolvingSessionId
 
-    const response = await postDomeggookFormJson<DomeggookLoginResponse>(this.client, {
-      ver: '4.1',
-      mode: 'setLogin',
-      aid: this.apiKey,
-      id: this.sellerId,
-      pw: this.sessionSecret,
-      loginKeep: 'on',
-      userAgent: 'FuntasticSaaS/1.0',
-      ip: await this.getLoginIp(),
-      device: 'Third Party',
-      oe: 'utf-8',
-      om: 'json',
-    })
+    this.resolvingSessionId = (async () => {
+      const response = await postDomeggookFormJson<DomeggookLoginResponse>(this.client, {
+        ver: '4.1',
+        mode: 'setLogin',
+        aid: this.apiKey,
+        id: this.sellerId,
+        pw: this.sessionSecret,
+        loginKeep: 'on',
+        userAgent: 'FuntasticSaaS/1.0',
+        ip: await this.getLoginIp(),
+        device: 'Third Party',
+        oe: 'utf-8',
+        om: 'json',
+      })
 
-    const { errorCode, errorMessage } = this.getApiError(response)
-    const sessionId = response.domeggook?.sId
-      ?? response.domeggook?.sid
-      ?? response.domeggook?.sessionId
-      ?? response.sId
-      ?? response.sid
-      ?? response.sessionId
-      ?? response.data?.sId
-      ?? response.data?.sid
-      ?? response.data?.sessionId
+      const { errorCode, errorMessage } = this.getApiError(response)
+      const sessionId = response.domeggook?.sId
+        ?? response.domeggook?.sid
+        ?? response.domeggook?.sessionId
+        ?? response.sId
+        ?? response.sid
+        ?? response.sessionId
+        ?? response.data?.sId
+        ?? response.data?.sid
+        ?? response.data?.sessionId
 
-    if (sessionId) {
-      this.resolvedSessionId = sessionId
-      return sessionId
+      if (sessionId) {
+        this.resolvedSessionId = sessionId
+        return sessionId
+      }
+
+      if (errorMessage || errorCode != null) {
+        throw new MarketplaceAuthError('domeggook', formatDomeggookApiError(errorCode, errorMessage, '로그인'))
+      }
+
+      throw new MarketplaceAuthError('domeggook', '도매꾹 로그인 API에서 sId를 받지 못했습니다.')
+    })()
+
+    try {
+      return await this.resolvingSessionId
+    } finally {
+      this.resolvingSessionId = undefined
     }
-
-    if (errorMessage || errorCode != null) {
-      throw new MarketplaceAuthError('domeggook', formatDomeggookApiError(errorCode, errorMessage, '로그인'))
-    }
-
-    throw new MarketplaceAuthError('domeggook', '도매꾹 로그인 API에서 sId를 받지 못했습니다.')
   }
 
   private getApiError(response: DomeggookLoginResponse | DomeggookListResponse<DomeggookOrder> | DomeggookOrderConfirmResponse): { errorCode?: string | number; errorMessage?: string } {

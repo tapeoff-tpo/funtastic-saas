@@ -53,6 +53,23 @@ function asString(value: unknown): string {
   return ''
 }
 
+function readEmpNumber(rawData: Record<string, unknown>): string {
+  const split = rawData.itemSplit && typeof rawData.itemSplit === 'object' && !Array.isArray(rawData.itemSplit)
+    ? rawData.itemSplit as Record<string, unknown>
+    : null
+  const mergedOrders = Array.isArray(rawData.mergedOrders) ? rawData.mergedOrders : []
+  const partIndex = Number(split?.partIndex)
+  const splitRaw = Number.isInteger(partIndex) && partIndex > 0
+    ? mergedOrders[partIndex - 1]
+    : null
+  if (splitRaw && typeof splitRaw === 'object' && !Array.isArray(splitRaw)) {
+    const row = splitRaw as Record<string, unknown>
+    const splitNumber = asString(row.empNumber ?? row.Number ?? row.number)
+    if (splitNumber) return splitNumber
+  }
+  return asString(rawData.empNumber ?? rawData.Number ?? rawData.number)
+}
+
 function asNumber(value: unknown): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0
   if (typeof value === 'string') {
@@ -294,7 +311,7 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
     const rawData = invoice.rawData && typeof invoice.rawData === 'object'
       ? invoice.rawData as Record<string, unknown>
       : {}
-    const empNumber = asString(rawData.empNumber ?? rawData.Number ?? rawData.number)
+    const empNumber = readEmpNumber(rawData)
     const number = empNumber || orderId
     const sender = asString(invoice.empCarrierCode) || EMP_CARRIER_CODES[invoice.carrierId] || invoice.carrierId
 

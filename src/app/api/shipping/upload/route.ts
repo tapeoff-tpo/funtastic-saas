@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { shipments, orders, marketplaceConnections, jobLogs } from '@/lib/db/schema'
-import { eq, and, inArray, isNotNull, gte } from 'drizzle-orm'
+import { eq, and, inArray, isNotNull, gte, or } from 'drizzle-orm'
 import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     targetConditions.push(eq(shipments.uploadStatus, 'pending'))
   }
 
-  const targetShipments = await db
+  let targetShipments = await db
     .select({
       id: shipments.id,
       orderId: shipments.orderId,
@@ -71,8 +71,8 @@ export async function POST(req: NextRequest) {
   }
 
   // Fetch related orders
-  const orderIds = targetShipments.map((s) => s.orderId)
-  const orderRows = await db
+  let orderIds = targetShipments.map((s) => s.orderId)
+  let orderRows = await db
     .select({
       id: orders.id,
       marketplaceId: orders.marketplaceId,
@@ -83,6 +83,55 @@ export async function POST(req: NextRequest) {
     })
     .from(orders)
     .where(inArray(orders.id, orderIds))
+
+  if (body.orderIds?.length && targetShipments.length > 0) {
+    const orderById = new Map(orderRows.map((o) => [o.id, o]))
+    const siblingConditions = targetShipments.flatMap((shipment) => {
+      const order = orderById.get(shipment.orderId)
+      if (!order?.marketplaceOrderId || !shipment.trackingNumber || !shipment.carrierId) return []
+      return [and(
+        eq(orders.marketplaceId, order.marketplaceId),
+        eq(orders.marketplaceOrderId, order.marketplaceOrderId),
+        eq(shipments.trackingNumber, shipment.trackingNumber),
+        eq(shipments.carrierId, shipment.carrierId),
+      )]
+    })
+
+    if (siblingConditions.length > 0) {
+      const siblingShipments = await db
+        .select({
+          id: shipments.id,
+          orderId: shipments.orderId,
+          trackingNumber: shipments.trackingNumber,
+          carrierId: shipments.carrierId,
+          uploadStatus: shipments.uploadStatus,
+          uploadAttempts: shipments.uploadAttempts,
+        })
+        .from(shipments)
+        .innerJoin(orders, eq(shipments.orderId, orders.id))
+        .where(and(
+          eq(shipments.userId, workspaceUserId),
+          isNotNull(shipments.trackingNumber),
+          or(...siblingConditions),
+        ))
+
+      const byShipmentId = new Map(targetShipments.map((shipment) => [shipment.id, shipment]))
+      for (const shipment of siblingShipments) byShipmentId.set(shipment.id, shipment)
+      targetShipments = Array.from(byShipmentId.values())
+      orderIds = targetShipments.map((s) => s.orderId)
+      orderRows = await db
+        .select({
+          id: orders.id,
+          marketplaceId: orders.marketplaceId,
+          marketplaceOrderId: orders.marketplaceOrderId,
+          connectionId: orders.connectionId,
+          rawData: orders.rawData,
+          recipientName: orders.recipientName,
+        })
+        .from(orders)
+        .where(inArray(orders.id, orderIds))
+    }
+  }
 
   const orderMap = new Map(orderRows.map((o) => [o.id, o]))
   const resultIdentity = (shipment: (typeof targetShipments)[number]) => ({

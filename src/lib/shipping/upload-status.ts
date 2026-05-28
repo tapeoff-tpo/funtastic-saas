@@ -30,23 +30,30 @@ export async function markShipmentUploadedAndOrderShipped(
 
     if (!seed) return
 
-    const relatedRows = await tx
-      .select({
-        shipmentId: shipments.id,
-        orderId: orders.id,
-        orderStatus: orders.status,
-        orderUserId: orders.userId,
-      })
-      .from(shipments)
-      .innerJoin(orders, eq(orders.id, shipments.orderId))
-      .where(and(
-        eq(shipments.userId, seed.userId),
-        eq(shipments.trackingNumber, seed.trackingNumber),
-        eq(shipments.carrierId, seed.carrierId),
-        eq(orders.marketplaceId, seed.marketplaceId),
-        eq(orders.marketplaceOrderId, seed.marketplaceOrderId),
-      ))
-      .for('update')
+    const relatedRows = seed.marketplaceId === 'playauto-emp'
+      ? [{
+          shipmentId: seed.shipmentId,
+          orderId: seed.orderId,
+          orderStatus: seed.orderStatus,
+          orderUserId: seed.orderUserId,
+        }]
+      : await tx
+        .select({
+          shipmentId: shipments.id,
+          orderId: orders.id,
+          orderStatus: orders.status,
+          orderUserId: orders.userId,
+        })
+        .from(shipments)
+        .innerJoin(orders, eq(orders.id, shipments.orderId))
+        .where(and(
+          eq(shipments.userId, seed.userId),
+          eq(shipments.trackingNumber, seed.trackingNumber),
+          eq(shipments.carrierId, seed.carrierId),
+          eq(orders.marketplaceId, seed.marketplaceId),
+          eq(orders.marketplaceOrderId, seed.marketplaceOrderId),
+        ))
+        .for('update')
 
     const activeRows = relatedRows.filter((row) => row.orderStatus !== 'cancelled')
     const shipmentIds = activeRows.map((row) => row.shipmentId)
@@ -130,19 +137,21 @@ export async function markShipmentUploadFailed(
 
     if (!seed) return
 
-    const [uploadedSibling] = await tx
-      .select({ id: shipments.id })
-      .from(shipments)
-      .innerJoin(orders, eq(orders.id, shipments.orderId))
-      .where(and(
-        eq(shipments.userId, seed.userId),
-        eq(shipments.trackingNumber, seed.trackingNumber),
-        eq(shipments.carrierId, seed.carrierId),
-        eq(orders.marketplaceId, seed.marketplaceId),
-        eq(orders.marketplaceOrderId, seed.marketplaceOrderId),
-        eq(shipments.uploadStatus, 'uploaded'),
-      ))
-      .limit(1)
+    const [uploadedSibling] = seed.marketplaceId === 'playauto-emp'
+      ? []
+      : await tx
+        .select({ id: shipments.id })
+        .from(shipments)
+        .innerJoin(orders, eq(orders.id, shipments.orderId))
+        .where(and(
+          eq(shipments.userId, seed.userId),
+          eq(shipments.trackingNumber, seed.trackingNumber),
+          eq(shipments.carrierId, seed.carrierId),
+          eq(orders.marketplaceId, seed.marketplaceId),
+          eq(orders.marketplaceOrderId, seed.marketplaceOrderId),
+          eq(shipments.uploadStatus, 'uploaded'),
+        ))
+        .limit(1)
 
     if (uploadedSibling) {
       await tx.update(shipments).set({

@@ -8,9 +8,9 @@ import { createClient } from '@/lib/supabase/server'
 import { getOrderById } from '@/lib/orders/queries'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
-import { orderItems, orders } from '@/lib/db/schema'
+import { inventory, orderItems, orders, products } from '@/lib/db/schema'
 import { logOrderChange } from '@/lib/orders/change-log'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, ilike, inArray, ne, or, sql } from 'drizzle-orm'
 
 const EDITABLE_CONFIRMED_ITEM_STATUSES = new Set(['new', 'confirmed', 'preparing', 'ready'])
 
@@ -37,6 +37,49 @@ type ItemUpdate = {
   optionName?: unknown
   quantity?: unknown
   sku?: unknown
+  searchQuery?: unknown
+}
+
+type NormalizedItemUpdate = {
+  id: string
+  productName: string
+  optionName: string | null
+  sku: string | null
+  quantity: number
+  searchQuery: string
+}
+
+async function resolveProductForConfirmedItem(userId: string, query: string) {
+  const q = query.trim()
+  if (!q) return null
+
+  const pattern = `%${q}%`
+  const rows = await db
+    .select({
+      sku: products.internalSku,
+      productName: products.name,
+      optionName: sql<string | null>`MAX(${inventory.optionName})`,
+    })
+    .from(products)
+    .leftJoin(
+      inventory,
+      and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
+    )
+    .where(and(
+      eq(products.userId, userId),
+      ne(products.status, 'deleted'),
+      or(
+        eq(products.internalSku, q),
+        ilike(products.internalSku, pattern),
+        ilike(products.name, pattern),
+      ),
+    ))
+    .groupBy(products.id)
+    .limit(2)
+
+  const exact = rows.find((row) => row.sku.toLowerCase() === q.toLowerCase())
+  if (exact) return exact
+  return rows.length === 1 ? rows[0] : null
 }
 
 export async function PATCH(
@@ -67,6 +110,7 @@ export async function PATCH(
     const productName = typeof item.productName === 'string' ? item.productName.trim() : ''
     const optionName = typeof item.optionName === 'string' ? item.optionName.trim() : ''
     const sku = typeof item.sku === 'string' ? item.sku.trim() : ''
+    const searchQuery = typeof item.searchQuery === 'string' ? item.searchQuery.trim() : ''
     const quantity = Number(item.quantity)
     return {
       id: itemId,
@@ -74,6 +118,7 @@ export async function PATCH(
       optionName: optionName || null,
       sku: sku || null,
       quantity,
+      searchQuery,
     }
   })
 
@@ -104,7 +149,27 @@ export async function PATCH(
     )
   }
 
-  const itemIds = normalized.map((item) => item.id)
+  const resolved: NormalizedItemUpdate[] = []
+  for (const item of normalized) {
+    const lookupQuery = item.searchQuery || item.sku || ''
+    const product = lookupQuery ? await resolveProductForConfirmedItem(workspaceUserId, lookupQuery) : null
+    if (item.searchQuery && !product) {
+      return NextResponse.json(
+        { error: '상품 검색 결과가 여러 개이거나 없습니다. 검색 결과에서 정확한 상품을 선택해주세요.' },
+        { status: 400 },
+      )
+    }
+    resolved.push(product
+      ? {
+          ...item,
+          sku: product.sku,
+          productName: product.productName,
+          optionName: product.optionName,
+        }
+      : item)
+  }
+
+  const itemIds = resolved.map((item) => item.id)
   const existingItems = await db
     .select({
       id: orderItems.id,
@@ -120,12 +185,12 @@ export async function PATCH(
     .from(orderItems)
     .where(and(eq(orderItems.orderId, id), inArray(orderItems.id, itemIds)))
 
-  if (existingItems.length !== normalized.length) {
+  if (existingItems.length !== resolved.length) {
     return NextResponse.json({ error: '주문에 포함되지 않은 상품이 있습니다.' }, { status: 400 })
   }
 
   const existingById = new Map(existingItems.map((item) => [item.id, item]))
-  const before = normalized.map((item) => {
+  const before = resolved.map((item) => {
     const existing = existingById.get(item.id)!
     return {
       id: existing.id,
@@ -135,7 +200,7 @@ export async function PATCH(
       sku: existing.lockedSku ?? existing.sku,
     }
   })
-  const after = normalized.map((item) => ({
+  const after = resolved.map((item) => ({
     id: item.id,
     productName: item.productName,
     optionName: item.optionName,
@@ -144,7 +209,7 @@ export async function PATCH(
   }))
 
   await db.transaction(async (tx) => {
-    for (const item of normalized) {
+    for (const item of resolved) {
       await tx
         .update(orderItems)
         .set({

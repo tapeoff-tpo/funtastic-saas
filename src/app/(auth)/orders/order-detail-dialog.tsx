@@ -279,6 +279,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
         optionName: draft?.optionName ?? item.displayOptionName ?? item.optionText ?? '',
         quantity: draft?.quantity ?? item.quantity,
         sku: draft?.sku ?? item.sku ?? '',
+        searchQuery: itemSearchTerms[item.id]?.trim() || undefined,
       }
     })
     const invalid = payload.find((item) => !item.productName.trim() || !Number.isInteger(item.quantity) || item.quantity < 1)

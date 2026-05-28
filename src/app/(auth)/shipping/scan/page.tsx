@@ -46,7 +46,7 @@ const STATUS_LABEL: Record<ScanStatus, string> = {
 }
 
 function normalizeTrackingNumber(value: string) {
-  return value.trim().replace(/[\s-]/g, '')
+  return value.trim().replace(/[^0-9A-Za-z]/g, '')
 }
 
 function speak(text: string) {
@@ -242,20 +242,10 @@ export default function ScanPage() {
       const nextItem: ScanQueueItem = {
         id,
         trackingNumber: normalized,
-        status: 'not_found',
-        message: '비정상입니다',
+        status: 'processing',
+        message: '확인 중',
       }
-      const nextResult: ScanResult = {
-        status: 'not_found',
-        message: '비정상입니다',
-        tts: '비정상입니다',
-        trackingNumber: normalized,
-      }
-      setResult(nextResult)
-      speak('비정상입니다')
       syncQueue([nextItem, ...queueRef.current])
-      pausedRef.current = true
-      setPaused(true)
       void persistScan(normalized, id)
       return
     }

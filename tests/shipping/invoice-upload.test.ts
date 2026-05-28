@@ -40,7 +40,7 @@ describe('Coupang uploadInvoice', () => {
     adapter = new CoupangAdapter({
       access_key: 'test-access',
       secret_key: 'test-secret',
-      vendor_id: 'V00001',
+      vendor_id: 'A00000001',
     })
   })
 
@@ -56,10 +56,10 @@ describe('Coupang uploadInvoice', () => {
 
     expect(mockPut).toHaveBeenCalledTimes(1)
     const [path, options] = mockPut.mock.calls[0]
-    expect(path).toContain('v2/providers/openapi/apis/api/v4/vendors/V00001/orders/invoices')
+    expect(path).toContain('v2/providers/openapi/apis/api/v4/vendors/A00000001/orders/invoices')
 
     const body = options.json
-    expect(body.vendorId).toBe('V00001')
+    expect(body.vendorId).toBe('A00000001')
     expect(body.orderSheetInvoiceApplyDtos).toBeInstanceOf(Array)
     expect(body.orderSheetInvoiceApplyDtos[0]).toMatchObject({
       shipmentBoxId: 99001,
@@ -109,6 +109,25 @@ describe('Coupang uploadInvoice', () => {
 
     expect(result.success).toBe(false)
     expect(result.error).toContain('Network timeout')
+  })
+
+  it('uses Coupang invoice identifiers from rawData when route does not pass explicit fields', async () => {
+    mockJsonResponse.mockResolvedValueOnce({ code: 'SUCCESS', message: 'OK' })
+
+    await adapter.uploadInvoice('order-123', {
+      trackingNumber: '1234567890',
+      carrierId: 'CJGLS',
+      rawData: {
+        shipmentBoxId: 99001,
+        orderItems: [{ vendorItemId: 55001 }],
+      },
+    })
+
+    const [, options] = mockPut.mock.calls[0]
+    expect(options.json.orderSheetInvoiceApplyDtos[0]).toMatchObject({
+      shipmentBoxId: 99001,
+      vendorItemId: 55001,
+    })
   })
 })
 

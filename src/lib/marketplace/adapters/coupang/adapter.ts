@@ -274,6 +274,22 @@ export class CoupangAdapter implements MarketplaceAdapter {
 
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/orders/invoices`
+    const rawData = invoice.rawData && typeof invoice.rawData === 'object'
+      ? invoice.rawData as Record<string, unknown>
+      : {}
+    const firstRawItem = Array.isArray(rawData.orderItems) ? rawData.orderItems[0] : null
+    const firstRawItemData = firstRawItem && typeof firstRawItem === 'object'
+      ? firstRawItem as Record<string, unknown>
+      : {}
+    const shipmentBoxId = invoice.shipmentBoxId ?? rawData.shipmentBoxId
+    const vendorItemId = invoice.vendorItemId ?? firstRawItemData.vendorItemId
+
+    if (!shipmentBoxId || !vendorItemId) {
+      return {
+        success: false,
+        error: '쿠팡 송장전송에 필요한 shipmentBoxId 또는 vendorItemId가 없습니다. 주문을 다시 수집한 뒤 송장전송을 시도해주세요.',
+      }
+    }
 
     try {
       const response = await this.client.put(path, {
@@ -281,9 +297,9 @@ export class CoupangAdapter implements MarketplaceAdapter {
           vendorId: this.vendorId,
           orderSheetInvoiceApplyDtos: [
             {
-              shipmentBoxId: invoice.shipmentBoxId,
+              shipmentBoxId,
               orderId,
-              vendorItemId: invoice.vendorItemId,
+              vendorItemId,
               deliveryCompanyCode: mapCarrierCode('coupang', invoice.carrierId),
               invoiceNumber: invoice.trackingNumber,
               splitShipping: false,
@@ -300,6 +316,11 @@ export class CoupangAdapter implements MarketplaceAdapter {
 
       return { success: false, error: response.message || `Upload failed with code: ${response.code}` }
     } catch (error) {
+      if (error instanceof Error && 'response' in error) {
+        const res = (error as unknown as { response: Response }).response
+        const body = await res.text().catch(() => '')
+        return { success: false, error: `${res.status}: ${body || error.message}` }
+      }
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
     }
   }

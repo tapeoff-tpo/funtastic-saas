@@ -252,10 +252,20 @@ export async function POST(req: NextRequest) {
           metadata: { shipmentId: s.id, marketplaceId },
         })
 
+        const rawData = ord.rawData && typeof ord.rawData === 'object'
+          ? ord.rawData as Record<string, unknown>
+          : {}
+        const firstRawItem = Array.isArray(rawData.orderItems) ? rawData.orderItems[0] : null
+        const firstRawItemData = firstRawItem && typeof firstRawItem === 'object'
+          ? firstRawItem as Record<string, unknown>
+          : {}
+
         const result = await adapter.uploadInvoice(ord.marketplaceOrderId, {
           trackingNumber: s.trackingNumber,
           carrierId: s.carrierId,
           recipientName: ord.recipientName,
+          shipmentBoxId: rawData.shipmentBoxId,
+          vendorItemId: firstRawItemData.vendorItemId,
           rawData: ord.rawData,
         })
 

@@ -28,6 +28,37 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
   right: { style: 'thin' },
 }
 
+function normalizeCombinedKeyPart(value: unknown): string {
+  return String(value ?? '').trim().replace(/[^0-9A-Za-z가-힣]/g, '').toLowerCase()
+}
+
+function getTrackingCombinedKeys(orders: Record<string, unknown>[]): Set<string> {
+  const counts = new Map<string, number>()
+  for (const order of orders) {
+    const trackingNumber = normalizeCombinedKeyPart(getNestedValue(order, 'trackingNumber'))
+    if (!trackingNumber) continue
+    const carrierName = normalizeCombinedKeyPart(getNestedValue(order, 'carrierName'))
+    const key = `${carrierName}::${trackingNumber}`
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count >= 2)
+      .map(([key]) => key),
+  )
+}
+
+function isCombinedExportRow(order: Record<string, unknown>, trackingCombinedKeys: Set<string>): boolean {
+  if (getCombinedShipmentFill(order.shipmentGroupId)) return true
+  if (order.isCombinedShipment === true) return true
+
+  const trackingNumber = normalizeCombinedKeyPart(getNestedValue(order, 'trackingNumber'))
+  if (!trackingNumber) return false
+  const carrierName = normalizeCombinedKeyPart(getNestedValue(order, 'carrierName'))
+  return trackingCombinedKeys.has(`${carrierName}::${trackingNumber}`)
+}
+
 /**
  * Estimate column width based on field type.
  */
@@ -71,6 +102,8 @@ export async function exportOrdersToExcel(
     cell.border = THIN_BORDER
   })
 
+  const trackingCombinedKeys = getTrackingCombinedKeys(orders)
+
   // Add data rows
   for (const order of orders) {
     const rowData: Record<string, unknown> = {}
@@ -78,9 +111,8 @@ export async function exportOrdersToExcel(
       rowData[col.field] = getNestedValue(order, col.field)
     }
     const row = worksheet.addRow(rowData)
-    const fill = getCombinedShipmentFill(order.shipmentGroupId)
-    if (fill) {
-      fillWholeRow(row, columns.length, fill)
+    if (isCombinedExportRow(order, trackingCombinedKeys)) {
+      fillWholeRow(row, columns.length, getCombinedShipmentFill('combined')!)
     }
   }
 

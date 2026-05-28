@@ -49,7 +49,7 @@ export const VALID_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   confirmed: ['preparing', 'cancelled'],
   preparing: ['ready', 'cancelled'],
   ready: ['shipped', 'cancelled'],
-  shipped: ['delivering'],
+  shipped: ['delivering', 'cancelled'],
   delivering: ['delivered'],
   delivered: [],
   cancelled: [],

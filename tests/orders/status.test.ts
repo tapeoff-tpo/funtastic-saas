@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import {
-  OrderStatus,
   ORDER_STATUS_LABELS,
   VALID_TRANSITIONS,
   isValidTransition,
@@ -12,14 +11,15 @@ describe('OrderStatus', () => {
       expect(ORDER_STATUS_LABELS['new']).toBe('신규')
       expect(ORDER_STATUS_LABELS['confirmed']).toBe('확인')
       expect(ORDER_STATUS_LABELS['preparing']).toBe('출고대기')
+      expect(ORDER_STATUS_LABELS['ready']).toBe('출고준비')
       expect(ORDER_STATUS_LABELS['shipped']).toBe('출고완료')
       expect(ORDER_STATUS_LABELS['delivering']).toBe('배송중')
       expect(ORDER_STATUS_LABELS['delivered']).toBe('배송완료')
       expect(ORDER_STATUS_LABELS['cancelled']).toBe('취소')
     })
 
-    it('has labels for all 7 statuses', () => {
-      expect(Object.keys(ORDER_STATUS_LABELS)).toHaveLength(7)
+    it('has labels for all 8 statuses', () => {
+      expect(Object.keys(ORDER_STATUS_LABELS)).toHaveLength(8)
     })
   })
 
@@ -36,12 +36,20 @@ describe('OrderStatus', () => {
       expect(VALID_TRANSITIONS['confirmed']).toContain('preparing')
     })
 
-    it('allows preparing -> shipped', () => {
-      expect(VALID_TRANSITIONS['preparing']).toContain('shipped')
+    it('allows preparing -> ready', () => {
+      expect(VALID_TRANSITIONS['preparing']).toContain('ready')
+    })
+
+    it('allows ready -> shipped', () => {
+      expect(VALID_TRANSITIONS['ready']).toContain('shipped')
     })
 
     it('allows shipped -> delivering', () => {
       expect(VALID_TRANSITIONS['shipped']).toContain('delivering')
+    })
+
+    it('allows shipped -> cancelled', () => {
+      expect(VALID_TRANSITIONS['shipped']).toContain('cancelled')
     })
 
     it('allows delivering -> delivered', () => {
@@ -63,9 +71,12 @@ describe('OrderStatus', () => {
       expect(isValidTransition('new', 'cancelled')).toBe(true)
       expect(isValidTransition('confirmed', 'preparing')).toBe(true)
       expect(isValidTransition('confirmed', 'cancelled')).toBe(true)
-      expect(isValidTransition('preparing', 'shipped')).toBe(true)
+      expect(isValidTransition('preparing', 'ready')).toBe(true)
       expect(isValidTransition('preparing', 'cancelled')).toBe(true)
+      expect(isValidTransition('ready', 'shipped')).toBe(true)
+      expect(isValidTransition('ready', 'cancelled')).toBe(true)
       expect(isValidTransition('shipped', 'delivering')).toBe(true)
+      expect(isValidTransition('shipped', 'cancelled')).toBe(true)
       expect(isValidTransition('delivering', 'delivered')).toBe(true)
     })
 
@@ -73,6 +84,7 @@ describe('OrderStatus', () => {
       expect(isValidTransition('new', 'delivered')).toBe(false)
       expect(isValidTransition('new', 'shipped')).toBe(false)
       expect(isValidTransition('confirmed', 'delivered')).toBe(false)
+      expect(isValidTransition('preparing', 'shipped')).toBe(false)
       expect(isValidTransition('delivered', 'new')).toBe(false)
       expect(isValidTransition('cancelled', 'new')).toBe(false)
       expect(isValidTransition('shipped', 'new')).toBe(false)

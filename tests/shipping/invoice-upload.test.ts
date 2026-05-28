@@ -83,6 +83,32 @@ describe('Coupang uploadInvoice', () => {
     expect(result).toEqual({ success: true })
   })
 
+  it('returns success when Coupang sends a numeric 200 code', async () => {
+    mockJsonResponse.mockResolvedValueOnce({ code: 200, message: 'OK' })
+
+    const result = await adapter.uploadInvoice('order-123', {
+      trackingNumber: '1234567890',
+      carrierId: 'CJGLS',
+      shipmentBoxId: 99001,
+      vendorItemId: 55001,
+    })
+
+    expect(result).toEqual({ success: true })
+  })
+
+  it('returns success when Coupang sends OK as the code', async () => {
+    mockJsonResponse.mockResolvedValueOnce({ code: 'OK', message: 'OK' })
+
+    const result = await adapter.uploadInvoice('order-123', {
+      trackingNumber: '1234567890',
+      carrierId: 'CJGLS',
+      shipmentBoxId: 99001,
+      vendorItemId: 55001,
+    })
+
+    expect(result).toEqual({ success: true })
+  })
+
   it('returns { success: false, error } on non-200 response', async () => {
     mockJsonResponse.mockResolvedValueOnce({ code: '400', message: 'Invalid invoice number' })
 

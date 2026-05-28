@@ -58,6 +58,11 @@ function assertCoupangVendorId(value: string): string {
   return vendorId
 }
 
+function isCoupangSuccessCode(code: unknown): boolean {
+  const codeStr = String(code).toUpperCase()
+  return codeStr === '200' || codeStr === 'SUCCESS' || codeStr === 'OK'
+}
+
 /**
  * Phase 8 — Normalize Coupang's free-form shipping label into a fixed enum.
  *
@@ -132,8 +137,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
       const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets?${qs}`
       const response = await this.client.get(path).json<CoupangOrderSheetsResponse>()
 
-      const codeStr = String(response.code)
-      if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
+      if (!isCoupangSuccessCode(response.code)) {
         throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
       }
 
@@ -170,8 +174,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
     try {
       const response = await this.client.get(path).json<CoupangReturnRequestsResponse>()
 
-      const codeStr = String(response.code)
-      if (codeStr !== '200' && codeStr !== 'SUCCESS' && codeStr !== 'OK') {
+      if (!isCoupangSuccessCode(response.code)) {
         throw new MarketplaceApiError('coupang', Number(response.code) || 500, response.message)
       }
 
@@ -257,7 +260,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
       }).json<{ code: number | string; message: string; data: unknown }>()
 
       const codeStr = String(response.code)
-      if (codeStr === '200' || codeStr === 'SUCCESS' || codeStr === 'OK') {
+      if (isCoupangSuccessCode(response.code)) {
         return { success: true }
       }
 
@@ -308,9 +311,9 @@ export class CoupangAdapter implements MarketplaceAdapter {
             },
           ],
         },
-      }).json<{ code: string; message: string }>()
+      }).json<{ code: string | number; message: string }>()
 
-      if (response.code === '200' || response.code === 'SUCCESS') {
+      if (isCoupangSuccessCode(response.code)) {
         return { success: true }
       }
 

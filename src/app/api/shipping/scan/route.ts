@@ -95,7 +95,22 @@ export async function POST(req: NextRequest) {
   // Look up all shipments for this tracking number. 묶음 기준은
   // 마켓 + 마켓주문번호 + 운송장번호 + 택배사다. 같은 운송장번호라도
   // 다른 마켓주문번호에 연결되어 있으면 자동 정상 처리하지 않는다.
-  const matchingShipments = await db
+  const shipmentSelect = {
+    id: shipments.id,
+    orderId: shipments.orderId,
+    trackingNumber: shipments.trackingNumber,
+    carrierId: shipments.carrierId,
+    carrierName: shipments.carrierName,
+    shippedAt: shipments.shippedAt,
+    uploadStatus: shipments.uploadStatus,
+    orderStatus: orders.status,
+    isHeld: orders.isHeld,
+    marketplaceStatus: orders.marketplaceStatus,
+    marketplaceId: orders.marketplaceId,
+    marketplaceOrderId: orders.marketplaceOrderId,
+  }
+
+  const exactTrackingShipments = await db
     .select({
       id: shipments.id,
       orderId: shipments.orderId,
@@ -114,14 +129,24 @@ export async function POST(req: NextRequest) {
     .innerJoin(orders, eq(orders.id, shipments.orderId))
     .where(and(
       eq(shipments.userId, workspaceUserId),
-      or(
-        eq(normalizedTrackingNumberSql(), scanValue),
-        eq(orders.marketplaceOrderId, rawScanValue),
-        eq(orders.marketplaceOrderId, scanValue),
-        eq(orders.internalNo, rawScanValue),
-        eq(orders.internalNo, scanValue),
-      ),
+      eq(normalizedTrackingNumberSql(), scanValue),
     ))
+
+  const matchingShipments = exactTrackingShipments.length > 0
+    ? exactTrackingShipments
+    : await db
+      .select(shipmentSelect)
+      .from(shipments)
+      .innerJoin(orders, eq(orders.id, shipments.orderId))
+      .where(and(
+        eq(shipments.userId, workspaceUserId),
+        or(
+          eq(orders.marketplaceOrderId, rawScanValue),
+          eq(orders.marketplaceOrderId, scanValue),
+          eq(orders.internalNo, rawScanValue),
+          eq(orders.internalNo, scanValue),
+        ),
+      ))
 
   // 비정상: 시스템에 없는 운송장
   if (matchingShipments.length === 0) {

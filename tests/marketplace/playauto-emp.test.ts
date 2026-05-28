@@ -118,6 +118,65 @@ describe('PlayautoEmpAdapter', () => {
     expect(searchParams.get('endDate')).toBe('20260528')
   })
 
+  it('ignores EMP rows whose actual order state is not being collected', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ([
+        {
+          Number: '1001',
+          SiteCode: 'A112',
+          SiteName: '11st',
+          SiteId: 'playauto',
+          OrderState: '\uC2E0\uADDC\uC8FC\uBB38',
+          OrderCode: '20260526287803',
+          ProdName: 'collectable product',
+          Price: '10000',
+          Count: '1',
+          OrderName: 'Buyer',
+          RecipientName: 'Receiver',
+          OrderDate: '2026-05-26 12:10:00',
+        },
+        {
+          Number: '1002',
+          SiteCode: 'A112',
+          SiteName: '11st',
+          SiteId: 'playauto',
+          OrderState: '\uBC30\uC1A1\uC911',
+          OrderCode: '2026052628507D',
+          ProdName: 'wrong state product',
+          Price: '10000',
+          Count: '1',
+          OrderName: 'Buyer',
+          RecipientName: 'Receiver',
+          OrderDate: '2026-05-26 12:10:00',
+        },
+        {
+          Number: '1003',
+          SiteCode: 'A112',
+          SiteName: '11st',
+          SiteId: 'playauto',
+          OrderState: '',
+          OrderCode: '2026052628508D',
+          ProdName: 'blank state product',
+          Price: '10000',
+          Count: '1',
+          OrderName: 'Buyer',
+          RecipientName: 'Receiver',
+          OrderDate: '2026-05-26 12:10:00',
+        },
+      ]),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new PlayautoEmpAdapter({ api_key: 'test-key', states: '\uC2E0\uADDC\uC8FC\uBB38' })
+    const orders = await adapter.getOrders(
+      new Date('2026-05-26T00:00:00+09:00'),
+      new Date('2026-05-26T23:59:59+09:00'),
+    )
+
+    expect(orders).toHaveLength(1)
+    expect(orders[0].marketplaceOrderId).toBe('20260526287803')
+  })
+
   it('falls back to the slash orders endpoint when EMP returns 404', async () => {
     const notFound = new Error('not found') as Error & { response: { status: number } }
     notFound.response = { status: 404 }

@@ -62,6 +62,24 @@ function asNumber(value: unknown): number {
   return 0
 }
 
+function normalizeStateKey(value: unknown): string {
+  return asString(value).replace(/\s+/g, '')
+}
+
+const COLLECTABLE_EMP_STATE_KEYS = new Set([
+  ...DEFAULT_STATES,
+  '\uC2E0\uADDC\uC8FC\uBB38',
+  '\uC8FC\uBB38\uD655\uC778',
+].map(normalizeStateKey))
+
+function isCollectableEmpState(order: PlayautoEmpOrder, requestedState: string): boolean {
+  const requested = normalizeStateKey(requestedState)
+  if (!COLLECTABLE_EMP_STATE_KEYS.has(requested)) return false
+
+  const actual = normalizeStateKey(order.OrderState)
+  return actual === requested
+}
+
 function isAblyMall(siteName: string, siteCode: string): boolean {
   const source = `${siteName} ${siteCode}`.toLowerCase()
   return source.includes('ably') || source.includes('\uC5D0\uC774\uBE14\uB9AC')
@@ -238,7 +256,7 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
           }
 
           const pageOrders = responseOrders(response)
-          orders.push(...pageOrders)
+          orders.push(...pageOrders.filter((order) => isCollectableEmpState(order, state)))
           if (pageOrders.length < ORDER_PAGE_SIZE) break
         }
       }

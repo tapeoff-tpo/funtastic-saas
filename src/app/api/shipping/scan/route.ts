@@ -28,6 +28,20 @@ function normalizedTrackingNumberSql() {
   return sql<string>`regexp_replace(${shipments.trackingNumber}, '[^0-9A-Za-z]', '', 'g')`
 }
 
+function normalizeScanGroupText(value: unknown): string {
+  return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase()
+}
+
+function scanGroupAddressKey(value: unknown): string {
+  if (!value || typeof value !== 'object') return ''
+  const address = value as { zipCode?: unknown; address1?: unknown; address2?: unknown }
+  return [
+    normalizeScanGroupText(address.zipCode),
+    normalizeScanGroupText(address.address1),
+    normalizeScanGroupText(address.address2),
+  ].join('|')
+}
+
 export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -108,6 +122,10 @@ export async function POST(req: NextRequest) {
     marketplaceStatus: orders.marketplaceStatus,
     marketplaceId: orders.marketplaceId,
     marketplaceOrderId: orders.marketplaceOrderId,
+    recipientName: orders.recipientName,
+    recipientPhone: orders.recipientPhone,
+    recipientPhone2: orders.recipientPhone2,
+    shippingAddress: orders.shippingAddress,
   }
 
   const exactTrackingShipments = await db
@@ -124,6 +142,10 @@ export async function POST(req: NextRequest) {
       marketplaceStatus: orders.marketplaceStatus,
       marketplaceId: orders.marketplaceId,
       marketplaceOrderId: orders.marketplaceOrderId,
+      recipientName: orders.recipientName,
+      recipientPhone: orders.recipientPhone,
+      recipientPhone2: orders.recipientPhone2,
+      shippingAddress: orders.shippingAddress,
     })
     .from(shipments)
     .innerJoin(orders, eq(orders.id, shipments.orderId))
@@ -167,7 +189,14 @@ export async function POST(req: NextRequest) {
 
   const matchedTrackingNumber = normalizeTrackingNumber(matchingShipments[0]?.trackingNumber ?? scanValue)
   const groupKey = (shipment: typeof matchingShipments[number]) =>
-    `${shipment.marketplaceId}::${shipment.marketplaceOrderId}::${normalizeTrackingNumber(shipment.trackingNumber ?? scanValue)}::${shipment.carrierId}`
+    [
+      shipment.marketplaceId,
+      normalizeTrackingNumber(shipment.trackingNumber ?? scanValue),
+      shipment.carrierId,
+      normalizeScanGroupText(shipment.recipientName),
+      normalizeScanGroupText(shipment.recipientPhone2 || shipment.recipientPhone),
+      scanGroupAddressKey(shipment.shippingAddress),
+    ].join('::')
   const groups = new Map<string, typeof matchingShipments>()
   for (const shipment of matchingShipments) {
     const key = groupKey(shipment)

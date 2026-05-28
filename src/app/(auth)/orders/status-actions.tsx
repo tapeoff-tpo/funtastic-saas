@@ -463,11 +463,7 @@ export function ManualStatusChangeButton({
       if (success > 0) {
         setClaimModalType(null)
       }
-      if (success > 0 && onMovedToProcessingTab) {
-        onMovedToProcessingTab(submittedClaimType)
-      } else {
-        onChanged?.()
-      }
+      onChanged?.()
     })
   }
 

@@ -21,13 +21,6 @@ function getRefresh(table: Table<OrderRow>): (() => void) | undefined {
   return meta?.refresh
 }
 
-function getMoveToProcessingTab(table: Table<OrderRow>): ((tab: ClaimType) => void) | undefined {
-  const meta = table.options.meta as {
-    moveToProcessingTab?: (tab: ClaimType) => void
-  } | undefined
-  return meta?.moveToProcessingTab
-}
-
 /** Copy-order button (shown under internal order id) — duplicates order + items with new internal UUID */
 function CopyOrderButton({ orderId }: { orderId: string }) {
   const [pending, startTransition] = useTransition()
@@ -76,7 +69,6 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [pending, startTransition] = useTransition()
   const refresh = getRefresh(table)
-  const moveToProcessingTab = getMoveToProcessingTab(table)
 
   function openClaimModal(claimType: ClaimType) {
     setModalType(claimType)
@@ -117,11 +109,7 @@ function ClaimCreateButton({ order, table }: { order: OrderRow; table: Table<Ord
         return
       }
       setModalType(null)
-      if (moveToProcessingTab) {
-        moveToProcessingTab(claimType)
-      } else {
-        refresh?.()
-      }
+      refresh?.()
     })
   }
 

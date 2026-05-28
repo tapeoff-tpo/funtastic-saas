@@ -38,11 +38,6 @@ function withSetSplit(
   }
 }
 
-function copyMarketplaceOrderId(base: string, index: number): string {
-  const suffix = Math.random().toString(36).slice(2, 8)
-  return `${base}-set-${index + 1}-${suffix}`.slice(0, 200)
-}
-
 function itemValues(orderId: string, row: ExpandedRow) {
   return {
     orderId,
@@ -159,7 +154,7 @@ export async function POST(req: NextRequest) {
             userId: order.userId,
             connectionId: order.connectionId,
             marketplaceId: order.marketplaceId,
-            marketplaceOrderId: copyMarketplaceOrderId(order.marketplaceOrderId, index),
+            marketplaceOrderId: order.marketplaceOrderId,
             status: order.status,
             previousStatus: order.previousStatus,
             buyerName: order.buyerName,

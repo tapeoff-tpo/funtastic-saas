@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
         ON i.sku = p.internal_sku AND i.user_id = p.user_id
       WHERE p.user_id = ${workspaceUserId}
         AND p.status <> 'deleted'
+        AND p.manage_inventory = true
         AND (p.internal_sku ILIKE ${pattern} OR p.name ILIKE ${pattern})
       GROUP BY split_part(p.internal_sku, '-', 1)
       ORDER BY MAX(p.name)
@@ -101,6 +102,7 @@ export async function GET(req: NextRequest) {
       and(
         eq(products.userId, workspaceUserId),
         ne(products.status, 'deleted'),
+        eq(products.manageInventory, true),
         or(
           ilike(products.internalSku, pattern),
           ilike(products.name, pattern),

@@ -481,6 +481,8 @@ const MARKETPLACE_LABELS: Record<string, string> = {
   ably: '에이블리',
   'hyundai-hmall': '현대홈쇼핑',
   'gs-shop': 'GS샵',
+  'kakao-gift': '카카오선물하기',
+  'kakao-store': '카카오쇼핑하기',
   esm: 'ESM',
   always: '올웨이즈',
   zigzag: '지그재그',

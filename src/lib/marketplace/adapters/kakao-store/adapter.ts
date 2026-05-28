@@ -21,7 +21,7 @@ import type {
 
 const KAKAO_STORE_CONFIG: MarketplaceConfig = {
   id: 'kakao-store',
-  name: '카카오톡스토어',
+  name: '카카오쇼핑하기',
   authType: 'api_key',
   rateLimitPerSecond: 30,
   requiredCredentials: ['admin_app_key', 'seller_app_key'],

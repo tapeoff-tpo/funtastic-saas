@@ -46,6 +46,8 @@ const MARKETPLACE_OPTIONS = [
   { value: 'auction', label: '옥션' },
   { value: '11st', label: '11번가' },
   { value: 'cafe24', label: 'Cafe24' },
+  { value: 'kakao-gift', label: '카카오선물하기' },
+  { value: 'kakao-store', label: '카카오쇼핑하기' },
   { value: 'toss-shopping', label: '토스쇼핑' },
   { value: 'ohouse', label: '오늘의집' },
   { value: 'ownerclan', label: '오너클랜' },

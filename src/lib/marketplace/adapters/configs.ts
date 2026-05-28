@@ -292,7 +292,7 @@ const ohouseAdapter: MarketplaceAdapter = {
   },
 }
 
-// --- Tier 1: Cafe24, CJ온스타일, 카카오선물하기, 카카오톡스토어 ---
+// --- Tier 1: Cafe24, CJ온스타일, 카카오선물하기, 카카오쇼핑하기 ---
 
 const cafe24Adapter = createStubAdapter({
   id: 'cafe24',
@@ -320,7 +320,7 @@ const kakaoGiftAdapter = createStubAdapter({
 
 const kakaoStoreAdapter = createStubAdapter({
   id: 'kakao-store',
-  name: '카카오톡스토어',
+  name: '카카오쇼핑하기',
   authType: 'api_key',
   rateLimitPerSecond: 30,
   requiredCredentials: ['admin_app_key', 'seller_app_key'],

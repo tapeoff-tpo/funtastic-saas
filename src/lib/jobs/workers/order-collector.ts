@@ -20,6 +20,7 @@ import { EsmAdapter } from '@/lib/marketplace/adapters/esm/adapter'
 import { OhouseAdapter } from '@/lib/marketplace/adapters/ohouse/adapter'
 import { OnchannelAdapter } from '@/lib/marketplace/adapters/onchannel/adapter'
 import { AblyAdapter } from '@/lib/marketplace/adapters/ably/adapter'
+import { KakaoGiftAdapter } from '@/lib/marketplace/adapters/kakao-gift/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
@@ -98,6 +99,11 @@ export function createAdapter(
       return new AblyAdapter({
         api_key: credentials.api_key ?? credentials.apiKey ?? '',
         shop_id: credentials.shop_id ?? credentials.shopId ?? '',
+      })
+    case 'kakao-gift':
+      return new KakaoGiftAdapter({
+        api_key: credentials.api_key ?? credentials.apiKey ?? '',
+        store_id: credentials.store_id ?? credentials.storeId ?? '',
       })
     case 'kakao-store':
       return new KakaoStoreAdapter({

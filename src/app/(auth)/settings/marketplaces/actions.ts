@@ -11,6 +11,7 @@ import { CoupangAdapter } from '@/lib/marketplace/adapters/coupang/adapter'
 import { NaverAdapter } from '@/lib/marketplace/adapters/naver/adapter'
 import { TossShoppingAdapter } from '@/lib/marketplace/adapters/toss-shopping/adapter'
 import { OwnerclanAdapter } from '@/lib/marketplace/adapters/ownerclan/adapter'
+import { KakaoGiftAdapter } from '@/lib/marketplace/adapters/kakao-gift/adapter'
 import { KakaoStoreAdapter } from '@/lib/marketplace/adapters/kakao-store/adapter'
 import { DomeggookAdapter } from '@/lib/marketplace/adapters/domeggook/adapter'
 import { DomesinAdapter } from '@/lib/marketplace/adapters/domesin/adapter'
@@ -249,6 +250,12 @@ export async function testMarketplaceCredentials(
           vendor_password: credentials.vendor_password?.trim() ?? '',
         }).testConnection()
         break
+      case 'kakao-gift':
+        result = await new KakaoGiftAdapter({
+          api_key: credentials.api_key?.trim() ?? '',
+          store_id: credentials.store_id?.trim() ?? '',
+        }).testConnection()
+        break
       case 'kakao-store':
         result = await new KakaoStoreAdapter({
           admin_app_key: credentials.admin_app_key?.trim() ?? '',
@@ -461,7 +468,7 @@ export async function registerMarketplaceCredentials(
     }).testConnection()
     if (!result.success) {
       return {
-        error: `카카오톡스토어 연동 확인 실패: ${result.error ?? '알 수 없는 오류'}`,
+        error: `카카오쇼핑하기 연동 확인 실패: ${result.error ?? '알 수 없는 오류'}`,
       }
     }
   }

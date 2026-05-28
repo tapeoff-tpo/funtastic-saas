@@ -1100,6 +1100,39 @@ function orderItemInsertValue(orderId: string, item: NormalizedOrderItem) {
   }
 }
 
+async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrderItem): Promise<void> {
+  const existingItems = await db
+    .select({ id: orderItems.id })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, baseOrderId))
+    .orderBy(orderItems.id)
+
+  const value = orderItemInsertValue(baseOrderId, item)
+  const [firstExistingItem, ...extraItems] = existingItems
+
+  if (firstExistingItem) {
+    await db
+      .update(orderItems)
+      .set({
+        marketplaceItemId: value.marketplaceItemId,
+        productName: value.productName,
+        optionText: value.optionText,
+        quantity: value.quantity,
+        unitPrice: value.unitPrice,
+        sku: value.sku,
+      })
+      .where(eq(orderItems.id, firstExistingItem.id))
+  } else {
+    await db.insert(orderItems).values(value)
+  }
+
+  if (extraItems.length > 0) {
+    await db
+      .delete(orderItems)
+      .where(inArray(orderItems.id, extraItems.map((existingItem) => existingItem.id)))
+  }
+}
+
 async function fillMissingSpecialofferOptionText(orderId: string, item?: NormalizedOrderItem): Promise<void> {
   const optionText = item?.optionText?.trim()
   if (!optionText) return
@@ -1193,6 +1226,8 @@ async function ensureSplitOrderCopies(
   userId: string,
 ): Promise<string[]> {
   if (items.length <= 1) return []
+
+  await normalizeBaseOrderItem(baseOrderId, items[0])
 
   const existingCopies = await db
     .select({ id: orders.id })

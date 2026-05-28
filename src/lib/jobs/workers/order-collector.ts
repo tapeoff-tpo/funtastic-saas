@@ -656,9 +656,12 @@ export async function collectOrdersForConnection(params: {
       const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
       let splitCopyIds: string[] = []
 
+      // Absolute order storage rule: every multi-item marketplace order is stored as split rows.
       if (!isExistingOrder && items.length > 0) {
         await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
         splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+      } else if (isExistingOrder && items.length > 1) {
+        splitCopyIds = await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
       } else if (isExistingOrder && marketplaceId === 'specialoffer') {
         await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
       }
@@ -828,7 +831,10 @@ export async function saveNormalizedOrdersForConnection(params: {
 
   for (const order of normalizedOrders) {
     const items = dedupeNormalizedOrderItems(order.items)
-    const orderForSave = { ...order, items }
+    const firstItem = items[0]
+    const orderForSave = firstItem && items.length > 1
+      ? { ...order, items: [firstItem], totalAmount: lineTotalAmount(firstItem) }
+      : { ...order, items }
     const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
     if (existingOrderMatches.skipKeys.has(orderKey)) {
       ordersSkipped++
@@ -838,8 +844,12 @@ export async function saveNormalizedOrdersForConnection(params: {
     const isExistingOrder = existingOrderMatches.upsertKeys.has(orderKey)
     const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
 
+    // Absolute order storage rule: every multi-item marketplace order is stored as split rows.
     if (!isExistingOrder && items.length > 0) {
-      await db.insert(orderItems).values(items.map((item) => orderItemInsertValue(upsertedOrder.id, item)))
+      await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
+      await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+    } else if (isExistingOrder && items.length > 1) {
+      await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
     } else if (isExistingOrder && marketplaceId === 'specialoffer') {
       await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
     }
@@ -1129,6 +1139,89 @@ async function createSplitOrderCopies(
     .where(eq(orders.id, baseOrderId))
 
   for (let index = 1; index < items.length; index += 1) {
+    const item = items[index]
+    const [copy] = await db
+      .insert(orders)
+      .values({
+        internalNo: generateInternalNo(),
+        userId,
+        connectionId,
+        marketplaceId: order.marketplaceId,
+        marketplaceOrderId: order.marketplaceOrderId,
+        status: order.status,
+        marketplaceStatus: order.marketplaceStatus,
+        marketplaceCollectionStatus: getMarketplaceCollectionStatus(order),
+        buyerName: order.buyerName,
+        buyerPhone: order.buyerPhone,
+        buyerPhone2: order.buyerPhone2,
+        recipientName: order.recipientName,
+        recipientPhone: order.recipientPhone,
+        recipientPhone2: order.recipientPhone2,
+        shippingAddress: order.shippingAddress,
+        orderedAt: order.orderedAt,
+        totalAmount: String(lineTotalAmount(item)),
+        shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
+        deliveryMessage: order.deliveryMessage ?? null,
+        rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [item], totalAmount: lineTotalAmount(item) }), {
+          ...splitBase,
+          partIndex: index + 1,
+          originalOrderId: baseOrderId,
+        }),
+        collectedAt: now,
+        isCopy: true,
+      })
+      .returning({ id: orders.id })
+
+    await db.insert(orderItems).values(orderItemInsertValue(copy.id, item))
+    copyIds.push(copy.id)
+  }
+
+  return copyIds
+}
+
+async function ensureSplitOrderCopies(
+  order: NormalizedOrder,
+  items: NormalizedOrderItem[],
+  baseOrderId: string,
+  connectionId: string,
+  userId: string,
+): Promise<string[]> {
+  if (items.length <= 1) return []
+
+  const existingCopies = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(
+      and(
+        eq(orders.userId, userId),
+        eq(orders.marketplaceId, order.marketplaceId),
+        eq(orders.marketplaceOrderId, order.marketplaceOrderId),
+        eq(orders.isCopy, true),
+      ),
+    )
+
+  const copyIds = existingCopies.map((copy) => copy.id)
+  const now = new Date()
+  const splitBase = {
+    sourceOrderId: baseOrderId,
+    splitAt: now.toISOString(),
+    totalParts: items.length,
+  }
+
+  await db
+    .update(orders)
+    .set({
+      rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [items[0]] }), {
+        ...splitBase,
+        partIndex: 1,
+        original: true,
+      }),
+      updatedAt: now,
+    })
+    .where(eq(orders.id, baseOrderId))
+
+  const missingStartIndex = existingCopies.length + 1
+  for (let index = missingStartIndex; index < items.length; index += 1) {
     const item = items[index]
     const [copy] = await db
       .insert(orders)

@@ -20,6 +20,7 @@ import { getCarrierName } from './carrier-codes'
 import { queueInvoiceUploadJob } from '@/lib/jobs/queues'
 import { logOrderChange } from '@/lib/orders/change-log'
 import { releaseShipmentGroupsWithConflictingShipments } from './combined-safety'
+import { isExchangeReshipOrder } from '@/lib/orders/exchange-reship'
 
 /**
  * Queue a single invoice upload.
@@ -41,6 +42,7 @@ export async function queueInvoiceUpload(
         id: orders.id,
         status: orders.status,
         mappedAt: orders.mappedAt,
+        marketplaceStatus: orders.marketplaceStatus,
         marketplaceId: orders.marketplaceId,
         marketplaceOrderId: orders.marketplaceOrderId,
         connectionId: orders.connectionId,
@@ -58,7 +60,7 @@ export async function queueInvoiceUpload(
     if (order.status !== 'confirmed') {
       return { success: false, error: '확인 상태 주문만 송장 등록할 수 있습니다.' }
     }
-    if (!order.mappedAt) {
+    if (!order.mappedAt && !isExchangeReshipOrder(order.marketplaceStatus)) {
       return { success: false, error: '매핑완료된 주문만 송장 등록할 수 있습니다.' }
     }
 
@@ -134,6 +136,7 @@ export async function registerInvoice(
           id: orders.id,
           status: orders.status,
           mappedAt: orders.mappedAt,
+          marketplaceStatus: orders.marketplaceStatus,
           userId: orders.userId,
         })
         .from(orders)
@@ -146,7 +149,7 @@ export async function registerInvoice(
       if (order.status !== 'confirmed' && order.status !== 'preparing') {
         throw new Error('확인/출고대기 상태 주문만 송장번호를 등록하거나 변경할 수 있습니다.')
       }
-      if (!order.mappedAt) {
+      if (!order.mappedAt && !isExchangeReshipOrder(order.marketplaceStatus)) {
         throw new Error('매핑완료된 주문만 송장 등록할 수 있습니다.')
       }
 

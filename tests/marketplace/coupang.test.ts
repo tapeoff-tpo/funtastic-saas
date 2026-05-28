@@ -116,6 +116,14 @@ describe('CoupangAdapter', () => {
     expect(adapter.config.requiredCredentials).toContain('vendor_id')
   })
 
+  it('rejects account aliases entered as Vendor ID', () => {
+    expect(() => new CoupangAdapter({
+      access_key: 'test-access-key',
+      secret_key: 'test-secret-key',
+      vendor_id: 'tapeoff',
+    })).toThrow('Vendor ID')
+  })
+
   it('authenticate() returns success (HMAC has no separate auth flow)', async () => {
     const result = await adapter.authenticate()
     expect(result.success).toBe(true)

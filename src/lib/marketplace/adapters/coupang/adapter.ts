@@ -39,6 +39,25 @@ const COUPANG_CONFIG: MarketplaceConfig = {
   requiredCredentials: ['access_key', 'secret_key', 'vendor_id'],
 }
 
+function normalizeCoupangVendorId(value: string): string {
+  return value.replace(/\s+/g, '')
+}
+
+function isLikelyCoupangVendorId(value: string): boolean {
+  return /^A\d{8,}$/i.test(value)
+}
+
+function assertCoupangVendorId(value: string): string {
+  const vendorId = normalizeCoupangVendorId(value)
+  if (!isLikelyCoupangVendorId(vendorId)) {
+    throw new MarketplaceAuthError(
+      'coupang',
+      '쿠팡 업체/판매자 ID가 올바르지 않습니다. 쿠팡 Vendor ID는 보통 A로 시작하는 숫자 코드입니다. 쿠팡 계정명/별칭이 아니라 Wing OpenAPI의 Vendor ID를 입력해주세요.',
+    )
+  }
+  return vendorId
+}
+
 /**
  * Phase 8 — Normalize Coupang's free-form shipping label into a fixed enum.
  *
@@ -69,8 +88,8 @@ export class CoupangAdapter implements MarketplaceAdapter {
   private readonly vendorId: string
 
   constructor(credentials: { access_key: string; secret_key: string; vendor_id: string }) {
-    this.client = createCoupangClient(credentials.access_key, credentials.secret_key, credentials.vendor_id)
-    this.vendorId = credentials.vendor_id
+    this.vendorId = assertCoupangVendorId(credentials.vendor_id)
+    this.client = createCoupangClient(credentials.access_key, credentials.secret_key, this.vendorId)
   }
 
   async testConnection(_credentials?: MarketplaceCredentials): Promise<{ success: boolean; error?: string; expiresAt?: Date }> {

@@ -336,6 +336,10 @@ const ORDER_RANGE_CONCURRENCY: Record<string, number> = {
 }
 const ORDER_RANGE_MS = 24 * 60 * 60 * 1000
 const MANUAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+const MARKETPLACE_CONFIRM_TIMEOUT_MS = 20_000
+const MARKETPLACE_CONFIRM_CONCURRENCY: Record<string, number> = {
+  ownerclan: 2,
+}
 
 function splitOrderRanges(since: Date, until: Date): Array<{ since: Date; until: Date }> {
   if (since >= until) return [{ since, until }]
@@ -378,6 +382,20 @@ async function mapWithConcurrency<T, R>(
   }))
 
   return results
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
 }
 
 async function fetchOrdersForRange(
@@ -666,23 +684,36 @@ export async function collectOrdersForConnection(params: {
 
     if (shippingPrepTargets.length > 0 && typeof adapter.confirmOrder === 'function') {
       await setProgress(`몰 주문단계 전환 중... (0/${shippingPrepTargets.length})`)
-      for (let index = 0; index < shippingPrepTargets.length; index += 1) {
-        const target = shippingPrepTargets[index]
-        const result = await adapter.confirmOrder(target.marketplaceOrderId, target.rawData ?? undefined)
+      const confirmErrors: string[] = []
+      const confirmConcurrency = MARKETPLACE_CONFIRM_CONCURRENCY[marketplaceId] ?? 3
+      await mapWithConcurrency(shippingPrepTargets, confirmConcurrency, async (target, index) => {
+        const result = await withTimeout(
+          adapter.confirmOrder!(target.marketplaceOrderId, target.rawData ?? undefined),
+          MARKETPLACE_CONFIRM_TIMEOUT_MS,
+          `몰 주문단계 전환 제한시간 초과 (${marketplaceId} ${target.marketplaceOrderId})`,
+        ).catch((error) => ({
+          success: false,
+          error: error instanceof Error ? error.message : '알 수 없는 오류',
+        }))
+
         if (!result.success) {
-          throw new Error(`몰 주문단계 전환 실패 (${marketplaceId} ${target.marketplaceOrderId}): ${result.error ?? '알 수 없는 오류'}`)
+          confirmErrors.push(`${target.marketplaceOrderId}: ${result.error ?? '알 수 없는 오류'}`)
+        } else {
+          await db
+            .update(orders)
+            .set({
+              marketplaceStatus: marketplaceShippingPrepStatus(marketplaceId),
+              marketplaceCollectionStatus: 'ready',
+              updatedAt: new Date(),
+            })
+            .where(inArray(orders.id, target.ids))
         }
 
-        await db
-          .update(orders)
-          .set({
-            marketplaceStatus: marketplaceShippingPrepStatus(marketplaceId),
-            marketplaceCollectionStatus: 'ready',
-            updatedAt: new Date(),
-          })
-          .where(inArray(orders.id, target.ids))
-
         await setProgress(`몰 주문단계 전환 중... (${index + 1}/${shippingPrepTargets.length})`)
+        return null
+      })
+      if (confirmErrors.length > 0) {
+        await setProgress(`몰 주문단계 전환 일부 실패 ${confirmErrors.length}건 - 주문 저장은 완료`)
       }
     }
 

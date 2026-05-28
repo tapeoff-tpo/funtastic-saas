@@ -292,7 +292,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
     }
 
     try {
-      const response = await this.client.put(path, {
+      const response = await this.client.post(path, {
         json: {
           vendorId: this.vendorId,
           orderSheetInvoiceApplyDtos: [

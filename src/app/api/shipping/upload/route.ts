@@ -22,6 +22,9 @@ import { logOrderChange } from '@/lib/orders/change-log'
 import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
+import pLimit from 'p-limit'
+
+const API_UPLOAD_CONCURRENCY = 5
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -237,7 +240,8 @@ export async function POST(req: NextRequest) {
 
     const adapter = createAdapter(marketplaceId, credentials)
 
-    for (const s of groupShipments) {
+    const uploadLimit = pLimit(API_UPLOAD_CONCURRENCY)
+    const groupResults = await Promise.all(groupShipments.map((s) => uploadLimit(async () => {
       const ord = orderMap.get(s.orderId)!
       try {
         await db.update(shipments).set({ uploadStatus: 'uploading', updatedAt: new Date() }).where(eq(shipments.id, s.id))
@@ -271,17 +275,18 @@ export async function POST(req: NextRequest) {
 
         if (result.success) {
           await markShipmentUploadedAndOrderShipped(s.id, s.orderId, s.uploadAttempts + 1)
-          results.push({ ...resultIdentity(s), success: true, marketplaceId })
+          return { ...resultIdentity(s), success: true, marketplaceId }
         } else {
           await markShipmentUploadFailed(s.id, result.error ?? 'Unknown error', s.uploadAttempts + 1)
-          results.push({ ...resultIdentity(s), success: false, error: result.error, marketplaceId })
+          return { ...resultIdentity(s), success: false, error: result.error, marketplaceId }
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : 'Unknown error'
         await markShipmentUploadFailed(s.id, msg, s.uploadAttempts + 1)
-        results.push({ ...resultIdentity(s), success: false, error: msg, marketplaceId })
+        return { ...resultIdentity(s), success: false, error: msg, marketplaceId }
       }
-    }
+    })))
+    results.push(...groupResults)
   }
 
   const queued = results.filter((r) => r.queued).length

@@ -250,8 +250,8 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
 
 const worker = new Worker<ScrapeJobData>('marketplace-scrape', processScrapeJob, {
   connection: getConnection(),
-  concurrency: 1, // 1 scrape at a time per worker — Chromium is heavy
-  limiter: { max: 1, duration: 5000 }, // throttle to avoid bot detection
+  concurrency: 2,
+  limiter: { max: 2, duration: 5000 }, // throttle to avoid bot detection
 })
 
 worker.on('completed', (job) => {

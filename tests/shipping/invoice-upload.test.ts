@@ -54,8 +54,8 @@ describe('Coupang uploadInvoice', () => {
       vendorItemId: 55001,
     })
 
-    expect(mockPut).toHaveBeenCalledTimes(1)
-    const [path, options] = mockPut.mock.calls[0]
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    const [path, options] = mockPost.mock.calls[0]
     expect(path).toContain('v2/providers/openapi/apis/api/v4/vendors/A00000001/orders/invoices')
 
     const body = options.json
@@ -123,7 +123,7 @@ describe('Coupang uploadInvoice', () => {
       },
     })
 
-    const [, options] = mockPut.mock.calls[0]
+    const [, options] = mockPost.mock.calls[0]
     expect(options.json.orderSheetInvoiceApplyDtos[0]).toMatchObject({
       shipmentBoxId: 99001,
       vendorItemId: 55001,

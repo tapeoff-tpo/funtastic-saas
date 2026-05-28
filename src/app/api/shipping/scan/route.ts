@@ -13,12 +13,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
-import { eq, and, gte, count, isNull, or, inArray } from 'drizzle-orm'
+import { eq, and, gte, count, isNull, or, inArray, sql } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 function normalizeTrackingNumber(value: string) {
-  return value.trim().replace(/[\s-]/g, '')
+  return value.trim().replace(/[^0-9A-Za-z]/g, '')
+}
+
+function normalizedTrackingNumberSql() {
+  return sql<string>`regexp_replace(${shipments.trackingNumber}, '[^0-9A-Za-z]', '', 'g')`
 }
 
 export async function GET() {
@@ -78,8 +82,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const trackingNumber = normalizeTrackingNumber(body.trackingNumber ?? '')
-  if (!trackingNumber) {
+  const rawScanValue = String(body.trackingNumber ?? '').trim()
+  const scanValue = normalizeTrackingNumber(rawScanValue)
+  if (!scanValue) {
     return NextResponse.json({ error: '운송장번호 없음' }, { status: 400 })
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
@@ -103,7 +108,16 @@ export async function POST(req: NextRequest) {
     })
     .from(shipments)
     .innerJoin(orders, eq(orders.id, shipments.orderId))
-    .where(and(eq(shipments.userId, workspaceUserId), eq(shipments.trackingNumber, trackingNumber)))
+    .where(and(
+      eq(shipments.userId, workspaceUserId),
+      or(
+        eq(normalizedTrackingNumberSql(), scanValue),
+        eq(orders.marketplaceOrderId, rawScanValue),
+        eq(orders.marketplaceOrderId, scanValue),
+        eq(orders.internalNo, rawScanValue),
+        eq(orders.internalNo, scanValue),
+      ),
+    ))
 
   // 비정상: 시스템에 없는 운송장
   if (matchingShipments.length === 0) {
@@ -112,7 +126,7 @@ export async function POST(req: NextRequest) {
       userId: workspaceUserId,
       shipmentId: null,
       orderId: null,
-      trackingNumber,
+      trackingNumber: scanValue,
       status: 'not_found',
     })
     return NextResponse.json({
@@ -122,8 +136,9 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  const matchedTrackingNumber = normalizeTrackingNumber(matchingShipments[0]?.trackingNumber ?? scanValue)
   const groupKey = (shipment: typeof matchingShipments[number]) =>
-    `${shipment.marketplaceId}::${shipment.marketplaceOrderId}::${shipment.trackingNumber ?? trackingNumber}::${shipment.carrierId}`
+    `${shipment.marketplaceId}::${shipment.marketplaceOrderId}::${normalizeTrackingNumber(shipment.trackingNumber ?? scanValue)}::${shipment.carrierId}`
   const groups = new Map<string, typeof matchingShipments>()
   for (const shipment of matchingShipments) {
     const key = groupKey(shipment)
@@ -136,7 +151,7 @@ export async function POST(req: NextRequest) {
         userId: workspaceUserId,
         shipmentId: shipment.id,
         orderId: shipment.orderId,
-        trackingNumber,
+        trackingNumber: matchedTrackingNumber,
         status: 'not_found',
       })),
     )
@@ -157,7 +172,7 @@ export async function POST(req: NextRequest) {
         userId: workspaceUserId,
         shipmentId: shipment.id,
         orderId: shipment.orderId,
-        trackingNumber,
+        trackingNumber: matchedTrackingNumber,
         status: 'not_found',
       })),
     )
@@ -182,7 +197,7 @@ export async function POST(req: NextRequest) {
       userId: workspaceUserId,
       shipmentId: shipment.id,
       orderId: shipment.orderId,
-      trackingNumber,
+      trackingNumber: matchedTrackingNumber,
       status: 'duplicate',
     })
 
@@ -218,7 +233,7 @@ export async function POST(req: NextRequest) {
       userId: workspaceUserId,
       shipmentId: shipment.id,
       orderId: shipment.orderId,
-      trackingNumber,
+      trackingNumber: matchedTrackingNumber,
       status: 'ok',
     })),
   )
@@ -258,7 +273,7 @@ export async function POST(req: NextRequest) {
     status: 'ok',
     message: '정상입니다',
     tts: '정상입니다',
-    trackingNumber,
+    trackingNumber: matchedTrackingNumber,
     carrierId: primaryShipment.carrierId,
     carrierName: primaryShipment.carrierName,
     order: order ?? null,

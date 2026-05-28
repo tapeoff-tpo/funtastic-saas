@@ -8,6 +8,7 @@
 import ExcelJS from 'exceljs'
 import { getNestedValue } from './export'
 import type { OrderFieldDef } from './templates'
+import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
 
 /** Header style matching carrier export for consistency */
 const HEADER_FILL: ExcelJS.FillPattern = {
@@ -25,18 +26,6 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
   left: { style: 'thin' },
   bottom: { style: 'thin' },
   right: { style: 'thin' },
-}
-
-const COMBINED_SHIPMENT_FILL: ExcelJS.FillPattern = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FFD8E4BC' },
-}
-
-function fillWholeRow(row: ExcelJS.Row, columnCount: number): void {
-  for (let index = 1; index <= columnCount; index += 1) {
-    row.getCell(index).fill = COMBINED_SHIPMENT_FILL
-  }
 }
 
 /**
@@ -89,8 +78,9 @@ export async function exportOrdersToExcel(
       rowData[col.field] = getNestedValue(order, col.field)
     }
     const row = worksheet.addRow(rowData)
-    if (order.shipmentGroupId || order.isCombinedShipment) {
-      fillWholeRow(row, columns.length)
+    const fill = getCombinedShipmentFill(order.shipmentGroupId)
+    if (fill) {
+      fillWholeRow(row, columns.length, fill)
     }
   }
 

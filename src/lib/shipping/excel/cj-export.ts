@@ -6,6 +6,7 @@
  */
 
 import ExcelJS from 'exceljs'
+import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
 
 export interface CjOrderRow {
   orderId: string
@@ -78,12 +79,6 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
     width: [15, 15, 15, 40, 30, 8, 8, 8, 20, 36, 8, 30, 10, 15, 40, 15, 20, 20, 20, 8, 30, 20, 35, 10, 15][i] ?? 15,
   }))
 
-  const COMBINED_FILL: ExcelJS.FillPattern = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFD8E4BC' },
-  }
-
   for (const row of rows) {
     const productAndOption = row.optionText
       ? `${row.productName} / ${row.optionText}`
@@ -122,11 +117,10 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
       '',
     ])
 
-    // 합포장 행은 실제 shipment group 기준으로 표시한다.
-    if (row.shipmentGroupId || row.isCombinedShipment) {
-      for (let index = 1; index <= HEADERS.length; index += 1) {
-        dataRow.getCell(index).fill = COMBINED_FILL
-      }
+    // 합포장 행은 실제 shipment group 기준으로 같은 묶음끼리 같은 색으로 표시한다.
+    const fill = getCombinedShipmentFill(row.shipmentGroupId)
+    if (fill) {
+      fillWholeRow(dataRow, HEADERS.length, fill)
     }
   }
 

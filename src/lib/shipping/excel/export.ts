@@ -7,6 +7,7 @@
 
 import ExcelJS from 'exceljs'
 import type { CarrierTemplate } from '../types'
+import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
 
 /**
  * Resolve a dot-notation path on an object.
@@ -42,22 +43,6 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
   left: { style: 'thin' },
   bottom: { style: 'thin' },
   right: { style: 'thin' },
-}
-
-const COMBINED_SHIPMENT_FILL: ExcelJS.FillPattern = {
-  type: 'pattern',
-  pattern: 'solid',
-  fgColor: { argb: 'FFD8E4BC' },
-}
-
-function isCombinedShipmentRow(order: Record<string, unknown>): boolean {
-  return Boolean(order.shipmentGroupId || order.isCombinedShipment)
-}
-
-function fillWholeRow(row: ExcelJS.Row, columnCount: number): void {
-  for (let index = 1; index <= columnCount; index += 1) {
-    row.getCell(index).fill = COMBINED_SHIPMENT_FILL
-  }
 }
 
 /**
@@ -113,8 +98,9 @@ export async function exportToCarrierExcel(
       }
     })
     const row = worksheet.addRow(rowData)
-    if (isCombinedShipmentRow(order)) {
-      fillWholeRow(row, template.columns.length)
+    const fill = getCombinedShipmentFill(order.shipmentGroupId)
+    if (fill) {
+      fillWholeRow(row, template.columns.length, fill)
     }
   }
 

@@ -275,6 +275,7 @@ export interface OrderRow {
   marketplaceName?: string | null
   connectionId?: string | null
   marketplaceOrderId: string
+  marketplaceStatus?: string | null
   marketplaceCollectionStatus?: MarketplaceCollectionStatus | null
   buyerName: string
   buyerPhone?: string | null

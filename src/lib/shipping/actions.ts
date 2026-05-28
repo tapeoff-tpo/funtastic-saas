@@ -12,7 +12,7 @@
 
 import { db } from '@/lib/db'
 import { orders, shipments } from '@/lib/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { createShipment } from './queries'
@@ -21,6 +21,14 @@ import { queueInvoiceUploadJob } from '@/lib/jobs/queues'
 import { logOrderChange } from '@/lib/orders/change-log'
 import { releaseShipmentGroupsWithConflictingShipments } from './combined-safety'
 import { isExchangeReshipOrder } from '@/lib/orders/exchange-reship'
+
+const INVOICE_EDITABLE_STATUSES = new Set(['confirmed', 'preparing'])
+const EXCHANGE_RESHIP_INVOICE_EDITABLE_STATUSES = new Set(['new', 'confirmed', 'preparing', 'ready'])
+
+function canRegisterInvoice(status: string, marketplaceStatus?: string | null) {
+  return INVOICE_EDITABLE_STATUSES.has(status)
+    || (isExchangeReshipOrder(marketplaceStatus) && EXCHANGE_RESHIP_INVOICE_EDITABLE_STATUSES.has(status))
+}
 
 /**
  * Queue a single invoice upload.
@@ -57,7 +65,7 @@ export async function queueInvoiceUpload(
     if (!order.connectionId) {
       return { success: false, error: '마켓 연동 정보가 없어 송장 전송을 예약할 수 없습니다.' }
     }
-    if (order.status !== 'confirmed') {
+    if (!canRegisterInvoice(order.status, order.marketplaceStatus)) {
       return { success: false, error: '확인 상태 주문만 송장 등록할 수 있습니다.' }
     }
     if (!order.mappedAt && !isExchangeReshipOrder(order.marketplaceStatus)) {
@@ -85,7 +93,7 @@ export async function queueInvoiceUpload(
       attempt: 1,
     })
 
-    if (order.status === 'confirmed') {
+    if (order.status === 'confirmed' || (isExchangeReshipOrder(order.marketplaceStatus) && order.status === 'new')) {
       await db
         .update(orders)
         .set({
@@ -93,7 +101,7 @@ export async function queueInvoiceUpload(
           preparingAt: new Date(),
           updatedAt: new Date(),
         })
-        .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
+        .where(and(eq(orders.id, orderId), eq(orders.userId, userId), inArray(orders.status, ['new', 'confirmed'])))
       await logOrderChange({
         orderId,
         userId,
@@ -146,7 +154,7 @@ export async function registerInvoice(
       if (!order) {
         throw new Error(`Order not found: ${orderId}`)
       }
-      if (order.status !== 'confirmed' && order.status !== 'preparing') {
+      if (!canRegisterInvoice(order.status, order.marketplaceStatus)) {
         throw new Error('확인/출고대기 상태 주문만 송장번호를 등록하거나 변경할 수 있습니다.')
       }
       if (!order.mappedAt && !isExchangeReshipOrder(order.marketplaceStatus)) {
@@ -178,7 +186,7 @@ export async function registerInvoice(
         })
       }
 
-      if (order.status === 'confirmed') {
+      if (order.status === 'confirmed' || (isExchangeReshipOrder(order.marketplaceStatus) && order.status === 'new')) {
         const updated = await tx
           .update(orders)
           .set({
@@ -186,7 +194,7 @@ export async function registerInvoice(
             preparingAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
+          .where(and(eq(orders.id, orderId), eq(orders.userId, userId), inArray(orders.status, ['new', 'confirmed'])))
           .returning({ id: orders.id })
 
         if (updated.length === 0) {

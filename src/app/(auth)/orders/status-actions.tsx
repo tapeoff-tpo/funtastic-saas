@@ -17,6 +17,7 @@ import {
 import { toast } from 'sonner'
 import { CARRIERS } from '@/lib/shipping/carrier-codes'
 import type { OrderRow } from './columns'
+import { isExchangeReshipOrder } from '@/lib/orders/exchange-reship'
 
 interface StatusDropdownProps {
   orderId: string
@@ -130,6 +131,12 @@ const CARRIER_LABELS: Record<string, string> = {
 }
 
 const INVOICE_EDITABLE_STATUSES = new Set<OrderStatus>(['confirmed', 'preparing'])
+const EXCHANGE_RESHIP_INVOICE_EDITABLE_STATUSES = new Set<OrderStatus>(['new', 'confirmed', 'preparing', 'ready'])
+
+function canEditInvoice(order: OrderRow) {
+  return INVOICE_EDITABLE_STATUSES.has(order.status)
+    || (isExchangeReshipOrder(order.marketplaceStatus) && EXCHANGE_RESHIP_INVOICE_EDITABLE_STATUSES.has(order.status))
+}
 
 export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoiceButtonProps) {
   const [open, setOpen] = useState(false)
@@ -137,7 +144,7 @@ export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoice
   const [trackingByOrderId, setTrackingByOrderId] = useState<Record<string, string>>({})
   const [isPending, startTransition] = useTransition()
   const selectedCount = selectedOrders.length
-  const invalidOrders = selectedOrders.filter((order) => !INVOICE_EDITABLE_STATUSES.has(order.status))
+  const invalidOrders = selectedOrders.filter((order) => !canEditInvoice(order))
 
   const handleOpen = () => {
     if (selectedCount === 0) {

@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs'
 
 import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
+import { COMBINED_SHIPMENT_FILL_ARGB } from '@/lib/shipping/excel/combined-fill'
 import type { CarrierTemplate } from '@/lib/shipping/types'
 
 function fillArgb(row: ExcelJS.Row, columnIndex = 1): string | undefined {
@@ -29,7 +30,7 @@ describe('combined shipment Excel row fill', () => {
       [
         { orderId: 'A-1', productName: 'First', shipmentGroupId: 'group-a' },
         { orderId: 'B-1', productName: 'Single' },
-        { orderId: 'A-2', productName: 'Second', shipmentGroupId: 'group-a' },
+        { orderId: 'A-2', productName: 'Second', shipmentGroupId: 'group-b' },
       ],
       template,
     )
@@ -38,8 +39,8 @@ describe('combined shipment Excel row fill', () => {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     const sheet = workbook.worksheets[0]
 
-    expect(fillArgb(sheet.getRow(2))).toBeTruthy()
-    expect(fillArgb(sheet.getRow(2))).toBe(fillArgb(sheet.getRow(4)))
+    expect(fillArgb(sheet.getRow(2))).toBe(COMBINED_SHIPMENT_FILL_ARGB)
+    expect(fillArgb(sheet.getRow(4))).toBe(COMBINED_SHIPMENT_FILL_ARGB)
     expect(fillArgb(sheet.getRow(3))).toBeUndefined()
     expect(fillArgb(sheet.getRow(2), 2)).toBe(fillArgb(sheet.getRow(2)))
   })
@@ -60,7 +61,7 @@ describe('combined shipment Excel row fill', () => {
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer)
     const sheet = workbook.worksheets[0]
 
-    expect(fillArgb(sheet.getRow(2))).toBeTruthy()
+    expect(fillArgb(sheet.getRow(2))).toBe(COMBINED_SHIPMENT_FILL_ARGB)
     expect(fillArgb(sheet.getRow(3))).toBeUndefined()
   })
 })

@@ -583,6 +583,37 @@ function scanStatusTitle(order: OrderRow): string {
   return parts.join(' · ')
 }
 
+function formatScannedAt(value: Date | string | null | undefined): string | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return format(date, 'MM-dd HH:mm')
+}
+
+function ScanCell({ order }: { order: OrderRow }) {
+  const scanMeta = scanStatusMeta(order.scanStatus)
+  const scannedAt = formatScannedAt(order.scannedAt)
+
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 text-[11px] leading-tight">
+      <span
+        className={`inline-flex h-5 w-fit max-w-full items-center truncate rounded border px-1.5 text-[10px] font-medium ${scanMeta.className}`}
+        title={scanStatusTitle(order)}
+      >
+        {scanMeta.label}
+      </span>
+      {scannedAt && (
+        <span
+          className="block truncate font-mono text-[10px] text-muted-foreground"
+          title={`스캔일시 ${format(new Date(order.scannedAt as Date | string), 'yyyy-MM-dd HH:mm')}`}
+        >
+          {scannedAt}
+        </span>
+      )}
+    </div>
+  )
+}
+
 function ClaimActionDropdown({
   claimId,
   claimType,
@@ -684,8 +715,6 @@ export const columns: ColumnDef<OrderRow>[] = [
         : STATUS_PILL_STYLES[order.status]
       const historicalClaimStatuses = (order.historicalClaimStatuses ?? [])
         .filter((status) => status !== primaryLabel)
-      const showScanStatus = order.status === 'preparing' || order.status === 'ready'
-      const scanMeta = scanStatusMeta(order.scanStatus)
       const collectionLabel = order.status === 'new' && order.marketplaceCollectionStatus
         ? MARKETPLACE_COLLECTION_STATUS_LABELS[order.marketplaceCollectionStatus]
         : null
@@ -718,14 +747,6 @@ export const columns: ColumnDef<OrderRow>[] = [
               </span>
             )}
           </div>
-          {showScanStatus && (
-            <span
-              className={`inline-flex h-5 w-fit max-w-full items-center truncate rounded border px-1.5 text-[10px] font-medium ${scanMeta.className}`}
-              title={scanStatusTitle(order)}
-            >
-              {scanMeta.label}
-            </span>
-          )}
           {collectionLabel && (
             <span
               className="inline-flex h-5 w-fit max-w-full items-center truncate rounded border border-cyan-200 bg-cyan-50 px-1.5 text-[10px] font-medium text-cyan-700"
@@ -777,6 +798,16 @@ export const columns: ColumnDef<OrderRow>[] = [
     size: 150,
     minSize: 112,
     maxSize: 340,
+  },
+
+  {
+    id: 'scan',
+    header: '스캔',
+    cell: ({ row }) => <ScanCell order={row.original} />,
+    enableSorting: false,
+    size: 82,
+    minSize: 76,
+    maxSize: 130,
   },
 
   // 쇼핑몰

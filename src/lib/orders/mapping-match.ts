@@ -48,6 +48,20 @@ export function isBlockedMappingSource(marketplaceId: string, marketplaceProduct
     || isLineSequenceMappingCandidate(marketplaceId, marketplaceProductId)
 }
 
+export function isBlockedMappingSourcePair(
+  marketplaceId: string,
+  marketplaceProductId: string,
+  marketplaceOptionId?: string | null,
+): boolean {
+  if (isBlockedMappingSource(marketplaceId, marketplaceProductId)) return true
+
+  // CJ order-line ids can be split as product=`002`, option=`001-001`.
+  // That pair still means "second row in this order", not a reusable product key.
+  return marketplaceId === 'cjonestyle'
+    && /^\d{3}$/.test(marketplaceProductId.trim())
+    && /^\d{3}-\d{3}$/.test((marketplaceOptionId ?? '').trim())
+}
+
 export type MappingSource = {
   marketplaceId: string
   marketplaceProductId: string

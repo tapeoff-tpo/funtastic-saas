@@ -12,7 +12,7 @@ import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { isBlockedMappingSource } from '@/lib/orders/mapping-match'
+import { isBlockedMappingSourcePair } from '@/lib/orders/mapping-match'
 
 interface SourceInput {
   marketplaceId: string
@@ -44,7 +44,11 @@ function normalizeMappingCode(rawCode: string): string {
 }
 
 function isBlockedSource(source: SourceInput): boolean {
-  return isBlockedMappingSource(source.marketplaceId, source.marketplaceProductId)
+  return isBlockedMappingSourcePair(
+    source.marketplaceId,
+    source.marketplaceProductId,
+    source.marketplaceOptionId,
+  )
 }
 
 export async function GET() {

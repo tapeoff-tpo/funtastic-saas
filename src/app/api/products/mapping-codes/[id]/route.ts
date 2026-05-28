@@ -12,7 +12,7 @@ import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq, and, sql } from 'drizzle-orm'
-import { isBlockedMappingSource } from '@/lib/orders/mapping-match'
+import { isBlockedMappingSourcePair } from '@/lib/orders/mapping-match'
 
 interface SourceInput {
   marketplaceId: string
@@ -37,7 +37,11 @@ interface UpdateBody {
 }
 
 function isBlockedSource(source: SourceInput): boolean {
-  return isBlockedMappingSource(source.marketplaceId, source.marketplaceProductId)
+  return isBlockedMappingSourcePair(
+    source.marketplaceId,
+    source.marketplaceProductId,
+    source.marketplaceOptionId,
+  )
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

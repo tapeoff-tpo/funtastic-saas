@@ -965,6 +965,7 @@ async function upsertOrder(
   userId: string
 ) {
   const rawData = enrichOrderRawData(order)
+  const enrichedOrder = withFallbackOrderFields(order, rawData)
   const insertStatus = collectedOrderStatus(order.status, order.marketplaceId)
   const updateStatus = collectedOrderUpdateStatus(order.status, order.marketplaceId)
   const marketplaceCollectionStatus = getMarketplaceCollectionStatus(order)
@@ -978,19 +979,19 @@ async function upsertOrder(
       marketplaceId: order.marketplaceId,
       marketplaceOrderId: order.marketplaceOrderId,
       status: insertStatus,
-      marketplaceStatus: order.marketplaceStatus,
+      marketplaceStatus: enrichedOrder.marketplaceStatus,
       marketplaceCollectionStatus,
-      buyerName: order.buyerName,
-      buyerPhone: order.buyerPhone,
-      buyerPhone2: order.buyerPhone2,
-      recipientName: order.recipientName,
-      recipientPhone: order.recipientPhone,
-      recipientPhone2: order.recipientPhone2,
-      shippingAddress: order.shippingAddress,
-      orderedAt: order.orderedAt,
-      totalAmount: String(order.totalAmount ?? 0),
-      shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
-      deliveryMessage: order.deliveryMessage ?? null,
+      buyerName: enrichedOrder.buyerName,
+      buyerPhone: enrichedOrder.buyerPhone,
+      buyerPhone2: enrichedOrder.buyerPhone2,
+      recipientName: enrichedOrder.recipientName,
+      recipientPhone: enrichedOrder.recipientPhone,
+      recipientPhone2: enrichedOrder.recipientPhone2,
+      shippingAddress: enrichedOrder.shippingAddress,
+      orderedAt: enrichedOrder.orderedAt,
+      totalAmount: String(enrichedOrder.totalAmount ?? 0),
+      shippingFee: enrichedOrder.shippingFee != null ? String(enrichedOrder.shippingFee) : null,
+      deliveryMessage: enrichedOrder.deliveryMessage ?? null,
       rawData,
       collectedAt: new Date(),
     })
@@ -1000,23 +1001,222 @@ async function upsertOrder(
       targetWhere: sql`is_copy = false`,
       set: {
         status: updateStatus,
-        marketplaceStatus: order.marketplaceStatus,
+        marketplaceStatus: enrichedOrder.marketplaceStatus,
         marketplaceCollectionStatus,
-        totalAmount: String(order.totalAmount ?? 0),
-        shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
-        buyerName: order.buyerName,
-        buyerPhone: order.buyerPhone,
-        buyerPhone2: order.buyerPhone2,
-        recipientName: order.recipientName,
-        recipientPhone: order.recipientPhone,
-        recipientPhone2: order.recipientPhone2,
-        shippingAddress: order.shippingAddress,
-        deliveryMessage: order.deliveryMessage ?? null,
+        totalAmount: String(enrichedOrder.totalAmount ?? 0),
+        shippingFee: enrichedOrder.shippingFee != null ? String(enrichedOrder.shippingFee) : null,
+        buyerName: enrichedOrder.buyerName,
+        buyerPhone: enrichedOrder.buyerPhone,
+        buyerPhone2: enrichedOrder.buyerPhone2,
+        recipientName: enrichedOrder.recipientName,
+        recipientPhone: enrichedOrder.recipientPhone,
+        recipientPhone2: enrichedOrder.recipientPhone2,
+        shippingAddress: enrichedOrder.shippingAddress,
+        deliveryMessage: enrichedOrder.deliveryMessage ?? null,
         rawData,
         updatedAt: new Date(),
       },
     })
     .returning({ id: orders.id, status: orders.status })
+}
+
+function cleanText(value: unknown): string | undefined {
+  if (value == null) return undefined
+  const text = String(value).trim()
+  return text && text !== '-' && text !== '--' ? text : undefined
+}
+
+function pickText(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    const text = cleanText(value)
+    if (text) return text
+  }
+  return undefined
+}
+
+function pickNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (value == null || value === '') continue
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+    if (typeof value === 'object' && value && 'units' in value) {
+      const units = Number((value as { units?: unknown }).units)
+      if (Number.isFinite(units)) return units
+    }
+    const parsed = Number(String(value).replaceAll(',', '').replace(/[^\d.-]/g, ''))
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return undefined
+}
+
+function recordAt(record: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = record[key]
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function firstRecordFromArray(value: unknown): Record<string, unknown> {
+  if (!Array.isArray(value)) return {}
+  const first = value.find((item) => item && typeof item === 'object' && !Array.isArray(item))
+  return first ? first as Record<string, unknown> : {}
+}
+
+function withFallbackOrderFields(order: NormalizedOrder, rawData: Record<string, unknown>): NormalizedOrder {
+  const orderer = recordAt(rawData, 'orderer')
+  const receiver = recordAt(rawData, 'receiver')
+  const buyer = recordAt(rawData, 'buyer')
+  const buyerInfo = recordAt(rawData, 'buyerInfo')
+  const consumer = recordAt(rawData, 'consumer')
+  const delivery = recordAt(rawData, 'delivery')
+  const shipment = recordAt(rawData, 'shipment')
+  const shipping = recordAt(rawData, 'shipping')
+  const shippingInfo = recordAt(rawData, 'shippingInfo')
+  const shippingSender = recordAt(shippingInfo, 'sender')
+  const shippingRecipient = recordAt(shippingInfo, 'recipient')
+  const destinationAddress = recordAt(shippingRecipient, 'destinationAddress')
+  const sabangnetRaw = recordAt(rawData, 'sabangnetRaw')
+  const firstRowRaw = recordAt(firstRecordFromArray(rawData.rows), 'raw')
+  const marketplaceRaw = Object.keys(sabangnetRaw).length > 0 ? sabangnetRaw : firstRowRaw
+  const firstRawItem = firstRecordFromArray(rawData.orderItems)
+  const fallbackRawItem = Object.keys(firstRawItem).length > 0 ? firstRawItem : firstRecordFromArray(rawData.items)
+
+  const buyerPhone = pickText(
+    order.buyerPhone,
+    orderer.ordererNumber,
+    orderer.safeNumber,
+    buyerInfo.buyerMobile,
+    buyerInfo.buyerPhone,
+    buyer.phone,
+    shippingSender.phoneNumber,
+    rawData.buyerPhone,
+    rawData.ordererPhone,
+    rawData.ordererTelephoneNo,
+    rawData.OrderHtel,
+    rawData.OrderTel,
+    rawData.SenderNo,
+    rawData.ordpeHpno,
+    rawData.ordpeTelno,
+    marketplaceRaw['주문자전화번호'],
+    marketplaceRaw['주문자연락처'],
+    marketplaceRaw['주문자핸드폰'],
+    marketplaceRaw['주문자휴대폰'],
+    marketplaceRaw['전화번호'],
+    marketplaceRaw['휴대폰'],
+  )
+  const recipientPhone = pickText(
+    order.recipientPhone,
+    receiver.receiverNumber,
+    receiver.safeNumber,
+    consumer.mobile,
+    consumer.phone,
+    shipping.phone,
+    shippingRecipient.phoneNumber,
+    rawData.recipientPhone,
+    rawData.receiverPhone,
+    rawData.recipientMobilePhoneNo,
+    rawData.recipientTelephoneNo,
+    rawData.RecipientHtel,
+    rawData.RecipientTel,
+    rawData.rcptpeHpno,
+    rawData.rcptpeTelno,
+    marketplaceRaw['수취인전화번호'],
+    marketplaceRaw['수취인연락처'],
+    marketplaceRaw['수취인핸드폰'],
+    marketplaceRaw['수취인휴대폰'],
+    marketplaceRaw['수령자전화번호'],
+    marketplaceRaw['수령자연락처'],
+    buyerPhone,
+  )
+  const buyerPhone2 = pickText(order.buyerPhone2, order.buyerPhone && order.buyerPhone !== buyerPhone ? order.buyerPhone : undefined)
+  const recipientPhone2 = pickText(order.recipientPhone2, order.recipientPhone && order.recipientPhone !== recipientPhone ? order.recipientPhone : undefined)
+  const shippingFee = order.shippingFee ?? pickNumber(
+    rawData.shippingFee,
+    rawData.shippingPrice,
+    rawData.deliveryFee,
+    rawData.customerResponsibilityCost,
+    delivery.fee,
+    shipment.shippingFee,
+    shipping.fee,
+    shippingInfo.shippingFee,
+    rawData.DelivPrice,
+    rawData.shppcst,
+    marketplaceRaw['배송비'],
+    marketplaceRaw['선결제배송비'],
+    marketplaceRaw['착불배송비'],
+  )
+  const totalAmount = order.totalAmount || pickNumber(
+    rawData.totalAmount,
+    rawData.paymentAmount,
+    rawData.paymentPrice,
+    rawData.orderAmount,
+    rawData.orderAmt,
+    rawData.orderAmtPay,
+    fallbackRawItem.orderPrice,
+    fallbackRawItem.salesPrice,
+    fallbackRawItem.paymentPrice,
+    rawData.Price,
+    rawData.SupplyPrice,
+    rawData.rlordAmt,
+    rawData.sellprc,
+    marketplaceRaw['최종결제금액'],
+    marketplaceRaw['결제금액'],
+    marketplaceRaw['판매가x수량'],
+    marketplaceRaw['판매가'],
+  ) || 0
+
+  return {
+    ...order,
+    buyerName: pickText(
+      order.buyerName,
+      orderer.name,
+      buyerInfo.buyerName,
+      buyer.companyName,
+      buyer.ownerName,
+      buyer.loginId,
+      rawData.ordererName,
+      rawData.buyerName,
+      rawData.OrderName,
+      rawData.Sender,
+      rawData.ordpeNm,
+      marketplaceRaw['주문자명'],
+    ) ?? order.buyerName,
+    buyerPhone,
+    buyerPhone2,
+    recipientName: pickText(
+      order.recipientName,
+      receiver.name,
+      consumer.name,
+      shipping.name,
+      shippingRecipient.name,
+      rawData.recipientName,
+      rawData.receiverName,
+      rawData.RecipientName,
+      rawData.rcptpeNm,
+      marketplaceRaw['수취인명'],
+      marketplaceRaw['수령자명'],
+    ) ?? order.recipientName,
+    recipientPhone,
+    recipientPhone2,
+    shippingAddress: {
+      zipCode: pickText(order.shippingAddress.zipCode, receiver.postCode, consumer.zipcode, shipping.zip, destinationAddress.postalCode, rawData.postalCode, rawData.RecipientZip, rawData.shpplocZipcd, marketplaceRaw['우편번호']) ?? '',
+      address1: pickText(order.shippingAddress.address1, receiver.addr1, consumer.address, shipping.address, destinationAddress.addr1, rawData.address, rawData.RecipientAddress, rawData.shpplocRoadAddr, rawData.shpplocAddr, rawData.shpplocBascAddr, marketplaceRaw['주소']) ?? '',
+      address2: pickText(order.shippingAddress.address2, receiver.addr2, shipping.addressDetail, destinationAddress.addr2, rawData.shpplocDtlAddr, marketplaceRaw['상세주소']) ?? undefined,
+    },
+    totalAmount,
+    shippingFee,
+    deliveryMessage: pickText(
+      order.deliveryMessage,
+      rawData.parcelPrintMessage,
+      rawData.deliveryNote,
+      shipping.memo,
+      consumer.deliReq,
+      rawData.Msg,
+      rawData.Note,
+      rawData.ordMemoCntt,
+      marketplaceRaw['배송메세지'],
+      marketplaceRaw['배송메시지'],
+      marketplaceRaw['물류메세지'],
+      marketplaceRaw['물류메시지'],
+    ) ?? null,
+  }
 }
 
 function mergeNormalizedOrdersByOrderId(ordersToMerge: NormalizedOrder[]): NormalizedOrder[] {

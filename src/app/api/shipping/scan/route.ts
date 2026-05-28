@@ -28,20 +28,6 @@ function normalizedTrackingNumberSql() {
   return sql<string>`regexp_replace(${shipments.trackingNumber}, '[^0-9A-Za-z]', '', 'g')`
 }
 
-function normalizeScanGroupText(value: unknown): string {
-  return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase()
-}
-
-function scanGroupAddressKey(value: unknown): string {
-  if (!value || typeof value !== 'object') return ''
-  const address = value as { zipCode?: unknown; address1?: unknown; address2?: unknown }
-  return [
-    normalizeScanGroupText(address.zipCode),
-    normalizeScanGroupText(address.address1),
-    normalizeScanGroupText(address.address2),
-  ].join('|')
-}
-
 export async function GET() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -106,9 +92,9 @@ export async function POST(req: NextRequest) {
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  // Look up all shipments for this tracking number. 묶음 기준은
-  // 마켓 + 마켓주문번호 + 운송장번호 + 택배사다. 같은 운송장번호라도
-  // 다른 마켓주문번호에 연결되어 있으면 자동 정상 처리하지 않는다.
+  // Look up all shipments for this tracking number. 등록된 송장번호는
+  // 여러 주문에 연결되어 있어도 함께 출고 처리한다. 취소/미발송/물류메세지
+  // 같은 명시적 보류 신호만 비정상으로 막는다.
   const shipmentSelect = {
     id: shipments.id,
     orderId: shipments.orderId,
@@ -119,13 +105,10 @@ export async function POST(req: NextRequest) {
     uploadStatus: shipments.uploadStatus,
     orderStatus: orders.status,
     isHeld: orders.isHeld,
+    logisticsMessage: orders.logisticsMessage,
     marketplaceStatus: orders.marketplaceStatus,
     marketplaceId: orders.marketplaceId,
     marketplaceOrderId: orders.marketplaceOrderId,
-    recipientName: orders.recipientName,
-    recipientPhone: orders.recipientPhone,
-    recipientPhone2: orders.recipientPhone2,
-    shippingAddress: orders.shippingAddress,
   }
 
   const exactTrackingShipments = await db
@@ -139,13 +122,10 @@ export async function POST(req: NextRequest) {
       uploadStatus: shipments.uploadStatus,
       orderStatus: orders.status,
       isHeld: orders.isHeld,
+      logisticsMessage: orders.logisticsMessage,
       marketplaceStatus: orders.marketplaceStatus,
       marketplaceId: orders.marketplaceId,
       marketplaceOrderId: orders.marketplaceOrderId,
-      recipientName: orders.recipientName,
-      recipientPhone: orders.recipientPhone,
-      recipientPhone2: orders.recipientPhone2,
-      shippingAddress: orders.shippingAddress,
     })
     .from(shipments)
     .innerJoin(orders, eq(orders.id, shipments.orderId))
@@ -188,41 +168,9 @@ export async function POST(req: NextRequest) {
   }
 
   const matchedTrackingNumber = normalizeTrackingNumber(matchingShipments[0]?.trackingNumber ?? scanValue)
-  const groupKey = (shipment: typeof matchingShipments[number]) =>
-    [
-      shipment.marketplaceId,
-      normalizeTrackingNumber(shipment.trackingNumber ?? scanValue),
-      shipment.carrierId,
-      normalizeScanGroupText(shipment.recipientName),
-      normalizeScanGroupText(shipment.recipientPhone2 || shipment.recipientPhone),
-      scanGroupAddressKey(shipment.shippingAddress),
-    ].join('::')
-  const groups = new Map<string, typeof matchingShipments>()
-  for (const shipment of matchingShipments) {
-    const key = groupKey(shipment)
-    groups.set(key, [...(groups.get(key) ?? []), shipment])
-  }
-
-  if (groups.size !== 1) {
-    await db.insert(scanLogs).values(
-      matchingShipments.map((shipment) => ({
-        userId: workspaceUserId,
-        shipmentId: shipment.id,
-        orderId: shipment.orderId,
-        trackingNumber: matchedTrackingNumber,
-        status: 'not_found',
-      })),
-    )
-    return NextResponse.json({
-      status: 'not_found',
-      message: '비정상입니다: 같은 송장번호가 여러 주문묶음에 연결되어 있습니다',
-      tts: '비정상입니다',
-    })
-  }
-
-  const groupedShipments = [...groups.values()][0]
+  const groupedShipments = matchingShipments
   const invalidGroup = groupedShipments.filter((shipment) =>
-    shipment.isHeld || shipment.orderStatus === 'cancelled',
+    shipment.isHeld || shipment.orderStatus === 'cancelled' || Boolean(shipment.logisticsMessage?.trim()),
   )
   if (invalidGroup.length > 0) {
     await db.insert(scanLogs).values(

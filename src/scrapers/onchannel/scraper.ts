@@ -185,13 +185,29 @@ async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise
 
   const button = root.getByRole('button', { name: pattern }).first()
   if (await button.isVisible().catch(() => false)) {
-    await button.click({ force: true, timeout: 15_000 })
-    return
+    const clicked = await button.click({ force: true, timeout: 15_000 }).then(() => true).catch(() => false)
+    if (clicked) return
+    const domClicked = await button.evaluate((element) => {
+      if (!(element instanceof HTMLElement)) return false
+      element.removeAttribute('disabled')
+      element.scrollIntoView({ block: 'center', inline: 'center' })
+      element.click()
+      return true
+    }).catch(() => false)
+    if (domClicked) return
   }
   const fallback = root.locator('button, input[type="button"], input[type="submit"], a.btn').filter({ hasText: pattern }).first()
   if (await fallback.isVisible().catch(() => false)) {
-    await fallback.click({ force: true, timeout: 15_000 })
-    return
+    const clicked = await fallback.click({ force: true, timeout: 15_000 }).then(() => true).catch(() => false)
+    if (clicked) return
+    const domClicked = await fallback.evaluate((element) => {
+      if (!(element instanceof HTMLElement)) return false
+      element.removeAttribute('disabled')
+      element.scrollIntoView({ block: 'center', inline: 'center' })
+      element.click()
+      return true
+    }).catch(() => false)
+    if (domClicked) return
   }
 
   const clicked = await root.locator('body, :scope').first().evaluate((element, source) => {

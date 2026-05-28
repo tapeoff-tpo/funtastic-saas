@@ -48,6 +48,12 @@ async function resolveOrderRawData(orderId: string): Promise<Record<string, unkn
   return (row?.rawData ?? null) as Record<string, unknown> | null
 }
 
+function firstInvoiceDetailIdx(rawData: Record<string, unknown> | null): string | null {
+  const details = rawData?.details as Array<{ DetailIdx?: string | number }> | undefined
+  const detailIdx = details?.find((detail) => detail.DetailIdx != null)?.DetailIdx
+  return detailIdx != null ? String(detailIdx) : null
+}
+
 /**
  * Process a single invoice upload job.
  *
@@ -60,10 +66,10 @@ export async function processInvoiceUpload(
     orderId,
     shipmentId,
     marketplaceId,
-    marketplaceOrderId,
     trackingNumber,
     carrierId,
   } = job.data
+  const marketplaceOrderId = job.data.marketplaceOrderId ?? job.data.orderId
 
   // 1. Mark as uploading
   await updateShipmentStatus(shipmentId, 'uploading')
@@ -79,10 +85,7 @@ export async function processInvoiceUpload(
   const rawData = await resolveOrderRawData(orderId)
   if (rawData) invoiceData.rawData = rawData
   if (marketplaceId === '10x10') {
-    const details = rawData?.details as Array<{ DetailIdx?: string | number }> | undefined
-    const detailIdx = details?.[0]?.DetailIdx != null
-      ? String(details[0].DetailIdx)
-      : await resolveTenByTenDetailIdx(orderId)
+    const detailIdx = firstInvoiceDetailIdx(rawData) ?? await resolveTenByTenDetailIdx(orderId)
     if (detailIdx) invoiceData.detailIdx = detailIdx
   }
 

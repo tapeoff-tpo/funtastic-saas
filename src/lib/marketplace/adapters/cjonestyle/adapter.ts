@@ -50,6 +50,11 @@ function cjOrderLineId(row: CjOnestyleDeliveryOrder): string {
   return parts.join('-')
 }
 
+function twoDigitText(value: unknown): string | null {
+  const text = String(value ?? '').trim()
+  return /^\d{2}$/.test(text) ? text : null
+}
+
 async function extractCjOnestyleError(error: unknown): Promise<string> {
   if (error instanceof HTTPError) {
     const body = await error.response.text().catch(() => '')
@@ -141,7 +146,12 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
   async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     try {
       const rawData = invoice.rawData as Record<string, unknown> | undefined
-      const carrierCode = mapCarrierCode('cjonestyle', invoice.carrierId)
+      const carrierCode = twoDigitText(rawData?.courierCompany)
+        ?? twoDigitText(mapCarrierCode('cjonestyle', invoice.carrierId))
+        ?? '22'
+      const deliveryLocation1 = twoDigitText(rawData?.deliveryLocation1)
+        ?? twoDigitText(rawData?.deliveryLocation2)
+        ?? '01'
       const response = await this.client.post('delivery/setTakeOutReg', {
         json: {
           orderNo: String(rawData?.orderNo ?? orderId).split('-')[0],
@@ -151,7 +161,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
           courierCompany: carrierCode,
           waybillNo: invoice.trackingNumber,
           waybillIdentifierNo: String(rawData?.waybillIdentifierNo ?? ''),
-          deliveryLocation1: String(rawData?.deliveryLocation1 ?? ''),
+          deliveryLocation1,
         },
       }).json<CjOnestyleStandardResponse>()
 

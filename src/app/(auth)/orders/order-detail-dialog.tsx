@@ -149,6 +149,15 @@ interface Props {
   onOpenChange: (open: boolean) => void
 }
 
+interface ProductSearchResult {
+  id: string
+  internalSku: string
+  name: string
+  optionName?: string | null
+  optionHint?: string | null
+  availableStock?: number | null
+}
+
 /** yyyy-MM-dd HH:mm:ss 포맷 (없으면 '-') */
 function fmtDateTime(value: string | Date | null | undefined): string {
   if (!value) return '-'
@@ -176,10 +185,13 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
   const [editingItems, setEditingItems] = useState(false)
   const [savingItems, setSavingItems] = useState(false)
   const [itemDrafts, setItemDrafts] = useState<Record<string, {
+    sku: string
     productName: string
     optionName: string
     quantity: number
   }>>({})
+  const [itemSearchTerms, setItemSearchTerms] = useState<Record<string, string>>({})
+  const [itemSearchResults, setItemSearchResults] = useState<Record<string, ProductSearchResult[]>>({})
   const router = useRouter()
 
   useEffect(() => {
@@ -204,6 +216,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
     setItemDrafts(Object.fromEntries(order.items.map((item) => [
       item.id,
       {
+        sku: item.sku ?? '',
         productName: item.displayName ?? item.productName,
         optionName: item.displayOptionName ?? item.optionText ?? '',
         quantity: item.quantity,
@@ -211,11 +224,13 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
     ])))
     setEditingItems(false)
     setSavingItems(false)
+    setItemSearchTerms({})
+    setItemSearchResults({})
   }, [order])
 
   const updateItemDraft = (
     itemId: string,
-    patch: Partial<{ productName: string; optionName: string; quantity: number }>,
+    patch: Partial<{ sku: string; productName: string; optionName: string; quantity: number }>,
   ) => {
     setItemDrafts((prev) => ({
       ...prev,
@@ -224,6 +239,34 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
         ...patch,
       },
     }))
+  }
+
+  const searchProductsForItem = async (itemId: string, query: string) => {
+    const q = query.trim()
+    setItemSearchTerms((prev) => ({ ...prev, [itemId]: query }))
+    if (!q) {
+      setItemSearchResults((prev) => ({ ...prev, [itemId]: [] }))
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/products/search?q=${encodeURIComponent(q)}&mode=option`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json() as { results?: ProductSearchResult[] }
+      setItemSearchResults((prev) => ({ ...prev, [itemId]: data.results ?? [] }))
+    } catch {
+      setItemSearchResults((prev) => ({ ...prev, [itemId]: [] }))
+    }
+  }
+
+  const selectProductForItem = (itemId: string, product: ProductSearchResult) => {
+    updateItemDraft(itemId, {
+      sku: product.internalSku,
+      productName: product.name,
+      optionName: product.optionName ?? product.optionHint ?? '',
+    })
+    setItemSearchTerms((prev) => ({ ...prev, [itemId]: product.internalSku }))
+    setItemSearchResults((prev) => ({ ...prev, [itemId]: [] }))
   }
 
   const saveItemDrafts = async () => {
@@ -235,7 +278,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
         productName: draft?.productName ?? item.displayName ?? item.productName,
         optionName: draft?.optionName ?? item.displayOptionName ?? item.optionText ?? '',
         quantity: draft?.quantity ?? item.quantity,
-        sku: item.sku ?? '',
+        sku: draft?.sku ?? item.sku ?? '',
       }
     })
     const invalid = payload.find((item) => !item.productName.trim() || !Number.isInteger(item.quantity) || item.quantity < 1)
@@ -441,11 +484,14 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                             setItemDrafts(Object.fromEntries(order.items.map((item) => [
                               item.id,
                               {
+                                sku: item.sku ?? '',
                                 productName: item.displayName ?? item.productName,
                                 optionName: item.displayOptionName ?? item.optionText ?? '',
                                 quantity: item.quantity,
                               },
                             ])))
+                            setItemSearchTerms({})
+                            setItemSearchResults({})
                           }}
                           disabled={savingItems}
                           className="rounded border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
@@ -487,7 +533,33 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                               확정상품명
                             </span>
                             {editingItems ? (
-                              <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,0.9fr)_80px]">
+                              <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_minmax(0,0.9fr)_80px]">
+                                <div className="relative">
+                                  <input
+                                    value={itemSearchTerms[item.id] ?? itemDrafts[item.id]?.sku ?? ''}
+                                    onChange={(event) => void searchProductsForItem(item.id, event.target.value)}
+                                    className="h-8 w-full rounded border px-2 font-mono text-sm"
+                                    placeholder="코드/상품명 검색"
+                                  />
+                                  {(itemSearchResults[item.id]?.length ?? 0) > 0 && (
+                                    <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-48 overflow-auto rounded border bg-white shadow-lg">
+                                      {itemSearchResults[item.id].map((product) => (
+                                        <button
+                                          key={`${item.id}-${product.internalSku}`}
+                                          type="button"
+                                          onClick={() => selectProductForItem(item.id, product)}
+                                          className="block w-full border-b px-2 py-1.5 text-left text-xs hover:bg-muted last:border-b-0"
+                                        >
+                                          <span className="block truncate font-mono">{product.internalSku}</span>
+                                          <span className="block truncate">{product.name}</span>
+                                          <span className="block truncate text-[10px] text-muted-foreground">
+                                            {product.optionName ?? product.optionHint ?? '-'} · 재고 {product.availableStock ?? '-'}
+                                          </span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
                                 <input
                                   value={itemDrafts[item.id]?.productName ?? ''}
                                   onChange={(event) => updateItemDraft(item.id, { productName: event.target.value })}

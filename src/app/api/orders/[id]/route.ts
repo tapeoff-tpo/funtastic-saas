@@ -111,9 +111,11 @@ export async function PATCH(
       productName: orderItems.productName,
       optionText: orderItems.optionText,
       quantity: orderItems.quantity,
+      sku: orderItems.sku,
       lockedProductName: orderItems.lockedProductName,
       lockedOptionName: orderItems.lockedOptionName,
       lockedQuantity: orderItems.lockedQuantity,
+      lockedSku: orderItems.lockedSku,
     })
     .from(orderItems)
     .where(and(eq(orderItems.orderId, id), inArray(orderItems.id, itemIds)))
@@ -130,6 +132,7 @@ export async function PATCH(
       productName: existing.lockedProductName ?? existing.productName,
       optionName: existing.lockedOptionName ?? existing.optionText,
       quantity: existing.lockedQuantity ?? existing.quantity,
+      sku: existing.lockedSku ?? existing.sku,
     }
   })
   const after = normalized.map((item) => ({

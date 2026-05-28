@@ -87,10 +87,6 @@ export function DataTable({
     for (const key of ['status', 'claimType', 'cancel', 'held', 'tab', 'page', 'mapping', 'scan', 'scanResult']) {
       params.delete(key)
     }
-    params.delete('dateField')
-    params.delete('dateFrom')
-    params.delete('dateTo')
-    params.set('datePreset', 'all')
     if (tab === 'cancel') {
       params.set('cancel', 'true')
     } else {

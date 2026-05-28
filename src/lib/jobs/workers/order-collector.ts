@@ -217,7 +217,7 @@ function shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId: string
   ]).has(marketplaceId)
 }
 
-function marketplaceShippingPrepStatus(marketplaceId: string): string {
+export function marketplaceShippingPrepStatus(marketplaceId: string): string {
   if (marketplaceId === '10x10') return '6'
   if (marketplaceId === 'cafe24') return 'N20'
   if (marketplaceId === 'cjonestyle') return '배송지시확인'

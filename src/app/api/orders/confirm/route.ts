@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 import { orders, marketplaceConnections } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { readCredential } from '@/lib/supabase/admin'
-import { createAdapter } from '@/lib/jobs/workers/order-collector'
+import { createAdapter, marketplaceShippingPrepStatus } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import '@/lib/marketplace/adapters/configs'
@@ -234,7 +234,8 @@ export async function POST(request: NextRequest) {
           .update(orders)
           .set({
             status: 'confirmed',
-            marketplaceStatus: 'CONFIRMED',
+            marketplaceStatus: marketplaceShippingPrepStatus(marketplaceId),
+            marketplaceCollectionStatus: 'ready',
             updatedAt: new Date(),
           })
           .where(eq(orders.id, order.id))
@@ -246,7 +247,7 @@ export async function POST(request: NextRequest) {
           title: '확정',
           description: '매핑완료 신규 주문이 확인 상태로 이동했습니다.',
           before: { status: order.status },
-          after: { status: 'confirmed', marketplaceStatus: 'CONFIRMED' },
+          after: { status: 'confirmed', marketplaceStatus: marketplaceShippingPrepStatus(marketplaceId) },
         })
 
         results.push({

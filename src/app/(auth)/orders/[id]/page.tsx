@@ -103,7 +103,7 @@ export default async function OrderDetailPage({
         return !min || t < min ? t : min
       }, null)
     : null
-  const completedClaims = claimList.filter((c) => c.claimStatus === 'completed')
+  const completedClaims = claimList.filter((c) => c.claimType === 'cancel' || c.claimStatus === 'completed')
   const claimCompletedAt = completedClaims.length > 0
     ? completedClaims.reduce<Date | null>((max, c) => {
         const t = new Date(c.updatedAt)

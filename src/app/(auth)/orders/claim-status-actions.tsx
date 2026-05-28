@@ -78,8 +78,9 @@ export function ClaimStatusActions({
   const [reasonSaving, setReasonSaving] = useState(false)
   const [, startTransition] = useTransition()
 
-  const nextStates = NEXT_STATES[claimStatus]
-  const canWithdraw = claimStatus === 'requested' || claimStatus === 'processing'
+  const isCancelClaim = claimType === 'cancel'
+  const nextStates = isCancelClaim ? [] : NEXT_STATES[claimStatus]
+  const canWithdraw = !isCancelClaim && (claimStatus === 'requested' || claimStatus === 'processing')
   const canCompletePickup = claimStatus !== 'completed'
     && (claimType === 'return' || (claimType === 'exchange' && (reason?.includes('회수준비') || reason?.includes('접수'))))
 
@@ -216,12 +217,16 @@ export function ClaimStatusActions({
         <Badge variant="outline" className={`text-xs ${TYPE_STYLES[claimType]}`}>
           {TYPE_LABELS[claimType]}
         </Badge>
-        <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_STYLES[claimStatus]}`}>
-          {STATUS_LABELS[claimStatus]}
-        </span>
+        {!isCancelClaim && (
+          <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${STATUS_STYLES[claimStatus]}`}>
+            {STATUS_LABELS[claimStatus]}
+          </span>
+        )}
       </div>
       <div className="mt-2 rounded-md border bg-muted/30 px-3 py-2">
-        <div className="mb-2 text-[11px] font-medium text-muted-foreground">접수 사유 이력</div>
+        <div className="mb-2 text-[11px] font-medium text-muted-foreground">
+          {isCancelClaim ? '취소 사유 이력' : '접수 사유 이력'}
+        </div>
         {savedRequestReasonHistory.length === 0 ? (
           <div className="text-sm text-foreground">등록된 접수 사유가 없습니다.</div>
         ) : (
@@ -241,7 +246,7 @@ export function ClaimStatusActions({
         <textarea
           value={requestReasonInput}
           onChange={(event) => setRequestReasonInput(event.target.value)}
-          placeholder="접수 사유를 입력하세요."
+          placeholder={isCancelClaim ? '취소 사유를 입력하세요.' : '접수 사유를 입력하세요.'}
           className="h-20 w-full resize-none rounded-md border px-3 py-2 text-sm"
         />
         <div className="flex justify-end">
@@ -251,7 +256,7 @@ export function ClaimStatusActions({
             disabled={reasonSaving}
             className="rounded border px-3 py-1.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {reasonSaving ? '저장 중' : '접수 사유 저장'}
+            {reasonSaving ? '저장 중' : isCancelClaim ? '취소 사유 저장' : '접수 사유 저장'}
           </button>
         </div>
       </div>

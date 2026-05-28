@@ -14,6 +14,8 @@ import { eq, and } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import type { ClaimStatus } from './types'
+import { isValidTransition } from './types'
+import { updateOrderStatus } from './actions'
 
 type ActionResult = { success: boolean; error?: string }
 
@@ -35,6 +37,38 @@ export async function updateClaimStatus(
   }
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
+
+  if (status === 'completed') {
+    const [claim] = await db
+      .select({
+        id: claims.id,
+        orderId: claims.orderId,
+        claimType: claims.claimType,
+        orderStatus: orders.status,
+      })
+      .from(claims)
+      .innerJoin(orders, eq(orders.id, claims.orderId))
+      .where(and(
+        eq(claims.id, claimId),
+        eq(claims.userId, workspaceUserId),
+        eq(orders.userId, workspaceUserId),
+      ))
+      .limit(1)
+
+    if (!claim) {
+      return { success: false, error: 'Claim not found or access denied' }
+    }
+
+    if (claim.claimType === 'cancel' && claim.orderStatus !== 'cancelled') {
+      if (!isValidTransition(claim.orderStatus, 'cancelled')) {
+        return { success: false, error: '이 주문은 취소로 변경할 수 없는 상태입니다.' }
+      }
+      const statusResult = await updateOrderStatus(claim.orderId, 'cancelled')
+      if (!statusResult.success) {
+        return { success: false, error: statusResult.error ?? '주문 취소 처리 실패' }
+      }
+    }
+  }
 
   const [updated] = await db
     .update(claims)

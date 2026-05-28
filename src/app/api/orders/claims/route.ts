@@ -3,10 +3,11 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
-import type { ClaimType } from '@/lib/orders/types'
+import { isValidTransition, type ClaimType } from '@/lib/orders/types'
 import { copyOrder } from '@/lib/orders/copy-order'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { logOrderChange } from '@/lib/orders/change-log'
+import { updateOrderStatus } from '@/lib/orders/actions'
 
 const VALID_TYPES = ['cancel', 'return', 'exchange'] as const
 const CLAIM_LABELS: Record<ClaimType, string> = {
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
       marketplaceId: orders.marketplaceId,
       marketplaceOrderId: orders.marketplaceOrderId,
       internalNo: orders.internalNo,
+      status: orders.status,
     })
     .from(orders)
     .where(and(eq(orders.id, body.orderId), eq(orders.userId, workspaceUserId)))
@@ -80,7 +82,8 @@ export async function POST(req: NextRequest) {
   const reason = detail ? `${reasonLabel} - ${detail}` : reasonLabel
   const reasonRegisteredAt = new Date().toISOString()
   const claimLabel = CLAIM_LABELS[body.claimType]
-  const claimRequestedStatus = `${claimLabel}접수`
+  const claimStatus = body.claimType === 'cancel' ? 'completed' : 'requested'
+  const claimDisplayStatus = body.claimType === 'cancel' ? claimLabel : `${claimLabel}접수`
   const marketplaceClaimId = `manual-${body.claimType}-${order.id}-${Date.now()}`
 
   const [existingClaim] = await db
@@ -97,6 +100,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '이미 접수된 클레임입니다.' }, { status: 409 })
   }
 
+  if (
+    body.claimType === 'cancel' &&
+    order.status !== 'cancelled' &&
+    !isValidTransition(order.status, 'cancelled')
+  ) {
+    return NextResponse.json({ error: '이 주문은 취소로 변경할 수 없는 상태입니다.' }, { status: 400 })
+  }
+
   const [created] = await db
     .insert(claims)
     .values({
@@ -105,8 +116,8 @@ export async function POST(req: NextRequest) {
       marketplaceId: order.marketplaceId,
       marketplaceClaimId,
       claimType: body.claimType,
-      claimStatus: 'requested',
-      reason: claimRequestedStatus,
+      claimStatus,
+      reason: claimDisplayStatus,
       rawData: {
         source: 'manual',
         marketplaceOrderId: order.marketplaceOrderId,
@@ -124,7 +135,7 @@ export async function POST(req: NextRequest) {
   await db
     .update(orders)
     .set({
-      marketplaceStatus: claimRequestedStatus,
+      marketplaceStatus: claimDisplayStatus,
       logisticsMessage: null,
       isHeld: false,
       holdReason: null,
@@ -138,15 +149,22 @@ export async function POST(req: NextRequest) {
     userId: workspaceUserId,
     actorId: user.id,
     action: 'claim.created',
-    title: `${claimLabel} 접수`,
+    title: body.claimType === 'cancel' ? claimLabel : `${claimLabel} 접수`,
     description: reason,
     after: {
       claimType: body.claimType,
-      claimStatus: 'requested',
-      marketplaceStatus: claimRequestedStatus,
+      claimStatus,
+      marketplaceStatus: claimDisplayStatus,
     },
     metadata: { claimId: created.id, quantities: claimQuantities },
   })
+
+  if (body.claimType === 'cancel' && order.status !== 'cancelled') {
+    const statusResult = await updateOrderStatus(order.id, 'cancelled')
+    if (!statusResult.success) {
+      return NextResponse.json({ error: statusResult.error ?? '주문 취소 처리 실패' }, { status: 400 })
+    }
+  }
 
   const copies: Array<{ id: string; kind: 'return-pickup' | 'exchange-pickup' | 'exchange-reship' }> = []
   if (body.claimType === 'return') {

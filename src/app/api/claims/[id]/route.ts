@@ -10,6 +10,8 @@ import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
 import { completeReturnClaim, getReturnableItemsForClaim } from '@/lib/inventory/actions'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { updateOrderStatus } from '@/lib/orders/actions'
+import { isValidTransition } from '@/lib/orders/types'
 
 const VALID_STATUSES = ['requested', 'processing', 'completed', 'rejected', 'withdrawn'] as const
 type ClaimStatus = (typeof VALID_STATUSES)[number]
@@ -115,6 +117,38 @@ export async function PATCH(
       { error: `유효한 상태: ${VALID_STATUSES.join(', ')}` },
       { status: 400 },
     )
+  }
+
+  if (body.claimStatus === 'completed') {
+    const [claim] = await db
+      .select({
+        id: claims.id,
+        orderId: claims.orderId,
+        claimType: claims.claimType,
+        orderStatus: orders.status,
+      })
+      .from(claims)
+      .innerJoin(orders, eq(orders.id, claims.orderId))
+      .where(and(
+        eq(claims.id, id),
+        eq(claims.userId, workspaceUserId),
+        eq(orders.userId, workspaceUserId),
+      ))
+      .limit(1)
+
+    if (!claim) {
+      return NextResponse.json({ error: '클레임을 찾을 수 없습니다.' }, { status: 404 })
+    }
+
+    if (claim.claimType === 'cancel' && claim.orderStatus !== 'cancelled') {
+      if (!isValidTransition(claim.orderStatus, 'cancelled')) {
+        return NextResponse.json({ error: '이 주문은 취소로 변경할 수 없는 상태입니다.' }, { status: 400 })
+      }
+      const statusResult = await updateOrderStatus(claim.orderId, 'cancelled')
+      if (!statusResult.success) {
+        return NextResponse.json({ error: statusResult.error ?? '주문 취소 처리 실패' }, { status: 400 })
+      }
+    }
   }
 
   if (body.claimStatus === 'completed' && body.returnCompletion) {

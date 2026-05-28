@@ -535,6 +535,7 @@ const CLAIM_TYPE_LABELS: Record<ClaimType, string> = {
 }
 
 function claimSummaryLabel(order: OrderRow): string | null {
+  if (order.claimType === 'cancel') return '취소'
   if (order.claimReason && /^(취소|반품|교환)/.test(order.claimReason)) {
     return order.claimReason
   }

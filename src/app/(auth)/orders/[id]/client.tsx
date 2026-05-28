@@ -63,16 +63,18 @@ function ClaimList({ claims, typeLabels, statusLabels }: ClaimListProps) {
               <span className="rounded border border-orange-300 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700">
                 {typeLabels[c.claimType] ?? c.claimType}
               </span>
-              <span className="rounded bg-muted px-2 py-0.5 text-xs">
-                {statusLabels[c.claimStatus] ?? c.claimStatus}
-              </span>
+              {c.claimType !== 'cancel' && (
+                <span className="rounded bg-muted px-2 py-0.5 text-xs">
+                  {statusLabels[c.claimStatus] ?? c.claimStatus}
+                </span>
+              )}
             </div>
             <span className="text-xs text-muted-foreground">
               {format(new Date(c.requestedAt), 'yyyy-MM-dd HH:mm')}
             </span>
           </div>
           {c.reason && <p className="text-muted-foreground">{c.reason}</p>}
-          {CLAIM_STATUS_FLOW[c.claimStatus]?.length > 0 && (
+          {c.claimType !== 'cancel' && CLAIM_STATUS_FLOW[c.claimStatus]?.length > 0 && (
             <div className="mt-3 flex gap-2">
               {CLAIM_STATUS_FLOW[c.claimStatus].map((next) => (
                 <button

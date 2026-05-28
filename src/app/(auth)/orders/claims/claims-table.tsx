@@ -43,6 +43,7 @@ function ClaimRow({ claim }: { claim: ClaimWithOrder }) {
   const [memo, setMemo] = useState(claim.reason ?? '')
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
+  const isCancelClaim = claim.claimType === 'cancel'
 
   function handleStatusUpdate(status: ClaimStatus) {
     startTransition(async () => {
@@ -101,7 +102,7 @@ function ClaimRow({ claim }: { claim: ClaimWithOrder }) {
             CLAIM_STATUS_STYLES[claim.claimStatus] ?? 'bg-gray-100 text-gray-700'
           }`}
         >
-          {CLAIM_STATUS_LABELS[claim.claimStatus] ?? claim.claimStatus}
+          {isCancelClaim ? '취소' : CLAIM_STATUS_LABELS[claim.claimStatus] ?? claim.claimStatus}
         </span>
       </td>
 
@@ -124,7 +125,7 @@ function ClaimRow({ claim }: { claim: ClaimWithOrder }) {
       {/* 액션 */}
       <td className="px-3 py-3">
         <div className="flex flex-col gap-1">
-          {claim.claimStatus !== 'processing' && (
+          {!isCancelClaim && claim.claimStatus !== 'processing' && (
             <button
               type="button"
               onClick={() => handleStatusUpdate('processing')}
@@ -134,7 +135,7 @@ function ClaimRow({ claim }: { claim: ClaimWithOrder }) {
               처리중
             </button>
           )}
-          {claim.claimStatus !== 'completed' && (
+          {!isCancelClaim && claim.claimStatus !== 'completed' && (
             <button
               type="button"
               onClick={() => handleStatusUpdate('completed')}
@@ -144,7 +145,7 @@ function ClaimRow({ claim }: { claim: ClaimWithOrder }) {
               완료
             </button>
           )}
-          {claim.claimStatus !== 'rejected' && (
+          {!isCancelClaim && claim.claimStatus !== 'rejected' && (
             <button
               type="button"
               onClick={() => handleStatusUpdate('rejected')}

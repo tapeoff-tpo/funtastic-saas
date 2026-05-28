@@ -144,7 +144,7 @@ function getSalesStatusLabel(status: string): string {
     shipped: '출고완료',
     delivering: '배송중',
     delivered: '배송완료',
-    cancelled: '취소완료',
+    cancelled: '취소',
   }
   return labels[status] ?? status
 }

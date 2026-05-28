@@ -328,7 +328,11 @@ function getOrderHistoricalClaimStatuses(order: typeof orders.$inferSelect): str
     const status = (raw as { 주문상태?: unknown }).주문상태
     if (typeof status !== 'string') continue
     const trimmed = status.trim()
-    if (/^(취소|반품|교환)/.test(trimmed)) statuses.add(trimmed)
+    if (/^취소/.test(trimmed)) {
+      statuses.add('취소')
+    } else if (/^(반품|교환)/.test(trimmed)) {
+      statuses.add(trimmed)
+    }
   }
   return [...statuses].sort((a, b) => a.localeCompare(b, 'ko'))
 }

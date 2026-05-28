@@ -110,7 +110,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .limit(1)
   if (!existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
   if (body.sources?.some(isBlockedSource)) {
-    return NextResponse.json({ error: '온채널 주문번호(MO_...)는 상품 매핑키로 저장할 수 없습니다. 상품코드 또는 자체코드로 매핑해 주세요.' }, { status: 400 })
+    return NextResponse.json({ error: '주문번호/주문행번호는 상품 매핑키로 저장할 수 없습니다. 실제 상품코드 또는 자체코드로 매핑해 주세요.' }, { status: 400 })
   }
 
   try {

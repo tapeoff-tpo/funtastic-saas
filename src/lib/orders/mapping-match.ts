@@ -20,18 +20,30 @@ const ORDER_NUMBER_MAPPING_PATTERNS: Partial<Record<string, RegExp[]>> = {
   onchannel: [/^MO_\d+$/i],
 }
 
+const LINE_SEQUENCE_MAPPING_PATTERNS: Partial<Record<string, RegExp[]>> = {
+  cjonestyle: [/^\d{3}-\d{3}-\d{3}$/],
+}
+
 export function isOrderNumberMappingCandidate(marketplaceId: string, candidateId: string): boolean {
   const patterns = ORDER_NUMBER_MAPPING_PATTERNS[marketplaceId] ?? []
   const normalized = candidateId.trim()
   return normalized.length > 0 && patterns.some((pattern) => pattern.test(normalized))
 }
 
+export function isLineSequenceMappingCandidate(marketplaceId: string, candidateId: string): boolean {
+  const patterns = LINE_SEQUENCE_MAPPING_PATTERNS[marketplaceId] ?? []
+  const normalized = candidateId.trim()
+  return normalized.length > 0 && patterns.some((pattern) => pattern.test(normalized))
+}
+
 export function isIgnoredMappingCandidate(marketplaceId: string, candidateId: string): boolean {
   return isOrderNumberMappingCandidate(marketplaceId, candidateId)
+    || isLineSequenceMappingCandidate(marketplaceId, candidateId)
 }
 
 export function isBlockedMappingSource(marketplaceId: string, marketplaceProductId: string): boolean {
   return isOrderNumberMappingCandidate(marketplaceId, marketplaceProductId)
+    || isLineSequenceMappingCandidate(marketplaceId, marketplaceProductId)
 }
 
 export type MappingSource = {
@@ -75,9 +87,8 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
   if (!record) return []
 
   const keys = [
-    'vendorItemCode',
     'itemCode',
-    'optionCode',
+    'vendorItemCode',
     'affiliateItemCode',
     'productCode',
     'goodsCode',
@@ -88,6 +99,7 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
     'sellerItemCode',
     'marketplaceProductId',
     'marketplaceItemId',
+    'optionCode',
   ]
 
   const values = keys

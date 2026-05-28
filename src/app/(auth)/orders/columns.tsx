@@ -317,6 +317,8 @@ export interface OrderRow {
   items: {
     id: string
     marketplaceItemId?: string | null
+    mappingProductId?: string | null
+    mappingOptionId?: string | null
     productName: string
     /** Phase 8 — product_name_mappings.display_name (null → fallback to productName) */
     displayName?: string | null

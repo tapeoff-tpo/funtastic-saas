@@ -45,6 +45,8 @@ interface MappingTarget {
   marketplaceId: string
   marketplaceOrderId: string
   marketplaceItemId: string
+  mappingProductId: string | null
+  mappingOptionId: string | null
   sku: string | null
   productName: string
   optionText: string | null
@@ -693,6 +695,8 @@ export function ShippingActions({
           marketplaceId: order.marketplaceId,
           marketplaceOrderId: order.marketplaceOrderId,
           marketplaceItemId: item.marketplaceItemId!,
+          mappingProductId: item.mappingProductId ?? null,
+          mappingOptionId: item.mappingOptionId ?? null,
           sku: item.sku ?? null,
           productName: item.productName,
           optionText: item.optionText,
@@ -1303,6 +1307,12 @@ function splitProductOption(itemId: string): { product: string; option: string }
 
 function getMappingTargetSource(target: MappingTarget): { product: string; option: string } {
   const split = splitProductOption(target.marketplaceItemId)
+  if (target.mappingProductId?.trim()) {
+    return {
+      product: target.mappingProductId.trim(),
+      option: target.mappingOptionId?.trim() || target.optionText?.trim() || EXACT_OPTION_ID,
+    }
+  }
   return {
     product: target.marketplaceId === 'funtastic-b2b' && target.sku?.trim()
       ? target.sku.trim()

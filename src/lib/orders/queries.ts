@@ -967,6 +967,8 @@ export async function getOrders(filters: OrderFilters = {}) {
     id: r.id,
     orderId: r.orderId,
     marketplaceItemId: r.marketplaceItemId,
+    mappingProductId: getRawMappingCandidateIds(r.orderRawData)[0] ?? null,
+    mappingOptionId: r.optionText?.trim().slice(0, 100) || null,
     productName: r.productName,
     optionText: r.optionText,
     quantity: r.quantity,

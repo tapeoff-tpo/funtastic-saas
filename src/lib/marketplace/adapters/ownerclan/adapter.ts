@@ -8,6 +8,7 @@ import type {
   InvoiceData,
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
+import { getCarrierName, mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import { createOwnerclanClient } from './client'
 import { mapOwnerclanStatus } from './status-map'
 import type {
@@ -100,6 +101,21 @@ const CHECK_ORDER_MUTATION = `
     checkOrder(key: $key) {
       key
       status
+    }
+  }
+`
+
+const SET_TRACKING_INFO_MUTATION = `
+  mutation OwnerclanSetTrackingInfo($key: ID!, $input: TrackingInfoInput!) {
+    setTrackingInfo(key: $key, input: $input) {
+      key
+      status
+      products {
+        trackingNumber
+        shippingCompanyCode
+        shippingCompanyName
+        shippedDate
+      }
     }
   }
 `
@@ -304,12 +320,50 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     return []
   }
 
-  async uploadInvoice(_orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+  async uploadInvoice(orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
     if (hasMatchingOwnerclanInvoice(invoice.rawData, invoice.trackingNumber)) {
       return { success: true }
     }
 
-    return { success: false, error: '오너클랜 송장 업로드 API는 매뉴얼에서 확인되지 않아 비활성화했습니다. 오너클랜에 이미 같은 송장번호가 등록된 주문은 성공으로 처리합니다.' }
+    try {
+      const trackingNumber = invoice.trackingNumber?.trim()
+      if (!trackingNumber) return { success: false, error: '오너클랜 송장번호가 비어 있습니다.' }
+
+      const shippingCompanyCode = mapCarrierCode('ownerclan', invoice.carrierId)
+      if (shippingCompanyCode === invoice.carrierId) {
+        return {
+          success: false,
+          error: `오너클랜 택배사 코드를 찾지 못했습니다. (${getCarrierName(invoice.carrierId)})`,
+        }
+      }
+
+      const response = await this.orderClient.mutate<{
+        setTrackingInfo: {
+          key?: string | null
+          status?: string | null
+          products?: Array<{
+            trackingNumber?: string | null
+            shippingCompanyCode?: string | null
+            shippingCompanyName?: string | null
+            shippedDate?: number | null
+          }> | null
+        } | null
+      }>(SET_TRACKING_INFO_MUTATION, {
+        key: orderId,
+        input: {
+          shippingCompanyCode,
+          trackingNumber,
+        },
+      })
+
+      if (!response.setTrackingInfo) {
+        return { success: false, error: '오너클랜 송장 정보를 등록하지 못했습니다.' }
+      }
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : '오너클랜 송장 업로드 실패' }
+    }
   }
 
   async confirmOrder(marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {

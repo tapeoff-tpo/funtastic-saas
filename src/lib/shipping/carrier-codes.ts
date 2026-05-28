@@ -88,6 +88,10 @@ const MARKETPLACE_CODE_OVERRIDES: Record<string, Record<string, string>> = {
     HONAM: '102',
     ETC: '24',
   },
+  ownerclan: {
+    CJGLS: '3',
+    KDEXP: '24',
+  },
 }
 
 /**

@@ -954,7 +954,7 @@ export function ShippingActions({
   const hideFulfillmentActions = showMappingAction
   const showInvoice = !stage || stage === 'invoice' || stage === 'confirm'
   const currentStatus = searchParams.get('status')
-  const showMarketplaceInvoiceUpload = currentStatus === 'preparing' || currentStatus === 'ready'
+  const showMarketplaceInvoiceUpload = currentStatus === 'preparing' || currentStatus === 'ready' || currentStatus === 'shipped'
   const showShipping = !hideFulfillmentActions && showMarketplaceInvoiceUpload
   const showPrint = !hideFulfillmentActions && (!stage || stage === 'shipping' || stage === 'done')
 

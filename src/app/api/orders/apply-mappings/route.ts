@@ -19,7 +19,7 @@ import { mappingComponents, mappingSources, orderItems, orders, products, produc
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
-import { buildMappingIndex, getRawMappingCandidateIds, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+import { getRawMappingCandidateIds, lookupCompatibleMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
 type ValidationFailure = {
   orderId: string
@@ -83,6 +83,8 @@ async function validateOrdersHaveInternalMappings(
         marketplaceId: mappingSources.marketplaceId,
         marketplaceProductId: mappingSources.marketplaceProductId,
         marketplaceOptionId: mappingSources.marketplaceOptionId,
+        productNameSnapshot: mappingSources.productNameSnapshot,
+        optionNameSnapshot: mappingSources.optionNameSnapshot,
       })
       .from(mappingSources)
       .where(eq(mappingSources.userId, userId)),
@@ -117,13 +119,15 @@ async function validateOrdersHaveInternalMappings(
   for (const row of productRows) validSkus.add(row.sku.trim())
   for (const row of variantRows) validSkus.add(row.sku.trim())
 
-  const mappingIndex = buildMappingIndex(
+  const mappingSourcesForLookup = (
     [...sourceRows, ...historicalAliasRows].map<MappingSource>((row) => ({
       marketplaceId: row.marketplaceId,
       marketplaceProductId: row.marketplaceProductId,
       marketplaceOptionId: row.marketplaceOptionId,
+      productNameSnapshot: 'productNameSnapshot' in row ? row.productNameSnapshot : null,
+      optionNameSnapshot: 'optionNameSnapshot' in row ? row.optionNameSnapshot : null,
       ref: row.mappingCodeId,
-    })),
+    }))
   )
 
   const componentsByCode = new Map<string, string[]>()
@@ -142,9 +146,13 @@ async function validateOrdersHaveInternalMappings(
     const directSku = candidateIds.find((candidateId) => validSkus.has(candidateId))
     if (directSku) return '__direct_sku__'
 
-    const mappingCodeId = candidateIds
-      .map((candidateId) => lookupMappingRef(mappingIndex, item.marketplaceId, candidateId, item.optionText))
-      .find((ref): ref is string => !!ref)
+    const mappingCodeId = lookupCompatibleMappingRef(
+      mappingSourcesForLookup,
+      item.marketplaceId,
+      candidateIds,
+      item.optionText,
+      item.productName,
+    )
     if (!mappingCodeId) return null
 
     const componentSkus = componentsByCode.get(mappingCodeId) ?? []

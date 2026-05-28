@@ -14,7 +14,7 @@ import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './type
 // re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
 export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
-import { buildMappingIndex, EXACT_OPTION_ID, getRawMappingCandidateIds, lookupMappingRef, type MappingSource } from './mapping-match'
+import { EXACT_OPTION_ID, getRawMappingCandidateIds, isMappingSourceSnapshotCompatible, lookupCompatibleMappingRef, type MappingSource } from './mapping-match'
 import { getOrderChangeLogs } from './change-log'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 
@@ -57,6 +57,8 @@ async function getMappingLookups(
             marketplaceId: mappingSources.marketplaceId,
             marketplaceProductId: mappingSources.marketplaceProductId,
             marketplaceOptionId: mappingSources.marketplaceOptionId,
+            productNameSnapshot: mappingSources.productNameSnapshot,
+            optionNameSnapshot: mappingSources.optionNameSnapshot,
           })
           .from(mappingSources)
           .where(
@@ -70,6 +72,8 @@ async function getMappingLookups(
           marketplaceId: string
           marketplaceProductId: string
           marketplaceOptionId: string
+          productNameSnapshot: string | null
+          optionNameSnapshot: string | null
         }>),
   ])
 
@@ -906,7 +910,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     : []
   const pageInventoryBySku = new Map(pageInventoryRows.map((row) => [row.sku, row]))
 
-  // Phase 8 — base orderItems shape. displayName is enriched below after mapping index is built.
+  // Phase 8 — base orderItems shape. displayName is enriched below after mapping sources are checked.
   const mappingCandidates = includeMappingDetails
     ? itemRows.reduce(
         (acc, item) => {
@@ -952,6 +956,8 @@ export async function getOrders(filters: OrderFilters = {}) {
             marketplaceId: string
             marketplaceProductId: string
             marketplaceOptionId: string
+            productNameSnapshot: string | null
+            optionNameSnapshot: string | null
           }>,
           components: [] as Array<{
             mappingCodeId: string
@@ -1088,21 +1094,20 @@ export async function getOrders(filters: OrderFilters = {}) {
   for (const p of productSkus) skuSet.add(p.sku)
   for (const v of variantSkus) skuSet.add(v.sku)
 
-  const mappingIndex = buildMappingIndex(
-    mappingSourceRows.map<MappingSource>((s) => ({
-      marketplaceId: s.marketplaceId,
-      marketplaceProductId: s.marketplaceProductId,
-      marketplaceOptionId: s.marketplaceOptionId,
-      ref: s.mappingCodeId,
-    })),
-  )
-
   const componentsByCode = new Map<string, typeof mappingComponentRows>()
   for (const component of mappingComponentRows) {
     const list = componentsByCode.get(component.mappingCodeId) ?? []
     list.push(component)
     componentsByCode.set(component.mappingCodeId, list)
   }
+  const compatibleMappingSources = mappingSourceRows.map<MappingSource>((source) => ({
+    marketplaceId: source.marketplaceId,
+    marketplaceProductId: source.marketplaceProductId,
+    marketplaceOptionId: source.marketplaceOptionId,
+    productNameSnapshot: source.productNameSnapshot,
+    optionNameSnapshot: source.optionNameSnapshot,
+    ref: source.mappingCodeId,
+  }))
 
   const componentSignatureByCode = new Map<string, string>()
   for (const [mappingCodeId, components] of componentsByCode) {
@@ -1118,6 +1123,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   const resolveSameComponentMappingCode = (
     marketplaceId: string,
     candidateIds: string[],
+    productName: string | null,
     optionText: string | null,
   ): string | null => {
     const normalizedOptionText = optionText?.trim().slice(0, 100)
@@ -1125,6 +1131,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     const matchedSources = mappingSourceRows.filter((source) => {
       if (source.marketplaceId !== marketplaceId) return false
       if (!candidateSet.has(source.marketplaceProductId)) return false
+      if (!isMappingSourceSnapshotCompatible(source, productName, optionText)) return false
       if (normalizedOptionText) {
         return source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === ''
       }
@@ -1144,6 +1151,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     marketplaceItemId: string | null,
     rawSku: string | null,
     rawData: unknown,
+    productName: string | null,
     optionText: string | null,
     orderQuantity: number,
   ): {
@@ -1159,10 +1167,13 @@ export async function getOrders(filters: OrderFilters = {}) {
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
-    const mappingCodeId = candidateIds
-      .map((candidateId) => lookupMappingRef(mappingIndex, marketplaceId, candidateId, optionText))
-      .find((ref): ref is string => !!ref)
-      ?? resolveSameComponentMappingCode(marketplaceId, candidateIds, optionText)
+    const mappingCodeId = lookupCompatibleMappingRef(
+      compatibleMappingSources,
+      marketplaceId,
+      candidateIds,
+      optionText,
+      productName,
+    ) ?? resolveSameComponentMappingCode(marketplaceId, candidateIds, productName, optionText)
     if (!mappingCodeId) return null
     const components = componentsByCode.get(mappingCodeId) ?? []
     if (components.length === 0) return null
@@ -1207,6 +1218,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       item.marketplaceItemId,
       item.sku,
       item.orderRawData,
+      item.productName,
       item.optionText,
       item.quantity,
     )
@@ -1411,14 +1423,14 @@ export async function getOrderById(id: string, userId?: string) {
     skus: Array.from(detailMappingCandidates.skus),
     marketplaceProductIds: Array.from(detailMappingCandidates.marketplaceProductIds),
   })
-  const detailMappingIndex = buildMappingIndex(
-    detailLookups.sources.map<MappingSource>((source) => ({
-      marketplaceId: source.marketplaceId,
-      marketplaceProductId: source.marketplaceProductId,
-      marketplaceOptionId: source.marketplaceOptionId,
-      ref: source.mappingCodeId,
-    })),
-  )
+  const detailMappingSources = detailLookups.sources.map<MappingSource>((source) => ({
+    marketplaceId: source.marketplaceId,
+    marketplaceProductId: source.marketplaceProductId,
+    marketplaceOptionId: source.marketplaceOptionId,
+    productNameSnapshot: source.productNameSnapshot,
+    optionNameSnapshot: source.optionNameSnapshot,
+    ref: source.mappingCodeId,
+  }))
   const detailComponentsByCode = new Map<string, typeof detailLookups.components>()
   for (const component of detailLookups.components) {
     const list = detailComponentsByCode.get(component.mappingCodeId) ?? []
@@ -1438,9 +1450,13 @@ export async function getOrderById(id: string, userId?: string) {
         .filter((id): id is string => Boolean(id)),
     ))
     const mappingCodeId = !locked
-      ? candidateIds
-          .map((candidateId) => lookupMappingRef(detailMappingIndex, order.marketplaceId, candidateId, r.optionText))
-          .find((ref): ref is string => !!ref) ?? null
+      ? lookupCompatibleMappingRef(
+          detailMappingSources,
+          order.marketplaceId,
+          candidateIds,
+          r.optionText,
+          r.productName,
+        )
       : null
     const components = mappingCodeId ? detailComponentsByCode.get(mappingCodeId) ?? [] : []
     const mappedDisplayName = components.length > 0
@@ -1543,6 +1559,8 @@ export async function getStockDeductionPreview(
       marketplaceId: mappingSources.marketplaceId,
       marketplaceProductId: mappingSources.marketplaceProductId,
       marketplaceOptionId: mappingSources.marketplaceOptionId,
+      productNameSnapshot: mappingSources.productNameSnapshot,
+      optionNameSnapshot: mappingSources.optionNameSnapshot,
       componentSku: mappingComponents.sku,
       componentQuantity: mappingComponents.quantity,
     })
@@ -1571,10 +1589,11 @@ export async function getStockDeductionPreview(
       marketplaceId: m.marketplaceId,
       marketplaceProductId: m.marketplaceProductId,
       marketplaceOptionId: m.marketplaceOptionId,
+      productNameSnapshot: m.productNameSnapshot,
+      optionNameSnapshot: m.optionNameSnapshot,
       ref: m.mappingCodeId,
     })
   }
-  const mappingIndex = buildMappingIndex(sourcesForIndex)
 
   // Accumulator: sku → { requiredQty, sourceItems, isBundleComponent }
   const acc = new Map<
@@ -1601,7 +1620,13 @@ export async function getStockDeductionPreview(
   for (const row of rows) {
     const orderQty = row.quantity * (row.skuMultiplier ?? 1)
     const mappingCodeId = row.marketplaceItemId
-      ? lookupMappingRef(mappingIndex, row.orderMarketplaceId, row.marketplaceItemId, row.optionText)
+      ? lookupCompatibleMappingRef(
+          sourcesForIndex,
+          row.orderMarketplaceId,
+          [row.marketplaceItemId],
+          row.optionText,
+          row.productName,
+        )
       : null
     const components = mappingCodeId ? componentsByCode.get(mappingCodeId) : null
     const src = {

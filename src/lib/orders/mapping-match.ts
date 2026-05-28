@@ -66,6 +66,8 @@ export type MappingSource = {
   marketplaceId: string
   marketplaceProductId: string
   marketplaceOptionId: string
+  productNameSnapshot?: string | null
+  optionNameSnapshot?: string | null
   /** sources 가 가리키는 매핑코드 식별자 (예: components 그룹 키 등 호출자 자유) */
   ref: string
 }
@@ -172,6 +174,96 @@ export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
   }
 
   return { optionMap, exactProductMap, productMap }
+}
+
+function normalizeMappingText(value: string | null | undefined): string {
+  return (value ?? '')
+    .trim()
+    .replace(/_펀타스틱$/i, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+}
+
+export function isMappingSourceSnapshotCompatible(
+  source: Pick<MappingSource, 'productNameSnapshot' | 'optionNameSnapshot'>,
+  productName?: string | null,
+  optionText?: string | null,
+): boolean {
+  const sourceProductName = normalizeMappingText(source.productNameSnapshot)
+  const currentProductName = normalizeMappingText(productName)
+  if (sourceProductName && currentProductName && sourceProductName !== currentProductName) {
+    return false
+  }
+
+  const sourceOptionName = normalizeMappingText(source.optionNameSnapshot)
+  const currentOptionName = normalizeMappingText(optionText)
+  if (sourceOptionName && currentOptionName && sourceOptionName !== currentOptionName) {
+    return false
+  }
+
+  return true
+}
+
+function sourceMatchesCandidate(
+  source: MappingSource,
+  marketplaceId: string,
+  marketplaceItemId: string,
+  optionText?: string | null,
+): boolean {
+  if (source.marketplaceId !== marketplaceId) return false
+  if (isIgnoredMappingCandidate(marketplaceId, marketplaceItemId)) return false
+  if (isBlockedMappingSourcePair(marketplaceId, source.marketplaceProductId, source.marketplaceOptionId)) return false
+
+  const normalizedOptionText = optionText?.trim().slice(0, 100)
+  const exactSourceKey = source.marketplaceOptionId
+    ? `${source.marketplaceProductId}${MAPPING_SEPARATOR}${source.marketplaceOptionId}`
+    : null
+  if (exactSourceKey && exactSourceKey === marketplaceItemId) return true
+
+  if (normalizedOptionText) {
+    return source.marketplaceProductId === marketplaceItemId
+      && (source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === '')
+  }
+
+  if (source.marketplaceOptionId === EXACT_OPTION_ID && source.marketplaceProductId === marketplaceItemId) {
+    return true
+  }
+
+  if (source.marketplaceOptionId === '' && source.marketplaceProductId === marketplaceItemId) {
+    return true
+  }
+
+  const sepIdx = marketplaceItemId.indexOf(MAPPING_SEPARATOR)
+  if (sepIdx > 0) {
+    return source.marketplaceOptionId === ''
+      && source.marketplaceProductId === marketplaceItemId.slice(0, sepIdx)
+  }
+
+  return false
+}
+
+export function lookupCompatibleMappingRef(
+  sources: MappingSource[],
+  marketplaceId: string,
+  candidateIds: string[],
+  optionText?: string | null,
+  productName?: string | null,
+): string | null {
+  const uniqueCandidateIds = Array.from(new Set(candidateIds.map((id) => id.trim()).filter(Boolean)))
+  for (const candidateId of uniqueCandidateIds) {
+    const matches = sources.filter((source) =>
+      sourceMatchesCandidate(source, marketplaceId, candidateId, optionText)
+      && isMappingSourceSnapshotCompatible(source, productName, optionText),
+    )
+    const exactOptionHit = matches.find((source) => source.marketplaceOptionId && source.marketplaceOptionId !== EXACT_OPTION_ID)
+    if (exactOptionHit) return exactOptionHit.ref
+    const exactProductHit = matches.find((source) => source.marketplaceOptionId === EXACT_OPTION_ID)
+    if (exactProductHit) return exactProductHit.ref
+    const productHit = matches.find((source) => source.marketplaceOptionId === '')
+    if (productHit) return productHit.ref
+  }
+
+  return null
 }
 
 /**

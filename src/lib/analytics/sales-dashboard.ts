@@ -26,9 +26,23 @@ export interface MarketplaceSalesRow {
 
 export interface SalesDashboardData {
   cards: SalesSummaryCard[]
+  comparison: SalesComparisonData
   rows: MarketplaceSalesRow[]
   totals: MarketplaceSalesRow
   currentMonthLabel: string
+}
+
+export interface SalesComparisonData {
+  currentSamePeriodSales: number
+  rows: SalesComparisonRow[]
+}
+
+export interface SalesComparisonRow {
+  monthLabel: string
+  totalSales: number
+  samePeriodSales: number
+  differenceFromCurrent: number
+  changeRate: number | null
 }
 
 type MetricRow = {
@@ -48,6 +62,11 @@ type DetailRow = {
   productCost: string | number | null
   paidShippingFee: string | number | null
   actualShippingFee: string | number | null
+}
+
+type MonthComparisonQueryRow = {
+  totalSales: string | number | null
+  samePeriodSales: string | number | null
 }
 
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
@@ -192,6 +211,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
   const currentSales = toNumber(metric?.currentPeriodSales)
   const lastMonthSamePeriod = toNumber(metric?.lastMonthSamePeriodSales)
   const previousThreeAverage = toNumber(metric?.previousThreeMonthAverageSales)
+  const comparison = await getSalesComparisonData(userId, now, currentSales)
 
   return {
     currentMonthLabel: monthLabel(now),
@@ -229,6 +249,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         subLabel: `3개월 평균 ${formatWon(previousThreeAverage)}`,
       },
     ],
+    comparison,
     rows,
     totals,
   }
@@ -244,9 +265,53 @@ export function emptySalesDashboardData(now = new Date()): SalesDashboardData {
       { key: 'last-month-same-period', label: '지난달 동기간 대비', value: 0, suffix: '%', subLabel: '지난달 동기간 0원' },
       { key: 'three-month-average', label: '직전 3개월 평균 대비', value: 0, suffix: '%', subLabel: '3개월 평균 0원' },
     ],
+    comparison: { currentSamePeriodSales: 0, rows: [] },
     rows: [],
     totals: buildTotals([]),
   }
+}
+
+async function getSalesComparisonData(
+  userId: string,
+  now: Date,
+  currentSamePeriodSales: number,
+): Promise<SalesComparisonData> {
+  const monthSpecs = [1, 2, 3].map((offset) => {
+    const start = new Date(now.getFullYear(), now.getMonth() - offset, 1)
+    const end = new Date(now.getFullYear(), now.getMonth() - offset + 1, 1)
+    const samePeriodEnd = new Date(now.getFullYear(), now.getMonth() - offset, now.getDate() + 1)
+    return {
+      label: `${start.getMonth() + 1}월`,
+      start,
+      end,
+      samePeriodEnd: samePeriodEnd > end ? end : samePeriodEnd,
+    }
+  }).reverse()
+
+  const rows = await Promise.all(monthSpecs.map(async (spec) => {
+    const result = await db.execute<MonthComparisonQueryRow>(sql`
+      SELECT
+        COALESCE(SUM(o.total_amount::numeric), 0)::text AS "totalSales",
+        COALESCE(SUM(o.total_amount::numeric) FILTER (WHERE o.ordered_at < ${spec.samePeriodEnd}), 0)::text AS "samePeriodSales"
+      FROM orders o
+      WHERE o.user_id = ${userId}
+        AND o.ordered_at >= ${spec.start}
+        AND o.ordered_at < ${spec.end}
+        AND o.status::text IN ${STATUS_FILTER}
+    `)
+    const row = resultRows(result)[0]
+    const totalSales = toNumber(row?.totalSales)
+    const samePeriodSales = toNumber(row?.samePeriodSales)
+    return {
+      monthLabel: spec.label,
+      totalSales,
+      samePeriodSales,
+      differenceFromCurrent: currentSamePeriodSales - samePeriodSales,
+      changeRate: samePeriodSales > 0 ? percentChange(currentSamePeriodSales, samePeriodSales) : null,
+    }
+  }))
+
+  return { currentSamePeriodSales, rows }
 }
 
 function toMarketplaceRow(row: DetailRow): MarketplaceSalesRow {

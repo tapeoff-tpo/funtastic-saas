@@ -6,6 +6,7 @@ import { getActualShippingCostRecentImports } from '@/lib/shipping/actual-costs'
 import {
   emptySalesDashboardData,
   getSalesDashboardData,
+  type SalesComparisonData,
   type MarketplaceSalesRow,
 } from '@/lib/analytics/sales-dashboard'
 import { ActualShippingCostUpload } from './actual-shipping-cost-upload'
@@ -59,7 +60,12 @@ export default async function AnalyticsPage({
       {tab === 'uploads' ? (
         <UploadPanel recent={recent} />
       ) : (
-        <DashboardPanel rows={dashboard.rows} totals={dashboard.totals} cards={dashboard.cards} />
+        <DashboardPanel
+          rows={dashboard.rows}
+          totals={dashboard.totals}
+          cards={dashboard.cards}
+          comparison={dashboard.comparison}
+        />
       )}
     </div>
   )
@@ -67,10 +73,12 @@ export default async function AnalyticsPage({
 
 function DashboardPanel({
   cards,
+  comparison,
   rows,
   totals,
 }: {
   cards: Awaited<ReturnType<typeof getSalesDashboardData>>['cards']
+  comparison: SalesComparisonData
   rows: MarketplaceSalesRow[]
   totals: MarketplaceSalesRow
 }) {
@@ -86,6 +94,51 @@ function DashboardPanel({
             <div className="mt-1 text-xs text-muted-foreground">{card.subLabel}</div>
           </div>
         ))}
+      </div>
+
+      <div className="rounded-lg border bg-card">
+        <div className="border-b px-4 py-3">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="text-base font-semibold">직전 3개월 매출 비교</h2>
+            <div className="text-sm text-muted-foreground">
+              현재 동기간 {formatWon(comparison.currentSamePeriodSales)}
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-muted/50 text-muted-foreground">
+              <tr>
+                <Th>구분</Th>
+                <Th align="right">매출총금액</Th>
+                <Th align="right">현재와 동기간 매출금액</Th>
+                <Th align="right">현재 동기간 대비</Th>
+                <Th align="right">증감률</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {comparison.rows.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-6 text-center text-muted-foreground" colSpan={5}>
+                    비교할 이전 매출 자료가 없습니다.
+                  </td>
+                </tr>
+              ) : (
+                comparison.rows.map((row) => (
+                  <tr key={row.monthLabel} className="border-t">
+                    <td className="px-3 py-2 font-medium">{row.monthLabel}</td>
+                    <Td>{formatWon(row.totalSales)}</Td>
+                    <Td>{formatWon(row.samePeriodSales)}</Td>
+                    <Td className={row.differenceFromCurrent < 0 ? 'text-red-600' : 'text-emerald-700'}>
+                      {formatWon(row.differenceFromCurrent)}
+                    </Td>
+                    <Td>{row.changeRate == null ? '-' : formatPercent(row.changeRate)}</Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card">

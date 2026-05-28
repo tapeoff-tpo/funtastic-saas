@@ -101,6 +101,23 @@ describe('PlayautoEmpAdapter', () => {
     })
   })
 
+  it('queries EMP order dates as KST calendar days', async () => {
+    const get = vi.fn(() => ({
+      json: async () => [],
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new PlayautoEmpAdapter({ api_key: 'test-key', states: '신규주문' })
+    await adapter.getOrders(
+      new Date('2026-05-27T15:00:00.000Z'),
+      new Date('2026-05-28T14:59:59.999Z'),
+    )
+
+    const searchParams = get.mock.calls[0]?.[1]?.searchParams as URLSearchParams
+    expect(searchParams.get('startDate')).toBe('20260528')
+    expect(searchParams.get('endDate')).toBe('20260528')
+  })
+
   it('falls back to the slash orders endpoint when EMP returns 404', async () => {
     const notFound = new Error('not found') as Error & { response: { status: number } }
     notFound.response = { status: 404 }
@@ -167,6 +184,28 @@ describe('PlayautoEmpAdapter', () => {
     const response = new Response(
       JSON.stringify({ status: false, message: '조회된 주문건이 없습니다.' }),
       { status: 404, headers: { 'content-type': 'application/json' } },
+    )
+    const noOrders = new Error('no orders') as Error & { response: Response }
+    noOrders.response = response
+    const get = vi.fn(() => {
+      throw noOrders
+    })
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new PlayautoEmpAdapter({ api_key: 'test-key', states: '신규주문' })
+    const orders = await adapter.getOrders(
+      new Date('2026-05-19T00:00:00+09:00'),
+      new Date('2026-05-19T23:59:59+09:00'),
+    )
+
+    expect(orders).toEqual([])
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats EMP no-order 500 responses as an empty collection', async () => {
+    const response = new Response(
+      JSON.stringify({ status: false, message: '조회된 주문건이 없습니다.' }),
+      { status: 500, headers: { 'content-type': 'application/json' } },
     )
     const noOrders = new Error('no orders') as Error & { response: Response }
     noOrders.response = response

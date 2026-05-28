@@ -39,9 +39,10 @@ const EMP_CARRIER_CODES: Record<string, string> = {
 }
 
 function formatDate(date: Date): string {
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
+  const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000)
+  const yyyy = kst.getUTCFullYear()
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(kst.getUTCDate()).padStart(2, '0')
   return `${yyyy}${mm}${dd}`
 }
 
@@ -157,18 +158,24 @@ function isHttpStatus(error: unknown, status: number): boolean {
   )
 }
 
+function isNoOrdersMessage(message: string): boolean {
+  return message.includes('조회된 주문건이 없습니다') || message.includes('議고쉶??二쇰Ц嫄댁씠 ?놁뒿?덈떎')
+}
+
 async function isNoOrdersError(error: unknown): Promise<boolean> {
   if (!error || typeof error !== 'object' || !('response' in error)) return false
   const response = (error as { response?: Response }).response
-  if (!response || ![400, 404].includes(response.status)) return false
+  if (!response || ![400, 404, 500].includes(response.status)) return false
 
   try {
     const body = await response.clone().json() as { message?: unknown; msg?: unknown; status?: unknown }
     const message = asString(body.message ?? body.msg)
+    if (body.status === false && isNoOrdersMessage(message)) return true
     return body.status === false && message.includes('조회된 주문건이 없습니다')
   } catch {
     try {
       const text = await response.clone().text()
+      if (isNoOrdersMessage(text)) return true
       return text.includes('조회된 주문건이 없습니다')
     } catch {
       return false

@@ -156,6 +156,24 @@ vi.mock('@/lib/marketplace/adapters/naver/adapter', () => ({
   }),
 }))
 
+vi.mock('@/lib/marketplace/adapters/ssgmall/adapter', () => ({
+  SsgmallAdapter: vi.fn().mockImplementation(function MockSsgmallAdapter() {
+    return {
+      config: {
+        id: 'ssgmall',
+        name: 'SSG',
+        authType: 'api_key',
+        rateLimitPerSecond: 10,
+        requiredCredentials: ['api_key'],
+      },
+      getOrders: adapterMocks.getOrders,
+      getClaimsOrders: adapterMocks.getClaimsOrders,
+      confirmOrder: adapterMocks.confirmOrder,
+      uploadInvoice: vi.fn(),
+    }
+  }),
+}))
+
 const sampleOrder: NormalizedOrder = {
   marketplaceOrderId: 'CP-2024-001',
   marketplaceId: 'coupang',
@@ -387,6 +405,68 @@ describe('processOrderCollection', () => {
     const updatePayloads = mockUpdate.mock.results.flatMap(({ value }) => value.set.mock.calls.map((call: unknown[]) => call[0]))
     expect(updatePayloads).toContainEqual(expect.objectContaining({
       marketplaceStatus: '발주확인',
+      marketplaceCollectionStatus: 'ready',
+    }))
+  })
+
+  it('acknowledges collected Coupang paid orders in the marketplace', async () => {
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'coupang',
+      marketplaceOrderId: 'CP-2026-001',
+      marketplaceStatus: 'ACCEPT',
+      marketplaceCollectionStatus: 'new',
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await processOrderCollection(createMockJob({
+      marketplaceId: 'coupang',
+      connectionId: 'conn-coupang',
+      userId: 'user-1',
+    }))
+
+    expect(result.ordersCollected).toBe(1)
+    expect(mockConfirmOrder).toHaveBeenCalledWith(
+      'CP-2026-001',
+      expect.objectContaining({ orderIdentity: expect.objectContaining({ orderId: 'CP-2026-001' }) }),
+    )
+    const updatePayloads = mockUpdate.mock.results.flatMap(({ value }) => value.set.mock.calls.map((call: unknown[]) => call[0]))
+    expect(updatePayloads).toContainEqual(expect.objectContaining({
+      marketplaceStatus: 'INSTRUCT',
+      marketplaceCollectionStatus: 'ready',
+    }))
+  })
+
+  it('acknowledges collected SSG orders in the marketplace', async () => {
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'ssgmall',
+      marketplaceOrderId: 'SSG-2026-001',
+      marketplaceStatus: '120',
+      marketplaceCollectionStatus: 'new',
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await processOrderCollection(createMockJob({
+      marketplaceId: 'ssgmall',
+      connectionId: 'conn-ssg',
+      userId: 'user-1',
+    }))
+
+    expect(result.ordersCollected).toBe(1)
+    expect(mockConfirmOrder).toHaveBeenCalledWith(
+      'SSG-2026-001',
+      expect.objectContaining({ orderIdentity: expect.objectContaining({ orderId: 'SSG-2026-001' }) }),
+    )
+    const updatePayloads = mockUpdate.mock.results.flatMap(({ value }) => value.set.mock.calls.map((call: unknown[]) => call[0]))
+    expect(updatePayloads).toContainEqual(expect.objectContaining({
+      marketplaceStatus: '140',
       marketplaceCollectionStatus: 'ready',
     }))
   })

@@ -154,14 +154,43 @@ async function ensureCheckboxChecked(root: Locator | Page, checkbox: Locator): P
 }
 
 async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise<void> {
+  const clickedVisibleControl = await root.locator('body, :scope').first().evaluate((element, source) => {
+    const regexp = new RegExp(source)
+    const isVisibleControl = (control: HTMLElement) => {
+      const style = window.getComputedStyle(control)
+      const rect = control.getBoundingClientRect()
+      return !control.hasAttribute('disabled')
+        && style.display !== 'none'
+        && style.visibility !== 'hidden'
+        && style.opacity !== '0'
+        && rect.width > 0
+        && rect.height > 0
+    }
+    const controls = Array.from(
+      element.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn'),
+    )
+
+    const control = controls.find((candidate) => {
+      if (!(candidate instanceof HTMLElement) || !isVisibleControl(candidate)) return false
+      const text = `${candidate.innerText || ''} ${(candidate as HTMLInputElement).value || ''}`.trim()
+      return regexp.test(text)
+    })
+    if (!(control instanceof HTMLElement)) return false
+
+    control.scrollIntoView({ block: 'center', inline: 'center' })
+    control.click()
+    return true
+  }, pattern.source).catch(() => false)
+  if (clickedVisibleControl) return
+
   const button = root.getByRole('button', { name: pattern }).first()
   if (await button.isVisible().catch(() => false)) {
-    await button.click({ timeout: 15_000 })
+    await button.click({ force: true, timeout: 15_000 })
     return
   }
   const fallback = root.locator('button, input[type="button"], input[type="submit"], a.btn').filter({ hasText: pattern }).first()
   if (await fallback.isVisible().catch(() => false)) {
-    await fallback.click({ timeout: 15_000 })
+    await fallback.click({ force: true, timeout: 15_000 })
     return
   }
 

@@ -18,6 +18,8 @@ export const EXACT_OPTION_ID = '__exact__'
 
 const ORDER_NUMBER_MAPPING_PATTERNS: Partial<Record<string, RegExp[]>> = {
   onchannel: [/^MO_\d+$/i],
+  naver: [/^20\d{14}$/],
+  ownerclan: [/^20\d{12,}A$/],
 }
 
 const LINE_SEQUENCE_MAPPING_PATTERNS: Partial<Record<string, RegExp[]>> = {
@@ -77,6 +79,13 @@ function stringValue(value: unknown): string | null {
   return null
 }
 
+function pushRecordValues(record: Record<string, unknown>, keys: string[], values: string[]) {
+  for (const key of keys) {
+    const value = stringValue(record[key])
+    if (value) values.push(value)
+  }
+}
+
 /**
  * Some marketplaces keep the order-line id and product mapping id separate.
  * CJ온스타일 is one example: marketplaceItemId is the line sequence
@@ -87,6 +96,9 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
   if (!record) return []
 
   const keys = [
+    'optionManageCode',
+    'sellerProductCode',
+    'itemKey',
     'itemCode',
     'vendorItemCode',
     'affiliateItemCode',
@@ -102,9 +114,27 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
     'optionCode',
   ]
 
-  const values = keys
-    .map((key) => stringValue(record[key]))
-    .filter((value): value is string => !!value)
+  const values: string[] = []
+  pushRecordValues(record, keys, values)
+
+  const productOrders = Array.isArray(record.productOrders) ? record.productOrders : []
+  for (const rawProductOrder of productOrders) {
+    const productOrder = asPlainRecord(rawProductOrder)
+    if (productOrder) pushRecordValues(productOrder, keys, values)
+  }
+
+  const originalData = Array.isArray(record.originalData) ? record.originalData : []
+  for (const rawOriginal of originalData) {
+    const original = asPlainRecord(rawOriginal)
+    const productOrder = asPlainRecord(original?.productOrder)
+    if (productOrder) pushRecordValues(productOrder, keys, values)
+  }
+
+  const products = Array.isArray(record.products) ? record.products : []
+  for (const rawProduct of products) {
+    const product = asPlainRecord(rawProduct)
+    if (product) pushRecordValues(product, keys, values)
+  }
 
   return Array.from(new Set(values))
 }

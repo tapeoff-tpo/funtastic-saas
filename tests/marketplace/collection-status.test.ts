@@ -6,6 +6,10 @@ describe('normalizeMarketplaceCollectionStatus', () => {
     expect(normalizeMarketplaceCollectionStatus('결제완료')).toBe('new')
   })
 
+  it('keeps CJ OnStyle delivery instruction orders as new before acknowledgement', () => {
+    expect(normalizeMarketplaceCollectionStatus('배송지시')).toBe('new')
+  })
+
   it('does not confuse shipping completion with payment completion', () => {
     expect(normalizeMarketplaceCollectionStatus('배송완료')).toBe('delivered')
   })

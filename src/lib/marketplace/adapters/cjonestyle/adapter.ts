@@ -166,9 +166,33 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
   }
 
   async confirmOrder(
-    _marketplaceOrderId: string,
+    marketplaceOrderId: string,
+    rawData?: Record<string, unknown>,
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+    if (String(rawData?.deliveryInstructionCheck ?? '').includes('지시확인')) {
+      return { success: true }
+    }
+
+    try {
+      const [orderNo, orderItemSequence, orderDetailSequence, orderProcessingSequence] = marketplaceOrderId.split('-')
+      const response = await this.client.post('delivery/setDeliveryInstructionCheck', {
+        json: {
+          orderNo: String(rawData?.orderNo ?? orderNo ?? ''),
+          orderItemSequence: String(rawData?.orderItemSequence ?? orderItemSequence ?? ''),
+          orderDetailSequence: String(rawData?.orderDetailSequence ?? orderDetailSequence ?? ''),
+          orderProcessingSequence: String(rawData?.orderProcessingSequence ?? orderProcessingSequence ?? ''),
+          waybillIdentifierNo: String(rawData?.waybillIdentifierNo ?? ''),
+        },
+      }).json<CjOnestyleStandardResponse>()
+
+      if (response.error || (response.returnCode && !['OK', '0000'].includes(response.returnCode))) {
+        return { success: false, error: response.returnMessage ?? 'CJ온스타일 배송지시 확인 실패' }
+      }
+
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: await extractCjOnestyleError(error) }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {

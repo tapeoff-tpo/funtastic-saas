@@ -150,6 +150,31 @@ function buildOptionText(product: OwnerclanOrderProduct): string | undefined {
   return text || undefined
 }
 
+function normalizeTrackingNumber(value: unknown): string {
+  return typeof value === 'string'
+    ? value.trim().replace(/[^0-9A-Za-z]/g, '')
+    : ''
+}
+
+function hasMatchingOwnerclanInvoice(rawData: unknown, trackingNumber: string): boolean {
+  const normalizedTarget = normalizeTrackingNumber(trackingNumber)
+  if (!normalizedTarget || !rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return false
+
+  const order = rawData as Partial<OwnerclanOrder> & {
+    trackingNumber?: unknown
+    invoiceNumber?: unknown
+  }
+  if (
+    normalizeTrackingNumber(order.trackingNumber) === normalizedTarget ||
+    normalizeTrackingNumber(order.invoiceNumber) === normalizedTarget
+  ) {
+    return true
+  }
+
+  const products = Array.isArray(order.products) ? order.products : []
+  return products.some((product) => normalizeTrackingNumber(product?.trackingNumber) === normalizedTarget)
+}
+
 export class OwnerclanAdapter implements MarketplaceAdapter {
   readonly config = OWNERCLAN_CONFIG
 
@@ -279,8 +304,12 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     return []
   }
 
-  async uploadInvoice(_orderId: string, _invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '오너클랜 송장 업로드 API는 매뉴얼에서 확인되지 않아 비활성화했습니다.' }
+  async uploadInvoice(_orderId: string, invoice: InvoiceData): Promise<{ success: boolean; error?: string }> {
+    if (hasMatchingOwnerclanInvoice(invoice.rawData, invoice.trackingNumber)) {
+      return { success: true }
+    }
+
+    return { success: false, error: '오너클랜 송장 업로드 API는 매뉴얼에서 확인되지 않아 비활성화했습니다. 오너클랜에 이미 같은 송장번호가 등록된 주문은 성공으로 처리합니다.' }
   }
 
   async confirmOrder(marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {

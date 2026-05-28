@@ -795,9 +795,9 @@ export const columns: ColumnDef<OrderRow>[] = [
       )
     },
     enableSorting: false,
-    size: 150,
-    minSize: 112,
-    maxSize: 340,
+    size: 118,
+    minSize: 96,
+    maxSize: 220,
   },
 
   {

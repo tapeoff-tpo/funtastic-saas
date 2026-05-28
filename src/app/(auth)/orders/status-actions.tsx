@@ -129,16 +129,23 @@ const CARRIER_LABELS: Record<string, string> = {
   ETC: '기타택배',
 }
 
+const INVOICE_EDITABLE_STATUSES = new Set<OrderStatus>(['confirmed', 'preparing'])
+
 export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoiceButtonProps) {
   const [open, setOpen] = useState(false)
   const [carrierId, setCarrierId] = useState(CARRIERS[0]?.code ?? 'CJGLS')
   const [trackingByOrderId, setTrackingByOrderId] = useState<Record<string, string>>({})
   const [isPending, startTransition] = useTransition()
   const selectedCount = selectedOrders.length
+  const invalidOrders = selectedOrders.filter((order) => !INVOICE_EDITABLE_STATUSES.has(order.status))
 
   const handleOpen = () => {
     if (selectedCount === 0) {
       toast.info('송장을 등록할 주문을 선택하세요.')
+      return
+    }
+    if (invalidOrders.length > 0) {
+      toast.error('송장번호는 확인/출고대기 상태 주문만 등록하거나 변경할 수 있습니다.')
       return
     }
 
@@ -153,6 +160,11 @@ export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoice
   }
 
   const handleSubmit = () => {
+    if (invalidOrders.length > 0) {
+      toast.error('송장번호는 확인/출고대기 상태 주문만 등록하거나 변경할 수 있습니다.')
+      return
+    }
+
     const payload = selectedOrders
       .map((order) => ({
         orderId: order.id,
@@ -194,7 +206,8 @@ export function ManualInvoiceButton({ selectedOrders, onChanged }: ManualInvoice
       <button
         type="button"
         onClick={handleOpen}
-        disabled={selectedCount === 0 || isPending}
+        disabled={selectedCount === 0 || isPending || invalidOrders.length > 0}
+        title={invalidOrders.length > 0 ? '확인/출고대기 상태 주문만 송장번호를 등록하거나 변경할 수 있습니다.' : undefined}
         className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isPending ? '등록 중...' : `송장 수기등록${selectedCount > 0 ? ` (${selectedCount})` : ''}`}

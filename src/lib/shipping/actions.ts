@@ -128,7 +128,7 @@ export async function registerInvoice(
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const carrierName = getCarrierName(carrierId)
-    await db.transaction(async (tx) => {
+    const previousStatus = await db.transaction(async (tx) => {
       const [order] = await tx
         .select({
           id: orders.id,
@@ -143,8 +143,8 @@ export async function registerInvoice(
       if (!order) {
         throw new Error(`Order not found: ${orderId}`)
       }
-      if (order.status !== 'confirmed') {
-        throw new Error('확인 상태 주문만 송장 등록할 수 있습니다.')
+      if (order.status !== 'confirmed' && order.status !== 'preparing') {
+        throw new Error('확인/출고대기 상태 주문만 송장번호를 등록하거나 변경할 수 있습니다.')
       }
       if (!order.mappedAt) {
         throw new Error('매핑완료된 주문만 송장 등록할 수 있습니다.')
@@ -175,19 +175,22 @@ export async function registerInvoice(
         })
       }
 
-      const updated = await tx
-        .update(orders)
-        .set({
-          status: 'preparing',
-          preparingAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
-        .returning({ id: orders.id })
+      if (order.status === 'confirmed') {
+        const updated = await tx
+          .update(orders)
+          .set({
+            status: 'preparing',
+            preparingAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(orders.id, orderId), eq(orders.userId, userId), eq(orders.status, 'confirmed')))
+          .returning({ id: orders.id })
 
-      if (updated.length === 0) {
-        throw new Error('주문 상태를 출고대기로 변경하지 못했습니다.')
+        if (updated.length === 0) {
+          throw new Error('주문 상태를 출고대기로 변경하지 못했습니다.')
+        }
       }
+      return order.status
     })
 
     await logOrderChange({
@@ -196,7 +199,7 @@ export async function registerInvoice(
       action: 'invoice.registered',
       title: '송장번호등록',
       description: `${carrierName} ${trackingNumber}`,
-      before: { status: 'confirmed' },
+      before: { status: previousStatus },
       after: { status: 'preparing', trackingNumber, carrierId },
     })
 

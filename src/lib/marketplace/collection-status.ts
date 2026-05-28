@@ -17,9 +17,9 @@ export const MARKETPLACE_COLLECTION_STATUS_LABELS: Record<MarketplaceCollectionS
   unknown: '\ubbf8\ubd84\ub958',
 }
 
-const NEW_STATUS_RE = /\uacb0\uc81c\uc644\ub8cc|\ubc30\uc1a1\uc9c0\uc2dc|\uc2e0\uaddc|\uc2e0\uaddc\uc8fc\ubb38|\uc8fc\ubb38\uc811\uc218|\uc8fc\ubb38\ud1b5\ubcf4|\ubc1c\uc8fc\uc694\uccad|\ubc1c\uc8fc\uc804|PAYED|PAID|NEW|ORDERED/i
-const READY_STATUS_RE = /\ubc30\uc1a1\uc900\ube44|\ubc30\uc1a1\uc900\ube44\uc911|\ubc1c\uc1a1\ub300\uc0c1|\ucd9c\uace0\uc900\ube44|\uc0c1\ud488\uc900\ube44|\uc0c1\ud488\uc900\ube44\uc911|\uc8fc\ubb38\ud655\uc778|\ubc1c\uc8fc\ud655\uc778|INSTRUCT|READY|PREPAR/i
-const SHIPPING_STATUS_RE = /\ubc30\uc1a1\uc911|\ubc1c\uc1a1\uc644\ub8cc|\ucd9c\uace0\uc644\ub8cc|\uc1a1\uc7a5|SHIPPED|DELIVERING/i
+const NEW_STATUS_RE = /\uacb0\uc81c\uc644\ub8cc|\uc785\uae08\uc644\ub8cc|\ubc30\uc1a1\uc9c0\uc2dc|\uc2e0\uaddc|\uc2e0\uaddc\uc8fc\ubb38|\uc8fc\ubb38\uc811\uc218|\uc8fc\ubb38\ud1b5\ubcf4|\ubc1c\uc8fc\uc694\uccad|\ubc1c\uc8fc\uc804|^ACCEPT$|^CONFIRMED$|^ORDER_CONFIRMED$|^PAID$|^PAYED$|^PLACED$|^NEW$|^ORDERED$|^(11|21|22|31|41|42|120|130)(:|$)/i
+const READY_STATUS_RE = /\ubc30\uc1a1\uc900\ube44|\ubc30\uc1a1\uc900\ube44\uc911|\ubc1c\uc1a1\ub300\uc0c1|\ucd9c\uace0\uc900\ube44|\uc0c1\ud488\uc900\ube44|\uc0c1\ud488\uc900\ube44\uc911|\uc8fc\ubb38\ud655\uc778|\ubc1c\uc8fc\ud655\uc778|^INSTRUCT$|^READY$|PREPAR|^PACKED$|^(140)(:|$)/i
+const SHIPPING_STATUS_RE = /\ubc30\uc1a1\uc911|\ubc1c\uc1a1\uc644\ub8cc|\ucd9c\uace0\uc644\ub8cc|\uc1a1\uc7a5|SHIPPED|DELIVERING|DEPARTURE|^(43|160)(:|$)/i
 const DELIVERED_STATUS_RE = /\ubc30\uc1a1\uc644\ub8cc|\uad6c\ub9e4\ud655\uc815|DELIVERED|COMPLETED/i
 const CANCELLED_STATUS_RE = /\ucde8\uc18c|CANCEL/i
 const CLAIM_STATUS_RE = /\ubc18\ud488|\uad50\ud658|\ud658\ubd88|\ud074\ub808\uc784|CLAIM|RETURN|EXCHANGE|REFUND/i

@@ -199,6 +199,7 @@ function shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId: string
   return new Set([
     '10x10',
     'cafe24',
+    'cjonestyle',
     'coupang',
     'domeggook',
     'domesin',
@@ -217,10 +218,15 @@ function shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId: string
 }
 
 function marketplaceShippingPrepStatus(marketplaceId: string): string {
+  if (marketplaceId === '10x10') return '6'
+  if (marketplaceId === 'cafe24') return 'N20'
+  if (marketplaceId === 'cjonestyle') return '배송지시확인'
   if (marketplaceId === 'ownerclan') return 'preparing'
   if (marketplaceId === 'naver') return '발주확인'
   if (marketplaceId === 'coupang') return 'INSTRUCT'
   if (marketplaceId === 'ssgmall') return '140'
+  if (marketplaceId === 'funtastic-b2b') return 'PREPARING'
+  if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
   return 'CONFIRMED'
 }
 

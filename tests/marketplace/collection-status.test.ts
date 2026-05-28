@@ -10,6 +10,19 @@ describe('normalizeMarketplaceCollectionStatus', () => {
     expect(normalizeMarketplaceCollectionStatus('배송지시')).toBe('new')
   })
 
+  it('keeps API marketplace paid states as new before acknowledgement', () => {
+    expect(normalizeMarketplaceCollectionStatus('ACCEPT')).toBe('new')
+    expect(normalizeMarketplaceCollectionStatus('paid')).toBe('new')
+    expect(normalizeMarketplaceCollectionStatus('CONFIRMED')).toBe('new')
+    expect(normalizeMarketplaceCollectionStatus('120:10:정상')).toBe('new')
+  })
+
+  it('maps marketplace prep states to ready', () => {
+    expect(normalizeMarketplaceCollectionStatus('INSTRUCT')).toBe('ready')
+    expect(normalizeMarketplaceCollectionStatus('PREPARING_PRODUCT')).toBe('ready')
+    expect(normalizeMarketplaceCollectionStatus('140:10:정상')).toBe('ready')
+  })
+
   it('does not confuse shipping completion with payment completion', () => {
     expect(normalizeMarketplaceCollectionStatus('배송완료')).toBe('delivered')
   })

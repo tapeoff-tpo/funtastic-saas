@@ -58,13 +58,8 @@ async function resolveProductForConfirmedItem(userId: string, query: string) {
     .select({
       sku: products.internalSku,
       productName: products.name,
-      optionName: sql<string | null>`MAX(${inventory.optionName})`,
     })
     .from(products)
-    .leftJoin(
-      inventory,
-      and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
-    )
     .where(and(
       eq(products.userId, userId),
       ne(products.status, 'deleted'),
@@ -74,12 +69,24 @@ async function resolveProductForConfirmedItem(userId: string, query: string) {
         ilike(products.name, pattern),
       ),
     ))
-    .groupBy(products.id)
+    .orderBy(sql`CASE WHEN lower(${products.internalSku}) = lower(${q}) THEN 0 ELSE 1 END`, products.internalSku)
     .limit(2)
 
   const exact = rows.find((row) => row.sku.toLowerCase() === q.toLowerCase())
-  if (exact) return exact
-  return rows.length === 1 ? rows[0] : null
+  const product = exact ?? (rows.length === 1 ? rows[0] : null)
+  if (!product) return null
+
+  const [inventoryRow] = await db
+    .select({
+      optionName: sql<string | null>`MAX(${inventory.optionName})`,
+    })
+    .from(inventory)
+    .where(and(eq(inventory.userId, userId), eq(inventory.sku, product.sku)))
+
+  return {
+    ...product,
+    optionName: inventoryRow?.optionName ?? null,
+  }
 }
 
 export async function PATCH(

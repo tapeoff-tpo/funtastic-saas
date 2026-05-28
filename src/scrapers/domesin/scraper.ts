@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs'
 import type { Dialog, Locator, Page } from 'playwright'
 import { MarketplaceApiError } from '@/lib/marketplace/errors'
 import { dumpStorageState, openContext } from '../browser'
+import { uploadInvoiceThroughOrderForm } from '../invoice-form-rpa'
 import { dismissRpaPopups } from '../popups'
 import type {
   MarketplaceScraper,
@@ -564,13 +565,43 @@ export class DomesinScraper implements MarketplaceScraper {
   }
 
   async uploadInvoice(
-    _credentials: ScraperCredentials,
-    _orderId: string,
-    _invoice: InvoiceData,
+    credentials: ScraperCredentials,
+    orderId: string,
+    invoice: InvoiceData,
   ): Promise<{ success: boolean; error?: string }> {
-    return {
-      success: false,
-      error: '도매의신 RPA 송장 업로드는 주문조회 화면 확인 후 구현이 필요합니다.',
+    let sessionState = credentials.storageState
+    let ctx = await openContext(sessionState)
+
+    try {
+      await gotoDomesin(ctx.page, DOMESIN_ORDER_LIST_URL)
+      if (!(await hasDomesinSession(ctx.page))) {
+        await ctx.close()
+        const loginResult = await this.login(credentials)
+        if (!loginResult.success || !loginResult.storageState) {
+          return { success: false, error: loginResult.error ?? 'domesin login failed' }
+        }
+        sessionState = loginResult.storageState
+        ctx = await openContext(sessionState)
+        await gotoDomesin(ctx.page, DOMESIN_ORDER_LIST_URL)
+      }
+
+      await openOrderListPage(ctx.page)
+      await uploadInvoiceThroughOrderForm({
+        page: ctx.page,
+        marketplaceId: this.marketplaceId,
+        displayName: this.displayName,
+        orderId,
+        invoice,
+        afterSearch: closePopups,
+      })
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'domesin invoice RPA failed',
+      }
+    } finally {
+      await ctx.close()
     }
   }
 

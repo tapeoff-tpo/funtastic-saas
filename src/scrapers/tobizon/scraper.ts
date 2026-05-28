@@ -9,6 +9,7 @@ import type {
   NormalizedOrder,
 } from '@/lib/marketplace/types'
 import { dumpStorageState, openContext } from '../browser'
+import { uploadInvoiceThroughOrderForm } from '../invoice-form-rpa'
 import { dismissRpaPopups } from '../popups'
 import type {
   MarketplaceScraper,
@@ -670,12 +671,41 @@ export class TobizonScraper implements MarketplaceScraper {
     orderId: string,
     invoice: InvoiceData,
   ): Promise<{ success: boolean; error?: string }> {
-    void credentials
-    void orderId
-    void invoice
-    return {
-      success: false,
-      error: '투비즈온 송장 등록 RPA는 주문 수집 안정화 후 배송정보 입력/엑셀 업로드 화면으로 연결해야 합니다.',
+    let sessionState = credentials.storageState
+    let ctx = await openContext(sessionState)
+
+    try {
+      await gotoTobizon(ctx.page, TOBIZON_ORDER_LIST_URL)
+      if (!(await hasTobizonSession(ctx.page))) {
+        await ctx.close()
+        const loginResult = await this.login(credentials)
+        if (!loginResult.success || !loginResult.storageState) {
+          return { success: false, error: loginResult.error ?? 'tobizon login failed' }
+        }
+        sessionState = loginResult.storageState
+        ctx = await openContext(sessionState)
+        await gotoTobizon(ctx.page, TOBIZON_ORDER_LIST_URL)
+      }
+
+      await openOrderManagementPage(ctx.page)
+      await uploadInvoiceThroughOrderForm({
+        page: ctx.page,
+        marketplaceId: this.marketplaceId,
+        displayName: this.displayName,
+        orderId,
+        invoice,
+        afterSearch: async (page) => {
+          await dismissRpaPopups(page, { marketplaceName: this.displayName, maxPasses: 4 })
+        },
+      })
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'tobizon invoice RPA failed',
+      }
+    } finally {
+      await ctx.close()
     }
   }
 

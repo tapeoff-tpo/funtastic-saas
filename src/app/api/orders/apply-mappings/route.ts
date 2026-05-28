@@ -19,7 +19,7 @@ import { mappingComponents, mappingSources, orderItems, orders, products, produc
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
-import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+import { buildMappingIndex, getRawMappingCandidateIds, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
 type ValidationFailure = {
   orderId: string
@@ -52,6 +52,7 @@ async function validateOrdersHaveInternalMappings(
       sku: orderItems.sku,
       productName: orderItems.productName,
       optionText: orderItems.optionText,
+      rawData: orders.rawData,
     })
     .from(orders)
     .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
@@ -133,14 +134,14 @@ async function validateOrdersHaveInternalMappings(
   }
 
   const findItemMappingCode = (item: typeof targetRows[number]): string | null => {
-    const directSku = item.sku?.trim()
-    if (directSku && validSkus.has(directSku)) return '__direct_sku__'
-
     const candidateIds = Array.from(new Set(
-      [item.marketplaceItemId, item.sku]
+      [item.marketplaceItemId, item.sku, ...getRawMappingCandidateIds(item.rawData)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
+    const directSku = candidateIds.find((candidateId) => validSkus.has(candidateId))
+    if (directSku) return '__direct_sku__'
+
     const mappingCodeId = candidateIds
       .map((candidateId) => lookupMappingRef(mappingIndex, item.marketplaceId, candidateId, item.optionText))
       .find((ref): ref is string => !!ref)

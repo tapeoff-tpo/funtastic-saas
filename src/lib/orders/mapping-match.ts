@@ -51,6 +51,52 @@ export type MappingIndex = {
   productMap: Map<string, string>
 }
 
+function asPlainRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function stringValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed || null
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return null
+}
+
+/**
+ * Some marketplaces keep the order-line id and product mapping id separate.
+ * CJ온스타일 is one example: marketplaceItemId is the line sequence
+ * (`001-001-001`), while rawData.itemCode/vendorItemCode hold the product ids.
+ */
+export function getRawMappingCandidateIds(rawData: unknown): string[] {
+  const record = asPlainRecord(rawData)
+  if (!record) return []
+
+  const keys = [
+    'vendorItemCode',
+    'itemCode',
+    'optionCode',
+    'affiliateItemCode',
+    'productCode',
+    'goodsCode',
+    'goodsNo',
+    'itemNo',
+    'originProductNo',
+    'sellerProductCode',
+    'sellerItemCode',
+    'marketplaceProductId',
+    'marketplaceItemId',
+  ]
+
+  const values = keys
+    .map((key) => stringValue(record[key]))
+    .filter((value): value is string => !!value)
+
+  return Array.from(new Set(values))
+}
+
 export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
   const optionMap = new Map<string, string>()
   const exactProductMap = new Map<string, string>()

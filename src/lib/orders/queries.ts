@@ -14,7 +14,7 @@ import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './type
 // re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
 export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
-import { buildMappingIndex, EXACT_OPTION_ID, lookupMappingRef, type MappingSource } from './mapping-match'
+import { buildMappingIndex, EXACT_OPTION_ID, getRawMappingCandidateIds, lookupMappingRef, type MappingSource } from './mapping-match'
 import { getOrderChangeLogs } from './change-log'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 
@@ -815,6 +815,7 @@ export async function getOrders(filters: OrderFilters = {}) {
             shippingCost: products.shippingCost,
             orderMarketplaceId: orders.marketplaceId,
             orderUserId: orders.userId,
+            orderRawData: orders.rawData,
           })
           .from(orderItems)
           .innerJoin(orders, eq(orders.id, orderItems.orderId))
@@ -921,6 +922,10 @@ export async function getOrders(filters: OrderFilters = {}) {
               if (sepIdx > 0) acc.marketplaceProductIds.add(marketplaceItemId.slice(0, sepIdx))
             }
           }
+          for (const candidateId of getRawMappingCandidateIds(item.orderRawData)) {
+            acc.marketplaceProductIds.add(candidateId)
+            acc.skus.add(candidateId)
+          }
           return acc
         },
         {
@@ -977,6 +982,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     lockedMappingCode: r.lockedMappingCode,
     lockedAt: r.lockedAt,
     orderMarketplaceId: r.orderMarketplaceId,
+    orderRawData: r.orderRawData,
     // 직접 SKU 매칭 표시명. 매핑 규칙 표시명은 mappingIndex 생성 후 아래에서 채운다.
     displayName: r.productInternalName ?? null,
     displayOptionName: r.sku ? pageInventoryBySku.get(r.sku)?.optionName ?? null : null,
@@ -1135,6 +1141,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     marketplaceId: string,
     marketplaceItemId: string | null,
     rawSku: string | null,
+    rawData: unknown,
     optionText: string | null,
     orderQuantity: number,
   ): {
@@ -1146,7 +1153,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     mappingCodeId: string
   } | null => {
     const candidateIds = Array.from(new Set(
-      [marketplaceItemId, rawSku]
+      [marketplaceItemId, rawSku, ...getRawMappingCandidateIds(rawData)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
@@ -1197,6 +1204,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       item.orderMarketplaceId,
       item.marketplaceItemId,
       item.sku,
+      item.orderRawData,
       item.optionText,
       item.quantity,
     )
@@ -1330,6 +1338,7 @@ export async function getOrderById(id: string, userId?: string) {
         lockedOptionName: orderItems.lockedOptionName,
         lockedQuantity: orderItems.lockedQuantity,
         lockedAt: orderItems.lockedAt,
+        orderRawData: orders.rawData,
         productInternalName: products.name,
         productInternalOptionName: sql<string | null>`(
           SELECT MAX(${inventory.optionName})
@@ -1385,6 +1394,10 @@ export async function getOrderById(id: string, userId?: string) {
           if (sepIdx > 0) acc.marketplaceProductIds.add(marketplaceItemId.slice(0, sepIdx))
         }
       }
+      for (const candidateId of getRawMappingCandidateIds(item.orderRawData)) {
+        acc.marketplaceProductIds.add(candidateId)
+        acc.skus.add(candidateId)
+      }
       return acc
     },
     {
@@ -1418,7 +1431,7 @@ export async function getOrderById(id: string, userId?: string) {
   const items = orderItemRows.map((r) => {
     const locked = !!r.lockedAt
     const candidateIds = Array.from(new Set(
-      [r.marketplaceItemId, r.sku]
+      [r.marketplaceItemId, r.sku, ...getRawMappingCandidateIds(r.orderRawData)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))

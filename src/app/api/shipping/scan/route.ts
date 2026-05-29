@@ -16,9 +16,6 @@ import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
 import { eq, and, gte, count, isNull, or, inArray, sql } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { deductForOrder } from '@/lib/inventory/actions'
-import { logOrderChange } from '@/lib/orders/change-log'
-import { isExchangeReshipOrder } from '@/lib/orders/exchange-reship'
 
 function normalizeTrackingNumber(value: string) {
   return value.trim().replace(/[^0-9A-Za-z]/g, '')
@@ -220,13 +217,6 @@ export async function POST(req: NextRequest) {
   const now = new Date()
   const pendingShipmentIds = pendingShipments.map((shipment) => shipment.id)
   const pendingOrderIds = pendingShipments.map((shipment) => shipment.orderId)
-  const exchangeReshipOrderIds = Array.from(new Set(
-    pendingShipments
-      .filter((shipment) => isExchangeReshipOrder(shipment.marketplaceStatus))
-      .map((shipment) => shipment.orderId),
-  ))
-  const exchangeReshipOrderIdSet = new Set(exchangeReshipOrderIds)
-  const regularPendingOrderIds = pendingOrderIds.filter((orderId) => !exchangeReshipOrderIdSet.has(orderId))
 
   await db.transaction(async (tx) => {
     await tx
@@ -238,38 +228,11 @@ export async function POST(req: NextRequest) {
       })
       .where(inArray(shipments.id, pendingShipmentIds))
 
-    if (regularPendingOrderIds.length > 0) {
+    if (pendingOrderIds.length > 0) {
       await tx
         .update(orders)
         .set({ status: 'ready', updatedAt: now })
-        .where(and(inArray(orders.id, regularPendingOrderIds), eq(orders.status, 'preparing')))
-    }
-
-    if (exchangeReshipOrderIds.length > 0) {
-      const exchangeOrders = await tx
-        .select({ id: orders.id, status: orders.status, userId: orders.userId })
-        .from(orders)
-        .where(inArray(orders.id, exchangeReshipOrderIds))
-        .for('update')
-
-      for (const order of exchangeOrders) {
-        if (order.status === 'shipped' || order.status === 'cancelled') continue
-        await tx.update(orders).set({
-          status: 'shipped',
-          previousStatus: order.status,
-          updatedAt: now,
-        }).where(eq(orders.id, order.id))
-        await logOrderChange({
-          orderId: order.id,
-          userId: order.userId,
-          action: 'status.shipped',
-          title: '교환발송 출고완료',
-          description: '교환발송준비 주문이 바코드 스캔되어 출고완료 처리되었습니다.',
-          before: { status: order.status },
-          after: { status: 'shipped' },
-        }, tx)
-        await deductForOrder(tx, order.userId, order.id)
-      }
+        .where(and(inArray(orders.id, pendingOrderIds), eq(orders.status, 'preparing')))
     }
   })
 

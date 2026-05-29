@@ -148,15 +148,15 @@ export async function GET(req: NextRequest) {
         AND (
           (s.marketplace_option_id <> ''
             AND (
-              (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id || '-' || s.marketplace_option_id
+              (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id || '-' || s.marketplace_option_id
               OR (s.marketplace_option_id = ${exactOptionId}
-                AND (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id)
-              OR ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
+                AND (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id)
+              OR ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
                 AND LEFT(COALESCE(oi.option_text, ''), 100) = s.marketplace_option_id)
             ))
           OR (s.marketplace_option_id = ''
-            AND ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
-              OR (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s.marketplace_product_id || '-%'))
+            AND ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
+              OR (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s.marketplace_product_id || '-%'))
         )
       ORDER BY (s.marketplace_option_id <> '') DESC
       LIMIT 1
@@ -183,7 +183,13 @@ export async function GET(req: NextRequest) {
       o.marketplace_id                AS "marketplaceId",
       o.marketplace_order_id          AS "marketplaceOrderId",
       o.ordered_at                    AS "orderedAt",
-      oi.marketplace_item_id          AS "marketplaceItemId",
+      CASE
+        WHEN o.marketplace_id = 'naver'
+          AND oi.marketplace_item_id ~ '^20[0-9]{14}$'
+          AND NULLIF(oi.sku, '') IS NOT NULL
+          THEN oi.sku
+        ELSE oi.marketplace_item_id
+      END                            AS "marketplaceItemId",
       oi.sku                          AS "sku",
       oi.product_name                 AS "productName",
       oi.option_text                  AS "optionText",
@@ -204,8 +210,8 @@ export async function GET(req: NextRequest) {
           AND s2.marketplace_id = o.marketplace_id
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s2.marketplace_option_id = ''
-          AND ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s2.marketplace_product_id
-            OR (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s2.marketplace_product_id || '-%')
+          AND ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s2.marketplace_product_id
+            OR (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s2.marketplace_product_id || '-%')
       )                               AS "hasProductMapping",
       EXISTS (
         SELECT 1 FROM mapping_sources s3
@@ -214,10 +220,10 @@ export async function GET(req: NextRequest) {
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s3.marketplace_option_id <> ''
           AND (
-            (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id || '-' || s3.marketplace_option_id
+            (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id || '-' || s3.marketplace_option_id
             OR (s3.marketplace_option_id = ${exactOptionId}
-              AND (CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id)
-            OR ((CASE WHEN o.marketplace_id = 'funtastic-b2b' AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id
+              AND (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id)
+            OR ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id
               AND LEFT(COALESCE(oi.option_text, ''), 100) = s3.marketplace_option_id)
           )
       )                               AS "hasOptionMapping",

@@ -1305,8 +1305,20 @@ function splitProductOption(itemId: string): { product: string; option: string }
   return { product: itemId.slice(0, idx), option: itemId.slice(idx + 1) }
 }
 
+function shouldUseSkuAsMappingProduct(target: MappingTarget): boolean {
+  return target.marketplaceId === 'naver'
+    && /^20\d{14}$/.test(target.marketplaceItemId.trim())
+    && Boolean(target.sku?.trim())
+}
+
 function getMappingTargetSource(target: MappingTarget): { product: string; option: string } {
   const split = splitProductOption(target.marketplaceItemId)
+  if (shouldUseSkuAsMappingProduct(target)) {
+    return {
+      product: target.sku!.trim(),
+      option: target.optionText?.trim() || EXACT_OPTION_ID,
+    }
+  }
   if (target.mappingProductId?.trim()) {
     return {
       product: target.mappingProductId.trim(),

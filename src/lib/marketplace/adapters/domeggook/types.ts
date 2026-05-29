@@ -32,6 +32,8 @@ export interface DomeggookListResponse<T> extends DomeggookApiErrorResponse {
   items?: T[] | { item?: T | T[] }
 }
 
+export type DomeggookOrderDetailResponse<T> = DomeggookListResponse<T>
+
 export interface DomeggookLoginResponse extends DomeggookApiErrorResponse {
   sId?: string
   sid?: string
@@ -83,6 +85,8 @@ export interface DomeggookOrder {
     no?: string | number
     title?: string
     itemCustomCode?: string
+    section?: string
+    market?: string
   }
   orderQty?: string | number
   orderAmt?: string | number
@@ -93,7 +97,9 @@ export interface DomeggookOrder {
     datePay?: string
   }
   buyerInfo?: {
+    buyerId?: string
     buyerName?: string
+    buyerMail?: string
     buyerPhone?: string
     buyerMobile?: string
     buyerZipcode?: string
@@ -111,6 +117,9 @@ export interface DomeggookOrder {
     fee?: string | number
     who?: string
     method?: string
+    code?: string | number
+    company?: string
+    companyName?: string
   }
   selectOpt?: {
     opt?: DomeggookOrderOption | DomeggookOrderOption[]

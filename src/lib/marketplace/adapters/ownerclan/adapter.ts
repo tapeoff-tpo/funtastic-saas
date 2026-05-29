@@ -95,6 +95,7 @@ const OWNERCLAN_PAGE_SIZE = 10
 const OWNERCLAN_MAX_PAGES_PER_WINDOW = 10
 const OWNERCLAN_WINDOW_MS = 24 * 60 * 60 * 1000
 const OWNERCLAN_MIN_WINDOW_MS = 60 * 60 * 1000
+const OWNERCLAN_COLLECTABLE_STATUSES = ['placed', 'paid'] as const
 
 const CHECK_ORDER_MUTATION = `
   mutation OwnerclanCheckOrder($key: ID!) {
@@ -284,7 +285,9 @@ export class OwnerclanAdapter implements MarketplaceAdapter {
     collected: NormalizedOrder[],
     seenOrderIds: Set<string>,
   ): Promise<void> {
-    await this.fetchOrdersWindowByStatus(dateFrom, dateTo, null, collected, seenOrderIds)
+    for (const status of OWNERCLAN_COLLECTABLE_STATUSES) {
+      await this.fetchOrdersWindowByStatus(dateFrom, dateTo, status, collected, seenOrderIds)
+    }
   }
 
   private async fetchOrdersWindowByStatus(

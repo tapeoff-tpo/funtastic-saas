@@ -9,7 +9,13 @@ import type {
 } from '../../types'
 import { MarketplaceApiError, MarketplaceAuthError } from '../../errors'
 import { createDomeggookClient, postDomeggookFormJson, readDomeggookJson } from './client'
-import type { DomeggookListResponse, DomeggookLoginResponse, DomeggookOrder, DomeggookOrderConfirmResponse } from './types'
+import type {
+  DomeggookListResponse,
+  DomeggookLoginResponse,
+  DomeggookOrder,
+  DomeggookOrderConfirmResponse,
+  DomeggookOrderDetailResponse,
+} from './types'
 
 const DOMEGGOOK_CONFIG: MarketplaceConfig = {
   id: 'domeggook',
@@ -31,6 +37,14 @@ function daysSince(since: Date): number {
 function asString(value: unknown): string {
   if (typeof value === 'string') return value
   if (typeof value === 'number') return String(value)
+  return ''
+}
+
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    const text = asString(value).trim()
+    if (text) return text
+  }
   return ''
 }
 
@@ -75,6 +89,41 @@ function mapStatus(status: string): NormalizedOrder['status'] {
 
 function orderKey(order: DomeggookOrder): string {
   return asString(order.orderNo) || order.orderUid || asString(order.itemNo)
+}
+
+function firstOrder(response: DomeggookOrderDetailResponse<DomeggookOrder>): DomeggookOrder | null {
+  return ensureArray(response.domeggook?.items ?? response.items)[0] ?? null
+}
+
+function mergeOrderDetail(order: DomeggookOrder, detail: DomeggookOrder): DomeggookOrder {
+  return {
+    ...order,
+    ...detail,
+    item: {
+      ...order.item,
+      ...detail.item,
+    },
+    pay: {
+      ...order.pay,
+      ...detail.pay,
+    },
+    buyerInfo: {
+      ...order.buyerInfo,
+      ...detail.buyerInfo,
+    },
+    consumer: {
+      ...order.consumer,
+      ...detail.consumer,
+    },
+    delivery: {
+      ...order.delivery,
+      ...detail.delivery,
+    },
+    selectOpt: {
+      ...order.selectOpt,
+      ...detail.selectOpt,
+    },
+  }
 }
 
 function toDomeggookOrderNo(marketplaceOrderId: string): string {
@@ -139,7 +188,11 @@ export class DomeggookAdapter implements MarketplaceAdapter {
         if (key) uniqueOrders.set(key, order)
       }
 
-      return Array.from(uniqueOrders.values()).map((order) => this.normalizeOrder(order))
+      const enrichedOrders = await Promise.all(
+        Array.from(uniqueOrders.values()).map((order) => this.enrichOrderDetail(order)),
+      )
+
+      return enrichedOrders.map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('NO_LOGIN') || error.message.includes('sId'))) {
@@ -215,6 +268,39 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     } while (page <= totalPages)
 
     return orders
+  }
+
+  private async enrichOrderDetail(order: DomeggookOrder): Promise<DomeggookOrder> {
+    const orderNo = toDomeggookOrderNo(orderKey(order))
+    if (!orderNo) return order
+
+    try {
+      const response = await readDomeggookJson<DomeggookOrderDetailResponse<DomeggookOrder>>(this.client, {
+        ver: '2.0',
+        mode: 'getOrderList',
+        aid: this.apiKey,
+        id: this.sellerId,
+        sId: await this.getSessionId(),
+        day: DOMEGGOOK_MAX_LOOKBACK_DAYS,
+        for: 'sell',
+        view: 'detail',
+        no: orderNo,
+        pg: 1,
+        ic: 1,
+        oe: 'utf-8',
+        om: 'json',
+      })
+
+      const { errorCode, errorMessage } = this.getApiError(response)
+      if (errorMessage || (errorCode != null && String(errorCode) !== '0')) {
+        return order
+      }
+
+      const detail = firstOrder(response)
+      return detail ? mergeOrderDetail(order, detail) : order
+    } catch {
+      return order
+    }
   }
 
   private isOrderInDaySlice(order: DomeggookOrder, day: number): boolean {
@@ -340,11 +426,22 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     const marketplaceStatus = order.statusMode || order.status || '결제완료'
     const productName = order.itemTitle || order.item?.title || `도매꾹 주문 ${orderId}`
     const quantity = asNumber(order.orderQty) || 1
-    const totalAmount = asNumber(order.pay?.payAmount) || asNumber(order.orderAmtPay) || asNumber(order.orderAmt) || asNumber(order.orderAmount)
-    const buyerName = order.buyerInfo?.buyerName || order.consumer?.name || '-'
+    const shippingFee = order.delivery?.fee != null ? asNumber(order.delivery.fee) : 0
+    const itemAmount = asNumber(order.orderAmtPay) || asNumber(order.orderAmount) || asNumber(order.orderAmt)
+    const totalAmount = asNumber(order.pay?.payAmount) || itemAmount + shippingFee
+    const buyerName = firstText(order.buyerInfo?.buyerName, order.consumer?.name, '-')
     const recipientName = order.consumer?.name || buyerName
-    const buyerPhone = order.buyerInfo?.buyerMobile || order.buyerInfo?.buyerPhone
-    const recipientPhone = order.consumer?.mobile || order.consumer?.phone || buyerPhone
+    const buyerPhone = firstText(order.buyerInfo?.buyerMobile, order.buyerInfo?.buyerPhone)
+    const recipientPhone = firstText(order.consumer?.mobile, order.consumer?.phone, buyerPhone)
+    const productCode = firstText(order.item?.itemCustomCode, order.item?.no, order.itemNo)
+    const itemIdentity = firstText(order.orderUid, productCode ? `${orderId}-${productCode}` : '', orderId)
+    const rawData = {
+      ...(order as unknown as Record<string, unknown>),
+      orderIdentity: {
+        orderId,
+        itemIds: Array.from(new Set([productCode, asString(order.item?.no), asString(order.itemNo), order.orderUid].filter(Boolean))),
+      },
+    }
 
     return {
       marketplaceOrderId: orderId,
@@ -361,20 +458,20 @@ export class DomeggookAdapter implements MarketplaceAdapter {
       },
       items: [
         {
-          marketplaceItemId: order.orderUid || orderId,
+          marketplaceItemId: itemIdentity,
           productName,
           optionText: this.formatOptions(order),
           quantity,
-          unitPrice: quantity > 0 ? totalAmount / quantity : totalAmount,
-          sku: order.item?.itemCustomCode,
+          unitPrice: quantity > 0 ? itemAmount / quantity : itemAmount,
+          sku: productCode || undefined,
         },
       ],
       orderedAt: parseDomeggookDate(order.date || order.pay?.datePay),
       totalAmount,
       shippingType: order.delivery?.who || null,
-      shippingFee: order.delivery?.fee != null ? asNumber(order.delivery.fee) : null,
+      shippingFee: order.delivery?.fee != null ? shippingFee : null,
       deliveryMessage: order.consumer?.deliReq || null,
-      rawData: order as unknown as Record<string, unknown>,
+      rawData,
     }
   }
 

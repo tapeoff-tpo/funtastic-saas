@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
   // Phase C 매핑코드 확장: orderItems → mapping_components 의 SKU 행으로 전개.
   const expanded = await expandOrderItemsWithMapping(
     workspaceUserId,
-    orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
+    orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId, rawData: o.rawData })),
     itemRows,
   )
   const expandedByOrder = new Map<string, typeof expanded>()

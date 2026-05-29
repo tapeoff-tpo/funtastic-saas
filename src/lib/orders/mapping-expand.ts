@@ -12,7 +12,13 @@
 import { db } from '@/lib/db'
 import { mappingSources, mappingComponents, inventory } from '@/lib/db/schema'
 import { eq, and, inArray, sql } from 'drizzle-orm'
-import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
+import {
+  buildMappingIndex,
+  getRawMappingCandidateIds,
+  lookupCompatibleMappingRef,
+  lookupMappingRef,
+  type MappingSource,
+} from './mapping-match'
 
 export type ExpandedRow = {
   /** 원본 orderItem id (참조용) */
@@ -61,6 +67,7 @@ type OrderItemInput = {
 type OrderInput = {
   id: string
   marketplaceId: string
+  rawData?: unknown
 }
 
 /**
@@ -87,6 +94,8 @@ export async function expandOrderItemsWithMapping(
       marketplaceId: mappingSources.marketplaceId,
       marketplaceProductId: mappingSources.marketplaceProductId,
       marketplaceOptionId: mappingSources.marketplaceOptionId,
+      productNameSnapshot: mappingSources.productNameSnapshot,
+      optionNameSnapshot: mappingSources.optionNameSnapshot,
       componentSku: mappingComponents.sku,
       componentQuantity: mappingComponents.quantity,
     })
@@ -126,6 +135,8 @@ export async function expandOrderItemsWithMapping(
       marketplaceId: m.marketplaceId,
       marketplaceProductId: m.marketplaceProductId,
       marketplaceOptionId: m.marketplaceOptionId,
+      productNameSnapshot: m.productNameSnapshot,
+      optionNameSnapshot: m.optionNameSnapshot,
       ref: m.mappingCodeId,
     })
   }
@@ -206,12 +217,19 @@ export async function expandOrderItemsWithMapping(
     const ord = orderById.get(it.orderId)
     const orderQty = it.quantity * (it.skuMultiplier ?? 1)
     const candidateIds = Array.from(new Set(
-      [it.marketplaceItemId, it.sku]
+      [it.marketplaceItemId, it.sku, ...getRawMappingCandidateIds(ord?.rawData)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
     const mappingCodeId = ord
-      ? candidateIds
+      ? lookupCompatibleMappingRef(
+          sourcesForIndex,
+          ord.marketplaceId,
+          candidateIds,
+          it.optionText,
+          it.productName,
+        )
+        ?? candidateIds
           .map((candidateId) => lookupMappingRef(mappingIndex, ord.marketplaceId, candidateId, it.optionText))
           .find((ref): ref is string => !!ref) ?? null
       : null

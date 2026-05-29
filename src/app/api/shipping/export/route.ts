@@ -232,7 +232,7 @@ export async function GET(request: NextRequest) {
     // 매핑 없으면 orderItems.sku 를 그대로 사용 (fallback).
     const expanded = await expandOrderItemsWithMapping(
       workspaceUserId,
-      orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId })),
+      orderRows.map((o) => ({ id: o.id, marketplaceId: o.marketplaceId, rawData: o.rawData })),
       itemRows,
     )
     const expandedByOrder = new Map<string, typeof expanded>()

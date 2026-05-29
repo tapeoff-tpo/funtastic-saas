@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
 
   const expandedRows = await expandOrderItemsWithMapping(
     workspaceUserId,
-    targetOrders.map((order) => ({ id: order.id, marketplaceId: order.marketplaceId })),
+    targetOrders.map((order) => ({ id: order.id, marketplaceId: order.marketplaceId, rawData: order.rawData })),
     sourceItems,
   )
 

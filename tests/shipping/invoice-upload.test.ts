@@ -109,6 +109,37 @@ describe('Coupang uploadInvoice', () => {
     expect(result).toEqual({ success: true })
   })
 
+  it('returns failure when Coupang top-level response is OK but invoice result failed', async () => {
+    mockJsonResponse.mockResolvedValueOnce({
+      code: '200',
+      message: 'OK',
+      data: {
+        responseCode: 99,
+        responseMessage: 'FAILED',
+        responseList: [
+          {
+            shipmentBoxId: 99001,
+            succeed: false,
+            resultCode: 'INVALID_STATUS',
+            resultMessage: '배송진행상태가 유효하지 않습니다.',
+            retryRequired: false,
+          },
+        ],
+      },
+    })
+
+    const result = await adapter.uploadInvoice('order-123', {
+      trackingNumber: '1234567890',
+      carrierId: 'CJGLS',
+      shipmentBoxId: 99001,
+      vendorItemId: 55001,
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('INVALID_STATUS')
+    expect(result.error).toContain('배송진행상태가 유효하지 않습니다.')
+  })
+
   it('returns { success: false, error } on non-200 response', async () => {
     mockJsonResponse.mockResolvedValueOnce({ code: '400', message: 'Invalid invoice number' })
 

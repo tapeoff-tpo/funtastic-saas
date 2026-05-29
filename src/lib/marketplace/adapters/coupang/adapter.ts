@@ -63,6 +63,49 @@ function isCoupangSuccessCode(code: unknown): boolean {
   return codeStr === '200' || codeStr === 'SUCCESS' || codeStr === 'OK'
 }
 
+type CoupangInvoiceUploadResponse = {
+  code: string | number
+  message?: string
+  data?: {
+    responseCode?: number | string
+    responseMessage?: string
+    responseList?: Array<{
+      shipmentBoxId?: number | string
+      succeed?: boolean
+      resultCode?: string
+      resultMessage?: string | null
+      retryRequired?: boolean
+    }>
+  }
+}
+
+function getCoupangInvoiceUploadError(response: CoupangInvoiceUploadResponse): string | null {
+  if (!isCoupangSuccessCode(response.code)) {
+    return response.message || `Upload failed with code: ${response.code}`
+  }
+
+  const data = response.data
+  if (!data) return null
+
+  const failed = data.responseList?.filter((item) => item.succeed === false) ?? []
+  if (failed.length > 0) {
+    return failed
+      .map((item) => {
+        const code = item.resultCode || 'UNKNOWN'
+        const message = item.resultMessage || data.responseMessage || '쿠팡 송장업로드 실패'
+        const shipmentBoxId = item.shipmentBoxId != null ? `shipmentBoxId ${item.shipmentBoxId}: ` : ''
+        return `${shipmentBoxId}${code} - ${message}`
+      })
+      .join('; ')
+  }
+
+  const responseCode = String(data.responseCode ?? '').toUpperCase()
+  if (responseCode && responseCode !== '0' && responseCode !== 'SUCCESS' && responseCode !== 'OK') {
+    return data.responseMessage || `Upload failed with responseCode: ${data.responseCode}`
+  }
+  return null
+}
+
 /**
  * Phase 8 — Normalize Coupang's free-form shipping label into a fixed enum.
  *
@@ -313,13 +356,14 @@ export class CoupangAdapter implements MarketplaceAdapter {
               estimatedShippingDate: undefined,
             })),
         },
-      }).json<{ code: string | number; message: string }>()
+      }).json<CoupangInvoiceUploadResponse>()
 
-      if (isCoupangSuccessCode(response.code)) {
+      const uploadError = getCoupangInvoiceUploadError(response)
+      if (!uploadError) {
         return { success: true }
       }
 
-      return { success: false, error: response.message || `Upload failed with code: ${response.code}` }
+      return { success: false, error: uploadError }
     } catch (error) {
       if (error instanceof Error && 'response' in error) {
         const res = (error as unknown as { response: Response }).response

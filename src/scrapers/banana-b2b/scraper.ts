@@ -30,6 +30,7 @@ const ORDER_COLLECTION_TARGETS: BananaOrderCollectionTarget[] = [
   { state: '1', label: '결제완료', collectionStatus: 'new' },
   { state: '2', label: '배송준비', collectionStatus: 'ready' },
 ]
+const BANANA_ORDER_NO_PATTERN = /\b\d{8}-\d{7,8}\b/g
 
 const ORDER_PAGE_CANDIDATES = [
   `${BANANA_B2B_BASE_URL}/order-delivery/order`,
@@ -339,7 +340,7 @@ async function readVisibleOrderNos(page: Page): Promise<Set<string>> {
   const source = rowTexts.length > 0
     ? rowTexts.join('\n')
     : await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  return new Set(source.match(/\b\d{8}-\d{7}\b/g) ?? [])
+  return new Set(source.match(BANANA_ORDER_NO_PATTERN) ?? [])
 }
 
 async function confirmPaymentCompleteOrders(page: Page): Promise<number> {

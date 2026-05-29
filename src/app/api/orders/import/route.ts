@@ -9,6 +9,7 @@ import { generateInternalNo } from '@/lib/orders/internal-no'
 import { findDefaultOrderImportTemplate } from '@/lib/orders/default-import-templates'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { parseImportedOrderedAt } from '@/lib/orders/import-date'
 
 /**
  * POST /api/orders/import
@@ -148,14 +149,7 @@ export async function POST(request: NextRequest) {
           continue
         }
 
-        // Parse ordered date
-        let orderedAt: Date
-        try {
-          orderedAt = new Date(first.orderedAt)
-          if (isNaN(orderedAt.getTime())) orderedAt = new Date()
-        } catch {
-          orderedAt = new Date()
-        }
+        const orderedAt = parseImportedOrderedAt(first.orderedAt)
 
         const normalizedItems = items.map((item) => normalizeImportedOrderItem(item, marketplaceId))
         const firstNormalized = normalizedItems[0]

@@ -12,6 +12,7 @@ import {
   REQUIRED_ORDER_IMPORT_FIELDS,
   type OrderImportMapping,
 } from './excel-import-fields'
+import { formatExcelDateCell } from './import-date'
 
 /** Map of Korean header names to internal field keys */
 const HEADER_MAP: Record<string, string> = {
@@ -129,7 +130,7 @@ export async function parseOrderExcel(
 
   const readCellText = (value: ExcelJS.CellValue): string => {
     if (value === null || value === undefined) return ''
-    if (value instanceof Date) return value.toISOString()
+    if (value instanceof Date) return formatExcelDateCell(value)
     if (typeof value === 'object') {
       if ('richText' in value && Array.isArray(value.richText)) {
         return value.richText.map((part) => part.text).join('').trim()

@@ -23,7 +23,7 @@ describe('lookupMappingRef', () => {
     expect(lookupMappingRef(index, 'market-b', 'product-1', 'red')).toBeNull()
   })
 
-  it('matches a product mapping only in the same marketplace', () => {
+  it('does not use a product-only mapping for orders that have an option', () => {
     const index = buildMappingIndex([
       {
         marketplaceId: 'market-a',
@@ -33,11 +33,11 @@ describe('lookupMappingRef', () => {
       },
     ])
 
-    expect(lookupMappingRef(index, 'market-a', 'P001-red')).toBe('mapping-a')
+    expect(lookupMappingRef(index, 'market-a', 'P001-red', 'red')).toBeNull()
     expect(lookupMappingRef(index, 'market-b', 'P001-red')).toBeNull()
   })
 
-  it('matches product-level mappings regardless of the saved option snapshot', () => {
+  it('does not treat a source with only an option snapshot as an all-options product mapping', () => {
     expect(lookupCompatibleMappingRef([
       {
         marketplaceId: 'ownerclan',
@@ -47,7 +47,20 @@ describe('lookupMappingRef', () => {
         optionNameSnapshot: '옵션: 3L',
         ref: 'mapping-code-id',
       },
-    ], 'ownerclan', ['W9D55DC'], '옵션: 5L', '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병')).toBe('mapping-code-id')
+    ], 'ownerclan', ['W9D55DC'], '옵션: 5L', '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병')).toBeNull()
+  })
+
+  it('does not match legacy sources when the option key was saved only as a snapshot', () => {
+    expect(lookupCompatibleMappingRef([
+      {
+        marketplaceId: 'ownerclan',
+        marketplaceProductId: 'W9D55DC',
+        marketplaceOptionId: '',
+        productNameSnapshot: '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병',
+        optionNameSnapshot: '옵션: 3L',
+        ref: 'mapping-code-id',
+      },
+    ], 'ownerclan', ['W9D55DC'], '옵션: 3L', '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병')).toBeNull()
   })
 })
 

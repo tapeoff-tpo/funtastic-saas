@@ -52,6 +52,16 @@ function isBlockedSource(source: SourceInput): boolean {
   )
 }
 
+function normalizeSourceOption(source: SourceInput): SourceInput {
+  const optionId = source.marketplaceOptionId?.trim()
+  if (optionId) return { ...source, marketplaceOptionId: optionId }
+
+  const collectedOption = source.optionNameSnapshot?.trim()
+  return collectedOption
+    ? { ...source, marketplaceOptionId: collectedOption }
+    : { ...source, marketplaceOptionId: '' }
+}
+
 function isMappingSourceConflict(message: string): boolean {
   const normalized = message.toLowerCase()
   return normalized.includes('mapping_sources_user_market_product_option_uniq')
@@ -188,7 +198,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '최소 1개 이상의 SKU 구성품이 필요합니다' }, { status: 400 })
   }
 
-  const normalizedSources = await normalizeMappingSources(workspaceUserId, body.sources)
+  const normalizedSources = await normalizeMappingSources(
+    workspaceUserId,
+    body.sources.map(normalizeSourceOption),
+  )
 
   if (normalizedSources.some(isBlockedSource)) {
     return NextResponse.json({ error: '주문번호/주문행번호는 상품 매핑키로 저장할 수 없습니다. 실제 상품코드 또는 자체코드로 매핑해 주세요.' }, { status: 400 })

@@ -45,6 +45,16 @@ function isBlockedSource(source: SourceInput): boolean {
   )
 }
 
+function normalizeSourceOption(source: SourceInput): SourceInput {
+  const optionId = source.marketplaceOptionId?.trim()
+  if (optionId) return { ...source, marketplaceOptionId: optionId }
+
+  const collectedOption = source.optionNameSnapshot?.trim()
+  return collectedOption
+    ? { ...source, marketplaceOptionId: collectedOption }
+    : { ...source, marketplaceOptionId: '' }
+}
+
 function isMappingSourceConflict(message: string): boolean {
   const normalized = message.toLowerCase()
   return normalized.includes('mapping_sources_user_market_product_option_uniq')
@@ -143,7 +153,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
   const normalizedSources = body.sources
-    ? await normalizeMappingSources(workspaceUserId, body.sources)
+    ? await normalizeMappingSources(workspaceUserId, body.sources.map(normalizeSourceOption))
     : undefined
 
   if (normalizedSources?.some(isBlockedSource)) {

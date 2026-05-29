@@ -188,7 +188,7 @@ function normalizeMappingText(value: string | null | undefined): string {
 }
 
 export function isMappingSourceSnapshotCompatible(
-  source: Pick<MappingSource, 'marketplaceOptionId' | 'productNameSnapshot' | 'optionNameSnapshot'>,
+  source: Pick<MappingSource, 'productNameSnapshot' | 'optionNameSnapshot'>,
   productName?: string | null,
   optionText?: string | null,
 ): boolean {
@@ -197,8 +197,6 @@ export function isMappingSourceSnapshotCompatible(
   if (sourceProductName && currentProductName && sourceProductName !== currentProductName) {
     return false
   }
-
-  if (source.marketplaceOptionId === '') return true
 
   const sourceOptionName = normalizeMappingText(source.optionNameSnapshot)
   const currentOptionName = normalizeMappingText(optionText)
@@ -227,7 +225,7 @@ function sourceMatchesCandidate(
 
   if (normalizedOptionText) {
     return source.marketplaceProductId === marketplaceItemId
-      && (source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === '')
+      && source.marketplaceOptionId === normalizedOptionText
   }
 
   if (source.marketplaceOptionId === EXACT_OPTION_ID && source.marketplaceProductId === marketplaceItemId) {
@@ -294,6 +292,7 @@ export function lookupMappingRef(
     const optionTextKey = `${marketplaceItemId}${MAPPING_SEPARATOR}${normalizedOptionText}`
     const optionTextHit = index.optionMap.get(`${marketplaceId}:${optionTextKey}`)
     if (optionTextHit) return optionTextHit
+    return null
   } else {
     const exactProductHit = index.exactProductMap.get(`${marketplaceId}:${marketplaceItemId}`)
     if (exactProductHit) return exactProductHit

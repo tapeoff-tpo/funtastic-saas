@@ -113,6 +113,8 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
 
   const keys = [
     'optionManageCode',
+    'productId',
+    'originalProductId',
     'sellerProductCode',
     'itemKey',
     'itemCode',

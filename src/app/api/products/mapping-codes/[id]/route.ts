@@ -45,6 +45,13 @@ function isBlockedSource(source: SourceInput): boolean {
   )
 }
 
+function isMappingSourceConflict(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return normalized.includes('mapping_sources_user_market_product_option_uniq')
+    || normalized.includes('mapping_sources_user_id_marketplace')
+    || (normalized.includes('duplicate key') && normalized.includes('mapping_sources'))
+}
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
@@ -178,11 +185,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ ok: true })
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown error'
+    if (isMappingSourceConflict(msg)) {
+      return NextResponse.json({ error: '이미 다른 매핑코드에 연결된 마켓상품/옵션입니다. 기존 매핑을 수정하거나 먼저 연결을 해제해주세요.' }, { status: 409 })
+    }
     if (msg.includes('mapping_codes_user_id_code_key') || msg.includes('mapping_codes_user_code_uniq')) {
       return NextResponse.json({ error: '이미 사용 중인 매핑코드입니다' }, { status: 409 })
-    }
-    if (msg.includes('mapping_sources_user_id_marketplace') || msg.includes('mapping_sources_user_market_product_option_uniq')) {
-      return NextResponse.json({ error: '일부 마켓상품이 이미 다른 매핑코드에 연결되어 있습니다' }, { status: 409 })
     }
     return NextResponse.json({ error: msg }, { status: 500 })
   }

@@ -224,21 +224,23 @@ function sourceMatchesCandidate(
   if (exactSourceKey && exactSourceKey === marketplaceItemId) return true
 
   if (normalizedOptionText) {
+    const effectiveOptionId = source.marketplaceOptionId || source.optionNameSnapshot?.trim().slice(0, 100) || ''
     return source.marketplaceProductId === marketplaceItemId
-      && source.marketplaceOptionId === normalizedOptionText
+      && effectiveOptionId === normalizedOptionText
   }
 
   if (source.marketplaceOptionId === EXACT_OPTION_ID && source.marketplaceProductId === marketplaceItemId) {
     return true
   }
 
-  if (source.marketplaceOptionId === '' && source.marketplaceProductId === marketplaceItemId) {
+  if (source.marketplaceOptionId === '' && !source.optionNameSnapshot?.trim() && source.marketplaceProductId === marketplaceItemId) {
     return true
   }
 
   const sepIdx = marketplaceItemId.indexOf(MAPPING_SEPARATOR)
   if (sepIdx > 0) {
     return source.marketplaceOptionId === ''
+      && !source.optionNameSnapshot?.trim()
       && source.marketplaceProductId === marketplaceItemId.slice(0, sepIdx)
   }
 

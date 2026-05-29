@@ -18,6 +18,26 @@ import { EXACT_OPTION_ID, getRawMappingCandidateIds, isMappingSourceSnapshotComp
 import { getOrderChangeLogs } from './change-log'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 
+const SABANGNET_MALL_NAMES_BY_MARKETPLACE: Record<string, string[]> = {
+  '10x10': ['텐바이텐'],
+  cjonestyle: ['CJ온스타일'],
+  domechango: ['도매창고'],
+  domeggook: ['도매꾹'],
+  domesin: ['도매의신'],
+  'funtastic-b2b': ['펀타스틱B2B', '펀타스틱 퍼스트몰'],
+  'hyundai-hmall': ['현대홈쇼핑', '현대홈쇼핑(3)'],
+  'kakao-gift': ['카카오선물하기'],
+  'kakao-store': ['카카오쇼핑하기'],
+  naver: ['스마트스토어'],
+  ohouse: ['오늘의집'],
+  onchannel: ['온채널'],
+  ownerclan: ['오너클랜'],
+  specialoffer: ['스페셜오퍼'],
+  ssgmall: ['SSG'],
+  tobizon: ['토비즈온'],
+  'toss-shopping': ['토스쇼핑'],
+}
+
 /**
  * mappingStatus/displayName 계산용 매핑 조회.
  *
@@ -426,6 +446,18 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) IN ('saas', 'order-excel', 'saas-excel')
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) LIKE 'saas-%'
   )`
+  const marketplaceCondition = (marketplaceId: string): SQL<unknown> => {
+    const sabangnetMallNames = SABANGNET_MALL_NAMES_BY_MARKETPLACE[marketplaceId] ?? []
+    if (sabangnetMallNames.length === 0) return eq(orders.marketplaceId, marketplaceId)
+
+    return or(
+      eq(orders.marketplaceId, marketplaceId),
+      and(
+        isSabangnetOrderSource,
+        inArray(sql<string>`${orders.rawData}->>'mallName'`, sabangnetMallNames),
+      ),
+    )!
+  }
 
   if (filters.userId) {
     conditions.push(eq(orders.userId, filters.userId))
@@ -438,9 +470,9 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   }
 
   if (filters.marketplaces?.length) {
-    conditions.push(inArray(orders.marketplaceId, filters.marketplaces))
+    conditions.push(or(...filters.marketplaces.map(marketplaceCondition))!)
   } else if (filters.marketplace) {
-    conditions.push(eq(orders.marketplaceId, filters.marketplace))
+    conditions.push(marketplaceCondition(filters.marketplace))
   }
 
   if (filters.mapping === 'mapped') {

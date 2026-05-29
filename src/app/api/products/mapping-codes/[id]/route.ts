@@ -50,6 +50,26 @@ function isMappingSourceConflict(message: string): boolean {
   return normalized.includes('mapping_sources_user_market_product_option_uniq')
     || normalized.includes('mapping_sources_user_id_marketplace')
     || (normalized.includes('duplicate key') && normalized.includes('mapping_sources'))
+    || (normalized.includes('23505') && normalized.includes('mapping_sources'))
+}
+
+function errorSearchText(error: unknown): string {
+  if (!error || typeof error !== 'object') {
+    return error instanceof Error ? error.message : String(error)
+  }
+
+  const parts: string[] = []
+  const appendError = (value: unknown) => {
+    if (!value || typeof value !== 'object') return
+    const record = value as Record<string, unknown>
+    for (const key of ['message', 'code', 'constraint', 'constraint_name', 'detail', 'table']) {
+      if (record[key] !== undefined) parts.push(String(record[key]))
+    }
+  }
+
+  appendError(error)
+  appendError((error as { cause?: unknown }).cause)
+  return parts.join(' ')
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -184,7 +204,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     revalidatePath('/products/mapping-codes')
     return NextResponse.json({ ok: true })
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'unknown error'
+    const msg = errorSearchText(e) || 'unknown error'
     if (isMappingSourceConflict(msg)) {
       return NextResponse.json({ error: '이미 다른 매핑코드에 연결된 마켓상품/옵션입니다. 기존 매핑을 수정하거나 먼저 연결을 해제해주세요.' }, { status: 409 })
     }

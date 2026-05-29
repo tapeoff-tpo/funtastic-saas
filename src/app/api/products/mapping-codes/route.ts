@@ -13,6 +13,7 @@ import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema
 import { eq, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { isBlockedMappingSourcePair } from '@/lib/orders/mapping-match'
+import { normalizeMappingSources } from '@/lib/orders/mapping-source-normalize'
 
 interface SourceInput {
   marketplaceId: string
@@ -158,7 +159,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '최소 1개 이상의 SKU 구성품이 필요합니다' }, { status: 400 })
   }
 
-  if (body.sources.some(isBlockedSource)) {
+  const normalizedSources = await normalizeMappingSources(workspaceUserId, body.sources)
+
+  if (normalizedSources.some(isBlockedSource)) {
     return NextResponse.json({ error: '주문번호/주문행번호는 상품 매핑키로 저장할 수 없습니다. 실제 상품코드 또는 자체코드로 매핑해 주세요.' }, { status: 400 })
   }
 
@@ -175,9 +178,9 @@ export async function POST(req: NextRequest) {
         })
         .returning()
 
-      if (body.sources.length > 0) {
+      if (normalizedSources.length > 0) {
         await tx.insert(mappingSources).values(
-          body.sources.map((s) => ({
+          normalizedSources.map((s) => ({
             userId: workspaceUserId,
             mappingCodeId: created.id,
             marketplaceId: s.marketplaceId,

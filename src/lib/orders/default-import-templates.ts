@@ -10,6 +10,27 @@ export interface DefaultOrderImportTemplate {
 
 export const DEFAULT_ORDER_IMPORT_TEMPLATES: DefaultOrderImportTemplate[] = [
   {
+    id: 'default:rocket-delivery',
+    name: '로켓배송 주문수집',
+    isDefault: true,
+    aliases: ['rocketdelivery', 'rocket', '로켓배송'],
+    mappings: [
+      { field: 'orderNumber', excelColumn: '발주번호' },
+      { field: 'marketplaceItemId', excelColumn: '상품번호' },
+      { field: 'orderedAt', excelColumn: '발주등록일시' },
+      { field: 'buyerName', excelColumn: '', fixedValue: '로켓배송' },
+      { field: 'recipientName', excelColumn: '물류센터' },
+      { field: 'recipientAddress', excelColumn: '', fixedValue: '로켓배송 물류센터' },
+      { field: 'productName', excelColumn: '상품이름' },
+      { field: 'optionText', excelColumn: '물류센터', extraColumns: ['입고유형'], joinSeparator: ' ' },
+      { field: 'quantity', excelColumn: '확정수량' },
+      { field: 'totalAmount', excelColumn: '총발주 매입금' },
+      { field: 'sku', excelColumn: '상품바코드' },
+      { field: 'deliveryMessage', excelColumn: '발주상태' },
+      { field: 'shippingFee', excelColumn: '', fixedValue: '0' },
+    ],
+  },
+  {
     id: 'default:ownerclan',
     name: '오너클랜 주문수집',
     isDefault: true,

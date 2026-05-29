@@ -111,8 +111,7 @@ export async function parseOrderExcel(
   // ExcelJS types don't account for Node.js 24+ Buffer changes
   await workbook.xlsx.load(buffer as ExcelJS.Buffer)
 
-  const worksheet = workbook.worksheets[0]
-  if (!worksheet) {
+  if (workbook.worksheets.length === 0) {
     return { rows: [], errors: [{ row: 0, message: '시트를 찾을 수 없습니다' }] }
   }
 
@@ -192,20 +191,24 @@ export async function parseOrderExcel(
     return requiredScore + Object.keys(candidate.colMap).length + candidate.mappedColumnNumbers.size
   }
 
+  let worksheet = workbook.worksheets[0]
   let headerRowNumber = 1
   let selectedColMap: Record<string, number> = {}
   let mappedColumnNumbers = new Map<string, number[]>()
   let bestScore = -1
-  const maxHeaderScanRows = Math.min(20, worksheet.rowCount)
 
-  for (let rowNumber = 1; rowNumber <= maxHeaderScanRows; rowNumber++) {
-    const candidate = mapColumnsFromRow(worksheet.getRow(rowNumber))
-    const score = scoreMappedRow(candidate)
-    if (score > bestScore) {
-      bestScore = score
-      headerRowNumber = rowNumber
-      selectedColMap = candidate.colMap
-      mappedColumnNumbers = candidate.mappedColumnNumbers
+  for (const candidateWorksheet of workbook.worksheets) {
+    const maxHeaderScanRows = Math.min(20, candidateWorksheet.rowCount)
+    for (let rowNumber = 1; rowNumber <= maxHeaderScanRows; rowNumber++) {
+      const candidate = mapColumnsFromRow(candidateWorksheet.getRow(rowNumber))
+      const score = scoreMappedRow(candidate)
+      if (score > bestScore) {
+        bestScore = score
+        worksheet = candidateWorksheet
+        headerRowNumber = rowNumber
+        selectedColMap = candidate.colMap
+        mappedColumnNumbers = candidate.mappedColumnNumbers
+      }
     }
   }
   Object.assign(colMap, selectedColMap)

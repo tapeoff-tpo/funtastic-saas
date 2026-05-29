@@ -8,6 +8,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ### Order Data Invariants
 
 - Once an order has been collected, marketplace collection must not re-collect, overwrite, downgrade, or otherwise mutate that existing order. Existing `(marketplace_id, marketplace_order_id)` rows are immutable from collection paths; duplicate collection must skip or no-op.
+- This duplicate-collection rule applies to every marketplace and every integration path: API, RPA, Excel import, connected-mall adapters, and future adapters. A later collection of the same `(user_id, marketplace_id, marketplace_order_id)` must never create an additional visible order row for the same marketplace order.
+- Split/copy rows (`orders.is_copy = true`) are part of the same marketplace order, not a reason to bypass duplicate protection. Re-collection must reuse/update the existing split rows, remove stale extra split rows, and remove all split rows when the refreshed marketplace order has become a single-item order.
+- Do not change the `orders_marketplace_unique` partial unique-index behavior or add collection code that bypasses `saveNormalizedOrdersForConnection`, `upsertOrder`, or `ensureSplitOrderCopies` unless the replacement preserves the same all-market dedupe guarantees.
 - Marketplace order source data and collected order items are the original record. Do not change collected product name, collected option text, raw marketplace payload, order quantity, or marketplace status as a side effect of later collection.
 - Product mapping rules and per-order confirmed item overrides are separate concepts.
 - Mapping rules (`mapping_codes`, `mapping_sources`, `mapping_components`) define how future or unmapped marketplace product/option combinations resolve to internal SKU components. Changing an individual order must not create, edit, delete, or infer mapping rules unless the user explicitly asks for mapping changes.

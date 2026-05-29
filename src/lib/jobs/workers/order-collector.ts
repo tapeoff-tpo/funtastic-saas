@@ -1425,7 +1425,20 @@ async function ensureSplitOrderCopies(
   connectionId: string,
   userId: string,
 ): Promise<string[]> {
-  if (items.length <= 1) return []
+  if (items.length <= 1) {
+    if (items[0]) await normalizeBaseOrderItem(baseOrderId, items[0])
+    await db
+      .delete(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          eq(orders.marketplaceId, order.marketplaceId),
+          eq(orders.marketplaceOrderId, order.marketplaceOrderId),
+          eq(orders.isCopy, true),
+        ),
+      )
+    return []
+  }
 
   await normalizeBaseOrderItem(baseOrderId, items[0])
 
@@ -1440,8 +1453,8 @@ async function ensureSplitOrderCopies(
         eq(orders.isCopy, true),
       ),
     )
+    .orderBy(orders.createdAt, orders.id)
 
-  const copyIds = existingCopies.map((copy) => copy.id)
   const now = new Date()
   const splitBase = {
     sourceOrderId: baseOrderId,
@@ -1461,9 +1474,30 @@ async function ensureSplitOrderCopies(
     })
     .where(eq(orders.id, baseOrderId))
 
-  const missingStartIndex = existingCopies.length + 1
-  for (let index = missingStartIndex; index < items.length; index += 1) {
+  const expectedCopyCount = Math.max(0, items.length - 1)
+  const reusableCopies = existingCopies.slice(0, expectedCopyCount)
+  const staleCopies = existingCopies.slice(expectedCopyCount)
+
+  if (staleCopies.length > 0) {
+    await db
+      .delete(orders)
+      .where(inArray(orders.id, staleCopies.map((copy) => copy.id)))
+  }
+
+  const copyIds: string[] = []
+  for (let index = 1; index < items.length; index += 1) {
     const item = items[index]
+    const existingCopy = reusableCopies[index - 1]
+    if (existingCopy) {
+      await updateSplitOrderCopy(existingCopy.id, order, item, connectionId, {
+        ...splitBase,
+        partIndex: index + 1,
+        originalOrderId: baseOrderId,
+      })
+      copyIds.push(existingCopy.id)
+      continue
+    }
+
     const [copy] = await db
       .insert(orders)
       .values({
@@ -1501,6 +1535,42 @@ async function ensureSplitOrderCopies(
   }
 
   return copyIds
+}
+
+async function updateSplitOrderCopy(
+  copyOrderId: string,
+  order: NormalizedOrder,
+  item: NormalizedOrderItem,
+  connectionId: string,
+  splitMeta: Record<string, unknown>,
+): Promise<void> {
+  const now = new Date()
+  await db
+    .update(orders)
+    .set({
+      connectionId,
+      status: order.status,
+      marketplaceStatus: order.marketplaceStatus,
+      marketplaceCollectionStatus: getMarketplaceCollectionStatus(order),
+      buyerName: order.buyerName,
+      buyerPhone: order.buyerPhone,
+      buyerPhone2: order.buyerPhone2,
+      recipientName: order.recipientName,
+      recipientPhone: order.recipientPhone,
+      recipientPhone2: order.recipientPhone2,
+      shippingAddress: order.shippingAddress,
+      orderedAt: order.orderedAt,
+      totalAmount: String(lineTotalAmount(item)),
+      shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
+      deliveryMessage: order.deliveryMessage ?? null,
+      rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [item], totalAmount: lineTotalAmount(item) }), splitMeta),
+      collectedAt: now,
+      updatedAt: now,
+    })
+    .where(eq(orders.id, copyOrderId))
+
+  await db.delete(orderItems).where(eq(orderItems.orderId, copyOrderId))
+  await db.insert(orderItems).values(orderItemInsertValue(copyOrderId, item))
 }
 
 function asPlainRecord(value: unknown): Record<string, unknown> | null {

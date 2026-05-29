@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
     // Use transaction for the entire batch
     await db.transaction(async (tx) => {
       for (const [orderNumber, items] of orderMap) {
+        const collectedAt = new Date()
         const first = items[0]
 
         // Check if order already exists
@@ -191,6 +192,7 @@ export async function POST(request: NextRequest) {
               shippingFee: first.shippingFee == null ? null : String(first.shippingFee),
               deliveryMessage: first.deliveryMessage ?? null,
               rawData: itemSplitRawData(baseRawData, { ...splitBase, partIndex: 1, original: true }),
+              collectedAt,
             })
             .returning({ id: orders.id })
 
@@ -230,6 +232,7 @@ export async function POST(request: NextRequest) {
                 shippingFee: first.shippingFee == null ? null : String(first.shippingFee),
                 deliveryMessage: first.deliveryMessage ?? null,
                 rawData: itemSplitRawData(baseRawData, { ...splitBase, partIndex: index + 1, originalOrderId: newOrder.id }),
+                collectedAt,
                 isCopy: true,
               })
               .returning({ id: orders.id })

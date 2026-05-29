@@ -400,7 +400,7 @@ function getShippedAtDateRangeCondition(filters: OrderFilters): SQL | null {
  */
 export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   const conditions: SQL[] = []
-  const sabangnetKoreanPattern = '%사방넷%'
+  const sabangnetKoreanPattern = '%\uC0AC\uBC29\uB137%'
   const isSabangnetOrderSource = sql`(
     LOWER(COALESCE(${orders.rawData}->>'source', '')) = 'sabangnet'
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) LIKE 'sabangnet-%'
@@ -410,6 +410,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     OR LOWER(${orders.marketplaceId}) LIKE 'sabangnet-%'
     OR ${orders.rawData} ? 'sabangnetSync'
     OR ${orders.rawData} ? 'sabangnetRaw'
+    OR COALESCE(${orders.rawData}->>'mallName', '') LIKE ${sabangnetKoreanPattern}
     OR COALESCE(${orders.rawData}->>'sourceFileName', '') LIKE ${sabangnetKoreanPattern}
     OR COALESCE(${orders.rawData}->>'importTemplateId', '') LIKE ${sabangnetKoreanPattern}
     OR LOWER(COALESCE(${orders.rawData}->>'mallName', '')) IN ('sabangnet', '사방넷')
@@ -417,6 +418,13 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     OR COALESCE(${orders.rawData}->>'sourceFileName', '') LIKE '%사방넷%'
     OR LOWER(COALESCE(${orders.rawData}->>'importTemplateId', '')) LIKE '%sabangnet%'
     OR COALESCE(${orders.rawData}->>'importTemplateId', '') LIKE '%사방넷%'
+  )`
+
+  const isSaasOrderSource = sql`(
+    ${orders.connectionId} IS NOT NULL
+    OR LOWER(COALESCE(${orders.rawData}->>'collectionSource', '')) IN ('saas', 'order-excel', 'saas-excel')
+    OR LOWER(COALESCE(${orders.rawData}->>'source', '')) IN ('saas', 'order-excel', 'saas-excel')
+    OR LOWER(COALESCE(${orders.rawData}->>'source', '')) LIKE 'saas-%'
   )`
 
   if (filters.userId) {
@@ -444,7 +452,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   if (filters.orderSource === 'sabangnet') {
     conditions.push(isSabangnetOrderSource)
   } else if (filters.orderSource === 'saas') {
-    conditions.push(sql`NOT ${isSabangnetOrderSource}`)
+    conditions.push(and(isSaasOrderSource, sql`NOT ${isSabangnetOrderSource}`)!)
   }
 
   if (filters.dateField === 'shippedAt') {

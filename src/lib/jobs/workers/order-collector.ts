@@ -650,7 +650,21 @@ export async function collectOrdersForConnection(params: {
     )
 
     type ShippingPrepTarget = { ids: string[]; marketplaceOrderId: string; rawData: Record<string, unknown> | null }
-    const shippingPrepTargets: ShippingPrepTarget[] = []
+    const shippingPrepTargetByKey = new Map<string, ShippingPrepTarget>()
+    for (const order of normalizedOrders) {
+      if (
+        shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId)
+        && isMarketplaceOrderReadyForShippingPrep(order)
+      ) {
+        const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
+        shippingPrepTargetByKey.set(orderKey, {
+          ids: [],
+          marketplaceOrderId: order.marketplaceOrderId,
+          rawData: enrichOrderRawData(order),
+        })
+      }
+    }
+    const shippingPrepTargets = Array.from(shippingPrepTargetByKey.values())
     const totalOrders = ordersToSave.length
     let idx = 0
     for (const order of ordersToSave) {
@@ -680,11 +694,11 @@ export async function collectOrdersForConnection(params: {
         shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId)
         && isMarketplaceOrderReadyForShippingPrep(order)
       ) {
-        shippingPrepTargets.push({
-          ids: [upsertedOrder.id, ...splitCopyIds],
-          marketplaceOrderId: order.marketplaceOrderId,
-          rawData: enrichOrderRawData(orderForSave),
-        })
+        const target = shippingPrepTargetByKey.get(orderKey)
+        if (target) {
+          target.ids = [upsertedOrder.id, ...splitCopyIds]
+          target.rawData = enrichOrderRawData(orderForSave)
+        }
       }
 
       // 진행률 표시(많은 주문 시): 5건마다 또는 마지막 1건에서 갱신
@@ -710,7 +724,7 @@ export async function collectOrdersForConnection(params: {
 
         if (!result.success) {
           confirmErrors.push(`${target.marketplaceOrderId}: ${result.error ?? '알 수 없는 오류'}`)
-        } else {
+        } else if (target.ids.length > 0) {
           await db
             .update(orders)
             .set({

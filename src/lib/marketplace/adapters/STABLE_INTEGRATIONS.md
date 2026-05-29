@@ -41,5 +41,6 @@ Regression guardrails:
 - When one marketplace order contains multiple line items, adapters must preserve every collectable line in `NormalizedOrder.items[]`; do not dedupe by parent order number before line items are grouped.
 - Split copy rows must use the same local collection status normalization as their base order.
 - Invoice upload must use all marketplace line identifiers required by the marketplace. For multi-line orders, do not silently upload only the first item unless the marketplace documentation proves invoice upload is shipment-box-level only.
+- A local `uploaded` shipment status is not proof that the marketplace has the invoice. RPA upload jobs must allow a retry/re-send path unless the marketplace was re-checked and the invoice number is confirmed there.
 - Adapter methods must not return `{ success: true }` for stubbed or unsupported marketplace actions. Return a clear failure message until a real API/RPA action and post-condition are implemented.
 - New fixes for duplicate collection, state filtering, line-item preservation, or invoice upload must include focused Vitest coverage in `tests/marketplace`, `tests/jobs`, or `tests/shipping`.

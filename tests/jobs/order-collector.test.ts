@@ -403,6 +403,39 @@ describe('processOrderCollection', () => {
     expect(result.ordersCollected).toBe(0)
   })
 
+  it('still acknowledges the marketplace when a collectable order is skipped as an existing cross-source duplicate', async () => {
+    const existingOrderNo = 'CP-2026-DUP'
+    mockExistingOrders = [{
+      marketplaceId: 'sabangnet-a866eef06e',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: 'excel buyer',
+      recipientName: 'excel recipient',
+    }]
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'coupang',
+      marketplaceOrderId: existingOrderNo,
+      marketplaceStatus: 'ACCEPT',
+      marketplaceCollectionStatus: 'new',
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await processOrderCollection(createMockJob({
+      marketplaceId: 'coupang',
+      connectionId: 'conn-coupang',
+      userId: 'user-1',
+    }))
+
+    expect(result.ordersCollected).toBe(0)
+    expect(mockConfirmOrder).toHaveBeenCalledWith(
+      existingOrderNo,
+      expect.objectContaining({ orderIdentity: expect.objectContaining({ orderId: existingOrderNo }) }),
+    )
+  })
+
   it('does not overwrite existing Sabangnet Excel orders during Ownerclan SaaS collection', async () => {
     const existingOrderNo = 'OC-2026-SABANGNET'
     mockExistingOrders = [{

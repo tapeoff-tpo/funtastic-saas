@@ -209,7 +209,7 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
         .where(eq(shipments.id, shipmentId))
         .limit(1)
       if (!shipment) throw new Error(`Shipment not found: ${shipmentId}`)
-      if (shipment.uploadStatus === 'uploaded') {
+      if (shipment.uploadStatus === 'uploaded' && process.env.FORCE_SKIP_UPLOADED_RPA_INVOICE === 'true') {
         await setProgress('이미 송신 완료된 송장입니다.')
         await db
           .update(jobLogs)

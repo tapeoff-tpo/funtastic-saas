@@ -241,7 +241,12 @@ export default async function OrderDetailPage({
                     </div>
                     {item.sku && (
                       <p className="mt-1 text-xs font-mono text-muted-foreground">
-                        SKU: {item.sku}
+                        내부 상품코드: {item.sku}
+                      </p>
+                    )}
+                    {item.marketplaceItemId && (
+                      <p className="mt-1 text-xs font-mono text-muted-foreground">
+                        수집상품코드: {item.marketplaceItemId}
                       </p>
                     )}
                   </div>

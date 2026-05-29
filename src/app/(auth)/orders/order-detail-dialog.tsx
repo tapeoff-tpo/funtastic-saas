@@ -80,6 +80,7 @@ interface OrderDetail {
   } | null
   items: Array<{
     id: string
+    marketplaceItemId?: string | null
     productName: string
     displayName: string | null
     displayOptionName?: string | null
@@ -601,6 +602,20 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                               </span>
                             )}
                           </div>
+                          {!editingItems && (item.sku || item.marketplaceItemId) && (
+                            <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                              {item.sku && (
+                                <span>
+                                  내부 상품코드 <span className="font-mono">{item.sku}</span>
+                                </span>
+                              )}
+                              {item.marketplaceItemId && (
+                                <span>
+                                  수집상품코드 <span className="font-mono">{item.marketplaceItemId}</span>
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="text-right text-xs">
                           {Number(item.unitPrice).toLocaleString('ko-KR')}원 × {item.quantity}

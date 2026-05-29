@@ -102,6 +102,16 @@ function isAblyMall(siteName: string, siteCode: string): boolean {
   return source.includes('ably') || source.includes('\uC5D0\uC774\uBE14\uB9AC')
 }
 
+function isIgnoredEmpMall(order: PlayautoEmpOrder): boolean {
+  const source = [
+    order.SiteName,
+    order.SiteCode,
+    order.SiteId,
+  ].map(asString).join(' ').toLowerCase()
+
+  return source.includes('ssg') || source.includes('\uC2E0\uC138\uACC4')
+}
+
 function normalizeAblyOrderCode(orderCode: string, siteName: string, siteCode: string): string {
   if (!isAblyMall(siteName, siteCode)) return orderCode
 
@@ -273,7 +283,7 @@ export class PlayautoEmpAdapter implements MarketplaceAdapter {
           }
 
           const pageOrders = responseOrders(response)
-          orders.push(...pageOrders.filter((order) => isCollectableEmpState(order, state)))
+          orders.push(...pageOrders.filter((order) => !isIgnoredEmpMall(order) && isCollectableEmpState(order, state)))
           if (pageOrders.length < ORDER_PAGE_SIZE) break
         }
       }

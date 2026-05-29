@@ -177,6 +177,50 @@ describe('PlayautoEmpAdapter', () => {
     expect(orders[0].marketplaceOrderId).toBe('20260526287803')
   })
 
+  it('ignores SSG rows from EMP so stale hub data is not collected as new orders', async () => {
+    const get = vi.fn(() => ({
+      json: async () => ([
+        {
+          Number: '1001',
+          SiteCode: 'SSG',
+          SiteName: '신세계몰',
+          SiteId: 'playauto',
+          OrderState: '신규주문',
+          OrderCode: '20260526287803',
+          ProdName: 'stale ssg product',
+          Price: '10000',
+          Count: '1',
+          OrderName: 'Buyer',
+          RecipientName: 'Receiver',
+          OrderDate: '2026-05-26 12:10:00',
+        },
+        {
+          Number: '1002',
+          SiteCode: 'SSG',
+          SiteName: 'SSG',
+          SiteId: 'playauto',
+          OrderState: '신규주문',
+          OrderCode: '2026052628507D',
+          ProdName: 'stale ssg product 2',
+          Price: '10000',
+          Count: '1',
+          OrderName: 'Buyer',
+          RecipientName: 'Receiver',
+          OrderDate: '2026-05-26 12:10:00',
+        },
+      ]),
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new PlayautoEmpAdapter({ api_key: 'test-key', states: '신규주문' })
+    const orders = await adapter.getOrders(
+      new Date('2026-05-26T00:00:00+09:00'),
+      new Date('2026-05-26T23:59:59+09:00'),
+    )
+
+    expect(orders).toEqual([])
+  })
+
   it('falls back to the slash orders endpoint when EMP returns 404', async () => {
     const notFound = new Error('not found') as Error & { response: { status: number } }
     notFound.response = { status: 404 }

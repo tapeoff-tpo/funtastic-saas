@@ -6,10 +6,11 @@
  */
 
 import ExcelJS from 'exceljs'
-import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
+import { fillWholeRow, getCombinedShipmentFill, getRepeatedCombinedKeys, shouldFillCombinedShipmentRow } from './combined-fill'
 
 export interface KyungdongOrderRow {
   orderId: string
+  marketplaceOrderId?: string
   shipmentGroupId?: string
   recipientName: string
   recipientPhone: string
@@ -101,6 +102,8 @@ export async function generateKyungdongExcel(rows: KyungdongOrderRow[]): Promise
     width: COLUMN_WIDTHS[i] ?? 10,
   }))
 
+  const combinedKeys = getRepeatedCombinedKeys(rows as unknown as Record<string, unknown>[])
+
   rows.forEach((row, idx) => {
     // 상품명에 위치 접두사 추가
     const displayName = row.pickingLocation
@@ -128,6 +131,9 @@ export async function generateKyungdongExcel(rows: KyungdongOrderRow[]): Promise
       row.internalSku ?? '',            // 상품코드
     ])
     const fill = getCombinedShipmentFill(row.shipmentGroupId)
+      ?? (shouldFillCombinedShipmentRow(row as unknown as Record<string, unknown>, combinedKeys)
+        ? getCombinedShipmentFill('combined')
+        : null)
     if (fill) {
       fillWholeRow(dataRow, HEADERS.length, fill)
     }

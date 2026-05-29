@@ -8,7 +8,7 @@
 import ExcelJS from 'exceljs'
 import { getNestedValue } from './export'
 import type { OrderFieldDef } from './templates'
-import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
+import { fillWholeRow, getCombinedShipmentFill, getRepeatedCombinedKeys, shouldFillCombinedShipmentRow } from './combined-fill'
 
 /** Header style matching carrier export for consistency */
 const HEADER_FILL: ExcelJS.FillPattern = {
@@ -103,6 +103,7 @@ export async function exportOrdersToExcel(
   })
 
   const trackingCombinedKeys = getTrackingCombinedKeys(orders)
+  const combinedKeys = getRepeatedCombinedKeys(orders)
 
   // Add data rows
   for (const order of orders) {
@@ -111,7 +112,7 @@ export async function exportOrdersToExcel(
       rowData[col.field] = getNestedValue(order, col.field)
     }
     const row = worksheet.addRow(rowData)
-    if (isCombinedExportRow(order, trackingCombinedKeys)) {
+    if (isCombinedExportRow(order, trackingCombinedKeys) || shouldFillCombinedShipmentRow(order, combinedKeys)) {
       fillWholeRow(row, columns.length, getCombinedShipmentFill('combined')!)
     }
   }

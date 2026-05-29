@@ -7,7 +7,7 @@
 
 import ExcelJS from 'exceljs'
 import type { CarrierTemplate } from '../types'
-import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
+import { fillWholeRow, getCombinedShipmentFill, getRepeatedCombinedKeys, shouldFillCombinedShipmentRow } from './combined-fill'
 
 /**
  * Resolve a dot-notation path on an object.
@@ -66,6 +66,34 @@ function getTrackingCombinedKeys(orders: Record<string, unknown>[]): Set<string>
   )
 }
 
+function getAddressCombinedKeys(orders: Record<string, unknown>[]): Set<string> {
+  const ordersByKey = new Map<string, Set<string>>()
+  for (const order of orders) {
+    const recipientName = normalizeCombinedKeyPart(getNestedValue(order, 'recipientName'))
+    if (!recipientName) continue
+    const addressValue = getNestedValue(order, 'shippingAddress')
+    const address = addressValue && typeof addressValue === 'object'
+      ? [
+          getNestedValue(order, 'shippingAddress.zipCode'),
+          getNestedValue(order, 'shippingAddress.address1'),
+          getNestedValue(order, 'shippingAddress.address2'),
+        ].map(normalizeCombinedKeyPart).join('')
+      : normalizeCombinedKeyPart(getNestedValue(order, 'recipientAddress'))
+    if (!address) continue
+
+    const key = `${recipientName}::${address}`
+    const orderSet = ordersByKey.get(key) ?? new Set<string>()
+    orderSet.add(String(getNestedValue(order, 'marketplaceOrderId') || getNestedValue(order, 'orderId') || ''))
+    ordersByKey.set(key, orderSet)
+  }
+
+  return new Set(
+    [...ordersByKey.entries()]
+      .filter(([, orderSet]) => orderSet.size >= 2)
+      .map(([key]) => key),
+  )
+}
+
 function isCombinedExportRow(order: Record<string, unknown>, trackingCombinedKeys: Set<string>): boolean {
   if (getCombinedShipmentFill(order.shipmentGroupId)) return true
   if (order.isCombinedShipment === true) return true
@@ -74,6 +102,21 @@ function isCombinedExportRow(order: Record<string, unknown>, trackingCombinedKey
   if (!trackingNumber) return false
   const carrierName = normalizeCombinedKeyPart(getNestedValue(order, 'carrierName'))
   return trackingCombinedKeys.has(`${carrierName}::${trackingNumber}`)
+}
+
+function isAddressCombinedExportRow(order: Record<string, unknown>, addressCombinedKeys: Set<string>): boolean {
+  const recipientName = normalizeCombinedKeyPart(getNestedValue(order, 'recipientName'))
+  if (!recipientName) return false
+  const addressValue = getNestedValue(order, 'shippingAddress')
+  const address = addressValue && typeof addressValue === 'object'
+    ? [
+        getNestedValue(order, 'shippingAddress.zipCode'),
+        getNestedValue(order, 'shippingAddress.address1'),
+        getNestedValue(order, 'shippingAddress.address2'),
+      ].map(normalizeCombinedKeyPart).join('')
+    : normalizeCombinedKeyPart(getNestedValue(order, 'recipientAddress'))
+  if (!address) return false
+  return addressCombinedKeys.has(`${recipientName}::${address}`)
 }
 
 /**
@@ -110,6 +153,8 @@ export async function exportToCarrierExcel(
   })
 
   const trackingCombinedKeys = getTrackingCombinedKeys(orders)
+  const addressCombinedKeys = getAddressCombinedKeys(orders)
+  const combinedKeys = getRepeatedCombinedKeys(orders)
 
   // Add data rows
   // - fixedValue 우선 (모든 행 동일 값)
@@ -131,7 +176,11 @@ export async function exportToCarrierExcel(
       }
     })
     const row = worksheet.addRow(rowData)
-    if (isCombinedExportRow(order, trackingCombinedKeys)) {
+    if (
+      isCombinedExportRow(order, trackingCombinedKeys)
+      || isAddressCombinedExportRow(order, addressCombinedKeys)
+      || shouldFillCombinedShipmentRow(order, combinedKeys)
+    ) {
       fillWholeRow(row, template.columns.length, getCombinedShipmentFill('combined')!)
     }
   }

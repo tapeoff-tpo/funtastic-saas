@@ -63,6 +63,7 @@ export async function GET(req: NextRequest) {
     for (const row of rows) {
       exportRows.push({
         orderId: order.id,
+        marketplaceOrderId: order.marketplaceOrderId,
         shipmentGroupId: groupIdByOrder.get(order.id),
         recipientName: order.recipientName,
         // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)

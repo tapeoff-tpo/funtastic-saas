@@ -5,7 +5,7 @@
  */
 
 import ExcelJS from 'exceljs'
-import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
+import { fillWholeRow, getCombinedShipmentFill, getRepeatedCombinedKeys, shouldFillCombinedShipmentRow } from './combined-fill'
 
 export interface DaesinOrderRow {
   orderId: string
@@ -93,6 +93,8 @@ export async function generateDaesinExcel(rows: DaesinOrderRow[]): Promise<Buffe
     width: COLUMN_WIDTHS[i] ?? 10,
   }))
 
+  const combinedKeys = getRepeatedCombinedKeys(rows as unknown as Record<string, unknown>[])
+
   for (const row of rows) {
     // 특기사항에 위치 + 상품명
     const displayName = row.pickingLocation
@@ -120,6 +122,9 @@ export async function generateDaesinExcel(rows: DaesinOrderRow[]): Promise<Buffe
       row.deliveryMessage ?? '',        // 물류메시지
     ])
     const fill = getCombinedShipmentFill(row.shipmentGroupId)
+      ?? (shouldFillCombinedShipmentRow(row as unknown as Record<string, unknown>, combinedKeys)
+        ? getCombinedShipmentFill('combined')
+        : null)
     if (fill) {
       fillWholeRow(dataRow, HEADERS.length, fill)
     }

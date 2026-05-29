@@ -30,6 +30,38 @@ export interface CjOrderRow {
   isCombinedShipment?: boolean
 }
 
+function normalizeCombinedKeyPart(value: unknown): string {
+  return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase()
+}
+
+function getCombinedAddressKeys(rows: CjOrderRow[]): Set<string> {
+  const ordersByKey = new Map<string, Set<string>>()
+  for (const row of rows) {
+    const key = [
+      normalizeCombinedKeyPart(row.recipientName),
+      normalizeCombinedKeyPart(row.recipientAddress),
+    ].join('::')
+    if (key === '::') continue
+    const orderSet = ordersByKey.get(key) ?? new Set<string>()
+    orderSet.add(row.marketplaceOrderId || row.orderId)
+    ordersByKey.set(key, orderSet)
+  }
+
+  return new Set(
+    [...ordersByKey.entries()]
+      .filter(([, orderSet]) => orderSet.size >= 2)
+      .map(([key]) => key),
+  )
+}
+
+function isCombinedAddressRow(row: CjOrderRow, keys: Set<string>): boolean {
+  const key = [
+    normalizeCombinedKeyPart(row.recipientName),
+    normalizeCombinedKeyPart(row.recipientAddress),
+  ].join('::')
+  return keys.has(key)
+}
+
 const HEADERS = [
   '받는분성명',
   '받는분전화번호',
@@ -79,6 +111,8 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
     width: [15, 15, 15, 40, 30, 8, 8, 8, 20, 36, 8, 30, 10, 15, 40, 15, 20, 20, 20, 8, 30, 20, 35, 10, 15][i] ?? 15,
   }))
 
+  const combinedAddressKeys = getCombinedAddressKeys(rows)
+
   for (const row of rows) {
     const productAndOption = row.optionText
       ? `${row.productName} / ${row.optionText}`
@@ -119,6 +153,9 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
 
     // 합포장 행은 실제 shipment group 기준으로 같은 묶음끼리 같은 색으로 표시한다.
     const fill = getCombinedShipmentFill(row.shipmentGroupId)
+      ?? (row.isCombinedShipment || isCombinedAddressRow(row, combinedAddressKeys)
+        ? getCombinedShipmentFill('combined')
+        : null)
     if (fill) {
       fillWholeRow(dataRow, HEADERS.length, fill)
     }

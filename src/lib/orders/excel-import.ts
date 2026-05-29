@@ -163,11 +163,14 @@ export async function parseOrderExcel(
             }
           }
         }
-        return
       }
 
       for (const [headerLabel, fieldKey] of Object.entries(HEADER_MAP)) {
-        if (value === headerLabel || (!nextColMap[fieldKey] && value.includes(headerLabel))) {
+        if (
+          !nextColMap[fieldKey]
+          && !nextMappedColumnNumbers.has(fieldKey)
+          && (value === headerLabel || value.includes(headerLabel))
+        ) {
           nextColMap[fieldKey] = colNumber
         }
       }

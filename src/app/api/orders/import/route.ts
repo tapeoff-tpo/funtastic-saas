@@ -10,6 +10,7 @@ import { findDefaultOrderImportTemplate } from '@/lib/orders/default-import-temp
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { parseImportedOrderedAt } from '@/lib/orders/import-date'
+import { normalizeImportedOrderItem } from '@/lib/orders/import-normalize'
 
 /**
  * POST /api/orders/import
@@ -263,17 +264,3 @@ export async function POST(request: NextRequest) {
   }
 }
 
-type ParsedImportItem = Awaited<ReturnType<typeof parseOrderExcel>>['rows'][number]
-
-function normalizeImportedOrderItem(item: ParsedImportItem, marketplaceId: string): ParsedImportItem {
-  if (marketplaceId !== 'ownerclan') return item
-  const skuParts = item.sku?.split(/\s+/).filter(Boolean) ?? []
-  if (skuParts.length === 0) return item
-
-  const marketplaceItemId = !item.marketplaceItemId || /^\d+$/.test(item.marketplaceItemId)
-    ? skuParts[0]
-    : item.marketplaceItemId
-  const sku = skuParts.length > 1 ? skuParts.slice(1).join(' ') : item.sku
-
-  return { ...item, marketplaceItemId, sku }
-}

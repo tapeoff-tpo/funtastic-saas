@@ -402,7 +402,7 @@ export async function getReturnableItemsForClaim(
 export async function completeReturnClaim(
   userId: string,
   claimId: string,
-  quantities: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number }>,
+  quantities: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number; warehouseZone?: string | null }>,
 ): Promise<ActionResult> {
   return db.transaction(async (tx) => {
     const processingClaimId = await resolveReturnProcessingClaimId(tx, userId, claimId)
@@ -426,25 +426,29 @@ export async function completeReturnClaim(
 
     const maxItems = await expandOrderItemsForDeduction(tx, userId, claim.orderId)
     const maxBySku = new Map(maxItems.map((item) => [item.sku, item.quantity]))
-    const requested = new Map<string, { availableQuantity: number; defectiveQuantity: number }>()
+    const requested = new Map<string, { availableQuantity: number; defectiveQuantity: number; warehouseZone: string }>()
 
     for (const item of quantities) {
       const sku = item.sku?.trim()
       const availableQuantity = Number(item.availableQuantity)
       const defectiveQuantity = Number(item.defectiveQuantity)
+      const warehouseZone = item.warehouseZone?.trim()
       if (
         !sku
+        || !warehouseZone
         || !Number.isInteger(availableQuantity)
         || !Number.isInteger(defectiveQuantity)
         || availableQuantity < 0
         || defectiveQuantity < 0
       ) {
-        return { success: false, error: '반품 수량이 올바르지 않습니다.' }
+        return { success: false, error: '반품 창고 또는 수량이 올바르지 않습니다.' }
       }
-      const existing = requested.get(sku) ?? { availableQuantity: 0, defectiveQuantity: 0 }
-      requested.set(sku, {
+      const key = `${sku}::${warehouseZone}`
+      const existing = requested.get(key) ?? { availableQuantity: 0, defectiveQuantity: 0, warehouseZone }
+      requested.set(key, {
         availableQuantity: existing.availableQuantity + availableQuantity,
         defectiveQuantity: existing.defectiveQuantity + defectiveQuantity,
+        warehouseZone,
       })
     }
 
@@ -458,8 +462,9 @@ export async function completeReturnClaim(
 
     const completionLabel = claim.claimType === 'exchange' ? '교환회수완료' : '반품회수완료'
 
-    for (const [sku, quantitiesByDisposition] of requested) {
-      const { availableQuantity, defectiveQuantity } = quantitiesByDisposition
+    for (const [key, quantitiesByDisposition] of requested) {
+      const sku = key.split('::')[0]
+      const { availableQuantity, defectiveQuantity, warehouseZone } = quantitiesByDisposition
       const quantity = availableQuantity + defectiveQuantity
       const max = maxBySku.get(sku)
       if (max == null) return { success: false, error: `반품 대상 SKU가 아닙니다: ${sku}` }
@@ -469,9 +474,8 @@ export async function completeReturnClaim(
       const [record] = await tx
         .select()
         .from(inventory)
-        .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku)))
+        .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku), eq(inventory.warehouseZone, warehouseZone)))
         .orderBy(
-          sql`CASE WHEN ${inventory.warehouseZone} = '1창고' THEN 0 WHEN ${inventory.warehouseZone} IS NULL THEN 1 ELSE 2 END`,
           desc(inventory.availableStock),
           asc(inventory.createdAt),
         )
@@ -479,7 +483,7 @@ export async function completeReturnClaim(
         .for('update')
 
       if (!record) {
-        return { success: false, error: `재고관리 SKU가 없습니다: ${sku}` }
+        return { success: false, error: `선택한 창고(${warehouseZone})에 재고관리 SKU가 없습니다: ${sku}` }
       }
 
       const previousTotal = record.totalStock

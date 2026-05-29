@@ -65,6 +65,8 @@ export function ClaimStatusActions({
   const router = useRouter()
   const [pendingStatus, setPendingStatus] = useState<ClaimStatus | null>(null)
   const [returnItems, setReturnItems] = useState<Array<{ sku: string; quantity: number }> | null>(null)
+  const [returnWarehouseZones, setReturnWarehouseZones] = useState<string[]>([])
+  const [returnWarehouseZone, setReturnWarehouseZone] = useState('')
   const [availableQuantities, setAvailableQuantities] = useState<Record<string, number>>({})
   const [defectiveQuantities, setDefectiveQuantities] = useState<Record<string, number>>({})
   const [returnItemsLoading, setReturnItemsLoading] = useState(false)
@@ -121,6 +123,8 @@ export function ClaimStatusActions({
   useEffect(() => {
     if (!canCompletePickup) {
       setReturnItems(null)
+      setReturnWarehouseZones([])
+      setReturnWarehouseZone('')
       return
     }
 
@@ -132,12 +136,16 @@ export function ClaimStatusActions({
           const { error } = await res.json().catch(() => ({ error: `HTTP ${res.status}` }))
           throw new Error(error ?? '회수 상품 조회 실패')
         }
-        return res.json() as Promise<{ items?: Array<{ sku: string; quantity: number }> }>
+        return res.json() as Promise<{ items?: Array<{ sku: string; quantity: number }>; warehouseZones?: string[] }>
       })
       .then((data) => {
         if (cancelled) return
         const items = data.items ?? []
+        const warehouseZones = data.warehouseZones ?? []
+        const defaultWarehouseZone = warehouseZones.includes('1창고') ? '1창고' : warehouseZones[0] ?? ''
         setReturnItems(items)
+        setReturnWarehouseZones(warehouseZones)
+        setReturnWarehouseZone(defaultWarehouseZone)
         setAvailableQuantities(Object.fromEntries(items.map((item) => [item.sku, item.quantity])))
         setDefectiveQuantities(Object.fromEntries(items.map((item) => [item.sku, 0])))
       })
@@ -180,6 +188,10 @@ export function ClaimStatusActions({
 
   function completeReturn() {
     const items = returnItems ?? []
+    if (!returnWarehouseZone) {
+      toast.error('입고할 창고를 선택해주세요.')
+      return
+    }
     setPendingStatus('completed')
     startTransition(async () => {
       try {
@@ -191,6 +203,7 @@ export function ClaimStatusActions({
             returnCompletion: {
               quantities: items.map((item) => ({
                 sku: item.sku,
+                warehouseZone: returnWarehouseZone,
                 availableQuantity: Number(availableQuantities[item.sku] ?? 0),
                 defectiveQuantity: Number(defectiveQuantities[item.sku] ?? 0),
               })),
@@ -292,11 +305,27 @@ export function ClaimStatusActions({
       {canCompletePickup && (
         <div className="mt-3 rounded-md border p-3">
           <h4 className="mb-2 text-sm font-semibold">{claimType === 'exchange' ? '교환회수완료 처리' : '반품회수완료 처리'}</h4>
+          <label className="mb-2 block text-xs font-medium text-muted-foreground">
+            입고 창고
+            <select
+              value={returnWarehouseZone}
+              onChange={(event) => setReturnWarehouseZone(event.target.value)}
+              disabled={returnItemsLoading || pendingStatus !== null}
+              className="mt-1 h-8 w-full rounded border bg-background px-2 text-sm text-foreground"
+            >
+              <option value="">창고 선택</option>
+              {returnWarehouseZones.map((zone) => (
+                <option key={zone} value={zone}>{zone}</option>
+              ))}
+            </select>
+          </label>
           <div className="max-h-64 overflow-auto rounded border">
             {returnItemsLoading ? (
               <div className="p-3 text-sm text-muted-foreground">회수 상품을 불러오는 중입니다.</div>
             ) : (returnItems ?? []).length === 0 ? (
               <div className="p-3 text-sm text-muted-foreground">회수 처리할 매핑 상품이 없습니다.</div>
+            ) : returnWarehouseZones.length === 0 ? (
+              <div className="p-3 text-sm text-muted-foreground">선택할 수 있는 창고 재고가 없습니다.</div>
             ) : (
               (returnItems ?? []).map((item) => (
                 <div key={item.sku} className="grid grid-cols-[1fr_78px_78px] items-end gap-2 border-b p-2 last:border-b-0">
@@ -340,7 +369,7 @@ export function ClaimStatusActions({
             <button
               type="button"
               onClick={completeReturn}
-              disabled={pendingStatus !== null || returnItemsLoading || (returnItems ?? []).length === 0}
+              disabled={pendingStatus !== null || returnItemsLoading || (returnItems ?? []).length === 0 || !returnWarehouseZone}
               className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
             >
               회수완료 처리

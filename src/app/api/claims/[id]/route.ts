@@ -4,10 +4,10 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { claims, orders } from '@/lib/db/schema'
+import { claims, inventory, orders } from '@/lib/db/schema'
 import { completeReturnClaim, getReturnableItemsForClaim } from '@/lib/inventory/actions'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { updateOrderStatus } from '@/lib/orders/actions'
@@ -48,7 +48,23 @@ export async function GET(
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const items = await getReturnableItemsForClaim(workspaceUserId, id)
-  return NextResponse.json({ items })
+  const skus = Array.from(new Set(items.map((item) => item.sku).filter(Boolean)))
+  const warehouseRows = skus.length > 0
+    ? await db
+        .selectDistinct({ warehouseZone: inventory.warehouseZone })
+        .from(inventory)
+        .where(and(
+          eq(inventory.userId, workspaceUserId),
+          inArray(inventory.sku, skus),
+          isNotNull(inventory.warehouseZone),
+        ))
+        .orderBy(inventory.warehouseZone)
+    : []
+  const warehouseZones = warehouseRows
+    .map((row) => row.warehouseZone)
+    .filter((zone): zone is string => Boolean(zone))
+
+  return NextResponse.json({ items, warehouseZones })
 }
 
 export async function PATCH(
@@ -65,7 +81,7 @@ export async function PATCH(
     claimStatus?: ClaimStatus
     requestReason?: string
     returnCompletion?: {
-      quantities?: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number }>
+      quantities?: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number; warehouseZone?: string | null }>
     }
   }
 

@@ -1306,9 +1306,14 @@ function splitProductOption(itemId: string): { product: string; option: string }
 }
 
 function shouldUseSkuAsMappingProduct(target: MappingTarget): boolean {
-  return (target.marketplaceId === 'naver' || target.marketplaceId === 'ownerclan')
+  return target.marketplaceId === 'naver'
     && /^20\d{14}$/.test(target.marketplaceItemId.trim())
     && Boolean(target.sku?.trim())
+}
+
+function ownerclanProductCodeFromItemId(itemId: string): string | null {
+  const match = itemId.trim().match(/^20\d{12,}A-(.+)$/)
+  return match?.[1]?.trim() || null
 }
 
 function getMappingTargetSource(target: MappingTarget): { product: string; option: string } {
@@ -1325,8 +1330,17 @@ function getMappingTargetSource(target: MappingTarget): { product: string; optio
       option: target.mappingOptionId?.trim() || target.optionText?.trim() || EXACT_OPTION_ID,
     }
   }
+  if (target.marketplaceId === 'ownerclan') {
+    const productCode = target.sku?.trim() || ownerclanProductCodeFromItemId(target.marketplaceItemId)
+    if (productCode) {
+      return {
+        product: productCode,
+        option: target.optionText?.trim() || EXACT_OPTION_ID,
+      }
+    }
+  }
   return {
-    product: (target.marketplaceId === 'funtastic-b2b' || target.marketplaceId === 'ownerclan') && target.sku?.trim()
+    product: target.marketplaceId === 'funtastic-b2b' && target.sku?.trim()
       ? target.sku.trim()
       : split.product,
     option: split.option || target.optionText?.trim() || EXACT_OPTION_ID,
@@ -1562,7 +1576,7 @@ function InventoryMappingDialog({
                     <div className="mt-1 truncate font-medium">{target.productName}</div>
                     {target.optionText && <div className="truncate text-[10px] text-muted-foreground">{target.optionText}</div>}
                     <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
-                      <span className="truncate font-mono">상품코드 {target.marketplaceItemId}</span>
+                      <span className="truncate font-mono">상품코드 {getMappingTargetSource(target).product}</span>
                       <span className="shrink-0 font-medium">수량 {target.quantity}</span>
                     </div>
                   </button>

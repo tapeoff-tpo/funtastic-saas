@@ -151,7 +151,7 @@ export const BUILT_IN_CARRIER_TEMPLATES: BuiltInCarrierTemplateDef[] = [
     name: '4숏미팅',
     isDefault: true,
     columns: [
-      { header: '주문상태', field: 'status', width: 12, required: false },
+      { header: '주문상태', field: 'salesStatus', width: 12, required: false },
       { header: '내부 상품코드', field: 'productCode', width: 16, required: true },
       { header: '쇼핑몰명', field: 'marketplaceId', width: 16, required: false },
       { header: '확정 상품명', field: 'productName', width: 34, required: false },

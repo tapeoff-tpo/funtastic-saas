@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useQueryState, parseAsString } from 'nuqs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Plus, Trash2, X, RefreshCw, Search } from 'lucide-react'
+import { Plus, Trash2, X, RefreshCw, Search, Pencil } from 'lucide-react'
 
 export const MARKETPLACE_LABELS: Record<string, string> = {
   coupang: '쿠팡', naver: '네이버', gmarket: 'G마켓', auction: '옥션',
@@ -27,6 +27,17 @@ function formatMarketplaceProductCode(source: MappingSourceView): string {
   return `${source.marketplaceProductId}-${source.marketplaceOptionId}`
 }
 
+function formatDate(value?: string | null): string {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleDateString('ko-KR', {
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+  })
+}
+
 interface MappingSourceView {
   marketplaceId: string
   marketplaceName?: string | null
@@ -34,6 +45,7 @@ interface MappingSourceView {
   marketplaceOptionId: string
   productNameSnapshot: string | null
   optionNameSnapshot: string | null
+  createdAt?: string | null
 }
 
 interface MappingComponentView {
@@ -53,6 +65,7 @@ interface MappingCodeRow {
   componentsCount: number
   sources: MappingSourceView[]
   components: MappingComponentView[]
+  createdAt: string
   updatedAt: string
 }
 
@@ -388,26 +401,27 @@ export function MappingManager() {
         </div>
 
         <div className="overflow-x-auto rounded-lg border">
-          <table className="min-w-[1320px] w-full text-sm">
+          <table className="min-w-[1540px] w-full text-sm">
             <thead className="bg-muted/50 text-xs">
               <tr>
                 <th className="w-[100px] whitespace-nowrap px-3 py-2 text-left font-medium">쇼핑몰</th>
                 <th className="w-[180px] whitespace-nowrap px-3 py-2 text-left font-medium">쇼핑몰상품코드</th>
-                <th className="w-[150px] whitespace-nowrap px-3 py-2 text-left font-medium">매핑코드</th>
+                <th className="w-[180px] whitespace-nowrap px-3 py-2 text-left font-medium">매핑코드 / 재고코드</th>
                 <th className="w-[70px] whitespace-nowrap px-3 py-2 text-right font-medium">수량</th>
                 <th className="min-w-[260px] whitespace-nowrap px-3 py-2 text-left font-medium">수집상품명</th>
                 <th className="min-w-[260px] whitespace-nowrap px-3 py-2 text-left font-medium">확정상품명</th>
                 <th className="w-[80px] whitespace-nowrap px-3 py-2 text-right font-medium">마켓상품</th>
                 <th className="w-[80px] whitespace-nowrap px-3 py-2 text-right font-medium">구성품</th>
+                <th className="w-[110px] whitespace-nowrap px-3 py-2 text-center font-medium">최초등록일</th>
                 <th className="w-[80px] whitespace-nowrap px-3 py-2 text-center font-medium">상태</th>
-                <th className="px-3 py-2 w-24" />
+                <th className="w-[96px] px-3 py-2 text-center font-medium">관리</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {loading ? (
-                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
+                <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
               ) : displayRows.length === 0 ? (
-                <tr><td colSpan={10} className="py-8 text-center text-muted-foreground">
+                <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">
                   {search ? '검색 결과가 없습니다' : '매핑코드가 없습니다. 우측 미매핑 목록에서 항목을 클릭해 추가하거나, 신규 매핑 버튼을 누르세요.'}
                 </td></tr>
               ) : visibleRows.map(({ key, code: c, source, component, groupStart }) => (
@@ -421,7 +435,12 @@ export function MappingManager() {
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
                     {source ? (
-                      formatMarketplaceProductCode(source)
+                      <>
+                        <div>{formatMarketplaceProductCode(source)}</div>
+                        <div className="mt-0.5 font-sans text-[10px] text-muted-foreground">
+                          연결 {formatDate(source.createdAt)}
+                        </div>
+                      </>
                     ) : (
                       <span className="text-muted-foreground">-</span>
                     )}
@@ -432,10 +451,12 @@ export function MappingManager() {
                       onClick={() => void openEdit(c.id)}
                       className="text-blue-600 hover:underline"
                     >
-                      {component?.sku ?? c.code}
+                      {c.code}
                     </button>
-                    {c.components.length > 1 && component && (
-                      <div className="mt-0.5 font-sans text-[10px] text-muted-foreground">세트 구성품</div>
+                    {component && (
+                      <div className="mt-0.5 text-[10px] text-muted-foreground">
+                        {component.sku}{c.components.length > 1 ? ' / 세트 구성품' : ''}
+                      </div>
                     )}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{component?.quantity ?? '-'}</td>
@@ -451,18 +472,31 @@ export function MappingManager() {
                   </td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{c.sourcesCount}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{c.componentsCount}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-center text-xs tabular-nums">{formatDate(c.createdAt)}</td>
                   <td className="whitespace-nowrap px-3 py-2 text-center">
                     {c.isActive ? <Badge variant="secondary">활성</Badge> : <Badge variant="outline">비활성</Badge>}
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-2">
+                    <div className="flex justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => void openEdit(c.id)}
+                        aria-label="수정"
+                        title="수정"
+                        className="rounded border px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <Pencil className="size-3.5" />
+                      </button>
                     <button
                       type="button"
                       onClick={() => void handleDelete(c.id, c.code)}
                       aria-label="삭제"
-                      className="text-muted-foreground hover:text-destructive"
+                        title="삭제"
+                        className="rounded border px-2 py-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                     >
                       <Trash2 className="size-3.5" />
                     </button>
+                    </div>
                   </td>
                 </tr>
               ))}

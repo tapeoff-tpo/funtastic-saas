@@ -89,6 +89,7 @@ export async function GET() {
         marketplaceOptionId: string
         productNameSnapshot: string | null
         optionNameSnapshot: string | null
+        createdAt: Date | null
       }>>`COALESCE((
         SELECT jsonb_agg(jsonb_build_object(
           'marketplaceId', ${mappingSources.marketplaceId},
@@ -103,7 +104,8 @@ export async function GET() {
           'marketplaceProductId', ${mappingSources.marketplaceProductId},
           'marketplaceOptionId', ${mappingSources.marketplaceOptionId},
           'productNameSnapshot', ${mappingSources.productNameSnapshot},
-          'optionNameSnapshot', ${mappingSources.optionNameSnapshot}
+          'optionNameSnapshot', ${mappingSources.optionNameSnapshot},
+          'createdAt', ${mappingSources.createdAt}
         ) ORDER BY ${mappingSources.marketplaceId}, ${mappingSources.marketplaceProductId}, ${mappingSources.marketplaceOptionId})
         FROM ${mappingSources}
         WHERE ${mappingSources.mappingCodeId} = ${mappingCodes.id}

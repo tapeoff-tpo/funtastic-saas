@@ -21,6 +21,7 @@ import { mapCarrierCode } from '@/lib/shipping/carrier-codes'
 import pLimit from 'p-limit'
 import type {
   Cafe24Order,
+  Cafe24OrderDetailResponse,
   Cafe24OrderResponse,
   Cafe24Claim,
   Cafe24ClaimResponse,
@@ -91,7 +92,12 @@ export class Cafe24Adapter implements MarketplaceAdapter {
         },
       }).json<Cafe24OrderResponse>()
 
-      return (response.orders ?? []).map((order) => this.normalizeOrder(order))
+      const orders = response.orders ?? []
+      const enrichedOrders = await Promise.all(
+        orders.map((order) => this.withOrderDetailItems(order)),
+      )
+
+      return enrichedOrders.map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('401') || error.message.includes('403'))) {
@@ -134,6 +140,19 @@ export class Cafe24Adapter implements MarketplaceAdapter {
         throw new MarketplaceAuthError('cafe24', 'OAuth2 token authentication failed', true)
       }
       throw new MarketplaceApiError('cafe24', 500, error instanceof Error ? error.message : 'Unknown error')
+    }
+  }
+
+  private async withOrderDetailItems(order: Cafe24Order): Promise<Cafe24Order> {
+    if ((order.items ?? []).length > 0) return order
+
+    try {
+      const detail = await this.client.get(`admin/orders/${order.order_id}`, {
+        searchParams: { shop_no: 1 },
+      }).json<Cafe24OrderDetailResponse>()
+      return detail.order ? { ...order, ...detail.order } : order
+    } catch {
+      return order
     }
   }
 

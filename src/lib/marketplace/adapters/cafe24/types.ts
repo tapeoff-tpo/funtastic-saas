@@ -44,6 +44,11 @@ export interface Cafe24OrderResponse {
   orders: Cafe24Order[]
 }
 
+/** Wrapper for Cafe24 order detail response */
+export interface Cafe24OrderDetailResponse {
+  order?: Cafe24Order
+}
+
 /** A claim from Cafe24 API (cancellation, return, exchange) */
 export interface Cafe24Claim {
   claim_id: string

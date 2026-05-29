@@ -402,6 +402,38 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
   return selected
 }
 
+async function selectAllVisibleOrdersForExcel(page: Page): Promise<boolean> {
+  const selectedCount = await page.evaluate(() => {
+    const isVisible = (element: Element) => {
+      const rect = element.getBoundingClientRect()
+      const style = window.getComputedStyle(element)
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
+    }
+    const isOrderRowText = (text: string) => /\d{10,}|신규주문|배송대상|배송준비중|배송중|배송완료/.test(text)
+    const rows = Array.from(document.querySelectorAll('tbody tr, .tui-grid-row, [role="row"]'))
+    let count = 0
+
+    for (const row of rows) {
+      const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+      if (!isOrderRowText(text)) continue
+      const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
+      if (!checkbox || checkbox.disabled || !isVisible(checkbox)) continue
+      checkbox.scrollIntoView({ block: 'center', inline: 'center' })
+      if (!checkbox.checked) checkbox.click()
+      if (!checkbox.checked) {
+        checkbox.checked = true
+        checkbox.dispatchEvent(new Event('input', { bubbles: true }))
+        checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+      }
+      if (checkbox.checked) count += 1
+    }
+
+    return count
+  }).catch(() => 0)
+
+  return selectedCount > 0
+}
+
 async function summarizeOrderSearchState(page: Page): Promise<string> {
   return page.evaluate(() => {
     const text = document.body.textContent?.replace(/\s+/g, ' ').trim() ?? ''
@@ -1234,7 +1266,10 @@ export class DomechangoScraper implements MarketplaceScraper {
         await setProgress?.(`도매창고 ${statusLabel[status]} 검색 중...`)
         await runStep(`orders: apply order search (${status})`, () => applyOrderSearch(ctx.page, since, until, status))
         await setProgress?.(`도매창고 ${statusLabel[status]} 엑셀 다운로드 대상 선택 중...`)
-        const hasOrder = await runStep(`orders: select first order (${status})`, () => selectFirstOrderForExcel(ctx.page))
+        const hasOrder = await runStep(`orders: select visible orders (${status})`, async () => {
+          if (await selectAllVisibleOrdersForExcel(ctx.page)) return true
+          return selectFirstOrderForExcel(ctx.page)
+        })
         if (!hasOrder) {
           const state = await summarizeOrderSearchState(ctx.page)
           await setProgress?.(`도매창고 ${statusLabel[status]} 선택 대상 없음 (${state})`)

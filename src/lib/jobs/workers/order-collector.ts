@@ -1611,8 +1611,7 @@ async function updateSplitOrderCopy(
     })
     .where(eq(orders.id, copyOrderId))
 
-  await db.delete(orderItems).where(eq(orderItems.orderId, copyOrderId))
-  await db.insert(orderItems).values(orderItemInsertValue(copyOrderId, item))
+  await normalizeBaseOrderItem(copyOrderId, item)
 }
 
 function asPlainRecord(value: unknown): Record<string, unknown> | null {

@@ -154,6 +154,7 @@ async function ensureCheckboxChecked(root: Locator | Page, checkbox: Locator): P
 }
 
 async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise<void> {
+  const buttonSelector = 'button, input[type="button"], input[type="submit"], a.btn, a, [role="button"], .btn'
   const clickedVisibleControl = await root.locator('body, :scope').first().evaluate((element, source) => {
     const regexp = new RegExp(source)
     const isVisibleControl = (control: HTMLElement) => {
@@ -167,7 +168,7 @@ async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise
         && rect.height > 0
     }
     const controls = Array.from(
-      element.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn'),
+      element.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn, a, [role="button"], .btn'),
     )
 
     const control = controls.find((candidate) => {
@@ -196,7 +197,7 @@ async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise
     }).catch(() => false)
     if (domClicked) return
   }
-  const fallback = root.locator('button, input[type="button"], input[type="submit"], a.btn').filter({ hasText: pattern }).first()
+  const fallback = root.locator(buttonSelector).filter({ hasText: pattern }).first()
   if (await fallback.isVisible().catch(() => false)) {
     const clicked = await fallback.click({ force: true, timeout: 15_000 }).then(() => true).catch(() => false)
     if (clicked) return
@@ -213,7 +214,7 @@ async function clickButtonByText(root: Locator | Page, pattern: RegExp): Promise
   const clicked = await root.locator('body, :scope').first().evaluate((element, source) => {
     const regexp = new RegExp(source)
     const controls = Array.from(
-      element.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn'),
+      element.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn, a, [role="button"], .btn'),
     )
 
     for (const control of controls) {

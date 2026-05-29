@@ -26,16 +26,34 @@ let mockExistingOrders: Array<{
   connectionId?: string | null
   rawData?: Record<string, unknown> | null
 }> = []
+let mockExistingOrderItems: Array<{ id: string }> = []
+let mockExistingCopyOrders: Array<{ id: string }> = []
 
 const mockDelete = vi.fn().mockReturnValue({
   where: vi.fn().mockResolvedValue(undefined),
 })
 
-const mockSelectFrom = vi.fn().mockImplementation((table: { storeAlias?: unknown } | unknown) => {
+const mockSelectFrom = vi.fn().mockImplementation((selection: Record<string, unknown>, table: { storeAlias?: unknown; __table?: string } | unknown) => {
   if (table && typeof table === 'object' && 'storeAlias' in table) {
     return {
       where: vi.fn().mockReturnValue({
         limit: vi.fn().mockResolvedValue([{ storeAlias: 'default' }]),
+      }),
+    }
+  }
+
+  if (table && typeof table === 'object' && '__table' in table && table.__table === 'orderItems') {
+    return {
+      where: vi.fn().mockReturnValue({
+        orderBy: vi.fn().mockResolvedValue(mockExistingOrderItems),
+      }),
+    }
+  }
+
+  if (selection && Object.keys(selection).length === 1 && 'id' in selection) {
+    return {
+      where: vi.fn().mockReturnValue({
+        orderBy: vi.fn().mockResolvedValue(mockExistingCopyOrders),
       }),
     }
   }
@@ -57,9 +75,9 @@ vi.mock('@/lib/db', () => ({
     insert: (...args: unknown[]) => mockInsert(...args),
     delete: (...args: unknown[]) => mockDelete(...args),
     update: (...args: unknown[]) => mockUpdate(...args),
-    select: vi.fn().mockReturnValue({
-      from: (...args: unknown[]) => mockSelectFrom(...args),
-    }),
+    select: vi.fn((selection: Record<string, unknown>) => ({
+      from: (...args: unknown[]) => mockSelectFrom(selection, ...args),
+    })),
   },
 }))
 
@@ -74,7 +92,7 @@ vi.mock('@/lib/db/schema', () => ({
     buyerName: 'buyer_name',
     recipientName: 'recipient_name',
   },
-  orderItems: { orderId: 'order_id' },
+  orderItems: { id: 'order_item_id', orderId: 'order_id', __table: 'orderItems' },
   claims: {
     marketplaceId: 'marketplace_id',
     marketplaceClaimId: 'marketplace_claim_id',
@@ -250,6 +268,8 @@ describe('processOrderCollection', () => {
     mockGetClaimsOrders.mockResolvedValue([])
     mockConfirmOrder.mockResolvedValue({ success: true })
     mockExistingOrders = []
+    mockExistingOrderItems = []
+    mockExistingCopyOrders = []
   })
 
   it('should fetch orders from adapter and UPSERT into database', async () => {
@@ -633,5 +653,55 @@ describe('processOrderCollection', () => {
       marketplaceStatus: '140',
       marketplaceCollectionStatus: 'ready',
     }))
+  })
+
+  it('updates reusable split-copy items without deleting referenced order_items', async () => {
+    const existingOrderNo = 'NAVER-SPLIT-001'
+    mockExistingOrders = [{
+      marketplaceId: 'naver',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: 'Buyer',
+      recipientName: 'Receiver',
+      connectionId: 'conn-naver',
+    }]
+    mockExistingOrderItems = [{ id: 'base-item-1' }]
+    mockExistingCopyOrders = [{ id: 'copy-order-1' }]
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'naver',
+      marketplaceOrderId: existingOrderNo,
+      marketplaceStatus: 'PAYED',
+      marketplaceCollectionStatus: 'new',
+      items: [
+        {
+          marketplaceItemId: 'po-1',
+          productName: 'Product A',
+          optionText: 'Black',
+          quantity: 1,
+          unitPrice: 10000,
+          sku: 'SKU-A',
+        },
+        {
+          marketplaceItemId: 'po-2',
+          productName: 'Product B',
+          optionText: 'White',
+          quantity: 1,
+          unitPrice: 12000,
+          sku: 'SKU-B',
+        },
+      ],
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    await processOrderCollection(createMockJob({
+      marketplaceId: 'naver',
+      connectionId: 'conn-naver',
+      userId: 'user-1',
+    }))
+
+    expect(mockDelete).not.toHaveBeenCalledWith(expect.objectContaining({ __table: 'orderItems' }))
   })
 })

@@ -667,6 +667,8 @@ export async function collectOrdersForConnection(params: {
       }
     }
     const shippingPrepTargets = Array.from(shippingPrepTargetByKey.values())
+    let confirmFailureSummary: string | null = null
+    const confirmErrors: string[] = []
     const totalOrders = ordersToSave.length
     let idx = 0
     for (const order of ordersToSave) {
@@ -717,7 +719,6 @@ export async function collectOrdersForConnection(params: {
 
     if (shippingPrepTargets.length > 0 && typeof adapter.confirmOrder === 'function') {
       await setProgress(`몰 주문단계 전환 중... (0/${shippingPrepTargets.length})`)
-      const confirmErrors: string[] = []
       const confirmConcurrency = MARKETPLACE_CONFIRM_CONCURRENCY[marketplaceId] ?? 3
       await mapWithConcurrency(shippingPrepTargets, confirmConcurrency, async (target, index) => {
         const result = await withTimeout(
@@ -750,9 +751,15 @@ export async function collectOrdersForConnection(params: {
       }
     }
 
-    // Local workflow remains: 신규 -> 매핑 -> 사용자 확인. Marketplace shipping
+    // Local workflow remains: new -> mapping -> user confirmation. Marketplace
     // prep acknowledgement above is intentionally tracked separately.
-    const completedProgressMessage = `${ordersNewlyCollected}건 신규수집 / ${ordersUpdated}건 갱신`
+    if (confirmErrors.length > 0) {
+      confirmFailureSummary = `몰 주문단계 전환 실패 ${confirmErrors.length}건: ${confirmErrors.slice(0, 3).join(' | ')}`
+    }
+    const completedProgressMessage = [
+      `${ordersNewlyCollected}건 신규수집 / ${ordersUpdated}건 갱신`,
+      confirmFailureSummary,
+    ].filter(Boolean).join(' · ')
     if (ordersCollected > 0) {
       await setProgress(completedProgressMessage)
     }

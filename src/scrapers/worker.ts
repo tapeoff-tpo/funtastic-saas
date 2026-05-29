@@ -25,6 +25,11 @@ import type { MarketplaceId } from '@/lib/marketplace/types'
 import { saveNormalizedOrdersForConnection, upsertClaim } from '@/lib/jobs/workers/order-collector'
 import { upsertInquiries } from '@/lib/orders/inquiry-queries'
 import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
+import {
+  SCRAPER_WORKER_CONCURRENCY,
+  SCRAPER_WORKER_RATE_LIMIT_DURATION_MS,
+  SCRAPER_WORKER_RATE_LIMIT_MAX,
+} from './worker-config'
 
 // Side-effect import — registers all scraper instances on the registry
 import './register'
@@ -250,8 +255,11 @@ async function processScrapeJob(job: Job<ScrapeJobData>): Promise<void> {
 
 const worker = new Worker<ScrapeJobData>('marketplace-scrape', processScrapeJob, {
   connection: getConnection(),
-  concurrency: 2,
-  limiter: { max: 2, duration: 5000 }, // throttle to avoid bot detection
+  concurrency: SCRAPER_WORKER_CONCURRENCY,
+  limiter: {
+    max: SCRAPER_WORKER_RATE_LIMIT_MAX,
+    duration: SCRAPER_WORKER_RATE_LIMIT_DURATION_MS,
+  },
 })
 
 worker.on('completed', (job) => {

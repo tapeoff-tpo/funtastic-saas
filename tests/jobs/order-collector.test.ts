@@ -704,4 +704,31 @@ describe('processOrderCollection', () => {
 
     expect(mockDelete).not.toHaveBeenCalledWith(expect.objectContaining({ __table: 'orderItems' }))
   })
+
+  it('keeps marketplace acknowledgement failures in the completed job progress', async () => {
+    mockConfirmOrder.mockResolvedValue({ success: false, error: 'remote rejected' })
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'coupang',
+      marketplaceOrderId: 'CP-2026-FAIL',
+      marketplaceStatus: 'ACCEPT',
+      marketplaceCollectionStatus: 'new',
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    await processOrderCollection(createMockJob({
+      marketplaceId: 'coupang',
+      connectionId: 'conn-coupang',
+      userId: 'user-1',
+    }))
+
+    const insertPayloads = mockInsert.mock.results.flatMap(({ value }) => value.values.mock.calls.map((call: unknown[]) => call[0]))
+    expect(insertPayloads).toContainEqual(expect.objectContaining({
+      status: 'completed',
+      progressMessage: expect.stringContaining('remote rejected'),
+    }))
+  })
 })

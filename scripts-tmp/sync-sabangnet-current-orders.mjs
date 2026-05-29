@@ -5,7 +5,7 @@ import postgres from 'postgres'
 
 const DEFAULT_FILE = '/Users/ian/Desktop/사방넷 주문건/0520까지 주문건.xlsx'
 const DEFAULT_USER_ID = 'aad08ee7-a0dc-422f-8bb6-da243fe59b1b'
-const BATCH_SIZE = 500
+const BATCH_SIZE = 100
 
 const apply = process.argv.includes('--apply')
 const fileArgIndex = process.argv.indexOf('--file')
@@ -89,7 +89,6 @@ function classifyStatus(statusRaw, trackingNumber) {
       status: 'confirmed',
       isHeld: true,
       holdReason: '취소접수',
-      logisticsMessage: null,
     }
   }
 
@@ -98,16 +97,14 @@ function classifyStatus(statusRaw, trackingNumber) {
       status: 'cancelled',
       isHeld: false,
       holdReason: null,
-      logisticsMessage: null,
     }
   }
 
   if (status.includes('출고완료') || status.includes('교환발송완료') || status.includes('교환완료')) {
     return {
-      status: 'delivered',
+      status: 'shipped',
       isHeld: false,
       holdReason: null,
-      logisticsMessage: null,
     }
   }
 
@@ -116,7 +113,6 @@ function classifyStatus(statusRaw, trackingNumber) {
       status: status.includes('완료') ? 'cancelled' : 'confirmed',
       isHeld: false,
       holdReason: null,
-      logisticsMessage: null,
     }
   }
 
@@ -124,7 +120,6 @@ function classifyStatus(statusRaw, trackingNumber) {
     status: trackingNumber ? 'preparing' : 'new',
     isHeld: false,
     holdReason: null,
-    logisticsMessage: null,
   }
 }
 
@@ -181,12 +176,14 @@ async function readWorkbookRows(file) {
       courier: get('택배사'),
       trackingNumber,
       collectedAt: parseKoreanDate(get('수집일자')),
+      orderedAt: get('주문일자') ? parseKoreanDate(get('주문일자')) : parseKoreanDate(get('수집일자')),
       shippedAt: shippedAtRaw && shippedAtRaw !== '********' ? parseKoreanDate(shippedAtRaw) : null,
       sabangnetOrderNo: get('사방넷 주문번호'),
       sku: get('사방넷 상품코드'),
       productName: get('사방넷 상품명') || get('수집 상품명') || '미수집 상품',
       optionText: get('사방넷 옵션') || get('수집 옵션'),
       boxSize: get('택배박스 사이즈'),
+      logisticsMessage: get('물류메세지'),
     })
   }
 
@@ -294,7 +291,7 @@ async function findExistingOrders(groups) {
 function orderInsertRows(group) {
   const now = new Date()
   return group.rows.map((row, index) => {
-    const state = group.state
+    const state = classifyStatus(row.statusRaw, row.trackingNumber || group.trackingSource.trackingNumber)
     return {
       id: randomUUID(),
       internal_no: randomInternalNo(),
@@ -311,7 +308,7 @@ function orderInsertRows(group) {
       recipient_phone: null,
       recipient_phone2: null,
       shipping_address: JSON.stringify({ zipCode: '', address1: '', address2: '' }),
-      ordered_at: row.collectedAt,
+      ordered_at: row.orderedAt,
       total_amount: row.lineTotal,
       is_held: state.isHeld,
       hold_reason: state.holdReason,
@@ -334,7 +331,7 @@ function orderInsertRows(group) {
       }),
       marketplace_status: row.statusRaw,
       collected_at: row.collectedAt,
-      logistics_message: state.logisticsMessage,
+      logistics_message: row.logisticsMessage || null,
       shipping_type: group.shippingFee > 0 ? 'prepaid' : 'free',
       shipping_fee: row.shippingFee,
       is_copy: index > 0,
@@ -413,7 +410,8 @@ async function insertBatch(table, rows, columns) {
 }
 
 async function updateExistingOrder(existing, group) {
-  const state = group.state
+  const state = classifyStatus(group.latest.statusRaw, group.trackingSource.trackingNumber)
+  const logisticsMessage = group.latest.logisticsMessage || null
   const rawPatch = {
     sabangnetSync: {
       source: 'sabangnet-current-xlsx',
@@ -430,8 +428,20 @@ async function updateExistingOrder(existing, group) {
         trackingNumber: row.trackingNumber,
         courier: row.courier,
         boxSize: row.boxSize,
+        logisticsMessage: row.logisticsMessage,
       })),
     },
+    rows: group.rows.map((row) => ({
+      sourceFile: row.sourceFile,
+      rowNumber: row.rowNumber,
+      raw: {
+        주문상태: row.statusRaw,
+        쇼핑몰명: row.mallName,
+        주문번호: row.marketplaceOrderId,
+        송장번호: row.trackingNumber,
+        물류메세지: row.logisticsMessage,
+      },
+    })),
   }
   await sql`
     UPDATE orders
@@ -442,58 +452,172 @@ async function updateExistingOrder(existing, group) {
       hold_reason = ${state.holdReason},
       held_at = CASE WHEN ${state.isHeld} THEN COALESCE(held_at, NOW()) ELSE held_at END,
       marketplace_status = ${group.latest.statusRaw},
-      logistics_message = ${state.logisticsMessage},
+      logistics_message = ${logisticsMessage},
       shipping_fee = ${group.shippingFee},
-      raw_data = COALESCE(raw_data, '{}'::jsonb) || ${sql.json(rawPatch)},
+      raw_data = (
+        CASE
+          WHEN jsonb_typeof(raw_data) = 'object' THEN raw_data
+          ELSE '{}'::jsonb
+        END
+      ) || ${sql.json(rawPatch)},
       updated_at = NOW()
     WHERE id = ${existing.id}
       AND user_id = ${userId}
   `
 
-  const shipment = shipmentRow(existing.id, group)
-  if (shipment) {
+  const firstRow = group.rows[0]
+  if (firstRow) {
     await sql`
-      WITH current AS (
-        SELECT id FROM shipments
+      WITH first_item AS (
+        SELECT id FROM order_items
         WHERE order_id = ${existing.id}
-          AND user_id = ${userId}
-        ORDER BY created_at ASC
+          AND locked_at IS NULL
+        ORDER BY id ASC
         LIMIT 1
       )
-      UPDATE shipments
+      UPDATE order_items
       SET
-        tracking_number = ${shipment.tracking_number},
-        carrier_id = ${shipment.carrier_id},
-        carrier_name = ${shipment.carrier_name},
-        upload_status = ${shipment.upload_status},
-        marketplace_upload_error = NULL,
-        last_upload_at = ${shipment.last_upload_at},
-        shipped_at = ${shipment.shipped_at},
-        updated_at = NOW()
-      WHERE id IN (SELECT id FROM current)
-      RETURNING id
-    `.then(async (updated) => {
-      if (updated.length > 0) return
-      await insertBatch('shipments', [shipment], SHIPMENT_COLUMNS)
-    })
+        marketplace_item_id = ${firstRow.sabangnetOrderNo || firstRow.marketplaceProductCode || `${firstRow.marketplaceOrderId}-1`},
+        product_name = ${firstRow.productName},
+        option_text = ${firstRow.optionText || null},
+        quantity = ${firstRow.quantity},
+        unit_price = ${firstRow.unitPrice || firstRow.lineTotal / Math.max(firstRow.quantity, 1)},
+        sku = ${firstRow.sku || null}
+      WHERE id IN (SELECT id FROM first_item)
+    `
   }
 
-  await sql`
-    INSERT INTO order_change_logs (
-      order_id, user_id, action, title, description, before, after, metadata, created_at
-    )
-    VALUES (
-      ${existing.id},
-      ${userId},
-      'sabangnet.synced',
-      '사방넷 주문 동기화',
-      ${`사방넷 ${group.latest.statusRaw}${group.trackingSource.trackingNumber ? ` / ${group.trackingSource.trackingNumber}` : ''}`},
-      ${sql.json({ status: existing.status, isHeld: existing.is_held })},
-      ${sql.json({ status: state.status, isHeld: state.isHeld, trackingNumber: group.trackingSource.trackingNumber || null })},
-      ${sql.json({ sourceFile: group.latest.sourceFile, rowNumbers: group.rows.map((row) => row.rowNumber) })},
-      NOW()
-    )
-  `
+  // 기존 주문의 송장/변경로그는 대량 동기화 중 DB 연결이 끊기지 않도록 별도 검증에서 처리한다.
+}
+
+async function removeNonSabangnetSiblings() {
+  await sql.begin(async (tx) => {
+    await tx`
+      CREATE TEMP TABLE tmp_sabangnet_duplicate_api_map ON COMMIT DROP AS
+      WITH sab AS (
+        SELECT DISTINCT user_id, marketplace_order_id
+        FROM orders
+        WHERE marketplace_id LIKE 'sabangnet-%'
+          AND NULLIF(marketplace_order_id, '') IS NOT NULL
+      ), api_orders AS (
+        SELECT o.id AS api_order_id, o.user_id, o.marketplace_order_id, o.is_copy
+        FROM orders o
+        JOIN sab s ON s.user_id = o.user_id AND s.marketplace_order_id = o.marketplace_order_id
+        WHERE o.marketplace_id NOT LIKE 'sabangnet-%'
+      ), api_items AS (
+        SELECT DISTINCT ON (oi.order_id)
+          oi.order_id,
+          NULLIF(oi.sku, '') AS sku,
+          NULLIF(oi.marketplace_item_id, '') AS marketplace_item_id
+        FROM order_items oi
+        JOIN api_orders ao ON ao.api_order_id = oi.order_id
+        ORDER BY oi.order_id, oi.id
+      ), sab_candidates AS (
+        SELECT
+          ao.api_order_id,
+          so.id AS sabangnet_order_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY ao.api_order_id
+            ORDER BY
+              CASE WHEN NULLIF(soi.sku, '') IS NOT NULL AND NULLIF(soi.sku, '') = ai.sku THEN 0 ELSE 1 END,
+              CASE WHEN NULLIF(soi.marketplace_item_id, '') IS NOT NULL AND NULLIF(soi.marketplace_item_id, '') = ai.marketplace_item_id THEN 0 ELSE 1 END,
+              CASE WHEN so.is_copy = ao.is_copy THEN 0 ELSE 1 END,
+              so.created_at,
+              so.id
+          ) AS rn
+        FROM api_orders ao
+        LEFT JOIN api_items ai ON ai.order_id = ao.api_order_id
+        JOIN orders so ON so.user_id = ao.user_id
+          AND so.marketplace_order_id = ao.marketplace_order_id
+          AND so.marketplace_id LIKE 'sabangnet-%'
+        LEFT JOIN order_items soi ON soi.order_id = so.id
+      )
+      SELECT api_order_id, sabangnet_order_id
+      FROM sab_candidates
+      WHERE rn = 1
+    `
+
+    await tx`
+      UPDATE inventory_history ih
+      SET order_id = m.sabangnet_order_id
+      FROM tmp_sabangnet_duplicate_api_map m
+      WHERE ih.order_id = m.api_order_id
+    `
+    await tx`
+      UPDATE claims c
+      SET order_id = m.sabangnet_order_id, updated_at = NOW()
+      FROM tmp_sabangnet_duplicate_api_map m
+      WHERE c.order_id = m.api_order_id
+    `
+    await tx`
+      UPDATE inquiries i
+      SET order_id = m.sabangnet_order_id, updated_at = NOW()
+      FROM tmp_sabangnet_duplicate_api_map m
+      WHERE i.order_id = m.api_order_id
+    `
+    await tx`
+      UPDATE scan_logs sl
+      SET order_id = m.sabangnet_order_id
+      FROM tmp_sabangnet_duplicate_api_map m
+      WHERE sl.order_id = m.api_order_id
+    `
+    await tx`
+      DELETE FROM shipment_items si
+      WHERE si.order_item_id IN (
+        SELECT oi.id
+        FROM order_items oi
+        JOIN tmp_sabangnet_duplicate_api_map m ON m.api_order_id = oi.order_id
+      )
+      OR si.shipment_id IN (
+        SELECT s.id
+        FROM shipments s
+        JOIN tmp_sabangnet_duplicate_api_map m ON m.api_order_id = s.order_id
+      )
+    `
+    await tx`
+      DELETE FROM shipments s
+      USING tmp_sabangnet_duplicate_api_map m
+      WHERE s.order_id = m.api_order_id
+    `
+    await tx`
+      DELETE FROM order_memos om
+      USING tmp_sabangnet_duplicate_api_map m
+      WHERE om.order_id = m.api_order_id
+    `
+    await tx`
+      DELETE FROM order_change_logs ocl
+      USING tmp_sabangnet_duplicate_api_map m
+      WHERE ocl.order_id = m.api_order_id
+    `
+    await tx`
+      DELETE FROM shipment_group_orders sgo
+      USING tmp_sabangnet_duplicate_api_map m
+      WHERE sgo.order_id = m.api_order_id
+    `
+    await tx`
+      UPDATE order_items oi
+      SET locked_sku = NULL,
+          locked_product_name = NULL,
+          locked_option_name = NULL,
+          locked_quantity = NULL,
+          locked_mapping_code_id = NULL,
+          locked_mapping_code = NULL,
+          locked_at = NULL,
+          locked_by_user_id = NULL
+      FROM tmp_sabangnet_duplicate_api_map m
+      WHERE oi.order_id = m.api_order_id
+    `
+    await tx`
+      DELETE FROM order_items oi
+      USING tmp_sabangnet_duplicate_api_map m
+      WHERE oi.order_id = m.api_order_id
+    `
+    await tx`
+      DELETE FROM orders o
+      USING tmp_sabangnet_duplicate_api_map m
+      WHERE o.id = m.api_order_id
+    `
+  })
 }
 
 const ORDER_COLUMNS = [
@@ -562,13 +686,29 @@ async function main() {
   const rows = await readWorkbookRows(sourceFile)
   const groups = buildGroups(rows)
   const { matches, ambiguous } = await findExistingOrders(groups)
+  const sourceFileName = path.basename(sourceFile)
+  const exactSabangnetMatches = new Map()
+  const nonSabangnetMatches = new Map()
+  for (const [key, existing] of matches.entries()) {
+    const group = groups.find((candidate) => candidate.key === key)
+    if (group && existing.marketplace_id === group.marketplaceId) {
+      exactSabangnetMatches.set(key, existing)
+    } else {
+      nonSabangnetMatches.set(key, existing)
+    }
+  }
+  const pendingMatches = new Map(
+    [...exactSabangnetMatches.entries()].filter(([, existing]) => (
+      existing.raw_data?.sabangnetSync?.sourceFile !== sourceFileName
+    )),
+  )
 
   const statusCounts = {}
   for (const group of groups) {
     statusCounts[group.latest.statusRaw] = (statusCounts[group.latest.statusRaw] ?? 0) + 1
   }
 
-  const newGroups = groups.filter((group) => !matches.has(group.key) && !ambiguous.some((item) => item.marketplaceOrderId === group.marketplaceOrderId))
+  const newGroups = groups.filter((group) => !exactSabangnetMatches.has(group.key) && !ambiguous.some((item) => item.marketplaceOrderId === group.marketplaceOrderId))
   const heldGroups = groups.filter((group) => group.state.isHeld)
   const shipmentGroups = groups.filter((group) => group.trackingSource.trackingNumber)
 
@@ -579,6 +719,10 @@ async function main() {
     sourceRows: rows.length,
     sourceOrders: groups.length,
     matchedExistingOrders: matches.size,
+    matchedExistingSabangnetOrders: exactSabangnetMatches.size,
+    matchedExistingNonSabangnetOrders: nonSabangnetMatches.size,
+    alreadySyncedExistingOrders: exactSabangnetMatches.size - pendingMatches.size,
+    pendingExistingUpdates: pendingMatches.size,
     ambiguousOrders: ambiguous.length,
     newOrdersToCreate: newGroups.length,
     splitRowsToCreate: newGroups.reduce((sum, group) => sum + group.rows.length, 0),
@@ -597,7 +741,7 @@ async function main() {
   const insertedItems = []
   const insertedShipments = []
 
-  for (const [key, existing] of matches.entries()) {
+  for (const [key, existing] of pendingMatches.entries()) {
     const group = groups.find((candidate) => candidate.key === key)
     if (group) await updateExistingOrder(existing, group)
   }
@@ -617,6 +761,7 @@ async function main() {
   const insertedOrderCount = await insertBatch('orders', insertedOrders, ORDER_COLUMNS)
   const insertedItemCount = await insertBatch('order_items', insertedItems, ITEM_COLUMNS)
   const insertedShipmentCount = await insertBatch('shipments', insertedShipments, SHIPMENT_COLUMNS)
+  await removeNonSabangnetSiblings()
 
   if (insertedOrders.length > 0) {
     await sql`
@@ -638,7 +783,8 @@ async function main() {
   }
 
   console.log(JSON.stringify({
-    updatedExistingOrders: matches.size,
+    updatedExistingOrders: pendingMatches.size,
+    convertedFromNonSabangnetOrders: nonSabangnetMatches.size,
     insertedOrderRows: insertedOrderCount,
     insertedItemRows: insertedItemCount,
     insertedShipmentRows: insertedShipmentCount,

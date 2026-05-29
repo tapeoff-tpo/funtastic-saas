@@ -101,6 +101,21 @@ describe('BUILT_IN_CARRIER_TEMPLATES', () => {
     expect(template?.columns.find((column) => column.header === '확정상품명')?.field).toBe('productName')
     expect(template?.columns.find((column) => column.header === '확정옵션')?.field).toBe('optionText')
   })
+  it('includes the 4 short meeting template with renamed confirmed columns', () => {
+    const template = BUILT_IN_CARRIER_TEMPLATES.find((entry) => entry.id === 'builtin:short-meeting')
+
+    expect(template?.name).toBe('4숏미팅')
+    expect(template?.columns.map((column) => column.header)).toEqual([
+      '주문상태', '내부 상품코드', '쇼핑몰명', '확정 상품명', '확정 옵션명', '주문수량', '현재고',
+      '판매가', '결제금액', '쇼핑몰 상품코드', '수집 상품명', '주문번호(쇼핑몰)', '수집 옵션',
+      '실 출고수량', '판매가x수량', '최종결제금액', '수집일시(YYYY-MM-DD HH:MM)', '출고완료일자',
+      '내부 주문번호', '주문자명', 'Location',
+    ])
+    expect(template?.columns.find((column) => column.header === '내부 상품코드')?.field).toBe('productCode')
+    expect(template?.columns.find((column) => column.header === '확정 옵션명')?.field).toBe('optionText')
+    expect(template?.columns.find((column) => column.header === '확정 상품명')?.field).toBe('productName')
+    expect(template?.columns.find((column) => column.header === '내부 주문번호')?.field).toBe('internalNo')
+  })
 })
 
 describe('Template CRUD queries', () => {

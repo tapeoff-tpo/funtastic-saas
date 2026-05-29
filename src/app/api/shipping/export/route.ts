@@ -23,6 +23,18 @@ import { ORDER_STATUS_LABELS, type ClaimType, type OrderFilters, type OrderStatu
 
 const FILTERED_EXPORT_LIMIT = 50000
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+function formatDateTimeMinute(date: Date): string {
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate()),
+  ].join('-') + ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
 function parseCommaFilter(value: string | null): string[] {
   if (!value) return []
   return Array.from(new Set(
@@ -364,6 +376,7 @@ export async function GET(request: NextRequest) {
         supplyPrice: '',
         // 수집일자 — yyyy-mm-dd 포맷
         collectedAt: collectedDate ? collectedDate.toISOString().slice(0, 10) : '',
+        collectedAtDateTime: collectedDate ? formatDateTimeMinute(collectedDate) : '',
         collectedDateYmd: collectedDate ? collectedDate.toISOString().slice(0, 10).replaceAll('-', '') : '',
         shippedAt: shippedDate ? shippedDate.toISOString().slice(0, 10) : '',
         // ─ 매출확인용 열 ─

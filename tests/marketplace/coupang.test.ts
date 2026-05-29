@@ -174,4 +174,14 @@ describe('CoupangAdapter', () => {
       expect(claim.rawData).toBeDefined()
     })
   })
+
+  describe('confirmOrder', () => {
+    it('uses the v4 PATCH acknowledgement endpoint', async () => {
+      const result = await adapter.confirmOrder('1001', {
+        shipmentBoxId: 123456789,
+      })
+
+      expect(result).toEqual({ success: true })
+    })
+  })
 })

@@ -511,35 +511,49 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
 
     if (orderOptionText(enriched)) return enriched
 
-    const singleProductOption = await this.singleProductOptionText(enriched)
-    return singleProductOption ? { ...enriched, option_text: singleProductOption } : enriched
+    const productOption = await this.productOptionTextForOrder(enriched)
+    return productOption ? { ...enriched, option_text: productOption } : enriched
   }
 
-  private async singleProductOptionText(order: SpecialofferBuyerOrder): Promise<string | null> {
+  private async productOptionTextForOrder(order: SpecialofferBuyerOrder): Promise<string | null> {
     const goodsNo = asString(order.goods_no)
     if (!goodsNo) return null
-    if (this.singleProductOptionCache.has(goodsNo)) return this.singleProductOptionCache.get(goodsNo) ?? null
+    const quantity = Math.max(1, asNumber(order.sum_qty))
+    const orderUnitPrice = quantity > 0 ? Math.round(asNumber(order.goods_price) / quantity) : asNumber(order.goods_price)
+    const cacheKey = `${goodsNo}:${orderUnitPrice}`
+    if (this.singleProductOptionCache.has(cacheKey)) return this.singleProductOptionCache.get(cacheKey) ?? null
 
     try {
       const response = await this.client
         .get(`api/goods/${encodeURIComponent(goodsNo)}`)
         .json<SpecialofferItemResponse<SpecialofferProduct>>()
-      const options = response.data?.option_values ?? []
-      if (options.length !== 1) {
-        this.singleProductOptionCache.set(goodsNo, null)
+      const product = response.data
+      const options = product?.option_values ?? []
+      if (options.length === 0) {
+        this.singleProductOptionCache.set(cacheKey, null)
         return null
       }
-      const values = options[0]?.values?.map(asString).filter(Boolean) ?? []
+      const basePrice = asNumber(product?.supply_price ?? product?.price ?? product?.origin_price)
+      const matchedOptions = options.filter((option) => {
+        if (options.length === 1) return true
+        const optionPrice = asNumber(option.option_price ?? option.supply_price)
+        return basePrice > 0 && orderUnitPrice === basePrice + optionPrice
+      })
+      if (matchedOptions.length !== 1) {
+        this.singleProductOptionCache.set(cacheKey, null)
+        return null
+      }
+      const values = matchedOptions[0]?.values?.map(asString).filter(Boolean) ?? []
       if (values.length === 0) {
-        this.singleProductOptionCache.set(goodsNo, null)
+        this.singleProductOptionCache.set(cacheKey, null)
         return null
       }
-      const title = response.data?.option_titles?.map(asString).find(Boolean)
+      const title = product?.option_titles?.map(asString).find(Boolean)
       const optionText = title ? `${title}: ${values.join(' / ')}` : values.join(' / ')
-      this.singleProductOptionCache.set(goodsNo, optionText)
+      this.singleProductOptionCache.set(cacheKey, optionText)
       return optionText
     } catch {
-      this.singleProductOptionCache.set(goodsNo, null)
+      this.singleProductOptionCache.set(cacheKey, null)
       return null
     }
   }

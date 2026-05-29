@@ -184,6 +184,24 @@ vi.mock('@/lib/marketplace/adapters/ssgmall/adapter', () => ({
   }),
 }))
 
+vi.mock('@/lib/marketplace/adapters/specialoffer/adapter', () => ({
+  SpecialofferAdapter: vi.fn().mockImplementation(function MockSpecialofferAdapter() {
+    return {
+      config: {
+        id: 'specialoffer',
+        name: 'Specialoffer',
+        authType: 'api_key',
+        rateLimitPerSecond: 10,
+        requiredCredentials: ['api_key'],
+      },
+      getOrders: adapterMocks.getOrders,
+      getClaimsOrders: adapterMocks.getClaimsOrders,
+      confirmOrder: adapterMocks.confirmOrder,
+      uploadInvoice: vi.fn(),
+    }
+  }),
+}))
+
 const sampleOrder: NormalizedOrder = {
   marketplaceOrderId: 'CP-2024-001',
   marketplaceId: 'coupang',
@@ -511,6 +529,44 @@ describe('processOrderCollection', () => {
     const updatePayloads = mockUpdate.mock.results.flatMap(({ value }) => value.set.mock.calls.map((call: unknown[]) => call[0]))
     expect(updatePayloads).toContainEqual(expect.objectContaining({
       marketplaceStatus: 'INSTRUCT',
+      marketplaceCollectionStatus: 'ready',
+    }))
+  })
+
+  it('acknowledges Specialoffer ready orders in the marketplace', async () => {
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'specialoffer',
+      marketplaceOrderId: 'SO-2026-001',
+      marketplaceStatus: '3',
+      marketplaceCollectionStatus: 'ready',
+      rawData: {
+        order_id: '571610',
+        marketplaceOrderIdentity: {
+          orderId: 'SO-2026-001',
+          itemIds: ['571610'],
+        },
+      },
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await processOrderCollection(createMockJob({
+      marketplaceId: 'specialoffer',
+      connectionId: 'conn-specialoffer',
+      userId: 'user-1',
+    }))
+
+    expect(result.ordersCollected).toBe(1)
+    expect(mockConfirmOrder).toHaveBeenCalledWith(
+      'SO-2026-001',
+      expect.objectContaining({ order_id: '571610' }),
+    )
+    const updatePayloads = mockUpdate.mock.results.flatMap(({ value }) => value.set.mock.calls.map((call: unknown[]) => call[0]))
+    expect(updatePayloads).toContainEqual(expect.objectContaining({
+      marketplaceStatus: 'CONFIRMED',
       marketplaceCollectionStatus: 'ready',
     }))
   })

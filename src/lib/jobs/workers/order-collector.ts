@@ -237,6 +237,9 @@ function isMarketplaceOrderReadyForShippingPrep(order: NormalizedOrder): boolean
   if (order.marketplaceId === 'naver') {
     return order.marketplaceStatus === 'PAYED'
   }
+  if (order.marketplaceId === 'specialoffer') {
+    return ['new', 'ready'].includes(getMarketplaceCollectionStatus(order) ?? '')
+  }
   return getMarketplaceCollectionStatus(order) === 'new'
 }
 

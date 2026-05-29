@@ -358,6 +358,24 @@ const coupangHandlers = [
       data: MOCK_COUPANG_RETURN_REQUESTS,
     })
   }),
+
+  http.patch('https://api-gateway.coupang.com/v2/providers/openapi/apis/api/v4/vendors/:vendorId/ordersheets/acknowledgement', () => {
+    return HttpResponse.json({
+      code: '200',
+      message: 'OK',
+      data: {
+        responseCode: 0,
+        responseMessage: 'OK',
+        responseList: [
+          {
+            shipmentBoxId: 123456789,
+            succeed: true,
+            resultMessage: 'request succeeded.',
+          },
+        ],
+      },
+    })
+  }),
 ]
 
 // ============================================================================

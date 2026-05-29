@@ -249,10 +249,10 @@ export class CoupangAdapter implements MarketplaceAdapter {
       return { success: false, error: 'shipmentBoxId가 없습니다 (rawData 확인 필요)' }
     }
 
-    const path = `v2/providers/openapi/apis/api/v5/vendors/${this.vendorId}/ordersheets/acknowledgement`
+    const path = `v2/providers/openapi/apis/api/v4/vendors/${this.vendorId}/ordersheets/acknowledgement`
 
     try {
-      const response = await this.client.put(path, {
+      const response = await this.client.patch(path, {
         json: {
           vendorId: this.vendorId,
           shipmentBoxIds: [shipmentBoxId],

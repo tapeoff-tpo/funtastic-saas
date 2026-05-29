@@ -147,6 +147,59 @@ describe('SpecialofferAdapter', () => {
     })
   })
 
+  it('fills missing order options from product options when the order price identifies one option', async () => {
+    const get = vi.fn((endpoint: string) => ({
+      json: async () => {
+        if (endpoint === 'api/v2/seller/orders') {
+          return {
+            data: [
+              {
+                order_id: '571612',
+                order_no: '26051415470131',
+                order_state: 2,
+                goods_no: '999001',
+                goods_name: 'option product',
+                sum_qty: 1,
+                goods_price: 7600,
+                total_price: 10600,
+                shipping_fee: 3000,
+                receiver_name: 'buyer',
+                receiver_zip: '06000',
+                receiver_addr1: 'addr',
+                order_date: '2026-05-14 15:47:01',
+                updated_at: '2026-05-14 15:47:01',
+              },
+            ],
+            meta: { current_page: 1, last_page: 1, total: 1 },
+          }
+        }
+        if (endpoint === 'api/v2/seller/orders/571612') {
+          return { data: { order_id: '571612' } }
+        }
+        if (endpoint === 'api/goods/999001') {
+          return {
+            data: {
+              goods_no: '999001',
+              option_titles: ['옵션'],
+              option_values: [
+                { values: ['기본'], option_price: 0, stock_quantity: 10 },
+                { values: ['대형'], option_price: 4400, stock_quantity: 10 },
+              ],
+              supply_price: 3200,
+            },
+          }
+        }
+        return { data: {} }
+      },
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-14T00:00:00+09:00'))
+
+    expect(orders[0].items[0].optionText).toBe('옵션: 대형')
+  })
+
   it('confirms collected orders with the seller order PATCH endpoint', async () => {
     const post = vi.fn(() => ({
       json: async () => ({ success: true }),

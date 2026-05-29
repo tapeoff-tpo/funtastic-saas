@@ -30,8 +30,10 @@ export async function GET() {
     SELECT
       o.marketplace_id AS "marketplaceId",
       CASE
-        WHEN o.marketplace_id = 'naver'
-          AND oi.marketplace_item_id ~ '^20[0-9]{14}$'
+        WHEN (
+          (o.marketplace_id = 'naver' AND oi.marketplace_item_id ~ '^20[0-9]{14}$')
+          OR (o.marketplace_id = 'ownerclan' AND oi.marketplace_item_id ~ '^20[0-9]{12,}A(-|$)')
+        )
           AND NULLIF(oi.sku, '') IS NOT NULL
           THEN oi.sku
         ELSE oi.marketplace_item_id
@@ -56,16 +58,16 @@ export async function GET() {
               (ms.marketplace_option_id <> ''
                 AND (
                   (CASE
-                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
+                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
                     ELSE oi.marketplace_item_id
                   END) = ms.marketplace_product_id || '-' || ms.marketplace_option_id
                   OR (ms.marketplace_option_id = ${exactOptionId}
                     AND (CASE
-                      WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
+                      WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
                       ELSE oi.marketplace_item_id
                     END) = ms.marketplace_product_id)
                   OR ((CASE
-                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
+                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
                     ELSE oi.marketplace_item_id
                   END) = ms.marketplace_product_id
                     AND LEFT(COALESCE(oi.option_text, ''), 100) = ms.marketplace_option_id)
@@ -73,18 +75,20 @@ export async function GET() {
               -- 품번매핑: 풀 일치 또는 productId+ "-" prefix
               OR (ms.marketplace_option_id = ''
                 AND ((CASE
-                  WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
+                  WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
                   ELSE oi.marketplace_item_id
                 END) = ms.marketplace_product_id
                   OR (CASE
-                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
+                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
                     ELSE oi.marketplace_item_id
                   END) LIKE ms.marketplace_product_id || '-%'))
             )
         )
     GROUP BY o.marketplace_id, CASE
-      WHEN o.marketplace_id = 'naver'
-        AND oi.marketplace_item_id ~ '^20[0-9]{14}$'
+      WHEN (
+        (o.marketplace_id = 'naver' AND oi.marketplace_item_id ~ '^20[0-9]{14}$')
+        OR (o.marketplace_id = 'ownerclan' AND oi.marketplace_item_id ~ '^20[0-9]{12,}A(-|$)')
+      )
         AND NULLIF(oi.sku, '') IS NOT NULL
         THEN oi.sku
       ELSE oi.marketplace_item_id

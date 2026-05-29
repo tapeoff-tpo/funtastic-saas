@@ -1306,7 +1306,7 @@ function splitProductOption(itemId: string): { product: string; option: string }
 }
 
 function shouldUseSkuAsMappingProduct(target: MappingTarget): boolean {
-  return target.marketplaceId === 'naver'
+  return (target.marketplaceId === 'naver' || target.marketplaceId === 'ownerclan')
     && /^20\d{14}$/.test(target.marketplaceItemId.trim())
     && Boolean(target.sku?.trim())
 }
@@ -1326,7 +1326,7 @@ function getMappingTargetSource(target: MappingTarget): { product: string; optio
     }
   }
   return {
-    product: target.marketplaceId === 'funtastic-b2b' && target.sku?.trim()
+    product: (target.marketplaceId === 'funtastic-b2b' || target.marketplaceId === 'ownerclan') && target.sku?.trim()
       ? target.sku.trim()
       : split.product,
     option: split.option || target.optionText?.trim() || EXACT_OPTION_ID,

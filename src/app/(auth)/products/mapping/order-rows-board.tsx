@@ -390,7 +390,7 @@ export function OrderRowsBoard() {
     }
     const sources = bulkTarget.rows.map((r) => {
       const split = splitProductOption(r.marketplaceItemId)
-      const marketplaceProductId = (r.marketplaceId === 'funtastic-b2b' || r.marketplaceId === 'naver') && r.sku?.trim()
+      const marketplaceProductId = (r.marketplaceId === 'funtastic-b2b' || r.marketplaceId === 'naver' || r.marketplaceId === 'ownerclan') && r.sku?.trim()
         ? r.sku.trim()
         : split.product
       return {

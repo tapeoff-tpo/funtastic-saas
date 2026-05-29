@@ -9,6 +9,13 @@ type SourceLike = {
   marketplaceOptionId?: string | null
 }
 
+const SKU_NORMALIZED_MARKETPLACES = ['naver', 'ownerclan'] as const
+type SkuNormalizedMarketplace = (typeof SKU_NORMALIZED_MARKETPLACES)[number]
+
+function isSkuNormalizedMarketplace(marketplaceId: string): marketplaceId is SkuNormalizedMarketplace {
+  return SKU_NORMALIZED_MARKETPLACES.includes(marketplaceId as SkuNormalizedMarketplace)
+}
+
 /**
  * Some marketplaces expose order-line ids in order_items.marketplace_item_id.
  * Those ids are valid for order actions, but must not become reusable product
@@ -19,69 +26,100 @@ export async function normalizeMappingSources<T extends SourceLike>(
   userId: string,
   sources: T[],
 ): Promise<T[]> {
-  const naverOrderIds = Array.from(new Set(
-    sources
-      .filter((source) =>
-        source.marketplaceId === 'naver'
-        && isOrderNumberMappingCandidate('naver', source.marketplaceProductId))
-      .map((source) => source.marketplaceProductId.trim())
-      .filter(Boolean),
-  ))
+  const candidateIdsByMarketplace = new Map<SkuNormalizedMarketplace, Set<string>>()
+  for (const source of sources) {
+    if (!isSkuNormalizedMarketplace(source.marketplaceId)) continue
+    const productId = source.marketplaceProductId.trim()
+    const optionId = source.marketplaceOptionId?.trim()
+    if (!productId) continue
 
-  if (naverOrderIds.length === 0) return sources
+    if (isOrderNumberMappingCandidate(source.marketplaceId, productId)) {
+      const ids = candidateIdsByMarketplace.get(source.marketplaceId) ?? new Set<string>()
+      ids.add(productId)
+      candidateIdsByMarketplace.set(source.marketplaceId, ids)
+    }
 
-  const [itemRows, orderRows] = await Promise.all([
-    db
-      .select({
-        candidateId: orderItems.marketplaceItemId,
-        sku: orderItems.sku,
-      })
-      .from(orderItems)
-      .innerJoin(orders, eq(orders.id, orderItems.orderId))
-      .where(and(
-        eq(orders.userId, userId),
-        eq(orders.marketplaceId, 'naver'),
-        inArray(orderItems.marketplaceItemId, naverOrderIds),
-      )),
-    db
-      .select({
-        candidateId: orders.marketplaceOrderId,
-        sku: orderItems.sku,
-      })
-      .from(orders)
-      .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
-      .where(and(
-        eq(orders.userId, userId),
-        eq(orders.marketplaceId, 'naver'),
-        inArray(orders.marketplaceOrderId, naverOrderIds),
-      )),
-  ])
+    const fullItemId = optionId ? `${productId}-${optionId}` : productId
+    if (fullItemId !== productId && isOrderNumberMappingCandidate(source.marketplaceId, productId)) {
+      const ids = candidateIdsByMarketplace.get(source.marketplaceId) ?? new Set<string>()
+      ids.add(fullItemId)
+      candidateIdsByMarketplace.set(source.marketplaceId, ids)
+    }
+  }
 
-  const skuSetsByCandidate = new Map<string, Set<string>>()
-  for (const row of [...itemRows, ...orderRows]) {
-    const candidateId = row.candidateId?.trim()
-    const sku = row.sku?.trim()
-    if (!candidateId || !sku) continue
-    const skuSet = skuSetsByCandidate.get(candidateId) ?? new Set<string>()
-    skuSet.add(sku)
-    skuSetsByCandidate.set(candidateId, skuSet)
+  const lookupPairs = [...candidateIdsByMarketplace.entries()].flatMap(([marketplaceId, ids]) =>
+    [...ids].map((candidateId) => ({ marketplaceId, candidateId })),
+  )
+
+  if (lookupPairs.length === 0) return sources
+
+  const skuSetsByMarketCandidate = new Map<string, Set<string>>()
+  for (const [marketplaceId, ids] of candidateIdsByMarketplace.entries()) {
+    const candidateIds = [...ids]
+    if (candidateIds.length === 0) continue
+
+    const [itemRows, orderRows] = await Promise.all([
+      db
+        .select({
+          candidateId: orderItems.marketplaceItemId,
+          sku: orderItems.sku,
+        })
+        .from(orderItems)
+        .innerJoin(orders, eq(orders.id, orderItems.orderId))
+        .where(and(
+          eq(orders.userId, userId),
+          eq(orders.marketplaceId, marketplaceId),
+          inArray(orderItems.marketplaceItemId, candidateIds),
+        )),
+      db
+        .select({
+          candidateId: orders.marketplaceOrderId,
+          sku: orderItems.sku,
+        })
+        .from(orders)
+        .innerJoin(orderItems, eq(orderItems.orderId, orders.id))
+        .where(and(
+          eq(orders.userId, userId),
+          eq(orders.marketplaceId, marketplaceId),
+          inArray(orders.marketplaceOrderId, candidateIds),
+        )),
+    ])
+
+    for (const row of [...itemRows, ...orderRows]) {
+      const candidateId = row.candidateId?.trim()
+      const sku = row.sku?.trim()
+      if (!candidateId || !sku) continue
+      const key = `${marketplaceId}:${candidateId}`
+      const skuSet = skuSetsByMarketCandidate.get(key) ?? new Set<string>()
+      skuSet.add(sku)
+      skuSetsByMarketCandidate.set(key, skuSet)
+    }
   }
 
   return sources.map((source) => {
-    if (
-      source.marketplaceId !== 'naver'
-      || !isOrderNumberMappingCandidate('naver', source.marketplaceProductId)
-    ) {
-      return source
+    if (!isSkuNormalizedMarketplace(source.marketplaceId)) return source
+
+    const productId = source.marketplaceProductId.trim()
+    const optionId = source.marketplaceOptionId?.trim()
+    const candidateIds = [
+      optionId && isOrderNumberMappingCandidate(source.marketplaceId, productId)
+        ? `${productId}-${optionId}`
+        : null,
+      productId,
+    ].filter((candidateId): candidateId is string => Boolean(candidateId))
+
+    for (const candidateId of candidateIds) {
+      const skuSet = skuSetsByMarketCandidate.get(`${source.marketplaceId}:${candidateId}`)
+      if (!skuSet || skuSet.size !== 1) continue
+
+      const [sku] = [...skuSet]
+      return {
+        ...source,
+        marketplaceProductId: sku,
+        marketplaceOptionId: candidateId === productId ? source.marketplaceOptionId : '',
+      }
     }
 
-    const skuSet = skuSetsByCandidate.get(source.marketplaceProductId.trim())
-    if (!skuSet || skuSet.size !== 1) return source
-
-    const [sku] = [...skuSet]
-    return {
-      ...source,
-      marketplaceProductId: sku,
-    }
+    return source
   })
 }

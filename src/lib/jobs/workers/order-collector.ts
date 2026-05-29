@@ -876,28 +876,6 @@ export async function saveNormalizedOrdersForConnection(params: {
   return { ordersCollected, ordersSkipped, ordersFetched: normalizedOrders.length }
 }
 
-function normalizeDuplicateName(value?: string | null): string | null {
-  const normalized = value?.replace(/\s+/g, '').trim()
-  return normalized ? normalized : null
-}
-
-function hasMatchingCustomerName(
-  incoming: NormalizedOrder,
-  existing: { buyerName: string; recipientName: string },
-): boolean {
-  const incomingNames = [
-    normalizeDuplicateName(incoming.buyerName),
-    normalizeDuplicateName(incoming.recipientName),
-  ].filter(Boolean)
-  const existingNames = [
-    normalizeDuplicateName(existing.buyerName),
-    normalizeDuplicateName(existing.recipientName),
-  ].filter(Boolean)
-
-  if (incomingNames.length === 0 || existingNames.length === 0) return false
-  return incomingNames.some((name) => existingNames.includes(name))
-}
-
 export async function findExistingOrderMatches(
   userId: string,
   marketplaceId: string,
@@ -946,7 +924,7 @@ export async function findExistingOrderMatches(
       continue
     }
 
-    if (existing.some((candidate) => hasMatchingCustomerName(order, candidate))) {
+    if (existing.length > 0) {
       skipKeys.add(orderKey)
     }
   }

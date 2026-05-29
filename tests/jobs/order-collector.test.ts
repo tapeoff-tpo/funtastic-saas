@@ -18,6 +18,12 @@ function createValuesChain() {
 }
 
 const mockInsert = vi.fn().mockImplementation(() => createValuesChain())
+let mockExistingOrders: Array<{
+  marketplaceId: string
+  marketplaceOrderId: string
+  buyerName: string
+  recipientName: string
+}> = []
 
 const mockDelete = vi.fn().mockReturnValue({
   where: vi.fn().mockResolvedValue(undefined),
@@ -34,7 +40,7 @@ const mockSelectFrom = vi.fn().mockImplementation((table: { storeAlias?: unknown
 
   return {
     innerJoin: vi.fn().mockReturnThis(),
-    where: vi.fn().mockResolvedValue([]),
+    where: vi.fn().mockResolvedValue(mockExistingOrders),
   }
 })
 
@@ -63,6 +69,8 @@ vi.mock('@/lib/db/schema', () => ({
     marketplaceId: 'marketplace_id',
     marketplaceOrderId: 'marketplace_order_id',
     isCopy: 'is_copy',
+    buyerName: 'buyer_name',
+    recipientName: 'recipient_name',
   },
   orderItems: { orderId: 'order_id' },
   claims: {
@@ -221,6 +229,7 @@ describe('processOrderCollection', () => {
     mockGetOrders.mockResolvedValue([])
     mockGetClaimsOrders.mockResolvedValue([])
     mockConfirmOrder.mockResolvedValue({ success: true })
+    mockExistingOrders = []
   })
 
   it('should fetch orders from adapter and UPSERT into database', async () => {
@@ -343,6 +352,35 @@ describe('processOrderCollection', () => {
     const result = await processOrderCollection(job)
 
     expect(result.ordersCollected).toBe(1)
+  })
+
+  it('skips collection when the same order number already exists from another source', async () => {
+    const existingOrderNo = 'GO_1017716539'
+    mockExistingOrders = [{
+      marketplaceId: 'sabangnet-a866eef06e',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: '미수집',
+      recipientName: '미수집',
+    }]
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'onchannel',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: '이승호',
+      recipientName: '이승호',
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await processOrderCollection(createMockJob({
+      marketplaceId: 'coupang',
+      connectionId: 'conn-onchannel',
+      userId: 'user-1',
+    }))
+
+    expect(result.ordersCollected).toBe(0)
   })
 
   it('moves newly collected Ownerclan orders to marketplace shipping preparation', async () => {

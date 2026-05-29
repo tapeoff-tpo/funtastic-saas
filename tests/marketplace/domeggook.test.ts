@@ -183,4 +183,46 @@ describe('DomeggookAdapter', () => {
       unitPrice: 6000,
     })
   })
+
+  it('marks collected Domeggook payment-complete orders as new for marketplace acknowledgement', async () => {
+    vi.mocked(readDomeggookJson)
+      .mockResolvedValueOnce({
+        domeggook: {
+          header: { numberOfPages: 1 },
+          items: {
+            item: {
+              orderNo: '80000001',
+              orderUid: 'OR80000001-1',
+              status: 'paid',
+              itemNo: 12345,
+              itemTitle: 'paid item',
+              orderQty: 1,
+              orderAmtPay: 10000,
+              date: '2026-05-29 12:00:00',
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        domeggook: {
+          header: { numberOfPages: 1 },
+          items: { item: { orderNo: '80000001', orderUid: 'OR80000001-1' } },
+        },
+      })
+
+    const adapter = new DomeggookAdapter({
+      api_key: 'api-key',
+      seller_id: 'seller-id',
+      session_id: 'password',
+    })
+
+    const orders = await adapter.getOrders(new Date('2026-05-29T00:00:00+09:00'))
+
+    expect(orders[0]).toMatchObject({
+      marketplaceOrderId: '80000001',
+      marketplaceStatus: 'paid',
+      marketplaceCollectionStatus: 'new',
+      status: 'new',
+    })
+  })
 })

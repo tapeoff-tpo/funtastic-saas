@@ -4,6 +4,7 @@ import {
   getRawMappingCandidateIds,
   isBlockedMappingSource,
   isBlockedMappingSourcePair,
+  lookupCompatibleMappingRef,
   lookupMappingRef,
 } from '@/lib/orders/mapping-match'
 
@@ -34,6 +35,19 @@ describe('lookupMappingRef', () => {
 
     expect(lookupMappingRef(index, 'market-a', 'P001-red')).toBe('mapping-a')
     expect(lookupMappingRef(index, 'market-b', 'P001-red')).toBeNull()
+  })
+
+  it('matches product-level mappings regardless of the saved option snapshot', () => {
+    expect(lookupCompatibleMappingRef([
+      {
+        marketplaceId: 'ownerclan',
+        marketplaceProductId: 'W9D55DC',
+        marketplaceOptionId: '',
+        productNameSnapshot: '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병',
+        optionNameSnapshot: '옵션: 3L',
+        ref: 'mapping-code-id',
+      },
+    ], 'ownerclan', ['W9D55DC'], '옵션: 5L', '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병')).toBe('mapping-code-id')
   })
 })
 

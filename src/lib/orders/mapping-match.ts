@@ -188,7 +188,7 @@ function normalizeMappingText(value: string | null | undefined): string {
 }
 
 export function isMappingSourceSnapshotCompatible(
-  source: Pick<MappingSource, 'productNameSnapshot' | 'optionNameSnapshot'>,
+  source: Pick<MappingSource, 'marketplaceOptionId' | 'productNameSnapshot' | 'optionNameSnapshot'>,
   productName?: string | null,
   optionText?: string | null,
 ): boolean {
@@ -197,6 +197,8 @@ export function isMappingSourceSnapshotCompatible(
   if (sourceProductName && currentProductName && sourceProductName !== currentProductName) {
     return false
   }
+
+  if (source.marketplaceOptionId === '') return true
 
   const sourceOptionName = normalizeMappingText(source.optionNameSnapshot)
   const currentOptionName = normalizeMappingText(optionText)

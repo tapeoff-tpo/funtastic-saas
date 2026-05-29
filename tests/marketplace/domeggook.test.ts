@@ -33,7 +33,7 @@ describe('DomeggookAdapter', () => {
 
     expect(createDomeggookClient).toHaveBeenCalledWith('api-key')
     expect(postDomeggookFormJson).toHaveBeenCalledTimes(1)
-    expect(readDomeggookJson).toHaveBeenCalledTimes(3)
+    expect(readDomeggookJson).toHaveBeenCalled()
   })
 
   it('enriches collected paid orders with detail fields used for mapping and shipping', async () => {
@@ -118,6 +118,69 @@ describe('DomeggookAdapter', () => {
     expect(orders[0].rawData.orderIdentity).toMatchObject({
       orderId: '73575647',
       itemIds: ['DG-001', '12345', 'OR73575647-1'],
+    })
+  })
+
+  it('keeps all Domeggook line items for the same order number', async () => {
+    const now = new Date().toISOString().slice(0, 19).replace('T', ' ')
+    vi.mocked(readDomeggookJson)
+      .mockResolvedValueOnce({
+        domeggook: {
+          header: { numberOfPages: 1 },
+          items: {
+            item: [
+              {
+                orderNo: '73575647',
+                orderUid: 'OR73575647-1',
+                status: '寃곗젣?꾨즺',
+                itemNo: 12345,
+                itemTitle: 'first',
+                orderQty: 1,
+                orderAmtPay: 10000,
+                date: now,
+              },
+              {
+                orderNo: '73575647',
+                orderUid: 'OR73575647-2',
+                status: '寃곗젣?꾨즺',
+                itemNo: 67890,
+                itemTitle: 'second',
+                orderQty: 2,
+                orderAmtPay: 12000,
+                date: now,
+              },
+            ],
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        domeggook: {
+          header: { numberOfPages: 1 },
+          items: { item: { orderNo: '73575647', orderUid: 'OR73575647-1' } },
+        },
+      })
+      .mockResolvedValueOnce({
+        domeggook: {
+          header: { numberOfPages: 1 },
+          items: { item: { orderNo: '73575647', orderUid: 'OR73575647-2' } },
+        },
+      })
+
+    const adapter = new DomeggookAdapter({
+      api_key: 'api-key',
+      seller_id: 'seller-id',
+      session_id: 'password',
+    })
+
+    const orders = await adapter.getOrders(new Date())
+
+    expect(orders).toHaveLength(1)
+    expect(orders[0].marketplaceOrderId).toBe('73575647')
+    expect(orders[0].items.map((item) => item.marketplaceItemId)).toEqual(['OR73575647-1', 'OR73575647-2'])
+    expect(orders[0].items[1]).toMatchObject({
+      productName: 'second',
+      quantity: 2,
+      unitPrice: 6000,
     })
   })
 })

@@ -280,14 +280,18 @@ export class CoupangAdapter implements MarketplaceAdapter {
     const rawData = invoice.rawData && typeof invoice.rawData === 'object'
       ? invoice.rawData as Record<string, unknown>
       : {}
-    const firstRawItem = Array.isArray(rawData.orderItems) ? rawData.orderItems[0] : null
-    const firstRawItemData = firstRawItem && typeof firstRawItem === 'object'
-      ? firstRawItem as Record<string, unknown>
-      : {}
     const shipmentBoxId = invoice.shipmentBoxId ?? rawData.shipmentBoxId
-    const vendorItemId = invoice.vendorItemId ?? firstRawItemData.vendorItemId
+    const rawVendorItemIds = Array.isArray(rawData.orderItems)
+      ? rawData.orderItems
+        .map((item) => item && typeof item === 'object' ? (item as Record<string, unknown>).vendorItemId : undefined)
+        .filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')
+      : []
+    const vendorItemIds = Array.from(new Set([
+      invoice.vendorItemId,
+      ...rawVendorItemIds,
+    ].filter((value): value is string | number => typeof value === 'string' || typeof value === 'number')))
 
-    if (!shipmentBoxId || !vendorItemId) {
+    if (!shipmentBoxId || vendorItemIds.length === 0) {
       return {
         success: false,
         error: '쿠팡 송장전송에 필요한 shipmentBoxId 또는 vendorItemId가 없습니다. 주문을 다시 수집한 뒤 송장전송을 시도해주세요.',
@@ -298,8 +302,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
       const response = await this.client.post(path, {
         json: {
           vendorId: this.vendorId,
-          orderSheetInvoiceApplyDtos: [
-            {
+          orderSheetInvoiceApplyDtos: vendorItemIds.map((vendorItemId) => ({
               shipmentBoxId,
               orderId,
               vendorItemId,
@@ -308,8 +311,7 @@ export class CoupangAdapter implements MarketplaceAdapter {
               splitShipping: false,
               preSplitShipped: false,
               estimatedShippingDate: undefined,
-            },
-          ],
+            })),
         },
       }).json<{ code: string | number; message: string }>()
 

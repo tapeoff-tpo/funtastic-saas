@@ -91,6 +91,11 @@ function orderKey(order: DomeggookOrder): string {
   return asString(order.orderNo) || order.orderUid || asString(order.itemNo)
 }
 
+function orderLineKey(order: DomeggookOrder): string {
+  const lineId = firstText(order.orderUid, order.itemNo, order.item?.no)
+  return [orderKey(order), lineId, JSON.stringify(order.selectOpt ?? {})].filter(Boolean).join(':')
+}
+
 function firstOrder(response: DomeggookOrderDetailResponse<DomeggookOrder>): DomeggookOrder | null {
   return ensureArray(response.domeggook?.items ?? response.items)[0] ?? null
 }
@@ -181,18 +186,26 @@ export class DomeggookAdapter implements MarketplaceAdapter {
       const lookbackDays = daysSince(since)
       const slices = Array.from({ length: lookbackDays }, (_, index) => index + 1)
       const sliceOrders = await Promise.all(slices.map((day) => this.fetchOrdersForDaySlice(day)))
-      const uniqueOrders = new Map<string, DomeggookOrder>()
+      const uniqueOrderLines = new Map<string, DomeggookOrder>()
 
       for (const order of sliceOrders.flat()) {
-        const key = orderKey(order)
-        if (key) uniqueOrders.set(key, order)
+        const key = orderLineKey(order)
+        if (key) uniqueOrderLines.set(key, order)
       }
 
       const enrichedOrders = await Promise.all(
-        Array.from(uniqueOrders.values()).map((order) => this.enrichOrderDetail(order)),
+        Array.from(uniqueOrderLines.values()).map((order) => this.enrichOrderDetail(order)),
       )
 
-      return enrichedOrders.map((order) => this.normalizeOrder(order))
+      const groupedOrders = new Map<string, DomeggookOrder[]>()
+      for (const order of enrichedOrders) {
+        const key = orderKey(order)
+        const group = groupedOrders.get(key) ?? []
+        group.push(order)
+        groupedOrders.set(key, group)
+      }
+
+      return Array.from(groupedOrders.values()).map((orders) => this.normalizeOrderGroup(orders))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error
       if (error instanceof Error && (error.message.includes('NO_LOGIN') || error.message.includes('sId'))) {
@@ -419,6 +432,73 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     }
     this.resolvedLoginIp = '127.0.0.1'
     return this.resolvedLoginIp
+  }
+
+  private normalizeOrderGroup(group: DomeggookOrder[]): NormalizedOrder {
+    const order = group[0]
+    const orderId = asString(order.orderNo) || order.orderUid || asString(order.itemNo)
+    const marketplaceStatus = order.statusMode || order.status || '寃곗젣?꾨즺'
+    const shippingFee = order.delivery?.fee != null ? asNumber(order.delivery.fee) : 0
+    const items = group.map((line) => this.normalizeOrderItem(line, orderId))
+    const itemsAmount = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+    const totalAmount = asNumber(order.pay?.payAmount) || itemsAmount + shippingFee
+    const buyerName = firstText(order.buyerInfo?.buyerName, order.consumer?.name, '-')
+    const recipientName = order.consumer?.name || buyerName
+    const buyerPhone = firstText(order.buyerInfo?.buyerMobile, order.buyerInfo?.buyerPhone)
+    const recipientPhone = firstText(order.consumer?.mobile, order.consumer?.phone, buyerPhone)
+    const itemIds = Array.from(new Set(group.flatMap((line) => [
+      firstText(line.item?.itemCustomCode, line.item?.no, line.itemNo),
+      asString(line.item?.no),
+      asString(line.itemNo),
+      line.orderUid,
+    ]).filter(Boolean)))
+    const rawData = {
+      ...(order as unknown as Record<string, unknown>),
+      orderLines: group,
+      orderIdentity: {
+        orderId,
+        itemIds,
+      },
+    }
+
+    return {
+      marketplaceOrderId: orderId,
+      marketplaceId: 'domeggook',
+      marketplaceStatus,
+      status: mapStatus(marketplaceStatus),
+      buyerName,
+      buyerPhone: buyerPhone || undefined,
+      recipientName,
+      recipientPhone: recipientPhone || undefined,
+      shippingAddress: {
+        zipCode: order.consumer?.zipcode || order.buyerInfo?.buyerZipcode || '',
+        address1: order.consumer?.address || order.buyerInfo?.buyerAddress || '',
+      },
+      items,
+      orderedAt: parseDomeggookDate(order.date || order.pay?.datePay),
+      totalAmount,
+      shippingType: order.delivery?.who || null,
+      shippingFee: order.delivery?.fee != null ? shippingFee : null,
+      deliveryMessage: order.consumer?.deliReq || null,
+      rawData,
+    }
+  }
+
+  private normalizeOrderItem(order: DomeggookOrder, orderId: string): NormalizedOrder['items'][number] {
+    const productName = order.itemTitle || order.item?.title || `?꾨ℓ袁?二쇰Ц ${orderId}`
+    const quantity = asNumber(order.orderQty) || 1
+    const itemAmount = asNumber(order.orderAmtPay) || asNumber(order.orderAmount) || asNumber(order.orderAmt)
+    const productCode = firstText(order.item?.itemCustomCode, order.item?.no, order.itemNo)
+    const itemIdentity = firstText(order.orderUid, productCode ? `${orderId}-${productCode}` : '', orderId)
+
+    return {
+      marketplaceItemId: itemIdentity,
+      productName,
+      optionText: this.formatOptions(order),
+      quantity,
+      unitPrice: quantity > 0 ? itemAmount / quantity : itemAmount,
+      sku: productCode || undefined,
+    }
   }
 
   private normalizeOrder(order: DomeggookOrder): NormalizedOrder {

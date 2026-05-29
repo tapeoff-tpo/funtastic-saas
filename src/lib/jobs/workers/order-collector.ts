@@ -1381,6 +1381,7 @@ async function createSplitOrderCopies(
     splitAt: now.toISOString(),
     totalParts: items.length,
   }
+  const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
 
   await db
     .update(orders)
@@ -1404,7 +1405,7 @@ async function createSplitOrderCopies(
         connectionId,
         marketplaceId: order.marketplaceId,
         marketplaceOrderId: order.marketplaceOrderId,
-        status: order.status,
+        status: copyStatus,
         marketplaceStatus: order.marketplaceStatus,
         marketplaceCollectionStatus: getMarketplaceCollectionStatus(order),
         buyerName: order.buyerName,
@@ -1478,6 +1479,7 @@ async function ensureSplitOrderCopies(
     splitAt: now.toISOString(),
     totalParts: items.length,
   }
+  const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
 
   await db
     .update(orders)
@@ -1523,7 +1525,7 @@ async function ensureSplitOrderCopies(
         connectionId,
         marketplaceId: order.marketplaceId,
         marketplaceOrderId: order.marketplaceOrderId,
-        status: order.status,
+        status: copyStatus,
         marketplaceStatus: order.marketplaceStatus,
         marketplaceCollectionStatus: getMarketplaceCollectionStatus(order),
         buyerName: order.buyerName,
@@ -1562,11 +1564,12 @@ async function updateSplitOrderCopy(
   splitMeta: Record<string, unknown>,
 ): Promise<void> {
   const now = new Date()
+  const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
   await db
     .update(orders)
     .set({
       connectionId,
-      status: order.status,
+      status: copyStatus,
       marketplaceStatus: order.marketplaceStatus,
       marketplaceCollectionStatus: getMarketplaceCollectionStatus(order),
       buyerName: order.buyerName,

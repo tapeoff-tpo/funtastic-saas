@@ -126,7 +126,9 @@ export class TossShoppingAdapter implements MarketplaceAdapter {
         nextCursor = success.nextCursor ?? undefined
       } while (nextCursor)
 
-      return this.normalizeOrderProducts(orderProducts)
+      return this.normalizeOrderProducts(
+        orderProducts.filter((product) => product.orderProductStatus === 'PAID'),
+      )
     } catch (error) {
       if (error instanceof MarketplaceApiError || error instanceof MarketplaceAuthError) throw error
       throw new MarketplaceApiError('toss-shopping', 500, error instanceof Error ? error.message : 'Unknown error')

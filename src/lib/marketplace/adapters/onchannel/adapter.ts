@@ -119,7 +119,7 @@ export class OnchannelAdapter implements MarketplaceAdapter {
         throw new MarketplaceApiError('onchannel', 400, response.message || 'Failed to fetch orders')
       }
 
-      const orders = response.data || []
+      const orders = (response.data || []).filter((order) => order.orderStatus === 'PAID')
       return orders.map((order) => this.normalizeOrder(order))
     } catch (error) {
       if (error instanceof MarketplaceApiError) throw error

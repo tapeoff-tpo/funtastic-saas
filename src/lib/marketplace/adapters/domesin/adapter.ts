@@ -97,7 +97,10 @@ export class DomesinAdapter implements MarketplaceAdapter {
 
   async confirmOrder(marketplaceOrderId: string): Promise<{ success: boolean; error?: string }> {
     void marketplaceOrderId
-    return { success: true }
+    return {
+      success: false,
+      error: '도매의신 API 발주확인은 아직 지원되지 않습니다. RPA 송신 경로에서 실제 처리 결과를 확인해야 합니다.',
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {

@@ -155,6 +155,29 @@ describe('Coupang uploadInvoice', () => {
       vendorItemId: 55001,
     })
   })
+
+  it('uploads invoices for every Coupang order item when rawData has multiple vendor items', async () => {
+    mockJsonResponse.mockResolvedValueOnce({ code: 'SUCCESS', message: 'OK' })
+
+    await adapter.uploadInvoice('order-123', {
+      trackingNumber: '1234567890',
+      carrierId: 'CJGLS',
+      rawData: {
+        shipmentBoxId: 99001,
+        orderItems: [
+          { vendorItemId: 55001 },
+          { vendorItemId: 55002 },
+        ],
+      },
+    })
+
+    const [, options] = mockPost.mock.calls[0]
+    expect(options.json.orderSheetInvoiceApplyDtos).toHaveLength(2)
+    expect(options.json.orderSheetInvoiceApplyDtos).toEqual([
+      expect.objectContaining({ shipmentBoxId: 99001, vendorItemId: 55001 }),
+      expect.objectContaining({ shipmentBoxId: 99001, vendorItemId: 55002 }),
+    ])
+  })
 })
 
 describe('Naver uploadInvoice', () => {

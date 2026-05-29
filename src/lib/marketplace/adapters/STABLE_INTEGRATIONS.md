@@ -33,3 +33,13 @@ Order collection range workflow:
 - Adapters that cannot safely pass `until` to the marketplace API must not be added to `RANGE_AWARE_ORDER_MARKETPLACES`, because repeated `since -> now` calls would create duplicated work and extra rate-limit pressure.
 - Current range-aware order adapters: Ownerclan, 10x10, Coupang, Cafe24, Naver, Toss Shopping, 11st, ESM, Ably, Ohouse, Onchannel, SSG Mall, CJ OnStyle, Kakao Gift, Kakao Store.
 - Domeggook is not listed here because its current private API implementation already slices by relative day internally, not by an exact `since`/`until` pair.
+
+Regression guardrails:
+
+- Order collection must only save marketplace states that are safe to process as new/paid orders. Shipped, delivered, cancelled, or unknown states must be excluded unless a marketplace README documents an explicit exception.
+- Marketplace order IDs must preserve option/line suffixes when the marketplace uses them as part of the order identity. Do not trim at separators such as `-` unless the marketplace API explicitly defines that value as the parent order id.
+- When one marketplace order contains multiple line items, adapters must preserve every collectable line in `NormalizedOrder.items[]`; do not dedupe by parent order number before line items are grouped.
+- Split copy rows must use the same local collection status normalization as their base order.
+- Invoice upload must use all marketplace line identifiers required by the marketplace. For multi-line orders, do not silently upload only the first item unless the marketplace documentation proves invoice upload is shipment-box-level only.
+- Adapter methods must not return `{ success: true }` for stubbed or unsupported marketplace actions. Return a clear failure message until a real API/RPA action and post-condition are implemented.
+- New fixes for duplicate collection, state filtering, line-item preservation, or invoice upload must include focused Vitest coverage in `tests/marketplace`, `tests/jobs`, or `tests/shipping`.

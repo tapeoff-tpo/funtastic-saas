@@ -334,28 +334,42 @@ export async function matchInvoicesToOrders(
       ),
     )
 
-  // Build lookup map
-  const orderMap = new Map<string, typeof matchingOrders[number]>()
+  // Marketplace order IDs are not unique for split orders; one invoice row
+  // should register to every internal order row that shares the order number.
+  const ordersByMarketplaceOrderId = new Map<string, Array<typeof matchingOrders[number]>>()
+  const orderByUniqueIdentifier = new Map<string, typeof matchingOrders[number]>()
   for (const order of matchingOrders) {
-    orderMap.set(order.marketplaceOrderId, order)
-    orderMap.set(order.internalNo, order)
-    orderMap.set(order.id, order)
-    orderMap.set(order.id.slice(0, 8), order)
+    const marketplaceOrders = ordersByMarketplaceOrderId.get(order.marketplaceOrderId) ?? []
+    marketplaceOrders.push(order)
+    ordersByMarketplaceOrderId.set(order.marketplaceOrderId, marketplaceOrders)
+    orderByUniqueIdentifier.set(order.internalNo, order)
+    orderByUniqueIdentifier.set(order.id, order)
+    orderByUniqueIdentifier.set(order.id.slice(0, 8), order)
   }
 
   const matched: MatchedInvoice[] = []
   const unmatched: ParsedInvoiceRow[] = []
+  const matchedKeys = new Set<string>()
 
   for (const row of parsedRows) {
-    const order = orderMap.get(row.orderIdentifier)
-    if (order) {
-      matched.push({
-        orderId: order.id,
-        orderIdentifier: row.orderIdentifier,
-        marketplaceOrderId: order.marketplaceOrderId,
-        trackingNumber: row.trackingNumber,
-        carrierId: row.carrierId,
-      })
+    const directOrder = orderByUniqueIdentifier.get(row.orderIdentifier)
+    const rowOrders = directOrder
+      ? [directOrder]
+      : ordersByMarketplaceOrderId.get(row.orderIdentifier) ?? []
+
+    if (rowOrders.length > 0) {
+      for (const order of rowOrders) {
+        const matchedKey = `${order.id}:${row.trackingNumber}`
+        if (matchedKeys.has(matchedKey)) continue
+        matchedKeys.add(matchedKey)
+        matched.push({
+          orderId: order.id,
+          orderIdentifier: row.orderIdentifier,
+          marketplaceOrderId: order.marketplaceOrderId,
+          trackingNumber: row.trackingNumber,
+          carrierId: row.carrierId,
+        })
+      }
     } else {
       unmatched.push(row)
     }

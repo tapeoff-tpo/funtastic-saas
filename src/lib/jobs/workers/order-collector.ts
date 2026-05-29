@@ -894,6 +894,8 @@ export async function findExistingOrderMatches(
       marketplaceOrderId: orders.marketplaceOrderId,
       buyerName: orders.buyerName,
       recipientName: orders.recipientName,
+      connectionId: orders.connectionId,
+      rawData: orders.rawData,
     })
     .from(orders)
     .where(
@@ -920,6 +922,10 @@ export async function findExistingOrderMatches(
     const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
 
     if (exact) {
+      if (isProtectedExcelCollectedOrder(exact)) {
+        skipKeys.add(orderKey)
+        continue
+      }
       upsertKeys.add(orderKey)
       continue
     }
@@ -930,6 +936,36 @@ export async function findExistingOrderMatches(
   }
 
   return { upsertKeys, skipKeys }
+}
+
+function rawText(rawData: unknown, key: string): string {
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return ''
+  const value = (rawData as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+function isProtectedExcelCollectedOrder(order: {
+  connectionId: string | null
+  rawData: unknown
+}): boolean {
+  if (order.connectionId) return false
+
+  const source = rawText(order.rawData, 'source')
+  const collectionSource = rawText(order.rawData, 'collectionSource')
+  const sourceFileName = rawText(order.rawData, 'sourceFileName')
+  const importTemplateId = rawText(order.rawData, 'importTemplateId')
+
+  return (
+    collectionSource === 'order-excel'
+    || collectionSource === 'sabangnet-excel'
+    || collectionSource.startsWith('sabangnet-')
+    || source === 'sabangnet'
+    || source.startsWith('sabangnet-')
+    || sourceFileName.includes('sabangnet')
+    || sourceFileName.includes('사방넷')
+    || importTemplateId.includes('sabangnet')
+    || importTemplateId.includes('사방넷')
+  )
 }
 
 /**

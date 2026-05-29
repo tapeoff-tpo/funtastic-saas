@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
         const isSabangnetImport = isSabangnetImportSource(marketplaceId, marketplaceName, file.name, templateId)
         const baseRawData = {
           ...(isSabangnetImport ? { source: 'sabangnet-import-xlsx' } : {}),
+          collectionSource: isSabangnetImport ? 'sabangnet-excel' : 'order-excel',
           importTemplateId: templateId ?? null,
           sourceFileName: file.name,
           mallName: marketplaceName || marketplaceId,

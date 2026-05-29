@@ -23,6 +23,8 @@ let mockExistingOrders: Array<{
   marketplaceOrderId: string
   buyerName: string
   recipientName: string
+  connectionId?: string | null
+  rawData?: Record<string, unknown> | null
 }> = []
 
 const mockDelete = vi.fn().mockReturnValue({
@@ -377,6 +379,41 @@ describe('processOrderCollection', () => {
     const result = await processOrderCollection(createMockJob({
       marketplaceId: 'coupang',
       connectionId: 'conn-onchannel',
+      userId: 'user-1',
+    }))
+
+    expect(result.ordersCollected).toBe(0)
+  })
+
+  it('does not overwrite existing Sabangnet Excel orders during Ownerclan SaaS collection', async () => {
+    const existingOrderNo = 'OC-2026-SABANGNET'
+    mockExistingOrders = [{
+      marketplaceId: 'ownerclan',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: '사방넷 구매자',
+      recipientName: '사방넷 수령자',
+      connectionId: null,
+      rawData: {
+        source: 'sabangnet-import-xlsx',
+        collectionSource: 'sabangnet-excel',
+        sourceFileName: '사방넷_오너클랜.xlsx',
+      },
+    }]
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'ownerclan',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: 'API 구매자',
+      recipientName: 'API 수령자',
+    }])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await processOrderCollection(createMockJob({
+      marketplaceId: 'ownerclan',
+      connectionId: 'conn-ownerclan',
       userId: 'user-1',
     }))
 

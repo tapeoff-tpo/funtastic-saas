@@ -109,6 +109,28 @@ describe('matchInvoicesToOrders', () => {
     expect(result.unmatched).toHaveLength(0)
   })
 
+  it('matches one marketplace order invoice to every split internal order', async () => {
+    const parsedRows = [
+      { orderIdentifier: 'MKT-SPLIT', trackingNumber: '111', carrierId: 'CJGLS' },
+    ]
+
+    const mockOrders = [
+      { id: 'uuid-1', marketplaceOrderId: 'MKT-SPLIT', internalNo: 'IN-1', userId: 'user-1' },
+      { id: 'uuid-2', marketplaceOrderId: 'MKT-SPLIT', internalNo: 'IN-2', userId: 'user-1' },
+      { id: 'uuid-3', marketplaceOrderId: 'MKT-SPLIT', internalNo: 'IN-3', userId: 'user-1' },
+    ]
+
+    const mockWhere = vi.fn().mockResolvedValue(mockOrders)
+    const mockFrom = vi.fn().mockReturnValue({ where: mockWhere })
+    ;(db.select as ReturnType<typeof vi.fn>).mockReturnValue({ from: mockFrom })
+
+    const result = await matchInvoicesToOrders(parsedRows, 'user-1')
+
+    expect(result.matched).toHaveLength(3)
+    expect(result.matched.map((row) => row.orderId)).toEqual(['uuid-1', 'uuid-2', 'uuid-3'])
+    expect(result.unmatched).toHaveLength(0)
+  })
+
   it('returns unmatched rows separately', async () => {
     const parsedRows = [
       { orderIdentifier: 'MKT-001', trackingNumber: '111', carrierId: 'CJGLS' },

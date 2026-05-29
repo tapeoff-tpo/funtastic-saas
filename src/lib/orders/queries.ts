@@ -400,11 +400,18 @@ function getShippedAtDateRangeCondition(filters: OrderFilters): SQL | null {
  */
 export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   const conditions: SQL[] = []
+  const sabangnetKoreanPattern = '%사방넷%'
   const isSabangnetOrderSource = sql`(
-    COALESCE(${orders.rawData}->>'source', '') LIKE 'sabangnet-%'
-    OR ${orders.marketplaceId} LIKE 'sabangnet-%'
+    LOWER(COALESCE(${orders.rawData}->>'source', '')) = 'sabangnet'
+    OR LOWER(COALESCE(${orders.rawData}->>'source', '')) LIKE 'sabangnet-%'
+    OR LOWER(COALESCE(${orders.rawData}->>'collectionSource', '')) IN ('sabangnet', 'sabangnet-excel')
+    OR LOWER(COALESCE(${orders.rawData}->>'collectionSource', '')) LIKE 'sabangnet-%'
+    OR LOWER(${orders.marketplaceId}) = 'sabangnet'
+    OR LOWER(${orders.marketplaceId}) LIKE 'sabangnet-%'
     OR ${orders.rawData} ? 'sabangnetSync'
     OR ${orders.rawData} ? 'sabangnetRaw'
+    OR COALESCE(${orders.rawData}->>'sourceFileName', '') LIKE ${sabangnetKoreanPattern}
+    OR COALESCE(${orders.rawData}->>'importTemplateId', '') LIKE ${sabangnetKoreanPattern}
     OR LOWER(COALESCE(${orders.rawData}->>'mallName', '')) IN ('sabangnet', '사방넷')
     OR LOWER(COALESCE(${orders.rawData}->>'sourceFileName', '')) LIKE '%sabangnet%'
     OR COALESCE(${orders.rawData}->>'sourceFileName', '') LIKE '%사방넷%'

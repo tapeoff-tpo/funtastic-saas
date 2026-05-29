@@ -60,9 +60,9 @@ function normalizeMarketplaceKey(value: string) {
 }
 
 const MARKETPLACE_DISPLAY_BY_NORMALIZED_KEY = Object.fromEntries(
-  Object.entries(MARKETPLACE_DISPLAY_NAMES).map(([key, label]) => [
-    normalizeMarketplaceKey(key),
-    label,
+  Object.entries(MARKETPLACE_DISPLAY_NAMES).flatMap(([key, label]) => [
+    [normalizeMarketplaceKey(key), label],
+    [normalizeMarketplaceKey(label), label],
   ]),
 )
 
@@ -75,6 +75,11 @@ export function resolveMarketplaceDisplayName(marketplaceId: string, rawName?: u
 
   const normalized = normalizeMarketplaceKey(trimmed)
   if (normalized === 'sabangnet') return fallback
+
+  const withoutAccountSuffix = trimmed.replace(/\s*\([^)]*@[^\)]*\)\s*$/, '').trim()
+  const normalizedWithoutAccountSuffix = normalizeMarketplaceKey(withoutAccountSuffix)
+  const accountSuffixMatch = MARKETPLACE_DISPLAY_BY_NORMALIZED_KEY[normalizedWithoutAccountSuffix]
+  if (accountSuffixMatch) return accountSuffixMatch
 
   return MARKETPLACE_DISPLAY_BY_NORMALIZED_KEY[normalized] ?? trimmed
 }

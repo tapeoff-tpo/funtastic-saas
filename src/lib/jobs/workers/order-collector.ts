@@ -527,6 +527,8 @@ export async function collectOrdersForConnection(params: {
   const jobLog = { id: logId }
 
   let ordersCollected = 0
+  let ordersNewlyCollected = 0
+  let ordersUpdated = 0
   const claimsCollected = 0
 
   // Helper: 사용자에게 보여줄 진행 상태 메시지를 job_logs에 기록.
@@ -689,6 +691,11 @@ export async function collectOrdersForConnection(params: {
         await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
       }
       ordersCollected++
+      if (isExistingOrder) {
+        ordersUpdated++
+      } else {
+        ordersNewlyCollected++
+      }
 
       if (
         shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId)
@@ -745,8 +752,9 @@ export async function collectOrdersForConnection(params: {
 
     // Local workflow remains: 신규 -> 매핑 -> 사용자 확인. Marketplace shipping
     // prep acknowledgement above is intentionally tracked separately.
+    const completedProgressMessage = `${ordersNewlyCollected}건 신규수집 / ${ordersUpdated}건 갱신`
     if (ordersCollected > 0) {
-      await setProgress(`${ordersCollected}건 신규/기존 주문 저장 완료`)
+      await setProgress(completedProgressMessage)
     }
 
     // 5. CS data is collected only from the CS management module.
@@ -763,7 +771,7 @@ export async function collectOrdersForConnection(params: {
         status: 'completed',
         ordersCollected,
         claimsCollected,
-        progressMessage: null,
+        progressMessage: completedProgressMessage,
         completedAt: new Date(),
       })
       .onConflictDoUpdate({
@@ -772,7 +780,7 @@ export async function collectOrdersForConnection(params: {
           status: 'completed',
           ordersCollected,
           claimsCollected,
-          progressMessage: null,
+          progressMessage: completedProgressMessage,
           completedAt: new Date(),
         },
       })

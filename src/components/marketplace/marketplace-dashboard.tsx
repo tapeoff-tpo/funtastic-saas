@@ -96,7 +96,7 @@ function formatLatestJobLog(log: NonNullable<Connection['latestJobLog']>): strin
   if (log.status === 'cancelled') return '수집 취소됨'
 
   if (log.status === 'completed') {
-    return formatCollectionSummary(log)
+    return `주문 ${formatOrderCollectResult(log)}`
   }
 
   return log.progressMessage ?? '수집 진행 중'
@@ -108,6 +108,24 @@ function formatCollectionSummary(log: Pick<NonNullable<Connection['latestJobLog'
   return claims > 0
     ? `주문 ${orders}건 · 클레임 ${claims}건 수집/갱신`
     : `주문 ${orders}건 수집/갱신`
+}
+
+function formatOrderCollectResult(log: Pick<JobLogResult, 'ordersCollected' | 'claimsCollected' | 'progressMessage'>): string {
+  const splitSummary = log.progressMessage?.match(/^\d+건 신규수집 \/ \d+건 갱신$/)
+  const claims = log.claimsCollected ?? 0
+  if (splitSummary) {
+    return claims > 0 ? `${splitSummary[0]} · 클레임 ${claims}건` : splitSummary[0]
+  }
+  const orders = log.ordersCollected ?? 0
+  return claims > 0
+    ? `${orders}건 수집/갱신 · 클레임 ${claims}건`
+    : `${orders}건 수집/갱신`
+}
+
+function parseSplitOrderCollectSummary(log: Pick<JobLogResult, 'progressMessage'>): { fresh: number; updated: number } | null {
+  const match = log.progressMessage?.match(/^(\d+)건 신규수집 \/ (\d+)건 갱신$/)
+  if (!match) return null
+  return { fresh: Number(match[1]), updated: Number(match[2]) }
 }
 
 function formatCollectionCount(log: Pick<NonNullable<Connection['latestJobLog']>, 'ordersCollected' | 'claimsCollected'>): string {
@@ -341,6 +359,18 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
   const showModal = enrichedLogs && enrichedLogs.length > 0
 
   const totalOrders = enrichedLogs?.reduce((sum, r) => sum + (r.ordersCollected ?? 0), 0) ?? 0
+  const totalSplitSummary = enrichedLogs?.reduce(
+    (sum, r) => {
+      const parsed = parseSplitOrderCollectSummary(r)
+      if (!parsed) return sum
+      return {
+        fresh: sum.fresh + parsed.fresh,
+        updated: sum.updated + parsed.updated,
+        count: sum.count + 1,
+      }
+    },
+    { fresh: 0, updated: 0, count: 0 },
+  ) ?? { fresh: 0, updated: 0, count: 0 }
   const totalClaims = enrichedLogs?.reduce((sum, r) => sum + (r.claimsCollected ?? 0), 0) ?? 0
   const successCount = enrichedLogs?.filter((r) => r.status === 'completed').length ?? 0
   const failCount = enrichedLogs?.filter((r) => r.status === 'failed').length ?? 0
@@ -715,7 +745,14 @@ export function MarketplaceDashboard({ connections, importTemplates: initialImpo
                   <p className="text-sm text-muted-foreground">
                     {successCount > 0 && (
                       <span>
-                        총 <span className="font-semibold text-foreground">{totalOrders}건</span> 수집/갱신
+                        {totalSplitSummary.count > 0 ? (
+                          <>
+                            총 <span className="font-semibold text-foreground">{totalSplitSummary.fresh}건</span> 신규수집 /{' '}
+                            <span className="font-semibold text-foreground">{totalSplitSummary.updated}건</span> 갱신
+                          </>
+                        ) : (
+                          <>총 <span className="font-semibold text-foreground">{totalOrders}건</span> 수집/갱신</>
+                        )}
                         {totalClaims > 0 && (
                           <> (클레임 <span className="font-semibold text-foreground">{totalClaims}건</span>)</>
                         )}
@@ -1517,12 +1554,9 @@ function ResultRow({ log, now }: { log: JobLogResult & { displayName: string }, 
         {isCompleted && (
           <>
             <p className="text-sm text-muted-foreground">
-              주문 <span className="font-medium text-foreground">{log.ordersCollected ?? 0}건</span>
-              {(log.claimsCollected ?? 0) > 0 && (
-                <>, 클레임 <span className="font-medium text-foreground">{log.claimsCollected}건</span></>
-              )}{' '}수집/갱신
+              주문 <span className="font-medium text-foreground">{formatOrderCollectResult(log)}</span>
             </p>
-            {log.progressMessage && (
+            {log.progressMessage && !parseSplitOrderCollectSummary(log) && (
               <p className="break-words text-xs text-muted-foreground">{log.progressMessage}</p>
             )}
           </>

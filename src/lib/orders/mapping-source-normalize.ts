@@ -1,7 +1,7 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { orderItems, orders } from '@/lib/db/schema'
-import { isOrderNumberMappingCandidate } from './mapping-match'
+import { usesSkuMappingKey } from './mapping-key-marketplaces'
 
 type SourceLike = {
   marketplaceId: string
@@ -9,11 +9,10 @@ type SourceLike = {
   marketplaceOptionId?: string | null
 }
 
-const SKU_NORMALIZED_MARKETPLACES = ['naver', 'ownerclan'] as const
-type SkuNormalizedMarketplace = (typeof SKU_NORMALIZED_MARKETPLACES)[number]
+type SkuNormalizedMarketplace = string
 
 function isSkuNormalizedMarketplace(marketplaceId: string): marketplaceId is SkuNormalizedMarketplace {
-  return SKU_NORMALIZED_MARKETPLACES.includes(marketplaceId as SkuNormalizedMarketplace)
+  return usesSkuMappingKey(marketplaceId)
 }
 
 /**
@@ -33,17 +32,13 @@ export async function normalizeMappingSources<T extends SourceLike>(
     const optionId = source.marketplaceOptionId?.trim()
     if (!productId) continue
 
-    if (isOrderNumberMappingCandidate(source.marketplaceId, productId)) {
-      const ids = candidateIdsByMarketplace.get(source.marketplaceId) ?? new Set<string>()
-      ids.add(productId)
-      candidateIdsByMarketplace.set(source.marketplaceId, ids)
-    }
+    const ids = candidateIdsByMarketplace.get(source.marketplaceId) ?? new Set<string>()
+    ids.add(productId)
+    candidateIdsByMarketplace.set(source.marketplaceId, ids)
 
     const fullItemId = optionId ? `${productId}-${optionId}` : productId
-    if (fullItemId !== productId && isOrderNumberMappingCandidate(source.marketplaceId, productId)) {
-      const ids = candidateIdsByMarketplace.get(source.marketplaceId) ?? new Set<string>()
+    if (fullItemId !== productId) {
       ids.add(fullItemId)
-      candidateIdsByMarketplace.set(source.marketplaceId, ids)
     }
   }
 
@@ -102,9 +97,7 @@ export async function normalizeMappingSources<T extends SourceLike>(
     const productId = source.marketplaceProductId.trim()
     const optionId = source.marketplaceOptionId?.trim()
     const candidateIds = [
-      optionId && isOrderNumberMappingCandidate(source.marketplaceId, productId)
-        ? `${productId}-${optionId}`
-        : null,
+      optionId ? `${productId}-${optionId}` : null,
       productId,
     ].filter((candidateId): candidateId is string => Boolean(candidateId))
 

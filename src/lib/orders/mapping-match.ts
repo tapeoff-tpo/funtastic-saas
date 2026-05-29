@@ -20,6 +20,7 @@ const ORDER_NUMBER_MAPPING_PATTERNS: Partial<Record<string, RegExp[]>> = {
   onchannel: [/^MO_\d+$/i],
   naver: [/^20\d{14}$/],
   ownerclan: [/^20\d{12,}A(?:-.+)?$/],
+  ssgmall: [/^20\d{12,}(?:-.+)?$/],
 }
 
 const LINE_SEQUENCE_MAPPING_PATTERNS: Partial<Record<string, RegExp[]>> = {

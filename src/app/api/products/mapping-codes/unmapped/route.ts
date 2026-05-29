@@ -10,6 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { SKU_MAPPING_MARKETPLACE_IDS } from '@/lib/orders/mapping-key-marketplaces'
 
 export async function GET() {
   const supabase = await createClient()
@@ -17,9 +18,14 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const exactOptionId = '__exact__'
+  const skuMappingMarketplaceList = sql.join(SKU_MAPPING_MARKETPLACE_IDS.map((id) => sql`${id}`), sql`, `)
+  const mappingItemId = sql`CASE
+    WHEN o.marketplace_id IN (${skuMappingMarketplaceList}) AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
+    ELSE oi.marketplace_item_id
+  END`
 
   // 최근 90일 내 주문에 등장한 마켓상품 중 매핑되지 않은 항목.
-  // 네이버 productOrderId 처럼 주문행 번호가 marketplace_item_id 로 들어오는 마켓은
+  // 주문행 번호가 marketplace_item_id 로 들어오는 마켓은
   // order_items.sku 에 보관된 판매자 자체코드/옵션관리코드를 매핑키로 사용한다.
   // 사방넷 방식 매칭:
   //   - 단품매핑: ms.product_id || '-' || ms.option_id == oi.marketplace_item_id  (option_id != '')
@@ -29,15 +35,7 @@ export async function GET() {
   const rows = await db.execute(sql`
     SELECT
       o.marketplace_id AS "marketplaceId",
-      CASE
-        WHEN (
-          (o.marketplace_id = 'naver' AND oi.marketplace_item_id ~ '^20[0-9]{14}$')
-          OR (o.marketplace_id = 'ownerclan' AND oi.marketplace_item_id ~ '^20[0-9]{12,}A(-|$)')
-        )
-          AND NULLIF(oi.sku, '') IS NOT NULL
-          THEN oi.sku
-        ELSE oi.marketplace_item_id
-      END AS "marketplaceItemId",
+      ${mappingItemId} AS "marketplaceItemId",
       MAX(oi.product_name) AS "productName",
       MAX(oi.option_text) AS "optionText",
       COUNT(*)::int AS "occurrences",
@@ -57,42 +55,19 @@ export async function GET() {
               -- 단품매핑 정확일치
               (ms.marketplace_option_id <> ''
                 AND (
-                  (CASE
-                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
-                    ELSE oi.marketplace_item_id
-                  END) = ms.marketplace_product_id || '-' || ms.marketplace_option_id
+                  ${mappingItemId} = ms.marketplace_product_id || '-' || ms.marketplace_option_id
                   OR (ms.marketplace_option_id = ${exactOptionId}
-                    AND (CASE
-                      WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
-                      ELSE oi.marketplace_item_id
-                    END) = ms.marketplace_product_id)
-                  OR ((CASE
-                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
-                    ELSE oi.marketplace_item_id
-                  END) = ms.marketplace_product_id
+                    AND ${mappingItemId} = ms.marketplace_product_id)
+                  OR (${mappingItemId} = ms.marketplace_product_id
                     AND LEFT(COALESCE(oi.option_text, ''), 100) = ms.marketplace_option_id)
                 ))
               -- 품번매핑: 풀 일치 또는 productId+ "-" prefix
               OR (ms.marketplace_option_id = ''
-                AND ((CASE
-                  WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
-                  ELSE oi.marketplace_item_id
-                END) = ms.marketplace_product_id
-                  OR (CASE
-                    WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
-                    ELSE oi.marketplace_item_id
-                  END) LIKE ms.marketplace_product_id || '-%'))
+                AND (${mappingItemId} = ms.marketplace_product_id
+                  OR ${mappingItemId} LIKE ms.marketplace_product_id || '-%'))
             )
         )
-    GROUP BY o.marketplace_id, CASE
-      WHEN (
-        (o.marketplace_id = 'naver' AND oi.marketplace_item_id ~ '^20[0-9]{14}$')
-        OR (o.marketplace_id = 'ownerclan' AND oi.marketplace_item_id ~ '^20[0-9]{12,}A(-|$)')
-      )
-        AND NULLIF(oi.sku, '') IS NOT NULL
-        THEN oi.sku
-      ELSE oi.marketplace_item_id
-    END
+    GROUP BY o.marketplace_id, ${mappingItemId}
     ORDER BY occurrences DESC
     LIMIT 500
   `)

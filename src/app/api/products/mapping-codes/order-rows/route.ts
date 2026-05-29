@@ -13,6 +13,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { SKU_MAPPING_MARKETPLACE_IDS } from '@/lib/orders/mapping-key-marketplaces'
 
 type ProductMatch = 'all' | 'matched' | 'unmatched'
 type OptionMatch = 'all' | 'matched' | 'unmatched' | 'sku'
@@ -87,6 +88,11 @@ export async function GET(req: NextRequest) {
   const pageSize = Math.min(200, Math.max(1, pageSizeRaw))
   const offset = (page - 1) * pageSize
   const exactOptionId = '__exact__'
+  const skuMappingMarketplaceList = sql.join(SKU_MAPPING_MARKETPLACE_IDS.map((id) => sql`${id}`), sql`, `)
+  const mappingItemId = sql`CASE
+    WHEN o.marketplace_id IN (${skuMappingMarketplaceList}) AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
+    ELSE oi.marketplace_item_id
+  END`
 
   // ---------- 동적 WHERE 절 (parametrized) ----------
   // o.user_id = user.id 는 항상.
@@ -109,6 +115,7 @@ export async function GET(req: NextRequest) {
     const like = `%${q}%`
     whereParts.push(sql`(
       oi.marketplace_item_id ILIKE ${like}
+      OR COALESCE(oi.sku, '') ILIKE ${like}
       OR oi.product_name ILIKE ${like}
       OR COALESCE(oi.option_text, '') ILIKE ${like}
     )`)
@@ -148,15 +155,15 @@ export async function GET(req: NextRequest) {
         AND (
           (s.marketplace_option_id <> ''
             AND (
-              (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id || '-' || s.marketplace_option_id
+              ${mappingItemId} = s.marketplace_product_id || '-' || s.marketplace_option_id
               OR (s.marketplace_option_id = ${exactOptionId}
-                AND (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id)
-              OR ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
+                AND ${mappingItemId} = s.marketplace_product_id)
+              OR (${mappingItemId} = s.marketplace_product_id
                 AND LEFT(COALESCE(oi.option_text, ''), 100) = s.marketplace_option_id)
             ))
           OR (s.marketplace_option_id = ''
-            AND ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s.marketplace_product_id
-              OR (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s.marketplace_product_id || '-%'))
+            AND (${mappingItemId} = s.marketplace_product_id
+              OR ${mappingItemId} LIKE s.marketplace_product_id || '-%'))
         )
       ORDER BY (s.marketplace_option_id <> '') DESC
       LIMIT 1
@@ -183,15 +190,8 @@ export async function GET(req: NextRequest) {
       o.marketplace_id                AS "marketplaceId",
       o.marketplace_order_id          AS "marketplaceOrderId",
       o.ordered_at                    AS "orderedAt",
-      CASE
-        WHEN (
-          (o.marketplace_id = 'naver' AND oi.marketplace_item_id ~ '^20[0-9]{14}$')
-          OR (o.marketplace_id = 'ownerclan' AND oi.marketplace_item_id ~ '^20[0-9]{12,}A(-|$)')
-        )
-          AND NULLIF(oi.sku, '') IS NOT NULL
-          THEN oi.sku
-        ELSE oi.marketplace_item_id
-      END                            AS "marketplaceItemId",
+      ${mappingItemId}
+                                      AS "marketplaceItemId",
       oi.sku                          AS "sku",
       oi.product_name                 AS "productName",
       oi.option_text                  AS "optionText",
@@ -212,8 +212,8 @@ export async function GET(req: NextRequest) {
           AND s2.marketplace_id = o.marketplace_id
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s2.marketplace_option_id = ''
-          AND ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s2.marketplace_product_id
-            OR (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) LIKE s2.marketplace_product_id || '-%')
+          AND (${mappingItemId} = s2.marketplace_product_id
+            OR ${mappingItemId} LIKE s2.marketplace_product_id || '-%')
       )                               AS "hasProductMapping",
       EXISTS (
         SELECT 1 FROM mapping_sources s3
@@ -222,10 +222,10 @@ export async function GET(req: NextRequest) {
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s3.marketplace_option_id <> ''
           AND (
-            (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id || '-' || s3.marketplace_option_id
+            ${mappingItemId} = s3.marketplace_product_id || '-' || s3.marketplace_option_id
             OR (s3.marketplace_option_id = ${exactOptionId}
-              AND (CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id)
-            OR ((CASE WHEN o.marketplace_id IN ('funtastic-b2b', 'naver', 'ownerclan') AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku ELSE oi.marketplace_item_id END) = s3.marketplace_product_id
+              AND ${mappingItemId} = s3.marketplace_product_id)
+            OR (${mappingItemId} = s3.marketplace_product_id
               AND LEFT(COALESCE(oi.option_text, ''), 100) = s3.marketplace_option_id)
           )
       )                               AS "hasOptionMapping",

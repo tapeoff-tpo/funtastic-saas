@@ -456,6 +456,31 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) IN ('saas', 'order-excel', 'saas-excel')
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) LIKE 'saas-%'
   )`
+  const hasSabangnetSibling = sql`EXISTS (
+    SELECT 1
+    FROM orders sabang_sibling
+    WHERE sabang_sibling.user_id = ${orders.userId}
+      AND UPPER(sabang_sibling.marketplace_order_id) = UPPER(${orders.marketplaceOrderId})
+      AND sabang_sibling.id <> ${orders.id}
+      AND (
+        LOWER(COALESCE(sabang_sibling.raw_data->>'source', '')) = 'sabangnet'
+        OR LOWER(COALESCE(sabang_sibling.raw_data->>'source', '')) LIKE 'sabangnet-%'
+        OR LOWER(COALESCE(sabang_sibling.raw_data->>'collectionSource', '')) IN ('sabangnet', 'sabangnet-excel')
+        OR LOWER(COALESCE(sabang_sibling.raw_data->>'collectionSource', '')) LIKE 'sabangnet-%'
+        OR LOWER(sabang_sibling.marketplace_id) = 'sabangnet'
+        OR LOWER(sabang_sibling.marketplace_id) LIKE 'sabangnet-%'
+        OR sabang_sibling.raw_data ? 'sabangnetSync'
+        OR sabang_sibling.raw_data ? 'sabangnetRaw'
+        OR COALESCE(sabang_sibling.raw_data->>'mallName', '') LIKE ${sabangnetKoreanPattern}
+        OR COALESCE(sabang_sibling.raw_data->>'sourceFileName', '') LIKE ${sabangnetKoreanPattern}
+        OR COALESCE(sabang_sibling.raw_data->>'importTemplateId', '') LIKE ${sabangnetKoreanPattern}
+        OR LOWER(COALESCE(sabang_sibling.raw_data->>'mallName', '')) IN ('sabangnet', '사방넷')
+        OR LOWER(COALESCE(sabang_sibling.raw_data->>'sourceFileName', '')) LIKE '%sabangnet%'
+        OR COALESCE(sabang_sibling.raw_data->>'sourceFileName', '') LIKE '%사방넷%'
+        OR LOWER(COALESCE(sabang_sibling.raw_data->>'importTemplateId', '')) LIKE '%sabangnet%'
+        OR COALESCE(sabang_sibling.raw_data->>'importTemplateId', '') LIKE '%사방넷%'
+      )
+  )`
   const marketplaceCondition = (marketplaceId: string): SQL<unknown> => {
     const sabangnetMallNames = SABANGNET_MALL_NAMES_BY_MARKETPLACE[marketplaceId] ?? []
     if (sabangnetMallNames.length === 0) return eq(orders.marketplaceId, marketplaceId)
@@ -494,7 +519,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   if (filters.orderSource === 'sabangnet') {
     conditions.push(isSabangnetOrderSource)
   } else if (filters.orderSource === 'saas') {
-    conditions.push(and(isSaasOrderSource, sql`NOT ${isSabangnetOrderSource}`)!)
+    conditions.push(and(isSaasOrderSource, sql`NOT ${isSabangnetOrderSource}`, sql`NOT ${hasSabangnetSibling}`)!)
   }
 
   if (filters.dateField === 'shippedAt') {

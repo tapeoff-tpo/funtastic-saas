@@ -91,6 +91,21 @@ function appendWrappedOrders(
   }
 }
 
+function containsClaimText(value: unknown): boolean {
+  return /교환|반품/.test(String(value ?? ''))
+}
+
+function isClaimShipmentOrder(order: SsgmallDirectionOrder): boolean {
+  return containsClaimText(order.ordItemDivNm)
+    || containsClaimText(order.shppDivDtlNm)
+    || containsClaimText(order.ordItemStatNm)
+    || containsClaimText(order.ordStatNm)
+}
+
+function isCollectableSsgOrder(order: SsgmallDirectionOrder): boolean {
+  return !isUnpaidSsgOrder(order) && !isClaimShipmentOrder(order)
+}
+
 function getDirections(response: SsgmallApiResponse): SsgmallDirectionOrder[] {
   const orders: SsgmallDirectionOrder[] = []
   orders.push(...asArray(response.result?.shppDirection))
@@ -336,7 +351,7 @@ export class SsgmallAdapter implements MarketplaceAdapter {
           ...getWarehouseOuts(response),
         ]
         diagnostics.push(summarizeCollectionResponse(label, response, responseOrders.length))
-        orders.push(...responseOrders.filter((order) => !isUnpaidSsgOrder(order)))
+        orders.push(...responseOrders.filter(isCollectableSsgOrder))
       }
 
       if (orders.length === 0) {

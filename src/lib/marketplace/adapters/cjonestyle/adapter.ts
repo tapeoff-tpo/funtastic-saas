@@ -55,6 +55,18 @@ function twoDigitText(value: unknown): string | null {
   return /^\d{2}$/.test(text) ? text : null
 }
 
+function parseCjOnestyleDate(value: unknown): Date | null {
+  const text = String(value ?? '').trim()
+  if (!text) return null
+
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? `${text}T00:00:00+09:00`
+    : `${text.replace(' ', 'T')}+09:00`
+  const parsed = new Date(normalized)
+
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 async function extractCjOnestyleError(error: unknown): Promise<string> {
   if (error instanceof HTTPError) {
     const body = await error.response.text().catch(() => '')
@@ -291,7 +303,9 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
         address1: String(first.address ?? ''),
       },
       items,
-      orderedAt: new Date(String(first.paymentDate ?? first.deliveryInstructionDate ?? new Date().toISOString())),
+      orderedAt: parseCjOnestyleDate(first.deliveryInstructionDate)
+        ?? parseCjOnestyleDate(first.paymentDate)
+        ?? new Date(),
       totalAmount,
       shippingFee: Number(first.customerResponsibilityCost ?? 0) || null,
       deliveryMessage: first.deliveryNote || null,

@@ -24,12 +24,14 @@ export interface CarrierInfo {
 export interface InvoiceUploadJobData {
   orderId: string
   shipmentId: string
+  userId: string
   marketplaceId: string
   marketplaceOrderId: string
   connectionId: string
   trackingNumber: string
   carrierId: string
   attempt: number
+  jobLogId?: string
 }
 
 /** Combined shipping group (per D-05/D-06) */

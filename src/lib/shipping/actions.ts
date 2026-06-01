@@ -85,6 +85,7 @@ export async function queueInvoiceUpload(
     await queueInvoiceUploadJob({
       orderId,
       shipmentId: shipment.id,
+      userId,
       marketplaceId: order.marketplaceId,
       marketplaceOrderId: order.marketplaceOrderId,
       connectionId: order.connectionId,

@@ -13,18 +13,14 @@ import { db } from '@/lib/db'
 import { shipments, orders, marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray, isNotNull, gte, or } from 'drizzle-orm'
 import { readCredential } from '@/lib/supabase/admin'
-import { createAdapter } from '@/lib/jobs/workers/order-collector'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
-import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
+import { markShipmentUploadedAndOrderShipped } from '@/lib/shipping/upload-status'
 import { logOrderChange } from '@/lib/orders/change-log'
-import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
+import { getMarketplaceScrapeQueue, queueInvoiceUploadJob } from '@/lib/jobs/queues'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
-import pLimit from 'p-limit'
-
-const API_UPLOAD_CONCURRENCY = 5
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient()
@@ -273,12 +269,10 @@ export async function POST(req: NextRequest) {
 
     const aliasTag = (conn?.storeAlias && conn.storeAlias !== 'default') ? `_${conn.storeAlias}` : ''
 
-    const credentials: Record<string, string> = {}
     let credError = false
     for (const key of adapterConfig.config.requiredCredentials) {
       const val = await readCredential(marketplaceId, workspaceUserId, `${key}${aliasTag}`)
       if (!val) { credError = true; break }
-      credentials[key] = val
     }
     if (credError) {
       for (const s of groupShipments) {
@@ -287,55 +281,61 @@ export async function POST(req: NextRequest) {
       continue
     }
 
-    const adapter = createAdapter(marketplaceId, credentials)
-
-    const uploadLimit = pLimit(API_UPLOAD_CONCURRENCY)
-    const groupResults = await Promise.all(groupShipments.map((s) => uploadLimit(async () => {
-      const ord = orderMap.get(s.orderId)!
-      try {
-        await db.update(shipments).set({ uploadStatus: 'uploading', updatedAt: new Date() }).where(eq(shipments.id, s.id))
-        await logOrderChange({
-          orderId: s.orderId,
-          userId: workspaceUserId,
-          actorId: user.id,
-          action: 'invoice.send_requested',
-          title: 'API 송장 송신시작',
-          description: s.trackingNumber,
-          after: { uploadStatus: 'uploading', trackingNumber: s.trackingNumber },
-          metadata: { shipmentId: s.id, marketplaceId },
-        })
-
-        const rawData = ord.rawData && typeof ord.rawData === 'object'
-          ? ord.rawData as Record<string, unknown>
-          : {}
-        const firstRawItem = Array.isArray(rawData.orderItems) ? rawData.orderItems[0] : null
-        const firstRawItemData = firstRawItem && typeof firstRawItem === 'object'
-          ? firstRawItem as Record<string, unknown>
-          : {}
-
-        const result = await adapter.uploadInvoice(ord.marketplaceOrderId, {
-          trackingNumber: s.trackingNumber,
-          carrierId: s.carrierId,
-          recipientName: ord.recipientName,
-          shipmentBoxId: rawData.shipmentBoxId,
-          vendorItemId: firstRawItemData.vendorItemId,
-          rawData: ord.rawData,
-        })
-
-        if (result.success) {
-          await markShipmentUploadedAndOrderShipped(s.id, s.orderId, s.uploadAttempts + 1)
-          return { ...resultIdentity(s), success: true, marketplaceId }
-        } else {
-          await markShipmentUploadFailed(s.id, result.error ?? 'Unknown error', s.uploadAttempts + 1)
-          return { ...resultIdentity(s), success: false, error: result.error, marketplaceId }
-        }
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Unknown error'
-        await markShipmentUploadFailed(s.id, msg, s.uploadAttempts + 1)
-        return { ...resultIdentity(s), success: false, error: msg, marketplaceId }
+    for (const s of groupShipments) {
+      const ord = orderMap.get(s.orderId)
+      if (!ord) {
+        results.push({ ...resultIdentity(s), success: false, error: '주문 정보를 찾지 못했습니다.', marketplaceId })
+        continue
       }
-    })))
-    results.push(...groupResults)
+
+      const [logRow] = await db
+        .insert(jobLogs)
+        .values({
+          jobType: 'invoice-upload',
+          marketplaceId,
+          connectionId,
+          status: 'queued',
+          progressMessage: '송장 송신 작업 대기 중',
+        })
+        .returning({ id: jobLogs.id })
+
+      await db.update(shipments).set({
+        uploadStatus: 'uploading',
+        marketplaceUploadError: null,
+        updatedAt: new Date(),
+      }).where(eq(shipments.id, s.id))
+      await logOrderChange({
+        orderId: s.orderId,
+        userId: workspaceUserId,
+        actorId: user.id,
+        action: 'invoice.send_requested',
+        title: 'API 송장 송신시작',
+        description: s.trackingNumber,
+        after: { uploadStatus: 'uploading', trackingNumber: s.trackingNumber },
+        metadata: { shipmentId: s.id, marketplaceId },
+      })
+
+      await queueInvoiceUploadJob({
+        orderId: s.orderId,
+        shipmentId: s.id,
+        userId: workspaceUserId,
+        marketplaceId,
+        marketplaceOrderId: ord.marketplaceOrderId,
+        connectionId,
+        trackingNumber: s.trackingNumber,
+        carrierId: s.carrierId,
+        attempt: s.uploadAttempts + 1,
+        jobLogId: logRow.id,
+      })
+
+      results.push({
+        ...resultIdentity(s),
+        success: true,
+        queued: true,
+        jobLogId: logRow.id,
+        marketplaceId,
+      })
+    }
   }
 
   const queued = results.filter((r) => r.queued).length

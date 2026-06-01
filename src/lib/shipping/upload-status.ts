@@ -80,24 +80,25 @@ export async function markShipmentUploadedAndOrderShipped(
       }, tx)
     }
 
-    const readyOrderIds = activeRows
-      .filter((row) => row.orderStatus === 'ready')
+    const shippableStatuses = new Set(['new', 'confirmed', 'preparing', 'ready'])
+    const shippableOrderIds = activeRows
+      .filter((row) => shippableStatuses.has(row.orderStatus))
       .map((row) => row.orderId)
 
-    if (readyOrderIds.length === 0) return
+    if (shippableOrderIds.length === 0) return
 
-    const readyOrders = await tx
+    const shippableOrders = await tx
       .select({ id: orders.id, status: orders.status, userId: orders.userId })
       .from(orders)
-      .where(inArray(orders.id, readyOrderIds))
+      .where(inArray(orders.id, shippableOrderIds))
       .for('update')
 
-    for (const order of readyOrders) {
-      if (order.status !== 'ready') continue
+    for (const order of shippableOrders) {
+      if (!shippableStatuses.has(order.status)) continue
       const related = activeRows.find((row) => row.orderId === order.id)
       await tx.update(orders).set({
         status: 'shipped',
-        previousStatus: 'ready',
+        previousStatus: order.status,
         updatedAt: new Date(),
       }).where(eq(orders.id, order.id))
       await logOrderChange({

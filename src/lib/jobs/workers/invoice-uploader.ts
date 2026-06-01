@@ -95,8 +95,9 @@ async function updateInvoiceJobLog(
  *
  * Exported separately for testing -- the worker wraps this function.
  */
-export async function processInvoiceUpload(
-  job: Job<InvoiceUploadJobData>,
+export async function executeInvoiceUpload(
+  data: InvoiceUploadJobData,
+  uploadAttempts: number,
 ): Promise<void> {
   const {
     orderId,
@@ -105,10 +106,10 @@ export async function processInvoiceUpload(
     trackingNumber,
     carrierId,
     userId,
-  } = job.data
-  const marketplaceOrderId = job.data.marketplaceOrderId ?? job.data.orderId
+  } = data
+  const marketplaceOrderId = data.marketplaceOrderId ?? data.orderId
 
-  await updateInvoiceJobLog(job.data.jobLogId, {
+  await updateInvoiceJobLog(data.jobLogId, {
     status: 'running',
     startedAt: new Date(),
     progressMessage: '마켓 송장 송신 중...',
@@ -121,7 +122,7 @@ export async function processInvoiceUpload(
   // 2. Get marketplace adapter with credentials
   const configAdapter = marketplaceRegistry.get(marketplaceId)
   const context = await resolveInvoiceOrderContext(orderId)
-  const connectionId = job.data.connectionId || context?.connectionId
+  const connectionId = data.connectionId || context?.connectionId
   if (!connectionId) {
     throw new Error('마켓 연동 정보가 없어 송장 송신을 진행할 수 없습니다.')
   }
@@ -158,8 +159,8 @@ export async function processInvoiceUpload(
 
   // 5. Update status based on result
   if (result.success) {
-    await markShipmentUploadedAndOrderShipped(shipmentId, orderId, job.attemptsMade + 1)
-    await updateInvoiceJobLog(job.data.jobLogId, {
+    await markShipmentUploadedAndOrderShipped(shipmentId, orderId, uploadAttempts)
+    await updateInvoiceJobLog(data.jobLogId, {
       status: 'completed',
       completedAt: new Date(),
       progressMessage: '송장 송신 완료',
@@ -167,8 +168,8 @@ export async function processInvoiceUpload(
     })
   } else {
     const errorMessage = result.error || 'Unknown upload error'
-    await markShipmentUploadFailed(shipmentId, errorMessage, job.attemptsMade + 1)
-    await updateInvoiceJobLog(job.data.jobLogId, {
+    await markShipmentUploadFailed(shipmentId, errorMessage, uploadAttempts)
+    await updateInvoiceJobLog(data.jobLogId, {
       status: 'failed',
       completedAt: new Date(),
       errorMessage,
@@ -179,8 +180,8 @@ export async function processInvoiceUpload(
   }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown upload error'
-    await markShipmentUploadFailed(shipmentId, errorMessage, job.attemptsMade + 1)
-    await updateInvoiceJobLog(job.data.jobLogId, {
+    await markShipmentUploadFailed(shipmentId, errorMessage, uploadAttempts)
+    await updateInvoiceJobLog(data.jobLogId, {
       status: 'failed',
       completedAt: new Date(),
       errorMessage,
@@ -188,6 +189,12 @@ export async function processInvoiceUpload(
     })
     throw error
   }
+}
+
+export async function processInvoiceUpload(
+  job: Job<InvoiceUploadJobData>,
+): Promise<void> {
+  await executeInvoiceUpload(job.data, job.attemptsMade + 1)
 }
 
 /**

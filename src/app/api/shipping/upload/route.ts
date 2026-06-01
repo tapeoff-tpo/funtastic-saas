@@ -18,7 +18,8 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { markShipmentUploadedAndOrderShipped } from '@/lib/shipping/upload-status'
 import { logOrderChange } from '@/lib/orders/change-log'
-import { getMarketplaceScrapeQueue, queueInvoiceUploadJob } from '@/lib/jobs/queues'
+import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
+import { executeInvoiceUpload } from '@/lib/jobs/workers/invoice-uploader'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
 
@@ -315,26 +316,35 @@ export async function POST(req: NextRequest) {
         metadata: { shipmentId: s.id, marketplaceId },
       })
 
-      await queueInvoiceUploadJob({
-        orderId: s.orderId,
-        shipmentId: s.id,
-        userId: workspaceUserId,
-        marketplaceId,
-        marketplaceOrderId: ord.marketplaceOrderId,
-        connectionId,
-        trackingNumber: s.trackingNumber,
-        carrierId: s.carrierId,
-        attempt: s.uploadAttempts + 1,
-        jobLogId: logRow.id,
-      })
+      try {
+        await executeInvoiceUpload({
+          orderId: s.orderId,
+          shipmentId: s.id,
+          userId: workspaceUserId,
+          marketplaceId,
+          marketplaceOrderId: ord.marketplaceOrderId,
+          connectionId,
+          trackingNumber: s.trackingNumber,
+          carrierId: s.carrierId,
+          attempt: s.uploadAttempts + 1,
+          jobLogId: logRow.id,
+        }, s.uploadAttempts + 1)
 
-      results.push({
-        ...resultIdentity(s),
-        success: true,
-        queued: true,
-        jobLogId: logRow.id,
-        marketplaceId,
-      })
+        results.push({
+          ...resultIdentity(s),
+          success: true,
+          jobLogId: logRow.id,
+          marketplaceId,
+        })
+      } catch (error) {
+        results.push({
+          ...resultIdentity(s),
+          success: false,
+          jobLogId: logRow.id,
+          marketplaceId,
+          error: error instanceof Error ? error.message : 'Unknown upload error',
+        })
+      }
     }
   }
 

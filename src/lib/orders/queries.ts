@@ -344,6 +344,37 @@ function getOrderMarketplaceOrderDisplayId(order: typeof orders.$inferSelect): s
   return normalizeAblyDisplayOrderId(candidate, rawData as Record<string, unknown>)
 }
 
+function isSabangnetOrderRawData(order: typeof orders.$inferSelect): boolean {
+  const marketplaceId = order.marketplaceId.toLowerCase()
+  if (marketplaceId === 'sabangnet' || marketplaceId.startsWith('sabangnet-')) return true
+
+  const rawData = order.rawData
+  if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return false
+
+  const raw = rawData as Record<string, unknown>
+  const source = typeof raw.source === 'string' ? raw.source.toLowerCase() : ''
+  const collectionSource = typeof raw.collectionSource === 'string' ? raw.collectionSource.toLowerCase() : ''
+  const mallName = typeof raw.mallName === 'string' ? raw.mallName : ''
+  const sourceFileName = typeof raw.sourceFileName === 'string' ? raw.sourceFileName : ''
+  const importTemplateId = typeof raw.importTemplateId === 'string' ? raw.importTemplateId : ''
+
+  return (
+    source === 'sabangnet'
+    || source.startsWith('sabangnet-')
+    || collectionSource === 'sabangnet'
+    || collectionSource === 'sabangnet-excel'
+    || collectionSource.startsWith('sabangnet-')
+    || 'sabangnetSync' in raw
+    || 'sabangnetRaw' in raw
+    || mallName.includes('사방넷')
+    || mallName.toLowerCase() === 'sabangnet'
+    || sourceFileName.includes('사방넷')
+    || sourceFileName.toLowerCase().includes('sabangnet')
+    || importTemplateId.includes('사방넷')
+    || importTemplateId.toLowerCase().includes('sabangnet')
+  )
+}
+
 function getOrderHistoricalClaimStatuses(order: typeof orders.$inferSelect): string[] {
   const rawData = order.rawData
   if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return []
@@ -1381,6 +1412,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       items: orderItemsData,
       mappingStatus: getComputedMappingStatus(order, orderItemsData),
       marketplaceDisplayName: getOrderMarketplaceDisplayName(order),
+      orderSourceType: isSabangnetOrderRawData(order) ? 'sabangnet' : 'saas',
       historicalClaimStatuses: getOrderHistoricalClaimStatuses(order),
     }
   })

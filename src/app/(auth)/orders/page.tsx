@@ -189,6 +189,7 @@ export default async function OrdersPage({
     internalNo: (o as { internalNo: string }).internalNo,
     marketplaceId: o.marketplaceId,
     marketplaceName: (o as { marketplaceDisplayName?: string | null }).marketplaceDisplayName ?? null,
+    orderSourceType: (o as { orderSourceType?: OrderRow['orderSourceType'] }).orderSourceType ?? 'saas',
     connectionId: o.connectionId,
     marketplaceOrderId: o.marketplaceOrderId,
     marketplaceStatus: o.marketplaceStatus,

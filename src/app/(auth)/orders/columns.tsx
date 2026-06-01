@@ -2,7 +2,7 @@
 
 import type { ColumnDef, Table } from '@tanstack/react-table'
 import { format } from 'date-fns'
-import { Copy, ExternalLink, MessageSquare, RotateCcw } from 'lucide-react'
+import { Cloud, Copy, ExternalLink, FileSpreadsheet, MessageSquare, RotateCcw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ORDER_STATUS_LABELS, type OrderStatus, type ClaimType, type ClaimStatus } from '@/lib/orders/types'
 import { MARKETPLACE_COLLECTION_STATUS_LABELS, type MarketplaceCollectionStatus } from '@/lib/marketplace/collection-status'
@@ -43,6 +43,30 @@ function CopyOrderButton({ orderId }: { orderId: string }) {
     >
       <Copy className="h-2.5 w-2.5" />
     </button>
+  )
+}
+
+function OrderSourceBadge({ source }: { source: OrderRow['orderSourceType'] }) {
+  if (source === 'sabangnet') {
+    return (
+      <span
+        title="사방넷 주문건"
+        aria-label="사방넷 주문건"
+        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+      >
+        <FileSpreadsheet className="h-2.5 w-2.5" />
+      </span>
+    )
+  }
+
+  return (
+    <span
+      title="SaaS 주문건"
+      aria-label="SaaS 주문건"
+      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded bg-sky-50 text-sky-700 ring-1 ring-sky-200"
+    >
+      <Cloud className="h-2.5 w-2.5" />
+    </span>
   )
 }
 
@@ -261,6 +285,7 @@ export interface OrderRow {
   internalNo: string
   marketplaceId: string
   marketplaceName?: string | null
+  orderSourceType?: 'sabangnet' | 'saas'
   connectionId?: string | null
   marketplaceOrderId: string
   marketplaceStatus?: string | null
@@ -864,6 +889,7 @@ export const columns: ColumnDef<OrderRow>[] = [
             {order.marketplaceOrderId}
           </button>
           <div className="flex min-w-0 items-center gap-1">
+            <OrderSourceBadge source={order.orderSourceType ?? 'saas'} />
             <span
               className="min-w-0 truncate font-mono text-[10px] text-muted-foreground"
               title="내부 주문번호"

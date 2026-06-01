@@ -200,6 +200,60 @@ describe('SpecialofferAdapter', () => {
     expect(orders[0].items[0].optionText).toBe('옵션: 대형')
   })
 
+  it('fills missing order options from the only in-stock product option when prices are identical', async () => {
+    const get = vi.fn((endpoint: string) => ({
+      json: async () => {
+        if (endpoint === 'api/v2/seller/orders') {
+          return {
+            data: [
+              {
+                order_id: '574598',
+                order_no: '26052920321507',
+                order_state: 2,
+                goods_no: '515138',
+                goods_name: '캠핑 USB 충전식 점화기 아크 플라즈마 전기 라이터',
+                sum_qty: 3,
+                goods_price: 4500,
+                total_price: 16500,
+                shipping_fee: 3000,
+                receiver_name: 'buyer',
+                receiver_zip: '06000',
+                receiver_addr1: 'addr',
+                order_date: '2026-05-29 20:32:15',
+                updated_at: '2026-05-29 20:32:15',
+              },
+            ],
+            meta: { current_page: 1, last_page: 1, total: 1 },
+          }
+        }
+        if (endpoint === 'api/v2/seller/orders/574598') {
+          return { data: { order_id: '574598' } }
+        }
+        if (endpoint === 'api/goods/515138') {
+          return {
+            data: {
+              goods_no: '515138',
+              option_titles: ['옵션'],
+              option_values: [
+                { values: ['실버'], option_price: 0, stock_quantity: 682 },
+                { values: ['블랙'], option_price: 0, stock_quantity: 0 },
+                { values: ['로즈골드'], option_price: 0, stock_quantity: 0 },
+              ],
+              supply_price: 5100,
+            },
+          }
+        }
+        return { data: {} }
+      },
+    }))
+    vi.mocked(ky.create).mockReturnValue({ get } as never)
+
+    const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
+    const orders = await adapter.getOrders(new Date('2026-05-29T00:00:00+09:00'))
+
+    expect(orders[0].items[0].optionText).toBe('옵션: 실버')
+  })
+
   it('confirms collected orders with the seller order PATCH endpoint', async () => {
     const post = vi.fn(() => ({
       json: async () => ({ success: true }),

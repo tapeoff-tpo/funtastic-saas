@@ -534,11 +534,20 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
         return null
       }
       const basePrice = asNumber(product?.supply_price ?? product?.price ?? product?.origin_price)
-      const matchedOptions = options.filter((option) => {
+      let matchedOptions = options.filter((option) => {
         if (options.length === 1) return true
         const optionPrice = asNumber(option.option_price ?? option.supply_price)
         return basePrice > 0 && orderUnitPrice === basePrice + optionPrice
       })
+      if (matchedOptions.length === 0) {
+        matchedOptions = options
+      }
+      if (matchedOptions.length !== 1) {
+        const inStockOptions = matchedOptions.filter((option) => asNumber(option.stock_quantity ?? option.stock_qty) > 0)
+        if (inStockOptions.length === 1) {
+          matchedOptions = inStockOptions
+        }
+      }
       if (matchedOptions.length !== 1) {
         this.singleProductOptionCache.set(cacheKey, null)
         return null

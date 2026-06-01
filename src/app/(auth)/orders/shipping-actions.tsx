@@ -14,6 +14,8 @@ import { forceBulkChangeStatusAction } from './actions'
 import type { OrderRow } from './columns'
 import type { OrderStage } from '@/lib/orders/types'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
+import { usesSkuMappingKey } from '@/lib/orders/mapping-key-marketplaces'
+import { stripMappingTextWrapper } from '@/lib/orders/mapping-match'
 
 interface UserTemplate {
   id: string
@@ -1306,9 +1308,7 @@ function splitProductOption(itemId: string): { product: string; option: string }
 }
 
 function shouldUseSkuAsMappingProduct(target: MappingTarget): boolean {
-  return target.marketplaceId === 'naver'
-    && /^20\d{14}$/.test(target.marketplaceItemId.trim())
-    && Boolean(target.sku?.trim())
+  return usesSkuMappingKey(target.marketplaceId) && Boolean(target.sku?.trim())
 }
 
 function ownerclanProductCodeFromItemId(itemId: string): string | null {
@@ -1319,31 +1319,33 @@ function ownerclanProductCodeFromItemId(itemId: string): string | null {
 function getMappingTargetSource(target: MappingTarget): { product: string; option: string } {
   const split = splitProductOption(target.marketplaceItemId)
   if (shouldUseSkuAsMappingProduct(target)) {
+    const option = stripMappingTextWrapper(target.mappingOptionId || target.optionText)
     return {
       product: target.sku!.trim(),
-      option: target.optionText?.trim() || EXACT_OPTION_ID,
+      option: option || EXACT_OPTION_ID,
     }
   }
   if (target.mappingProductId?.trim()) {
+    const option = stripMappingTextWrapper(target.mappingOptionId || target.optionText)
     return {
       product: target.mappingProductId.trim(),
-      option: target.mappingOptionId?.trim() || target.optionText?.trim() || EXACT_OPTION_ID,
+      option: option || EXACT_OPTION_ID,
     }
   }
   if (target.marketplaceId === 'ownerclan') {
     const productCode = target.sku?.trim() || ownerclanProductCodeFromItemId(target.marketplaceItemId)
     if (productCode) {
+      const option = stripMappingTextWrapper(target.optionText)
       return {
         product: productCode,
-        option: target.optionText?.trim() || EXACT_OPTION_ID,
+        option: option || EXACT_OPTION_ID,
       }
     }
   }
+  const option = stripMappingTextWrapper(split.option || target.optionText)
   return {
-    product: (target.marketplaceId === 'funtastic-b2b' || target.marketplaceId === 'manual-NUQyoT') && target.sku?.trim()
-      ? target.sku.trim()
-      : split.product,
-    option: split.option || target.optionText?.trim() || EXACT_OPTION_ID,
+    product: split.product,
+    option: option || EXACT_OPTION_ID,
   }
 }
 
@@ -1544,10 +1546,17 @@ function InventoryMappingDialog({
         }),
       })
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        const message = String(err.error ?? '')
+        const rawError = await res.text().catch(() => '')
+        let err: { error?: string; invalidSkus?: string[] } = {}
+        try {
+          err = rawError ? JSON.parse(rawError) as typeof err : {}
+        } catch {
+          err = {}
+        }
+        const message = err.error || rawError || `HTTP ${res.status}`
         if (!message.includes('이미') && res.status !== 409) {
-          toast.error(err.error ?? '매핑 저장 실패')
+          const invalidSkuText = err.invalidSkus?.length ? ` (${err.invalidSkus.join(', ')})` : ''
+          toast.error(`매핑 저장 실패: ${message}${invalidSkuText}`, { duration: 8000 })
           return
         }
         toast.info('이미 매핑된 상품입니다. 다음 상품으로 넘어갑니다.')
@@ -1557,6 +1566,8 @@ function InventoryMappingDialog({
       setCompletedSourceKeys((prev) => new Set(prev).add(selectedSourceKey))
       setComponents([])
       onSaved()
+    } catch (error) {
+      toast.error(`매핑 저장 실패: ${error instanceof Error ? error.message : String(error)}`, { duration: 8000 })
     } finally {
       setSaving(false)
     }

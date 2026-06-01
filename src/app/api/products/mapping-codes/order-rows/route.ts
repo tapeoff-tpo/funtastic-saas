@@ -97,6 +97,12 @@ export async function GET(req: NextRequest) {
       NULLIF(oi.sku, ''),
       oi.marketplace_item_id
     )
+    WHEN o.marketplace_id = 'cjonestyle' THEN COALESCE(
+      NULLIF(o.raw_data->>'vendorItemCode', ''),
+      NULLIF(o.raw_data->>'itemCode', ''),
+      NULLIF(oi.sku, ''),
+      oi.marketplace_item_id
+    )
     WHEN o.marketplace_id IN (${skuMappingMarketplaceList}) AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
     ELSE oi.marketplace_item_id
   END`

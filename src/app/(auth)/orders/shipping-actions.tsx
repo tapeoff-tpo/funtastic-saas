@@ -1363,6 +1363,21 @@ function createManualMappingCode(source: { product: string; option: string }): s
   return `M-${product}-${option}-${suffix}`.slice(0, 40)
 }
 
+function mappingCodeNameFromComponents(target: MappingTarget, components: MappingComponentDraft[]): string {
+  const names = Array.from(new Set(
+    components
+      .map((component) => component.productName.trim())
+      .filter(Boolean),
+  ))
+  return names.length > 0 ? names.join(' + ') : target.productName
+}
+
+function componentQuantityForMapping(totalQuantity: number, orderQuantity: number): number | null {
+  const safeOrderQuantity = Math.max(1, orderQuantity || 1)
+  if (totalQuantity % safeOrderQuantity !== 0) return null
+  return Math.max(1, totalQuantity / safeOrderQuantity)
+}
+
 function InventoryMappingDialog({
   open,
   onOpenChange,
@@ -1453,17 +1468,18 @@ function InventoryMappingDialog({
 
   function addComponent(product: ProductSearchResult) {
     setComponents((prev) => {
+      const orderQuantity = Math.max(1, selectedTarget?.quantity ?? 1)
       const existingIdx = prev.findIndex((component) => component.sku === product.internalSku)
       if (existingIdx >= 0) {
         return prev.map((component, idx) => (
-          idx === existingIdx ? { ...component, quantity: component.quantity + 1 } : component
+          idx === existingIdx ? { ...component, quantity: component.quantity + orderQuantity } : component
         ))
       }
       return [
         ...prev,
         {
           sku: product.internalSku,
-          quantity: 1,
+          quantity: orderQuantity,
           productName: product.name,
           optionName: product.optionHint ?? product.optionName ?? null,
         },
@@ -1490,9 +1506,19 @@ function InventoryMappingDialog({
       return
     }
 
+    const normalizedComponents = validComponents.map((component) => ({
+      ...component,
+      quantity: componentQuantityForMapping(component.quantity, selectedTarget.quantity),
+    }))
+    if (normalizedComponents.some((component) => component.quantity == null)) {
+      toast.error('출고수량은 주문수량으로 나누어지는 수량으로 입력해주세요.')
+      return
+    }
+
     const source = getMappingTargetSource(selectedTarget)
     const code = createManualMappingCode(source)
     const selectedSourceKey = getMappingTargetSourceKey(selectedTarget)
+    const codeName = mappingCodeNameFromComponents(selectedTarget, validComponents)
 
     setSaving(true)
     try {
@@ -1501,7 +1527,7 @@ function InventoryMappingDialog({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           code,
-          name: selectedTarget.productName,
+          name: codeName,
           note: '주문관리 신규 탭에서 생성',
           isActive: true,
           sources: [{
@@ -1511,9 +1537,9 @@ function InventoryMappingDialog({
             productNameSnapshot: selectedTarget.productName,
             optionNameSnapshot: selectedTarget.optionText,
           }],
-          components: validComponents.map((component) => ({
+          components: normalizedComponents.map((component) => ({
             sku: component.sku,
-            quantity: component.quantity,
+            quantity: component.quantity ?? 1,
           })),
         }),
       })

@@ -13,6 +13,7 @@ import { generateKyungdongExcel, type KyungdongOrderRow } from '@/lib/shipping/e
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
+import { primaryPhone, secondaryPhone } from '@/lib/orders/phone-normalize'
 
 export async function GET(req: NextRequest) {
   const supabase = await createClient()
@@ -67,9 +68,9 @@ export async function GET(req: NextRequest) {
         shipmentGroupId: groupIdByOrder.get(order.id),
         recipientName: order.recipientName,
         // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
-        recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
+        recipientPhone: primaryPhone(order.recipientPhone2, order.recipientPhone),
         // 보조 = 휴대폰이 phone2 에 있으면 phone1 이 보조전화
-        recipientAltPhone: order.recipientPhone2 ? (order.recipientPhone ?? '') : '',
+        recipientAltPhone: secondaryPhone(order.recipientPhone2, order.recipientPhone),
         recipientAddress: addr?.address1 ?? '',
         recipientDetailAddress: addr?.address2 ?? '',
         recipientZipCode: addr?.zipCode ?? '',

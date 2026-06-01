@@ -11,6 +11,7 @@ import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { parseImportedOrderedAt } from '@/lib/orders/import-date'
 import { normalizeImportedOrderItem } from '@/lib/orders/import-normalize'
+import { splitPhonePair } from '@/lib/orders/phone-normalize'
 
 /**
  * POST /api/orders/import
@@ -152,6 +153,8 @@ export async function POST(request: NextRequest) {
         }
 
         const orderedAt = parseImportedOrderedAt(first.orderedAt)
+        const buyerPhones = splitPhonePair(first.buyerPhone)
+        const recipientPhones = splitPhonePair(first.recipientPhone)
 
         const normalizedItems = items.map((item) => normalizeImportedOrderItem(item, marketplaceId))
         const firstNormalized = normalizedItems[0]
@@ -180,9 +183,11 @@ export async function POST(request: NextRequest) {
               marketplaceOrderId: orderNumber,
               status: 'new',
               buyerName: first.buyerName,
-              buyerPhone2: first.buyerPhone ?? null,
+              buyerPhone: buyerPhones.phone1,
+              buyerPhone2: buyerPhones.phone2,
               recipientName: first.recipientName,
-              recipientPhone2: first.recipientPhone ?? null,
+              recipientPhone: recipientPhones.phone1,
+              recipientPhone2: recipientPhones.phone2,
               shippingAddress: {
                 zipCode: first.zipCode ?? '',
                 address1: first.recipientAddress,
@@ -220,9 +225,11 @@ export async function POST(request: NextRequest) {
                 marketplaceOrderId: orderNumber,
                 status: 'new',
                 buyerName: first.buyerName,
-                buyerPhone2: first.buyerPhone ?? null,
+                buyerPhone: buyerPhones.phone1,
+                buyerPhone2: buyerPhones.phone2,
                 recipientName: first.recipientName,
-                recipientPhone2: first.recipientPhone ?? null,
+                recipientPhone: recipientPhones.phone1,
+                recipientPhone2: recipientPhones.phone2,
                 shippingAddress: {
                   zipCode: first.zipCode ?? '',
                   address1: first.recipientAddress,
@@ -266,4 +273,3 @@ export async function POST(request: NextRequest) {
     )
   }
 }
-

@@ -20,6 +20,7 @@ import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options
 import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
 import { getOrderIds } from '@/lib/orders/queries'
 import { ORDER_STATUS_LABELS, type ClaimType, type OrderFilters, type OrderStatus } from '@/lib/orders/types'
+import { primaryPhone, secondaryPhone } from '@/lib/orders/phone-normalize'
 
 const FILTERED_EXPORT_LIMIT = 50000
 
@@ -334,10 +335,10 @@ export async function GET(request: NextRequest) {
         marketplaceStatus: order.marketplaceStatus ?? order.status,
         buyerName: order.buyerName,
         // 기본 '구매자연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
-        buyerPhone: order.buyerPhone2 || order.buyerPhone || '',
+        buyerPhone: primaryPhone(order.buyerPhone2, order.buyerPhone),
         recipientName: order.recipientName,
         // 기본 '수령인연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
-        recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
+        recipientPhone: primaryPhone(order.recipientPhone2, order.recipientPhone),
         shippingAddress: order.shippingAddress,
         productName: confirmedValue(productName),
         optionText,
@@ -370,8 +371,8 @@ export async function GET(request: NextRequest) {
         // 배송메세지 — 구매자가 마켓에서 입력한 배송 요청 (쿠팡 parcelPrintMessage 등)
         deliveryMessage: order.deliveryMessage ?? '',
         // 명시적 phone2 (휴대폰) 출력항목 — migration 020 이후 DB 에 직접 저장됨
-        recipientPhone2: order.recipientPhone2 ?? '',
-        buyerPhone2: order.buyerPhone2 ?? '',
+        recipientPhone2: secondaryPhone(order.recipientPhone2, order.recipientPhone),
+        buyerPhone2: secondaryPhone(order.buyerPhone2, order.buyerPhone),
         // ─ DB 컬럼 미존재 — 사용자가 fixedValue 로 채우거나 비워둠 ─
         supplyPrice: '',
         // 수집일자 — yyyy-mm-dd 포맷

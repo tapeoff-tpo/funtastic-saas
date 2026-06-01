@@ -15,6 +15,7 @@ import { generateCjExcel, type CjOrderRow } from '@/lib/shipping/excel/cj-export
 import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
+import { primaryPhone } from '@/lib/orders/phone-normalize'
 
 function resolveMarketplaceProductCode(
   marketplaceId: string,
@@ -102,7 +103,7 @@ export async function GET(req: NextRequest) {
         isCombinedShipment: Boolean(shipmentGroupId),
         recipientName: order.recipientName ?? '',
         // 기본 = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
-        recipientPhone: order.recipientPhone2 || order.recipientPhone || '',
+        recipientPhone: primaryPhone(order.recipientPhone2, order.recipientPhone),
         recipientAddress: fullAddress,
         productName: row.productName,
         optionText: row.optionText || undefined,

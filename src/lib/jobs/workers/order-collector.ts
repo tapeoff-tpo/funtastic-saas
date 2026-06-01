@@ -685,11 +685,12 @@ export async function collectOrdersForConnection(params: {
 
       // Absolute order storage rule: every multi-item marketplace order is stored as split rows.
       if (!isExistingOrder && items.length > 0) {
-        await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
+        await normalizeBaseOrderItem(upsertedOrder.id, items[0])
         splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
-      } else if (isExistingOrder && items.length > 1) {
+      } else if (isExistingOrder) {
         splitCopyIds = await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
-      } else if (isExistingOrder && marketplaceId === 'specialoffer') {
+      }
+      if (isExistingOrder && marketplaceId === 'specialoffer') {
         await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
       }
       ordersCollected++
@@ -884,11 +885,13 @@ export async function saveNormalizedOrdersForConnection(params: {
 
     // Absolute order storage rule: every multi-item marketplace order is stored as split rows.
     if (!isExistingOrder && items.length > 0) {
-      await db.insert(orderItems).values(orderItemInsertValue(upsertedOrder.id, items[0]))
+      await normalizeBaseOrderItem(upsertedOrder.id, items[0])
       await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
-    } else if (isExistingOrder && items.length > 1) {
+    } else if (isExistingOrder) {
       await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
-    } else if (isExistingOrder && marketplaceId === 'specialoffer') {
+    }
+
+    if (isExistingOrder && marketplaceId === 'specialoffer') {
       await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
     }
     ordersCollected++
@@ -1356,6 +1359,12 @@ async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrder
   const value = orderItemInsertValue(baseOrderId, item)
   const [firstExistingItem, ...extraItems] = existingItems
 
+  if (extraItems.length > 0) {
+    await db
+      .delete(orderItems)
+      .where(inArray(orderItems.id, extraItems.map((existingItem) => existingItem.id)))
+  }
+
   if (firstExistingItem) {
     await db
       .update(orderItems)
@@ -1369,13 +1378,10 @@ async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrder
       })
       .where(eq(orderItems.id, firstExistingItem.id))
   } else {
-    await db.insert(orderItems).values(value)
-  }
-
-  if (extraItems.length > 0) {
     await db
-      .delete(orderItems)
-      .where(inArray(orderItems.id, extraItems.map((existingItem) => existingItem.id)))
+      .insert(orderItems)
+      .values(value)
+      .onConflictDoNothing()
   }
 }
 

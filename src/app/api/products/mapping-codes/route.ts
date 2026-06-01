@@ -9,7 +9,7 @@ import { revalidatePath, revalidateTag } from 'next/cache'
 import { createHash } from 'crypto'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { mappingCodes, mappingSources, mappingComponents, products, productVariants } from '@/lib/db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { isBlockedMappingSourcePair } from '@/lib/orders/mapping-match'
@@ -90,6 +90,34 @@ function errorSearchText(error: unknown): string {
   appendError(error)
   appendError((error as { cause?: unknown }).cause)
   return parts.join(' ')
+}
+
+async function findInvalidComponentSkus(userId: string, components: ComponentInput[]): Promise<string[]> {
+  const requestedSkus = Array.from(new Set(
+    components.map((component) => component.sku.trim()).filter(Boolean),
+  ))
+  if (requestedSkus.length === 0) return []
+
+  const rows = await db.execute<{ sku: string }>(sql`
+    SELECT sku
+    FROM (
+      SELECT ${products.internalSku} AS sku
+      FROM ${products}
+      WHERE ${products.userId} = ${userId}
+        AND ${products.internalSku} = ANY(${requestedSkus})
+      UNION
+      SELECT ${productVariants.sku} AS sku
+      FROM ${productVariants}
+      INNER JOIN ${products} ON ${products.id} = ${productVariants.productId}
+      WHERE ${products.userId} = ${userId}
+        AND ${productVariants.sku} = ANY(${requestedSkus})
+    ) valid_skus
+  `)
+  const validRows = Array.isArray(rows)
+    ? rows
+    : (rows as unknown as { rows?: Array<{ sku: string }> }).rows ?? []
+  const validSkus = new Set(validRows.map((row) => row.sku))
+  return requestedSkus.filter((sku) => !validSkus.has(sku))
 }
 
 export async function GET() {
@@ -202,6 +230,14 @@ export async function POST(req: NextRequest) {
   }
   if (body.components.length === 0) {
     return NextResponse.json({ error: '최소 1개 이상의 SKU 구성품이 필요합니다' }, { status: 400 })
+  }
+
+  const invalidComponentSkus = await findInvalidComponentSkus(workspaceUserId, body.components)
+  if (invalidComponentSkus.length > 0) {
+    return NextResponse.json({
+      error: `상품관리/재고관리에 없는 내부상품코드는 매핑할 수 없습니다: ${invalidComponentSkus.join(', ')}`,
+      invalidSkus: invalidComponentSkus,
+    }, { status: 400 })
   }
 
   const normalizedSources = await normalizeMappingSources(

@@ -142,6 +142,9 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
     if (productOrder) pushRecordValues(productOrder, keys, values)
   }
 
+  const item = asPlainRecord(record.item)
+  if (item) pushRecordValues(item, keys.concat(['no', 'itemCustomCode']), values)
+
   const originalData = Array.isArray(record.originalData) ? record.originalData : []
   for (const rawOriginal of originalData) {
     const original = asPlainRecord(rawOriginal)
@@ -153,6 +156,15 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
   for (const rawProduct of products) {
     const product = asPlainRecord(rawProduct)
     if (product) pushRecordValues(product, keys, values)
+  }
+
+  const orderLines = Array.isArray(record.orderLines) ? record.orderLines : []
+  for (const rawLine of orderLines) {
+    const line = asPlainRecord(rawLine)
+    if (!line) continue
+    pushRecordValues(line, keys, values)
+    const lineItem = asPlainRecord(line.item)
+    if (lineItem) pushRecordValues(lineItem, keys.concat(['no', 'itemCustomCode']), values)
   }
 
   return Array.from(new Set(values))
@@ -205,6 +217,19 @@ function normalizeSourceOptionId(value: string | null | undefined): string {
   return stripMappingTextWrapper(value).slice(0, 100)
 }
 
+function collapseRepeatedOptionText(value: string): string {
+  const midpoint = value.length / 2
+  if (Number.isInteger(midpoint) && midpoint > 0 && value.slice(0, midpoint) === value.slice(midpoint)) {
+    return value.slice(0, midpoint)
+  }
+  return value
+}
+
+function optionTextEquals(left: string | null | undefined, right: string | null | undefined): boolean {
+  return collapseRepeatedOptionText(normalizeMappingOptionText(left))
+    === collapseRepeatedOptionText(normalizeMappingOptionText(right))
+}
+
 export function isMappingSourceSnapshotCompatible(
   source: Pick<MappingSource, 'marketplaceOptionId' | 'productNameSnapshot' | 'optionNameSnapshot'>,
   productName?: string | null,
@@ -222,7 +247,7 @@ export function isMappingSourceSnapshotCompatible(
     if (
       sourceOptionName
       && currentOptionName
-      && normalizeMappingOptionText(source.optionNameSnapshot) !== normalizeMappingOptionText(optionText)
+      && !optionTextEquals(source.optionNameSnapshot, optionText)
     ) {
       return false
     }
@@ -252,10 +277,10 @@ function sourceMatchesCandidate(
     const effectiveOptionId = normalizeSourceOptionId(source.marketplaceOptionId || source.optionNameSnapshot)
     if (source.marketplaceOptionId === '' && source.marketplaceProductId === marketplaceItemId) {
       if (!source.optionNameSnapshot?.trim()) return true
-      return normalizeMappingOptionText(source.optionNameSnapshot) === normalizeMappingOptionText(normalizedOptionText)
+      return optionTextEquals(source.optionNameSnapshot, normalizedOptionText)
     }
     return source.marketplaceProductId === marketplaceItemId
-      && normalizeMappingOptionText(effectiveOptionId) === normalizeMappingOptionText(normalizedOptionText)
+      && optionTextEquals(effectiveOptionId, normalizedOptionText)
   }
 
   if (source.marketplaceOptionId === EXACT_OPTION_ID && source.marketplaceProductId === marketplaceItemId) {

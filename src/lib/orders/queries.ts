@@ -483,13 +483,22 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
   )`
   const marketplaceCondition = (marketplaceId: string): SQL<unknown> => {
     const sabangnetMallNames = SABANGNET_MALL_NAMES_BY_MARKETPLACE[marketplaceId] ?? []
-    if (sabangnetMallNames.length === 0) return eq(orders.marketplaceId, marketplaceId)
+    const sabangnetCanonicalCondition = and(
+      isSabangnetOrderSource,
+      eq(sql<string>`${orders.rawData}->'sabangnetSync'->>'canonicalMarketplaceId'`, marketplaceId),
+    )
+    if (sabangnetMallNames.length === 0) {
+      return or(eq(orders.marketplaceId, marketplaceId), sabangnetCanonicalCondition)!
+    }
 
     return or(
       eq(orders.marketplaceId, marketplaceId),
       and(
         isSabangnetOrderSource,
-        inArray(sql<string>`${orders.rawData}->>'mallName'`, sabangnetMallNames),
+        or(
+          inArray(sql<string>`${orders.rawData}->>'mallName'`, sabangnetMallNames),
+          sabangnetCanonicalCondition,
+        )!,
       ),
     )!
   }

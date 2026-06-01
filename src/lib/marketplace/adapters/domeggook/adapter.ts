@@ -15,6 +15,7 @@ import type {
   DomeggookOrder,
   DomeggookOrderConfirmResponse,
   DomeggookOrderDetailResponse,
+  DomeggookOrderOption,
 } from './types'
 
 const DOMEGGOOK_CONFIG: MarketplaceConfig = {
@@ -439,7 +440,7 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     const orderId = asString(order.orderNo) || order.orderUid || asString(order.itemNo)
     const marketplaceStatus = order.statusMode || order.status || '寃곗젣?꾨즺'
     const shippingFee = order.delivery?.fee != null ? asNumber(order.delivery.fee) : 0
-    const items = group.map((line) => this.normalizeOrderItem(line, orderId))
+    const items = group.flatMap((line) => this.normalizeOrderItems(line, orderId))
     const itemsAmount = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
     const totalAmount = asNumber(order.pay?.payAmount) || itemsAmount + shippingFee
     const buyerName = firstText(order.buyerInfo?.buyerName, order.consumer?.name, '-')
@@ -485,20 +486,64 @@ export class DomeggookAdapter implements MarketplaceAdapter {
     }
   }
 
-  private normalizeOrderItem(order: DomeggookOrder, orderId: string): NormalizedOrder['items'][number] {
+  private normalizeOrderItems(order: DomeggookOrder, orderId: string): NormalizedOrder['items'] {
     const productName = order.itemTitle || order.item?.title || `?꾨ℓ袁?二쇰Ц ${orderId}`
     const quantity = asNumber(order.orderQty) || 1
     const itemAmount = asNumber(order.orderAmtPay) || asNumber(order.orderAmount) || asNumber(order.orderAmt)
     const productCode = firstText(order.item?.itemCustomCode, order.item?.no, order.itemNo)
+    const options = ensureArray(order.selectOpt?.opt)
+
+    if (options.length > 0) {
+      return options.map((option, index) => this.normalizeOptionItem({
+        option,
+        index,
+        orderId,
+        orderUid: order.orderUid,
+        productCode,
+        productName,
+        fallbackQuantity: quantity,
+        fallbackAmount: itemAmount,
+      }))
+    }
+
     const itemIdentity = firstText(order.orderUid, productCode ? `${orderId}-${productCode}` : '', orderId)
 
-    return {
+    return [{
       marketplaceItemId: itemIdentity,
       productName,
       optionText: this.formatOptions(order),
       quantity,
       unitPrice: quantity > 0 ? itemAmount / quantity : itemAmount,
       sku: productCode || undefined,
+    }]
+  }
+
+  private normalizeOptionItem(params: {
+    option: DomeggookOrderOption
+    index: number
+    orderId: string
+    orderUid?: string
+    productCode: string
+    productName: string
+    fallbackQuantity: number
+    fallbackAmount: number
+  }): NormalizedOrder['items'][number] {
+    const optionQuantity = asNumber(params.option.qty) || params.fallbackQuantity
+    const optionAmount = asNumber(params.option.amt) || asNumber(params.option.price) * optionQuantity || params.fallbackAmount
+    const optionCode = firstText(params.option.code, String(params.index + 1))
+    const itemIdentity = firstText(
+      params.orderUid ? `${params.orderUid}-${optionCode}` : '',
+      params.productCode ? `${params.orderId}-${params.productCode}-${optionCode}` : '',
+      `${params.orderId}-${optionCode}`,
+    )
+
+    return {
+      marketplaceItemId: itemIdentity,
+      productName: params.productName,
+      optionText: this.cleanOptionText(params.option.name) || undefined,
+      quantity: optionQuantity,
+      unitPrice: optionQuantity > 0 ? optionAmount / optionQuantity : optionAmount,
+      sku: params.productCode || undefined,
     }
   }
 
@@ -560,9 +605,16 @@ export class DomeggookAdapter implements MarketplaceAdapter {
   private formatOptions(order: DomeggookOrder): string | undefined {
     const options = ensureArray(order.selectOpt?.opt)
     const text = options
-      .map((option) => option.name)
+      .map((option) => this.cleanOptionText(option.name))
       .filter(Boolean)
       .join(' / ')
     return text || undefined
+  }
+
+  private cleanOptionText(value: unknown): string {
+    return asString(value)
+      .replace(/^<!\[CDATA\[/, '')
+      .replace(/\]\]>$/, '')
+      .trim()
   }
 }

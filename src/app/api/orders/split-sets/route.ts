@@ -4,6 +4,7 @@
  * 매핑완료 주문 중 세트 매핑(한 주문상품 → 여러 재고 SKU)을 실제 주문 줄로 분리한다.
  * - 원본 주문은 첫 번째 구성품 1줄만 남긴다.
  * - 나머지 구성품은 복사 주문(isCopy=true)으로 생성한다.
+ * - 엑셀/수집 단계에서 이미 행분리된 복사 주문도 세트분리 대상이다.
  * - rawData.setSplit 로 재실행 방지와 원본 추적 정보를 남긴다.
  */
 
@@ -50,6 +51,10 @@ function itemValues(orderId: string, row: ExpandedRow) {
     skuMultiplier: 1,
     fulfillmentCode: 'set-split',
   }
+}
+
+function canSplitSetInStatus(status: string): boolean {
+  return status === 'new' || status === 'confirmed'
 }
 
 export async function POST(req: NextRequest) {
@@ -119,8 +124,7 @@ export async function POST(req: NextRequest) {
       const hasExpandedSet = Array.from(mappedPartCountByItem.values()).some((count) => count > 1)
 
       if (
-        order.isCopy ||
-        order.status !== 'new' ||
+        !canSplitSetInStatus(order.status) ||
         !order.mappedAt ||
         hasSetSplit(order.rawData) ||
         rows.length <= 1 ||

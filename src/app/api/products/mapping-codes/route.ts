@@ -10,7 +10,7 @@ import { createHash } from 'crypto'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents, products, productVariants } from '@/lib/db/schema'
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { isBlockedMappingSourcePair } from '@/lib/orders/mapping-match'
 import { normalizeMappingSources } from '@/lib/orders/mapping-source-normalize'
@@ -63,6 +63,20 @@ function normalizeSourceOption(source: SourceInput): SourceInput {
   return collectedOption
     ? { ...source, marketplaceOptionId: collectedOption }
     : { ...source, marketplaceOptionId: '' }
+}
+
+function uniqueSources(sources: SourceInput[]): SourceInput[] {
+  const seen = new Set<string>()
+  return sources.filter((source) => {
+    const key = [
+      source.marketplaceId,
+      source.marketplaceProductId,
+      source.marketplaceOptionId ?? '',
+    ].join('\u0000')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function isMappingSourceConflict(message: string): boolean {
@@ -240,10 +254,10 @@ export async function POST(req: NextRequest) {
     }, { status: 400 })
   }
 
-  const normalizedSources = await normalizeMappingSources(
+  const normalizedSources = uniqueSources(await normalizeMappingSources(
     workspaceUserId,
     body.sources.map(normalizeSourceOption),
-  )
+  ))
 
   if (normalizedSources.some(isBlockedSource)) {
     return NextResponse.json({ error: '주문번호/주문행번호는 상품 매핑키로 저장할 수 없습니다. 실제 상품코드 또는 자체코드로 매핑해 주세요.' }, { status: 400 })
@@ -263,6 +277,16 @@ export async function POST(req: NextRequest) {
         .returning()
 
       if (normalizedSources.length > 0) {
+        for (const source of normalizedSources) {
+          await tx
+            .delete(mappingSources)
+            .where(and(
+              eq(mappingSources.userId, workspaceUserId),
+              eq(mappingSources.marketplaceId, source.marketplaceId),
+              eq(mappingSources.marketplaceProductId, source.marketplaceProductId),
+              eq(mappingSources.marketplaceOptionId, source.marketplaceOptionId ?? ''),
+            ))
+        }
         await tx.insert(mappingSources).values(
           normalizedSources.map((s) => ({
             userId: workspaceUserId,

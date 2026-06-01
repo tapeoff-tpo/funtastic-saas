@@ -55,6 +55,20 @@ function normalizeSourceOption(source: SourceInput): SourceInput {
     : { ...source, marketplaceOptionId: '' }
 }
 
+function uniqueSources(sources: SourceInput[]): SourceInput[] {
+  const seen = new Set<string>()
+  return sources.filter((source) => {
+    const key = [
+      source.marketplaceId,
+      source.marketplaceProductId,
+      source.marketplaceOptionId ?? '',
+    ].join('\u0000')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 function isMappingSourceConflict(message: string): boolean {
   const normalized = message.toLowerCase()
   return normalized.includes('mapping_sources_user_market_product_option_uniq')
@@ -181,7 +195,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!existing) return NextResponse.json({ error: 'not found' }, { status: 404 })
 
   const normalizedSources = body.sources
-    ? await normalizeMappingSources(workspaceUserId, body.sources.map(normalizeSourceOption))
+    ? uniqueSources(await normalizeMappingSources(workspaceUserId, body.sources.map(normalizeSourceOption)))
     : undefined
 
   if (normalizedSources?.some(isBlockedSource)) {
@@ -215,6 +229,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (normalizedSources !== undefined) {
         await tx.delete(mappingSources).where(eq(mappingSources.mappingCodeId, id))
         if (normalizedSources.length > 0) {
+          for (const source of normalizedSources) {
+            await tx
+              .delete(mappingSources)
+              .where(and(
+                eq(mappingSources.userId, workspaceUserId),
+                eq(mappingSources.marketplaceId, source.marketplaceId),
+                eq(mappingSources.marketplaceProductId, source.marketplaceProductId),
+                eq(mappingSources.marketplaceOptionId, source.marketplaceOptionId ?? ''),
+              ))
+          }
           await tx.insert(mappingSources).values(
             normalizedSources.map((s) => ({
               userId: workspaceUserId,

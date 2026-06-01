@@ -315,6 +315,8 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
       setEditingItems(false)
       toast.success('확정상품 정보를 저장했습니다.')
       router.refresh()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '확정상품 수정에 실패했습니다.')
     } finally {
       setSavingItems(false)
     }

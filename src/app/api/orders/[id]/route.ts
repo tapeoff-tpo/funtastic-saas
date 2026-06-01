@@ -215,37 +215,45 @@ export async function PATCH(
     quantity: item.quantity,
   }))
 
-  await db.transaction(async (tx) => {
-    for (const item of resolved) {
+  try {
+    await db.transaction(async (tx) => {
+      for (const item of resolved) {
+        await tx
+          .update(orderItems)
+          .set({
+            lockedProductName: item.productName,
+            lockedOptionName: item.optionName,
+            lockedQuantity: item.quantity,
+            lockedSku: item.sku,
+            lockedAt: new Date(),
+            lockedByUserId: user.id,
+          })
+          .where(and(eq(orderItems.id, item.id), eq(orderItems.orderId, id)))
+      }
+
       await tx
-        .update(orderItems)
-        .set({
-          lockedProductName: item.productName,
-          lockedOptionName: item.optionName,
-          lockedQuantity: item.quantity,
-          lockedSku: item.sku,
-          lockedAt: new Date(),
-          lockedByUserId: user.id,
-        })
-        .where(and(eq(orderItems.id, item.id), eq(orderItems.orderId, id)))
-    }
+        .update(orders)
+        .set({ updatedAt: new Date() })
+        .where(eq(orders.id, id))
 
-    await tx
-      .update(orders)
-      .set({ updatedAt: new Date() })
-      .where(eq(orders.id, id))
-
-    await logOrderChange({
-      orderId: id,
-      userId: workspaceUserId,
-      actorId: user.id,
-      action: 'items.confirmed_updated',
-      title: '확정상품 수정',
-      description: '주문 상세창에서 확정상품, 확정옵션, 수량을 수정했습니다.',
-      before: { items: before },
-      after: { items: after },
-    }, tx)
-  })
+      await logOrderChange({
+        orderId: id,
+        userId: workspaceUserId,
+        actorId: user.id,
+        action: 'items.confirmed_updated',
+        title: '확정상품 수정',
+        description: '주문 상세창에서 확정상품, 확정옵션, 수량을 수정했습니다.',
+        before: { items: before },
+        after: { items: after },
+      }, tx)
+    })
+  } catch (error) {
+    console.error('confirmed item update failed:', error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : '확정상품 수정에 실패했습니다.' },
+      { status: 500 },
+    )
+  }
 
   const refreshed = await getOrderById(id, workspaceUserId)
   return NextResponse.json({ order: refreshed })

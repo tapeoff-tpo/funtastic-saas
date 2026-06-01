@@ -12,12 +12,12 @@ import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 import { and, eq, inArray, like, notLike } from 'drizzle-orm'
 import { getProducts, getProductById } from './queries'
-import { createProduct, updateProduct, deleteProduct } from './actions'
+import { createProduct, updateProduct, deleteProduct, updateProductStatus } from './actions'
 import { syncProductToMarketplace, syncProductToAllMarketplaces } from './sync'
 import { reverseCollectProducts, type ReverseCollectResult } from './reverse-collect'
 import { getCategoryMappings, getInternalCategories } from './categories'
 import { saveCategoryMapping, deleteCategoryMapping } from './category-actions'
-import type { ProductFilters, ProductFormData, ProductListItem, ProductDetail, CategoryMapping } from './types'
+import type { ProductFilters, ProductFormData, ProductListItem, ProductDetail, CategoryMapping, ProductStatus } from './types'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 type ActionResult<T = void> = { success: true; data: T } | { success: false; error: string }
@@ -78,6 +78,17 @@ export async function deleteProductAction(
 ): Promise<ActionResult<void>> {
   const userId = await requireUser()
   return deleteProduct(userId, productId)
+}
+
+/**
+ * Update a product's sell/display status from the product list.
+ */
+export async function updateProductStatusAction(
+  productId: string,
+  status: Exclude<ProductStatus, 'deleted'>,
+): Promise<ActionResult<void>> {
+  const userId = await requireUser()
+  return updateProductStatus(userId, productId, status)
 }
 
 /**

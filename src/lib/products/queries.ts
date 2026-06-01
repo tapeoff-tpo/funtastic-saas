@@ -12,9 +12,10 @@ import {
   productMarketplaceLinks,
   inventory,
 } from '@/lib/db/schema'
-import { eq, and, or, ilike, desc, asc, count, ne, sql } from 'drizzle-orm'
+import { eq, and, or, ilike, desc, asc, count, ne, sql, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { ProductFilters, ProductListItem, ProductDetail } from './types'
+import { summarizeProductVariantOptions } from './options'
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -121,7 +122,35 @@ export async function getProducts(
       .where(whereClause),
   ])
 
-  return { items: rows as ProductListItem[], total }
+  const productIds = rows.map((row) => row.id)
+  const variantRows = productIds.length > 0
+    ? await db
+        .select({
+          productId: productVariants.productId,
+          optionName: productVariants.optionName,
+          optionValues: productVariants.optionValues,
+          isActive: productVariants.isActive,
+          sortOrder: productVariants.sortOrder,
+        })
+        .from(productVariants)
+        .where(inArray(productVariants.productId, productIds))
+        .orderBy(asc(productVariants.sortOrder))
+    : []
+
+  const variantsByProduct = new Map<string, typeof variantRows>()
+  for (const variant of variantRows) {
+    const list = variantsByProduct.get(variant.productId) ?? []
+    list.push(variant)
+    variantsByProduct.set(variant.productId, list)
+  }
+
+  return {
+    items: rows.map((row) => ({
+      ...row,
+      optionName: summarizeProductVariantOptions(variantsByProduct.get(row.id) ?? []) ?? row.optionName,
+    })) as ProductListItem[],
+    total,
+  }
 }
 
 /**

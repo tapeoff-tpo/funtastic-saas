@@ -1,5 +1,6 @@
 'use client'
 
+import { useTransition } from 'react'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'
 import { PRODUCT_STATUS_LABELS, type ProductStatus } from '@/lib/products/types'
@@ -27,6 +28,49 @@ const STATUS_VARIANT: Record<ProductStatus, 'default' | 'secondary' | 'destructi
   active: 'default',
   inactive: 'secondary',
   deleted: 'destructive',
+}
+
+const EDITABLE_STATUSES: Array<Exclude<ProductStatus, 'deleted'>> = ['draft', 'active', 'inactive']
+
+function ProductStatusCell({ product }: { product: ProductRow }) {
+  const [isPending, startTransition] = useTransition()
+
+  if (product.status === 'deleted') {
+    return (
+      <Badge variant={STATUS_VARIANT.deleted}>
+        {PRODUCT_STATUS_LABELS.deleted}
+      </Badge>
+    )
+  }
+
+  const handleChange = (nextStatus: Exclude<ProductStatus, 'deleted'>) => {
+    if (nextStatus === product.status) return
+    startTransition(async () => {
+      const { updateProductStatusAction } = await import('@/lib/products/ui-actions')
+      const result = await updateProductStatusAction(product.id, nextStatus)
+      if (!result.success) {
+        alert(`상태 변경 실패: ${result.error}`)
+        return
+      }
+      window.location.reload()
+    })
+  }
+
+  return (
+    <select
+      value={product.status}
+      onChange={(event) => handleChange(event.target.value as Exclude<ProductStatus, 'deleted'>)}
+      disabled={isPending}
+      className="h-8 rounded-md border bg-background px-2 text-xs disabled:opacity-60"
+      aria-label="상품 상태 변경"
+    >
+      {EDITABLE_STATUSES.map((status) => (
+        <option key={status} value={status}>
+          {PRODUCT_STATUS_LABELS[status]}
+        </option>
+      ))}
+    </select>
+  )
 }
 
 export const columns: ColumnDef<ProductRow>[] = [
@@ -161,14 +205,7 @@ export const columns: ColumnDef<ProductRow>[] = [
   {
     accessorKey: 'status',
     header: '상태',
-    cell: ({ row }) => {
-      const status = row.getValue('status') as ProductStatus
-      return (
-        <Badge variant={STATUS_VARIANT[status]}>
-          {PRODUCT_STATUS_LABELS[status]}
-        </Badge>
-      )
-    },
+    cell: ({ row }) => <ProductStatusCell product={row.original} />,
     size: 100,
   },
 ]

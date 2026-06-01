@@ -257,19 +257,23 @@ async function readDownloadBufferStream(download: Download): Promise<Buffer> {
 
 async function hasOhouseSession(page: Page): Promise<boolean> {
   const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-  if (/로그아웃|주문\s*관리|상품\s*관리|배송\s*관리|정산\s*관리|매출\s*현황|판매진행|미확인주문|배송준비중|주문배송현황|검색결과\s*엑셀\s*다운로드/.test(bodyText)) {
+  if (/로그아웃|주문\s*관리|상품\s*관리|배송\s*관리|정산\s*관리|매출\s*현황|판매진행/.test(bodyText) || isOhouseOrderPageTextReady(bodyText)) {
     return true
   }
   if (/login|signin/i.test(page.url())) return false
   return false
 }
 
+export function isOhouseOrderPageTextReady(text: string): boolean {
+  return /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*[\d,]+\s*개의\s*주문\s*목록|미확인주문|배송준비중|주문번호|주문상태|상품명|개씩\s*보기|송장\s*입력/.test(text)
+}
+
 async function waitForOhouseAppReady(page: Page): Promise<boolean> {
   return page
     .waitForFunction(() => {
       const text = document.body?.innerText ?? ''
-      return /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록|개씩\s*보기|송장\s*입력/.test(text)
-    }, undefined, { timeout: 30_000 })
+      return /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*[\d,]+\s*개의\s*주문\s*목록|미확인주문|배송준비중|주문번호|주문상태|상품명|개씩\s*보기|송장\s*입력/.test(text)
+    }, undefined, { timeout: 60_000 })
     .then(() => true)
     .catch(() => false)
 }
@@ -1150,7 +1154,7 @@ async function clickOhouseUnconfirmedOrdersCard(page: Page): Promise<boolean> {
     await page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined)
     await page.waitForTimeout(1200)
     const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
-    if (/주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return true
+    if (isOhouseOrderPageTextReady(bodyText) && !/404|찾을 수 없습니다/.test(bodyText)) return true
   }
 
   return false
@@ -1159,10 +1163,11 @@ async function clickOhouseUnconfirmedOrdersCard(page: Page): Promise<boolean> {
 async function openOrdersPage(page: Page): Promise<void> {
   await gotoOhouse(page, PAYMENT_COMPLETE_ORDER_URL).catch(() => undefined)
   if (!isOhouseSignInUrl(page.url())) {
-    const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+    await waitForOhouseAppReady(page).catch(() => false)
+    const bodyText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '')
     if (
       page.url().includes('customFilters=PAYMENT_COMPLETE')
-      && /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText)
+      && isOhouseOrderPageTextReady(bodyText)
       && !/404|찾을 수 없습니다/.test(bodyText)
     ) {
       return
@@ -1174,10 +1179,11 @@ async function openOrdersPage(page: Page): Promise<void> {
       await gotoOhouse(page, PAYMENT_COMPLETE_ORDER_URL).catch(() => undefined)
     }
     if (!isOhouseSignInUrl(page.url())) {
-      const bodyText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+      await waitForOhouseAppReady(page).catch(() => false)
+      const bodyText = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '')
       if (
         page.url().includes('customFilters=PAYMENT_COMPLETE')
-        && /주문배송현황|검색결과\s*엑셀\s*다운로드|총\s*\d+\s*개의\s*주문\s*목록/.test(bodyText)
+        && isOhouseOrderPageTextReady(bodyText)
         && !/404|찾을 수 없습니다/.test(bodyText)
       ) {
         return

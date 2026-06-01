@@ -23,6 +23,7 @@ import { ORDER_STATUS_LABELS, type ClaimType, type OrderFilters, type OrderStatu
 import { primaryPhone, secondaryPhone } from '@/lib/orders/phone-normalize'
 
 const FILTERED_EXPORT_LIMIT = 50000
+const SCAN_FILTER_STATUSES = new Set(['preparing', 'ready', 'shipped'])
 
 function getKstDateParts(date: Date): { year: string; month: string; day: string; hour: string; minute: string } {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -114,7 +115,7 @@ function buildFilteredExportFilters(searchParams: URLSearchParams, userId: strin
   const scanResultParam = searchParams.get('scanResult')
   const cancelTab = parseBooleanParam(searchParams.get('cancel'))
   const held = parseBooleanParam(searchParams.get('held'))
-  const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
+  const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => SCAN_FILTER_STATUSES.has(status))
 
   return {
     page: 1,

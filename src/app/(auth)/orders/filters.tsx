@@ -50,6 +50,7 @@ const SCAN_OPTIONS = [
   { value: 'scanned', label: '스캔함' },
   { value: 'unscanned', label: '미스캔' },
 ]
+const SCAN_FILTER_STATUSES = new Set(['preparing', 'ready', 'shipped'])
 
 const SCAN_RESULT_OPTIONS = [
   { value: '', label: '전체' },
@@ -400,7 +401,7 @@ export function OrderFilters({
   const isNewTab = selectedStatuses.length === 1 && selectedStatuses[0] === 'new'
   const isConfirmedTab = selectedStatuses.length === 1 && selectedStatuses[0] === 'confirmed'
   const showMappingFilter = isNewTab || isConfirmedTab
-  const showScanFilter = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
+  const showScanFilter = selectedStatuses.length > 0 && selectedStatuses.every((status) => SCAN_FILTER_STATUSES.has(status))
   const formatDateInput = useCallback((date: Date) => {
     const year = date.getFullYear()
     const month = String(date.getMonth() + 1).padStart(2, '0')
@@ -527,8 +528,8 @@ export function OrderFilters({
             updateDraftFilter({
               status: nextStatus,
               mapping: nextShowsMapping ? draftFilters.mapping : null,
-              scan: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? draftFilters.scan : null,
-              scanResult: nextStatuses.length > 0 && nextStatuses.every((status) => status === 'preparing' || status === 'ready') ? draftFilters.scanResult : null,
+              scan: nextStatuses.length > 0 && nextStatuses.every((status) => SCAN_FILTER_STATUSES.has(status)) ? draftFilters.scan : null,
+              scanResult: nextStatuses.length > 0 && nextStatuses.every((status) => SCAN_FILTER_STATUSES.has(status)) ? draftFilters.scanResult : null,
             })
           }}
         />

@@ -56,6 +56,8 @@ type MarketplaceFilterOption = {
   label: string
 }
 
+const SCAN_FILTER_STATUSES = new Set(['preparing', 'ready', 'shipped'])
+
 function parseStatusFilter(value: string | null): OrderStatus[] {
   if (!value) return []
   const validStatuses = new Set(Object.keys(ORDER_STATUS_LABELS))
@@ -132,7 +134,7 @@ export default async function OrdersPage({
 
   const isNewTab = singleStatus === 'new'
   const isConfirmedTab = singleStatus === 'confirmed'
-  const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => status === 'preparing' || status === 'ready')
+  const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => SCAN_FILTER_STATUSES.has(status))
   const isGeneralStatusTab = Boolean(params.status) && !params.claimType && !params.cancel && !params.held
   const needsMappingDetails = true
   const needsStockDetails = isNewTab || isConfirmedTab || isScanFilterTab

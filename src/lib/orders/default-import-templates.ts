@@ -31,6 +31,36 @@ export const DEFAULT_ORDER_IMPORT_TEMPLATES: DefaultOrderImportTemplate[] = [
     ],
   },
   {
+    id: 'default:funtastic-b2b-new-site',
+    name: '펀타스틱B2B (신규사이트) 주문수집',
+    isDefault: true,
+    aliases: [
+      'funtastic-b2b',
+      'funtasticb2b',
+      '펀타스틱B2B',
+      '펀타스틱B2B신규사이트',
+      '펀타스틱B2B신규',
+    ],
+    mappings: [
+      { field: 'orderNumber', excelColumn: '주문번호' },
+      { field: 'marketplaceItemId', excelColumn: '상품코드' },
+      { field: 'orderedAt', excelColumn: '주문일' },
+      { field: 'buyerName', excelColumn: '업체명' },
+      { field: 'buyerPhone', excelColumn: '연락처' },
+      { field: 'recipientName', excelColumn: '수령인' },
+      { field: 'recipientPhone', excelColumn: '연락처2' },
+      { field: 'zipCode', excelColumn: '우편번호' },
+      { field: 'recipientAddress', excelColumn: '배송지' },
+      { field: 'productName', excelColumn: '상품명' },
+      { field: 'optionText', excelColumn: '옵션' },
+      { field: 'quantity', excelColumn: '수량' },
+      { field: 'totalAmount', excelColumn: '금액' },
+      { field: 'sku', excelColumn: '상품코드' },
+      { field: 'deliveryMessage', excelColumn: '배송메모' },
+      { field: 'shippingFee', excelColumn: '배송비' },
+    ],
+  },
+  {
     id: 'default:ownerclan',
     name: '오너클랜 주문수집',
     isDefault: true,
@@ -152,7 +182,7 @@ export const DEFAULT_ORDER_IMPORT_TEMPLATES: DefaultOrderImportTemplate[] = [
 ]
 
 function normalizeImportTemplateKey(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '')
+  return value.toLowerCase().replace(/[^a-z0-9가-힣]+/g, '')
 }
 
 export function findDefaultOrderImportTemplate(

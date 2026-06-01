@@ -19,6 +19,7 @@ export interface ExcelImportTemplateView {
   name: string
   mappings: OrderImportMapping[]
   isDefault: boolean
+  aliases?: string[]
 }
 
 async function getCurrentUserId(): Promise<string | null> {

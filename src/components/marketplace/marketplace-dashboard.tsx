@@ -183,7 +183,7 @@ const IMPORT_TEMPLATE_KEY = 'orders.collect.selectedImportTemplateId'
 function normalizeTemplateName(value: string): string {
   return value
     .toLowerCase()
-    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9가-힣]+/g, '')
 }
 
 function findTemplateForConnection(
@@ -195,10 +195,17 @@ function findTemplateForConnection(
 
   return templates.find((template) => {
     const templateName = normalizeTemplateName(template.name)
+    const aliases = template.aliases?.map(normalizeTemplateName) ?? []
     return (
       templateName.includes(displayName) ||
       displayName.includes(templateName.replace('주문수집', '')) ||
-      templateName.includes(marketplaceId)
+      templateName.includes(marketplaceId) ||
+      aliases.some((alias) =>
+        alias.includes(displayName) ||
+        displayName.includes(alias) ||
+        alias.includes(marketplaceId) ||
+        marketplaceId.includes(alias),
+      )
     )
   }) ?? null
 }

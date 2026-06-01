@@ -6,7 +6,7 @@ import { db } from '@/lib/db'
 import { excelImportTemplates, orders, orderItems } from '@/lib/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { generateInternalNo } from '@/lib/orders/internal-no'
-import { findDefaultOrderImportTemplate } from '@/lib/orders/default-import-templates'
+import { DEFAULT_ORDER_IMPORT_TEMPLATES, findDefaultOrderImportTemplate } from '@/lib/orders/default-import-templates'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { parseImportedOrderedAt } from '@/lib/orders/import-date'
@@ -78,8 +78,8 @@ export async function POST(request: NextRequest) {
 
     let templateMappings: OrderImportMapping[] | undefined
     if (templateId?.startsWith('default:')) {
-      const template = findDefaultOrderImportTemplate(marketplaceId, marketplaceName)
-      if (!template || template.id !== templateId) {
+      const template = DEFAULT_ORDER_IMPORT_TEMPLATES.find((candidate) => candidate.id === templateId)
+      if (!template) {
         return NextResponse.json({ error: '선택한 기본 엑셀 양식을 찾을 수 없습니다' }, { status: 400 })
       }
       templateMappings = template.mappings

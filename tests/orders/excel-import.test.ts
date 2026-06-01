@@ -2,6 +2,7 @@ import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
 import { parseOrderExcel } from '@/lib/orders/excel-import'
 import { findDefaultOrderImportTemplate } from '@/lib/orders/default-import-templates'
+import { normalizeImportedOrderItem } from '@/lib/orders/import-normalize'
 
 describe('parseOrderExcel', () => {
   it('still reads product unique id when a custom template maps shipping item number', async () => {
@@ -106,6 +107,83 @@ describe('parseOrderExcel', () => {
       totalAmount: 91500,
       sku: 'R221407410001',
       marketplaceItemId: '53246845',
+    })
+  })
+
+  it('reads the Funtastic B2B new-site order collection template', async () => {
+    const template = findDefaultOrderImportTemplate('manual-test', '펀타스틱B2B (신규사이트)')
+    expect(template?.id).toBe('default:funtastic-b2b-new-site')
+    expect(findDefaultOrderImportTemplate('manual-test', '펀타스틱 퍼스트몰')).toBeNull()
+
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('주문내역')
+    sheet.addRow([
+      '주문번호',
+      '주문일',
+      '업체명',
+      '연락처',
+      '상품코드',
+      '상품명',
+      '옵션',
+      '수량',
+      '단가',
+      '금액',
+      '배송비',
+      '총금액',
+      '상태',
+      '수령인',
+      '연락처2',
+      '우편번호',
+      '배송지',
+      '배송메모',
+      '송장번호',
+      '택배사',
+    ])
+    sheet.addRow([
+      'ORD-20260528-0003',
+      '2026. 5. 28.',
+      '노이엠',
+      '010-3265-5232',
+      '650',
+      '스토션 허리 스트레칭 기구',
+      '블루',
+      2,
+      6300,
+      12600,
+      3000,
+      15600,
+      '주문확인',
+      '박혜진',
+      '0502-2810-0127',
+      '13374',
+      '경기 성남시 중원구 둔촌대로63번길 11 102동 1208호',
+      '현관앞에 놓아주세요~ 감사합니다.',
+      '',
+      '',
+    ])
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    const result = await parseOrderExcel(buffer, template?.mappings)
+    const normalized = normalizeImportedOrderItem(result.rows[0], 'funtastic-b2b')
+
+    expect(result.errors).toEqual([])
+    expect(result.rows).toHaveLength(1)
+    expect(normalized).toMatchObject({
+      orderNumber: 'ORD-20260528-0003',
+      buyerName: '노이엠',
+      buyerPhone: '010-3265-5232',
+      recipientName: '박혜진',
+      recipientPhone: '0502-2810-0127',
+      recipientAddress: '경기 성남시 중원구 둔촌대로63번길 11 102동 1208호',
+      orderedAt: '2026. 5. 28.',
+      productName: '스토션 허리 스트레칭 기구',
+      optionText: '블루',
+      quantity: 2,
+      totalAmount: 12600,
+      shippingFee: 3000,
+      sku: '650',
+      marketplaceItemId: '650',
+      deliveryMessage: '현관앞에 놓아주세요~ 감사합니다.',
     })
   })
 })

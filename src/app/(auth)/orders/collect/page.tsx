@@ -51,10 +51,13 @@ export default async function OrdersCollectPage() {
     .from(excelImportTemplates)
     .where(eq(excelImportTemplates.userId, workspaceUserId))
 
+  const forcedDefaultTemplateNames = new Set(['펀타스틱B2B (신규사이트) 주문수집'])
   const userTemplateNames = new Set(userImportTemplates.map((template) => template.name))
   const importTemplates = [
-    ...userImportTemplates,
-    ...DEFAULT_ORDER_IMPORT_TEMPLATES.filter((template) => !userTemplateNames.has(template.name)),
+    ...DEFAULT_ORDER_IMPORT_TEMPLATES.filter((template) =>
+      forcedDefaultTemplateNames.has(template.name) || !userTemplateNames.has(template.name),
+    ),
+    ...userImportTemplates.filter((template) => !forcedDefaultTemplateNames.has(template.name)),
   ]
 
   const dashboardConnections = connections

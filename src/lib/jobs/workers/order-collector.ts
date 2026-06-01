@@ -688,7 +688,7 @@ export async function collectOrdersForConnection(params: {
         await normalizeBaseOrderItem(upsertedOrder.id, items[0])
         splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
       } else if (isExistingOrder) {
-        splitCopyIds = await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+        splitCopyIds = await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId, upsertedOrder.collectedAt)
       }
       if (isExistingOrder && marketplaceId === 'specialoffer') {
         await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
@@ -888,7 +888,7 @@ export async function saveNormalizedOrdersForConnection(params: {
       await normalizeBaseOrderItem(upsertedOrder.id, items[0])
       await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
     } else if (isExistingOrder) {
-      await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
+      await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId, upsertedOrder.collectedAt)
     }
 
     if (isExistingOrder && marketplaceId === 'specialoffer') {
@@ -1066,7 +1066,7 @@ async function upsertOrder(
         updatedAt: new Date(),
       },
     })
-    .returning({ id: orders.id, status: orders.status })
+    .returning({ id: orders.id, status: orders.status, collectedAt: orders.collectedAt })
 }
 
 function cleanText(value: unknown): string | undefined {
@@ -1477,6 +1477,7 @@ async function ensureSplitOrderCopies(
   baseOrderId: string,
   connectionId: string,
   userId: string,
+  baseCollectedAt?: Date | null,
 ): Promise<string[]> {
   if (items.length <= 1) {
     if (items[0]) await normalizeBaseOrderItem(baseOrderId, items[0])
@@ -1509,6 +1510,7 @@ async function ensureSplitOrderCopies(
     .orderBy(orders.createdAt, orders.id)
 
   const now = new Date()
+  const initialCollectedAt = baseCollectedAt ?? now
   const splitBase = {
     sourceOrderId: baseOrderId,
     splitAt: now.toISOString(),
@@ -1579,7 +1581,7 @@ async function ensureSplitOrderCopies(
           partIndex: index + 1,
           originalOrderId: baseOrderId,
         }),
-        collectedAt: now,
+        collectedAt: initialCollectedAt,
         isCopy: true,
       })
       .returning({ id: orders.id })
@@ -1619,7 +1621,6 @@ async function updateSplitOrderCopy(
       shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
       deliveryMessage: order.deliveryMessage ?? null,
       rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [item], totalAmount: lineTotalAmount(item) }), splitMeta),
-      collectedAt: now,
       updatedAt: now,
     })
     .where(eq(orders.id, copyOrderId))

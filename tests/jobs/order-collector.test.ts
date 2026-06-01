@@ -11,10 +11,11 @@ const adapterMocks = vi.hoisted(() => ({
 
 // Mock db module — supports both .values().returning() and .values().onConflictDoUpdate().returning()
 function createValuesChain() {
-  const returning = vi.fn().mockResolvedValue([{ id: 'order-uuid-1' }])
+  const returning = vi.fn().mockResolvedValue([{ id: 'order-uuid-1', collectedAt: new Date('2026-05-01T00:00:00.000Z') }])
   const onConflictDoUpdate = vi.fn().mockReturnValue({ returning })
-  const values = vi.fn().mockReturnValue({ onConflictDoUpdate, returning })
-  return { values, onConflictDoUpdate, returning }
+  const onConflictDoNothing = vi.fn().mockResolvedValue(undefined)
+  const values = vi.fn().mockReturnValue({ onConflictDoUpdate, onConflictDoNothing, returning })
+  return { values, onConflictDoUpdate, onConflictDoNothing, returning }
 }
 
 const mockInsert = vi.fn().mockImplementation(() => createValuesChain())
@@ -703,6 +704,15 @@ describe('processOrderCollection', () => {
     }))
 
     expect(mockDelete).not.toHaveBeenCalledWith(expect.objectContaining({ __table: 'orderItems' }))
+    const updatePayloads = mockUpdate.mock.results.flatMap(({ value }) => value.set.mock.calls.map((call: unknown[]) => call[0]))
+    expect(updatePayloads).toContainEqual(expect.objectContaining({
+      connectionId: 'conn-naver',
+      totalAmount: '12000',
+    }))
+    expect(updatePayloads).not.toContainEqual(expect.objectContaining({
+      connectionId: 'conn-naver',
+      collectedAt: expect.any(Date),
+    }))
   })
 
   it('keeps marketplace acknowledgement failures in the completed job progress', async () => {

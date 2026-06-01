@@ -284,7 +284,7 @@ export class CjOnestyleAdapter implements MarketplaceAdapter {
         optionText: row.optionName || undefined,
         quantity,
         unitPrice,
-        sku: row.vendorItemCode || String(row.optionCode ?? row.itemCode ?? '') || undefined,
+        sku: row.vendorItemCode || undefined,
       }
     })
     const totalAmount = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)

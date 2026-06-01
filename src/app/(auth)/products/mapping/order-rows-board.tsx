@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge'
 import { PageSizeSelector } from '@/components/ui/pagination'
 import { RefreshCw, Plus, Search, X } from 'lucide-react'
 import { MARKETPLACE_LABELS, marketLabel, type SourceMode } from './mapping-manager'
+import { usesSkuMappingKey } from '@/lib/orders/mapping-key-marketplaces'
 
 const EXACT_OPTION_ID = '__exact__'
 
@@ -390,7 +391,7 @@ export function OrderRowsBoard() {
     }
     const sources = bulkTarget.rows.map((r) => {
       const split = splitProductOption(r.marketplaceItemId)
-      const marketplaceProductId = (r.marketplaceId === 'funtastic-b2b' || r.marketplaceId === 'manual-NUQyoT' || r.marketplaceId === 'naver' || r.marketplaceId === 'ownerclan') && r.sku?.trim()
+      const marketplaceProductId = usesSkuMappingKey(r.marketplaceId) && r.sku?.trim()
         ? r.sku.trim()
         : split.product
       return {

@@ -106,6 +106,7 @@ export async function GET() {
                 ))
               -- 품번매핑: 풀 일치 또는 productId+ "-" prefix
               OR (ms.marketplace_option_id = ''
+                AND NULLIF(BTRIM(COALESCE(oi.option_text, '')), '') IS NULL
                 AND ${sourceProductMatches(sql`ms`)})
             )
         )

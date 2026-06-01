@@ -209,6 +209,7 @@ export async function GET(req: NextRequest) {
                 AND ${normalizedOption(sql`oi.option_text`)} = ${normalizedOption(sql`s.marketplace_option_id`)})
             ))
           OR (s.marketplace_option_id = ''
+            AND NULLIF(BTRIM(COALESCE(oi.option_text, '')), '') IS NULL
             AND ${sourceProductMatches(sql`s`)})
         )
       ORDER BY (s.marketplace_option_id <> '') DESC
@@ -262,6 +263,7 @@ export async function GET(req: NextRequest) {
           AND s2.marketplace_id = o.marketplace_id
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s2.marketplace_option_id = ''
+          AND NULLIF(BTRIM(COALESCE(oi.option_text, '')), '') IS NULL
           AND ${sourceProductMatches(sql`s2`)}
       )                               AS "hasProductMapping",
       EXISTS (

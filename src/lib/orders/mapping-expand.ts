@@ -154,7 +154,7 @@ export async function expandOrderItemsWithMapping(
       if (source.marketplaceId !== marketplaceId) return false
       if (!candidateSet.has(source.marketplaceProductId)) return false
       if (normalizedOptionText) {
-        return source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === ''
+        return source.marketplaceOptionId === normalizedOptionText
       }
       return source.marketplaceOptionId === ''
     })

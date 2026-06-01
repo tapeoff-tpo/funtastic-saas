@@ -27,10 +27,12 @@ vi.mock('@/lib/db', () => ({
     select: vi.fn(() => ({
       from: vi.fn((table: unknown) => {
         void table
+        const mappingQuery = {
+          innerJoin: vi.fn(() => mappingQuery),
+          where: vi.fn(async () => fixtures.mappingRows),
+        }
         return {
-          innerJoin: vi.fn(() => ({
-            where: vi.fn(async () => fixtures.mappingRows),
-          })),
+          innerJoin: vi.fn(() => mappingQuery),
           where: vi.fn(() => ({
             groupBy: vi.fn(async () => fixtures.inventoryRows),
           })),
@@ -144,6 +146,50 @@ describe('expandOrderItemsWithMapping', () => {
     expect(rows).toMatchObject([
       { sku: '108300-0001', quantity: 3, fromMapping: true },
       { sku: '109733-0001', quantity: 3, fromMapping: true },
+    ])
+  })
+
+  it('does not expand a product-only mapping for an optioned order item', async () => {
+    fixtures.mappingRows = [
+      {
+        mappingCodeId: 'map-product-only',
+        marketplaceId: 'ownerclan',
+        marketplaceProductId: '1015200001',
+        marketplaceOptionId: '',
+        productNameSnapshot: 'sample product',
+        optionNameSnapshot: null,
+        componentSku: 'INTERNAL-001',
+        componentQuantity: 1,
+      },
+    ]
+    fixtures.inventoryRows = [
+      { sku: 'INTERNAL-001', productName: 'internal product', optionName: 'blue' },
+    ]
+
+    const rows = await expandOrderItemsWithMapping(
+      'user-1',
+      [{ id: 'order-1', marketplaceId: 'ownerclan' }],
+      [{
+        id: 'item-1',
+        orderId: 'order-1',
+        marketplaceItemId: '1015200001',
+        sku: null,
+        productName: 'sample product',
+        optionText: 'option: blue',
+        quantity: 1,
+        skuMultiplier: 1,
+        unitPrice: '1000',
+      }],
+    )
+
+    expect(rows).toMatchObject([
+      {
+        sku: '',
+        productName: 'sample product',
+        optionText: 'option: blue',
+        quantity: 1,
+        fromMapping: false,
+      },
     ])
   })
 })

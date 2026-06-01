@@ -1261,7 +1261,7 @@ export async function getOrders(filters: OrderFilters = {}) {
       if (!candidateSet.has(source.marketplaceProductId)) return false
       if (!isMappingSourceSnapshotCompatible(source, productName, optionText)) return false
       if (normalizedOptionText) {
-        return source.marketplaceOptionId === normalizedOptionText || source.marketplaceOptionId === ''
+        return source.marketplaceOptionId === normalizedOptionText
       }
       return source.marketplaceOptionId === '' || source.marketplaceOptionId === EXACT_OPTION_ID
     })

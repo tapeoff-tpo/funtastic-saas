@@ -147,10 +147,32 @@ export class NaverAdapter implements MarketplaceAdapter {
           { productOrderIds: batch },
         )
 
-        const failedIds = response.data.failProductOrderIds ?? response.data.failProductOrderInfos?.map((info) => info.productOrderId ?? '') ?? []
+        const failedInfos = response.data.failProductOrderInfos ?? []
+        const failedIds = response.data.failProductOrderIds ?? failedInfos.map((info) => info.productOrderId ?? '') ?? []
         const failed = failedIds.filter((id) => batch.includes(id))
         if (failed.length > 0) {
-          return { success: false, error: `발주확인 실패: ${failed.join(', ')}` }
+          const failedMessages = failedInfos
+            .filter((info) => info.productOrderId && failed.includes(info.productOrderId))
+            .map((info) => info.message ?? '')
+            .filter(Boolean)
+
+          if (
+            failedMessages.length > 0
+            && failedMessages.every((message) => isBenignNaverConfirmFailure(message))
+          ) {
+            continue
+          }
+
+          const failedDetails = await this.fetchProductOrderDetails(failed).catch(() => [])
+          const stillPayedIds = failedDetails
+            .filter((po) => this.getNaverProductOrder(po).productOrderStatus === 'PAYED')
+            .map((po) => this.getNaverProductOrder(po).productOrderId)
+          if (stillPayedIds.length === 0) {
+            continue
+          }
+
+          const detailMessage = failedMessages.length > 0 ? ` (${failedMessages.join(' / ')})` : ''
+          return { success: false, error: `발주확인 실패: ${stillPayedIds.join(', ')}${detailMessage}` }
         }
       }
 
@@ -640,6 +662,16 @@ export class NaverAdapter implements MarketplaceAdapter {
       .filter(Boolean)
     return ids.length > 0 ? ids : null
   }
+}
+
+function isBenignNaverConfirmFailure(message: string): boolean {
+  const normalized = message.replace(/\s+/g, '').toLowerCase()
+  return [
+    '이미',
+    '처리된',
+    '처리완료',
+    '완료된',
+  ].some((token) => normalized.includes(token.toLowerCase()))
 }
 
 function sleep(ms: number): Promise<void> {

@@ -24,16 +24,35 @@ import { primaryPhone, secondaryPhone } from '@/lib/orders/phone-normalize'
 
 const FILTERED_EXPORT_LIMIT = 50000
 
-function pad2(value: number): string {
-  return String(value).padStart(2, '0')
+function getKstDateParts(date: Date): { year: string; month: string; day: string; hour: string; minute: string } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
+  return {
+    year: get('year'),
+    month: get('month'),
+    day: get('day'),
+    hour: get('hour'),
+    minute: get('minute'),
+  }
+}
+
+function formatKstDate(date: Date): string {
+  const parts = getKstDateParts(date)
+  return `${parts.year}-${parts.month}-${parts.day}`
 }
 
 function formatDateTimeMinute(date: Date): string {
-  return [
-    date.getFullYear(),
-    pad2(date.getMonth() + 1),
-    pad2(date.getDate()),
-  ].join('-') + ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  const parts = getKstDateParts(date)
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`
 }
 
 function parseCommaFilter(value: string | null): string[] {
@@ -376,10 +395,10 @@ export async function GET(request: NextRequest) {
         // ─ DB 컬럼 미존재 — 사용자가 fixedValue 로 채우거나 비워둠 ─
         supplyPrice: '',
         // 수집일자 — yyyy-mm-dd 포맷
-        collectedAt: collectedDate ? collectedDate.toISOString().slice(0, 10) : '',
+        collectedAt: collectedDate ? formatKstDate(collectedDate) : '',
         collectedAtDateTime: collectedDate ? formatDateTimeMinute(collectedDate) : '',
-        collectedDateYmd: collectedDate ? collectedDate.toISOString().slice(0, 10).replaceAll('-', '') : '',
-        shippedAt: shippedDate ? shippedDate.toISOString().slice(0, 10) : '',
+        collectedDateYmd: collectedDate ? formatKstDate(collectedDate).replaceAll('-', '') : '',
+        shippedAt: shippedDate ? formatKstDate(shippedDate) : '',
         // ─ 매출확인용 열 ─
         salesStatus: getSalesStatusLabel(order.status),
         collectedQuantity: rawFirst?.quantity ?? '',

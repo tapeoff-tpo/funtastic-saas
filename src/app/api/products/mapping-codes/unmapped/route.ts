@@ -19,7 +19,14 @@ export async function GET() {
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const exactOptionId = '__exact__'
   const skuMappingMarketplaceList = sql.join(SKU_MAPPING_MARKETPLACE_IDS.map((id) => sql`${id}`), sql`, `)
+  const normalizedOption = (value: ReturnType<typeof sql>) => sql`LOWER(regexp_replace(regexp_replace(regexp_replace(LEFT(COALESCE(${value}, ''), 100), ${'<!\\[CDATA\\[|\\]\\]>'}, '', 'g'), ${'\\s*\\(\\s*\\d+\\s*개\\s*\\)\\s*$'}, '', 'i'), ${'\\s+'}, '', 'g'))`
   const mappingItemId = sql`CASE
+    WHEN o.marketplace_id = 'domeggook' THEN COALESCE(
+      NULLIF(o.raw_data->>'itemNo', ''),
+      NULLIF(o.raw_data->'item'->>'no', ''),
+      NULLIF(oi.sku, ''),
+      oi.marketplace_item_id
+    )
     WHEN o.marketplace_id IN (${skuMappingMarketplaceList}) AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
     ELSE oi.marketplace_item_id
   END`
@@ -59,7 +66,7 @@ export async function GET() {
                   OR (ms.marketplace_option_id = ${exactOptionId}
                     AND ${mappingItemId} = ms.marketplace_product_id)
                   OR (${mappingItemId} = ms.marketplace_product_id
-                    AND LEFT(COALESCE(oi.option_text, ''), 100) = ms.marketplace_option_id)
+                    AND ${normalizedOption(sql`oi.option_text`)} = ${normalizedOption(sql`ms.marketplace_option_id`)})
                 ))
               -- 품번매핑: 풀 일치 또는 productId+ "-" prefix
               OR (ms.marketplace_option_id = ''

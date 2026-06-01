@@ -89,7 +89,14 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * pageSize
   const exactOptionId = '__exact__'
   const skuMappingMarketplaceList = sql.join(SKU_MAPPING_MARKETPLACE_IDS.map((id) => sql`${id}`), sql`, `)
+  const normalizedOption = (value: ReturnType<typeof sql>) => sql`LOWER(regexp_replace(regexp_replace(regexp_replace(LEFT(COALESCE(${value}, ''), 100), ${'<!\\[CDATA\\[|\\]\\]>'}, '', 'g'), ${'\\s*\\(\\s*\\d+\\s*개\\s*\\)\\s*$'}, '', 'i'), ${'\\s+'}, '', 'g'))`
   const mappingItemId = sql`CASE
+    WHEN o.marketplace_id = 'domeggook' THEN COALESCE(
+      NULLIF(o.raw_data->>'itemNo', ''),
+      NULLIF(o.raw_data->'item'->>'no', ''),
+      NULLIF(oi.sku, ''),
+      oi.marketplace_item_id
+    )
     WHEN o.marketplace_id IN (${skuMappingMarketplaceList}) AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
     ELSE oi.marketplace_item_id
   END`
@@ -163,7 +170,7 @@ export async function GET(req: NextRequest) {
               OR (s.marketplace_option_id = ${exactOptionId}
                 AND ${mappingItemId} = s.marketplace_product_id)
               OR (${mappingItemId} = s.marketplace_product_id
-                AND LEFT(COALESCE(oi.option_text, ''), 100) = s.marketplace_option_id)
+                AND ${normalizedOption(sql`oi.option_text`)} = ${normalizedOption(sql`s.marketplace_option_id`)})
             ))
           OR (s.marketplace_option_id = ''
             AND (${mappingItemId} = s.marketplace_product_id
@@ -238,7 +245,7 @@ export async function GET(req: NextRequest) {
             OR (s3.marketplace_option_id = ${exactOptionId}
               AND ${mappingItemId} = s3.marketplace_product_id)
             OR (${mappingItemId} = s3.marketplace_product_id
-              AND LEFT(COALESCE(oi.option_text, ''), 100) = s3.marketplace_option_id)
+              AND ${normalizedOption(sql`oi.option_text`)} = ${normalizedOption(sql`s3.marketplace_option_id`)})
           )
       )                               AS "hasOptionMapping",
       COALESCE(

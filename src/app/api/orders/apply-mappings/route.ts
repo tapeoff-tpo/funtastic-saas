@@ -19,7 +19,7 @@ import { inventory, mappingCodes, mappingComponents, mappingSources, orderItems,
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
-import { getRawMappingCandidateIds, lookupCompatibleMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+import { getRawMappingCandidateIds, isIgnoredMappingCandidate, lookupCompatibleMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 
 type ValidationFailure = {
   orderId: string
@@ -41,6 +41,39 @@ type HistoricalAliasRow = Pick<MappingAlias, 'mappingCodeId' | 'marketplaceId' |
 type ItemMappingLookupResult = {
   mappingCodeId: string | null
   failureReason?: string
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function textValue(value: unknown): string | null {
+  if (value == null) return null
+  const text = String(value).trim()
+  return text || null
+}
+
+function mappingFailureTarget(item: {
+  marketplaceId: string
+  marketplaceItemId: string | null
+  sku: string | null
+  productName: string
+  optionText: string | null
+  rawData: unknown
+  itemId: string
+}, candidateIds: string[]): string {
+  const raw = asRecord(item.rawData)
+  if (item.marketplaceId === 'cjonestyle') {
+    const productId = textValue(raw?.vendorItemCode) ?? textValue(raw?.itemCode)
+    const option = item.optionText?.trim() || textValue(raw?.optionName) || textValue(raw?.optionCode)
+    if (productId) return `CJ 상품코드 ${productId}${option ? ` / 옵션 ${option}` : ''}`
+  }
+
+  const reusableCandidate = candidateIds.find((candidateId) => !isIgnoredMappingCandidate(item.marketplaceId, candidateId))
+  const directSku = item.sku && !isIgnoredMappingCandidate(item.marketplaceId, item.sku) ? item.sku : null
+  return directSku ?? reusableCandidate ?? item.productName ?? item.itemId
 }
 
 async function validateOrdersHaveInternalMappings(
@@ -156,20 +189,22 @@ async function validateOrdersHaveInternalMappings(
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
-    const directSku = candidateIds.find((candidateId) => validSkus.has(candidateId))
+    const reusableCandidateIds = candidateIds.filter((candidateId) => !isIgnoredMappingCandidate(item.marketplaceId, candidateId))
+    const failureTarget = mappingFailureTarget(item, reusableCandidateIds)
+    const directSku = reusableCandidateIds.find((candidateId) => validSkus.has(candidateId))
     if (directSku) return { mappingCodeId: '__direct_sku__' }
 
     const mappingCodeId = lookupCompatibleMappingRef(
       mappingSourcesForLookup,
       item.marketplaceId,
-      candidateIds,
+      reusableCandidateIds,
       item.optionText,
       item.productName,
     )
     if (!mappingCodeId) {
       return {
         mappingCodeId: null,
-        failureReason: `내부 상품코드 매핑 실패: ${item.sku || item.marketplaceItemId || item.itemId}`,
+        failureReason: `내부 상품코드 매핑 실패: ${failureTarget}`,
       }
     }
 
@@ -177,7 +212,7 @@ async function validateOrdersHaveInternalMappings(
     if (componentSkus.length === 0) {
       return {
         mappingCodeId: null,
-        failureReason: `매핑 구성상품이 비어있음: ${item.sku || item.marketplaceItemId || item.itemId}`,
+        failureReason: `매핑 구성상품이 비어있음: ${failureTarget}`,
       }
     }
 

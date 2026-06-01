@@ -1373,15 +1373,10 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const getComputedMappingStatus = (order: typeof orders.$inferSelect, orderItemsData: ItemRow[]): MappingStatus => {
     if (!order.mappedAt || orderItemsData.length === 0) return 'unmapped'
-
-    const resolvedCount = orderItemsData.filter((item) => {
-      const sku = item.sku?.trim()
-      return Boolean(sku || item.resolvedMappingCodeId)
-    }).length
-
-    if (resolvedCount === orderItemsData.length) return 'mapped'
-    if (resolvedCount > 0) return 'partial'
-    return 'unmapped'
+    // apply-mappings validates the order before setting mapped_at. Treat that
+    // timestamp as the source of truth even when display enrichment cannot
+    // reconstruct the mapping from current lookup snapshots.
+    return 'mapped'
   }
 
   // Combine orders with items, claim, shipment info, and mapping status

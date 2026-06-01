@@ -19,7 +19,8 @@ import { inventory, mappingCodes, mappingComponents, mappingSources, orderItems,
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
-import { getRawMappingCandidateIds, isIgnoredMappingCandidate, lookupCompatibleMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+import { getRawMappingCandidateIdsForItem, isIgnoredMappingCandidate, lookupCompatibleMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+import { lockOrderItemsForOrders } from '@/lib/orders/locking'
 
 type ValidationFailure = {
   orderId: string
@@ -185,7 +186,7 @@ async function validateOrdersHaveInternalMappings(
 
   const findItemMappingCode = (item: typeof targetRows[number]): ItemMappingLookupResult => {
     const candidateIds = Array.from(new Set(
-      [item.marketplaceItemId, item.sku, ...getRawMappingCandidateIds(item.rawData)]
+      [item.marketplaceItemId, item.sku, ...getRawMappingCandidateIdsForItem(item.rawData, item.marketplaceItemId)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
@@ -311,25 +312,56 @@ export async function POST(req: NextRequest) {
     }, { status: 409 })
   }
 
-  if (aliases.length > 0) {
-    await db
-      .insert(mappingSources)
-      .values(aliases.map((alias) => ({
-        ...alias,
-        userId: workspaceUserId,
-      })))
-      .onConflictDoNothing()
-  }
+  let result: Array<{ id: string; mappedAt: Date | null }>
+  try {
+    result = await db.transaction(async (tx) => {
+      if (aliases.length > 0) {
+        await tx
+          .insert(mappingSources)
+          .values(aliases.map((alias) => ({
+            ...alias,
+            userId: workspaceUserId,
+          })))
+          .onConflictDoNothing()
+      }
 
-  const result = await db
-    .update(orders)
-    .set({
-      mappedAt: new Date(),
-      mappedByUserId: user.id,
-      updatedAt: new Date(),
+      await lockOrderItemsForOrders(tx, workspaceUserId, validOrderIds, user.id)
+
+      const unresolvedItems = await tx
+        .select({ itemId: orderItems.id })
+        .from(orderItems)
+        .innerJoin(orders, eq(orders.id, orderItems.orderId))
+        .where(and(
+          eq(orders.userId, workspaceUserId),
+          inArray(orderItems.orderId, validOrderIds),
+          sql`${orderItems.lockedSku} IS NULL AND ${orderItems.lockedMappingCodeId} IS NULL`,
+        ))
+        .limit(1)
+
+      if (unresolvedItems.length > 0) {
+        throw new Error('매핑 결과를 확정상품으로 저장하지 못했습니다.')
+      }
+
+      const updatedOrders = await tx
+        .update(orders)
+        .set({
+          mappedAt: new Date(),
+          mappedByUserId: user.id,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, validOrderIds)))
+        .returning({ id: orders.id, mappedAt: orders.mappedAt })
+
+      return updatedOrders
     })
-    .where(and(eq(orders.userId, workspaceUserId), inArray(orders.id, validOrderIds)))
-    .returning({ id: orders.id, mappedAt: orders.mappedAt })
+  } catch (error) {
+    return NextResponse.json({
+      applied: 0,
+      failed: validOrderIds.length + failures.length,
+      failures,
+      error: error instanceof Error ? error.message : '매핑 결과를 확정상품으로 저장하지 못했습니다.',
+    }, { status: 409 })
+  }
 
   await logOrderChanges(result.map((order) => ({
     orderId: order.id,

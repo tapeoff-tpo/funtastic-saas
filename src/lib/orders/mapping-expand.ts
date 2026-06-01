@@ -14,7 +14,7 @@ import { mappingCodes, mappingSources, mappingComponents, inventory } from '@/li
 import { eq, and, inArray, sql } from 'drizzle-orm'
 import {
   buildMappingIndex,
-  getRawMappingCandidateIds,
+  getRawMappingCandidateIdsForItem,
   lookupCompatibleMappingRef,
   lookupMappingRef,
   type MappingSource,
@@ -218,7 +218,7 @@ export async function expandOrderItemsWithMapping(
     const ord = orderById.get(it.orderId)
     const orderQty = it.quantity * (it.skuMultiplier ?? 1)
     const candidateIds = Array.from(new Set(
-      [it.marketplaceItemId, it.sku, ...getRawMappingCandidateIds(ord?.rawData)]
+      [it.marketplaceItemId, it.sku, ...getRawMappingCandidateIdsForItem(ord?.rawData, it.marketplaceItemId)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))

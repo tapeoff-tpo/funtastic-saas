@@ -14,7 +14,7 @@ import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './type
 // re-export so existing imports `import { OrderStats } from '@/lib/orders/queries'` keep working
 export type { OrderStats }
 import { listInquiriesByOrderIds } from './inquiry-queries'
-import { EXACT_OPTION_ID, getRawMappingCandidateIds, isMappingSourceSnapshotCompatible, lookupCompatibleMappingRef, type MappingSource } from './mapping-match'
+import { EXACT_OPTION_ID, getRawMappingCandidateIdsForItem, isMappingSourceSnapshotCompatible, lookupCompatibleMappingRef, type MappingSource } from './mapping-match'
 import { getOrderChangeLogs } from './change-log'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
 
@@ -1054,7 +1054,7 @@ export async function getOrders(filters: OrderFilters = {}) {
               if (sepIdx > 0) acc.marketplaceProductIds.add(marketplaceItemId.slice(0, sepIdx))
             }
           }
-          for (const candidateId of getRawMappingCandidateIds(item.orderRawData)) {
+          for (const candidateId of getRawMappingCandidateIdsForItem(item.orderRawData, item.marketplaceItemId)) {
             acc.marketplaceProductIds.add(candidateId)
             acc.skus.add(candidateId)
           }
@@ -1101,7 +1101,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     id: r.id,
     orderId: r.orderId,
     marketplaceItemId: r.marketplaceItemId,
-    mappingProductId: getRawMappingCandidateIds(r.orderRawData)[0] ?? null,
+    mappingProductId: getRawMappingCandidateIdsForItem(r.orderRawData, r.marketplaceItemId)[0] ?? null,
     mappingOptionId: r.optionText?.trim().slice(0, 100) || null,
     productName: r.productName,
     optionText: r.optionText,
@@ -1291,7 +1291,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     mappingCodeId: string
   } | null => {
     const candidateIds = Array.from(new Set(
-      [marketplaceItemId, rawSku, ...getRawMappingCandidateIds(rawData)]
+      [marketplaceItemId, rawSku, ...getRawMappingCandidateIdsForItem(rawData, marketplaceItemId)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
@@ -1373,9 +1373,12 @@ export async function getOrders(filters: OrderFilters = {}) {
 
   const getComputedMappingStatus = (order: typeof orders.$inferSelect, orderItemsData: ItemRow[]): MappingStatus => {
     if (!order.mappedAt || orderItemsData.length === 0) return 'unmapped'
-    // apply-mappings validates the order before setting mapped_at. Treat that
-    // timestamp as the source of truth even when display enrichment cannot
-    // reconstruct the mapping from current lookup snapshots.
+    const resolvedCount = orderItemsData.filter((item) => {
+      const sku = item.sku?.trim()
+      return Boolean(sku || item.resolvedMappingCodeId)
+    }).length
+    if (resolvedCount === 0) return 'unmapped'
+    if (resolvedCount < orderItemsData.length) return 'partial'
     return 'mapped'
   }
 
@@ -1532,7 +1535,7 @@ export async function getOrderById(id: string, userId?: string) {
           if (sepIdx > 0) acc.marketplaceProductIds.add(marketplaceItemId.slice(0, sepIdx))
         }
       }
-      for (const candidateId of getRawMappingCandidateIds(item.orderRawData)) {
+      for (const candidateId of getRawMappingCandidateIdsForItem(item.orderRawData, item.marketplaceItemId)) {
         acc.marketplaceProductIds.add(candidateId)
         acc.skus.add(candidateId)
       }
@@ -1569,7 +1572,7 @@ export async function getOrderById(id: string, userId?: string) {
   const items = orderItemRows.map((r) => {
     const locked = !!r.lockedAt
     const candidateIds = Array.from(new Set(
-      [r.marketplaceItemId, r.sku, ...getRawMappingCandidateIds(r.orderRawData)]
+      [r.marketplaceItemId, r.sku, ...getRawMappingCandidateIdsForItem(r.orderRawData, r.marketplaceItemId)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))

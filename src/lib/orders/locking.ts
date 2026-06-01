@@ -7,10 +7,17 @@ import {
   orderItems,
   orders,
   products,
+  productVariants,
   userProfiles,
 } from '@/lib/db/schema'
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import { buildMappingIndex, lookupMappingRef, type MappingSource } from './mapping-match'
+import {
+  getRawMappingCandidateIdsForItem,
+  isIgnoredMappingCandidate,
+  lookupCompatibleMappingRef,
+  normalizeMappingOptionText,
+  type MappingSource,
+} from './mapping-match'
 
 type DrizzleTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
@@ -30,11 +37,17 @@ type Snapshot = {
   lockedMappingCode: string | null
 }
 
-async function getInventoryInfoBySku(tx: DrizzleTransaction, userId: string, skus: string[]) {
-  const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
-  if (uniqueSkus.length === 0) return new Map<string, { productName: string | null; optionName: string | null }>()
+type SkuInfo = {
+  productName: string | null
+  optionName: string | null
+}
 
-  const rows = await tx
+async function getSkuInfoBySku(tx: DrizzleTransaction, userId: string, skus: string[]) {
+  const uniqueSkus = Array.from(new Set(skus.map((sku) => sku.trim()).filter(Boolean)))
+  const info = new Map<string, SkuInfo>()
+  if (uniqueSkus.length === 0) return info
+
+  const inventoryRows = await tx
     .select({
       sku: inventory.sku,
       productName: sql<string | null>`MAX(${inventory.productName})`,
@@ -44,19 +57,109 @@ async function getInventoryInfoBySku(tx: DrizzleTransaction, userId: string, sku
     .where(and(eq(inventory.userId, userId), inArray(inventory.sku, uniqueSkus)))
     .groupBy(inventory.sku)
 
-  return new Map(rows.map((row) => [row.sku, { productName: row.productName, optionName: row.optionName }]))
-}
+  for (const row of inventoryRows) {
+    info.set(row.sku, { productName: row.productName, optionName: row.optionName })
+  }
 
-async function getProductNameBySku(tx: DrizzleTransaction, userId: string, skus: string[]) {
-  const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
-  if (uniqueSkus.length === 0) return new Map<string, string>()
-
-  const rows = await tx
+  const productRows = await tx
     .select({ sku: products.internalSku, name: products.name })
     .from(products)
     .where(and(eq(products.userId, userId), inArray(products.internalSku, uniqueSkus)))
 
-  return new Map(rows.map((row) => [row.sku, row.name]))
+  for (const row of productRows) {
+    const current = info.get(row.sku)
+    info.set(row.sku, {
+      productName: current?.productName ?? row.name,
+      optionName: current?.optionName ?? null,
+    })
+  }
+
+  const variantRows = await tx
+    .select({ sku: productVariants.sku, name: products.name, optionName: productVariants.optionName })
+    .from(productVariants)
+    .innerJoin(products, eq(products.id, productVariants.productId))
+    .where(and(eq(products.userId, userId), inArray(productVariants.sku, uniqueSkus)))
+
+  for (const row of variantRows) {
+    const current = info.get(row.sku)
+    info.set(row.sku, {
+      productName: current?.productName ?? row.name,
+      optionName: current?.optionName ?? row.optionName ?? null,
+    })
+  }
+
+  return info
+}
+
+function getSkuPrefixes(skus: string[]) {
+  return Array.from(new Set(skus.map((sku) => {
+    const match = sku.trim().match(/^(.+)-\d+$/)
+    return match?.[1] ?? null
+  }).filter((prefix): prefix is string => Boolean(prefix))))
+}
+
+async function addInventoryInfoBySkuPrefixes(
+  tx: DrizzleTransaction,
+  userId: string,
+  info: Map<string, SkuInfo>,
+  skus: string[],
+) {
+  const prefixes = getSkuPrefixes(skus)
+  if (prefixes.length === 0) return
+
+  for (const prefix of prefixes) {
+    const rows = await tx
+      .select({
+        sku: inventory.sku,
+        productName: sql<string | null>`MAX(${inventory.productName})`,
+        optionName: sql<string | null>`MAX(${inventory.optionName})`,
+      })
+      .from(inventory)
+      .where(and(
+        eq(inventory.userId, userId),
+        sql`${inventory.sku} LIKE ${`${prefix}-%`}`,
+      ))
+      .groupBy(inventory.sku)
+
+    for (const row of rows) {
+      const current = info.get(row.sku)
+      info.set(row.sku, {
+        productName: current?.productName ?? row.productName,
+        optionName: current?.optionName ?? row.optionName,
+      })
+    }
+  }
+}
+
+function optionMatchesOrder(skuInfo: SkuInfo | undefined, orderOptionText: string | null) {
+  const orderOption = normalizeMappingOptionText(orderOptionText)
+  const skuOption = normalizeMappingOptionText(skuInfo?.optionName)
+  if (!orderOption || !skuOption) return true
+  return orderOption === skuOption || orderOption.includes(skuOption) || skuOption.includes(orderOption)
+}
+
+function findDirectSkuForOrder(
+  candidateIds: string[],
+  skuInfoBySku: Map<string, SkuInfo>,
+  optionText: string | null,
+) {
+  const exactOptionCandidate = candidateIds.find((candidateId) =>
+    skuInfoBySku.has(candidateId) && optionMatchesOrder(skuInfoBySku.get(candidateId), optionText),
+  )
+  if (exactOptionCandidate) return exactOptionCandidate
+
+  const directCandidate = candidateIds.find((candidateId) => skuInfoBySku.has(candidateId))
+  const directInfo = directCandidate ? skuInfoBySku.get(directCandidate) : undefined
+  if (!directCandidate || !directInfo) return null
+  if (optionMatchesOrder(directInfo, optionText)) return directCandidate
+
+  for (const [sku, info] of skuInfoBySku) {
+    if (info.productName === directInfo.productName && optionMatchesOrder(info, optionText)) {
+      return sku
+    }
+  }
+
+  return null
 }
 
 export async function lockOrderItemsForOrders(
@@ -80,6 +183,7 @@ export async function lockOrderItemsForOrders(
       sku: orderItems.sku,
       skuMultiplier: orderItems.skuMultiplier,
       lockedAt: orderItems.lockedAt,
+      rawData: orders.rawData,
     })
     .from(orderItems)
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
@@ -95,6 +199,8 @@ export async function lockOrderItemsForOrders(
         marketplaceId: mappingSources.marketplaceId,
         marketplaceProductId: mappingSources.marketplaceProductId,
         marketplaceOptionId: mappingSources.marketplaceOptionId,
+        productNameSnapshot: mappingSources.productNameSnapshot,
+        optionNameSnapshot: mappingSources.optionNameSnapshot,
       })
       .from(mappingSources)
       .innerJoin(mappingCodes, eq(mappingCodes.id, mappingSources.mappingCodeId))
@@ -111,41 +217,53 @@ export async function lockOrderItemsForOrders(
       .where(and(eq(mappingComponents.userId, userId), eq(mappingCodes.isActive, true))),
   ])
 
-  const mappingIndex = buildMappingIndex(
-    sourceRows.map<MappingSource>((source) => ({
-      marketplaceId: source.marketplaceId,
-      marketplaceProductId: source.marketplaceProductId,
-      marketplaceOptionId: source.marketplaceOptionId,
-      ref: source.mappingCodeId,
-    })),
-  )
+  const mappingSourcesForLookup = sourceRows.map<MappingSource>((source) => ({
+    marketplaceId: source.marketplaceId,
+    marketplaceProductId: source.marketplaceProductId,
+    marketplaceOptionId: source.marketplaceOptionId,
+    productNameSnapshot: source.productNameSnapshot,
+    optionNameSnapshot: source.optionNameSnapshot,
+    ref: source.mappingCodeId,
+  }))
 
   const componentSkus = componentRows.map((component) => component.sku)
-  const directSkus = unlockedItems.map((item) => item.sku ?? '').filter(Boolean)
-  const [inventoryBySku, productNameBySku] = await Promise.all([
-    getInventoryInfoBySku(tx, userId, [...componentSkus, ...directSkus]),
-    getProductNameBySku(tx, userId, directSkus),
+  const candidateSkus = unlockedItems.flatMap((item) => [
+    item.marketplaceItemId ?? '',
+    item.sku ?? '',
+    ...getRawMappingCandidateIdsForItem(item.rawData, item.marketplaceItemId),
   ])
+  const skuInfoBySku = await getSkuInfoBySku(tx, userId, [...componentSkus, ...candidateSkus])
+  await addInventoryInfoBySkuPrefixes(tx, userId, skuInfoBySku, candidateSkus)
 
   const componentsByCode = new Map<string, SnapshotComponent[]>()
   const mappingCodeById = new Map<string, string>()
   for (const component of componentRows) {
     mappingCodeById.set(component.mappingCodeId, component.mappingCode)
-    const inventoryInfo = inventoryBySku.get(component.sku)
+    const skuInfo = skuInfoBySku.get(component.sku)
     const list = componentsByCode.get(component.mappingCodeId) ?? []
     list.push({
       sku: component.sku,
       quantity: component.quantity,
-      productName: inventoryInfo?.productName ?? component.sku,
-      optionName: inventoryInfo?.optionName ?? null,
+      productName: skuInfo?.productName ?? component.sku,
+      optionName: skuInfo?.optionName ?? null,
     })
     componentsByCode.set(component.mappingCodeId, list)
   }
 
-  const buildSnapshot = (item: typeof unlockedItems[number]): Snapshot => {
-    const mappingCodeId = item.marketplaceItemId
-      ? lookupMappingRef(mappingIndex, item.marketplaceId, item.marketplaceItemId, item.optionText)
-      : null
+  const buildSnapshot = (item: typeof unlockedItems[number]): Snapshot | null => {
+    const candidateIds = Array.from(new Set(
+      [item.marketplaceItemId, item.sku, ...getRawMappingCandidateIdsForItem(item.rawData, item.marketplaceItemId)]
+        .map((id) => id?.trim())
+        .filter((id): id is string => Boolean(id))
+        .filter((id) => !isIgnoredMappingCandidate(item.marketplaceId, id)),
+    ))
+    const mappingCodeId = lookupCompatibleMappingRef(
+      mappingSourcesForLookup,
+      item.marketplaceId,
+      candidateIds,
+      item.optionText,
+      item.productName,
+    )
     const components = mappingCodeId ? componentsByCode.get(mappingCodeId) : null
     const orderQuantity = item.quantity * (item.skuMultiplier ?? 1)
 
@@ -163,14 +281,14 @@ export async function lockOrderItemsForOrders(
       }
     }
 
-    const directSku = item.sku ?? null
-    const inventoryInfo = directSku ? inventoryBySku.get(directSku) : undefined
-    const productName = directSku ? productNameBySku.get(directSku) : undefined
+    const directSku = findDirectSkuForOrder(candidateIds, skuInfoBySku, item.optionText)
+    if (!directSku) return null
+    const skuInfo = directSku ? skuInfoBySku.get(directSku) : undefined
 
     return {
       lockedSku: directSku,
-      lockedProductName: productName ?? inventoryInfo?.productName ?? item.productName,
-      lockedOptionName: inventoryInfo?.optionName ?? item.optionText,
+      lockedProductName: skuInfo?.productName ?? item.productName,
+      lockedOptionName: skuInfo?.optionName ?? item.optionText,
       lockedQuantity: orderQuantity,
       lockedMappingCodeId: null,
       lockedMappingCode: null,
@@ -178,8 +296,10 @@ export async function lockOrderItemsForOrders(
   }
 
   const lockedAt = new Date()
+  let lockedCount = 0
   for (const item of unlockedItems) {
     const snapshot = buildSnapshot(item)
+    if (!snapshot) continue
     await tx
       .update(orderItems)
       .set({
@@ -188,9 +308,10 @@ export async function lockOrderItemsForOrders(
         lockedByUserId: lockedByUserId ?? null,
       })
       .where(eq(orderItems.id, item.id))
+    lockedCount += 1
   }
 
-  return unlockedItems.length
+  return lockedCount
 }
 
 export async function unlockOrderItemsForOrders(

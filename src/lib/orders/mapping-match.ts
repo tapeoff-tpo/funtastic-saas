@@ -103,6 +103,37 @@ function pushRecordValues(record: Record<string, unknown>, keys: string[], value
   }
 }
 
+const RAW_MAPPING_KEYS = [
+  'optionManageCode',
+  'productId',
+  'originalProductId',
+  'sellerProductCode',
+  'itemKey',
+  'itemCode',
+  'vendorItemCode',
+  'affiliateItemCode',
+  'productCode',
+  'goodsCode',
+  'goodsNo',
+  'itemNo',
+  'originProductNo',
+  'sellerProductCode',
+  'sellerItemCode',
+  'marketplaceProductId',
+  'marketplaceItemId',
+  'optionCode',
+]
+
+const RAW_ITEM_ID_KEYS = [
+  'productOrderId',
+  'orderProductId',
+  'marketplaceItemId',
+  'marketplaceOrderItemId',
+  'itemId',
+  'lineId',
+  'id',
+]
+
 /**
  * Some marketplaces keep the order-line id and product mapping id separate.
  * CJ온스타일 is one example: marketplaceItemId is the line sequence
@@ -112,62 +143,79 @@ export function getRawMappingCandidateIds(rawData: unknown): string[] {
   const record = asPlainRecord(rawData)
   if (!record) return []
 
-  const keys = [
-    'optionManageCode',
-    'productId',
-    'originalProductId',
-    'sellerProductCode',
-    'itemKey',
-    'itemCode',
-    'vendorItemCode',
-    'affiliateItemCode',
-    'productCode',
-    'goodsCode',
-    'goodsNo',
-    'itemNo',
-    'originProductNo',
-    'sellerProductCode',
-    'sellerItemCode',
-    'marketplaceProductId',
-    'marketplaceItemId',
-    'optionCode',
-  ]
-
   const values: string[] = []
-  pushRecordValues(record, keys, values)
+  pushRecordValues(record, RAW_MAPPING_KEYS, values)
 
   const productOrders = Array.isArray(record.productOrders) ? record.productOrders : []
   for (const rawProductOrder of productOrders) {
     const productOrder = asPlainRecord(rawProductOrder)
-    if (productOrder) pushRecordValues(productOrder, keys, values)
+    if (productOrder) pushRecordValues(productOrder, RAW_MAPPING_KEYS, values)
   }
 
   const item = asPlainRecord(record.item)
-  if (item) pushRecordValues(item, keys.concat(['no', 'itemCustomCode']), values)
+  if (item) pushRecordValues(item, RAW_MAPPING_KEYS.concat(['no', 'itemCustomCode']), values)
 
   const originalData = Array.isArray(record.originalData) ? record.originalData : []
   for (const rawOriginal of originalData) {
     const original = asPlainRecord(rawOriginal)
     const productOrder = asPlainRecord(original?.productOrder)
-    if (productOrder) pushRecordValues(productOrder, keys, values)
+    if (productOrder) pushRecordValues(productOrder, RAW_MAPPING_KEYS, values)
   }
 
   const products = Array.isArray(record.products) ? record.products : []
   for (const rawProduct of products) {
     const product = asPlainRecord(rawProduct)
-    if (product) pushRecordValues(product, keys, values)
+    if (product) pushRecordValues(product, RAW_MAPPING_KEYS, values)
   }
 
   const orderLines = Array.isArray(record.orderLines) ? record.orderLines : []
   for (const rawLine of orderLines) {
     const line = asPlainRecord(rawLine)
     if (!line) continue
-    pushRecordValues(line, keys, values)
+    pushRecordValues(line, RAW_MAPPING_KEYS, values)
     const lineItem = asPlainRecord(line.item)
-    if (lineItem) pushRecordValues(lineItem, keys.concat(['no', 'itemCustomCode']), values)
+    if (lineItem) pushRecordValues(lineItem, RAW_MAPPING_KEYS.concat(['no', 'itemCustomCode']), values)
   }
 
   return Array.from(new Set(values))
+}
+
+function rawRecordMatchesItem(record: Record<string, unknown>, marketplaceItemId: string) {
+  return RAW_ITEM_ID_KEYS.some((key) => stringValue(record[key]) === marketplaceItemId)
+}
+
+function pushMatchedRawCandidates(rawValue: unknown, marketplaceItemId: string, values: string[]) {
+  const record = asPlainRecord(rawValue)
+  if (!record || !rawRecordMatchesItem(record, marketplaceItemId)) return
+  pushRecordValues(record, RAW_MAPPING_KEYS.concat(['no', 'itemCustomCode']), values)
+  const item = asPlainRecord(record.item)
+  if (item) pushRecordValues(item, RAW_MAPPING_KEYS.concat(['no', 'itemCustomCode']), values)
+}
+
+export function getRawMappingCandidateIdsForItem(rawData: unknown, marketplaceItemId?: string | null): string[] {
+  const itemId = marketplaceItemId?.trim()
+  const record = asPlainRecord(rawData)
+  if (!record || !itemId) return getRawMappingCandidateIds(rawData)
+
+  const values: string[] = []
+  for (const rawProductOrder of Array.isArray(record.productOrders) ? record.productOrders : []) {
+    pushMatchedRawCandidates(rawProductOrder, itemId, values)
+  }
+
+  for (const rawOriginal of Array.isArray(record.originalData) ? record.originalData : []) {
+    const original = asPlainRecord(rawOriginal)
+    pushMatchedRawCandidates(original?.productOrder, itemId, values)
+  }
+
+  for (const rawProduct of Array.isArray(record.products) ? record.products : []) {
+    pushMatchedRawCandidates(rawProduct, itemId, values)
+  }
+
+  for (const rawLine of Array.isArray(record.orderLines) ? record.orderLines : []) {
+    pushMatchedRawCandidates(rawLine, itemId, values)
+  }
+
+  return values.length > 0 ? Array.from(new Set(values)) : getRawMappingCandidateIds(rawData)
 }
 
 export function buildMappingIndex(sources: MappingSource[]): MappingIndex {

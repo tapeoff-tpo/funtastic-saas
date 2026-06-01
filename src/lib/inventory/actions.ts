@@ -10,7 +10,7 @@
  */
 
 import { db } from '@/lib/db'
-import { claims, inventory, inventoryHistory, orderItems, orders, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { claims, inventory, inventoryHistory, orderItems, orders, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, and, asc, desc, sql, inArray } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
@@ -219,8 +219,9 @@ export async function expandOrderItemsForDeduction(
       componentQuantity: mappingComponents.quantity,
     })
     .from(mappingSources)
+    .innerJoin(mappingCodes, eq(mappingCodes.id, mappingSources.mappingCodeId))
     .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
-    .where(eq(mappingSources.userId, userId))
+    .where(and(eq(mappingSources.userId, userId), eq(mappingCodes.isActive, true)))
 
   // mappingCodeId 별 components 모음
   const componentsByCode = new Map<string, Array<{ sku: string; quantity: number }>>()

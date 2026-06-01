@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
+import { mappingCodes, mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
@@ -87,14 +87,16 @@ async function validateOrdersHaveInternalMappings(
         optionNameSnapshot: mappingSources.optionNameSnapshot,
       })
       .from(mappingSources)
-      .where(eq(mappingSources.userId, userId)),
+      .innerJoin(mappingCodes, eq(mappingCodes.id, mappingSources.mappingCodeId))
+      .where(and(eq(mappingSources.userId, userId), eq(mappingCodes.isActive, true))),
     db
       .select({
         mappingCodeId: mappingComponents.mappingCodeId,
         sku: mappingComponents.sku,
       })
       .from(mappingComponents)
-      .where(eq(mappingComponents.userId, userId)),
+      .innerJoin(mappingCodes, eq(mappingCodes.id, mappingComponents.mappingCodeId))
+      .where(and(eq(mappingComponents.userId, userId), eq(mappingCodes.isActive, true))),
     db.execute<HistoricalAliasRow>(sql`
       SELECT DISTINCT
         ms.mapping_code_id AS "mappingCodeId",
@@ -102,6 +104,7 @@ async function validateOrdersHaveInternalMappings(
         oi.sku AS "marketplaceProductId",
         ms.marketplace_option_id AS "marketplaceOptionId"
       FROM mapping_sources ms
+      INNER JOIN mapping_codes mc ON mc.id = ms.mapping_code_id AND mc.user_id = ms.user_id AND mc.is_active = TRUE
       INNER JOIN order_items oi ON oi.marketplace_item_id = ms.marketplace_product_id
       INNER JOIN orders o ON o.id = oi.order_id
       WHERE ms.user_id = ${userId}

@@ -149,6 +149,10 @@ export async function GET(req: NextRequest) {
     LEFT JOIN LATERAL (
       SELECT s.*
       FROM mapping_sources s
+      INNER JOIN mapping_codes active_mc
+        ON active_mc.id = s.mapping_code_id
+       AND active_mc.user_id = s.user_id
+       AND active_mc.is_active = TRUE
       WHERE s.user_id = o.user_id
         AND s.marketplace_id = o.marketplace_id
         AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
@@ -208,6 +212,10 @@ export async function GET(req: NextRequest) {
       -- 둘 다 있을 때 단품만 채택되어 품번 존재가 가려지므로 별도 EXISTS 로 확인.
       EXISTS (
         SELECT 1 FROM mapping_sources s2
+        INNER JOIN mapping_codes active_mc2
+          ON active_mc2.id = s2.mapping_code_id
+         AND active_mc2.user_id = s2.user_id
+         AND active_mc2.is_active = TRUE
         WHERE s2.user_id = o.user_id
           AND s2.marketplace_id = o.marketplace_id
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
@@ -217,6 +225,10 @@ export async function GET(req: NextRequest) {
       )                               AS "hasProductMapping",
       EXISTS (
         SELECT 1 FROM mapping_sources s3
+        INNER JOIN mapping_codes active_mc3
+          ON active_mc3.id = s3.mapping_code_id
+         AND active_mc3.user_id = s3.user_id
+         AND active_mc3.is_active = TRUE
         WHERE s3.user_id = o.user_id
           AND s3.marketplace_id = o.marketplace_id
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')

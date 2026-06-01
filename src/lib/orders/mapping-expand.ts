@@ -10,7 +10,7 @@
  */
 
 import { db } from '@/lib/db'
-import { mappingSources, mappingComponents, inventory } from '@/lib/db/schema'
+import { mappingCodes, mappingSources, mappingComponents, inventory } from '@/lib/db/schema'
 import { eq, and, inArray, sql } from 'drizzle-orm'
 import {
   buildMappingIndex,
@@ -100,8 +100,9 @@ export async function expandOrderItemsWithMapping(
       componentQuantity: mappingComponents.quantity,
     })
     .from(mappingSources)
+    .innerJoin(mappingCodes, eq(mappingCodes.id, mappingSources.mappingCodeId))
     .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
-    .where(eq(mappingSources.userId, userId))
+    .where(and(eq(mappingSources.userId, userId), eq(mappingCodes.isActive, true)))
 
   // mappingCodeId 별 components 모음 (중복 제거)
   const componentsByCode = new Map<string, Array<{ sku: string; quantity: number }>>()

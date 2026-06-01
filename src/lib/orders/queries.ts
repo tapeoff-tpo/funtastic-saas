@@ -7,7 +7,7 @@
 
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, notInArray, isNotNull, isNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
@@ -91,9 +91,11 @@ async function getMappingLookups(
             optionNameSnapshot: mappingSources.optionNameSnapshot,
           })
           .from(mappingSources)
+          .innerJoin(mappingCodes, eq(mappingCodes.id, mappingSources.mappingCodeId))
           .where(
             and(
               eq(mappingSources.userId, userId),
+              eq(mappingCodes.isActive, true),
               inArray(mappingSources.marketplaceProductId, marketplaceProductIds),
             ),
           )
@@ -1692,8 +1694,9 @@ export async function getStockDeductionPreview(
       componentQuantity: mappingComponents.quantity,
     })
     .from(mappingSources)
+    .innerJoin(mappingCodes, eq(mappingCodes.id, mappingSources.mappingCodeId))
     .innerJoin(mappingComponents, eq(mappingComponents.mappingCodeId, mappingSources.mappingCodeId))
-    .where(eq(mappingSources.userId, userId))
+    .where(and(eq(mappingSources.userId, userId), eq(mappingCodes.isActive, true)))
 
   // mappingCodeId 별로 components 모아두기
   const componentsByCode = new Map<string, Array<{ sku: string; quantity: number }>>()

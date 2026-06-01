@@ -97,7 +97,8 @@ export async function lockOrderItemsForOrders(
         marketplaceOptionId: mappingSources.marketplaceOptionId,
       })
       .from(mappingSources)
-      .where(eq(mappingSources.userId, userId)),
+      .innerJoin(mappingCodes, eq(mappingCodes.id, mappingSources.mappingCodeId))
+      .where(and(eq(mappingSources.userId, userId), eq(mappingCodes.isActive, true))),
     tx
       .select({
         mappingCodeId: mappingComponents.mappingCodeId,
@@ -107,7 +108,7 @@ export async function lockOrderItemsForOrders(
       })
       .from(mappingComponents)
       .innerJoin(mappingCodes, eq(mappingCodes.id, mappingComponents.mappingCodeId))
-      .where(eq(mappingComponents.userId, userId)),
+      .where(and(eq(mappingComponents.userId, userId), eq(mappingCodes.isActive, true))),
   ])
 
   const mappingIndex = buildMappingIndex(

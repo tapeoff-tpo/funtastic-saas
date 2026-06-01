@@ -285,7 +285,6 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
   readonly config = SPECIALOFFER_CONFIG
 
   private readonly client: ReturnType<typeof createSpecialofferClient>
-  private readonly singleProductOptionCache = new Map<string, string | null>()
 
   constructor(credentials: { api_key: string }) {
     this.client = createSpecialofferClient(credentials)
@@ -510,61 +509,7 @@ export class SpecialofferAdapter implements MarketplaceAdapter {
     }
 
     if (orderOptionText(enriched)) return enriched
-
-    const productOption = await this.productOptionTextForOrder(enriched)
-    return productOption ? { ...enriched, option_text: productOption } : enriched
-  }
-
-  private async productOptionTextForOrder(order: SpecialofferBuyerOrder): Promise<string | null> {
-    const goodsNo = asString(order.goods_no)
-    if (!goodsNo) return null
-    const quantity = Math.max(1, asNumber(order.sum_qty))
-    const orderUnitPrice = quantity > 0 ? Math.round(asNumber(order.goods_price) / quantity) : asNumber(order.goods_price)
-    const cacheKey = `${goodsNo}:${orderUnitPrice}`
-    if (this.singleProductOptionCache.has(cacheKey)) return this.singleProductOptionCache.get(cacheKey) ?? null
-
-    try {
-      const response = await this.client
-        .get(`api/goods/${encodeURIComponent(goodsNo)}`)
-        .json<SpecialofferItemResponse<SpecialofferProduct>>()
-      const product = response.data
-      const options = product?.option_values ?? []
-      if (options.length === 0) {
-        this.singleProductOptionCache.set(cacheKey, null)
-        return null
-      }
-      const basePrice = asNumber(product?.supply_price ?? product?.price ?? product?.origin_price)
-      let matchedOptions = options.filter((option) => {
-        if (options.length === 1) return true
-        const optionPrice = asNumber(option.option_price ?? option.supply_price)
-        return basePrice > 0 && orderUnitPrice === basePrice + optionPrice
-      })
-      if (matchedOptions.length === 0) {
-        matchedOptions = options
-      }
-      if (matchedOptions.length !== 1) {
-        const inStockOptions = matchedOptions.filter((option) => asNumber(option.stock_quantity ?? option.stock_qty) > 0)
-        if (inStockOptions.length === 1) {
-          matchedOptions = inStockOptions
-        }
-      }
-      if (matchedOptions.length !== 1) {
-        this.singleProductOptionCache.set(cacheKey, null)
-        return null
-      }
-      const values = matchedOptions[0]?.values?.map(asString).filter(Boolean) ?? []
-      if (values.length === 0) {
-        this.singleProductOptionCache.set(cacheKey, null)
-        return null
-      }
-      const title = product?.option_titles?.map(asString).find(Boolean)
-      const optionText = title ? `${title}: ${values.join(' / ')}` : values.join(' / ')
-      this.singleProductOptionCache.set(cacheKey, optionText)
-      return optionText
-    } catch {
-      this.singleProductOptionCache.set(cacheKey, null)
-      return null
-    }
+    return enriched
   }
 
   private normalizeOrder(order: SpecialofferBuyerOrder): NormalizedOrder {

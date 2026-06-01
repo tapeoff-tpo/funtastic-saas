@@ -147,7 +147,7 @@ describe('SpecialofferAdapter', () => {
     })
   })
 
-  it('fills missing order options from product options when the order price identifies one option', async () => {
+  it('does not infer missing order options from product catalog prices', async () => {
     const get = vi.fn((endpoint: string) => ({
       json: async () => {
         if (endpoint === 'api/v2/seller/orders') {
@@ -197,10 +197,10 @@ describe('SpecialofferAdapter', () => {
     const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
     const orders = await adapter.getOrders(new Date('2026-05-14T00:00:00+09:00'))
 
-    expect(orders[0].items[0].optionText).toBe('옵션: 대형')
+    expect(orders[0].items[0].optionText).toBeUndefined()
   })
 
-  it('fills missing order options from the only in-stock product option when prices are identical', async () => {
+  it('does not infer missing order options from the only in-stock product option', async () => {
     const get = vi.fn((endpoint: string) => ({
       json: async () => {
         if (endpoint === 'api/v2/seller/orders') {
@@ -251,7 +251,7 @@ describe('SpecialofferAdapter', () => {
     const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
     const orders = await adapter.getOrders(new Date('2026-05-29T00:00:00+09:00'))
 
-    expect(orders[0].items[0].optionText).toBe('옵션: 실버')
+    expect(orders[0].items[0].optionText).toBeUndefined()
   })
 
   it('confirms collected orders with the seller order PATCH endpoint', async () => {
@@ -374,7 +374,7 @@ describe('SpecialofferAdapter', () => {
     expect(orders[0].items[0].optionText).toBe('화이트')
   })
 
-  it('uses a single product option when order responses omit option fields', async () => {
+  it('does not use product options when order responses omit option fields', async () => {
     const get = vi.fn((path: string) => ({
       json: async () => {
         if (path === 'api/v2/seller/orders/573489') {
@@ -413,8 +413,8 @@ describe('SpecialofferAdapter', () => {
     const adapter = new SpecialofferAdapter({ api_key: 'test-key' })
     const orders = await adapter.getOrders(new Date('2026-05-26T00:00:00+09:00'))
 
-    expect(get).toHaveBeenCalledWith('api/goods/831678')
-    expect(orders[0].items[0].optionText).toBe('선택: 화이트')
+    expect(get).not.toHaveBeenCalledWith('api/goods/831678')
+    expect(orders[0].items[0].optionText).toBeUndefined()
   })
 
   it('stops paging when a seller order page reaches older records', async () => {

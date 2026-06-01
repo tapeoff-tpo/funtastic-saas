@@ -147,8 +147,8 @@ export function MappingManager() {
     setLoading(true)
     try {
       const [codesRes, unmappedRes] = await Promise.all([
-        fetch('/api/products/mapping-codes', { cache: 'no-store' }).then((r) => r.json()),
-        fetch('/api/products/mapping-codes/unmapped', { cache: 'no-store' }).then((r) => r.json()),
+        fetch(`/api/products/mapping-codes?t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json()),
+        fetch(`/api/products/mapping-codes/unmapped?t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json()),
       ])
       setCodes(codesRes.codes ?? [])
       setUnmapped(unmappedRes.items ?? [])
@@ -177,6 +177,7 @@ export function MappingManager() {
     return (
       c.code.toLowerCase().includes(q) ||
       c.name.toLowerCase().includes(q) ||
+      (c.note ?? '').toLowerCase().includes(q) ||
       c.sources.some((s) =>
         s.marketplaceId.toLowerCase().includes(q) ||
         s.marketplaceProductId.toLowerCase().includes(q) ||

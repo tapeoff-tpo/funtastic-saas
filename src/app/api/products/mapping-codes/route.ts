@@ -15,6 +15,9 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { isBlockedMappingSourcePair } from '@/lib/orders/mapping-match'
 import { normalizeMappingSources } from '@/lib/orders/mapping-source-normalize'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 interface SourceInput {
   marketplaceId: string
   marketplaceProductId: string
@@ -170,7 +173,10 @@ export async function GET() {
     .where(eq(mappingCodes.userId, workspaceUserId))
     .orderBy(sql`${mappingCodes.updatedAt} DESC`)
 
-  return NextResponse.json({ codes: rows })
+  return NextResponse.json(
+    { codes: rows },
+    { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+  )
 }
 
 export async function POST(req: NextRequest) {

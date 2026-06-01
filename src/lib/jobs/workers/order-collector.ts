@@ -1481,16 +1481,7 @@ async function ensureSplitOrderCopies(
 ): Promise<string[]> {
   if (items.length <= 1) {
     if (items[0]) await normalizeBaseOrderItem(baseOrderId, items[0])
-    await db
-      .delete(orders)
-      .where(
-        and(
-          eq(orders.userId, userId),
-          eq(orders.marketplaceId, order.marketplaceId),
-          eq(orders.marketplaceOrderId, order.marketplaceOrderId),
-          eq(orders.isCopy, true),
-        ),
-      )
+    await deleteUnreferencedSplitCopies(userId, order.marketplaceId, order.marketplaceOrderId)
     return []
   }
 
@@ -1535,9 +1526,12 @@ async function ensureSplitOrderCopies(
   const staleCopies = existingCopies.slice(expectedCopyCount)
 
   if (staleCopies.length > 0) {
-    await db
-      .delete(orders)
-      .where(inArray(orders.id, staleCopies.map((copy) => copy.id)))
+    await deleteUnreferencedSplitCopies(
+      userId,
+      order.marketplaceId,
+      order.marketplaceOrderId,
+      staleCopies.map((copy) => copy.id),
+    )
   }
 
   const copyIds: string[] = []
@@ -1626,6 +1620,30 @@ async function updateSplitOrderCopy(
     .where(eq(orders.id, copyOrderId))
 
   await normalizeBaseOrderItem(copyOrderId, item)
+}
+
+async function deleteUnreferencedSplitCopies(
+  userId: string,
+  marketplaceId: string,
+  marketplaceOrderId: string,
+  copyIds?: string[],
+): Promise<void> {
+  if (copyIds && copyIds.length === 0) return
+
+  await db
+    .delete(orders)
+    .where(
+      and(
+        eq(orders.userId, userId),
+        eq(orders.marketplaceId, marketplaceId),
+        eq(orders.marketplaceOrderId, marketplaceOrderId),
+        eq(orders.isCopy, true),
+        copyIds ? inArray(orders.id, copyIds) : undefined,
+        sql`NOT EXISTS (SELECT 1 FROM shipments s WHERE s.order_id = ${orders.id})`,
+        sql`NOT EXISTS (SELECT 1 FROM claims c WHERE c.order_id = ${orders.id})`,
+        sql`NOT EXISTS (SELECT 1 FROM shipment_group_orders sgo WHERE sgo.order_id = ${orders.id})`,
+      ),
+    )
 }
 
 function asPlainRecord(value: unknown): Record<string, unknown> | null {

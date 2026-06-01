@@ -62,6 +62,19 @@ describe('lookupMappingRef', () => {
       },
     ], 'ownerclan', ['W9D55DC'], '옵션: 3L', '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병')).toBe('mapping-code-id')
   })
+
+  it('matches collected option labels with or without common prefixes', () => {
+    expect(lookupCompatibleMappingRef([
+      {
+        marketplaceId: 'manual-NUQyoT',
+        marketplaceProductId: '829',
+        marketplaceOptionId: '월넛',
+        productNameSnapshot: '메이겔 우드 도어스토퍼 (월넛)',
+        optionNameSnapshot: '월넛',
+        ref: 'mapping-code-id',
+      },
+    ], 'manual-NUQyoT', ['829'], '옵션 월넛', '메이겔 우드 도어스토퍼 (월넛)')).toBe('mapping-code-id')
+  })
 })
 
 describe('mapping source guards', () => {

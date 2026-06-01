@@ -187,6 +187,11 @@ function normalizeMappingText(value: string | null | undefined): string {
     .toLowerCase()
 }
 
+function normalizeMappingOptionText(value: string | null | undefined): string {
+  return normalizeMappingText(value)
+    .replace(/^(옵션|선택|색상|구성|타입|종류|상품선택|사이즈)[:=ㆍ·-]?/i, '')
+}
+
 export function isMappingSourceSnapshotCompatible(
   source: Pick<MappingSource, 'marketplaceOptionId' | 'productNameSnapshot' | 'optionNameSnapshot'>,
   productName?: string | null,
@@ -201,7 +206,11 @@ export function isMappingSourceSnapshotCompatible(
   if (source.marketplaceOptionId) {
     const sourceOptionName = normalizeMappingText(source.optionNameSnapshot)
     const currentOptionName = normalizeMappingText(optionText)
-    if (sourceOptionName && currentOptionName && sourceOptionName !== currentOptionName) {
+    if (
+      sourceOptionName
+      && currentOptionName
+      && normalizeMappingOptionText(source.optionNameSnapshot) !== normalizeMappingOptionText(optionText)
+    ) {
       return false
     }
   }
@@ -228,10 +237,11 @@ function sourceMatchesCandidate(
   if (normalizedOptionText) {
     const effectiveOptionId = source.marketplaceOptionId || source.optionNameSnapshot?.trim().slice(0, 100) || ''
     if (source.marketplaceOptionId === '' && source.marketplaceProductId === marketplaceItemId) {
-      return true
+      if (!source.optionNameSnapshot?.trim()) return true
+      return normalizeMappingOptionText(source.optionNameSnapshot) === normalizeMappingOptionText(normalizedOptionText)
     }
     return source.marketplaceProductId === marketplaceItemId
-      && effectiveOptionId === normalizedOptionText
+      && normalizeMappingOptionText(effectiveOptionId) === normalizeMappingOptionText(normalizedOptionText)
   }
 
   if (source.marketplaceOptionId === EXACT_OPTION_ID && source.marketplaceProductId === marketplaceItemId) {

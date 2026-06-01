@@ -1,5 +1,6 @@
 export const SKU_MAPPING_MARKETPLACE_IDS = [
   'funtastic-b2b',
+  'manual-NUQyoT',
   'naver',
   'ownerclan',
   'ssgmall',

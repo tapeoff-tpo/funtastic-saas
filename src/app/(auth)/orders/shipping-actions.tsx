@@ -1340,7 +1340,7 @@ function getMappingTargetSource(target: MappingTarget): { product: string; optio
     }
   }
   return {
-    product: target.marketplaceId === 'funtastic-b2b' && target.sku?.trim()
+    product: (target.marketplaceId === 'funtastic-b2b' || target.marketplaceId === 'manual-NUQyoT') && target.sku?.trim()
       ? target.sku.trim()
       : split.product,
     option: split.option || target.optionText?.trim() || EXACT_OPTION_ID,

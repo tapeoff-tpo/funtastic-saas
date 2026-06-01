@@ -1,7 +1,7 @@
 import type { ParsedOrderRow } from './excel-import'
 
 export function normalizeImportedOrderItem(item: ParsedOrderRow, marketplaceId: string): ParsedOrderRow {
-  if (marketplaceId === 'funtastic-b2b') {
+  if (marketplaceId === 'funtastic-b2b' || marketplaceId === 'manual-NUQyoT') {
     const productUniqueId = item.sku?.trim()
     return productUniqueId
       ? { ...item, marketplaceItemId: productUniqueId }

@@ -402,8 +402,45 @@ async function selectFirstOrderForExcel(page: Page): Promise<boolean> {
   return selected
 }
 
+export function selectDomechangoVisibleOrderRowsForExcel(root: ParentNode = document): number {
+  const doc = root instanceof Document ? root : root.ownerDocument ?? document
+  const win = doc.defaultView
+  const isHidden = (element: Element) => {
+    if (element instanceof HTMLElement && element.hidden) return true
+    const style = win?.getComputedStyle(element)
+    return style?.visibility === 'hidden' || style?.display === 'none'
+  }
+  const isOrderRowText = (text: string) => /\d{10,}|신규\s*주문|주문\s*접수|주문\s*확인|배송\s*준비|배송준비중|배송\s*대상/.test(text)
+  const rows = Array.from(root.querySelectorAll('tbody tr, .tui-grid-row, [role="row"]'))
+  let count = 0
+
+  for (const row of rows) {
+    if (isHidden(row)) continue
+    const text = row.textContent?.replace(/\s+/g, ' ').trim() ?? ''
+    if (!isOrderRowText(text)) continue
+    const checkbox = row.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    if (!checkbox || checkbox.disabled) continue
+
+    checkbox.scrollIntoView?.({ block: 'center', inline: 'center' })
+    if (!checkbox.checked) checkbox.click()
+    if (!checkbox.checked) {
+      checkbox.checked = true
+      checkbox.dispatchEvent(new Event('input', { bubbles: true }))
+      checkbox.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    if (checkbox.checked) count += 1
+  }
+
+  return count
+}
+
 async function selectAllVisibleOrdersForExcel(page: Page): Promise<boolean> {
-  const selectedCount = await page.evaluate(() => {
+  const selectedCount = await page
+    .evaluate(`(${selectDomechangoVisibleOrderRowsForExcel.toString()})(document)`)
+    .catch(() => 0)
+  if (selectedCount > 0) return true
+
+  const legacySelectedCount = await page.evaluate(() => {
     const isVisible = (element: Element) => {
       const rect = element.getBoundingClientRect()
       const style = window.getComputedStyle(element)
@@ -431,7 +468,7 @@ async function selectAllVisibleOrdersForExcel(page: Page): Promise<boolean> {
     return count
   }).catch(() => 0)
 
-  return selectedCount > 0
+  return legacySelectedCount > 0
 }
 
 async function summarizeOrderSearchState(page: Page): Promise<string> {

@@ -100,6 +100,42 @@ export async function GET(req: NextRequest) {
     WHEN o.marketplace_id IN (${skuMappingMarketplaceList}) AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
     ELSE oi.marketplace_item_id
   END`
+  const mappingCandidateIds = sql`array_remove(ARRAY[
+    ${mappingItemId},
+    NULLIF(oi.marketplace_item_id, ''),
+    NULLIF(oi.sku, ''),
+    NULLIF(o.raw_data->>'optionManageCode', ''),
+    NULLIF(o.raw_data->>'productId', ''),
+    NULLIF(o.raw_data->>'originalProductId', ''),
+    NULLIF(o.raw_data->>'sellerProductCode', ''),
+    NULLIF(o.raw_data->>'itemKey', ''),
+    NULLIF(o.raw_data->>'itemCode', ''),
+    NULLIF(o.raw_data->>'vendorItemCode', ''),
+    NULLIF(o.raw_data->>'affiliateItemCode', ''),
+    NULLIF(o.raw_data->>'productCode', ''),
+    NULLIF(o.raw_data->>'goodsCode', ''),
+    NULLIF(o.raw_data->>'goodsNo', ''),
+    NULLIF(o.raw_data->>'itemNo', ''),
+    NULLIF(o.raw_data->>'originProductNo', ''),
+    NULLIF(o.raw_data->>'sellerItemCode', ''),
+    NULLIF(o.raw_data->>'marketplaceProductId', ''),
+    NULLIF(o.raw_data->>'marketplaceItemId', ''),
+    NULLIF(o.raw_data->>'optionCode', ''),
+    NULLIF(o.raw_data->'item'->>'no', ''),
+    NULLIF(o.raw_data->'item'->>'itemCustomCode', ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>0, ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>1, ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>2, ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>3, '')
+  ]::text[], NULL)`
+  const sourceProductMatches = (source: ReturnType<typeof sql>) => sql`(
+    ${source}.marketplace_product_id = ANY(${mappingCandidateIds})
+    OR EXISTS (
+      SELECT 1
+      FROM unnest(${mappingCandidateIds}) AS candidate_id(value)
+      WHERE candidate_id.value LIKE ${source}.marketplace_product_id || '-%'
+    )
+  )`
 
   // ---------- 동적 WHERE 절 (parametrized) ----------
   // o.user_id = user.id 는 항상.
@@ -168,13 +204,12 @@ export async function GET(req: NextRequest) {
             AND (
               ${mappingItemId} = s.marketplace_product_id || '-' || s.marketplace_option_id
               OR (s.marketplace_option_id = ${exactOptionId}
-                AND ${mappingItemId} = s.marketplace_product_id)
-              OR (${mappingItemId} = s.marketplace_product_id
+                AND ${sourceProductMatches(sql`s`)})
+              OR (${sourceProductMatches(sql`s`)}
                 AND ${normalizedOption(sql`oi.option_text`)} = ${normalizedOption(sql`s.marketplace_option_id`)})
             ))
           OR (s.marketplace_option_id = ''
-            AND (${mappingItemId} = s.marketplace_product_id
-              OR ${mappingItemId} LIKE s.marketplace_product_id || '-%'))
+            AND ${sourceProductMatches(sql`s`)})
         )
       ORDER BY (s.marketplace_option_id <> '') DESC
       LIMIT 1
@@ -227,8 +262,7 @@ export async function GET(req: NextRequest) {
           AND s2.marketplace_id = o.marketplace_id
           AND NOT (o.marketplace_id = 'onchannel' AND oi.marketplace_item_id ~* '^MO_[0-9]+$')
           AND s2.marketplace_option_id = ''
-          AND (${mappingItemId} = s2.marketplace_product_id
-            OR ${mappingItemId} LIKE s2.marketplace_product_id || '-%')
+          AND ${sourceProductMatches(sql`s2`)}
       )                               AS "hasProductMapping",
       EXISTS (
         SELECT 1 FROM mapping_sources s3
@@ -243,8 +277,8 @@ export async function GET(req: NextRequest) {
           AND (
             ${mappingItemId} = s3.marketplace_product_id || '-' || s3.marketplace_option_id
             OR (s3.marketplace_option_id = ${exactOptionId}
-              AND ${mappingItemId} = s3.marketplace_product_id)
-            OR (${mappingItemId} = s3.marketplace_product_id
+              AND ${sourceProductMatches(sql`s3`)})
+            OR (${sourceProductMatches(sql`s3`)}
               AND ${normalizedOption(sql`oi.option_text`)} = ${normalizedOption(sql`s3.marketplace_option_id`)})
           )
       )                               AS "hasOptionMapping",

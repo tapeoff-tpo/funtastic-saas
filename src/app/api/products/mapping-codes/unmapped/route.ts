@@ -30,6 +30,42 @@ export async function GET() {
     WHEN o.marketplace_id IN (${skuMappingMarketplaceList}) AND NULLIF(oi.sku, '') IS NOT NULL THEN oi.sku
     ELSE oi.marketplace_item_id
   END`
+  const mappingCandidateIds = sql`array_remove(ARRAY[
+    ${mappingItemId},
+    NULLIF(oi.marketplace_item_id, ''),
+    NULLIF(oi.sku, ''),
+    NULLIF(o.raw_data->>'optionManageCode', ''),
+    NULLIF(o.raw_data->>'productId', ''),
+    NULLIF(o.raw_data->>'originalProductId', ''),
+    NULLIF(o.raw_data->>'sellerProductCode', ''),
+    NULLIF(o.raw_data->>'itemKey', ''),
+    NULLIF(o.raw_data->>'itemCode', ''),
+    NULLIF(o.raw_data->>'vendorItemCode', ''),
+    NULLIF(o.raw_data->>'affiliateItemCode', ''),
+    NULLIF(o.raw_data->>'productCode', ''),
+    NULLIF(o.raw_data->>'goodsCode', ''),
+    NULLIF(o.raw_data->>'goodsNo', ''),
+    NULLIF(o.raw_data->>'itemNo', ''),
+    NULLIF(o.raw_data->>'originProductNo', ''),
+    NULLIF(o.raw_data->>'sellerItemCode', ''),
+    NULLIF(o.raw_data->>'marketplaceProductId', ''),
+    NULLIF(o.raw_data->>'marketplaceItemId', ''),
+    NULLIF(o.raw_data->>'optionCode', ''),
+    NULLIF(o.raw_data->'item'->>'no', ''),
+    NULLIF(o.raw_data->'item'->>'itemCustomCode', ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>0, ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>1, ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>2, ''),
+    NULLIF(o.raw_data->'orderIdentity'->'itemIds'->>3, '')
+  ]::text[], NULL)`
+  const sourceProductMatches = (source: ReturnType<typeof sql>) => sql`(
+    ${source}.marketplace_product_id = ANY(${mappingCandidateIds})
+    OR EXISTS (
+      SELECT 1
+      FROM unnest(${mappingCandidateIds}) AS candidate_id(value)
+      WHERE candidate_id.value LIKE ${source}.marketplace_product_id || '-%'
+    )
+  )`
 
   // 최근 90일 내 주문에 등장한 마켓상품 중 매핑되지 않은 항목.
   // 주문행 번호가 marketplace_item_id 로 들어오는 마켓은
@@ -64,14 +100,13 @@ export async function GET() {
                 AND (
                   ${mappingItemId} = ms.marketplace_product_id || '-' || ms.marketplace_option_id
                   OR (ms.marketplace_option_id = ${exactOptionId}
-                    AND ${mappingItemId} = ms.marketplace_product_id)
-                  OR (${mappingItemId} = ms.marketplace_product_id
+                    AND ${sourceProductMatches(sql`ms`)})
+                  OR (${sourceProductMatches(sql`ms`)}
                     AND ${normalizedOption(sql`oi.option_text`)} = ${normalizedOption(sql`ms.marketplace_option_id`)})
                 ))
               -- 품번매핑: 풀 일치 또는 productId+ "-" prefix
               OR (ms.marketplace_option_id = ''
-                AND (${mappingItemId} = ms.marketplace_product_id
-                  OR ${mappingItemId} LIKE ms.marketplace_product_id || '-%'))
+                AND ${sourceProductMatches(sql`ms`)})
             )
         )
     GROUP BY o.marketplace_id, ${mappingItemId}

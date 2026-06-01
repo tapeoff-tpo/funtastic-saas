@@ -10,7 +10,7 @@ import { createHash } from 'crypto'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { mappingCodes, mappingSources, mappingComponents, products, productVariants, inventory } from '@/lib/db/schema'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { isBlockedMappingSourcePair, stripMappingTextWrapper } from '@/lib/orders/mapping-match'
 import { normalizeMappingSources } from '@/lib/orders/mapping-source-normalize'
@@ -112,29 +112,22 @@ async function findInvalidComponentSkus(userId: string, components: ComponentInp
   ))
   if (requestedSkus.length === 0) return []
 
-  const rows = await db.execute<{ sku: string }>(sql`
-    SELECT sku
-    FROM (
-      SELECT ${products.internalSku} AS sku
-      FROM ${products}
-      WHERE ${products.userId} = ${userId}
-        AND ${products.internalSku} = ANY(${requestedSkus})
-      UNION
-      SELECT ${productVariants.sku} AS sku
-      FROM ${productVariants}
-      INNER JOIN ${products} ON ${products.id} = ${productVariants.productId}
-      WHERE ${products.userId} = ${userId}
-        AND ${productVariants.sku} = ANY(${requestedSkus})
-      UNION
-      SELECT ${inventory.sku} AS sku
-      FROM ${inventory}
-      WHERE ${inventory.userId} = ${userId}
-        AND ${inventory.sku} = ANY(${requestedSkus})
-    ) valid_skus
-  `)
-  const validRows = Array.isArray(rows)
-    ? rows
-    : (rows as unknown as { rows?: Array<{ sku: string }> }).rows ?? []
+  const [productRows, variantRows, inventoryRows] = await Promise.all([
+    db
+      .select({ sku: products.internalSku })
+      .from(products)
+      .where(and(eq(products.userId, userId), inArray(products.internalSku, requestedSkus))),
+    db
+      .select({ sku: productVariants.sku })
+      .from(productVariants)
+      .innerJoin(products, eq(products.id, productVariants.productId))
+      .where(and(eq(products.userId, userId), inArray(productVariants.sku, requestedSkus))),
+    db
+      .select({ sku: inventory.sku })
+      .from(inventory)
+      .where(and(eq(inventory.userId, userId), inArray(inventory.sku, requestedSkus))),
+  ])
+  const validRows = [...productRows, ...variantRows, ...inventoryRows]
   const validSkus = new Set(validRows.map((row) => row.sku))
   return requestedSkus.filter((sku) => !validSkus.has(sku))
 }

@@ -84,7 +84,7 @@ function normalizeCodeCandidate(value: string, codeLength?: number): string | nu
   return digits.length >= 4 && digits.length <= 8 ? digits : null
 }
 
-function extractVerificationCode(message: string, codeLength?: number): string | null {
+export function extractVerificationCodeFromMessage(message: string, codeLength?: number): string | null {
   const body = extractMessageBody(message)
   const decoded = decodeMimeWord(stripHtml(decodeQuotedPrintable(body)))
     .replace(/https?:\/\/\S+/gi, ' ')
@@ -239,7 +239,7 @@ export async function readNaverVerificationCode(options: NaverMailCodeOptions): 
         if (receivedAfter && messageDate && messageDate.getTime() < receivedAfter - receivedAfterSlackMs) continue
         const decoded = decodeMimeWord(decodeQuotedPrintable(message)).toLowerCase()
         if (!subjectHints.some((hint) => decoded.includes(hint.toLowerCase()))) continue
-        const code = extractVerificationCode(message, options.codeLength)
+        const code = extractVerificationCodeFromMessage(message, options.codeLength)
         if (code) {
           if (options.markAsRead) await client.markAsRead(uid).catch(() => undefined)
           return code

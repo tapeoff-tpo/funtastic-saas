@@ -970,9 +970,9 @@ async function handleEmailSecondFactor(
       receivedAfterSlackMs: 1000,
       timeoutMs: 45_000,
       pollIntervalMs: 3_000,
-      fromHints: ['bucketplace', 'ohou', '오늘의집', ''],
-      subjectHints: ['오늘의집', 'ohou', '인증'],
-      onlyUnread: true,
+      fromHints: ['bucketplace.net', 'bucketplace', 'ohou', '오늘의집', ''],
+      subjectHints: ['오늘의집', 'ohou', '인증번호', '인증'],
+      onlyUnread: false,
       codeLength: 6,
       markAsRead: true,
     })

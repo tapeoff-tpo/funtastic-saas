@@ -965,12 +965,26 @@ export async function findExistingOrderMatches(
       continue
     }
 
-    if (existing.length > 0) {
+    if (existing.length > 0 && shouldSkipCrossMarketplaceDuplicate(order.marketplaceId, existing)) {
       skipKeys.add(orderKey)
     }
   }
 
   return { upsertKeys, skipKeys }
+}
+
+function shouldSkipCrossMarketplaceDuplicate(
+  incomingMarketplaceId: string,
+  existingOrders: Array<{ connectionId: string | null; rawData: unknown }>,
+): boolean {
+  if (
+    incomingMarketplaceId === 'banana-b2b'
+    && existingOrders.every((order) => isProtectedExcelCollectedOrder(order))
+  ) {
+    return false
+  }
+
+  return true
 }
 
 function rawText(rawData: unknown, key: string): string {

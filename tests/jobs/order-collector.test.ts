@@ -492,6 +492,42 @@ describe('processOrderCollection', () => {
     expect(result.ordersCollected).toBe(0)
   })
 
+  it('does not skip Banana B2B orders when the same order number exists from Sabangnet Excel', async () => {
+    const existingOrderNo = '20260527-00000010'
+    mockExistingOrders = [{
+      marketplaceId: 'sabangnet-a866eef06e',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: 'sabangnet buyer',
+      recipientName: 'sabangnet receiver',
+      connectionId: null,
+      rawData: {
+        source: 'sabangnet-current-xlsx',
+        collectionSource: 'sabangnet-excel',
+      },
+    }]
+    mockGetOrders.mockResolvedValue([{
+      ...sampleOrder,
+      marketplaceId: 'banana-b2b',
+      marketplaceOrderId: existingOrderNo,
+      buyerName: 'banana buyer',
+      recipientName: 'banana receiver',
+      rawData: { source: 'rpa-excel' },
+    }])
+
+    const { findExistingOrderMatches } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await findExistingOrderMatches('user-1', 'banana-b2b', [{
+      ...sampleOrder,
+      marketplaceId: 'banana-b2b',
+      marketplaceOrderId: existingOrderNo,
+    }])
+
+    expect(result.skipKeys.has(`banana-b2b:${existingOrderNo}`)).toBe(false)
+    expect(result.upsertKeys.has(`banana-b2b:${existingOrderNo}`)).toBe(false)
+  })
+
   it('moves newly collected Ownerclan orders to marketplace shipping preparation', async () => {
     mockGetOrders.mockResolvedValue([{
       ...sampleOrder,

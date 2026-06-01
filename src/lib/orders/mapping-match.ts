@@ -275,11 +275,8 @@ function sourceMatchesCandidate(
 
   if (normalizedOptionText) {
     const effectiveOptionId = normalizeSourceOptionId(source.marketplaceOptionId || source.optionNameSnapshot)
-    if (source.marketplaceOptionId === '' && source.marketplaceProductId === marketplaceItemId) {
-      if (!source.optionNameSnapshot?.trim()) return true
-      return optionTextEquals(source.optionNameSnapshot, normalizedOptionText)
-    }
     return source.marketplaceProductId === marketplaceItemId
+      && Boolean(effectiveOptionId)
       && optionTextEquals(effectiveOptionId, normalizedOptionText)
   }
 

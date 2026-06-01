@@ -50,6 +50,19 @@ describe('lookupMappingRef', () => {
     ], 'ownerclan', ['W9D55DC'], '옵션: 5L', '미니 워터바 음료 주스 생수 디스펜서 수도꼭지 물병')).toBeNull()
   })
 
+  it('does not use a product-only compatible source for orders that have an option', () => {
+    expect(lookupCompatibleMappingRef([
+      {
+        marketplaceId: 'ownerclan',
+        marketplaceProductId: '1015200001',
+        marketplaceOptionId: '',
+        productNameSnapshot: 'sample product',
+        optionNameSnapshot: '',
+        ref: 'mapping-code-id',
+      },
+    ], 'ownerclan', ['1015200001'], 'option: blue', 'sample product')).toBeNull()
+  })
+
   it('matches legacy sources only when the option snapshot exactly matches', () => {
     expect(lookupCompatibleMappingRef([
       {

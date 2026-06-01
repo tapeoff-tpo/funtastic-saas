@@ -38,6 +38,11 @@ type MappingAlias = {
 
 type HistoricalAliasRow = Pick<MappingAlias, 'mappingCodeId' | 'marketplaceId' | 'marketplaceProductId' | 'marketplaceOptionId'>
 
+type ItemMappingLookupResult = {
+  mappingCodeId: string | null
+  failureReason?: string
+}
+
 async function validateOrdersHaveInternalMappings(
   userId: string,
   orderIds: string[],
@@ -145,14 +150,14 @@ async function validateOrdersHaveInternalMappings(
     componentsByCode.set(row.mappingCodeId, list)
   }
 
-  const findItemMappingCode = (item: typeof targetRows[number]): string | null => {
+  const findItemMappingCode = (item: typeof targetRows[number]): ItemMappingLookupResult => {
     const candidateIds = Array.from(new Set(
       [item.marketplaceItemId, item.sku, ...getRawMappingCandidateIds(item.rawData)]
         .map((id) => id?.trim())
         .filter((id): id is string => Boolean(id)),
     ))
     const directSku = candidateIds.find((candidateId) => validSkus.has(candidateId))
-    if (directSku) return '__direct_sku__'
+    if (directSku) return { mappingCodeId: '__direct_sku__' }
 
     const mappingCodeId = lookupCompatibleMappingRef(
       mappingSourcesForLookup,
@@ -161,12 +166,30 @@ async function validateOrdersHaveInternalMappings(
       item.optionText,
       item.productName,
     )
-    if (!mappingCodeId) return null
+    if (!mappingCodeId) {
+      return {
+        mappingCodeId: null,
+        failureReason: `내부 상품코드 매핑 실패: ${item.sku || item.marketplaceItemId || item.itemId}`,
+      }
+    }
 
     const componentSkus = componentsByCode.get(mappingCodeId) ?? []
-    return componentSkus.length > 0 && componentSkus.every((sku) => validSkus.has(sku))
-      ? mappingCodeId
-      : null
+    if (componentSkus.length === 0) {
+      return {
+        mappingCodeId: null,
+        failureReason: `매핑 구성상품이 비어있음: ${item.sku || item.marketplaceItemId || item.itemId}`,
+      }
+    }
+
+    const invalidComponentSkus = componentSkus.filter((sku) => !validSkus.has(sku))
+    if (invalidComponentSkus.length > 0) {
+      return {
+        mappingCodeId: null,
+        failureReason: `매핑된 내부 상품코드가 상품/재고에 없음: ${invalidComponentSkus.join(', ')}`,
+      }
+    }
+
+    return { mappingCodeId }
   }
 
   const validOrderIds: string[] = []
@@ -181,9 +204,14 @@ async function validateOrdersHaveInternalMappings(
       continue
     }
 
-    const itemMatches = items.map((item) => ({ item, mappingCodeId: findItemMappingCode(item) }))
-    const failedItem = itemMatches.find((match) => !match.mappingCodeId)?.item
-    if (failedItem) {
+    const itemMatches = items.map((item) => ({ item, ...findItemMappingCode(item) }))
+    const failedMatch = itemMatches.find((match) => !match.mappingCodeId)
+    if (failedMatch) {
+      if (failedMatch.failureReason) {
+        failures.push({ orderId, marketplaceOrderId, reason: failedMatch.failureReason })
+        continue
+      }
+      const failedItem = failedMatch.item
       failures.push({
         orderId,
         marketplaceOrderId,

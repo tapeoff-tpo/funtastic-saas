@@ -227,6 +227,9 @@ function sourceMatchesCandidate(
 
   if (normalizedOptionText) {
     const effectiveOptionId = source.marketplaceOptionId || source.optionNameSnapshot?.trim().slice(0, 100) || ''
+    if (source.marketplaceOptionId === '' && source.marketplaceProductId === marketplaceItemId) {
+      return true
+    }
     return source.marketplaceProductId === marketplaceItemId
       && effectiveOptionId === normalizedOptionText
   }

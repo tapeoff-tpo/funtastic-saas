@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
 import { ClaimList, MemoPanel } from './[id]/client'
 import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
+import { usesSkuMappingKey } from '@/lib/orders/mapping-key-marketplaces'
 
 const EDITABLE_CONFIRMED_ITEM_STATUSES = new Set<OrderStatus>(['new', 'confirmed', 'preparing', 'ready'])
 
@@ -38,6 +39,15 @@ const CHANGE_ACTION_LABELS: Record<string, string> = {
   'invoice.send_requested': '송장 송신시작',
   'invoice.sent': '송장 송신',
   'claim.created': '클레임접수',
+}
+
+function displayCollectedProductCode(
+  marketplaceId: string,
+  item: { sku?: string | null; marketplaceItemId?: string | null },
+): string | null {
+  return usesSkuMappingKey(marketplaceId) && item.sku
+    ? item.sku
+    : item.marketplaceItemId ?? null
 }
 
 interface OrderDetail {
@@ -521,7 +531,9 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                   </div>
                   )}
                   <ul className="divide-y text-sm">
-                    {order.items.map((item) => (
+                    {order.items.map((item) => {
+                      const collectedProductCode = displayCollectedProductCode(order.marketplaceId, item)
+                      return (
                       <li key={item.id} className="flex justify-between gap-3 py-2">
                         <div className="flex-1 space-y-1">
                           <div className="flex gap-2">
@@ -602,16 +614,16 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                               </span>
                             )}
                           </div>
-                          {!editingItems && (item.sku || item.marketplaceItemId) && (
+                          {!editingItems && (item.sku || collectedProductCode) && (
                             <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                               {item.sku && (
                                 <span>
                                   내부 상품코드 <span className="font-mono">{item.sku}</span>
                                 </span>
                               )}
-                              {item.marketplaceItemId && (
+                              {collectedProductCode && (
                                 <span>
-                                  수집상품코드 <span className="font-mono">{item.marketplaceItemId}</span>
+                                  수집상품코드 <span className="font-mono">{collectedProductCode}</span>
                                 </span>
                               )}
                             </div>
@@ -621,7 +633,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
                           {Number(item.unitPrice).toLocaleString('ko-KR')}원 × {item.quantity}
                         </div>
                       </li>
-                    ))}
+                    )})}
                   </ul>
                 </section>
 

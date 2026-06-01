@@ -8,6 +8,7 @@ import { ORDER_STATUS_LABELS, type OrderStatus } from '@/lib/orders/types'
 import { getUserDisplayNames } from '@/lib/supabase/admin'
 import { ClaimList } from './client'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { usesSkuMappingKey } from '@/lib/orders/mapping-key-marketplaces'
 
 export const metadata: Metadata = {
   title: '주문 상세',
@@ -60,6 +61,15 @@ function getSabangnetRawData(rawData: unknown): SabangnetRawData | null {
   if (!rawData || typeof rawData !== 'object') return null
   const data = rawData as SabangnetRawData
   return data.source === 'sabangnet-history-xlsx' ? data : null
+}
+
+function displayCollectedProductCode(
+  marketplaceId: string,
+  item: { sku?: string | null; marketplaceItemId?: string | null },
+): string | null {
+  return usesSkuMappingKey(marketplaceId) && item.sku
+    ? item.sku
+    : item.marketplaceItemId ?? null
 }
 
 export default async function OrderDetailPage({
@@ -213,7 +223,9 @@ export default async function OrderDetailPage({
               주문 상품 ({order.items.length}건)
             </h2>
             <ul className="divide-y">
-              {order.items.map((item) => (
+              {order.items.map((item) => {
+                const collectedProductCode = displayCollectedProductCode(order.marketplaceId, item)
+                return (
                 <li key={item.id} className="flex justify-between gap-4 py-3 text-sm">
                   <div className="flex-1 space-y-1">
                     {/* 수집상품명 */}
@@ -244,9 +256,9 @@ export default async function OrderDetailPage({
                         내부 상품코드: {item.sku}
                       </p>
                     )}
-                    {item.marketplaceItemId && (
+                    {collectedProductCode && (
                       <p className="mt-1 text-xs font-mono text-muted-foreground">
-                        수집상품코드: {item.marketplaceItemId}
+                        수집상품코드: {collectedProductCode}
                       </p>
                     )}
                   </div>
@@ -256,7 +268,7 @@ export default async function OrderDetailPage({
                     </p>
                   </div>
                 </li>
-              ))}
+              )})}
             </ul>
           </section>
 

@@ -89,6 +89,8 @@ describe('mapping source guards', () => {
     expect(getRawMappingCandidateIds({
       productOrders: [{ productId: 5204136979, optionManageCode: '5204136979_2' }],
       originalData: [{ productOrder: { originalProductId: '5184242974' } }],
-    })).toEqual(['5204136979_2', '5204136979', '5184242974'])
+      item: { no: '12179088249' },
+      orderLines: [{ item: { itemCustomCode: 'DG-CUSTOM-1' } }],
+    })).toEqual(['5204136979_2', '5204136979', '12179088249', '5184242974', 'DG-CUSTOM-1'])
   })
 })

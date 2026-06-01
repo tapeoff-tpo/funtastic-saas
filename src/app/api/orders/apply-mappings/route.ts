@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { mappingCodes, mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
+import { inventory, mappingCodes, mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
@@ -67,7 +67,7 @@ async function validateOrdersHaveInternalMappings(
     rowsByOrderId.set(row.orderId, list)
   }
 
-  const [productRows, variantRows, sourceRows, componentRows, historicalAliasResult] = await Promise.all([
+  const [productRows, variantRows, inventoryRows, sourceRows, componentRows, historicalAliasResult] = await Promise.all([
     db
       .select({ sku: products.internalSku })
       .from(products)
@@ -77,6 +77,10 @@ async function validateOrdersHaveInternalMappings(
       .from(productVariants)
       .innerJoin(products, eq(products.id, productVariants.productId))
       .where(eq(products.userId, userId)),
+    db
+      .select({ sku: inventory.sku })
+      .from(inventory)
+      .where(eq(inventory.userId, userId)),
     db
       .select({
         mappingCodeId: mappingSources.mappingCodeId,
@@ -121,6 +125,7 @@ async function validateOrdersHaveInternalMappings(
   const validSkus = new Set<string>()
   for (const row of productRows) validSkus.add(row.sku.trim())
   for (const row of variantRows) validSkus.add(row.sku.trim())
+  for (const row of inventoryRows) validSkus.add(row.sku.trim())
 
   const mappingSourcesForLookup = (
     [...sourceRows, ...historicalAliasRows].map<MappingSource>((row) => ({

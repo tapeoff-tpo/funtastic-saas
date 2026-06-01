@@ -9,10 +9,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { mappingCodes, mappingSources, mappingComponents, products, productVariants } from '@/lib/db/schema'
+import { mappingCodes, mappingSources, mappingComponents, products, productVariants, inventory } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq, and, sql } from 'drizzle-orm'
-import { isBlockedMappingSourcePair } from '@/lib/orders/mapping-match'
+import { isBlockedMappingSourcePair, stripMappingTextWrapper } from '@/lib/orders/mapping-match'
 import { normalizeMappingSources } from '@/lib/orders/mapping-source-normalize'
 
 interface SourceInput {
@@ -46,12 +46,12 @@ function isBlockedSource(source: SourceInput): boolean {
 }
 
 function normalizeSourceOption(source: SourceInput): SourceInput {
-  const optionId = source.marketplaceOptionId?.trim()
-  if (optionId) return { ...source, marketplaceOptionId: optionId }
+  const optionId = stripMappingTextWrapper(source.marketplaceOptionId)
+  if (optionId) return { ...source, marketplaceOptionId: optionId, optionNameSnapshot: stripMappingTextWrapper(source.optionNameSnapshot) || source.optionNameSnapshot }
 
-  const collectedOption = source.optionNameSnapshot?.trim()
+  const collectedOption = stripMappingTextWrapper(source.optionNameSnapshot)
   return collectedOption
-    ? { ...source, marketplaceOptionId: collectedOption }
+    ? { ...source, marketplaceOptionId: collectedOption, optionNameSnapshot: collectedOption }
     : { ...source, marketplaceOptionId: '' }
 }
 
@@ -115,6 +115,11 @@ async function findInvalidComponentSkus(userId: string, components: ComponentInp
       INNER JOIN ${products} ON ${products.id} = ${productVariants.productId}
       WHERE ${products.userId} = ${userId}
         AND ${productVariants.sku} = ANY(${requestedSkus})
+      UNION
+      SELECT ${inventory.sku} AS sku
+      FROM ${inventory}
+      WHERE ${inventory.userId} = ${userId}
+        AND ${inventory.sku} = ANY(${requestedSkus})
     ) valid_skus
   `)
   const validRows = Array.isArray(rows)

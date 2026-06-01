@@ -165,9 +165,10 @@ export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
 
   for (const s of sources) {
     if (s.marketplaceOptionId) {
-      const sourceKey = `${s.marketplaceProductId}${MAPPING_SEPARATOR}${s.marketplaceOptionId}`
+      const sourceOptionId = normalizeSourceOptionId(s.marketplaceOptionId)
+      const sourceKey = `${s.marketplaceProductId}${MAPPING_SEPARATOR}${sourceOptionId}`
       optionMap.set(`${s.marketplaceId}:${sourceKey}`, s.ref)
-      if (s.marketplaceOptionId === EXACT_OPTION_ID) {
+      if (sourceOptionId === EXACT_OPTION_ID) {
         exactProductMap.set(`${s.marketplaceId}:${s.marketplaceProductId}`, s.ref)
       }
     } else {
@@ -179,17 +180,28 @@ export function buildMappingIndex(sources: MappingSource[]): MappingIndex {
   return { optionMap, exactProductMap, productMap }
 }
 
-function normalizeMappingText(value: string | null | undefined): string {
+export function stripMappingTextWrapper(value: string | null | undefined): string {
   return (value ?? '')
     .trim()
+    .replace(/<!\[CDATA\[/gi, '')
+    .replace(/\]\]>/g, '')
+    .trim()
+}
+
+function normalizeMappingText(value: string | null | undefined): string {
+  return stripMappingTextWrapper(value)
     .replace(/_펀타스틱$/i, '')
     .replace(/\s+/g, '')
     .toLowerCase()
 }
 
-function normalizeMappingOptionText(value: string | null | undefined): string {
+export function normalizeMappingOptionText(value: string | null | undefined): string {
   return normalizeMappingText(value)
     .replace(/^(옵션|선택|색상|구성|타입|종류|상품선택|사이즈)[:=ㆍ·-]?/i, '')
+}
+
+function normalizeSourceOptionId(value: string | null | undefined): string {
+  return stripMappingTextWrapper(value).slice(0, 100)
 }
 
 export function isMappingSourceSnapshotCompatible(
@@ -228,14 +240,15 @@ function sourceMatchesCandidate(
   if (isIgnoredMappingCandidate(marketplaceId, marketplaceItemId)) return false
   if (isBlockedMappingSourcePair(marketplaceId, source.marketplaceProductId, source.marketplaceOptionId)) return false
 
-  const normalizedOptionText = optionText?.trim().slice(0, 100)
-  const exactSourceKey = source.marketplaceOptionId
-    ? `${source.marketplaceProductId}${MAPPING_SEPARATOR}${source.marketplaceOptionId}`
+  const normalizedOptionText = normalizeSourceOptionId(optionText)
+  const sourceOptionId = normalizeSourceOptionId(source.marketplaceOptionId)
+  const exactSourceKey = sourceOptionId
+    ? `${source.marketplaceProductId}${MAPPING_SEPARATOR}${sourceOptionId}`
     : null
   if (exactSourceKey && exactSourceKey === marketplaceItemId) return true
 
   if (normalizedOptionText) {
-    const effectiveOptionId = source.marketplaceOptionId || source.optionNameSnapshot?.trim().slice(0, 100) || ''
+    const effectiveOptionId = normalizeSourceOptionId(source.marketplaceOptionId || source.optionNameSnapshot)
     if (source.marketplaceOptionId === '' && source.marketplaceProductId === marketplaceItemId) {
       if (!source.optionNameSnapshot?.trim()) return true
       return normalizeMappingOptionText(source.optionNameSnapshot) === normalizeMappingOptionText(normalizedOptionText)
@@ -298,7 +311,7 @@ export function lookupMappingRef(
 ): string | null {
   if (isIgnoredMappingCandidate(marketplaceId, marketplaceItemId)) return null
 
-  const normalizedOptionText = optionText?.trim().slice(0, 100)
+  const normalizedOptionText = normalizeSourceOptionId(optionText)
 
   // 1) 단품 정확매치
   const optKey = `${marketplaceId}:${marketplaceItemId}`

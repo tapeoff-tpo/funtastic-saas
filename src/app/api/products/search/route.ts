@@ -51,7 +51,12 @@ export async function GET(req: NextRequest) {
       WHERE p.user_id = ${workspaceUserId}
         AND p.status <> 'deleted'
         AND p.manage_inventory = true
-        AND (p.internal_sku ILIKE ${pattern} OR p.name ILIKE ${pattern})
+        AND (
+          p.internal_sku ILIKE ${pattern}
+          OR p.name ILIKE ${pattern}
+          OR i.product_name ILIKE ${pattern}
+          OR i.option_name ILIKE ${pattern}
+        )
       GROUP BY split_part(p.internal_sku, '-', 1)
       ORDER BY MAX(p.name)
       LIMIT 50
@@ -106,6 +111,8 @@ export async function GET(req: NextRequest) {
         or(
           ilike(products.internalSku, pattern),
           ilike(products.name, pattern),
+          ilike(inventory.productName, pattern),
+          ilike(inventory.optionName, pattern),
         ),
       ),
     )

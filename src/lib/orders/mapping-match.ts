@@ -191,6 +191,7 @@ export function stripMappingTextWrapper(value: string | null | undefined): strin
 function normalizeMappingText(value: string | null | undefined): string {
   return stripMappingTextWrapper(value)
     .replace(/_펀타스틱$/i, '')
+    .replace(/\(\s*\d+\s*개\s*\)$/i, '')
     .replace(/\s+/g, '')
     .toLowerCase()
 }

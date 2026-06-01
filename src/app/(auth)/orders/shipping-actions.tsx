@@ -1318,6 +1318,13 @@ function ownerclanProductCodeFromItemId(itemId: string): string | null {
 
 function getMappingTargetSource(target: MappingTarget): { product: string; option: string } {
   const split = splitProductOption(target.marketplaceItemId)
+  if (target.marketplaceId === 'domeggook' && target.mappingProductId?.trim()) {
+    const option = stripMappingTextWrapper(target.mappingOptionId || target.optionText)
+    return {
+      product: target.mappingProductId.trim(),
+      option: option || EXACT_OPTION_ID,
+    }
+  }
   if (shouldUseSkuAsMappingProduct(target)) {
     const option = stripMappingTextWrapper(target.mappingOptionId || target.optionText)
     return {

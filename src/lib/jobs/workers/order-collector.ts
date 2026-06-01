@@ -1351,7 +1351,7 @@ function orderItemInsertValue(orderId: string, item: NormalizedOrderItem) {
 
 async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrderItem): Promise<void> {
   const existingItems = await db
-    .select({ id: orderItems.id })
+    .select({ id: orderItems.id, lockedAt: orderItems.lockedAt })
     .from(orderItems)
     .where(eq(orderItems.orderId, baseOrderId))
     .orderBy(orderItems.id)
@@ -1360,12 +1360,20 @@ async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrder
   const [firstExistingItem, ...extraItems] = existingItems
 
   if (extraItems.length > 0) {
-    await db
-      .delete(orderItems)
-      .where(inArray(orderItems.id, extraItems.map((existingItem) => existingItem.id)))
+    const deletableExtraItemIds = extraItems
+      .filter((existingItem) => !existingItem.lockedAt)
+      .map((existingItem) => existingItem.id)
+
+    if (deletableExtraItemIds.length > 0) {
+      await db
+        .delete(orderItems)
+        .where(inArray(orderItems.id, deletableExtraItemIds))
+    }
   }
 
   if (firstExistingItem) {
+    if (firstExistingItem.lockedAt) return
+
     await db
       .update(orderItems)
       .set({

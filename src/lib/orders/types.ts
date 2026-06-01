@@ -103,6 +103,7 @@ export interface OrderFilters {
   statuses?: OrderStatus[]
   marketplace?: string
   marketplaces?: string[]
+  carrierId?: string
   search?: string
   searchField?: OrderSearchField
   /**

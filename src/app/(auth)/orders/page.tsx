@@ -41,6 +41,7 @@ const searchParamsCache = createSearchParamsCache({
   order: parseAsString,
   claimType: parseAsString,
   mapping: parseAsString,
+  carrier: parseAsString,
   scan: parseAsString,
   scanResult: parseAsString,
   held: parseAsBoolean,
@@ -156,6 +157,7 @@ export default async function OrdersPage({
         statuses: multipleStatuses as OrderFiltersParams['statuses'],
         marketplace: singleMarketplace,
         marketplaces: multipleMarketplaces,
+        carrierId: params.carrier ?? undefined,
         search: params.search ?? undefined,
         searchField: (params.searchField ?? undefined) as OrderFiltersParams['searchField'],
         orderSource: (params.orderSource === 'saas' || params.orderSource === 'sabangnet')

@@ -124,6 +124,7 @@ function buildFilteredExportFilters(searchParams: URLSearchParams, userId: strin
     statuses: multipleStatuses,
     marketplace: singleMarketplace,
     marketplaces: multipleMarketplaces,
+    carrierId: searchParams.get('carrier') ?? undefined,
     search: searchParams.get('search') ?? undefined,
     searchField: searchParams.get('searchField') as OrderFilters['searchField'] ?? undefined,
     orderSource: (searchParams.get('orderSource') === 'saas' || searchParams.get('orderSource') === 'sabangnet')

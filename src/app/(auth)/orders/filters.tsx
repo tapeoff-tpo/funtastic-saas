@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { useQueryStates, parseAsString, parseAsInteger } from 'nuqs'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { ORDER_STATUS_LABELS, type OrderSearchField, type OrderStatus } from '@/lib/orders/types'
+import { CARRIERS } from '@/lib/shipping/carrier-codes'
 
 const MARKETPLACE_OPTIONS = [
   { value: 'coupang', label: '쿠팡' },
@@ -37,6 +38,11 @@ const ORDER_SOURCE_OPTIONS = [
   { value: '', label: '전체 출처' },
   { value: 'saas', label: 'SaaS' },
   { value: 'sabangnet', label: '사방넷' },
+]
+
+const CARRIER_OPTIONS = [
+  { value: '', label: '전체 택배사' },
+  ...CARRIERS.map((carrier) => ({ value: carrier.code, label: carrier.koreanName })),
 ]
 
 const SCAN_OPTIONS = [
@@ -350,6 +356,7 @@ export function OrderFilters({
     scan: parseAsString,
     scanResult: parseAsString,
     orderSource: parseAsString,
+    carrier: parseAsString,
     marketplace: parseAsString,
     search: parseAsString,
     searchField: parseAsString,
@@ -368,6 +375,7 @@ export function OrderFilters({
     filters.scan,
     filters.scanResult,
     filters.orderSource,
+    filters.carrier,
     filters.marketplace,
     filters.search,
     filters.searchField,
@@ -422,6 +430,7 @@ export function OrderFilters({
       scan: null,
       scanResult: null,
       orderSource: null,
+      carrier: null,
       marketplace: null,
       search: null,
       searchField: null,
@@ -536,6 +545,24 @@ export function OrderFilters({
           className="rounded-md border px-3 py-1.5 text-sm"
         >
           {ORDER_SOURCE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="filter-carrier" className="text-xs font-medium text-muted-foreground">
+          택배사
+        </label>
+        <select
+          id="filter-carrier"
+          value={draftFilters.carrier ?? ''}
+          onChange={(e) => updateDraftFilter({ carrier: e.target.value || null })}
+          className="rounded-md border px-3 py-1.5 text-sm"
+        >
+          {CARRIER_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

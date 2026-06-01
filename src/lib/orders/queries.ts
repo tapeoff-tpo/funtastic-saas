@@ -552,6 +552,20 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     conditions.push(marketplaceCondition(filters.marketplace))
   }
 
+  if (filters.carrierId) {
+    conditions.push(
+      exists(
+        db
+          .select({ x: sql`1` })
+          .from(shipments)
+          .where(and(
+            eq(shipments.orderId, orders.id),
+            eq(shipments.carrierId, filters.carrierId),
+          )),
+      ),
+    )
+  }
+
   if (filters.mapping === 'mapped') {
     conditions.push(isNotNull(orders.mappedAt))
   } else if (filters.mapping === 'unmapped') {
@@ -873,6 +887,7 @@ export async function getOrders(filters: OrderFilters = {}) {
   const canUseCachedStatsTotal = !!userId
     && !filters.marketplace
     && !filters.marketplaces?.length
+    && !filters.carrierId
     && !filters.search
     && !filters.dateFrom
     && !filters.dateTo

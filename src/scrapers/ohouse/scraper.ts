@@ -21,6 +21,25 @@ const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
 
 type JsonRecord = Record<string, unknown>
 
+interface OhouseOrderDetailData {
+  buyerName?: string
+  buyerPhone?: string
+  recipientName?: string
+  recipientPhone?: string
+  zipCode?: string
+  address1?: string
+  address2?: string
+  deliveryMessage?: string | null
+  items: Array<{
+    orderProductNo?: string
+    orderOptionNo?: string
+    productName: string
+    optionText?: string
+    quantity?: number
+    unitPrice?: number
+  }>
+}
+
 function logStep(step: string): void {
   console.log(`[오늘의집-rpa] ${step}`)
 }
@@ -1525,6 +1544,273 @@ function dedupeOhouseOrders(orders: NormalizedOrder[]): NormalizedOrder[] {
   return result
 }
 
+export function isOhouseMaskedText(value: unknown): boolean {
+  const text = String(value ?? '').trim()
+  if (!text || text === '-') return true
+  return /[*＊●•]/.test(text)
+}
+
+function pickUnmaskedDetailText(detailValue: unknown, currentValue: unknown): string | undefined {
+  const detailText = String(detailValue ?? '').replace(/\s+/g, ' ').trim()
+  if (detailText && !isOhouseMaskedText(detailText)) return detailText
+  const currentText = String(currentValue ?? '').replace(/\s+/g, ' ').trim()
+  return currentText || undefined
+}
+
+function splitOhouseAddress(value: string): { zipCode?: string; address1?: string; address2?: string } {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  const match = normalized.match(/^\[?\s*(\d{5,6})\s*\]?\s*(.+)$/)
+  if (!match) return { address1: normalized }
+  return { zipCode: match[1], address1: match[2].trim() }
+}
+
+export function mergeOhouseOrderDetail(order: NormalizedOrder, detail: OhouseOrderDetailData): NormalizedOrder {
+  const accountKey = normalizeAccountKey(
+    typeof order.rawData?.accountKey === 'string'
+      ? order.rawData.accountKey
+      : order.marketplaceOrderId.split(':')[0],
+  )
+  const addressFromDetail = detail.address1
+    ? splitOhouseAddress([detail.zipCode, detail.address1, detail.address2].filter(Boolean).join(' '))
+    : {}
+  const detailItems = detail.items
+    .filter((item) => item.productName && !isOhouseMaskedText(item.productName))
+    .map((item, index) => {
+      const fallback = order.items[index] ?? order.items[0]
+      const itemId = item.orderOptionNo || item.orderProductNo || fallback?.marketplaceItemId?.split(':').pop() || `${getOhouseOrderNo(order)}-${index + 1}`
+      const quantity = Math.max(Number(item.quantity ?? fallback?.quantity ?? 1) || 1, 1)
+      const unitPrice = Number(item.unitPrice ?? fallback?.unitPrice ?? 0) || 0
+      return {
+        marketplaceItemId: `${accountKey}:${itemId}`,
+        productName: item.productName,
+        optionText: item.optionText || fallback?.optionText,
+        quantity,
+        unitPrice,
+        sku: fallback?.sku,
+      }
+    })
+
+  const items = detailItems.length > 0 ? detailItems : order.items
+  return {
+    ...order,
+    buyerName: pickUnmaskedDetailText(detail.buyerName, order.buyerName) ?? order.buyerName,
+    buyerPhone: pickUnmaskedDetailText(detail.buyerPhone, order.buyerPhone),
+    recipientName: pickUnmaskedDetailText(detail.recipientName, order.recipientName) ?? order.recipientName,
+    recipientPhone: pickUnmaskedDetailText(detail.recipientPhone, order.recipientPhone),
+    shippingAddress: {
+      zipCode: pickUnmaskedDetailText(addressFromDetail.zipCode ?? detail.zipCode, order.shippingAddress.zipCode) ?? '',
+      address1: pickUnmaskedDetailText(addressFromDetail.address1 ?? detail.address1, order.shippingAddress.address1) ?? '',
+      address2: pickUnmaskedDetailText(addressFromDetail.address2 ?? detail.address2, order.shippingAddress.address2),
+    },
+    deliveryMessage: detail.deliveryMessage !== undefined
+      ? pickUnmaskedDetailText(detail.deliveryMessage, order.deliveryMessage) ?? null
+      : order.deliveryMessage,
+    totalAmount: items.reduce((sum, item) => sum + lineTotalAmountForOhouseDetail(item), 0) || order.totalAmount,
+    rawData: {
+      ...(order.rawData ?? {}),
+      ohouseDetail: detail,
+    },
+    items,
+  }
+}
+
+function lineTotalAmountForOhouseDetail(item: NormalizedOrder['items'][number]): number {
+  return (Number(item.unitPrice) || 0) * Math.max(1, Number(item.quantity) || 1)
+}
+
+function getOhouseOrderNo(order: NormalizedOrder): string {
+  return order.marketplaceOrderId.split(':').pop() || order.marketplaceOrderId
+}
+
+async function revealOhouseMaskedInfo(page: Page): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const clicked = await page
+      .evaluate(() => {
+        const visible = (element: HTMLElement) => {
+          const style = window.getComputedStyle(element)
+          const rect = element.getBoundingClientRect()
+          return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+        }
+        const controls = Array.from(document.querySelectorAll<HTMLElement>('button, a, [role="button"], input[type="button"]'))
+        let count = 0
+        for (const control of controls) {
+          if (!visible(control)) continue
+          const label = control instanceof HTMLInputElement ? control.value : control.innerText || control.textContent || ''
+          if (!/가림\s*해제|마스킹\s*해제|개인정보\s*조회|정보\s*조회/.test(label)) continue
+          const disabled = control instanceof HTMLButtonElement || control instanceof HTMLInputElement ? control.disabled : false
+          if (disabled || control.getAttribute('aria-disabled') === 'true') continue
+          control.click()
+          count += 1
+        }
+        return count
+      })
+      .catch(() => 0)
+    if (clicked === 0) break
+    await page.waitForTimeout(1000)
+  }
+}
+
+async function readOhouseOrderDetail(page: Page): Promise<OhouseOrderDetailData | null> {
+  await revealOhouseMaskedInfo(page)
+  return page
+    .evaluate(() => {
+      const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim()
+      const normalize = (value: string) => clean(value).replace(/[()[\]{}]/g, '').replace(/\s+/g, '')
+      const parseNumber = (value: string) => {
+        const parsed = Number(value.replaceAll(',', '').replace(/[^\d.-]/g, ''))
+        return Number.isFinite(parsed) ? parsed : undefined
+      }
+      const cellText = (element: Element) => clean(element.textContent)
+      const data: OhouseOrderDetailData = { items: [] }
+
+      const assign = (label: string, value: string, section = '') => {
+        const key = normalize(label)
+        const text = clean(value)
+        if (!text || text === '-') return
+        if (/주문자|구매자/.test(key) && !/연락처|전화|이메일/.test(key)) data.buyerName = text
+        if (/수령인|수취인|받는분|받는사람/.test(key) && !/연락처|전화/.test(key)) data.recipientName = text
+        if (/연락처|전화|휴대폰/.test(key)) {
+          if (/배송|수령|수취|받는/.test(section + key)) data.recipientPhone = text
+          else data.buyerPhone = text
+        }
+        if (/주소/.test(key)) data.address1 = text
+        if (/배송메모|배송메세지|배송메시지|주문메모/.test(key)) data.deliveryMessage = text
+      }
+
+      const tables = Array.from(document.querySelectorAll('table'))
+      for (const table of tables) {
+        const rows = Array.from(table.querySelectorAll('tr')).map((tr) => Array.from(tr.querySelectorAll('th, td')).map(cellText))
+        if (rows.length === 0) continue
+        const headers = rows[0].map(normalize)
+        const headerText = headers.join(' ')
+
+        if (/상품명/.test(headerText) && (/옵션명/.test(headerText) || /주문옵션번호/.test(headerText) || /주문상품번호/.test(headerText))) {
+          for (const row of rows.slice(1)) {
+            const byHeader = (pattern: RegExp) => {
+              const index = headers.findIndex((header) => pattern.test(header))
+              return index >= 0 ? clean(row[index]) : ''
+            }
+            const productName = byHeader(/상품명/)
+            if (!productName) continue
+            data.items.push({
+              orderProductNo: byHeader(/주문상품번호|상품주문번호/),
+              orderOptionNo: byHeader(/주문옵션번호|옵션주문번호/),
+              productName,
+              optionText: byHeader(/옵션명|옵션/),
+              quantity: parseNumber(byHeader(/수량|주문수량/)),
+              unitPrice: parseNumber(byHeader(/금액|가격|판매가|결제/)),
+            })
+          }
+          continue
+        }
+
+        if (headers.some((header) => /주문자|구매자|수령인|수취인|주소|연락처|배송메모/.test(header))) {
+          const values = rows.find((row, index) => index > 0 && row.some(Boolean)) ?? []
+          headers.forEach((header, index) => assign(header, values[index] ?? '', headerText))
+        }
+
+        for (const row of rows) {
+          if (row.length < 2) continue
+          assign(row[0], row.slice(1).join(' '), headerText)
+        }
+      }
+
+      return data.items.length > 0 || data.buyerName || data.recipientName || data.address1 ? data : null
+    })
+    .catch(() => null)
+}
+
+async function openOhouseOrderDetailForOrder(page: Page, order: NormalizedOrder): Promise<{ page: Page; close: () => Promise<void> } | null> {
+  const orderNo = getOhouseOrderNo(order)
+  const currentUrl = page.url()
+  const href = await page
+    .evaluate((targetOrderNo) => {
+      const visible = (element: HTMLElement) => {
+        const style = window.getComputedStyle(element)
+        const rect = element.getBoundingClientRect()
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
+      }
+      const elements = Array.from(document.querySelectorAll<HTMLElement>('a, button, [role="button"], td, span, div'))
+      for (const element of elements) {
+        if (!visible(element)) continue
+        if (!((element.innerText || element.textContent || '').includes(targetOrderNo))) continue
+        const anchor = element.closest('a') as HTMLAnchorElement | null
+        if (anchor?.href) return anchor.href
+      }
+      return ''
+    }, orderNo)
+    .catch(() => '')
+
+  if (href) {
+    await gotoOhouse(page, href)
+    await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+    await page.waitForTimeout(1200)
+    return {
+      page,
+      close: async () => {
+        await gotoOhouse(page, currentUrl).catch(() => undefined)
+        await waitForOhouseAppReady(page).catch(() => false)
+      },
+    }
+  }
+
+  const detailPagePromise = page.context().waitForEvent('page', { timeout: 3000 }).catch(() => null)
+  const clicked = await page
+    .getByText(orderNo, { exact: false })
+    .first()
+    .click({ timeout: 5000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!clicked) return null
+
+  const openedPage = await detailPagePromise
+  const detailPage = openedPage ?? page
+  await detailPage.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await detailPage.waitForTimeout(1200)
+  return {
+    page: detailPage,
+    close: async () => {
+      if (openedPage) {
+        await openedPage.close().catch(() => undefined)
+      } else {
+        await gotoOhouse(page, currentUrl).catch(() => undefined)
+        await waitForOhouseAppReady(page).catch(() => false)
+      }
+    },
+  }
+}
+
+async function enrichOhouseOrdersFromDetails(
+  page: Page,
+  orders: NormalizedOrder[],
+  setProgress?: (message: string) => Promise<void>,
+): Promise<NormalizedOrder[]> {
+  if (orders.length === 0) return orders
+
+  const detailByOrderNo = new Map<string, OhouseOrderDetailData>()
+  for (const order of orders) {
+    const orderNo = getOhouseOrderNo(order)
+    if (detailByOrderNo.has(orderNo)) continue
+    const detailPage = await openOhouseOrderDetailForOrder(page, order)
+    if (!detailPage) continue
+    try {
+      const detail = await readOhouseOrderDetail(detailPage.page)
+      if (detail) {
+        detailByOrderNo.set(orderNo, detail)
+        await setProgress?.(`오늘의집 주문 ${orderNo} 상세 가림해제 정보 수집`)
+      }
+    } finally {
+      await detailPage.close()
+    }
+  }
+
+  if (detailByOrderNo.size === 0) return orders
+  return orders.map((order) => {
+    const detail = detailByOrderNo.get(getOhouseOrderNo(order))
+    return detail ? mergeOhouseOrderDetail(order, detail) : order
+  })
+}
+
 function watchOhouseOrderPageResponses(page: Page, credentials: ScraperCredentials): { orders: () => NormalizedOrder[] } {
   const orders: NormalizedOrder[] = []
 
@@ -1915,6 +2201,7 @@ export class OhouseScraper implements MarketplaceScraper {
         orders = visibleOrders
       }
       orders = orders.filter((order) => order.orderedAt >= since)
+      orders = await enrichOhouseOrdersFromDetails(ctx.page, orders, setProgress)
       if (orders.length > 0 && ctx.page.url().includes('customFilters=PAYMENT_COMPLETE')) {
         if (await hasVisibleOhouseOrderConfirmButton(ctx.page)) {
           await setProgress?.(`오늘의집 ${orders.length}건 수집 완료, 주문 확인 처리 중...`)
@@ -1984,12 +2271,13 @@ export class OhouseScraper implements MarketplaceScraper {
     await setProgress?.(`오늘의집 ${label} ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
     try {
       const workbook = await downloadOrdersExcel(page, authFailures)
-      return this.parseOrdersExcel(workbook, credentials)
+      const orders = await this.parseOrdersExcel(workbook, credentials)
+      return enrichOhouseOrdersFromDetails(page, orders, setProgress)
     } catch (error) {
       if (visibleOrders.length === 0) throw error
       const message = error instanceof Error ? error.message : 'download failed'
       await setProgress?.(`오늘의집 ${label} 엑셀 다운로드 실패, 화면 주문 ${visibleOrders.length}건으로 진행 (${message.slice(0, 80)})`)
-      return visibleOrders
+      return enrichOhouseOrdersFromDetails(page, visibleOrders, setProgress)
     }
   }
 

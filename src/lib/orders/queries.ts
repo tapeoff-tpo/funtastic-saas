@@ -421,40 +421,25 @@ function getDateFilterCondition(
 
 function getShippedAtDateRangeCondition(filters: OrderFilters): SQL | null {
   const rangeConditions: SQL[] = [eq(shipments.orderId, orders.id), isNotNull(shipments.shippedAt)]
-  const fallbackConditions: SQL[] = [inArray(orders.status, ['shipped', 'delivering', 'delivered'])]
 
   if (filters.dateFrom) {
     const from = parseKstDateBoundary(filters.dateFrom, 'start')
     rangeConditions.push(gte(shipments.shippedAt, from))
-    fallbackConditions.push(gte(orders.updatedAt, from))
   }
 
   if (filters.dateTo) {
     const to = parseKstDateBoundary(filters.dateTo, 'end')
     rangeConditions.push(lte(shipments.shippedAt, to))
-    fallbackConditions.push(lte(orders.updatedAt, to))
   }
 
   if (!filters.dateFrom && !filters.dateTo) return null
 
-  const shipmentInRange = exists(
+  return exists(
     db
       .select({ x: sql`1` })
       .from(shipments)
       .where(and(...rangeConditions)),
   )
-
-  const noShippedShipment = sql`NOT EXISTS (
-    SELECT 1
-    FROM ${shipments}
-    WHERE ${shipments.orderId} = ${orders.id}
-      AND ${shipments.shippedAt} IS NOT NULL
-  )`
-
-  return or(
-    shipmentInRange,
-    and(...fallbackConditions, noShippedShipment),
-  )!
 }
 
 /**

@@ -167,14 +167,21 @@ async function validateOrdersHaveInternalMappings(
   for (const row of inventoryRows) validSkus.add(row.sku.trim())
 
   const mappingSourcesForLookup = (
-    [...sourceRows, ...historicalAliasRows].map<MappingSource>((row) => ({
+    sourceRows.map<MappingSource>((row) => ({
       marketplaceId: row.marketplaceId,
       marketplaceProductId: row.marketplaceProductId,
       marketplaceOptionId: row.marketplaceOptionId,
-      productNameSnapshot: 'productNameSnapshot' in row ? row.productNameSnapshot : null,
-      optionNameSnapshot: 'optionNameSnapshot' in row ? row.optionNameSnapshot : null,
+      productNameSnapshot: row.productNameSnapshot,
+      optionNameSnapshot: row.optionNameSnapshot,
       ref: row.mappingCodeId,
-    }))
+    })).concat(historicalAliasRows.map<MappingSource>((row) => ({
+      marketplaceId: row.marketplaceId,
+      marketplaceProductId: row.marketplaceProductId,
+      marketplaceOptionId: row.marketplaceOptionId,
+      productNameSnapshot: null,
+      optionNameSnapshot: null,
+      ref: row.mappingCodeId,
+    })))
   )
 
   const componentsByCode = new Map<string, string[]>()

@@ -42,6 +42,13 @@ type SkuInfo = {
   optionName: string | null
 }
 
+type HistoricalAliasRow = {
+  mappingCodeId: string
+  marketplaceId: string
+  marketplaceProductId: string
+  marketplaceOptionId: string
+}
+
 async function getSkuInfoBySku(tx: DrizzleTransaction, userId: string, skus: string[]) {
   const uniqueSkus = Array.from(new Set(skus.map((sku) => sku.trim()).filter(Boolean)))
   const info = new Map<string, SkuInfo>()
@@ -192,7 +199,7 @@ export async function lockOrderItemsForOrders(
   const unlockedItems = itemRows.filter((item) => !item.lockedAt)
   if (unlockedItems.length === 0) return 0
 
-  const [sourceRows, componentRows] = await Promise.all([
+  const [sourceRows, componentRows, historicalAliasResult] = await Promise.all([
     tx
       .select({
         mappingCodeId: mappingSources.mappingCodeId,
@@ -215,7 +222,26 @@ export async function lockOrderItemsForOrders(
       .from(mappingComponents)
       .innerJoin(mappingCodes, eq(mappingCodes.id, mappingComponents.mappingCodeId))
       .where(and(eq(mappingComponents.userId, userId), eq(mappingCodes.isActive, true))),
+    tx.execute<HistoricalAliasRow>(sql`
+      SELECT DISTINCT
+        ms.mapping_code_id AS "mappingCodeId",
+        ms.marketplace_id AS "marketplaceId",
+        oi.sku AS "marketplaceProductId",
+        ms.marketplace_option_id AS "marketplaceOptionId"
+      FROM mapping_sources ms
+      INNER JOIN mapping_codes mc ON mc.id = ms.mapping_code_id AND mc.user_id = ms.user_id AND mc.is_active = TRUE
+      INNER JOIN order_items oi ON oi.marketplace_item_id = ms.marketplace_product_id
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE ms.user_id = ${userId}
+        AND ms.marketplace_id = 'funtastic-b2b'
+        AND o.user_id = ms.user_id
+        AND o.marketplace_id = ms.marketplace_id
+        AND NULLIF(oi.sku, '') IS NOT NULL
+    `),
   ])
+  const historicalAliasRows = Array.isArray(historicalAliasResult)
+    ? historicalAliasResult as HistoricalAliasRow[]
+    : (historicalAliasResult as unknown as { rows?: HistoricalAliasRow[] }).rows ?? []
 
   const mappingSourcesForLookup = sourceRows.map<MappingSource>((source) => ({
     marketplaceId: source.marketplaceId,
@@ -224,7 +250,14 @@ export async function lockOrderItemsForOrders(
     productNameSnapshot: source.productNameSnapshot,
     optionNameSnapshot: source.optionNameSnapshot,
     ref: source.mappingCodeId,
-  }))
+  })).concat(historicalAliasRows.map<MappingSource>((source) => ({
+    marketplaceId: source.marketplaceId,
+    marketplaceProductId: source.marketplaceProductId,
+    marketplaceOptionId: source.marketplaceOptionId,
+    productNameSnapshot: null,
+    optionNameSnapshot: null,
+    ref: source.mappingCodeId,
+  })))
 
   const componentSkus = componentRows.map((component) => component.sku)
   const candidateSkus = unlockedItems.flatMap((item) => [

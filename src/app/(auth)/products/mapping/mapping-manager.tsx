@@ -196,8 +196,12 @@ export function MappingManager() {
   const reload = useCallback(async () => {
     setLoading(true)
     try {
+      const codeParams = new URLSearchParams({ t: String(Date.now()) })
+      const trimmedSearch = search.trim()
+      if (trimmedSearch) codeParams.set('q', trimmedSearch)
+
       const [codesRes, unmappedRes] = await Promise.all([
-        fetch(`/api/products/mapping-codes?t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json()),
+        fetch(`/api/products/mapping-codes?${codeParams.toString()}`, { cache: 'no-store' }).then((r) => r.json()),
         fetch(`/api/products/mapping-codes/unmapped?t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json()),
       ])
       setCodes(codesRes.codes ?? [])
@@ -205,7 +209,7 @@ export function MappingManager() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [search])
 
   useEffect(() => { void reload() }, [reload])
   useEffect(() => { setSearchInput(search) }, [search])

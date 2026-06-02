@@ -1,7 +1,7 @@
 /**
  * Mapping codes API — 매핑코드 목록/생성.
  *
- * GET: 사용자의 모든 매핑코드 + sources/components 카운트.
+ * GET: 사용자의 매핑코드 + sources/components 카운트.
  * POST: 매핑코드 + sources + components 일괄 생성 (트랜잭션).
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -132,11 +132,77 @@ async function findInvalidComponentSkus(userId: string, components: ComponentInp
   return requestedSkus.filter((sku) => !validSkus.has(sku))
 }
 
-export async function GET() {
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, '')
+}
+
+function searchTokens(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+}
+
+function mappingCodeSearchCondition(query: string) {
+  const tokens = searchTokens(query)
+  if (tokens.length === 0) return undefined
+
+  return and(...tokens.map((token) => {
+    const pattern = `%${token}%`
+    const compactPattern = `%${normalizeSearchText(token)}%`
+
+    return sql`(
+      ${mappingCodes.code} ILIKE ${pattern}
+      OR ${mappingCodes.name} ILIKE ${pattern}
+      OR COALESCE(${mappingCodes.note}, '') ILIKE ${pattern}
+      OR regexp_replace(lower(${mappingCodes.code}), '\\s+', '', 'g') LIKE ${compactPattern}
+      OR regexp_replace(lower(${mappingCodes.name}), '\\s+', '', 'g') LIKE ${compactPattern}
+      OR regexp_replace(lower(COALESCE(${mappingCodes.note}, '')), '\\s+', '', 'g') LIKE ${compactPattern}
+      OR EXISTS (
+        SELECT 1
+        FROM mapping_sources ms
+        WHERE ms.mapping_code_id = ${mappingCodes.id}
+          AND (
+            ms.marketplace_id ILIKE ${pattern}
+            OR ms.marketplace_product_id ILIKE ${pattern}
+            OR ms.marketplace_option_id ILIKE ${pattern}
+            OR COALESCE(ms.product_name_snapshot, '') ILIKE ${pattern}
+            OR COALESCE(ms.option_name_snapshot, '') ILIKE ${pattern}
+            OR regexp_replace(lower(ms.marketplace_id), '\\s+', '', 'g') LIKE ${compactPattern}
+            OR regexp_replace(lower(ms.marketplace_product_id), '\\s+', '', 'g') LIKE ${compactPattern}
+            OR regexp_replace(lower(ms.marketplace_option_id), '\\s+', '', 'g') LIKE ${compactPattern}
+            OR regexp_replace(lower(COALESCE(ms.product_name_snapshot, '')), '\\s+', '', 'g') LIKE ${compactPattern}
+            OR regexp_replace(lower(COALESCE(ms.option_name_snapshot, '')), '\\s+', '', 'g') LIKE ${compactPattern}
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM mapping_components mcp
+        LEFT JOIN inventory inv
+          ON inv.user_id = mcp.user_id
+         AND inv.sku = mcp.sku
+        WHERE mcp.mapping_code_id = ${mappingCodes.id}
+          AND (
+            mcp.sku ILIKE ${pattern}
+            OR COALESCE(inv.product_name, '') ILIKE ${pattern}
+            OR COALESCE(inv.option_name, '') ILIKE ${pattern}
+            OR regexp_replace(lower(mcp.sku), '\\s+', '', 'g') LIKE ${compactPattern}
+            OR regexp_replace(lower(COALESCE(inv.product_name, '')), '\\s+', '', 'g') LIKE ${compactPattern}
+            OR regexp_replace(lower(COALESCE(inv.option_name, '')), '\\s+', '', 'g') LIKE ${compactPattern}
+          )
+      )
+    )`
+  }))
+}
+
+export async function GET(req: NextRequest) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   const workspaceUserId = await getWorkspaceUserId(user.id)
+  const search = req.nextUrl.searchParams.get('q')?.trim() ?? ''
+  const searchCondition = mappingCodeSearchCondition(search)
 
   const rows = await db
     .select({
@@ -210,7 +276,10 @@ export async function GET() {
       ), '[]'::jsonb)`,
     })
     .from(mappingCodes)
-    .where(eq(mappingCodes.userId, workspaceUserId))
+    .where(and(
+      eq(mappingCodes.userId, workspaceUserId),
+      searchCondition,
+    ))
     .orderBy(sql`${mappingCodes.updatedAt} DESC`)
 
   return NextResponse.json(

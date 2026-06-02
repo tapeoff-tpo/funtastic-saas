@@ -6,7 +6,7 @@
  */
 
 import ExcelJS from 'exceljs'
-import { fillWholeRow, getCombinedShipmentFill } from './combined-fill'
+import { fillWholeRow, getCombinedShipmentFill, getRepeatedCombinedKeys, shouldFillCombinedShipmentRow } from './combined-fill'
 
 export interface CjOrderRow {
   orderId: string
@@ -28,38 +28,6 @@ export interface CjOrderRow {
   pickingLocation?: string      // 피킹위치 (e.g. '1창고 A-01-03')
   shipmentGroupId?: string
   isCombinedShipment?: boolean
-}
-
-function normalizeCombinedKeyPart(value: unknown): string {
-  return String(value ?? '').trim().replace(/\s+/g, '').toLowerCase()
-}
-
-function getCombinedAddressKeys(rows: CjOrderRow[]): Set<string> {
-  const ordersByKey = new Map<string, Set<string>>()
-  for (const row of rows) {
-    const key = [
-      normalizeCombinedKeyPart(row.recipientName),
-      normalizeCombinedKeyPart(row.recipientAddress),
-    ].join('::')
-    if (key === '::') continue
-    const orderSet = ordersByKey.get(key) ?? new Set<string>()
-    orderSet.add(row.marketplaceOrderId || row.orderId)
-    ordersByKey.set(key, orderSet)
-  }
-
-  return new Set(
-    [...ordersByKey.entries()]
-      .filter(([, orderSet]) => orderSet.size >= 2)
-      .map(([key]) => key),
-  )
-}
-
-function isCombinedAddressRow(row: CjOrderRow, keys: Set<string>): boolean {
-  const key = [
-    normalizeCombinedKeyPart(row.recipientName),
-    normalizeCombinedKeyPart(row.recipientAddress),
-  ].join('::')
-  return keys.has(key)
 }
 
 const HEADERS = [
@@ -111,7 +79,14 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
     width: [15, 15, 15, 40, 30, 8, 8, 8, 20, 36, 8, 30, 10, 15, 40, 15, 20, 20, 20, 8, 30, 20, 35, 10, 15][i] ?? 15,
   }))
 
-  const combinedAddressKeys = getCombinedAddressKeys(rows)
+  const combinedKeys = getRepeatedCombinedKeys(rows.map((row) => ({
+    orderId: row.orderId,
+    marketplaceOrderId: row.marketplaceOrderId,
+    shipmentGroupId: row.shipmentGroupId,
+    isCombinedShipment: row.isCombinedShipment,
+    recipientName: row.recipientName,
+    recipientAddress: row.recipientAddress,
+  })))
 
   for (const row of rows) {
     const productAndOption = row.optionText
@@ -152,8 +127,16 @@ export async function generateCjExcel(rows: CjOrderRow[]): Promise<Buffer> {
     ])
 
     // 합포장 행은 실제 shipment group 기준으로 같은 묶음끼리 같은 색으로 표시한다.
+    const combinedRow = {
+      orderId: row.orderId,
+      marketplaceOrderId: row.marketplaceOrderId,
+      shipmentGroupId: row.shipmentGroupId,
+      isCombinedShipment: row.isCombinedShipment,
+      recipientName: row.recipientName,
+      recipientAddress: row.recipientAddress,
+    }
     const fill = getCombinedShipmentFill(row.shipmentGroupId)
-      ?? (row.isCombinedShipment || isCombinedAddressRow(row, combinedAddressKeys)
+      ?? (shouldFillCombinedShipmentRow(combinedRow, combinedKeys)
         ? getCombinedShipmentFill('combined')
         : null)
     if (fill) {

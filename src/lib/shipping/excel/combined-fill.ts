@@ -68,6 +68,7 @@ export function getRepeatedCombinedKeys(rows: Record<string, unknown>[]): {
   trackingKeys: Set<string>
 } {
   const addressOrders = new Map<string, Set<string>>()
+  const addressCounts = new Map<string, number>()
   const trackingCounts = new Map<string, number>()
 
   for (const row of rows) {
@@ -77,6 +78,7 @@ export function getRepeatedCombinedKeys(rows: Record<string, unknown>[]): {
       const orderSet = addressOrders.get(addressKey) ?? new Set<string>()
       orderSet.add(orderKey)
       addressOrders.set(addressKey, orderSet)
+      addressCounts.set(addressKey, (addressCounts.get(addressKey) ?? 0) + 1)
     }
 
     const trackingKey = getTrackingKey(row)
@@ -86,7 +88,9 @@ export function getRepeatedCombinedKeys(rows: Record<string, unknown>[]): {
   }
 
   return {
-    addressKeys: new Set([...addressOrders.entries()].filter(([, orders]) => orders.size >= 2).map(([key]) => key)),
+    addressKeys: new Set([...addressOrders.entries()]
+      .filter(([key, orders]) => orders.size >= 2 || (addressCounts.get(key) ?? 0) >= 2)
+      .map(([key]) => key)),
     trackingKeys: new Set([...trackingCounts.entries()].filter(([, count]) => count >= 2).map(([key]) => key)),
   }
 }

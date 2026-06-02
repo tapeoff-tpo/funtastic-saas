@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { and, eq, inArray } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { orderItems, orders } from '@/lib/db/schema'
+import { orderItems, orders, shipmentGroupOrders, shipmentGroups } from '@/lib/db/schema'
 import { expandOrderItemsWithMapping, type ExpandedRow } from '@/lib/orders/mapping-expand'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -150,6 +150,7 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(orders.id, order.id))
 
+      const splitOrderIds = [order.id]
       for (let index = 1; index < rows.length; index += 1) {
         const [copy] = await tx
           .insert(orders)
@@ -189,8 +190,26 @@ export async function POST(req: NextRequest) {
           .returning({ id: orders.id })
 
         await tx.insert(orderItems).values(itemValues(copy.id, rows[index]))
+        splitOrderIds.push(copy.id)
         createdCopies += 1
       }
+
+      const [shipmentGroup] = await tx
+        .insert(shipmentGroups)
+        .values({
+          userId: order.userId,
+          groupKey: `set-split|${order.id}`,
+          fulfillmentCode: 'set-split',
+          status: 'confirmed',
+        })
+        .returning({ id: shipmentGroups.id })
+
+      await tx.insert(shipmentGroupOrders).values(
+        splitOrderIds.map((orderId) => ({
+          shipmentGroupId: shipmentGroup.id,
+          orderId,
+        })),
+      )
 
       splitOrders += 1
     }

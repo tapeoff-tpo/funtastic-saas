@@ -31,6 +31,8 @@ export interface DeleteOrdersResult {
   errors: string[]
 }
 
+const PROTECTED_ORDER_STATUSES = ['shipped', 'delivering', 'delivered'] as const
+
 export async function deleteOrdersForUser(
   orderIds: string[],
   userId: string,
@@ -39,11 +41,37 @@ export async function deleteOrdersForUser(
 
   // userId 스코프 검증 — 다른 사용자 주문은 절대 삭제 불가
   const ownedRows = await db
-    .select({ id: orders.id })
+    .select({ id: orders.id, status: orders.status, marketplaceOrderId: orders.marketplaceOrderId })
     .from(orders)
     .where(and(inArray(orders.id, orderIds), eq(orders.userId, userId)))
   const owned = ownedRows.map((r) => r.id)
   if (owned.length === 0) return { deleted: 0, errors: ['삭제 가능한 주문이 없습니다.'] }
+
+  const protectedRows = ownedRows.filter((row) =>
+    PROTECTED_ORDER_STATUSES.includes(row.status as (typeof PROTECTED_ORDER_STATUSES)[number]),
+  )
+  if (protectedRows.length > 0) {
+    return {
+      deleted: 0,
+      errors: protectedRows.map((row) =>
+        `출고완료 이후 주문은 삭제할 수 없습니다: ${row.marketplaceOrderId}`,
+      ),
+    }
+  }
+
+  const shipmentRows = await db
+    .select({ orderId: shipments.orderId })
+    .from(shipments)
+    .where(inArray(shipments.orderId, owned))
+  if (shipmentRows.length > 0) {
+    const blocked = new Set(shipmentRows.map((row) => row.orderId))
+    return {
+      deleted: 0,
+      errors: ownedRows
+        .filter((row) => blocked.has(row.id))
+        .map((row) => `송장 등록된 주문은 삭제할 수 없습니다: ${row.marketplaceOrderId}`),
+    }
+  }
 
   const errors: string[] = []
 

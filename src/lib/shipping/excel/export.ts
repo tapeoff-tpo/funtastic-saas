@@ -6,6 +6,7 @@
  */
 
 import ExcelJS from 'exceljs'
+import { PassThrough } from 'node:stream'
 import type { CarrierTemplate } from '../types'
 import { fillWholeRow, getCombinedShipmentFill, getRepeatedCombinedKeys, shouldFillCombinedShipmentRow } from './combined-fill'
 
@@ -27,7 +28,6 @@ export function getNestedValue(obj: Record<string, unknown>, path: string): unkn
   return current
 }
 
-/** Header style: bold white text on gray background with thin borders */
 const HEADER_FILL: ExcelJS.FillPattern = {
   type: 'pattern',
   pattern: 'solid',
@@ -46,7 +46,7 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 }
 
 function normalizeCombinedKeyPart(value: unknown): string {
-  return String(value ?? '').trim().replace(/[^0-9A-Za-z가-힣]/g, '').toLowerCase()
+  return String(value ?? '').trim().replace(/[^\p{L}\p{N}]/gu, '').toLowerCase()
 }
 
 function getTrackingCombinedKeys(orders: Record<string, unknown>[]): Set<string> {
@@ -119,32 +119,20 @@ function isAddressCombinedExportRow(order: Record<string, unknown>, addressCombi
   return addressCombinedKeys.has(`${recipientName}::${address}`)
 }
 
-/**
- * Export orders to a carrier-specific Excel format.
- *
- * Creates a styled workbook with:
- * - Worksheet named after the template
- * - Columns sized per template definition
- * - Bold header row with gray background and borders
- * - Data rows populated by extracting field values using dot-notation
- */
-export async function exportToCarrierExcel(
+function populateCarrierWorkbook(
+  workbook: ExcelJS.Workbook,
   orders: Record<string, unknown>[],
   template: CarrierTemplate,
-): Promise<Buffer> {
-  const workbook = new ExcelJS.Workbook()
+): void {
   const worksheet = workbook.addWorksheet(template.name)
 
-  // Set columns from template — index 기반 unique key.
-  // 같은 source field 를 두 컬럼이 쓰는 경우(예: 배송메세지 = internalNo+deliveryMessage,
-  // 고객주문번호 = internalNo) ExcelJS 가 key 로 dedupe 해서 한쪽이 빈칸으로 출력되는 버그가 있음.
+  // Use index-based unique keys because multiple template columns can point to the same source field.
   worksheet.columns = template.columns.map((col, idx) => ({
     header: col.header,
     key: `c${idx}`,
     width: col.width,
   }))
 
-  // Style header row
   const headerRow = worksheet.getRow(1)
   headerRow.eachCell((cell) => {
     cell.font = HEADER_FONT
@@ -156,9 +144,6 @@ export async function exportToCarrierExcel(
   const addressCombinedKeys = getAddressCombinedKeys(orders)
   const combinedKeys = getRepeatedCombinedKeys(orders)
 
-  // Add data rows
-  // - fixedValue 우선 (모든 행 동일 값)
-  // - extraFields 가 있으면 primary + extras 를 공백으로 합쳐서 출력
   for (const order of orders) {
     const rowData: Record<string, unknown> = {}
     template.columns.forEach((col, idx) => {
@@ -167,14 +152,15 @@ export async function exportToCarrierExcel(
         rowData[key] = col.fixedValue
       } else if (col.extraFields && col.extraFields.length > 0) {
         const parts = [col.field, ...col.extraFields]
-          .map((f) => getNestedValue(order, f))
-          .filter((v) => v !== undefined && v !== null && v !== '')
-          .map((v) => String(v))
+          .map((field) => getNestedValue(order, field))
+          .filter((value) => value !== undefined && value !== null && value !== '')
+          .map((value) => String(value))
         rowData[key] = parts.join(col.joinSeparator ?? ' ')
       } else {
         rowData[key] = getNestedValue(order, col.field)
       }
     })
+
     const row = worksheet.addRow(rowData)
     if (
       isCombinedExportRow(order, trackingCombinedKeys)
@@ -184,7 +170,46 @@ export async function exportToCarrierExcel(
       fillWholeRow(row, template.columns.length, getCombinedShipmentFill('combined')!)
     }
   }
+}
 
+export async function exportToCarrierExcel(
+  orders: Record<string, unknown>[],
+  template: CarrierTemplate,
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook()
+  populateCarrierWorkbook(workbook, orders, template)
   const arrayBuffer = await workbook.xlsx.writeBuffer()
   return Buffer.from(arrayBuffer as ArrayBuffer)
+}
+
+export function exportToCarrierExcelStream(
+  orders: Record<string, unknown>[],
+  template: CarrierTemplate,
+): ReadableStream<Uint8Array> {
+  const passThrough = new PassThrough()
+  const readable = new ReadableStream<Uint8Array>({
+    start(controller) {
+      passThrough.on('data', (chunk: Buffer) => {
+        controller.enqueue(new Uint8Array(chunk))
+      })
+      passThrough.on('end', () => controller.close())
+      passThrough.on('error', (error) => controller.error(error))
+    },
+    cancel() {
+      passThrough.destroy()
+    },
+  })
+
+  void (async () => {
+    try {
+      const workbook = new ExcelJS.Workbook()
+      populateCarrierWorkbook(workbook, orders, template)
+      await workbook.xlsx.write(passThrough)
+      passThrough.end()
+    } catch (error) {
+      passThrough.destroy(error instanceof Error ? error : new Error(String(error)))
+    }
+  })()
+
+  return readable
 }

@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, orderItems, shipments, marketplaceConnections, products, inventory } from '@/lib/db/schema'
 import { and, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm'
-import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
+import { exportToCarrierExcelStream } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
 import { AVAILABLE_ORDER_FIELDS } from '@/lib/shipping/excel/templates'
@@ -541,7 +541,6 @@ async function handleExportRequest(request: NextRequest, body: ExportRequestBody
       })
     })
 
-    let buffer: Buffer
     let filename: string
 
     if (type === 'order-list') {
@@ -553,8 +552,14 @@ async function handleExportRequest(request: NextRequest, body: ExportRequestBody
           })
         : AVAILABLE_ORDER_FIELDS
 
-      buffer = await exportOrdersToExcel(exportData, selectedFields)
+      const buffer = await exportOrdersToExcel(exportData, selectedFields)
       filename = `orders_${new Date().toISOString().slice(0, 10)}.xlsx`
+      return new NextResponse(new Uint8Array(buffer), {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
+        },
+      })
     } else {
       // Carrier template export
       let template
@@ -573,16 +578,14 @@ async function handleExportRequest(request: NextRequest, body: ExportRequestBody
         )
       }
 
-      buffer = await exportToCarrierExcel(exportData, template)
       filename = `${template.name}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      return new NextResponse(exportToCarrierExcelStream(exportData, template), {
+        headers: {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
+        },
+      })
     }
-
-    return new NextResponse(new Uint8Array(buffer), {
-      headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(filename)}"`,
-      },
-    })
   } catch (error) {
     console.error('Excel export error:', error)
     const message = error instanceof Error ? error.message : String(error)

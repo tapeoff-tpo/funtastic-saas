@@ -1661,6 +1661,62 @@ export function mergeOhouseOrderDetail(order: NormalizedOrder, detail: OhouseOrd
   }
 }
 
+export function mergeOhouseOrdersWithVisibleRevealedData(
+  orders: NormalizedOrder[],
+  visibleOrders: NormalizedOrder[],
+): NormalizedOrder[] {
+  if (orders.length === 0 || visibleOrders.length === 0) return orders
+
+  const visibleByOrderId = new Map<string, NormalizedOrder>()
+  for (const visibleOrder of visibleOrders) {
+    const current = visibleByOrderId.get(visibleOrder.marketplaceOrderId)
+    if (!current) {
+      visibleByOrderId.set(visibleOrder.marketplaceOrderId, visibleOrder)
+      continue
+    }
+    visibleByOrderId.set(visibleOrder.marketplaceOrderId, {
+      ...current,
+      buyerName: pickUnmaskedDetailText(visibleOrder.buyerName, current.buyerName) ?? current.buyerName,
+      buyerPhone: pickUnmaskedDetailText(visibleOrder.buyerPhone, current.buyerPhone),
+      recipientName: pickUnmaskedDetailText(visibleOrder.recipientName, current.recipientName) ?? current.recipientName,
+      recipientPhone: pickUnmaskedDetailText(visibleOrder.recipientPhone, current.recipientPhone),
+      shippingAddress: {
+        zipCode: pickUnmaskedDetailText(visibleOrder.shippingAddress.zipCode, current.shippingAddress.zipCode) ?? current.shippingAddress.zipCode,
+        address1: pickUnmaskedDetailText(visibleOrder.shippingAddress.address1, current.shippingAddress.address1) ?? current.shippingAddress.address1,
+        address2: pickUnmaskedDetailText(visibleOrder.shippingAddress.address2, current.shippingAddress.address2),
+      },
+    })
+  }
+
+  return orders.map((order) => {
+    const visibleOrder = visibleByOrderId.get(order.marketplaceOrderId)
+    if (!visibleOrder) return order
+
+    return {
+      ...order,
+      buyerName: pickUnmaskedDetailText(visibleOrder.buyerName, order.buyerName) ?? order.buyerName,
+      buyerPhone: pickUnmaskedDetailText(visibleOrder.buyerPhone, order.buyerPhone),
+      recipientName: pickUnmaskedDetailText(visibleOrder.recipientName, order.recipientName) ?? order.recipientName,
+      recipientPhone: pickUnmaskedDetailText(visibleOrder.recipientPhone, order.recipientPhone),
+      shippingAddress: {
+        zipCode: pickUnmaskedDetailText(visibleOrder.shippingAddress.zipCode, order.shippingAddress.zipCode) ?? order.shippingAddress.zipCode,
+        address1: pickUnmaskedDetailText(visibleOrder.shippingAddress.address1, order.shippingAddress.address1) ?? order.shippingAddress.address1,
+        address2: pickUnmaskedDetailText(visibleOrder.shippingAddress.address2, order.shippingAddress.address2),
+      },
+      rawData: {
+        ...(order.rawData ?? {}),
+        ohouseVisibleReveal: {
+          buyerName: visibleOrder.buyerName,
+          buyerPhone: visibleOrder.buyerPhone,
+          recipientName: visibleOrder.recipientName,
+          recipientPhone: visibleOrder.recipientPhone,
+          shippingAddress: visibleOrder.shippingAddress,
+        },
+      },
+    }
+  })
+}
+
 function lineTotalAmountForOhouseDetail(item: NormalizedOrder['items'][number]): number {
   return (Number(item.unitPrice) || 0) * Math.max(1, Number(item.quantity) || 1)
 }
@@ -2247,6 +2303,7 @@ export class OhouseScraper implements MarketplaceScraper {
         await setProgress?.('오늘의집 미확인주문 0건')
         return []
       }
+      await revealOhouseMaskedInfo(ctx.page)
       const visibleOrders = await readVisibleOhouseOrders(ctx.page, credentials)
       let pageResponseOrders = orderPageResponses.orders()
       await setProgress?.(`오늘의집 미확인주문 ${unconfirmedCount ?? '확인된'}건 엑셀 다운로드 중...`)
@@ -2268,6 +2325,7 @@ export class OhouseScraper implements MarketplaceScraper {
         await setProgress?.(`오늘의집 엑셀 주문 0건, 화면 주문 ${visibleOrders.length}건으로 수집 진행`)
         orders = visibleOrders
       }
+      orders = mergeOhouseOrdersWithVisibleRevealedData(orders, visibleOrders)
       orders = orders.filter((order) => order.orderedAt >= since)
       orders = await enrichOhouseOrdersFromDetails(ctx.page, orders, setProgress)
       if (orders.length > 0 && ctx.page.url().includes('customFilters=PAYMENT_COMPLETE')) {
@@ -2335,12 +2393,13 @@ export class OhouseScraper implements MarketplaceScraper {
       return []
     }
 
+    await revealOhouseMaskedInfo(page)
     const visibleOrders = await readVisibleOhouseOrders(page, credentials)
     await setProgress?.(`오늘의집 ${label} ${orderCount ?? '확인된'}건 엑셀 다운로드 중...`)
     try {
       const workbook = await downloadOrdersExcel(page, authFailures)
       const orders = await this.parseOrdersExcel(workbook, credentials)
-      return enrichOhouseOrdersFromDetails(page, orders, setProgress)
+      return enrichOhouseOrdersFromDetails(page, mergeOhouseOrdersWithVisibleRevealedData(orders, visibleOrders), setProgress)
     } catch (error) {
       if (visibleOrders.length === 0) throw error
       const message = error instanceof Error ? error.message : 'download failed'

@@ -3,6 +3,7 @@ import type { NormalizedOrder } from '@/lib/marketplace/types'
 import {
   enrichOhouseNetworkOrderFromDirectFields,
   isOhouseMaskedText,
+  mergeOhouseOrdersWithVisibleRevealedData,
   mergeOhouseOrderDetail,
 } from '@/scrapers/ohouse/scraper'
 
@@ -114,5 +115,40 @@ describe('enrichOhouseNetworkOrderFromDirectFields', () => {
     })
     expect(enriched.items[0].marketplaceItemId).toBe('tapeoff:655348316')
     expect(enriched.items[0].sku).toBe('509720960')
+  })
+})
+
+describe('mergeOhouseOrdersWithVisibleRevealedData', () => {
+  it('replaces masked identity fields from the revealed visible table without changing items', () => {
+    const masked = baseOrder()
+    const revealed: NormalizedOrder = {
+      ...baseOrder(),
+      buyerName: '송희',
+      buyerPhone: '010-1234-7436',
+      recipientName: '송희',
+      recipientPhone: '010-1234-7436',
+      shippingAddress: {
+        zipCode: '58582',
+        address1: '전라남도 무안군 일로읍 오룡번영1로 10',
+        address2: '104동 1404호',
+      },
+      items: [
+        {
+          marketplaceItemId: 'tapeoff:visible-row-only',
+          productName: 'visible row product',
+          quantity: 1,
+          unitPrice: 1,
+        },
+      ],
+    }
+
+    const [merged] = mergeOhouseOrdersWithVisibleRevealedData([masked], [revealed])
+
+    expect(merged.buyerName).toBe('송희')
+    expect(merged.buyerPhone).toBe('010-1234-7436')
+    expect(merged.recipientName).toBe('송희')
+    expect(merged.recipientPhone).toBe('010-1234-7436')
+    expect(merged.shippingAddress.address1).toBe('전라남도 무안군 일로읍 오룡번영1로 10')
+    expect(merged.items).toEqual(masked.items)
   })
 })

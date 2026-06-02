@@ -2,7 +2,7 @@ import { Queue } from 'bullmq'
 import { and, eq, inArray } from 'drizzle-orm'
 import { getConnection } from './connection'
 import { db } from '@/lib/db'
-import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
+import { marketplaceConnections, jobLogs, shipments } from '@/lib/db/schema'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
 import type { ScrapeJobData } from '@/scrapers/types'
 
@@ -178,6 +178,69 @@ export async function queueInvoiceUploadJob(
       removeOnFail: { count: 200 },
     },
   )
+}
+
+/**
+ * Cancel queued invoice upload jobs.
+ *
+ * Jobs that are already active may already be talking to an external
+ * marketplace, so this only removes waiting/delayed jobs. Removed shipments are
+ * returned to pending so the user can retry them later.
+ */
+export async function cancelInvoiceUploadJobs(
+  jobLogIds: string[],
+  userId: string,
+): Promise<{
+  cancelled: string[]
+  alreadyRunning: string[]
+}> {
+  const queue = getInvoiceUploadQueue()
+  const waitingJobs = await queue.getJobs(['waiting', 'delayed'])
+  const removedJobLogIds: string[] = []
+  const removedShipmentIds: string[] = []
+
+  for (const job of waitingJobs) {
+    const jobLogId = job.data.jobLogId
+    if (!jobLogId || !jobLogIds.includes(jobLogId) || job.data.userId !== userId) continue
+
+    await job.remove()
+    removedJobLogIds.push(jobLogId)
+    removedShipmentIds.push(job.data.shipmentId)
+  }
+
+  const activeJobs = await queue.getJobs(['active'])
+  const alreadyRunning = activeJobs
+    .map((job) => job.data)
+    .filter((data) => data.userId === userId && !!data.jobLogId && jobLogIds.includes(data.jobLogId))
+    .map((data) => data.jobLogId!)
+
+  if (removedJobLogIds.length > 0) {
+    await db
+      .update(jobLogs)
+      .set({
+        status: 'cancelled',
+        completedAt: new Date(),
+        progressMessage: '사용자 요청으로 송장 송신을 취소했습니다.',
+      })
+      .where(inArray(jobLogs.id, removedJobLogIds))
+  }
+
+  if (removedShipmentIds.length > 0) {
+    await db
+      .update(shipments)
+      .set({
+        uploadStatus: 'pending',
+        marketplaceUploadError: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(shipments.userId, userId),
+        inArray(shipments.id, removedShipmentIds),
+        eq(shipments.uploadStatus, 'uploading'),
+      ))
+  }
+
+  return { cancelled: removedJobLogIds, alreadyRunning }
 }
 
 /**

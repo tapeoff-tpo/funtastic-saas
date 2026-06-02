@@ -267,6 +267,8 @@ export function ShippingActions({
   const [classifying, setClassifying] = useState(false)
   const [combining, setCombining] = useState(false)
   const [uploadingToMarket, setUploadingToMarket] = useState(false)
+  const [apiInvoiceJobLogIds, setApiInvoiceJobLogIds] = useState<string[]>([])
+  const [cancellingApiInvoiceUpload, setCancellingApiInvoiceUpload] = useState(false)
   const [uploadingRpaInvoice, setUploadingRpaInvoice] = useState(false)
   const [rpaInvoiceFailure, setRpaInvoiceFailure] = useState<{
     title: string
@@ -355,6 +357,7 @@ export function ShippingActions({
     updateInvoiceTransmissionWindow(reportWindow, report)
 
     setUploadingToMarket(true)
+    setApiInvoiceJobLogIds([])
     let keepUploadingUntilPollFinishes = false
     try {
       if (selectedRpaOrders.length > 0) {
@@ -414,6 +417,7 @@ export function ShippingActions({
       const failed = data.failed ?? 0
       if (queued > 0 && data.jobLogIds?.length) {
         keepUploadingUntilPollFinishes = true
+        setApiInvoiceJobLogIds(data.jobLogIds)
         appendInvoiceTransmissionStep(report, '-> Stage IV: 비동기 송신 작업의 완료 여부를 확인하고 있습니다.')
         updateInvoiceTransmissionWindow(reportWindow, report)
         pollRpaInvoiceUpload(data.jobLogIds, report, reportWindow)
@@ -447,6 +451,49 @@ export function ShippingActions({
       toast.error(message)
     } finally {
       if (!keepUploadingUntilPollFinishes) setUploadingToMarket(false)
+    }
+  }
+
+  const handleCancelApiInvoiceUpload = async () => {
+    if (apiInvoiceJobLogIds.length === 0 || cancellingApiInvoiceUpload) return
+
+    setCancellingApiInvoiceUpload(true)
+    try {
+      const res = await fetch('/api/shipping/upload/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobLogIds: apiInvoiceJobLogIds }),
+      })
+      const data = await res.json().catch(() => ({})) as {
+        cancelled?: string[]
+        alreadyRunning?: string[]
+        error?: string
+      }
+
+      if (!res.ok) {
+        toast.error(data.error ?? 'API 송장 송신 취소에 실패했습니다.')
+        return
+      }
+
+      const cancelled = data.cancelled?.length ?? 0
+      const running = data.alreadyRunning?.length ?? 0
+
+      if (running > 0) {
+        toast.warning(`${cancelled}건 취소, ${running}건은 이미 송신 중입니다.`)
+        setApiInvoiceJobLogIds(data.alreadyRunning ?? [])
+        return
+      }
+
+      stopRpaInvoicePolling()
+      setApiInvoiceJobLogIds([])
+      setUploadingToMarket(false)
+      toast.success(`${cancelled}건 송장 송신을 취소했습니다.`)
+      router.refresh()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'API 송장 송신 취소에 실패했습니다.'
+      toast.error(message)
+    } finally {
+      setCancellingApiInvoiceUpload(false)
     }
   }
 
@@ -579,6 +626,7 @@ export function ShippingActions({
 
     const finishPolling = () => {
       stopRpaInvoicePolling()
+      setApiInvoiceJobLogIds([])
       setUploadingToMarket(false)
       setUploadingRpaInvoice(false)
       router.refresh()
@@ -1191,6 +1239,17 @@ export function ShippingActions({
             >
               {uploadingToMarket ? 'API 전송 중...' : `API 송장 전송 (${selectedApiOrders.length})`}
             </button>
+            {uploadingToMarket && apiInvoiceJobLogIds.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void handleCancelApiInvoiceUpload()}
+                disabled={cancellingApiInvoiceUpload}
+                className="rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
+                title="대기 중인 API 송장 송신 작업을 취소합니다."
+              >
+                {cancellingApiInvoiceUpload ? '취소 중...' : 'API 송신 취소'}
+              </button>
+            )}
             {selectedRpaOrders.length > 0 && (
               <button
                 type="button"

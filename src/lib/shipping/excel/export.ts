@@ -10,6 +10,20 @@ import { PassThrough } from 'node:stream'
 import type { CarrierTemplate } from '../types'
 import { fillWholeRow, getCombinedShipmentFill, getRepeatedCombinedKeys, shouldFillCombinedShipmentRow } from './combined-fill'
 
+type NormalizedCarrierColumn = {
+  header: string
+  field: string
+  width: number
+  fixedValue?: string
+  extraFields?: string[]
+  joinSeparator?: string
+}
+
+type NormalizedCarrierTemplate = {
+  name: string
+  columns: NormalizedCarrierColumn[]
+}
+
 /**
  * Resolve a dot-notation path on an object.
  * e.g., getNestedValue(order, 'shippingAddress.zipCode') -> '06234'
@@ -47,6 +61,42 @@ const THIN_BORDER: Partial<ExcelJS.Borders> = {
 
 function normalizeCombinedKeyPart(value: unknown): string {
   return String(value ?? '').trim().replace(/[^\p{L}\p{N}]/gu, '').toLowerCase()
+}
+
+function safeString(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean' || value instanceof Date) return String(value)
+  return ''
+}
+
+function safeWorksheetName(value: unknown): string {
+  const name = safeString(value).trim().replace(/[\[\]:*?/\\]/g, ' ').slice(0, 31)
+  return name || '엑셀다운로드'
+}
+
+function normalizeTemplate(template: CarrierTemplate): NormalizedCarrierTemplate {
+  const rawColumns = Array.isArray(template.columns) ? template.columns : []
+  const columns = rawColumns.map((column, index) => {
+    const record = column && typeof column === 'object' ? column as Record<string, unknown> : {}
+    const width = Number(record.width)
+    const extraFields = Array.isArray(record.extraFields)
+      ? record.extraFields.map(safeString).filter(Boolean)
+      : undefined
+    return {
+      header: safeString(record.header).trim() || `컬럼${index + 1}`,
+      field: safeString(record.field).trim(),
+      width: Number.isFinite(width) && width > 0 ? width : 12,
+      fixedValue: record.fixedValue === undefined ? undefined : safeString(record.fixedValue),
+      extraFields,
+      joinSeparator: safeString(record.joinSeparator) || ' ',
+    }
+  })
+
+  return {
+    name: safeWorksheetName(template.name),
+    columns,
+  }
 }
 
 function getTrackingCombinedKeys(orders: Record<string, unknown>[]): Set<string> {
@@ -124,10 +174,11 @@ function populateCarrierWorkbook(
   orders: Record<string, unknown>[],
   template: CarrierTemplate,
 ): void {
-  const worksheet = workbook.addWorksheet(template.name)
+  const normalizedTemplate = normalizeTemplate(template)
+  const worksheet = workbook.addWorksheet(normalizedTemplate.name)
 
   // Use index-based unique keys because multiple template columns can point to the same source field.
-  worksheet.columns = template.columns.map((col, idx) => ({
+  worksheet.columns = normalizedTemplate.columns.map((col, idx) => ({
     header: col.header,
     key: `c${idx}`,
     width: col.width,
@@ -146,7 +197,7 @@ function populateCarrierWorkbook(
 
   for (const order of orders) {
     const rowData: Record<string, unknown> = {}
-    template.columns.forEach((col, idx) => {
+    normalizedTemplate.columns.forEach((col, idx) => {
       const key = `c${idx}`
       if (col.fixedValue !== undefined && col.fixedValue !== '') {
         rowData[key] = col.fixedValue
@@ -167,7 +218,7 @@ function populateCarrierWorkbook(
       || isAddressCombinedExportRow(order, addressCombinedKeys)
       || shouldFillCombinedShipmentRow(order, combinedKeys)
     ) {
-      fillWholeRow(row, template.columns.length, getCombinedShipmentFill('combined')!)
+      fillWholeRow(row, normalizedTemplate.columns.length, getCombinedShipmentFill('combined')!)
     }
   }
 }

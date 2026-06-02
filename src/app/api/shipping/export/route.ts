@@ -109,6 +109,15 @@ function calculateSalesFeeAmount(amount: unknown, percent: number | null): numbe
   return Math.round(numericAmount * (percent / 100))
 }
 
+function safeFilenamePart(value: unknown): string {
+  const text = typeof value === 'string'
+    ? value
+    : typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : ''
+  return text.trim().replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ').slice(0, 80) || '엑셀다운로드'
+}
+
 function buildFilteredExportFilters(searchParams: URLSearchParams, userId: string): OrderFilters {
   const selectedStatuses = parseStatusFilter(searchParams.get('status'))
   const singleStatus = selectedStatuses.length === 1 ? selectedStatuses[0] : undefined
@@ -578,7 +587,7 @@ async function handleExportRequest(request: NextRequest, body: ExportRequestBody
         )
       }
 
-      filename = `${template.name}_${new Date().toISOString().slice(0, 10)}.xlsx`
+      filename = `${safeFilenamePart(template.name)}_${new Date().toISOString().slice(0, 10)}.xlsx`
       return new NextResponse(exportToCarrierExcelStream(exportData, template), {
         headers: {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

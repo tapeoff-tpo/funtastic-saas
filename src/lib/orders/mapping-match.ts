@@ -359,6 +359,12 @@ export function lookupCompatibleMappingRef(
       sourceMatchesCandidate(source, marketplaceId, candidateId, optionText)
       && isMappingSourceSnapshotCompatible(source, productName, optionText),
     )
+    const exactRawOptionHit = matches.find((source) =>
+      source.marketplaceOptionId
+      && source.marketplaceOptionId !== EXACT_OPTION_ID
+      && normalizeSourceOptionId(source.marketplaceOptionId) === normalizeSourceOptionId(optionText),
+    )
+    if (exactRawOptionHit) return exactRawOptionHit.ref
     const exactOptionHit = matches.find((source) => source.marketplaceOptionId && source.marketplaceOptionId !== EXACT_OPTION_ID)
     if (exactOptionHit) return exactOptionHit.ref
     const exactProductHit = matches.find((source) => source.marketplaceOptionId === EXACT_OPTION_ID)

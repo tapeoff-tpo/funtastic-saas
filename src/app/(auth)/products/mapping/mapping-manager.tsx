@@ -214,6 +214,16 @@ export function MappingManager() {
   useEffect(() => { void reload() }, [reload])
   useEffect(() => { setSearchInput(search) }, [search])
   useEffect(() => { setDisplayPage(1) }, [search, codes.length])
+  useEffect(() => {
+    const nextSearch = searchInput.trim()
+    if (nextSearch === search.trim()) return
+
+    const timer = window.setTimeout(() => {
+      void setSearch(nextSearch || null)
+    }, 350)
+
+    return () => window.clearTimeout(timer)
+  }, [search, searchInput, setSearch])
 
   const handleSearchSubmit = useCallback((e?: React.FormEvent) => {
     e?.preventDefault()

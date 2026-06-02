@@ -10,8 +10,13 @@ export type NormalizedShippingAddress = {
   address2: string
 }
 
-function cleanText(value: string | null | undefined): string {
-  return (value ?? '').trim().replace(/\s+/g, ' ')
+function cleanText(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value.trim().replace(/\s+/g, ' ')
+  if (typeof value === 'number' || typeof value === 'boolean' || value instanceof Date) {
+    return String(value).trim().replace(/\s+/g, ' ')
+  }
+  return ''
 }
 
 function extractZipFromLabeledText(value: string): { zipCode: string; rest: string } | null {

@@ -1,7 +1,16 @@
 const PHONE_PATTERN = /0\d{1,3}[-\s.]?\d{3,4}[-\s.]?\d{4}/g
 
-function normalizePhone(value: string): string | null {
-  const digits = value.replace(/\D/g, '')
+function toPhoneText(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'boolean' || value instanceof Date) return String(value).trim()
+  return ''
+}
+
+function normalizePhone(value: unknown): string | null {
+  const text = toPhoneText(value)
+  if (!text) return null
+  const digits = text.replace(/\D/g, '')
   if (digits.length < 9 || digits.length > 12) return null
 
   if (digits.startsWith('02')) {
@@ -21,20 +30,20 @@ function normalizePhone(value: string): string | null {
     return `${digits.slice(0, 4)}-${digits.slice(4, 8)}-${digits.slice(8)}`
   }
 
-  return value.trim() || null
+  return text || null
 }
 
-function isPreferredPhone(phone: string): boolean {
-  const digits = phone.replace(/\D/g, '')
+function isPreferredPhone(phone: unknown): boolean {
+  const digits = toPhoneText(phone).replace(/\D/g, '')
   return /^(010|011|016|017|018|019|050)/.test(digits)
 }
 
-export function extractPhoneNumbers(...values: Array<string | null | undefined>): string[] {
+export function extractPhoneNumbers(...values: unknown[]): string[] {
   const phones: string[] = []
   const seen = new Set<string>()
 
   for (const value of values) {
-    const text = value?.trim()
+    const text = toPhoneText(value)
     if (!text) continue
 
     const matches = text.match(PHONE_PATTERN) ?? [text]
@@ -53,7 +62,7 @@ export function extractPhoneNumbers(...values: Array<string | null | undefined>)
   return phones
 }
 
-export function splitPhonePair(...values: Array<string | null | undefined>): {
+export function splitPhonePair(...values: unknown[]): {
   phone1: string | null
   phone2: string | null
 } {
@@ -71,12 +80,12 @@ export function splitPhonePair(...values: Array<string | null | undefined>): {
   }
 }
 
-export function primaryPhone(...values: Array<string | null | undefined>): string {
+export function primaryPhone(...values: unknown[]): string {
   const { phone1, phone2 } = splitPhonePair(...values)
   return phone2 ?? phone1 ?? ''
 }
 
-export function secondaryPhone(...values: Array<string | null | undefined>): string {
+export function secondaryPhone(...values: unknown[]): string {
   const { phone1 } = splitPhonePair(...values)
   return phone1 ?? ''
 }

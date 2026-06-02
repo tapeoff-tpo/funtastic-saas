@@ -19,7 +19,7 @@ import { updateShipmentStatus } from '@/lib/shipping/queries'
 import { db } from '@/lib/db'
 import { jobLogs, marketplaceConnections, orders } from '@/lib/db/schema'
 import type { InvoiceUploadJobData } from '@/lib/shipping/types'
-import type { InvoiceData } from '@/lib/marketplace/types'
+import type { InvoiceData, MarketplaceAdapter } from '@/lib/marketplace/types'
 import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@/lib/shipping/upload-status'
 import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from './order-collector'
@@ -76,6 +76,11 @@ function firstInvoiceDetailIdx(rawData: Record<string, unknown> | null): string 
   const details = rawData?.details as Array<{ DetailIdx?: string | number }> | undefined
   const detailIdx = details?.find((detail) => detail.DetailIdx != null)?.DetailIdx
   return detailIdx != null ? String(detailIdx) : null
+}
+
+type PreparedInvoiceContext = {
+  rawData?: Record<string, unknown> | null
+  recipientName?: string | null
 }
 
 async function updateInvoiceJobLog(
@@ -187,6 +192,86 @@ export async function executeInvoiceUpload(
       errorMessage,
       progressMessage: '송장 송신 실패',
     })
+    throw error
+  }
+}
+
+export async function executePreparedInvoiceUpload(
+  data: InvoiceUploadJobData,
+  uploadAttempts: number,
+  adapter: Pick<MarketplaceAdapter, 'uploadInvoice'>,
+  context?: PreparedInvoiceContext | null,
+): Promise<void> {
+  const {
+    orderId,
+    shipmentId,
+    marketplaceId,
+    trackingNumber,
+    carrierId,
+  } = data
+  const marketplaceOrderId = data.marketplaceOrderId ?? data.orderId
+
+  await updateInvoiceJobLog(data.jobLogId, {
+    status: 'running',
+    startedAt: new Date(),
+    progressMessage: 'Uploading invoice...',
+  })
+
+  await updateShipmentStatus(shipmentId, 'uploading')
+
+  let failureMarked = false
+  try {
+    const invoiceData: InvoiceData = {
+      trackingNumber,
+      carrierId,
+    }
+    const rawData = context?.rawData ?? await resolveOrderRawData(orderId)
+    if (rawData) invoiceData.rawData = rawData
+    if (context?.recipientName) invoiceData.recipientName = context.recipientName
+    const firstRawItem = Array.isArray(rawData?.orderItems) ? rawData.orderItems[0] : null
+    const firstRawItemData = firstRawItem && typeof firstRawItem === 'object'
+      ? firstRawItem as Record<string, unknown>
+      : {}
+    if (rawData?.shipmentBoxId) invoiceData.shipmentBoxId = rawData.shipmentBoxId
+    if (firstRawItemData.vendorItemId) invoiceData.vendorItemId = firstRawItemData.vendorItemId
+    if (marketplaceId === '10x10') {
+      const detailIdx = firstInvoiceDetailIdx(rawData) ?? await resolveTenByTenDetailIdx(orderId)
+      if (detailIdx) invoiceData.detailIdx = detailIdx
+    }
+
+    const result = await adapter.uploadInvoice(marketplaceOrderId, invoiceData)
+
+    if (!result.success) {
+      const errorMessage = result.error || 'Unknown upload error'
+      await markShipmentUploadFailed(shipmentId, errorMessage, uploadAttempts)
+      failureMarked = true
+      await updateInvoiceJobLog(data.jobLogId, {
+        status: 'failed',
+        completedAt: new Date(),
+        errorMessage,
+        progressMessage: 'Invoice upload failed',
+      })
+      throw new Error(errorMessage)
+    }
+
+    await markShipmentUploadedAndOrderShipped(shipmentId, orderId, uploadAttempts)
+    await updateInvoiceJobLog(data.jobLogId, {
+      status: 'completed',
+      completedAt: new Date(),
+      progressMessage: 'Invoice upload completed',
+      ordersCollected: 1,
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown upload error'
+    if (!failureMarked) {
+      await markShipmentUploadFailed(shipmentId, errorMessage, uploadAttempts)
+      await updateInvoiceJobLog(data.jobLogId, {
+        status: 'failed',
+        completedAt: new Date(),
+        errorMessage,
+        progressMessage: 'Invoice upload failed',
+      })
+    }
     throw error
   }
 }

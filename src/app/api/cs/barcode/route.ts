@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { and, desc, eq, inArray } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
 import { orderItems, orders, shipments } from '@/lib/db/schema'
@@ -17,8 +17,7 @@ export async function GET(req: NextRequest) {
   if (!trackingNumber) {
     return NextResponse.json({ error: '송장번호를 입력해주세요.' }, { status: 400 })
   }
-  const normalizedTrackingNumber = trackingNumber.replace(/[\s-]/g, '')
-  const trackingCandidates = Array.from(new Set([trackingNumber, normalizedTrackingNumber].filter(Boolean)))
+  const normalizedTrackingNumber = trackingNumber.replace(/[^0-9A-Za-z]/g, '').toUpperCase()
 
   const [row] = await db
     .select({
@@ -42,7 +41,7 @@ export async function GET(req: NextRequest) {
     .innerJoin(orders, eq(shipments.orderId, orders.id))
     .where(and(
       eq(shipments.userId, workspaceUserId),
-      inArray(shipments.trackingNumber, trackingCandidates),
+      eq(shipments.normalizedTrackingNumber, normalizedTrackingNumber),
     ))
     .orderBy(desc(shipments.createdAt))
     .limit(1)

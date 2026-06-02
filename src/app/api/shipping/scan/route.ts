@@ -13,16 +13,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
-import { eq, and, gte, count, isNull, or, inArray, sql } from 'drizzle-orm'
+import { eq, and, gte, count, isNull, or, inArray } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 function normalizeTrackingNumber(value: string) {
-  return value.trim().replace(/[^0-9A-Za-z]/g, '')
-}
-
-function normalizedTrackingNumberSql() {
-  return sql<string>`regexp_replace(${shipments.trackingNumber}, '[^0-9A-Za-z]', '', 'g')`
+  return value.trim().replace(/[^0-9A-Za-z]/g, '').toUpperCase()
 }
 
 export async function GET() {
@@ -128,7 +124,7 @@ export async function POST(req: NextRequest) {
     .innerJoin(orders, eq(orders.id, shipments.orderId))
     .where(and(
       eq(shipments.userId, workspaceUserId),
-      eq(normalizedTrackingNumberSql(), scanValue),
+      eq(shipments.normalizedTrackingNumber, scanValue),
     ))
 
   const matchingShipments = exactTrackingShipments.length > 0

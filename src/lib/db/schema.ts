@@ -342,6 +342,7 @@ export const shipments = pgTable(
       .references(() => orders.id),
     userId: uuid('user_id').notNull(),
     trackingNumber: varchar('tracking_number', { length: 100 }).notNull(),
+    normalizedTrackingNumber: varchar('normalized_tracking_number', { length: 100 }).notNull().$defaultFn(() => ''),
     carrierId: varchar('carrier_id', { length: 50 }).notNull(),
     carrierName: varchar('carrier_name', { length: 100 }).notNull(),
     uploadStatus: uploadStatusEnum('upload_status').notNull().default('pending'),
@@ -360,6 +361,7 @@ export const shipments = pgTable(
     index('shipments_order_id').on(table.orderId),
     index('shipments_upload_status').on(table.uploadStatus),
     index('shipments_user_tracking_number_idx').on(table.userId, table.trackingNumber),
+    index('shipments_user_normalized_tracking_number_idx').on(table.userId, table.normalizedTrackingNumber),
   ],
 )
 

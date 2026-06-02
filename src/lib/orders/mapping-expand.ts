@@ -72,6 +72,14 @@ type OrderInput = {
   rawData?: unknown
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function hasSetSplit(rawData: unknown): boolean {
+  return isRecord(rawData) && isRecord(rawData.setSplit)
+}
+
 /**
  * 매핑 확장 + inventory 메타 lookup 을 한 번에 수행.
  *
@@ -193,6 +201,30 @@ export async function expandOrderItemsWithMapping(
 
   const result: ExpandedRow[] = []
 
+  const pushFallbackRow = (it: OrderItemInput, fromMapping: boolean): void => {
+    const orderQty = it.quantity * (it.skuMultiplier ?? 1)
+    const fallbackSku = it.lockedSku ?? it.sku ?? ''
+    const inv = fallbackSku ? invMap.get(fallbackSku) : undefined
+    result.push({
+      orderItemId: it.id,
+      orderId: it.orderId,
+      sku: fallbackSku,
+      quantity: it.lockedQuantity ?? orderQty,
+      optionText: it.lockedOptionName ?? inv?.optionName ?? it.optionText ?? '',
+      productName: it.lockedProductName ?? inv?.productName ?? it.productName ?? '',
+      source: {
+        productName: it.productName,
+        optionText: it.optionText,
+        sku: it.sku,
+        quantity: it.quantity,
+        marketplaceItemId: it.marketplaceItemId,
+        skuMultiplier: it.skuMultiplier,
+        unitPrice: it.unitPrice,
+      },
+      fromMapping,
+    })
+  }
+
   for (const it of items) {
     if (it.lockedAt) {
       const lockedComponents = it.lockedMappingCodeId ? componentsByCode.get(it.lockedMappingCodeId) : null
@@ -222,30 +254,17 @@ export async function expandOrderItemsWithMapping(
         continue
       }
 
-      const lockedQuantity = it.lockedQuantity ?? it.quantity * (it.skuMultiplier ?? 1)
-      result.push({
-        orderItemId: it.id,
-        orderId: it.orderId,
-        sku: it.lockedSku ?? it.sku ?? '',
-        quantity: lockedQuantity,
-        optionText: it.lockedOptionName ?? it.optionText ?? '',
-        productName: it.lockedProductName ?? it.productName ?? '',
-        source: {
-          productName: it.productName,
-          optionText: it.optionText,
-          sku: it.sku,
-          quantity: it.quantity,
-          marketplaceItemId: it.marketplaceItemId,
-          skuMultiplier: it.skuMultiplier,
-          unitPrice: it.unitPrice,
-        },
-        fromMapping: Boolean(it.lockedSku),
-      })
+      pushFallbackRow(it, Boolean(it.lockedSku))
       continue
     }
 
     const ord = orderById.get(it.orderId)
     const orderQty = it.quantity * (it.skuMultiplier ?? 1)
+    if (hasSetSplit(ord?.rawData)) {
+      pushFallbackRow(it, false)
+      continue
+    }
+
     const candidateIds = Array.from(new Set(
       [it.marketplaceItemId, it.sku, ...getRawMappingCandidateIdsForItem(ord?.rawData, it.marketplaceItemId)]
         .map((id) => id?.trim())
@@ -292,26 +311,7 @@ export async function expandOrderItemsWithMapping(
     } else {
       // 매핑 없음 → 원본 1 행 유지.
       // 단, 주문 SKU가 재고관리코드와 직접 맞으면 발주서의 "확정상품명"은 내부 재고명을 쓴다.
-      const fallbackSku = it.sku ?? ''
-      const inv = fallbackSku ? invMap.get(fallbackSku) : undefined
-      result.push({
-        orderItemId: it.id,
-        orderId: it.orderId,
-        sku: fallbackSku,
-        quantity: orderQty,
-        optionText: inv?.optionName ?? it.optionText ?? '',
-        productName: inv?.productName ?? it.productName ?? '',
-        source: {
-          productName: it.productName,
-          optionText: it.optionText,
-          sku: it.sku,
-          quantity: it.quantity,
-          marketplaceItemId: it.marketplaceItemId,
-          skuMultiplier: it.skuMultiplier,
-          unitPrice: it.unitPrice,
-        },
-        fromMapping: false,
-      })
+      pushFallbackRow(it, false)
     }
   }
 

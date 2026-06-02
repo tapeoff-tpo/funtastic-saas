@@ -36,6 +36,7 @@ import { HyundaiHmallAdapter } from '@/lib/marketplace/adapters/hyundai-hmall/ad
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
 import { normalizeMarketplaceCollectionStatus } from '@/lib/marketplace/collection-status'
 import { generateInternalNo } from '@/lib/orders/internal-no'
+import { normalizeShippingAddress } from '@/lib/orders/shipping-address'
 import '@/lib/marketplace/adapters/configs'
 import type {
   MarketplaceAdapter,
@@ -1029,6 +1030,7 @@ async function upsertOrder(
 ) {
   const rawData = enrichOrderRawData(order)
   const enrichedOrder = withFallbackOrderFields(order, rawData)
+  const shippingAddress = normalizeShippingAddress(enrichedOrder.shippingAddress)
   const insertStatus = collectedOrderStatus(order.status, order.marketplaceId)
   const updateStatus = collectedOrderUpdateStatus(order.status, order.marketplaceId)
   const marketplaceCollectionStatus = getMarketplaceCollectionStatus(order)
@@ -1050,7 +1052,7 @@ async function upsertOrder(
       recipientName: enrichedOrder.recipientName,
       recipientPhone: enrichedOrder.recipientPhone,
       recipientPhone2: enrichedOrder.recipientPhone2,
-      shippingAddress: enrichedOrder.shippingAddress,
+      shippingAddress,
       orderedAt: enrichedOrder.orderedAt,
       totalAmount: String(enrichedOrder.totalAmount ?? 0),
       shippingFee: enrichedOrder.shippingFee != null ? String(enrichedOrder.shippingFee) : null,
@@ -1074,7 +1076,7 @@ async function upsertOrder(
         recipientName: enrichedOrder.recipientName,
         recipientPhone: enrichedOrder.recipientPhone,
         recipientPhone2: enrichedOrder.recipientPhone2,
-        shippingAddress: enrichedOrder.shippingAddress,
+        shippingAddress,
         deliveryMessage: enrichedOrder.deliveryMessage ?? null,
         rawData,
         updatedAt: new Date(),
@@ -1439,6 +1441,7 @@ async function createSplitOrderCopies(
     totalParts: items.length,
   }
   const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
+  const shippingAddress = normalizeShippingAddress(order.shippingAddress)
 
   await db
     .update(orders)
@@ -1471,7 +1474,7 @@ async function createSplitOrderCopies(
         recipientName: order.recipientName,
         recipientPhone: order.recipientPhone,
         recipientPhone2: order.recipientPhone2,
-        shippingAddress: order.shippingAddress,
+        shippingAddress,
         orderedAt: order.orderedAt,
         totalAmount: String(lineTotalAmount(item)),
         shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
@@ -1530,6 +1533,7 @@ async function ensureSplitOrderCopies(
     totalParts: items.length,
   }
   const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
+  const shippingAddress = normalizeShippingAddress(order.shippingAddress)
 
   await db
     .update(orders)
@@ -1587,7 +1591,7 @@ async function ensureSplitOrderCopies(
         recipientName: order.recipientName,
         recipientPhone: order.recipientPhone,
         recipientPhone2: order.recipientPhone2,
-        shippingAddress: order.shippingAddress,
+        shippingAddress,
         orderedAt: order.orderedAt,
         totalAmount: String(lineTotalAmount(item)),
         shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
@@ -1618,6 +1622,7 @@ async function updateSplitOrderCopy(
 ): Promise<void> {
   const now = new Date()
   const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
+  const shippingAddress = normalizeShippingAddress(order.shippingAddress)
   await db
     .update(orders)
     .set({
@@ -1631,7 +1636,7 @@ async function updateSplitOrderCopy(
       recipientName: order.recipientName,
       recipientPhone: order.recipientPhone,
       recipientPhone2: order.recipientPhone2,
-      shippingAddress: order.shippingAddress,
+      shippingAddress,
       orderedAt: order.orderedAt,
       totalAmount: String(lineTotalAmount(item)),
       shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,

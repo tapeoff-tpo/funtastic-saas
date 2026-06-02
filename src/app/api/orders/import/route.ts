@@ -12,6 +12,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { parseImportedOrderedAt } from '@/lib/orders/import-date'
 import { normalizeImportedOrderItem } from '@/lib/orders/import-normalize'
 import { splitPhonePair } from '@/lib/orders/phone-normalize'
+import { normalizeShippingAddress } from '@/lib/orders/shipping-address'
 
 /**
  * POST /api/orders/import
@@ -170,6 +171,10 @@ export async function POST(request: NextRequest) {
           splitAt: new Date().toISOString(),
           totalParts: normalizedItems.length,
         }
+        const shippingAddress = normalizeShippingAddress({
+          zipCode: first.zipCode ?? '',
+          address1: first.recipientAddress,
+        })
 
         try {
           // Insert order
@@ -188,10 +193,7 @@ export async function POST(request: NextRequest) {
               recipientName: first.recipientName,
               recipientPhone: recipientPhones.phone1,
               recipientPhone2: recipientPhones.phone2,
-              shippingAddress: {
-                zipCode: first.zipCode ?? '',
-                address1: first.recipientAddress,
-              },
+              shippingAddress,
               orderedAt,
               totalAmount: String(importedLineAmount(firstNormalized)),
               shippingFee: first.shippingFee == null ? null : String(first.shippingFee),
@@ -230,10 +232,7 @@ export async function POST(request: NextRequest) {
                 recipientName: first.recipientName,
                 recipientPhone: recipientPhones.phone1,
                 recipientPhone2: recipientPhones.phone2,
-                shippingAddress: {
-                  zipCode: first.zipCode ?? '',
-                  address1: first.recipientAddress,
-                },
+                shippingAddress,
                 orderedAt,
                 totalAmount: String(importedLineAmount(item)),
                 shippingFee: first.shippingFee == null ? null : String(first.shippingFee),

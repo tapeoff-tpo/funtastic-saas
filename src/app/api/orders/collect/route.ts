@@ -146,6 +146,12 @@ export async function POST(request: NextRequest) {
       const since = manualDateFrom
         ? new Date(`${manualDateFrom}T00:00:00+09:00`)
         : new Date(Date.now() - (safeManualLookbackDays ?? 3) * 24 * 60 * 60 * 1000)
+      await db
+        .update(jobLogs)
+        .set({
+          progressMessage: '로컬 마켓 에이전트 대기 중... PC에서 start-market-agent.cmd가 실행 중이어야 합니다.',
+        })
+        .where(eq(jobLogs.id, jobLogId))
       await getMarketplaceScrapeQueue().add(
         `manual-scrape-${conn.marketplaceId}-${Date.now()}`,
         {

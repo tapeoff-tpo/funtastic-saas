@@ -215,6 +215,7 @@ export async function POST(req: NextRequest) {
             marketplaceId,
             connectionId,
             status: 'queued',
+            progressMessage: '로컬 마켓 에이전트 대기 중... PC에서 start-market-agent.cmd가 실행 중이어야 합니다.',
           })
           .returning({ id: jobLogs.id })
 

@@ -6,9 +6,9 @@ import { and, eq, inArray, like, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 const RPA_QUEUE_TIMEOUT_MESSAGE =
-  'RPA 워커가 작업을 시작하지 못했습니다. scrape-worker 서비스가 실행 중인지 확인해주세요.'
+  '로컬 마켓 에이전트가 작업을 시작하지 못했습니다. PC에서 start-market-agent.cmd를 실행한 뒤 다시 시도해주세요.'
 const RPA_RUNNING_TIMEOUT_MESSAGE =
-  'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
+  '로컬 마켓 에이전트 작업이 제한시간 안에 끝나지 않았습니다. 에이전트 창의 오류를 확인한 뒤 다시 시도해주세요.'
 const RPA_SCRAPE_STALE_TIMEOUT_SECONDS = 780
 const withLastProgress = (message: string) =>
   sql<string>`case

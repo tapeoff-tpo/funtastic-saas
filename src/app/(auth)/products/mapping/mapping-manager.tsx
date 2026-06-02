@@ -20,56 +20,6 @@ export const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
 const EXACT_OPTION_ID = '__exact__'
 const DISPLAY_PAGE_SIZE = 300
 
-function normalizeSearchText(value: string): string {
-  return value.toLowerCase().replace(/\s+/g, '')
-}
-
-function searchTokens(query: string): string[] {
-  return query
-    .toLowerCase()
-    .split(/\s+/)
-    .map((token) => token.trim())
-    .filter(Boolean)
-}
-
-function mappingSearchHaystack(code: MappingCodeRow): string {
-  const parts = [
-    code.code,
-    code.name,
-    code.note ?? '',
-    ...code.sources.flatMap((source) => [
-      source.marketplaceId,
-      source.marketplaceProductId,
-      source.marketplaceOptionId,
-      source.marketplaceName ?? '',
-      source.productNameSnapshot ?? '',
-      source.optionNameSnapshot ?? '',
-      marketLabel(source.marketplaceId),
-      formatMarketplaceProductCode(source),
-      formatCollectedProductName(source),
-    ]),
-    ...code.components.flatMap((component) => [
-      component.sku,
-      component.productName ?? '',
-      component.optionName ?? '',
-      formatConfirmedProductName(component, code),
-    ]),
-  ]
-
-  return parts.join(' ')
-}
-
-function mappingCodeMatchesSearch(code: MappingCodeRow, query: string): boolean {
-  const tokens = searchTokens(query)
-  if (tokens.length === 0) return true
-
-  const haystack = mappingSearchHaystack(code).toLowerCase()
-  const compactHaystack = normalizeSearchText(haystack)
-  return tokens.every((token) =>
-    haystack.includes(token) || compactHaystack.includes(normalizeSearchText(token)),
-  )
-}
-
 function formatMarketplaceProductCode(source: MappingSourceView): string {
   if (!source.marketplaceOptionId || source.marketplaceOptionId === EXACT_OPTION_ID) {
     return source.marketplaceProductId
@@ -235,10 +185,7 @@ export function MappingManager() {
     void setSearch(null)
   }, [setSearch])
 
-  const filtered = codes.filter((c) => {
-    if (!search) return true
-    return mappingCodeMatchesSearch(c, search)
-  })
+  const filtered = codes
 
   const displayRows: MappingDisplayRow[] = filtered.flatMap((code) => {
     const sources = code.sources.length > 0 ? code.sources : [null]

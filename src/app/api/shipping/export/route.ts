@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orders, orderItems, shipments, marketplaceConnections, products, inventory } from '@/lib/db/schema'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, gte, inArray, isNotNull, lte, sql } from 'drizzle-orm'
 import { exportToCarrierExcel } from '@/lib/shipping/excel/export'
 import { exportOrdersToExcel } from '@/lib/shipping/excel/order-export'
 import { getCarrierTemplateById, getCarrierTemplates } from '@/lib/shipping/template-queries'
@@ -25,6 +25,12 @@ import { normalizeShippingAddress } from '@/lib/orders/shipping-address'
 
 const FILTERED_EXPORT_LIMIT = 50000
 const SCAN_FILTER_STATUSES = new Set(['preparing', 'ready', 'shipped'])
+
+function parseKstDateBoundary(value: string, boundary: 'start' | 'end'): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return new Date(value)
+  const time = boundary === 'start' ? '00:00:00.000' : '23:59:59.999'
+  return new Date(`${value}T${time}+09:00`)
+}
 
 function getKstDateParts(date: Date): { year: string; month: string; day: string; hour: string; minute: string } {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -184,7 +190,89 @@ function getSalesStatusLabel(status: string): string {
   return labels[status] ?? status
 }
 
-export async function GET(request: NextRequest) {
+interface ExportRequestBody {
+  orderIds?: unknown
+  scope?: unknown
+  type?: unknown
+  templateId?: unknown
+  columns?: unknown
+  filters?: unknown
+}
+
+function stringBodyValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function orderIdsFromBody(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return Array.from(new Set(value.map((item) => String(item ?? '').trim()).filter(Boolean)))
+}
+
+function canUseFastShippedExportPath(searchParams: URLSearchParams): boolean {
+  if (searchParams.get('dateField') !== 'shippedAt') return false
+  if (!searchParams.get('dateFrom') && !searchParams.get('dateTo')) return false
+
+  const status = searchParams.get('status')
+  const statuses = searchParams.get('statuses')
+  const allowedStatuses = new Set(['shipped', 'delivering', 'delivered'])
+  if (status && !allowedStatuses.has(status)) return false
+  if (statuses && statuses.split(',').some((item) => !allowedStatuses.has(item.trim()))) return false
+
+  const unsupportedFilters = [
+    'marketplace',
+    'marketplaces',
+    'carrier',
+    'search',
+    'searchField',
+    'orderSource',
+    'claimType',
+    'mapping',
+    'scan',
+    'scanResult',
+    'isHeld',
+    'cancelTab',
+  ]
+  return unsupportedFilters.every((key) => !searchParams.get(key))
+}
+
+async function getFastShippedExportOrderIds(
+  searchParams: URLSearchParams,
+  userId: string,
+  limit: number,
+): Promise<{ ids: string[]; total: number }> {
+  const conditions = [
+    eq(orders.userId, userId),
+    isNotNull(shipments.shippedAt),
+  ]
+  const status = searchParams.get('status')
+  const statuses = searchParams.get('statuses')?.split(',').map((item) => item.trim()).filter(Boolean)
+  if (status) {
+    conditions.push(eq(orders.status, status as typeof orders.$inferSelect.status))
+  } else if (statuses?.length) {
+    conditions.push(inArray(orders.status, statuses as Array<typeof orders.$inferSelect.status>))
+  } else {
+    conditions.push(inArray(orders.status, ['shipped', 'delivering', 'delivered']))
+  }
+
+  const dateFrom = searchParams.get('dateFrom')
+  const dateTo = searchParams.get('dateTo')
+  if (dateFrom) conditions.push(gte(shipments.shippedAt, parseKstDateBoundary(dateFrom, 'start')))
+  if (dateTo) conditions.push(lte(shipments.shippedAt, parseKstDateBoundary(dateTo, 'end')))
+
+  const rows = await db
+    .selectDistinct({ id: orders.id })
+    .from(shipments)
+    .innerJoin(orders, eq(shipments.orderId, orders.id))
+    .where(and(...conditions))
+    .limit(limit + 1)
+
+  return {
+    ids: rows.slice(0, limit).map((row) => row.id),
+    total: rows.length > limit ? limit + 1 : rows.length,
+  }
+}
+
+async function handleExportRequest(request: NextRequest, body: ExportRequestBody = {}) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) {
@@ -192,17 +280,27 @@ export async function GET(request: NextRequest) {
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  const searchParams = request.nextUrl.searchParams
+  const searchParams = new URLSearchParams(request.nextUrl.searchParams)
+  if (body.filters && typeof body.filters === 'object' && !Array.isArray(body.filters)) {
+    for (const [key, value] of Object.entries(body.filters)) {
+      if (typeof value === 'string') searchParams.set(key, value)
+    }
+  }
   const orderIdsParam = searchParams.get('orderIds')
-  const scope = searchParams.get('scope')
-  const type = searchParams.get('type') ?? 'carrier'
-  const templateId = searchParams.get('templateId')
-  const columnsParam = searchParams.get('columns')
+  const bodyOrderIds = orderIdsFromBody(body.orderIds)
+  const scope = stringBodyValue(body.scope) ?? searchParams.get('scope')
+  const type = stringBodyValue(body.type) ?? searchParams.get('type') ?? 'carrier'
+  const templateId = stringBodyValue(body.templateId) ?? searchParams.get('templateId')
+  const columnsParam = stringBodyValue(body.columns) ?? searchParams.get('columns')
 
   try {
-    let orderIds = orderIdsParam?.split(',').filter(Boolean) ?? []
+    let orderIds = bodyOrderIds.length > 0
+      ? bodyOrderIds
+      : orderIdsParam?.split(',').map((id) => id.trim()).filter(Boolean) ?? []
     if (scope === 'filtered') {
-      const filtered = await getOrderIds(buildFilteredExportFilters(searchParams, workspaceUserId), FILTERED_EXPORT_LIMIT)
+      const filtered = canUseFastShippedExportPath(searchParams)
+        ? await getFastShippedExportOrderIds(searchParams, workspaceUserId, FILTERED_EXPORT_LIMIT)
+        : await getOrderIds(buildFilteredExportFilters(searchParams, workspaceUserId), FILTERED_EXPORT_LIMIT)
       if (filtered.total > FILTERED_EXPORT_LIMIT) {
         return NextResponse.json(
           { error: `검색 결과가 ${FILTERED_EXPORT_LIMIT.toLocaleString('ko-KR')}건을 초과합니다. 조건을 더 좁혀서 다운로드해 주세요.` },
@@ -264,6 +362,13 @@ export async function GET(request: NextRequest) {
       list.push(row)
       expandedByOrder.set(row.orderId, list)
     }
+    const itemRowsByOrder = new Map<string, typeof itemRows>()
+    for (const item of itemRows) {
+      const list = itemRowsByOrder.get(item.orderId) ?? []
+      list.push(item)
+      itemRowsByOrder.set(item.orderId, list)
+    }
+    const shipmentByOrder = new Map(shipmentRows.map((shipment) => [shipment.orderId, shipment]))
 
     // SKU 기준 products(원가) + inventory(현재고/로케이션/확정옵션명) lookup —
     // 매핑 확장 후 행들의 SKU 까지 모두 포함해야 함.
@@ -307,8 +412,8 @@ export async function GET(request: NextRequest) {
 
     // Build flat order records for export. 매출확인용은 구성 상품별 실 출고 행을 보존한다.
     const exportData: Record<string, unknown>[] = orderRows.flatMap((order) => {
-      const items = itemRows.filter((item) => item.orderId === order.id)
-      const shipment = shipmentRows.find((s) => s.orderId === order.id)
+      const items = itemRowsByOrder.get(order.id) ?? []
+      const shipment = shipmentByOrder.get(order.id)
       const expandedRows = expandedByOrder.get(order.id) ?? []
       const shipmentGroupId = groupIdByOrder.get(order.id) ?? null
       const isCombinedShipment = shipmentGroupId !== null
@@ -475,9 +580,24 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     console.error('Excel export error:', error)
+    const message = error instanceof Error ? error.message : String(error)
     return NextResponse.json(
-      { error: 'Failed to generate Excel file' },
+      { error: `Failed to generate Excel file: ${message}` },
       { status: 500 },
     )
   }
+}
+
+export async function GET(request: NextRequest) {
+  return handleExportRequest(request)
+}
+
+export async function POST(request: NextRequest) {
+  let body: ExportRequestBody = {}
+  try {
+    body = await request.json() as ExportRequestBody
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+  return handleExportRequest(request, body)
 }

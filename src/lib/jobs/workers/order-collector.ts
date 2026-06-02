@@ -211,6 +211,7 @@ function shouldMoveMarketplaceOrderToShippingPrepOnCollect(marketplaceId: string
     'hyundai-hmall',
     'kakao-store',
     'naver',
+    'onchannel',
     'ownerclan',
     'specialoffer',
     'ssgmall',
@@ -227,6 +228,7 @@ export function marketplaceShippingPrepStatus(marketplaceId: string): string {
   if (marketplaceId === 'coupang') return 'INSTRUCT'
   if (marketplaceId === 'ssgmall') return '140'
   if (marketplaceId === 'funtastic-b2b') return 'PREPARING'
+  if (marketplaceId === 'onchannel') return 'READY_TO_SHIP'
   if (marketplaceId === 'toss-shopping') return 'PREPARING_PRODUCT'
   return 'CONFIRMED'
 }

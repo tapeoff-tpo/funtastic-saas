@@ -3,10 +3,13 @@ import { OnchannelAdapter } from '@/lib/marketplace/adapters/onchannel/adapter'
 
 const mockJson = vi.fn()
 const mockGet = vi.fn(() => ({ json: mockJson }))
+const mockPostJson = vi.fn()
+const mockPost = vi.fn(() => ({ json: mockPostJson }))
 
 vi.mock('@/lib/marketplace/adapters/onchannel/client', () => ({
   createOnchannelClient: vi.fn(() => ({
     get: mockGet,
+    post: mockPost,
   })),
 }))
 
@@ -49,5 +52,22 @@ describe('OnchannelAdapter', () => {
 
     expect(orders.map((order) => order.marketplaceOrderId)).toEqual(['GO_1'])
     expect(orders[0].status).toBe('new')
+  })
+
+  it('confirms a paid order into Onchannel shipping-prep state', async () => {
+    mockPostJson.mockResolvedValueOnce({
+      success: true,
+      data: null,
+    })
+
+    const adapter = new OnchannelAdapter({ api_key: 'api-key', shop_id: 'shop' })
+    const result = await adapter.confirmOrder('GO_1')
+
+    expect(result).toEqual({ success: true })
+    expect(mockPost).toHaveBeenCalledWith('orders/GO_1/confirm', {
+      json: {
+        shopId: 'shop',
+      },
+    })
   })
 })

@@ -221,6 +221,24 @@ vi.mock('@/lib/marketplace/adapters/specialoffer/adapter', () => ({
   }),
 }))
 
+vi.mock('@/lib/marketplace/adapters/onchannel/adapter', () => ({
+  OnchannelAdapter: vi.fn().mockImplementation(function MockOnchannelAdapter() {
+    return {
+      config: {
+        id: 'onchannel',
+        name: '온채널',
+        authType: 'api_key',
+        rateLimitPerSecond: 20,
+        requiredCredentials: ['api_key', 'shop_id'],
+      },
+      getOrders: adapterMocks.getOrders,
+      getClaimsOrders: adapterMocks.getClaimsOrders,
+      confirmOrder: adapterMocks.confirmOrder,
+      uploadInvoice: vi.fn(),
+    }
+  }),
+}))
+
 const sampleOrder: NormalizedOrder = {
   marketplaceOrderId: 'CP-2024-001',
   marketplaceId: 'coupang',
@@ -454,6 +472,33 @@ describe('processOrderCollection', () => {
     expect(mockConfirmOrder).toHaveBeenCalledWith(
       existingOrderNo,
       expect.objectContaining({ orderIdentity: expect.objectContaining({ orderId: existingOrderNo }) }),
+    )
+  })
+
+  it('acknowledges Onchannel paid orders after collection', async () => {
+    const onchannelOrder = {
+      ...sampleOrder,
+      marketplaceId: 'onchannel',
+      marketplaceOrderId: 'GO_2026_ONCH',
+      marketplaceStatus: 'PAID',
+      marketplaceCollectionStatus: 'new',
+    } satisfies NormalizedOrder
+    mockGetOrders.mockResolvedValue([onchannelOrder])
+
+    const { processOrderCollection } = await import(
+      '@/lib/jobs/workers/order-collector'
+    )
+
+    const result = await processOrderCollection(createMockJob({
+      marketplaceId: 'onchannel',
+      connectionId: 'conn-onchannel',
+      userId: 'user-1',
+    }))
+
+    expect(result.ordersCollected).toBe(1)
+    expect(mockConfirmOrder).toHaveBeenCalledWith(
+      'GO_2026_ONCH',
+      expect.objectContaining({ orderIdentity: expect.objectContaining({ orderId: 'GO_2026_ONCH' }) }),
     )
   })
 

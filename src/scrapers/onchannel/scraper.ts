@@ -584,7 +584,7 @@ async function findOrderRow(page: Page, orderId: string): Promise<Locator | null
 async function clickInvoiceInputForOrder(page: Page, orderId: string): Promise<void> {
   const row = await findOrderRow(page, orderId)
   if (row) {
-    await clickButtonByText(row, /송장\s*입력|송장등록|송장\s*등록/)
+    await clickButtonByText(row, /송장\s*입력|송장등록|송장\s*등록|운송장\s*입력|운송장\s*등록|배송정보|택배/)
     return
   }
 
@@ -594,16 +594,19 @@ async function clickInvoiceInputForOrder(page: Page, orderId: string): Promise<v
       const rect = element.getBoundingClientRect()
       return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0
     }
-    const hasInvoiceText = (element: Element) => /송장\s*(입력|등록)/.test(element.textContent ?? '')
     const candidateContainers = Array.from(document.querySelectorAll('tr, li, div, section, article'))
       .filter((element) => isVisible(element) && (element.textContent ?? '').includes(targetOrderId))
       .sort((a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0))
 
     for (const container of candidateContainers) {
       const controls = Array.from(
-        container.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn, a'),
+        container.querySelectorAll('button, input[type="button"], input[type="submit"], a.btn, a, [role="button"]'),
       )
-      const control = controls.find((item) => item instanceof HTMLElement && isVisible(item) && hasInvoiceText(item))
+      const control = controls.find((item) => {
+        if (!(item instanceof HTMLElement) || !isVisible(item)) return false
+        const text = `${item.textContent ?? ''} ${(item as HTMLInputElement).value ?? ''}`.trim()
+        return /송장\s*(입력|등록)|운송장\s*(입력|등록)|배송정보|택배/.test(text)
+      })
       if (control instanceof HTMLElement) {
         control.click()
         return true

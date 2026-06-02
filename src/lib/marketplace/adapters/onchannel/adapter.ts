@@ -180,9 +180,22 @@ export class OnchannelAdapter implements MarketplaceAdapter {
   }
 
   async confirmOrder(
-    _marketplaceOrderId: string,
+    marketplaceOrderId: string,
   ): Promise<{ success: boolean; error?: string }> {
-    return { success: false, error: '발주확인 미구현' }
+    try {
+      const response = await this.client.post(`orders/${marketplaceOrderId}/confirm`, {
+        json: {
+          shopId: this.shopId,
+        },
+      }).json<OnchannelApiResponse<null>>()
+
+      if (response.success) {
+        return { success: true }
+      }
+      return { success: false, error: response.message || 'Order confirmation failed' }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
   }
 
   async getProducts(): Promise<NormalizedProduct[]> {

@@ -88,7 +88,6 @@ interface ManualStatusChangeButtonProps {
   selectedOrders: OrderRow[]
   canUnlockOrderSnapshots?: boolean
   onChanged?: () => void
-  onMovedToProcessingTab?: (tab: 'cancel' | 'return' | 'exchange') => void
 }
 
 interface ManualInvoiceButtonProps {
@@ -312,7 +311,6 @@ export function ManualStatusChangeButton({
   selectedOrders,
   canUnlockOrderSnapshots = false,
   onChanged,
-  onMovedToProcessingTab,
 }: ManualStatusChangeButtonProps) {
   const [open, setOpen] = useState(false)
   const [claimModalType, setClaimModalType] = useState<'return' | 'exchange' | null>(null)
@@ -361,11 +359,7 @@ export function ManualStatusChangeButton({
           toast.error(failure.error, { duration: 7000 })
         }
       }
-      if (newStatus === 'cancelled' && result.updated > 0 && onMovedToProcessingTab) {
-        onMovedToProcessingTab('cancel')
-      } else {
-        onChanged?.()
-      }
+      onChanged?.()
     })
   }
 

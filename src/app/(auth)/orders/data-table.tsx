@@ -226,7 +226,6 @@ export function DataTable({
             setRowSelection({})
             router.refresh()
           }}
-          onMovedToProcessingTab={moveToProcessingTab}
         />
         <ManualInvoiceButton
           selectedOrders={selectedOrders}

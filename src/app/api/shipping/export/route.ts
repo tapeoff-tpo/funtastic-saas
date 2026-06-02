@@ -23,6 +23,9 @@ import { ORDER_STATUS_LABELS, type ClaimType, type OrderFilters, type OrderStatu
 import { primaryPhone, secondaryPhone } from '@/lib/orders/phone-normalize'
 import { normalizeShippingAddress } from '@/lib/orders/shipping-address'
 
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
 const FILTERED_EXPORT_LIMIT = 50000
 const SCAN_FILTER_STATUSES = new Set(['preparing', 'ready', 'shipped'])
 
@@ -218,21 +221,23 @@ function canUseFastShippedExportPath(searchParams: URLSearchParams): boolean {
   if (status && !allowedStatuses.has(status)) return false
   if (statuses && statuses.split(',').some((item) => !allowedStatuses.has(item.trim()))) return false
 
-  const unsupportedFilters = [
-    'marketplace',
-    'marketplaces',
-    'carrier',
-    'search',
-    'searchField',
-    'orderSource',
-    'claimType',
-    'mapping',
-    'scan',
-    'scanResult',
-    'isHeld',
-    'cancelTab',
-  ]
-  return unsupportedFilters.every((key) => !searchParams.get(key))
+  const hasMeaningfulFilter = (key: string): boolean => {
+    const value = searchParams.get(key)?.trim()
+    return Boolean(value && value !== 'all' && value !== 'false' && value !== '0')
+  }
+  const unsupportedFilters = ['marketplace', 'marketplaces', 'carrier', 'search', 'claimType', 'scan', 'scanResult']
+  if (unsupportedFilters.some(hasMeaningfulFilter)) return false
+
+  const orderSource = searchParams.get('orderSource')?.trim()
+  if (orderSource === 'saas' || orderSource === 'sabangnet') return false
+
+  const mapping = searchParams.get('mapping')?.trim()
+  if (mapping === 'mapped' || mapping === 'unmapped') return false
+
+  const searchField = searchParams.get('searchField')?.trim()
+  if (searchField && searchField !== 'all') return false
+
+  return !hasMeaningfulFilter('held') && !hasMeaningfulFilter('isHeld') && !hasMeaningfulFilter('cancelTab')
 }
 
 async function getFastShippedExportOrderIds(

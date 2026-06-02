@@ -61,6 +61,8 @@ type OrderItemInput = {
   lockedProductName?: string | null
   lockedOptionName?: string | null
   lockedQuantity?: number | null
+  lockedMappingCodeId?: string | null
+  lockedMappingCode?: string | null
   lockedAt?: Date | string | null
 }
 
@@ -193,6 +195,33 @@ export async function expandOrderItemsWithMapping(
 
   for (const it of items) {
     if (it.lockedAt) {
+      const lockedComponents = it.lockedMappingCodeId ? componentsByCode.get(it.lockedMappingCodeId) : null
+      if (lockedComponents && lockedComponents.length > 0) {
+        const orderQty = it.quantity * (it.skuMultiplier ?? 1)
+        for (const c of lockedComponents) {
+          const inv = invMap.get(c.sku)
+          result.push({
+            orderItemId: it.id,
+            orderId: it.orderId,
+            sku: c.sku,
+            quantity: orderQty * c.quantity,
+            optionText: inv?.optionName ?? '',
+            productName: inv?.productName ?? c.sku,
+            source: {
+              productName: it.productName,
+              optionText: it.optionText,
+              sku: it.sku,
+              quantity: it.quantity,
+              marketplaceItemId: it.marketplaceItemId,
+              skuMultiplier: it.skuMultiplier,
+              unitPrice: it.unitPrice,
+            },
+            fromMapping: true,
+          })
+        }
+        continue
+      }
+
       const lockedQuantity = it.lockedQuantity ?? it.quantity * (it.skuMultiplier ?? 1)
       result.push({
         orderItemId: it.id,

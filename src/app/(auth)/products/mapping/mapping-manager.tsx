@@ -136,6 +136,7 @@ export function MappingManager() {
   const [codes, setCodes] = useState<MappingCodeRow[]>([])
   const [unmapped, setUnmapped] = useState<UnmappedItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   // 탭 전환 후 복원되도록 URL 쿼리스트링에 저장 (탭바가 마지막 URL 기억).
   const [search, setSearch] = useQueryState('q', parseAsString.withDefault(''))
   const [searchInput, setSearchInput] = useState(search)
@@ -145,17 +146,25 @@ export function MappingManager() {
 
   const reload = useCallback(async () => {
     setLoading(true)
+    setLoadError(null)
     try {
       const codeParams = new URLSearchParams({ t: String(Date.now()) })
       const trimmedSearch = search.trim()
       if (trimmedSearch) codeParams.set('q', trimmedSearch)
 
       const [codesRes, unmappedRes] = await Promise.all([
-        fetch(`/api/products/mapping-codes?${codeParams.toString()}`, { cache: 'no-store' }).then((r) => r.json()),
-        fetch(`/api/products/mapping-codes/unmapped?t=${Date.now()}`, { cache: 'no-store' }).then((r) => r.json()),
+        fetch(`/api/products/mapping-codes?${codeParams.toString()}`, { cache: 'no-store' }),
+        fetch(`/api/products/mapping-codes/unmapped?t=${Date.now()}`, { cache: 'no-store' }),
       ])
-      setCodes(codesRes.codes ?? [])
-      setUnmapped(unmappedRes.items ?? [])
+      if (!codesRes.ok) throw new Error(`매핑코드 조회 실패 (${codesRes.status})`)
+      if (!unmappedRes.ok) throw new Error(`미매핑 목록 조회 실패 (${unmappedRes.status})`)
+      const [codesData, unmappedData] = await Promise.all([codesRes.json(), unmappedRes.json()])
+      setCodes(codesData.codes ?? [])
+      setUnmapped(unmappedData.items ?? [])
+    } catch (error) {
+      setCodes([])
+      setUnmapped([])
+      setLoadError(error instanceof Error ? error.message : '매핑코드를 불러오지 못했습니다')
     } finally {
       setLoading(false)
     }
@@ -413,6 +422,8 @@ export function MappingManager() {
             <tbody className="divide-y">
               {loading ? (
                 <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
+              ) : loadError ? (
+                <tr><td colSpan={11} className="py-8 text-center text-red-600">{loadError}</td></tr>
               ) : displayRows.length === 0 ? (
                 <tr><td colSpan={11} className="py-8 text-center text-muted-foreground">
                   {search ? '검색 결과가 없습니다' : '매핑코드가 없습니다. 우측 미매핑 목록에서 항목을 클릭해 추가하거나, 신규 매핑 버튼을 누르세요.'}

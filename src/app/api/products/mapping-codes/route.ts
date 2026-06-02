@@ -144,25 +144,25 @@ function searchTokens(query: string): string[] {
     .filter(Boolean)
 }
 
-function mappingCodeSearchCondition(query: string) {
+async function findMatchingMappingCodeIds(userId: string, query: string): Promise<string[]> {
   const tokens = searchTokens(query)
-  if (tokens.length === 0) return undefined
+  if (tokens.length === 0) return []
 
-  return and(...tokens.map((token) => {
+  const conditions = tokens.map((token) => {
     const pattern = `%${token}%`
     const compactPattern = `%${normalizeSearchText(token)}%`
 
     return sql`(
-      ${mappingCodes.code} ILIKE ${pattern}
-      OR ${mappingCodes.name} ILIKE ${pattern}
-      OR COALESCE(${mappingCodes.note}, '') ILIKE ${pattern}
-      OR regexp_replace(lower(${mappingCodes.code}), '\\s+', '', 'g') LIKE ${compactPattern}
-      OR regexp_replace(lower(${mappingCodes.name}), '\\s+', '', 'g') LIKE ${compactPattern}
-      OR regexp_replace(lower(COALESCE(${mappingCodes.note}, '')), '\\s+', '', 'g') LIKE ${compactPattern}
+      mc.code ILIKE ${pattern}
+      OR mc.name ILIKE ${pattern}
+      OR COALESCE(mc.note, '') ILIKE ${pattern}
+      OR regexp_replace(lower(mc.code), '\\s+', '', 'g') LIKE ${compactPattern}
+      OR regexp_replace(lower(mc.name), '\\s+', '', 'g') LIKE ${compactPattern}
+      OR regexp_replace(lower(COALESCE(mc.note, '')), '\\s+', '', 'g') LIKE ${compactPattern}
       OR EXISTS (
         SELECT 1
         FROM mapping_sources ms
-        WHERE ms.mapping_code_id = ${mappingCodes.id}
+        WHERE ms.mapping_code_id = mc.id
           AND (
             ms.marketplace_id ILIKE ${pattern}
             OR ms.marketplace_product_id ILIKE ${pattern}
@@ -182,7 +182,7 @@ function mappingCodeSearchCondition(query: string) {
         LEFT JOIN inventory inv
           ON inv.user_id = mcp.user_id
          AND inv.sku = mcp.sku
-        WHERE mcp.mapping_code_id = ${mappingCodes.id}
+        WHERE mcp.mapping_code_id = mc.id
           AND (
             mcp.sku ILIKE ${pattern}
             OR COALESCE(inv.product_name, '') ILIKE ${pattern}
@@ -193,7 +193,18 @@ function mappingCodeSearchCondition(query: string) {
           )
       )
     )`
-  }))
+  })
+
+  const rows = await db.execute<{ id: string }>(sql`
+    SELECT mc.id::text AS id
+    FROM mapping_codes mc
+    WHERE mc.user_id = ${userId}
+      AND ${sql.join(conditions, sql` AND `)}
+    ORDER BY mc.updated_at DESC
+    LIMIT 500
+  `)
+
+  return rows.map((row) => row.id)
 }
 
 export async function GET(req: NextRequest) {
@@ -202,7 +213,13 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const search = req.nextUrl.searchParams.get('q')?.trim() ?? ''
-  const searchCondition = mappingCodeSearchCondition(search)
+  const matchedIds = search ? await findMatchingMappingCodeIds(workspaceUserId, search) : []
+  if (search && matchedIds.length === 0) {
+    return NextResponse.json(
+      { codes: [] },
+      { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    )
+  }
 
   const rows = await db
     .select({
@@ -278,7 +295,7 @@ export async function GET(req: NextRequest) {
     .from(mappingCodes)
     .where(and(
       eq(mappingCodes.userId, workspaceUserId),
-      searchCondition,
+      search ? inArray(mappingCodes.id, matchedIds) : undefined,
     ))
     .orderBy(sql`${mappingCodes.updatedAt} DESC`)
 

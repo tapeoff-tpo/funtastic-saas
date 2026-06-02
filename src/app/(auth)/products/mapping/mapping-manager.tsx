@@ -20,6 +20,56 @@ export const marketLabel = (id: string) => MARKETPLACE_LABELS[id] ?? id
 const EXACT_OPTION_ID = '__exact__'
 const DISPLAY_PAGE_SIZE = 300
 
+function normalizeSearchText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, '')
+}
+
+function searchTokens(query: string): string[] {
+  return query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
+}
+
+function mappingSearchHaystack(code: MappingCodeRow): string {
+  const parts = [
+    code.code,
+    code.name,
+    code.note ?? '',
+    ...code.sources.flatMap((source) => [
+      source.marketplaceId,
+      source.marketplaceProductId,
+      source.marketplaceOptionId,
+      source.marketplaceName ?? '',
+      source.productNameSnapshot ?? '',
+      source.optionNameSnapshot ?? '',
+      marketLabel(source.marketplaceId),
+      formatMarketplaceProductCode(source),
+      formatCollectedProductName(source),
+    ]),
+    ...code.components.flatMap((component) => [
+      component.sku,
+      component.productName ?? '',
+      component.optionName ?? '',
+      formatConfirmedProductName(component, code),
+    ]),
+  ]
+
+  return parts.join(' ')
+}
+
+function mappingCodeMatchesSearch(code: MappingCodeRow, query: string): boolean {
+  const tokens = searchTokens(query)
+  if (tokens.length === 0) return true
+
+  const haystack = mappingSearchHaystack(code).toLowerCase()
+  const compactHaystack = normalizeSearchText(haystack)
+  return tokens.every((token) =>
+    haystack.includes(token) || compactHaystack.includes(normalizeSearchText(token)),
+  )
+}
+
 function formatMarketplaceProductCode(source: MappingSourceView): string {
   if (!source.marketplaceOptionId || source.marketplaceOptionId === EXACT_OPTION_ID) {
     return source.marketplaceProductId
@@ -173,26 +223,7 @@ export function MappingManager() {
 
   const filtered = codes.filter((c) => {
     if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      c.code.toLowerCase().includes(q) ||
-      c.name.toLowerCase().includes(q) ||
-      (c.note ?? '').toLowerCase().includes(q) ||
-      c.sources.some((s) =>
-        s.marketplaceId.toLowerCase().includes(q) ||
-        s.marketplaceProductId.toLowerCase().includes(q) ||
-        s.marketplaceOptionId.toLowerCase().includes(q) ||
-        (s.marketplaceName ?? '').toLowerCase().includes(q) ||
-        (s.productNameSnapshot ?? '').toLowerCase().includes(q) ||
-        (s.optionNameSnapshot ?? '').toLowerCase().includes(q) ||
-        marketLabel(s.marketplaceId).toLowerCase().includes(q)
-      ) ||
-      c.components.some((component) =>
-        component.sku.toLowerCase().includes(q) ||
-        (component.productName ?? '').toLowerCase().includes(q) ||
-        (component.optionName ?? '').toLowerCase().includes(q)
-      )
-    )
+    return mappingCodeMatchesSearch(c, search)
   })
 
   const displayRows: MappingDisplayRow[] = filtered.flatMap((code) => {

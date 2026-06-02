@@ -355,6 +355,7 @@ export function ShippingActions({
     updateInvoiceTransmissionWindow(reportWindow, report)
 
     setUploadingToMarket(true)
+    let keepUploadingUntilPollFinishes = false
     try {
       if (selectedRpaOrders.length > 0) {
         toast.info(`RPA 주문 ${selectedRpaOrders.length}건은 [RPA 송장 전송] 버튼에서 별도로 전송해주세요.`)
@@ -412,6 +413,7 @@ export function ShippingActions({
       const queued = data.queued ?? 0
       const failed = data.failed ?? 0
       if (queued > 0 && data.jobLogIds?.length) {
+        keepUploadingUntilPollFinishes = true
         appendInvoiceTransmissionStep(report, '-> Stage IV: 비동기 송신 작업의 완료 여부를 확인하고 있습니다.')
         updateInvoiceTransmissionWindow(reportWindow, report)
         pollRpaInvoiceUpload(data.jobLogIds, report, reportWindow)
@@ -444,7 +446,7 @@ export function ShippingActions({
       updateInvoiceTransmissionWindow(reportWindow, report)
       toast.error(message)
     } finally {
-      setUploadingToMarket(false)
+      if (!keepUploadingUntilPollFinishes) setUploadingToMarket(false)
     }
   }
 
@@ -577,6 +579,7 @@ export function ShippingActions({
 
     const finishPolling = () => {
       stopRpaInvoicePolling()
+      setUploadingToMarket(false)
       setUploadingRpaInvoice(false)
       router.refresh()
     }

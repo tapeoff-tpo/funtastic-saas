@@ -24,6 +24,15 @@ import { markShipmentUploadedAndOrderShipped, markShipmentUploadFailed } from '@
 import { readCredential } from '@/lib/supabase/admin'
 import { createAdapter } from './order-collector'
 
+const INVOICE_UPLOAD_CONCURRENCY = Number(process.env.INVOICE_UPLOAD_CONCURRENCY ?? 4)
+const INVOICE_UPLOAD_RATE_PER_SECOND = Number(process.env.INVOICE_UPLOAD_RATE_PER_SECOND ?? 4)
+const ADAPTER_CACHE_TTL_MS = Number(process.env.INVOICE_UPLOAD_ADAPTER_CACHE_TTL_MS ?? 5 * 60 * 1000)
+
+const adapterCache = new Map<string, {
+  adapter: ReturnType<typeof createAdapter>
+  expiresAt: number
+}>()
+
 /**
  * For 10x10, look up detailIdx from the order's stored rawData.
  * Returns the first detail's DetailIdx — multi-line orders need separate work.
@@ -133,12 +142,22 @@ export async function executeInvoiceUpload(
   }
 
   const aliasTag = (context?.storeAlias && context.storeAlias !== 'default') ? `_${context.storeAlias}` : ''
-  const credentials: Record<string, string> = {}
-  for (const key of configAdapter.config.requiredCredentials) {
-    const val = await readCredential(marketplaceId, userId, `${key}${aliasTag}`)
-    if (val) credentials[key] = val
+  const adapterCacheKey = `${marketplaceId}:${userId}:${connectionId}:${aliasTag}`
+  const cachedAdapter = adapterCache.get(adapterCacheKey)
+  const now = Date.now()
+  let preparedAdapter = cachedAdapter && cachedAdapter.expiresAt > now ? cachedAdapter.adapter : null
+  if (!preparedAdapter) {
+    const credentials: Record<string, string> = {}
+    for (const key of configAdapter.config.requiredCredentials) {
+      const val = await readCredential(marketplaceId, userId, `${key}${aliasTag}`)
+      if (val) credentials[key] = val
+    }
+    preparedAdapter = createAdapter(marketplaceId, credentials)
+    adapterCache.set(adapterCacheKey, {
+      adapter: preparedAdapter,
+      expiresAt: now + (Number.isFinite(ADAPTER_CACHE_TTL_MS) && ADAPTER_CACHE_TTL_MS > 0 ? ADAPTER_CACHE_TTL_MS : 300000),
+    })
   }
-  const adapter = createAdapter(marketplaceId, credentials)
 
   // 3. Build invoice data (with marketplace-specific extras)
   const invoiceData: InvoiceData = {
@@ -160,7 +179,7 @@ export async function executeInvoiceUpload(
   }
 
   // 4. Call adapter
-  const result = await adapter.uploadInvoice(marketplaceOrderId, invoiceData)
+  const result = await preparedAdapter.uploadInvoice(marketplaceOrderId, invoiceData)
 
   // 5. Update status based on result
   if (result.success) {
@@ -286,8 +305,7 @@ export async function processInvoiceUpload(
  * Create and return the invoice upload BullMQ worker.
  *
  * Worker config:
- * - concurrency: 1 (conservative for API rate limits)
- * - limiter: max 2 jobs per 1000ms (Naver's rate limit is ~2/s)
+ * - concurrency/rate limit are intentionally conservative and env-tunable.
  */
 export function createInvoiceUploadWorker() {
   const worker = new Worker<InvoiceUploadJobData>(
@@ -295,9 +313,13 @@ export function createInvoiceUploadWorker() {
     processInvoiceUpload,
     {
       connection: getConnection(),
-      concurrency: 1,
+      concurrency: Number.isFinite(INVOICE_UPLOAD_CONCURRENCY) && INVOICE_UPLOAD_CONCURRENCY > 0
+        ? INVOICE_UPLOAD_CONCURRENCY
+        : 4,
       limiter: {
-        max: 2,
+        max: Number.isFinite(INVOICE_UPLOAD_RATE_PER_SECOND) && INVOICE_UPLOAD_RATE_PER_SECOND > 0
+          ? INVOICE_UPLOAD_RATE_PER_SECOND
+          : 4,
         duration: 1000,
       },
     },

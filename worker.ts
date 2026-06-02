@@ -5,7 +5,7 @@
  * Run with: npx tsx worker.ts
  */
 import { Worker } from 'bullmq'
-import { connection } from './src/lib/jobs/connection'
+import { getConnection } from './src/lib/jobs/connection'
 import { processOrderCollection } from './src/lib/jobs/workers/order-collector'
 import { createInvoiceUploadWorker } from './src/lib/jobs/workers/invoice-uploader'
 import { scheduleAllCollections } from './src/lib/jobs/queues'
@@ -15,7 +15,7 @@ import './src/lib/marketplace/adapters/configs'
 
 // Order collection worker
 const orderCollectionWorker = new Worker('order-collection', processOrderCollection, {
-  connection,
+  connection: getConnection(),
   concurrency: 2,
 })
 

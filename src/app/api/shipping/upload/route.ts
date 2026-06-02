@@ -18,9 +18,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { markShipmentUploadedAndOrderShipped } from '@/lib/shipping/upload-status'
 import { logOrderChange } from '@/lib/orders/change-log'
-import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
-import { executePreparedInvoiceUpload } from '@/lib/jobs/workers/invoice-uploader'
-import { createAdapter } from '@/lib/jobs/workers/order-collector'
+import { getMarketplaceScrapeQueue, queueInvoiceUploadJob } from '@/lib/jobs/queues'
 import '@/lib/marketplace/adapters/configs'
 import { startOfDay } from 'date-fns'
 
@@ -271,12 +269,10 @@ export async function POST(req: NextRequest) {
 
     const aliasTag = (conn?.storeAlias && conn.storeAlias !== 'default') ? `_${conn.storeAlias}` : ''
 
-    const credentials: Record<string, string> = {}
     let credError = false
     for (const key of adapterConfig.config.requiredCredentials) {
       const val = await readCredential(marketplaceId, workspaceUserId, `${key}${aliasTag}`)
       if (!val) { credError = true; break }
-      credentials[key] = val
     }
     if (credError) {
       for (const s of groupShipments) {
@@ -284,8 +280,6 @@ export async function POST(req: NextRequest) {
       }
       continue
     }
-
-    const adapter = createAdapter(marketplaceId, credentials)
 
     for (const s of groupShipments) {
       const ord = orderMap.get(s.orderId)
@@ -322,7 +316,7 @@ export async function POST(req: NextRequest) {
       })
 
       try {
-        await executePreparedInvoiceUpload({
+        await queueInvoiceUploadJob({
           orderId: s.orderId,
           shipmentId: s.id,
           userId: workspaceUserId,
@@ -333,18 +327,22 @@ export async function POST(req: NextRequest) {
           carrierId: s.carrierId,
           attempt: s.uploadAttempts + 1,
           jobLogId: logRow.id,
-        }, s.uploadAttempts + 1, adapter, {
-          rawData: (ord.rawData ?? null) as Record<string, unknown> | null,
-          recipientName: ord.recipientName,
         })
 
         results.push({
           ...resultIdentity(s),
           success: true,
+          queued: true,
           jobLogId: logRow.id,
           marketplaceId,
         })
       } catch (error) {
+        await db.update(shipments).set({
+          uploadStatus: 'failed',
+          marketplaceUploadError: error instanceof Error ? error.message : 'Unknown upload error',
+          uploadAttempts: s.uploadAttempts + 1,
+          updatedAt: new Date(),
+        }).where(eq(shipments.id, s.id))
         results.push({
           ...resultIdentity(s),
           success: false,

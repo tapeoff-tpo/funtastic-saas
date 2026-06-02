@@ -126,6 +126,16 @@ function readDeepApiValue(record: JsonRecord, aliases: string[], maxDepth = 4): 
   return walk(record, maxDepth)
 }
 
+function readDirectApiValue(record: JsonRecord, aliases: string[]): string {
+  const normalizedAliases = new Set(aliases.map(normalizeApiKey))
+  for (const [key, value] of Object.entries(record)) {
+    if (!normalizedAliases.has(normalizeApiKey(key))) continue
+    const direct = apiValueToString(value)
+    if (direct) return direct
+  }
+  return ''
+}
+
 function normalizeHeader(value: string): string {
   return value.replace(/\s+/g, '').replace(/[()[\]{}]/g, '').trim()
 }
@@ -1532,6 +1542,43 @@ function normalizeOhouseApiOrderRecord(
   }
 }
 
+export function enrichOhouseNetworkOrderFromDirectFields(order: NormalizedOrder, record: JsonRecord): NormalizedOrder {
+  const accountKey = normalizeAccountKey(
+    typeof order.rawData?.accountKey === 'string'
+      ? order.rawData.accountKey
+      : order.marketplaceOrderId.split(':')[0],
+  )
+  const orderOptionNo = readDirectApiValue(record, [
+    'orderOptionNo',
+    'orderOptionId',
+    'orderProductOptionNo',
+    'productOrderId',
+  ]).replace(/^[_']+/, '')
+  const orderProductNo = readDirectApiValue(record, [
+    'orderProductNo',
+    'orderProductId',
+  ]).replace(/^[_']+/, '')
+  const receivedZipCode = readDirectApiValue(record, ['receivedZipCode', 'zipCode', 'zipcode', 'postalCode'])
+  const receivedAddress = readDirectApiValue(record, ['receivedAt', 'baseAddress', 'address1'])
+  const receivedAddressDetail = readDirectApiValue(record, ['receivedAtDetail', 'detailAddress', 'address2'])
+  const address1 = [receivedAddress, receivedAddressDetail].filter(Boolean).join(' ').trim()
+  const items = order.items.map((item) => ({
+    ...item,
+    marketplaceItemId: orderOptionNo ? `${accountKey}:${orderOptionNo}` : item.marketplaceItemId,
+    sku: item.sku ?? (orderProductNo || undefined),
+  }))
+
+  return {
+    ...order,
+    shippingAddress: {
+      zipCode: receivedZipCode || order.shippingAddress.zipCode,
+      address1: address1 || order.shippingAddress.address1,
+      address2: receivedAddressDetail || order.shippingAddress.address2,
+    },
+    items,
+  }
+}
+
 function dedupeOhouseOrders(orders: NormalizedOrder[]): NormalizedOrder[] {
   const seen = new Set<string>()
   const result: NormalizedOrder[] = []
@@ -1754,6 +1801,27 @@ async function openOhouseOrderDetailForOrder(page: Page, order: NormalizedOrder)
     }
   }
 
+  const detailUrl = `${PARTNER_BASE_URL}/order-detail/${encodeURIComponent(orderNo)}`
+  await gotoOhouse(page, detailUrl).catch(() => undefined)
+  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined)
+  await page.waitForTimeout(1200)
+  const detailText = await page.locator('body').innerText({ timeout: 3000 }).catch(() => '')
+  if (
+    page.url().includes(`/order-detail/${encodeURIComponent(orderNo)}`)
+    && detailText.includes(orderNo)
+    && /주문|상품|배송|가림\s*해제|수령|수취/.test(detailText)
+  ) {
+    return {
+      page,
+      close: async () => {
+        await gotoOhouse(page, currentUrl).catch(() => undefined)
+        await waitForOhouseAppReady(page).catch(() => false)
+      },
+    }
+  }
+  await gotoOhouse(page, currentUrl).catch(() => undefined)
+  await waitForOhouseAppReady(page).catch(() => false)
+
   const detailPagePromise = page.context().waitForEvent('page', { timeout: 3000 }).catch(() => null)
   const clicked = await page
     .getByText(orderNo, { exact: false })
@@ -1823,7 +1891,7 @@ function watchOhouseOrderPageResponses(page: Page, credentials: ScraperCredentia
       const records = collectOhouseApiOrderRecords(payload)
       records.forEach((record, index) => {
         const order = normalizeOhouseApiOrderRecord(record, credentials, index)
-        if (order) orders.push(order)
+        if (order) orders.push(enrichOhouseNetworkOrderFromDirectFields(order, record))
       })
     } catch {
       // Some Orora responses are streaming/empty. The Excel and DOM fallbacks stay active.

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedOrder } from '@/lib/marketplace/types'
-import { isOhouseMaskedText, mergeOhouseOrderDetail } from '@/scrapers/ohouse/scraper'
+import {
+  enrichOhouseNetworkOrderFromDirectFields,
+  isOhouseMaskedText,
+  mergeOhouseOrderDetail,
+} from '@/scrapers/ohouse/scraper'
 
 function baseOrder(): NormalizedOrder {
   return {
@@ -88,5 +92,27 @@ describe('isOhouseMaskedText', () => {
     expect(isOhouseMaskedText('010-****-7436')).toBe(true)
     expect(isOhouseMaskedText('-')).toBe(true)
     expect(isOhouseMaskedText('송희')).toBe(false)
+  })
+})
+
+describe('enrichOhouseNetworkOrderFromDirectFields', () => {
+  it('uses unmasked address fragments and orderOptionId from the Orora network row', () => {
+    const enriched = enrichOhouseNetworkOrderFromDirectFields(baseOrder(), {
+      orderId: 330681319,
+      orderProductId: 509720960,
+      orderOptionId: 655348316,
+      address: '58582 전라남도 무안군 일로읍 오룡번영1로 ******',
+      receivedZipCode: '58582',
+      receivedAt: '전라남도 무안군 일로읍 오룡번영1로 10 (오룡 푸르지오 파르세나)',
+      receivedAtDetail: '104동 1404호',
+    })
+
+    expect(enriched.shippingAddress).toEqual({
+      zipCode: '58582',
+      address1: '전라남도 무안군 일로읍 오룡번영1로 10 (오룡 푸르지오 파르세나) 104동 1404호',
+      address2: '104동 1404호',
+    })
+    expect(enriched.items[0].marketplaceItemId).toBe('tapeoff:655348316')
+    expect(enriched.items[0].sku).toBe('509720960')
   })
 })

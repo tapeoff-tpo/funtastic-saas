@@ -5,6 +5,7 @@ import {
   isOhouseMaskedText,
   mergeOhouseOrdersWithVisibleRevealedData,
   mergeOhouseOrderDetail,
+  normalizeOhouseOrderUnmaskResponses,
 } from '@/scrapers/ohouse/scraper'
 
 function baseOrder(): NormalizedOrder {
@@ -150,5 +151,26 @@ describe('mergeOhouseOrdersWithVisibleRevealedData', () => {
     expect(merged.recipientPhone).toBe('010-1234-7436')
     expect(merged.shippingAddress.address1).toBe('전라남도 무안군 일로읍 오룡번영1로 10')
     expect(merged.items).toEqual(masked.items)
+  })
+})
+
+describe('normalizeOhouseOrderUnmaskResponses', () => {
+  it('maps Orora order unmask responses into detail fields', () => {
+    const detail = normalizeOhouseOrderUnmaskResponses({
+      ORDERER_NAME: { ordererName: '송희' },
+      ORDERER_PHONE_NUMBER: { ordererPhoneNumber: '010-1234-7436' },
+      RECIPIENT_NAME: { recipientName: '송희' },
+      RECIPIENT_PHONE_NUMBER: { recipientPhoneNumber: '010-1234-7436' },
+      DELIVERY_ADDRESS: { deliveryAddress: '58582 전라남도 무안군 일로읍 오룡번영1로 10 104동 1404호' },
+    })
+
+    expect(detail).toEqual({
+      buyerName: '송희',
+      buyerPhone: '010-1234-7436',
+      recipientName: '송희',
+      recipientPhone: '010-1234-7436',
+      address1: '58582 전라남도 무안군 일로읍 오룡번영1로 10 104동 1404호',
+      items: [],
+    })
   })
 })

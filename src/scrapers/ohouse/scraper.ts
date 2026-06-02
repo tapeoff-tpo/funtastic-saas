@@ -16,10 +16,19 @@ const DOWNLOAD_TIMEOUT_MS = 45_000
 const DOWNLOAD_READ_TIMEOUT_MS = 30_000
 const LOGIN_STAGE_TIMEOUT_MS = 180_000
 const OHOUSE_ACCOUNT_API_URL = 'https://api.ohou.se/orora/member/v1/accounts'
+const OHOUSE_ORDER_API_BASE_URL = 'https://api.ohou.se/orora/order/v1/orora'
 const OHOUSE_RPA_VERSION = 'ohouse-rpa/orora-v44'
 const OHOUSE_DOWNLOAD_PASSWORD = 'Eksrnr2125@'
+const OHOUSE_ORDER_UNMASK_TYPES = [
+  'ORDERER_NAME',
+  'ORDERER_PHONE_NUMBER',
+  'RECIPIENT_NAME',
+  'RECIPIENT_PHONE_NUMBER',
+  'DELIVERY_ADDRESS',
+] as const
 
 type JsonRecord = Record<string, unknown>
+type OhouseOrderUnmaskType = typeof OHOUSE_ORDER_UNMASK_TYPES[number]
 
 interface OhouseOrderDetailData {
   buyerName?: string
@@ -1717,6 +1726,91 @@ export function mergeOhouseOrdersWithVisibleRevealedData(
   })
 }
 
+function readOhouseUnmaskResponseValue(record: JsonRecord | undefined, aliases: string[]): string {
+  if (!record) return ''
+  return readDeepApiValue(record, aliases, 2)
+}
+
+export function normalizeOhouseOrderUnmaskResponses(
+  responses: Partial<Record<OhouseOrderUnmaskType, JsonRecord>>,
+): OhouseOrderDetailData | null {
+  const detail: OhouseOrderDetailData = { items: [] }
+  detail.buyerName = readOhouseUnmaskResponseValue(responses.ORDERER_NAME, [
+    'ordererName',
+    'buyerName',
+    'payerName',
+    'name',
+    'value',
+  ]) || undefined
+  detail.buyerPhone = readOhouseUnmaskResponseValue(responses.ORDERER_PHONE_NUMBER, [
+    'ordererPhoneNumber',
+    'ordererPhone',
+    'buyerPhone',
+    'payerPhoneNumber',
+    'phoneNumber',
+    'phone',
+    'value',
+  ]) || undefined
+  detail.recipientName = readOhouseUnmaskResponseValue(responses.RECIPIENT_NAME, [
+    'recipientName',
+    'recipient',
+    'receiverName',
+    'name',
+    'value',
+  ]) || undefined
+  detail.recipientPhone = readOhouseUnmaskResponseValue(responses.RECIPIENT_PHONE_NUMBER, [
+    'recipientPhoneNumber',
+    'receivedPhoneNumber',
+    'receiverPhoneNumber',
+    'recipientPhone',
+    'phoneNumber',
+    'phone',
+    'value',
+  ]) || undefined
+  detail.address1 = readOhouseUnmaskResponseValue(responses.DELIVERY_ADDRESS, [
+    'deliveryAddress',
+    'address',
+    'orderAddress',
+    'receivedAt',
+    'value',
+  ]) || undefined
+
+  return detail.buyerName || detail.buyerPhone || detail.recipientName || detail.recipientPhone || detail.address1
+    ? detail
+    : null
+}
+
+async function fetchOhouseOrderUnmaskDetail(page: Page, orderNo: string): Promise<OhouseOrderDetailData | null> {
+  const responses = await page
+    .evaluate(
+      async ({ apiBaseUrl, orderId, maskingTypes }) => {
+        const entries: Array<[string, Record<string, unknown>]> = []
+        for (const maskingType of maskingTypes) {
+          const url = new URL(`${apiBaseUrl}/orders/${encodeURIComponent(orderId)}/unmask`)
+          url.searchParams.set('maskingType', maskingType)
+          const response = await fetch(url.toString(), {
+            credentials: 'include',
+            headers: { Accept: 'application/json' },
+          }).catch(() => null)
+          if (!response || !response.ok) continue
+          const data = await response.json().catch(() => null)
+          if (data && typeof data === 'object' && !Array.isArray(data)) {
+            entries.push([maskingType, data as Record<string, unknown>])
+          }
+        }
+        return Object.fromEntries(entries)
+      },
+      {
+        apiBaseUrl: OHOUSE_ORDER_API_BASE_URL,
+        orderId: orderNo,
+        maskingTypes: [...OHOUSE_ORDER_UNMASK_TYPES],
+      },
+    )
+    .catch(() => ({}))
+
+  return normalizeOhouseOrderUnmaskResponses(responses as Partial<Record<OhouseOrderUnmaskType, JsonRecord>>)
+}
+
 function lineTotalAmountForOhouseDetail(item: NormalizedOrder['items'][number]): number {
   return (Number(item.unitPrice) || 0) * Math.max(1, Number(item.quantity) || 1)
 }
@@ -1915,6 +2009,12 @@ async function enrichOhouseOrdersFromDetails(
   for (const order of orders) {
     const orderNo = getOhouseOrderNo(order)
     if (detailByOrderNo.has(orderNo)) continue
+    const unmaskDetail = await fetchOhouseOrderUnmaskDetail(page, orderNo)
+    if (unmaskDetail) {
+      detailByOrderNo.set(orderNo, unmaskDetail)
+      await setProgress?.(`오늘의집 주문 ${orderNo} API 가림해제 정보 수집`)
+      continue
+    }
     const detailPage = await openOhouseOrderDetailForOrder(page, order)
     if (!detailPage) continue
     try {

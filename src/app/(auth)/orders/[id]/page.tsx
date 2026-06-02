@@ -9,6 +9,7 @@ import { getUserDisplayNames } from '@/lib/supabase/admin'
 import { ClaimList } from './client'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { usesSkuMappingKey } from '@/lib/orders/mapping-key-marketplaces'
+import { formatShippingAddress } from '@/lib/orders/shipping-address'
 
 export const metadata: Metadata = {
   title: '주문 상세',
@@ -193,11 +194,7 @@ export default async function OrderDetailPage({
 
               <dt className="text-muted-foreground">배송지</dt>
               <dd>
-                {shippingAddr
-                  ? `[${shippingAddr.zipCode}] ${shippingAddr.address1}${
-                      shippingAddr.address2 ? ` ${shippingAddr.address2}` : ''
-                    }`
-                  : '-'}
+                {formatShippingAddress(shippingAddr)}
               </dd>
 
               <dt className="text-muted-foreground">배송메세지</dt>

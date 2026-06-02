@@ -21,6 +21,7 @@ import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
 import { getOrderIds } from '@/lib/orders/queries'
 import { ORDER_STATUS_LABELS, type ClaimType, type OrderFilters, type OrderStatus } from '@/lib/orders/types'
 import { primaryPhone, secondaryPhone } from '@/lib/orders/phone-normalize'
+import { normalizeShippingAddress } from '@/lib/orders/shipping-address'
 
 const FILTERED_EXPORT_LIMIT = 50000
 const SCAN_FILTER_STATUSES = new Set(['preparing', 'ready', 'shipped'])
@@ -339,6 +340,9 @@ export async function GET(request: NextRequest) {
         const optionText = confirmedValue(primary?.optionText ?? '')
         const isAdditionalComponent = isSalesCheckTemplate && index > 0
         const salesValue = (value: unknown) => isAdditionalComponent ? 0 : value
+        const shippingAddress = order.shippingAddress && typeof order.shippingAddress === 'object'
+          ? normalizeShippingAddress(order.shippingAddress as { zipCode?: string | null; address1?: string | null; address2?: string | null })
+          : order.shippingAddress
 
         return {
         // 사용자 노출용 8자리 내부 주문번호
@@ -360,7 +364,7 @@ export async function GET(request: NextRequest) {
         recipientName: order.recipientName,
         // 기본 '수령인연락처' = 휴대폰(phone2) 우선, 없으면 일반전화(phone1)
         recipientPhone: primaryPhone(order.recipientPhone2, order.recipientPhone),
-        shippingAddress: order.shippingAddress,
+        shippingAddress,
         productName: confirmedValue(productName),
         optionText,
         quantity: isSalesCheckTemplate

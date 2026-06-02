@@ -16,6 +16,7 @@ import { expandOrderItemsWithMapping } from '@/lib/orders/mapping-expand'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCombinedShipmentGroupIds } from '@/lib/shipping/combined-safety'
 import { primaryPhone } from '@/lib/orders/phone-normalize'
+import { formatShippingAddress } from '@/lib/orders/shipping-address'
 
 function resolveMarketplaceProductCode(
   marketplaceId: string,
@@ -86,10 +87,10 @@ export async function GET(req: NextRequest) {
     const rows = expandedByOrder.get(order.id) ?? []
     const shipmentGroupId = groupIdByOrder.get(order.id)
 
-    const addr = order.shippingAddress
-    const fullAddress = addr && typeof addr === 'object'
-      ? [addr.zipCode, addr.address1, addr.address2].filter(Boolean).join(' ')
-      : ''
+    const addr = order.shippingAddress && typeof order.shippingAddress === 'object'
+      ? order.shippingAddress as { zipCode?: string | null; address1?: string | null; address2?: string | null }
+      : null
+    const fullAddress = formatShippingAddress(addr)
 
     if (rows.length === 0) continue
 

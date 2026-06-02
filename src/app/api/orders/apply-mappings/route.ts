@@ -19,7 +19,7 @@ import { inventory, mappingCodes, mappingComponents, mappingSources, orderItems,
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
-import { getRawMappingCandidateIdsForItem, isIgnoredMappingCandidate, lookupCompatibleMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+import { getRawMappingCandidateIdsForItem, isIgnoredMappingCandidate, lookupCompatibleMappingRef, normalizeMappingOptionText, type MappingSource } from '@/lib/orders/mapping-match'
 import { lockOrderItemsForOrders } from '@/lib/orders/locking'
 
 type ValidationFailure = {
@@ -42,6 +42,11 @@ type HistoricalAliasRow = Pick<MappingAlias, 'mappingCodeId' | 'marketplaceId' |
 type ItemMappingLookupResult = {
   mappingCodeId: string | null
   failureReason?: string
+}
+
+type SkuInfo = {
+  productName: string | null
+  optionName: string | null
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -77,6 +82,23 @@ function mappingFailureTarget(item: {
   return directSku ?? reusableCandidate ?? item.productName ?? item.itemId
 }
 
+function optionMatchesOrder(skuInfo: SkuInfo | undefined, orderOptionText: string | null) {
+  const orderOption = normalizeMappingOptionText(orderOptionText)
+  const skuOption = normalizeMappingOptionText(skuInfo?.optionName)
+  if (!orderOption || !skuOption) return true
+  return orderOption === skuOption || orderOption.includes(skuOption) || skuOption.includes(orderOption)
+}
+
+function findDirectSkuForOrder(
+  candidateIds: string[],
+  skuInfoBySku: Map<string, SkuInfo>,
+  optionText: string | null,
+) {
+  return candidateIds.find((candidateId) =>
+    skuInfoBySku.has(candidateId) && optionMatchesOrder(skuInfoBySku.get(candidateId), optionText),
+  ) ?? null
+}
+
 async function validateOrdersHaveInternalMappings(
   userId: string,
   orderIds: string[],
@@ -108,18 +130,23 @@ async function validateOrdersHaveInternalMappings(
 
   const [productRows, variantRows, inventoryRows, sourceRows, componentRows, historicalAliasResult] = await Promise.all([
     db
-      .select({ sku: products.internalSku })
+      .select({ sku: products.internalSku, productName: products.name, optionName: sql<string | null>`NULL` })
       .from(products)
       .where(eq(products.userId, userId)),
     db
-      .select({ sku: productVariants.sku })
+      .select({ sku: productVariants.sku, productName: products.name, optionName: productVariants.optionName })
       .from(productVariants)
       .innerJoin(products, eq(products.id, productVariants.productId))
       .where(eq(products.userId, userId)),
     db
-      .select({ sku: inventory.sku })
+      .select({
+        sku: inventory.sku,
+        productName: sql<string | null>`MAX(${inventory.productName})`,
+        optionName: sql<string | null>`MAX(${inventory.optionName})`,
+      })
       .from(inventory)
-      .where(eq(inventory.userId, userId)),
+      .where(eq(inventory.userId, userId))
+      .groupBy(inventory.sku),
     db
       .select({
         mappingCodeId: mappingSources.mappingCodeId,
@@ -162,9 +189,18 @@ async function validateOrdersHaveInternalMappings(
     : (historicalAliasResult as unknown as { rows?: HistoricalAliasRow[] }).rows ?? []
 
   const validSkus = new Set<string>()
+  const skuInfoBySku = new Map<string, SkuInfo>()
   for (const row of productRows) validSkus.add(row.sku.trim())
   for (const row of variantRows) validSkus.add(row.sku.trim())
   for (const row of inventoryRows) validSkus.add(row.sku.trim())
+  for (const row of [...productRows, ...variantRows, ...inventoryRows]) {
+    const sku = row.sku.trim()
+    const current = skuInfoBySku.get(sku)
+    skuInfoBySku.set(sku, {
+      productName: current?.productName ?? row.productName,
+      optionName: current?.optionName ?? row.optionName,
+    })
+  }
 
   const mappingSourcesForLookup = (
     sourceRows.map<MappingSource>((row) => ({
@@ -199,7 +235,7 @@ async function validateOrdersHaveInternalMappings(
     ))
     const reusableCandidateIds = candidateIds.filter((candidateId) => !isIgnoredMappingCandidate(item.marketplaceId, candidateId))
     const failureTarget = mappingFailureTarget(item, reusableCandidateIds)
-    const directSku = reusableCandidateIds.find((candidateId) => validSkus.has(candidateId))
+    const directSku = findDirectSkuForOrder(reusableCandidateIds, skuInfoBySku, item.optionText)
     if (directSku) return { mappingCodeId: '__direct_sku__' }
 
     const mappingCodeId = lookupCompatibleMappingRef(

@@ -189,6 +189,10 @@ export async function lockOrderItemsForOrders(
       quantity: orderItems.quantity,
       sku: orderItems.sku,
       skuMultiplier: orderItems.skuMultiplier,
+      lockedSku: orderItems.lockedSku,
+      lockedMappingCodeId: orderItems.lockedMappingCodeId,
+      lockedProductName: orderItems.lockedProductName,
+      lockedQuantity: orderItems.lockedQuantity,
       lockedAt: orderItems.lockedAt,
       rawData: orders.rawData,
     })
@@ -196,7 +200,12 @@ export async function lockOrderItemsForOrders(
     .innerJoin(orders, eq(orders.id, orderItems.orderId))
     .where(and(eq(orders.userId, userId), inArray(orderItems.orderId, uniqueOrderIds)))
 
-  const unlockedItems = itemRows.filter((item) => !item.lockedAt)
+  const unlockedItems = itemRows.filter((item) =>
+    !item.lockedAt
+    || (!item.lockedSku && !item.lockedMappingCodeId)
+    || !item.lockedProductName
+    || !item.lockedQuantity,
+  )
   if (unlockedItems.length === 0) return 0
 
   const [sourceRows, componentRows, historicalAliasResult] = await Promise.all([

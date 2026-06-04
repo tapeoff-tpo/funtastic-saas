@@ -802,22 +802,10 @@ function getOrderByExpressions(sort?: string, order?: 'asc' | 'desc') {
   const direction = order === 'asc' ? asc : desc
 
   if (!sort || sort === 'ordered_at') {
-    const groupOrderedAt = sql<Date>`COALESCE(
-      (
-        SELECT MAX(o2.ordered_at)
-        FROM orders o2
-        WHERE o2.user_id = ${orders.userId}
-          AND o2.marketplace_id = ${orders.marketplaceId}
-          AND o2.marketplace_order_id IS NOT DISTINCT FROM ${orders.marketplaceOrderId}
-      ),
-      ${orders.orderedAt}
-    )`
-
     return [
-      direction(groupOrderedAt),
+      direction(orders.orderedAt),
       asc(orders.marketplaceId),
       direction(orders.marketplaceOrderId),
-      direction(orders.orderedAt),
       desc(orders.createdAt),
       desc(orders.id),
     ]

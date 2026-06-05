@@ -472,7 +472,7 @@ export async function completeReturnClaim(
       if (quantity > max) return { success: false, error: `${sku} 가용/불용 합계는 최대 ${max}개까지 처리할 수 있습니다.` }
       if (quantity === 0) continue
 
-      const [record] = await tx
+      let [record] = await tx
         .select()
         .from(inventory)
         .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku), eq(inventory.warehouseZone, warehouseZone)))
@@ -484,7 +484,28 @@ export async function completeReturnClaim(
         .for('update')
 
       if (!record) {
-        return { success: false, error: `선택한 창고(${warehouseZone})에 재고관리 SKU가 없습니다: ${sku}` }
+        const [template] = await tx
+          .select()
+          .from(inventory)
+          .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku)))
+          .orderBy(asc(inventory.createdAt))
+          .limit(1)
+
+        ;[record] = await tx
+          .insert(inventory)
+          .values({
+            userId,
+            sku,
+            productName: template?.productName ?? sku,
+            warehouseZone,
+            optionName: template?.optionName ?? null,
+            packagingUnit: template?.packagingUnit ?? null,
+            totalStock: 0,
+            reservedStock: 0,
+            availableStock: 0,
+            defectiveStock: 0,
+          })
+          .returning()
       }
 
       const previousTotal = record.totalStock

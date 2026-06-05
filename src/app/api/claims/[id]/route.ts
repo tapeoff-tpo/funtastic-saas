@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { and, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
+import { and, eq, isNotNull, or, sql } from 'drizzle-orm'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { claims, inventory, orders } from '@/lib/db/schema'
@@ -48,18 +48,15 @@ export async function GET(
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const items = await getReturnableItemsForClaim(workspaceUserId, id)
-  const skus = Array.from(new Set(items.map((item) => item.sku).filter(Boolean)))
-  const warehouseRows = skus.length > 0
-    ? await db
-        .selectDistinct({ warehouseZone: inventory.warehouseZone })
-        .from(inventory)
-        .where(and(
-          eq(inventory.userId, workspaceUserId),
-          inArray(inventory.sku, skus),
-          isNotNull(inventory.warehouseZone),
-        ))
-        .orderBy(inventory.warehouseZone)
-    : []
+  const warehouseRows = await db
+    .selectDistinct({ warehouseZone: inventory.warehouseZone })
+    .from(inventory)
+    .where(and(
+      eq(inventory.userId, workspaceUserId),
+      isNotNull(inventory.warehouseZone),
+      sql`TRIM(${inventory.warehouseZone}) <> ''`,
+    ))
+    .orderBy(inventory.warehouseZone)
   const warehouseZones = warehouseRows
     .map((row) => row.warehouseZone)
     .filter((zone): zone is string => Boolean(zone))

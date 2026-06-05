@@ -13,13 +13,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { shipments, orders, orderItems, scanLogs } from '@/lib/db/schema'
-import { eq, and, gte, count, isNull, or, inArray } from 'drizzle-orm'
+import { eq, and, gte, count, isNull, or, inArray, sql } from 'drizzle-orm'
 import { startOfDay } from 'date-fns'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-
-function normalizeTrackingNumber(value: string) {
-  return value.trim().replace(/[^0-9A-Za-z]/g, '').toUpperCase()
-}
+import { normalizeTrackingNumber } from '@/lib/shipping/tracking-number'
 
 export async function GET() {
   const supabase = await createClient()
@@ -136,6 +133,7 @@ export async function POST(req: NextRequest) {
       .where(and(
         eq(shipments.userId, workspaceUserId),
         or(
+          eq(sql<string>`upper(regexp_replace(${shipments.trackingNumber}, '[^0-9A-Za-z]', '', 'g'))`, scanValue),
           eq(orders.marketplaceOrderId, rawScanValue),
           eq(orders.marketplaceOrderId, scanValue),
           eq(orders.internalNo, rawScanValue),

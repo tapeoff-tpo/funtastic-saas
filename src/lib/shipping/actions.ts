@@ -21,6 +21,7 @@ import { queueInvoiceUploadJob } from '@/lib/jobs/queues'
 import { logOrderChange } from '@/lib/orders/change-log'
 import { releaseShipmentGroupsWithConflictingShipments } from './combined-safety'
 import { isExchangeReshipOrder } from '@/lib/orders/exchange-reship'
+import { normalizeTrackingNumber } from './tracking-number'
 
 const INVOICE_EDITABLE_STATUSES = new Set(['confirmed', 'preparing'])
 const EXCHANGE_RESHIP_INVOICE_EDITABLE_STATUSES = new Set(['new', 'confirmed', 'preparing', 'ready'])
@@ -171,6 +172,7 @@ export async function registerInvoice(
       if (existing) {
         await tx.update(shipments).set({
           trackingNumber,
+          normalizedTrackingNumber: normalizeTrackingNumber(trackingNumber),
           carrierId,
           carrierName,
           uploadStatus: 'pending',
@@ -182,6 +184,7 @@ export async function registerInvoice(
           orderId,
           userId,
           trackingNumber,
+          normalizedTrackingNumber: normalizeTrackingNumber(trackingNumber),
           carrierId,
           carrierName,
         })

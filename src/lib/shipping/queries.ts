@@ -9,6 +9,7 @@ import { db } from '@/lib/db'
 import { shipments, shipmentItems, orders, orderItems } from '@/lib/db/schema'
 import { eq, and, inArray, sql, desc, lt, isNull, isNotNull } from 'drizzle-orm'
 import type { InvoiceUploadStatus, ShipmentRecord } from './types'
+import { normalizeTrackingNumber } from './tracking-number'
 
 // ─── Held Shipments ──────────────────────────────────────────────
 
@@ -132,6 +133,7 @@ export async function createShipment(data: {
       orderId: data.orderId,
       userId: data.userId,
       trackingNumber: data.trackingNumber,
+      normalizedTrackingNumber: normalizeTrackingNumber(data.trackingNumber),
       carrierId: data.carrierId,
       carrierName: data.carrierName,
     })
@@ -158,6 +160,7 @@ export async function createShipmentWithItems(data: {
         orderId: data.orderId,
         userId: data.userId,
         trackingNumber: data.trackingNumber,
+        normalizedTrackingNumber: normalizeTrackingNumber(data.trackingNumber),
         carrierId: data.carrierId,
         carrierName: data.carrierName,
       })

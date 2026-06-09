@@ -32,6 +32,48 @@ export interface SalesDashboardData {
   currentMonthLabel: string
 }
 
+export interface OrderProfitRow {
+  orderId: string
+  internalNo: string
+  marketplaceOrderId: string
+  marketplaceName: string
+  orderedAt: Date
+  productSummary: string
+  skuSummary: string
+  sales: number
+  marketplaceFee: number
+  productCost: number
+  paidShippingFee: number
+  actualShippingFee: number
+  boxCost: number
+  finalProfit: number
+  profitRate: number | null
+  missingFee: boolean
+  missingProductCost: boolean
+  missingActualShipping: boolean
+  missingPackaging: boolean
+}
+
+export interface ProfitMissingSummary {
+  totalOrders: number
+  completeOrders: number
+  incompleteOrders: number
+  missingFeeOrders: number
+  missingProductCostOrders: number
+  missingActualShippingOrders: number
+  missingPackagingOrders: number
+}
+
+export interface OrderProfitAnalysisData {
+  rows: OrderProfitRow[]
+  summary: ProfitMissingSummary
+  page: number
+  pageSize: number
+  totalPages: number
+  missingOnly: boolean
+  currentMonthLabel: string
+}
+
 export interface SalesComparisonData {
   currentSamePeriodSales: number
   rows: SalesComparisonRow[]
@@ -69,7 +111,223 @@ type MonthComparisonQueryRow = {
   samePeriodSales: string | number | null
 }
 
+type OrderProfitQueryRow = {
+  orderId: string
+  internalNo: string
+  marketplaceOrderId: string
+  marketplaceName: string | null
+  orderedAt: Date
+  productSummary: string | null
+  skuSummary: string | null
+  sales: string | number | null
+  marketplaceFee: string | number | null
+  productCost: string | number | null
+  paidShippingFee: string | number | null
+  actualShippingFee: string | number | null
+  missingFee: boolean
+  missingProductCost: boolean
+  missingActualShipping: boolean
+  missingPackaging: boolean
+}
+
+type ProfitMissingSummaryQueryRow = {
+  totalOrders: string | number | null
+  completeOrders: string | number | null
+  incompleteOrders: string | number | null
+  missingFeeOrders: string | number | null
+  missingProductCostOrders: string | number | null
+  missingActualShippingOrders: string | number | null
+  missingPackagingOrders: string | number | null
+}
+
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
+const ORDER_PROFIT_PAGE_SIZE = 50
+
+export async function getOrderProfitAnalysisData(
+  userId: string,
+  options: { page?: number; missingOnly?: boolean; now?: Date } = {},
+): Promise<OrderProfitAnalysisData> {
+  await ensureActualShippingCostsTable()
+
+  const now = options.now ?? new Date()
+  const page = Math.max(1, Math.floor(options.page ?? 1))
+  const missingOnly = options.missingOnly ?? false
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const offset = (page - 1) * ORDER_PROFIT_PAGE_SIZE
+  const missingFilter = missingOnly
+    ? sql`AND (missing_fee OR missing_product_cost OR missing_actual_shipping OR missing_packaging)`
+    : sql``
+
+  const baseQuery = sql`
+    WITH inventory_packaging AS (
+      SELECT
+        i.user_id,
+        i.sku,
+        MAX(NULLIF(BTRIM(i.packaging_unit), '')) AS packaging_unit
+      FROM inventory i
+      WHERE i.user_id = ${userId}
+      GROUP BY i.user_id, i.sku
+    ),
+    item_summary AS (
+      SELECT
+        o.id AS order_id,
+        STRING_AGG(DISTINCT COALESCE(NULLIF(oi.locked_product_name, ''), oi.product_name), ', ') AS product_summary,
+        STRING_AGG(DISTINCT COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''), '미매핑'), ', ') AS sku_summary,
+        COALESCE(SUM(
+          COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+          * COALESCE(p.cost_price::numeric, 0)
+        ), 0) AS product_cost,
+        BOOL_OR(
+          COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IS NULL
+          OR p.id IS NULL
+          OR p.cost_price IS NULL
+        ) AS missing_product_cost,
+        BOOL_OR(ip.packaging_unit IS NULL) AS missing_packaging
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN products p
+        ON p.user_id = o.user_id
+       AND p.internal_sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+      LEFT JOIN inventory_packaging ip
+        ON ip.user_id = o.user_id
+       AND ip.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+      WHERE o.user_id = ${userId}
+        AND o.ordered_at >= ${monthStart}
+        AND o.ordered_at < ${nextMonthStart}
+        AND o.status::text IN ${STATUS_FILTER}
+      GROUP BY o.id
+    ),
+    shipment_summary AS (
+      SELECT
+        s.order_id,
+        COUNT(DISTINCT s.id) AS shipment_count,
+        COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
+        COUNT(DISTINCT s.id) FILTER (WHERE ascost.id IS NULL) AS unmatched_shipment_count
+      FROM shipments s
+      LEFT JOIN actual_shipping_costs ascost ON ascost.shipment_id = s.id
+      WHERE s.user_id = ${userId}
+      GROUP BY s.order_id
+    ),
+    profit_rows AS (
+      SELECT
+        o.id AS order_id,
+        o.internal_no,
+        o.marketplace_order_id,
+        COALESCE(NULLIF(mc.display_name, ''), o.marketplace_id) AS marketplace_name,
+        o.ordered_at,
+        COALESCE(items.product_summary, '상품정보 없음') AS product_summary,
+        COALESCE(items.sku_summary, '미매핑') AS sku_summary,
+        o.total_amount::numeric AS sales,
+        (
+          o.total_amount::numeric
+          * COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, 0)
+          / 100
+        ) AS marketplace_fee,
+        COALESCE(items.product_cost, 0) AS product_cost,
+        COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
+        COALESCE(shipments.actual_shipping_fee, 0) AS actual_shipping_fee,
+        COALESCE(NULLIF(mc.metadata->>'salesFeePercent', ''), '') = '' AS missing_fee,
+        COALESCE(items.missing_product_cost, true) AS missing_product_cost,
+        COALESCE(shipments.shipment_count, 0) = 0
+          OR COALESCE(shipments.unmatched_shipment_count, 0) > 0 AS missing_actual_shipping,
+        COALESCE(items.missing_packaging, true) AS missing_packaging
+      FROM orders o
+      LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
+      LEFT JOIN item_summary items ON items.order_id = o.id
+      LEFT JOIN shipment_summary shipments ON shipments.order_id = o.id
+      WHERE o.user_id = ${userId}
+        AND o.ordered_at >= ${monthStart}
+        AND o.ordered_at < ${nextMonthStart}
+        AND o.status::text IN ${STATUS_FILTER}
+    )
+  `
+
+  const [summaryResult, rowsResult] = await Promise.all([
+    db.execute<ProfitMissingSummaryQueryRow>(sql`
+      ${baseQuery}
+      SELECT
+        COUNT(*)::text AS "totalOrders",
+        COUNT(*) FILTER (
+          WHERE NOT missing_fee
+            AND NOT missing_product_cost
+            AND NOT missing_actual_shipping
+            AND NOT missing_packaging
+        )::text AS "completeOrders",
+        COUNT(*) FILTER (
+          WHERE missing_fee OR missing_product_cost OR missing_actual_shipping OR missing_packaging
+        )::text AS "incompleteOrders",
+        COUNT(*) FILTER (WHERE missing_fee)::text AS "missingFeeOrders",
+        COUNT(*) FILTER (WHERE missing_product_cost)::text AS "missingProductCostOrders",
+        COUNT(*) FILTER (WHERE missing_actual_shipping)::text AS "missingActualShippingOrders",
+        COUNT(*) FILTER (WHERE missing_packaging)::text AS "missingPackagingOrders"
+      FROM profit_rows
+    `),
+    db.execute<OrderProfitQueryRow>(sql`
+      ${baseQuery}
+      SELECT
+        order_id AS "orderId",
+        internal_no AS "internalNo",
+        marketplace_order_id AS "marketplaceOrderId",
+        marketplace_name AS "marketplaceName",
+        ordered_at AS "orderedAt",
+        product_summary AS "productSummary",
+        sku_summary AS "skuSummary",
+        sales::text AS sales,
+        marketplace_fee::text AS "marketplaceFee",
+        product_cost::text AS "productCost",
+        paid_shipping_fee::text AS "paidShippingFee",
+        actual_shipping_fee::text AS "actualShippingFee",
+        missing_fee AS "missingFee",
+        missing_product_cost AS "missingProductCost",
+        missing_actual_shipping AS "missingActualShipping",
+        missing_packaging AS "missingPackaging"
+      FROM profit_rows
+      WHERE true
+      ${missingFilter}
+      ORDER BY ordered_at DESC, internal_no DESC
+      LIMIT ${ORDER_PROFIT_PAGE_SIZE}
+      OFFSET ${offset}
+    `),
+  ])
+
+  const summaryRow = resultRows(summaryResult)[0]
+  const summary = toProfitMissingSummary(summaryRow)
+  const filteredTotal = missingOnly ? summary.incompleteOrders : summary.totalOrders
+
+  return {
+    rows: resultRows(rowsResult).map(toOrderProfitRow),
+    summary,
+    page,
+    pageSize: ORDER_PROFIT_PAGE_SIZE,
+    totalPages: Math.max(1, Math.ceil(filteredTotal / ORDER_PROFIT_PAGE_SIZE)),
+    missingOnly,
+    currentMonthLabel: monthLabel(now),
+  }
+}
+
+export function emptyOrderProfitAnalysisData(
+  options: { page?: number; missingOnly?: boolean; now?: Date } = {},
+): OrderProfitAnalysisData {
+  const now = options.now ?? new Date()
+  return {
+    rows: [],
+    summary: {
+      totalOrders: 0,
+      completeOrders: 0,
+      incompleteOrders: 0,
+      missingFeeOrders: 0,
+      missingProductCostOrders: 0,
+      missingActualShippingOrders: 0,
+      missingPackagingOrders: 0,
+    },
+    page: Math.max(1, options.page ?? 1),
+    pageSize: ORDER_PROFIT_PAGE_SIZE,
+    totalPages: 1,
+    missingOnly: options.missingOnly ?? false,
+    currentMonthLabel: monthLabel(now),
+  }
+}
 
 export async function getSalesDashboardData(userId: string, now = new Date()): Promise<SalesDashboardData> {
   await ensureActualShippingCostsTable()
@@ -335,6 +593,50 @@ function toMarketplaceRow(row: DetailRow): MarketplaceSalesRow {
     boxCost,
     finalProfit,
     profitRate: sales > 0 ? (finalProfit / sales) * 100 : null,
+  }
+}
+
+function toOrderProfitRow(row: OrderProfitQueryRow): OrderProfitRow {
+  const sales = toNumber(row.sales)
+  const marketplaceFee = toNumber(row.marketplaceFee)
+  const productCost = toNumber(row.productCost)
+  const paidShippingFee = toNumber(row.paidShippingFee)
+  const actualShippingFee = toNumber(row.actualShippingFee)
+  const boxCost = 0
+  const finalProfit = sales - marketplaceFee - productCost + paidShippingFee - actualShippingFee - boxCost
+
+  return {
+    orderId: row.orderId,
+    internalNo: row.internalNo,
+    marketplaceOrderId: row.marketplaceOrderId,
+    marketplaceName: row.marketplaceName || '-',
+    orderedAt: new Date(row.orderedAt),
+    productSummary: row.productSummary || '상품정보 없음',
+    skuSummary: row.skuSummary || '미매핑',
+    sales,
+    marketplaceFee,
+    productCost,
+    paidShippingFee,
+    actualShippingFee,
+    boxCost,
+    finalProfit,
+    profitRate: sales > 0 ? (finalProfit / sales) * 100 : null,
+    missingFee: Boolean(row.missingFee),
+    missingProductCost: Boolean(row.missingProductCost),
+    missingActualShipping: Boolean(row.missingActualShipping),
+    missingPackaging: Boolean(row.missingPackaging),
+  }
+}
+
+function toProfitMissingSummary(row: ProfitMissingSummaryQueryRow | undefined): ProfitMissingSummary {
+  return {
+    totalOrders: toNumber(row?.totalOrders),
+    completeOrders: toNumber(row?.completeOrders),
+    incompleteOrders: toNumber(row?.incompleteOrders),
+    missingFeeOrders: toNumber(row?.missingFeeOrders),
+    missingProductCostOrders: toNumber(row?.missingProductCostOrders),
+    missingActualShippingOrders: toNumber(row?.missingActualShippingOrders),
+    missingPackagingOrders: toNumber(row?.missingPackagingOrders),
   }
 }
 

@@ -410,6 +410,28 @@ export const actualShippingCosts = pgTable(
   ],
 )
 
+export const boxCostRates = pgTable(
+  'box_cost_rates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    packageName: varchar('package_name', { length: 100 }).notNull(),
+    unitCost: numeric('unit_cost', { precision: 12, scale: 2 }).notNull(),
+    effectiveFrom: date('effective_from').notNull(),
+    isActive: boolean('is_active').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('box_cost_rates_user_package_effective_unique').on(
+      table.userId,
+      table.packageName,
+      table.effectiveFrom,
+    ),
+    index('box_cost_rates_user_active_idx').on(table.userId, table.isActive),
+  ],
+)
+
 export const shipmentGroups = pgTable('shipment_groups', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull(),

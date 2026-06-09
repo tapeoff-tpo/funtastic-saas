@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { AlertCircle, CheckCircle2 } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { listBoxCostRates } from '@/lib/analytics/box-costs'
 import { getActualShippingCostRecentImports } from '@/lib/shipping/actual-costs'
 import {
   emptyOrderProfitAnalysisData,
@@ -15,6 +16,7 @@ import {
   type MarketplaceSalesRow,
 } from '@/lib/analytics/sales-dashboard'
 import { ActualShippingCostUpload } from './actual-shipping-cost-upload'
+import { BoxCostSettings } from './box-cost-settings'
 
 export const metadata: Metadata = {
   title: '매출분석',
@@ -26,7 +28,7 @@ const carrierLabels: Record<string, string> = {
   DAESIN: '대신택배',
 }
 
-type AnalyticsTab = 'dashboard' | 'orders' | 'missing' | 'uploads'
+type AnalyticsTab = 'dashboard' | 'orders' | 'missing' | 'uploads' | 'settings'
 
 export default async function AnalyticsPage({
   searchParams,
@@ -59,6 +61,12 @@ export default async function AnalyticsPage({
       return []
     })
     : []
+  const boxCostRates = tab === 'settings'
+    ? await listBoxCostRates(workspaceUserId).catch((error) => {
+      console.error('box cost settings error:', error)
+      return []
+    })
+    : []
 
   return (
     <div className="space-y-4">
@@ -74,11 +82,14 @@ export default async function AnalyticsPage({
           <TabLink href="/analytics?tab=orders" active={tab === 'orders'}>주문별 손익</TabLink>
           <TabLink href="/analytics?tab=missing" active={tab === 'missing'}>계산 누락</TabLink>
           <TabLink href="/analytics?tab=uploads" active={tab === 'uploads'}>업로드</TabLink>
+          <TabLink href="/analytics?tab=settings" active={tab === 'settings'}>설정</TabLink>
         </div>
       </div>
 
       {tab === 'uploads' ? (
         <UploadPanel recent={recent} />
+      ) : tab === 'settings' ? (
+        <BoxCostSettings rates={boxCostRates} />
       ) : tab === 'orders' || tab === 'missing' ? (
         <OrderProfitPanel data={profitData!} />
       ) : (
@@ -94,7 +105,7 @@ export default async function AnalyticsPage({
 }
 
 function parseTab(value: string | undefined): AnalyticsTab {
-  if (value === 'orders' || value === 'missing' || value === 'uploads') return value
+  if (value === 'orders' || value === 'missing' || value === 'uploads' || value === 'settings') return value
   return 'dashboard'
 }
 

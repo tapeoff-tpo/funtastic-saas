@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { ensureBoxCostRatesTable } from '@/lib/analytics/box-costs'
 import { ensureActualShippingCostsTable } from '@/lib/shipping/actual-costs'
 
 export interface SalesSummaryCard {
@@ -104,6 +105,7 @@ type DetailRow = {
   productCost: string | number | null
   paidShippingFee: string | number | null
   actualShippingFee: string | number | null
+  boxCost: string | number | null
 }
 
 type MonthComparisonQueryRow = {
@@ -124,6 +126,7 @@ type OrderProfitQueryRow = {
   productCost: string | number | null
   paidShippingFee: string | number | null
   actualShippingFee: string | number | null
+  boxCost: string | number | null
   missingFee: boolean
   missingProductCost: boolean
   missingActualShipping: boolean
@@ -147,7 +150,7 @@ export async function getOrderProfitAnalysisData(
   userId: string,
   options: { page?: number; missingOnly?: boolean; now?: Date } = {},
 ): Promise<OrderProfitAnalysisData> {
-  await ensureActualShippingCostsTable()
+  await Promise.all([ensureActualShippingCostsTable(), ensureBoxCostRatesTable()])
 
   const now = options.now ?? new Date()
   const page = Math.max(1, Math.floor(options.page ?? 1))
@@ -183,7 +186,11 @@ export async function getOrderProfitAnalysisData(
           OR p.id IS NULL
           OR p.cost_price IS NULL
         ) AS missing_product_cost,
-        BOOL_OR(ip.packaging_unit IS NULL) AS missing_packaging
+        CASE
+          WHEN COUNT(DISTINCT ip.packaging_unit) = 1 AND BOOL_AND(ip.packaging_unit IS NOT NULL)
+            THEN MAX(ip.packaging_unit)
+          ELSE NULL
+        END AS fallback_package_name
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p
@@ -203,9 +210,29 @@ export async function getOrderProfitAnalysisData(
         s.order_id,
         COUNT(DISTINCT s.id) AS shipment_count,
         COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
-        COUNT(DISTINCT s.id) FILTER (WHERE ascost.id IS NULL) AS unmatched_shipment_count
+        COUNT(DISTINCT s.id) FILTER (WHERE ascost.id IS NULL) AS unmatched_shipment_count,
+        COALESCE(SUM(
+          COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
+        ), 0) AS box_cost,
+        COUNT(DISTINCT s.id) FILTER (
+          WHERE resolved.package_name IS NULL OR rate.unit_cost IS NULL
+        ) AS missing_box_cost_count
       FROM shipments s
       LEFT JOIN actual_shipping_costs ascost ON ascost.shipment_id = s.id
+      LEFT JOIN item_summary items ON items.order_id = s.order_id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) AS package_name
+      ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT bcr.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates bcr
+        WHERE bcr.user_id = ${userId}
+          AND bcr.is_active = true
+          AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
+          AND bcr.effective_from <= (COALESCE(s.shipped_at, s.created_at) AT TIME ZONE 'Asia/Seoul')::date
+        ORDER BY bcr.effective_from DESC
+        LIMIT 1
+      ) rate ON true
       WHERE s.user_id = ${userId}
       GROUP BY s.order_id
     ),
@@ -227,11 +254,13 @@ export async function getOrderProfitAnalysisData(
         COALESCE(items.product_cost, 0) AS product_cost,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
         COALESCE(shipments.actual_shipping_fee, 0) AS actual_shipping_fee,
+        COALESCE(shipments.box_cost, 0) AS box_cost,
         COALESCE(NULLIF(mc.metadata->>'salesFeePercent', ''), '') = '' AS missing_fee,
         COALESCE(items.missing_product_cost, true) AS missing_product_cost,
         COALESCE(shipments.shipment_count, 0) = 0
           OR COALESCE(shipments.unmatched_shipment_count, 0) > 0 AS missing_actual_shipping,
-        COALESCE(items.missing_packaging, true) AS missing_packaging
+        COALESCE(shipments.shipment_count, 0) = 0
+          OR COALESCE(shipments.missing_box_cost_count, 0) > 0 AS missing_packaging
       FROM orders o
       LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
       LEFT JOIN item_summary items ON items.order_id = o.id
@@ -278,6 +307,7 @@ export async function getOrderProfitAnalysisData(
         product_cost::text AS "productCost",
         paid_shipping_fee::text AS "paidShippingFee",
         actual_shipping_fee::text AS "actualShippingFee",
+        box_cost::text AS "boxCost",
         missing_fee AS "missingFee",
         missing_product_cost AS "missingProductCost",
         missing_actual_shipping AS "missingActualShipping",
@@ -330,7 +360,7 @@ export function emptyOrderProfitAnalysisData(
 }
 
 export async function getSalesDashboardData(userId: string, now = new Date()): Promise<SalesDashboardData> {
-  await ensureActualShippingCostsTable()
+  await Promise.all([ensureActualShippingCostsTable(), ensureBoxCostRatesTable()])
 
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
@@ -436,14 +466,51 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         AND o.status::text IN ${STATUS_FILTER}
       GROUP BY o.marketplace_id
     ),
-    actual_costs AS (
+    order_packaging AS (
+      SELECT
+        o.id AS order_id,
+        CASE
+          WHEN COUNT(DISTINCT NULLIF(BTRIM(i.packaging_unit), '')) = 1
+            AND BOOL_AND(NULLIF(BTRIM(i.packaging_unit), '') IS NOT NULL)
+            THEN MAX(NULLIF(BTRIM(i.packaging_unit), ''))
+          ELSE NULL
+        END AS fallback_package_name
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN inventory i
+        ON i.user_id = o.user_id
+       AND i.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+      WHERE o.user_id = ${userId}
+        AND o.ordered_at >= ${monthStart}
+        AND o.ordered_at < ${nextMonthStart}
+        AND o.status::text IN ${STATUS_FILTER}
+      GROUP BY o.id
+    ),
+    shipment_costs AS (
       SELECT
         o.marketplace_id,
-        COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee
-      FROM actual_shipping_costs ascost
-      JOIN shipments s ON s.id = ascost.shipment_id
+        COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
+        COALESCE(SUM(
+          COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
+        ), 0) AS box_cost
+      FROM shipments s
       JOIN orders o ON o.id = s.order_id
-      WHERE ascost.user_id = ${userId}
+      LEFT JOIN actual_shipping_costs ascost ON ascost.shipment_id = s.id
+      LEFT JOIN order_packaging op ON op.order_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), op.fallback_package_name) AS package_name
+      ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT bcr.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates bcr
+        WHERE bcr.user_id = ${userId}
+          AND bcr.is_active = true
+          AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
+          AND bcr.effective_from <= (COALESCE(s.shipped_at, s.created_at) AT TIME ZONE 'Asia/Seoul')::date
+        ORDER BY bcr.effective_from DESC
+        LIMIT 1
+      ) rate ON true
+      WHERE s.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -456,10 +523,11 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       COALESCE(SUM(ob.total_amount * ob.fee_percent / 100), 0)::text AS "marketplaceFee",
       COALESCE(MAX(pc.product_cost), 0)::text AS "productCost",
       COALESCE(SUM(ob.paid_shipping_fee), 0)::text AS "paidShippingFee",
-      COALESCE(MAX(ac.actual_shipping_fee), 0)::text AS "actualShippingFee"
+      COALESCE(MAX(sc.actual_shipping_fee), 0)::text AS "actualShippingFee",
+      COALESCE(MAX(sc.box_cost), 0)::text AS "boxCost"
     FROM order_base ob
     LEFT JOIN product_costs pc ON pc.marketplace_id = ob.marketplace_id
-    LEFT JOIN actual_costs ac ON ac.marketplace_id = ob.marketplace_id
+    LEFT JOIN shipment_costs sc ON sc.marketplace_id = ob.marketplace_id
     GROUP BY ob.marketplace_id
     ORDER BY SUM(ob.total_amount) DESC
   `)
@@ -578,7 +646,7 @@ function toMarketplaceRow(row: DetailRow): MarketplaceSalesRow {
   const productCost = toNumber(row.productCost)
   const paidShippingFee = toNumber(row.paidShippingFee)
   const actualShippingFee = toNumber(row.actualShippingFee)
-  const boxCost = 0
+  const boxCost = toNumber(row.boxCost)
   const shippingMargin = paidShippingFee - actualShippingFee
   const finalProfit = sales - marketplaceFee - productCost + shippingMargin - boxCost
   return {
@@ -602,7 +670,7 @@ function toOrderProfitRow(row: OrderProfitQueryRow): OrderProfitRow {
   const productCost = toNumber(row.productCost)
   const paidShippingFee = toNumber(row.paidShippingFee)
   const actualShippingFee = toNumber(row.actualShippingFee)
-  const boxCost = 0
+  const boxCost = toNumber(row.boxCost)
   const finalProfit = sales - marketplaceFee - productCost + paidShippingFee - actualShippingFee - boxCost
 
   return {

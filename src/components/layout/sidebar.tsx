@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
@@ -26,25 +27,33 @@ import {
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
+import {
+  applySidebarMenuOrder,
+  readSidebarMenuOrder,
+  SIDEBAR_MENU_ORDER_EVENT,
+} from './sidebar-menu-order'
 
-interface NavItem {
+export interface NavItem {
   href: string
   label: string
   icon: typeof LayoutDashboard
 }
 
-interface NavSection {
+export interface NavSection {
+  id: string
   title?: string
   items: NavItem[]
 }
 
-const navSections: NavSection[] = [
+export const navSections: NavSection[] = [
   {
+    id: 'dashboard',
     items: [
       { href: '/dashboard', label: '대시보드', icon: LayoutDashboard },
     ],
   },
   {
+    id: 'orders',
     title: '주문',
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
@@ -53,6 +62,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'cs',
     title: 'CS',
     items: [
       { href: '/cs', label: '상품검수/CS', icon: Headphones },
@@ -60,6 +70,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'shipping',
     title: '출고 작업',
     items: [
       { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
@@ -67,6 +78,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'products',
     title: '상품',
     items: [
       { href: '/products', label: '상품 관리', icon: Package },
@@ -78,19 +90,23 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'analytics',
     title: '분석',
     items: [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
     ],
   },
   {
+    id: 'settings',
     title: '설정',
     items: [
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
+      { href: '/settings/menu', label: '메뉴', icon: Settings },
       { href: '/settings', label: '설정', icon: Settings },
     ],
   },
   {
+    id: 'admin',
     title: '관리자',
     items: [
       { href: '/admin/dev-log', label: '개발로그', icon: FileText },
@@ -110,6 +126,18 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const pathname = usePathname()
   const router = useRouter()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
+  const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
+
+  useEffect(() => {
+    const syncOrder = () => setOrderedSections(applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
+    syncOrder()
+    window.addEventListener(SIDEBAR_MENU_ORDER_EVENT, syncOrder)
+    window.addEventListener('storage', syncOrder)
+    return () => {
+      window.removeEventListener(SIDEBAR_MENU_ORDER_EVENT, syncOrder)
+      window.removeEventListener('storage', syncOrder)
+    }
+  }, [])
 
   async function handleSignOut() {
     const supabase = createClient()
@@ -117,8 +145,9 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
     router.push('/login')
   }
 
+  const orderedNavItems = orderedSections.flatMap((section) => section.items)
   const favoriteItems = favorites
-    .map((href) => allNavItems.find((i) => i.href === href))
+    .map((href) => orderedNavItems.find((i) => i.href === href) ?? allNavItems.find((i) => i.href === href))
     .filter((i): i is NavItem => Boolean(i))
 
   function isItemActive(href: string) {
@@ -192,7 +221,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
       <nav className="flex-1 overflow-y-auto px-2 py-1.5">
         {/* Dashboard */}
         <div className="space-y-px">
-          {navSections[0].items.map((item) => renderNavItem(item, { showStar: false }))}
+          {orderedSections.find((section) => section.id === 'dashboard')?.items.map((item) => renderNavItem(item, { showStar: false }))}
         </div>
 
         {/* Favorites — directly below Dashboard */}
@@ -209,8 +238,8 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         )}
 
         {/* Remaining sections */}
-        {navSections.slice(1).map((section, sIdx) => (
-          <div key={sIdx} className="mt-2">
+        {orderedSections.filter((section) => section.id !== 'dashboard').map((section) => (
+          <div key={section.id} className="mt-2">
             {section.title && (
               <p className="mb-0.5 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
                 {section.title}

@@ -1,7 +1,6 @@
 import { sql } from 'drizzle-orm'
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { ensureBoxCostRatesTable } from '@/lib/analytics/box-costs'
-import { ensureActualShippingCostsTable } from '@/lib/shipping/actual-costs'
 
 export interface SalesSummaryCard {
   key: string
@@ -41,6 +40,8 @@ export interface OrderProfitRow {
   orderedAt: Date
   productSummary: string
   skuSummary: string
+  packageSummary: string
+  trackingSummary: string
   sales: number
   marketplaceFee: number
   productCost: number
@@ -72,8 +73,11 @@ export interface OrderProfitAnalysisData {
   pageSize: number
   totalPages: number
   missingOnly: boolean
+  selectedIssue: ProfitMissingIssue
   currentMonthLabel: string
 }
+
+export type ProfitMissingIssue = 'all' | 'fee' | 'product-cost' | 'actual-shipping' | 'packaging'
 
 export interface SalesComparisonData {
   currentSamePeriodSales: number
@@ -109,6 +113,7 @@ type DetailRow = {
 }
 
 type MonthComparisonQueryRow = {
+  monthKey: string
   totalSales: string | number | null
   samePeriodSales: string | number | null
 }
@@ -121,6 +126,8 @@ type OrderProfitQueryRow = {
   orderedAt: Date
   productSummary: string | null
   skuSummary: string | null
+  packageSummary: string | null
+  trackingSummary: string | null
   sales: string | number | null
   marketplaceFee: string | number | null
   productCost: string | number | null
@@ -148,22 +155,46 @@ const ORDER_PROFIT_PAGE_SIZE = 50
 
 export async function getOrderProfitAnalysisData(
   userId: string,
-  options: { page?: number; missingOnly?: boolean; now?: Date } = {},
+  options: { page?: number; missingOnly?: boolean; issue?: ProfitMissingIssue; now?: Date } = {},
 ): Promise<OrderProfitAnalysisData> {
-  await Promise.all([ensureActualShippingCostsTable(), ensureBoxCostRatesTable()])
-
   const now = options.now ?? new Date()
   const page = Math.max(1, Math.floor(options.page ?? 1))
   const missingOnly = options.missingOnly ?? false
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const selectedIssue = options.issue ?? 'all'
+  const monthStart = sqlDate(new Date(now.getFullYear(), now.getMonth(), 1))
+  const nextMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() + 1, 1))
   const offset = (page - 1) * ORDER_PROFIT_PAGE_SIZE
-  const missingFilter = missingOnly
-    ? sql`AND (missing_fee OR missing_product_cost OR missing_actual_shipping OR missing_packaging)`
-    : sql``
+  const missingFilter = selectedIssue === 'fee'
+    ? sql`AND missing_fee`
+    : selectedIssue === 'product-cost'
+      ? sql`AND missing_product_cost`
+      : selectedIssue === 'actual-shipping'
+        ? sql`AND missing_actual_shipping`
+        : selectedIssue === 'packaging'
+          ? sql`AND missing_packaging`
+          : missingOnly
+            ? sql`AND (missing_fee OR missing_product_cost OR missing_actual_shipping OR missing_packaging)`
+            : sql``
 
   const baseQuery = sql`
-    WITH inventory_packaging AS (
+    WITH marketplace_fee_settings AS (
+      SELECT
+        user_id,
+        marketplace_id,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE NULLIF(metadata->>'salesFeePercent', '') IS NULL) = 0
+            AND COUNT(DISTINCT NULLIF(metadata->>'salesFeePercent', '')::numeric) = 1
+            THEN MAX(NULLIF(metadata->>'salesFeePercent', '')::numeric)
+          ELSE NULL
+        END AS fallback_fee_percent,
+        CASE WHEN COUNT(*) = 1 THEN MAX(display_name) ELSE NULL END AS fallback_display_name,
+        CASE WHEN COUNT(*) = 1 THEN MAX(NULLIF(metadata->>'systemMarketplaceName', '')) ELSE NULL END AS fallback_system_name,
+        CASE WHEN COUNT(*) = 1 THEN MAX(NULLIF(metadata->>'salesExportMarketplaceId', '')) ELSE NULL END AS fallback_sales_export_id
+      FROM marketplace_connections
+      WHERE user_id = ${userId}
+      GROUP BY user_id, marketplace_id
+    ),
+    inventory_packaging AS (
       SELECT
         i.user_id,
         i.sku,
@@ -209,6 +240,8 @@ export async function getOrderProfitAnalysisData(
       SELECT
         s.order_id,
         COUNT(DISTINCT s.id) AS shipment_count,
+        STRING_AGG(DISTINCT s.tracking_number, ', ') AS tracking_summary,
+        STRING_AGG(DISTINCT COALESCE(resolved.package_name, '박스명 없음'), ', ') AS package_summary,
         COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
         COUNT(DISTINCT s.id) FILTER (WHERE ascost.id IS NULL) AS unmatched_shipment_count,
         COALESCE(SUM(
@@ -241,21 +274,29 @@ export async function getOrderProfitAnalysisData(
         o.id AS order_id,
         o.internal_no,
         o.marketplace_order_id,
-        COALESCE(NULLIF(mc.display_name, ''), o.marketplace_id) AS marketplace_name,
+        COALESCE(
+          NULLIF(mc.metadata->>'systemMarketplaceName', ''),
+          NULLIF(mfs.fallback_system_name, ''),
+          NULLIF(mc.display_name, ''),
+          NULLIF(mfs.fallback_display_name, ''),
+          o.marketplace_id
+        ) AS marketplace_name,
         o.ordered_at,
         COALESCE(items.product_summary, '상품정보 없음') AS product_summary,
         COALESCE(items.sku_summary, '미매핑') AS sku_summary,
+        COALESCE(shipments.package_summary, '박스명 없음') AS package_summary,
+        COALESCE(shipments.tracking_summary, '송장 없음') AS tracking_summary,
         o.total_amount::numeric AS sales,
         (
           o.total_amount::numeric
-          * COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, 0)
+          * COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0)
           / 100
         ) AS marketplace_fee,
         COALESCE(items.product_cost, 0) AS product_cost,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
         COALESCE(shipments.actual_shipping_fee, 0) AS actual_shipping_fee,
         COALESCE(shipments.box_cost, 0) AS box_cost,
-        COALESCE(NULLIF(mc.metadata->>'salesFeePercent', ''), '') = '' AS missing_fee,
+        COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent) IS NULL AS missing_fee,
         COALESCE(items.missing_product_cost, true) AS missing_product_cost,
         COALESCE(shipments.shipment_count, 0) = 0
           OR COALESCE(shipments.unmatched_shipment_count, 0) > 0 AS missing_actual_shipping,
@@ -263,6 +304,9 @@ export async function getOrderProfitAnalysisData(
           OR COALESCE(shipments.missing_box_cost_count, 0) > 0 AS missing_packaging
       FROM orders o
       LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
+      LEFT JOIN marketplace_fee_settings mfs
+        ON mfs.user_id = o.user_id
+       AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN item_summary items ON items.order_id = o.id
       LEFT JOIN shipment_summary shipments ON shipments.order_id = o.id
       WHERE o.user_id = ${userId}
@@ -302,6 +346,8 @@ export async function getOrderProfitAnalysisData(
         ordered_at AS "orderedAt",
         product_summary AS "productSummary",
         sku_summary AS "skuSummary",
+        package_summary AS "packageSummary",
+        tracking_summary AS "trackingSummary",
         sales::text AS sales,
         marketplace_fee::text AS "marketplaceFee",
         product_cost::text AS "productCost",
@@ -323,7 +369,15 @@ export async function getOrderProfitAnalysisData(
 
   const summaryRow = resultRows(summaryResult)[0]
   const summary = toProfitMissingSummary(summaryRow)
-  const filteredTotal = missingOnly ? summary.incompleteOrders : summary.totalOrders
+  const filteredTotal = selectedIssue === 'fee'
+    ? summary.missingFeeOrders
+    : selectedIssue === 'product-cost'
+      ? summary.missingProductCostOrders
+      : selectedIssue === 'actual-shipping'
+        ? summary.missingActualShippingOrders
+        : selectedIssue === 'packaging'
+          ? summary.missingPackagingOrders
+          : missingOnly ? summary.incompleteOrders : summary.totalOrders
 
   return {
     rows: resultRows(rowsResult).map(toOrderProfitRow),
@@ -332,12 +386,24 @@ export async function getOrderProfitAnalysisData(
     pageSize: ORDER_PROFIT_PAGE_SIZE,
     totalPages: Math.max(1, Math.ceil(filteredTotal / ORDER_PROFIT_PAGE_SIZE)),
     missingOnly,
+    selectedIssue,
     currentMonthLabel: monthLabel(now),
   }
 }
 
+export const getCachedOrderProfitAnalysisData = unstable_cache(
+  async (
+    userId: string,
+    page: number,
+    missingOnly: boolean,
+    issue: ProfitMissingIssue,
+  ) => getOrderProfitAnalysisData(userId, { page, missingOnly, issue }),
+  ['order-profit-analysis'],
+  { revalidate: 30 },
+)
+
 export function emptyOrderProfitAnalysisData(
-  options: { page?: number; missingOnly?: boolean; now?: Date } = {},
+  options: { page?: number; missingOnly?: boolean; issue?: ProfitMissingIssue; now?: Date } = {},
 ): OrderProfitAnalysisData {
   const now = options.now ?? new Date()
   return {
@@ -355,28 +421,44 @@ export function emptyOrderProfitAnalysisData(
     pageSize: ORDER_PROFIT_PAGE_SIZE,
     totalPages: 1,
     missingOnly: options.missingOnly ?? false,
+    selectedIssue: options.issue ?? 'all',
     currentMonthLabel: monthLabel(now),
   }
 }
 
 export async function getSalesDashboardData(userId: string, now = new Date()): Promise<SalesDashboardData> {
-  await Promise.all([ensureActualShippingCostsTable(), ensureBoxCostRatesTable()])
+  const monthStart = sqlDate(new Date(now.getFullYear(), now.getMonth(), 1))
+  const nextMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() + 1, 1))
+  const lastMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() - 1, 1))
+  const lastMonthSameDayEnd = sqlDate(new Date(now.getFullYear(), now.getMonth() - 1, now.getDate() + 1))
+  const previousThreeMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() - 3, 1))
 
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
-  const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const lastMonthSameDayEnd = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate() + 1)
-  const previousThreeMonthStart = new Date(now.getFullYear(), now.getMonth() - 3, 1)
-
-  const metricRows = await db.execute<MetricRow>(sql`
-    WITH current_orders AS (
+  const metricRowsPromise = db.execute<MetricRow>(sql`
+    WITH marketplace_fee_settings AS (
+      SELECT
+        user_id,
+        marketplace_id,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE NULLIF(metadata->>'salesFeePercent', '') IS NULL) = 0
+            AND COUNT(DISTINCT NULLIF(metadata->>'salesFeePercent', '')::numeric) = 1
+            THEN MAX(NULLIF(metadata->>'salesFeePercent', '')::numeric)
+          ELSE NULL
+        END AS fallback_fee_percent
+      FROM marketplace_connections
+      WHERE user_id = ${userId}
+      GROUP BY user_id, marketplace_id
+    ),
+    current_orders AS (
       SELECT
         o.id,
         o.total_amount::numeric AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS shipping_fee,
-        COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, 0) AS fee_percent
+        COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0) AS fee_percent
       FROM orders o
       LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
+      LEFT JOIN marketplace_fee_settings mfs
+        ON mfs.user_id = o.user_id
+       AND mfs.marketplace_id = o.marketplace_id
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
@@ -433,19 +515,48 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       ), 0)::text AS "lastMonthSamePeriodSales",
       COALESCE((SELECT AVG(sales) FROM previous_months), 0)::text AS "previousThreeMonthAverageSales"
   `)
-  const metric = resultRows(metricRows)[0]
-
-  const detailRows = await db.execute<DetailRow>(sql`
-    WITH order_base AS (
+  const detailRowsPromise = db.execute<DetailRow>(sql`
+    WITH marketplace_fee_settings AS (
+      SELECT
+        user_id,
+        marketplace_id,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE NULLIF(metadata->>'salesFeePercent', '') IS NULL) = 0
+            AND COUNT(DISTINCT NULLIF(metadata->>'salesFeePercent', '')::numeric) = 1
+            THEN MAX(NULLIF(metadata->>'salesFeePercent', '')::numeric)
+          ELSE NULL
+        END AS fallback_fee_percent,
+        CASE WHEN COUNT(*) = 1 THEN MAX(display_name) ELSE NULL END AS fallback_display_name,
+        CASE WHEN COUNT(*) = 1 THEN MAX(NULLIF(metadata->>'systemMarketplaceName', '')) ELSE NULL END AS fallback_system_name,
+        CASE WHEN COUNT(*) = 1 THEN MAX(NULLIF(metadata->>'salesExportMarketplaceId', '')) ELSE NULL END AS fallback_sales_export_id
+      FROM marketplace_connections
+      WHERE user_id = ${userId}
+      GROUP BY user_id, marketplace_id
+    ),
+    order_base AS (
       SELECT
         o.id,
-        o.marketplace_id,
-        COALESCE(NULLIF(mc.display_name, ''), o.marketplace_id) AS marketplace_name,
+        o.marketplace_id || ':' || COALESCE(
+          NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
+          o.connection_id::text,
+          mfs.fallback_sales_export_id,
+          'unlinked'
+        ) AS account_key,
+        COALESCE(
+          NULLIF(mc.metadata->>'systemMarketplaceName', ''),
+          NULLIF(mfs.fallback_system_name, ''),
+          NULLIF(mc.display_name, ''),
+          NULLIF(mfs.fallback_display_name, ''),
+          o.marketplace_id
+        ) AS marketplace_name,
         o.total_amount::numeric AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
-        COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, 0) AS fee_percent
+        COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0) AS fee_percent
       FROM orders o
       LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
+      LEFT JOIN marketplace_fee_settings mfs
+        ON mfs.user_id = o.user_id
+       AND mfs.marketplace_id = o.marketplace_id
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
@@ -453,18 +564,15 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     ),
     product_costs AS (
       SELECT
-        o.marketplace_id,
+        ob.account_key,
         COALESCE(SUM(oi.quantity * COALESCE(oi.sku_multiplier, 1) * COALESCE(p.cost_price::numeric, 0)), 0) AS product_cost
-      FROM orders o
-      JOIN order_items oi ON oi.order_id = o.id
+      FROM order_base ob
+      JOIN orders o ON o.id = ob.id
+      JOIN order_items oi ON oi.order_id = ob.id
       LEFT JOIN products p
         ON p.user_id = o.user_id
        AND p.internal_sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
-      WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text IN ${STATUS_FILTER}
-      GROUP BY o.marketplace_id
+      GROUP BY ob.account_key
     ),
     order_packaging AS (
       SELECT
@@ -475,26 +583,24 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
             THEN MAX(NULLIF(BTRIM(i.packaging_unit), ''))
           ELSE NULL
         END AS fallback_package_name
-      FROM orders o
-      JOIN order_items oi ON oi.order_id = o.id
+      FROM order_base ob
+      JOIN orders o ON o.id = ob.id
+      JOIN order_items oi ON oi.order_id = ob.id
       LEFT JOIN inventory i
         ON i.user_id = o.user_id
        AND i.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
-      WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text IN ${STATUS_FILTER}
       GROUP BY o.id
     ),
     shipment_costs AS (
       SELECT
-        o.marketplace_id,
+        ob.account_key,
         COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
         COALESCE(SUM(
           COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
         ), 0) AS box_cost
       FROM shipments s
       JOIN orders o ON o.id = s.order_id
+      JOIN order_base ob ON ob.id = o.id
       LEFT JOIN actual_shipping_costs ascost ON ascost.shipment_id = s.id
       LEFT JOIN order_packaging op ON op.order_id = o.id
       LEFT JOIN LATERAL (
@@ -511,13 +617,10 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         LIMIT 1
       ) rate ON true
       WHERE s.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
-        AND o.status::text IN ${STATUS_FILTER}
-      GROUP BY o.marketplace_id
+      GROUP BY ob.account_key
     )
     SELECT
-      ob.marketplace_id AS "marketplaceId",
+      ob.account_key AS "marketplaceId",
       MAX(ob.marketplace_name) AS "marketplaceName",
       COALESCE(SUM(ob.total_amount), 0)::text AS sales,
       COALESCE(SUM(ob.total_amount * ob.fee_percent / 100), 0)::text AS "marketplaceFee",
@@ -526,18 +629,22 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       COALESCE(MAX(sc.actual_shipping_fee), 0)::text AS "actualShippingFee",
       COALESCE(MAX(sc.box_cost), 0)::text AS "boxCost"
     FROM order_base ob
-    LEFT JOIN product_costs pc ON pc.marketplace_id = ob.marketplace_id
-    LEFT JOIN shipment_costs sc ON sc.marketplace_id = ob.marketplace_id
-    GROUP BY ob.marketplace_id
+    LEFT JOIN product_costs pc ON pc.account_key = ob.account_key
+    LEFT JOIN shipment_costs sc ON sc.account_key = ob.account_key
+    GROUP BY ob.account_key
     ORDER BY SUM(ob.total_amount) DESC
   `)
 
+  const metricRows = await metricRowsPromise
+  const metric = resultRows(metricRows)[0]
+  const currentSales = toNumber(metric?.currentPeriodSales)
+  const comparisonPromise = getSalesComparisonData(userId, now, currentSales)
+  const detailRows = await detailRowsPromise
   const rows = resultRows(detailRows).map(toMarketplaceRow)
   const totals = buildTotals(rows)
-  const currentSales = toNumber(metric?.currentPeriodSales)
   const lastMonthSamePeriod = toNumber(metric?.lastMonthSamePeriodSales)
   const previousThreeAverage = toNumber(metric?.previousThreeMonthAverageSales)
-  const comparison = await getSalesComparisonData(userId, now, currentSales)
+  const comparison = await comparisonPromise
 
   return {
     currentMonthLabel: monthLabel(now),
@@ -581,6 +688,12 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
   }
 }
 
+export const getCachedSalesDashboardData = unstable_cache(
+  async (userId: string) => getSalesDashboardData(userId),
+  ['sales-dashboard'],
+  { revalidate: 30 },
+)
+
 export function emptySalesDashboardData(now = new Date()): SalesDashboardData {
   return {
     currentMonthLabel: monthLabel(now),
@@ -608,34 +721,47 @@ async function getSalesComparisonData(
     const samePeriodEnd = new Date(now.getFullYear(), now.getMonth() - offset, now.getDate() + 1)
     return {
       label: `${start.getMonth() + 1}월`,
-      start,
-      end,
-      samePeriodEnd: samePeriodEnd > end ? end : samePeriodEnd,
+      start: sqlDate(start),
+      end: sqlDate(end),
+      samePeriodEnd: sqlDate(samePeriodEnd > end ? end : samePeriodEnd),
     }
   }).reverse()
 
-  const rows = await Promise.all(monthSpecs.map(async (spec) => {
-    const result = await db.execute<MonthComparisonQueryRow>(sql`
-      SELECT
-        COALESCE(SUM(o.total_amount::numeric), 0)::text AS "totalSales",
-        COALESCE(SUM(o.total_amount::numeric) FILTER (WHERE o.ordered_at < ${spec.samePeriodEnd}), 0)::text AS "samePeriodSales"
-      FROM orders o
-      WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${spec.start}
-        AND o.ordered_at < ${spec.end}
-        AND o.status::text IN ${STATUS_FILTER}
-    `)
-    const row = resultRows(result)[0]
+  const comparisonResult = await db.execute<MonthComparisonQueryRow>(sql`
+    WITH comparison_months(month_key, month_start, month_end, same_period_end) AS (
+      VALUES
+        ${sql.join(monthSpecs.map((spec) => sql`(
+          ${spec.label},
+          ${spec.start}::timestamptz,
+          ${spec.end}::timestamptz,
+          ${spec.samePeriodEnd}::timestamptz
+        )`), sql`, `)}
+    )
+    SELECT
+      cm.month_key AS "monthKey",
+      COALESCE(SUM(o.total_amount::numeric), 0)::text AS "totalSales",
+      COALESCE(SUM(o.total_amount::numeric) FILTER (WHERE o.ordered_at < cm.same_period_end), 0)::text AS "samePeriodSales"
+    FROM comparison_months cm
+    LEFT JOIN orders o
+      ON o.user_id = ${userId}
+     AND o.ordered_at >= cm.month_start
+     AND o.ordered_at < cm.month_end
+     AND o.status::text IN ${STATUS_FILTER}
+    GROUP BY cm.month_key, cm.month_start
+    ORDER BY cm.month_start
+  `)
+
+  const rows = resultRows(comparisonResult).map((row) => {
     const totalSales = toNumber(row?.totalSales)
     const samePeriodSales = toNumber(row?.samePeriodSales)
     return {
-      monthLabel: spec.label,
+      monthLabel: row.monthKey,
       totalSales,
       samePeriodSales,
       differenceFromCurrent: currentSamePeriodSales - samePeriodSales,
       changeRate: samePeriodSales > 0 ? percentChange(currentSamePeriodSales, samePeriodSales) : null,
     }
-  }))
+  })
 
   return { currentSamePeriodSales, rows }
 }
@@ -681,6 +807,8 @@ function toOrderProfitRow(row: OrderProfitQueryRow): OrderProfitRow {
     orderedAt: new Date(row.orderedAt),
     productSummary: row.productSummary || '상품정보 없음',
     skuSummary: row.skuSummary || '미매핑',
+    packageSummary: row.packageSummary || '박스명 없음',
+    trackingSummary: row.trackingSummary || '송장 없음',
     sales,
     marketplaceFee,
     productCost,
@@ -743,6 +871,10 @@ function toNumber(value: string | number | null | undefined): number {
 
 function resultRows<T>(result: T[] | { rows?: T[] }): T[] {
   return Array.isArray(result) ? result : result.rows ?? []
+}
+
+function sqlDate(value: Date): string {
+  return value.toISOString()
 }
 
 function percentChange(current: number, base: number): number {

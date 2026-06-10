@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { AlertCircle, CheckCircle2 } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ExternalLink } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { listBoxCostRates } from '@/lib/analytics/box-costs'
@@ -8,10 +8,11 @@ import { getActualShippingCostRecentImports } from '@/lib/shipping/actual-costs'
 import {
   emptyOrderProfitAnalysisData,
   emptySalesDashboardData,
-  getOrderProfitAnalysisData,
-  getSalesDashboardData,
+  getCachedOrderProfitAnalysisData,
+  getCachedSalesDashboardData,
   type OrderProfitAnalysisData,
   type OrderProfitRow,
+  type ProfitMissingIssue,
   type SalesComparisonData,
   type MarketplaceSalesRow,
 } from '@/lib/analytics/sales-dashboard'
@@ -33,7 +34,7 @@ type AnalyticsTab = 'dashboard' | 'orders' | 'missing' | 'uploads' | 'settings'
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ tab?: string; page?: string }>
+  searchParams?: Promise<{ tab?: string; page?: string; issue?: string }>
 }) {
   const user = await getCurrentUser()
   if (!user) return null
@@ -41,18 +42,23 @@ export default async function AnalyticsPage({
   const params = await searchParams
   const tab = parseTab(params?.tab)
   const page = Math.max(1, Number.parseInt(params?.page ?? '1', 10) || 1)
+  const issue = parseMissingIssue(params?.issue)
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const dashboard = await getSalesDashboardData(workspaceUserId).catch((error) => {
-    console.error('sales analytics dashboard error:', error)
-    return emptySalesDashboardData()
-  })
+  const dashboard = tab === 'dashboard'
+    ? await getCachedSalesDashboardData(workspaceUserId).catch((error) => {
+      console.error('sales analytics dashboard error:', error)
+      return emptySalesDashboardData()
+    })
+    : emptySalesDashboardData()
   const profitData = tab === 'orders' || tab === 'missing'
-    ? await getOrderProfitAnalysisData(workspaceUserId, {
+    ? await getCachedOrderProfitAnalysisData(
+      workspaceUserId,
       page,
-      missingOnly: tab === 'missing',
-    }).catch((error) => {
+      tab === 'missing',
+      tab === 'missing' ? issue : 'all',
+    ).catch((error) => {
       console.error('order profit analysis error:', error)
-      return emptyOrderProfitAnalysisData({ page, missingOnly: tab === 'missing' })
+      return emptyOrderProfitAnalysisData({ page, missingOnly: tab === 'missing', issue: tab === 'missing' ? issue : 'all' })
     })
     : null
   const recent = tab === 'uploads'
@@ -109,13 +115,18 @@ function parseTab(value: string | undefined): AnalyticsTab {
   return 'dashboard'
 }
 
+function parseMissingIssue(value: string | undefined): ProfitMissingIssue {
+  if (value === 'fee' || value === 'product-cost' || value === 'actual-shipping' || value === 'packaging') return value
+  return 'all'
+}
+
 function DashboardPanel({
   cards,
   comparison,
   rows,
   totals,
 }: {
-  cards: Awaited<ReturnType<typeof getSalesDashboardData>>['cards']
+  cards: Awaited<ReturnType<typeof getCachedSalesDashboardData>>['cards']
   comparison: SalesComparisonData
   rows: MarketplaceSalesRow[]
   totals: MarketplaceSalesRow
@@ -225,11 +236,13 @@ function OrderProfitPanel({ data }: { data: OrderProfitAnalysisData }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
         <StatusSummaryCard
           label="전체 주문"
           value={data.summary.totalOrders}
           subLabel={`${data.currentMonthLabel} 주문 기준`}
+          href={data.missingOnly ? '/analytics?tab=missing' : undefined}
+          active={data.missingOnly && data.selectedIssue === 'all'}
         />
         <StatusSummaryCard
           label="기초데이터 완료"
@@ -247,18 +260,33 @@ function OrderProfitPanel({ data }: { data: OrderProfitAnalysisData }) {
           label="수수료 누락"
           value={data.summary.missingFeeOrders}
           subLabel="연결 계정 수수료 설정"
+          href="/analytics?tab=missing&issue=fee"
+          active={data.selectedIssue === 'fee'}
         />
         <StatusSummaryCard
           label="상품원가 누락"
           value={data.summary.missingProductCostOrders}
           subLabel="내부상품코드 또는 원가"
+          href="/analytics?tab=missing&issue=product-cost"
+          active={data.selectedIssue === 'product-cost'}
         />
         <StatusSummaryCard
-          label="배송·박스 누락"
-          value={data.summary.missingActualShippingOrders + data.summary.missingPackagingOrders}
-          subLabel={`배송비 ${data.summary.missingActualShippingOrders.toLocaleString('ko-KR')} · 박스 ${data.summary.missingPackagingOrders.toLocaleString('ko-KR')}`}
+          label="실제배송비 누락"
+          value={data.summary.missingActualShippingOrders}
+          subLabel="송장 또는 택배비 매칭"
+          href="/analytics?tab=missing&issue=actual-shipping"
+          active={data.selectedIssue === 'actual-shipping'}
+        />
+        <StatusSummaryCard
+          label="박스비 누락"
+          value={data.summary.missingPackagingOrders}
+          subLabel="박스명 또는 단가"
+          href="/analytics?tab=missing&issue=packaging"
+          active={data.selectedIssue === 'packaging'}
         />
       </div>
+
+      {data.missingOnly ? <MissingWorkGuide selectedIssue={data.selectedIssue} /> : null}
 
       <div className="rounded-lg border bg-card">
         <div className="flex flex-col gap-1 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -275,13 +303,15 @@ function OrderProfitPanel({ data }: { data: OrderProfitAnalysisData }) {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1600px] text-sm">
+          <table className="w-full min-w-[1880px] text-sm">
             <thead className="bg-muted/50 text-muted-foreground">
               <tr>
                 <Th>주문</Th>
                 <Th>쇼핑몰</Th>
                 <Th>확정상품 / 내부상품코드</Th>
                 <Th>계산 상태</Th>
+                <Th>누락 상세</Th>
+                <Th>처리</Th>
                 <Th align="right">매출</Th>
                 <Th align="right">수수료</Th>
                 <Th align="right">상품원가</Th>
@@ -295,7 +325,7 @@ function OrderProfitPanel({ data }: { data: OrderProfitAnalysisData }) {
             <tbody>
               {data.rows.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-10 text-center text-muted-foreground" colSpan={12}>
+                  <td className="px-3 py-10 text-center text-muted-foreground" colSpan={14}>
                     {data.missingOnly ? '계산 누락 주문이 없습니다.' : '당월 주문 자료가 없습니다.'}
                   </td>
                 </tr>
@@ -309,6 +339,7 @@ function OrderProfitPanel({ data }: { data: OrderProfitAnalysisData }) {
           page={data.page}
           totalPages={data.totalPages}
           tab={data.missingOnly ? 'missing' : 'orders'}
+          issue={data.selectedIssue}
         />
       </div>
     </div>
@@ -320,14 +351,18 @@ function StatusSummaryCard({
   value,
   subLabel,
   tone = 'default',
+  href,
+  active = false,
 }: {
   label: string
   value: number
   subLabel: string
   tone?: 'default' | 'complete' | 'warning'
+  href?: string
+  active?: boolean
 }) {
-  return (
-    <div className="rounded-lg border bg-card p-4">
+  const content = (
+    <div className={`rounded-lg border bg-card p-4 ${active ? 'border-primary ring-1 ring-primary' : ''}`}>
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {tone === 'complete' ? <CheckCircle2 className="size-3.5 text-emerald-600" /> : null}
         {tone === 'warning' ? <AlertCircle className="size-3.5 text-amber-600" /> : null}
@@ -335,6 +370,68 @@ function StatusSummaryCard({
       </div>
       <div className="mt-2 text-2xl font-bold tabular-nums">{value.toLocaleString('ko-KR')}건</div>
       <div className="mt-1 text-xs text-muted-foreground">{subLabel}</div>
+    </div>
+  )
+  return href ? <Link href={href} className="block hover:bg-muted/20">{content}</Link> : content
+}
+
+function MissingWorkGuide({ selectedIssue }: { selectedIssue: ProfitMissingIssue }) {
+  const guides: Record<ProfitMissingIssue, { title: string; description: string; action?: { href: string; label: string } }> = {
+    all: {
+      title: '누락 주문 처리',
+      description: '누락 종류를 선택하면 해당 주문만 모아서 볼 수 있습니다. 수정 후 이 화면을 새로 열면 즉시 다시 계산됩니다.',
+    },
+    fee: {
+      title: '수수료 누락',
+      description: '쇼핑몰 연결 계정의 매출 설정에 수수료율이 없습니다.',
+      action: { href: '/settings/marketplaces', label: '쇼핑몰 수수료 설정' },
+    },
+    'product-cost': {
+      title: '상품원가 누락',
+      description: '내부상품코드가 없거나 해당 내부상품에 원가가 등록되지 않았습니다.',
+      action: { href: '/products?searched=1', label: '상품 원가 관리' },
+    },
+    'actual-shipping': {
+      title: '실제배송비 누락',
+      description: '송장이 없거나 택배사 실제배송비 파일과 매칭되지 않았습니다.',
+      action: { href: '/analytics?tab=uploads', label: '실제배송비 업로드' },
+    },
+    packaging: {
+      title: '박스비 누락',
+      description: '박스명이 없거나 인식된 박스명과 동일한 단가 설정이 없습니다.',
+      action: { href: '/analytics?tab=settings', label: '박스단가 설정' },
+    },
+  }
+  const guide = guides[selectedIssue]
+  const filters: Array<{ issue: ProfitMissingIssue; label: string }> = [
+    { issue: 'all', label: '전체 누락' },
+    { issue: 'fee', label: '수수료' },
+    { issue: 'product-cost', label: '상품원가' },
+    { issue: 'actual-shipping', label: '실제배송비' },
+    { issue: 'packaging', label: '박스비' },
+  ]
+
+  return (
+    <div className="flex flex-col gap-3 border-y bg-muted/30 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <div className="font-medium">{guide.title}</div>
+        <p className="mt-0.5 text-sm text-muted-foreground">{guide.description}</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {filters.map((filter) => (
+          <Link
+            key={filter.issue}
+            href={filter.issue === 'all' ? '/analytics?tab=missing' : `/analytics?tab=missing&issue=${filter.issue}`}
+            className={[
+              'rounded-md border px-2.5 py-1.5 text-xs font-medium',
+              selectedIssue === filter.issue ? 'border-primary bg-primary text-primary-foreground' : 'bg-background hover:bg-muted',
+            ].join(' ')}
+          >
+            {filter.label}
+          </Link>
+        ))}
+        {guide.action ? <ActionLink href={guide.action.href}>{guide.action.label}</ActionLink> : null}
+      </div>
     </div>
   )
 }
@@ -374,6 +471,25 @@ function OrderProfitTableRow({ row }: { row: OrderProfitRow }) {
           </div>
         )}
       </td>
+      <td className="max-w-[280px] px-3 py-2 text-xs">
+        {row.missingProductCost ? <IssueDetail label="원가 대상" value={row.skuSummary} /> : null}
+        {row.missingActualShipping ? <IssueDetail label="미매칭 송장" value={row.trackingSummary} /> : null}
+        {row.missingPackaging ? <IssueDetail label="인식 박스명" value={row.packageSummary} /> : null}
+        {row.missingFee ? <IssueDetail label="수수료" value={`${row.marketplaceName} 연결 계정에 미설정`} /> : null}
+      </td>
+      <td className="px-3 py-2">
+        <div className="flex max-w-[230px] flex-wrap gap-1.5">
+          {row.missingFee ? <ActionLink href="/settings/marketplaces">수수료 설정</ActionLink> : null}
+          {row.missingProductCost ? <ActionLink href={`/products?search=${encodeURIComponent(firstSku(row.skuSummary))}&searched=1`}>원가 수정</ActionLink> : null}
+          {row.missingActualShipping ? <ActionLink href="/analytics?tab=uploads">배송비 업로드</ActionLink> : null}
+          {row.missingPackaging ? (
+            <>
+              <ActionLink href={`/inventory?search=${encodeURIComponent(firstSku(row.skuSummary))}&searched=1`}>박스명 확인</ActionLink>
+              <ActionLink href="/analytics?tab=settings">박스단가 설정</ActionLink>
+            </>
+          ) : null}
+        </div>
+      </td>
       <Td>{formatWon(row.sales)}</Td>
       <Td className={row.missingFee ? 'text-amber-700' : ''}>{formatWon(row.marketplaceFee)}</Td>
       <Td className={row.missingProductCost ? 'text-amber-700' : ''}>{formatWon(row.productCost)}</Td>
@@ -384,6 +500,28 @@ function OrderProfitTableRow({ row }: { row: OrderProfitRow }) {
       <Td>{row.profitRate == null ? '-' : formatPlainPercent(row.profitRate)}</Td>
     </tr>
   )
+}
+
+function IssueDetail({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mb-1 last:mb-0">
+      <span className="font-medium text-amber-800">{label}: </span>
+      <span className="text-muted-foreground" title={value}>{value}</span>
+    </div>
+  )
+}
+
+function ActionLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link href={href} className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs font-medium hover:bg-muted">
+      {children}
+      <ExternalLink className="size-3" />
+    </Link>
+  )
+}
+
+function firstSku(value: string): string {
+  return value.split(',')[0]?.trim() || value
 }
 
 function getProfitIssues(row: OrderProfitRow): string[] {
@@ -399,18 +537,20 @@ function Pagination({
   page,
   totalPages,
   tab,
+  issue,
 }: {
   page: number
   totalPages: number
   tab: 'orders' | 'missing'
+  issue: ProfitMissingIssue
 }) {
   if (totalPages <= 1) return null
   return (
     <div className="flex items-center justify-between border-t px-4 py-3 text-sm">
       <div className="text-muted-foreground">{page.toLocaleString('ko-KR')} / {totalPages.toLocaleString('ko-KR')} 페이지</div>
       <div className="flex gap-2">
-        <PageLink href={`/analytics?tab=${tab}&page=${Math.max(1, page - 1)}`} disabled={page <= 1}>이전</PageLink>
-        <PageLink href={`/analytics?tab=${tab}&page=${Math.min(totalPages, page + 1)}`} disabled={page >= totalPages}>다음</PageLink>
+        <PageLink href={paginationHref(tab, issue, Math.max(1, page - 1))} disabled={page <= 1}>이전</PageLink>
+        <PageLink href={paginationHref(tab, issue, Math.min(totalPages, page + 1))} disabled={page >= totalPages}>다음</PageLink>
       </div>
     </div>
   )
@@ -422,6 +562,11 @@ function PageLink({ href, disabled, children }: { href: string; disabled: boolea
   ) : (
     <Link href={href} className="rounded-md border px-3 py-1.5 font-medium hover:bg-muted">{children}</Link>
   )
+}
+
+function paginationHref(tab: 'orders' | 'missing', issue: ProfitMissingIssue, page: number): string {
+  const issueParam = tab === 'missing' && issue !== 'all' ? `&issue=${issue}` : ''
+  return `/analytics?tab=${tab}${issueParam}&page=${page}`
 }
 
 function UploadPanel({
@@ -481,7 +626,6 @@ function SalesRow({ row, total = false }: { row: MarketplaceSalesRow; total?: bo
     <tr className={total ? 'border-t bg-muted/40 font-semibold' : 'border-t'}>
       <td className="px-3 py-2">
         <div className="font-medium">{row.marketplaceName}</div>
-        {!total ? <div className="text-xs text-muted-foreground">{row.marketplaceId}</div> : null}
       </td>
       <Td>{formatWon(row.sales)}</Td>
       <Td>{formatWon(row.marketplaceFee)}</Td>

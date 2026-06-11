@@ -19,6 +19,7 @@ export interface MarketSettingsItem {
   salesExportMarketplaceId: string
   salesFeePercent: string
   linkedMarketplaces: string[]
+  isCommon: boolean
 }
 
 export function MarketSettingsList({ connections }: { connections: MarketSettingsItem[] }) {
@@ -82,10 +83,11 @@ function MarketSettingsRow({ connection }: { connection: MarketSettingsItem }) {
   return (
     <form action={formAction} className="grid gap-4 px-4 py-4 xl:grid-cols-[minmax(220px,1fr)_minmax(180px,1fr)_minmax(180px,1fr)_140px_auto] xl:items-end">
       <input type="hidden" name="connection_id" value={connection.id} />
+      <input type="hidden" name="marketplace_id" value={connection.marketplaceId} />
       <div className="min-w-0 self-center">
         <div className="font-medium">{connection.marketplaceName}</div>
         <div className="mt-0.5 truncate text-xs text-muted-foreground">
-          연결 계정명: {connection.storeAlias}
+          {connection.isCommon ? '연결 전 공통 설정' : `연결 계정명: ${connection.storeAlias}`}
           {connection.linkedMarketplaces.length > 0 ? ` · 연동몰: ${connection.linkedMarketplaces.join(', ')}` : ''}
         </div>
       </div>

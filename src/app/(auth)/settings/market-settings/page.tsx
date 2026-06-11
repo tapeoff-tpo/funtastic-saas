@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { marketplaceRegistry } from '@/lib/marketplace/registry'
+import { listMarketplaceBusinessSettings } from '@/lib/marketplace/business-settings'
 import '@/lib/marketplace/adapters/configs'
 import { MarketSettingsList, type MarketSettingsItem } from './market-settings-list'
 
@@ -18,13 +19,16 @@ export default async function MarketSettingsPage() {
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const connections = await db
-    .select()
-    .from(marketplaceConnections)
-    .where(eq(marketplaceConnections.userId, workspaceUserId))
+  const [connections, commonSettings] = await Promise.all([
+    db.select().from(marketplaceConnections).where(eq(marketplaceConnections.userId, workspaceUserId)),
+    listMarketplaceBusinessSettings(workspaceUserId),
+  ])
 
-  const marketplaceNames = new Map(marketplaceRegistry.listConfigs().map((config) => [config.id, config.name]))
-  const rows: MarketSettingsItem[] = connections
+  const configs = marketplaceRegistry.listConfigs()
+  const marketplaceNames = new Map(configs.map((config) => [config.id, config.name]))
+  const connectedMarketplaceIds = new Set(connections.map((connection) => connection.marketplaceId))
+  const commonSettingsByMarketplace = new Map(commonSettings.map((setting) => [setting.marketplaceId, setting]))
+  const connectionRows: MarketSettingsItem[] = connections
     .filter((connection) => !isDomechangoManualConnection(connection))
     .map((connection) => ({
       id: connection.id,
@@ -36,7 +40,26 @@ export default async function MarketSettingsPage() {
       salesExportMarketplaceId: textMetadata(connection.metadata, 'salesExportMarketplaceId'),
       salesFeePercent: parseSalesFeePercentForInput(connection.metadata?.salesFeePercent),
       linkedMarketplaces: linkedMarketplacesFromMetadata(connection.metadata),
+      isCommon: false,
     }))
+  const commonRows: MarketSettingsItem[] = configs
+    .filter((config) => !connectedMarketplaceIds.has(config.id))
+    .map((config) => {
+      const setting = commonSettingsByMarketplace.get(config.id)
+      return {
+        id: `common:${config.id}`,
+        marketplaceId: config.id,
+        marketplaceName: config.name,
+        storeAlias: '',
+        displayName: config.name,
+        systemMarketplaceName: setting?.systemMarketplaceName ?? '',
+        salesExportMarketplaceId: setting?.salesExportMarketplaceId ?? '',
+        salesFeePercent: setting?.salesFeePercent ?? '',
+        linkedMarketplaces: [],
+        isCommon: true,
+      }
+    })
+  const rows = [...connectionRows, ...commonRows]
     .sort((a, b) => a.marketplaceName.localeCompare(b.marketplaceName, 'ko-KR') || a.storeAlias.localeCompare(b.storeAlias, 'ko-KR'))
 
   return (

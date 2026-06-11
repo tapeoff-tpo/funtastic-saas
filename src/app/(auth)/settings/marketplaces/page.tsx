@@ -83,10 +83,6 @@ export default async function MarketplaceSettingsPage() {
     marketplaceName: marketplaceNames.get(connection.marketplaceId) ?? connection.displayName,
     storeAlias: connection.storeAlias,
     displayName: connection.displayName,
-    salesExportMarketplaceId: typeof connection.metadata?.salesExportMarketplaceId === 'string'
-      ? connection.metadata.salesExportMarketplaceId
-      : '',
-    salesFeePercent: parseSalesFeePercentForInput(connection.metadata?.salesFeePercent),
     status: connection.status,
     integrationMethod: getIntegrationMethod(connection.marketplaceId, {
       isManual: connection.isManual,
@@ -121,18 +117,6 @@ function linkedMarketplacesFromMetadata(metadata: Record<string, unknown> | null
   return Array.isArray(value)
     ? value.map((entry) => String(entry).trim()).filter(Boolean)
     : []
-}
-
-function parseSalesFeePercentForInput(value: unknown): string {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return String(value)
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    const numericValue = Number(trimmed)
-    return trimmed !== '' && Number.isFinite(numericValue) ? trimmed : ''
-  }
-  return ''
 }
 
 function isDomechangoManualConnection(connection: typeof marketplaceConnections.$inferSelect): boolean {

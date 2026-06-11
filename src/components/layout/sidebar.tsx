@@ -101,6 +101,7 @@ export const navSections: NavSection[] = [
     title: '설정',
     items: [
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
+      { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
       { href: '/settings/menu', label: '메뉴', icon: Settings },
       { href: '/settings', label: '설정', icon: Settings },
     ],

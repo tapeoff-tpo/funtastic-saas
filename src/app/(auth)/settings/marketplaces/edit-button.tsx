@@ -7,7 +7,6 @@ import {
   getMarketplaceCredentials,
   renameRpaMarketplaceConnection,
   registerMarketplaceCredentials,
-  saveSalesExportSettings,
   testMarketplaceCredentials,
 } from './actions'
 import { DeleteConnectionButton } from './delete-button'
@@ -52,8 +51,6 @@ interface ConnectionRowProps {
   marketplaceName: string
   storeAlias: string
   displayName: string
-  salesExportMarketplaceId: string
-  salesFeePercent: string
   status: ConnectionStatus
   integrationMethod: IntegrationMethod
   linkedMarketplaces?: string[]
@@ -72,15 +69,12 @@ export function ConnectionRow({
   marketplaceName,
   storeAlias,
   displayName,
-  salesExportMarketplaceId,
-  salesFeePercent,
   status,
   integrationMethod,
   linkedMarketplaces = [],
 }: ConnectionRowProps) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
-  const [salesIdOpen, setSalesIdOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<LoadedData | null>(null)
   const [reveal, setReveal] = useState<Record<string, boolean>>({})
@@ -93,17 +87,11 @@ export function ConnectionRow({
     renameRpaMarketplaceConnection,
     null,
   )
-  const [salesIdState, salesIdFormAction, isSalesIdPending] = useActionState(
-    saveSalesExportSettings,
-    null,
-  )
-
   async function handleToggle() {
     if (open) {
       setOpen(false)
       return
     }
-    setSalesIdOpen(false)
     setLoading(true)
     const res = await getMarketplaceCredentials(connectionId)
     setLoading(false)
@@ -116,7 +104,6 @@ export function ConnectionRow({
   }
 
   function handleRpaToggle() {
-    setSalesIdOpen(false)
     setOpen((current) => !current)
   }
 
@@ -142,16 +129,6 @@ export function ConnectionRow({
       toast.error(rpaState.error)
     }
   }, [router, rpaState])
-
-  useEffect(() => {
-    if (salesIdState?.success && salesIdState.message) {
-      toast.success(salesIdState.message)
-      router.refresh()
-      setTimeout(() => setSalesIdOpen(false), 0)
-    } else if (salesIdState?.error) {
-      toast.error(salesIdState.error)
-    }
-  }, [router, salesIdState])
 
   async function handleTest(form: HTMLFormElement) {
     if (!data) return
@@ -194,17 +171,6 @@ export function ConnectionRow({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              setOpen(false)
-              setSalesIdOpen((current) => !current)
-            }}
-          >
-            {salesIdOpen ? '닫기' : '매출 설정'}
-          </Button>
           {(integrationMethod === 'api' || integrationMethod === 'hub') && (
             <Button
               type="button"
@@ -233,52 +199,6 @@ export function ConnectionRow({
         <p className="mt-2 text-xs text-muted-foreground">
           연동몰: {linkedMarketplaces.length > 0 ? linkedMarketplaces.join(', ') : 'EMP 설정 전체'}
         </p>
-      )}
-
-      {salesIdOpen && (
-        <form
-          action={salesIdFormAction}
-          className="mt-3 space-y-3 rounded-md border bg-muted/30 p-3"
-        >
-          <input type="hidden" name="connection_id" value={connectionId} />
-          <div className="space-y-1">
-            <Label htmlFor={`sales-export-${connectionId}-marketplace-id`}>매출확인용 마켓 ID</Label>
-            <Input
-              id={`sales-export-${connectionId}-marketplace-id`}
-              name="sales_export_marketplace_id"
-              type="text"
-              defaultValue={salesExportMarketplaceId}
-              maxLength={100}
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">매출확인용 엑셀의 ID열에만 출력됩니다.</p>
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor={`sales-export-${connectionId}-fee-percent`}>수수료율(%)</Label>
-            <Input
-              id={`sales-export-${connectionId}-fee-percent`}
-              name="sales_fee_percent"
-              type="number"
-              defaultValue={salesFeePercent}
-              min="0"
-              max="100"
-              step="0.01"
-              inputMode="decimal"
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">
-              매출확인용 엑셀의 판매자할인금액+수수료 열에만 계산되어 출력됩니다.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={isSalesIdPending}>
-              {isSalesIdPending ? '저장 중...' : '저장'}
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setSalesIdOpen(false)}>
-              취소
-            </Button>
-          </div>
-        </form>
       )}
 
       {open && data && (integrationMethod === 'api' || integrationMethod === 'hub') && (

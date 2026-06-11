@@ -354,11 +354,15 @@ export async function saveSalesExportSettings(
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const connectionId = String(formData.get('connection_id') ?? '').trim()
+  const systemMarketplaceName = String(formData.get('system_marketplace_name') ?? '').trim()
   const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
   const rawSalesFeePercent = String(formData.get('sales_fee_percent') ?? '').trim()
   const salesFeePercent = rawSalesFeePercent === '' ? null : Number(rawSalesFeePercent)
 
   if (!connectionId) return { error: '연결 ID가 필요합니다.' }
+  if (systemMarketplaceName.length > 100) {
+    return { error: '전산·엑셀 표시 마켓명은 100자 이내로 입력해주세요.' }
+  }
   if (salesExportMarketplaceId.length > 100) {
     return { error: '매출확인용 마켓 ID는 100자 이내로 입력해주세요.' }
   }
@@ -389,6 +393,11 @@ export async function saveSalesExportSettings(
       ...(connection.metadata ?? {}),
       salesExportMarketplaceId,
     }
+    if (systemMarketplaceName) {
+      metadata.systemMarketplaceName = systemMarketplaceName
+    } else {
+      delete metadata.systemMarketplaceName
+    }
     if (salesFeePercent === null) {
       delete metadata.salesFeePercent
     } else {
@@ -413,7 +422,8 @@ export async function saveSalesExportSettings(
   }
 
   revalidatePath('/settings/marketplaces')
-  return { success: true, message: '매출확인용 설정이 저장되었습니다.' }
+  revalidatePath('/settings/market-settings')
+  return { success: true, message: '마켓 설정이 저장되었습니다.' }
 }
 
 export async function registerMarketplaceCredentials(

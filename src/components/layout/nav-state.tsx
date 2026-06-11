@@ -57,6 +57,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/settings/account': '계정 설정',
   '/settings/company': '회사 설정',
   '/settings/marketplaces': '마켓연동',
+  '/settings/market-settings': '마켓설정',
   '/settings/menu': '메뉴 설정',
 }
 

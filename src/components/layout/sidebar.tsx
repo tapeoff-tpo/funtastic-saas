@@ -24,6 +24,7 @@ import {
   Star,
   Headphones,
   MessageSquareText,
+  CircleDollarSign,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -58,6 +59,7 @@ export const navSections: NavSection[] = [
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
       { href: '/orders/collect', label: '주문 수집', icon: Download },
+      { href: '/costs', label: '원가', icon: CircleDollarSign },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
     ],
   },

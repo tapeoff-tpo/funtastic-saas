@@ -36,6 +36,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
 import {
   applySidebarMenuOrder,
+  fetchSidebarMenuOrder,
   readSidebarMenuOrder,
   SIDEBAR_MENU_ORDER_EVENT,
 } from './sidebar-menu-order'
@@ -152,6 +153,13 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
   useEffect(() => {
     const syncOrder = () => setOrderedSections(applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
     syncOrder()
+    void fetchSidebarMenuOrder()
+      .then((order) => {
+        if (order) setOrderedSections(applySidebarMenuOrder(navSections, order))
+      })
+      .catch(() => {
+        // Local order remains usable if the account-level setting cannot be loaded.
+      })
     window.addEventListener(SIDEBAR_MENU_ORDER_EVENT, syncOrder)
     window.addEventListener('storage', syncOrder)
     return () => {

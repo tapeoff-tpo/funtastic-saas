@@ -1,15 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState, useTransition } from 'react'
 import { ArrowDown, ArrowUp, RotateCcw, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { navSections, type NavSection } from '@/components/layout/sidebar'
 import {
   applySidebarMenuOrder,
-  clearSidebarMenuOrder,
+  clearSidebarMenuOrderRemote,
   createSidebarMenuOrder,
+  fetchSidebarMenuOrder,
   readSidebarMenuOrder,
-  saveSidebarMenuOrder,
+  saveSidebarMenuOrderRemote,
 } from '@/components/layout/sidebar-menu-order'
 
 function move<T>(values: T[], index: number, direction: -1 | 1): T[] {
@@ -22,6 +23,17 @@ function move<T>(values: T[], index: number, direction: -1 | 1): T[] {
 
 export function MenuOrderSettings() {
   const [sections, setSections] = useState<NavSection[]>(() => applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
+  const [isPending, startTransition] = useTransition()
+
+  useEffect(() => {
+    void fetchSidebarMenuOrder()
+      .then((order) => {
+        setSections(applySidebarMenuOrder(navSections, order))
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : '계정 메뉴 순서를 불러오지 못했습니다.')
+      })
+  }, [])
 
   function moveSection(index: number, direction: -1 | 1) {
     if (sections[index]?.id === 'dashboard' || index + direction === 0) return
@@ -35,14 +47,26 @@ export function MenuOrderSettings() {
   }
 
   function save() {
-    saveSidebarMenuOrder(createSidebarMenuOrder(sections))
-    toast.success('왼쪽 메뉴 순서를 저장했습니다.')
+    startTransition(async () => {
+      try {
+        await saveSidebarMenuOrderRemote(createSidebarMenuOrder(sections))
+        toast.success('계정별 왼쪽 메뉴 순서를 저장했습니다.')
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '메뉴 순서를 저장하지 못했습니다.')
+      }
+    })
   }
 
   function reset() {
-    clearSidebarMenuOrder()
-    setSections(applySidebarMenuOrder(navSections, null))
-    toast.success('기본 메뉴 순서로 복원했습니다.')
+    startTransition(async () => {
+      try {
+        await clearSidebarMenuOrderRemote()
+        setSections(applySidebarMenuOrder(navSections, null))
+        toast.success('계정별 메뉴 순서를 기본값으로 복원했습니다.')
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '기본 메뉴 순서로 복원하지 못했습니다.')
+      }
+    })
   }
 
   return (
@@ -51,6 +75,7 @@ export function MenuOrderSettings() {
         <button
           type="button"
           onClick={reset}
+          disabled={isPending}
           className="inline-flex h-9 items-center gap-2 rounded border bg-white px-3 text-sm font-medium hover:bg-gray-50"
         >
           <RotateCcw className="h-4 w-4" />
@@ -59,10 +84,11 @@ export function MenuOrderSettings() {
         <button
           type="button"
           onClick={save}
-          className="inline-flex h-9 items-center gap-2 rounded bg-gray-900 px-3 text-sm font-medium text-white hover:bg-gray-800"
+          disabled={isPending}
+          className="inline-flex h-9 items-center gap-2 rounded bg-gray-900 px-3 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
         >
           <Save className="h-4 w-4" />
-          저장
+          {isPending ? '저장 중' : '저장'}
         </button>
       </div>
 

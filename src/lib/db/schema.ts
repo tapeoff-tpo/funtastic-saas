@@ -772,6 +772,23 @@ export const companySettings = pgTable(
   ],
 )
 
+export const sidebarMenuSettings = pgTable(
+  'sidebar_menu_settings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    menuOrder: jsonb('menu_order').$type<{
+      sections: string[]
+      items: Record<string, string[]>
+    }>().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('sidebar_menu_settings_user_id').on(table.userId),
+  ],
+)
+
 // ─── Phase 8: Marketplace Inquiries ────────────────────────────
 // 마켓플레이스 문의 수집 (migration 013).
 // Coupang 우선 — Naver는 별도 quick task로 분리.

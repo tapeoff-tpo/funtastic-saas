@@ -32,9 +32,42 @@ export function saveSidebarMenuOrder(order: SidebarMenuOrder): void {
   window.dispatchEvent(new CustomEvent(SIDEBAR_MENU_ORDER_EVENT))
 }
 
+export async function saveSidebarMenuOrderRemote(order: SidebarMenuOrder): Promise<void> {
+  const response = await fetch('/api/settings/menu-order', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(body.error ?? '메뉴 순서를 저장하지 못했습니다.')
+  }
+  saveSidebarMenuOrder(order)
+}
+
 export function clearSidebarMenuOrder(): void {
   localStorage.removeItem(SIDEBAR_MENU_ORDER_KEY)
   window.dispatchEvent(new CustomEvent(SIDEBAR_MENU_ORDER_EVENT))
+}
+
+export async function clearSidebarMenuOrderRemote(): Promise<void> {
+  const response = await fetch('/api/settings/menu-order', { method: 'DELETE' })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(body.error ?? '기본 메뉴 순서로 복원하지 못했습니다.')
+  }
+  clearSidebarMenuOrder()
+}
+
+export async function fetchSidebarMenuOrder(): Promise<SidebarMenuOrder | null> {
+  const response = await fetch('/api/settings/menu-order', { cache: 'no-store' })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    throw new Error(body.error ?? '메뉴 순서를 불러오지 못했습니다.')
+  }
+  const order = body.order as SidebarMenuOrder | null
+  if (order) saveSidebarMenuOrder(order)
+  return order
 }
 
 export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection extends OrderableNavSection<TItem>>(

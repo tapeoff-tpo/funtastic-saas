@@ -72,7 +72,7 @@ export function ProductCostUpload() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        기본 양식: 품목코드, 품목명, works 신규 원가, works 기존 원가
+        기본 양식: 품목코드, 품목명, works 신규 원가, works 기존 원가, 한국창고기준 위치
       </p>
 
       {result ? (

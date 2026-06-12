@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const buffer = await exportProductCostsToExcel(workspaceUserId, filters)
   const date = new Date().toISOString().slice(0, 10)
-  const filename = `원가_${date}.xlsx`
+  const filename = `품목_${date}.xlsx`
 
   return new NextResponse(new Uint8Array(buffer), {
     headers: {

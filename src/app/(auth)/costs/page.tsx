@@ -52,9 +52,9 @@ export default async function CostsPage({
     <div className="space-y-6">
       <header className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">원가</h1>
+          <h1 className="text-2xl font-semibold">품목</h1>
           <p className="text-sm text-muted-foreground">
-            발주 원가 양식과 같은 열로 상품 원가를 조회하고 내려받습니다.
+            보유 품목의 상품코드, 상품명, 원가, 위치 정보를 관리합니다.
           </p>
         </div>
         <p className="text-sm text-muted-foreground">

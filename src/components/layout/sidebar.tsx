@@ -24,7 +24,6 @@ import {
   Star,
   Headphones,
   MessageSquareText,
-  CircleDollarSign,
   Boxes,
   ClipboardList,
   CreditCard,
@@ -73,7 +72,7 @@ export const navSections: NavSection[] = [
     id: 'purchasing',
     title: '발주',
     items: [
-      { href: '/costs', label: '원가', icon: CircleDollarSign },
+      { href: '/costs', label: '품목', icon: Package },
       { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
       { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
       { href: '/purchasing/purchases', label: '구매', icon: CreditCard },

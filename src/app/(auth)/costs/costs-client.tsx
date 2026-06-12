@@ -201,7 +201,7 @@ export function CostsClient({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={5} className="h-32 text-center text-muted-foreground">
-                  원가를 표시할 상품이 없습니다.
+                  표시할 품목이 없습니다.
                 </td>
               </tr>
             ) : rows.map((row) => (

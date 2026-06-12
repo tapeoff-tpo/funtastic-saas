@@ -54,7 +54,7 @@ export async function exportProductCostsToExcel(
   } while (allProducts.length < total)
 
   const workbook = new ExcelJS.Workbook()
-  const worksheet = workbook.addWorksheet('원가')
+  const worksheet = workbook.addWorksheet('품목')
 
   worksheet.columns = COST_COLUMNS.map((column) => ({
     header: column.header,

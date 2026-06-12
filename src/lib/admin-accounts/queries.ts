@@ -5,7 +5,7 @@
  */
 import { cache } from 'react'
 import { db } from '@/lib/db'
-import { marketplaceConnections, orders, userProfiles, auditLogs, type UserProfile } from '@/lib/db/schema'
+import { marketplaceConnections, orders, products, userProfiles, auditLogs, type UserProfile } from '@/lib/db/schema'
 import { and, asc, desc, eq, ilike, isNull, or } from 'drizzle-orm'
 
 export async function listAdmins(): Promise<UserProfile[]> {
@@ -51,8 +51,6 @@ export const getWorkspaceUserId = cache(async (userId: string): Promise<string> 
     .limit(1)
   if (admin123Owner?.id) return admin123Owner.id
 
-  if (profile?.createdBy) return profile.createdBy
-
   const [connectionOwner] = await db
     .select({ id: marketplaceConnections.userId })
     .from(marketplaceConnections)
@@ -66,6 +64,15 @@ export const getWorkspaceUserId = cache(async (userId: string): Promise<string> 
     .orderBy(asc(orders.createdAt))
     .limit(1)
   if (orderOwner?.id) return orderOwner.id
+
+  const [productOwner] = await db
+    .select({ id: products.userId })
+    .from(products)
+    .orderBy(asc(products.createdAt))
+    .limit(1)
+  if (productOwner?.id) return productOwner.id
+
+  if (profile?.createdBy) return profile.createdBy
 
   if (profile?.role === 'super_admin') return userId
 

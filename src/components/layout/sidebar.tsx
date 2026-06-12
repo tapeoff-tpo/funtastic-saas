@@ -59,8 +59,14 @@ export const navSections: NavSection[] = [
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
       { href: '/orders/collect', label: '주문 수집', icon: Download },
-      { href: '/costs', label: '원가', icon: CircleDollarSign },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
+    ],
+  },
+  {
+    id: 'purchasing',
+    title: '발주',
+    items: [
+      { href: '/costs', label: '원가', icon: CircleDollarSign },
     ],
   },
   {

@@ -25,6 +25,12 @@ import {
   Headphones,
   MessageSquareText,
   CircleDollarSign,
+  Boxes,
+  ClipboardList,
+  CreditCard,
+  Ship,
+  PackageCheck,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -67,6 +73,12 @@ export const navSections: NavSection[] = [
     title: '발주',
     items: [
       { href: '/costs', label: '원가', icon: CircleDollarSign },
+      { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
+      { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
+      { href: '/purchasing/purchases', label: '구매', icon: CreditCard },
+      { href: '/purchasing/shipping', label: '배송', icon: Ship },
+      { href: '/purchasing/arrivals', label: '도착', icon: PackageCheck },
+      { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
     ],
   },
   {

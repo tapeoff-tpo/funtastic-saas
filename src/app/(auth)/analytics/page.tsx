@@ -16,9 +16,9 @@ import {
   type SalesComparisonData,
   type MarketplaceSalesRow,
 } from '@/lib/analytics/sales-dashboard'
+import { ProductCostUpload } from '@/components/product-cost-upload'
 import { ActualShippingCostUpload } from './actual-shipping-cost-upload'
 import { BoxCostSettings } from './box-cost-settings'
-import { ProductCostUpload } from './product-cost-upload'
 
 export const metadata: Metadata = {
   title: '매출분석',

@@ -18,6 +18,7 @@ import {
 } from '@/lib/analytics/sales-dashboard'
 import { ActualShippingCostUpload } from './actual-shipping-cost-upload'
 import { BoxCostSettings } from './box-cost-settings'
+import { ProductCostUpload } from './product-cost-upload'
 
 export const metadata: Metadata = {
   title: '매출분석',
@@ -576,6 +577,7 @@ function UploadPanel({
 }) {
   return (
     <div className="space-y-4">
+      <ProductCostUpload />
       <ActualShippingCostUpload />
 
       <div className="rounded-lg border bg-card">

@@ -1,0 +1,4 @@
+scripts-tmp/
+.claude/
+.next/
+node_modules/

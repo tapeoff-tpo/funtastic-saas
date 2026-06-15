@@ -59,6 +59,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/products/marketplace-categories': '마켓 카테고리 매핑',
   '/inventory': '재고관리',
   '/inventory/adjustments': '입출고관리',
+  '/costs': '품목',
   '/analytics': '매출분석',
   '/settings': '설정',
   '/settings/account': '계정 설정',

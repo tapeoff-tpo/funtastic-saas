@@ -492,7 +492,7 @@ const MARKETPLACE_LABELS: Record<string, string> = {
   specialoffer: '스페셜오퍼',
   'banana-b2b': '바나나B2B',
   ohouse: '오늘의집',
-  ssgmall: 'SSG',
+  ssgmall: '신세계몰',
   cjonestyle: 'CJ온스타일',
   ably: '에이블리',
   'hyundai-hmall': '현대홈쇼핑',

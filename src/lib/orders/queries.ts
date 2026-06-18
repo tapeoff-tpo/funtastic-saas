@@ -7,7 +7,7 @@
 
 import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
-import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs, mappingCodes, mappingSources, mappingComponents } from '@/lib/db/schema'
+import { orders, orderItems, claims, shipments, orderMemos, products, productVariants, inventory, shipmentGroups, shipmentGroupOrders, scanLogs, mappingCodes, mappingSources, mappingComponents, marketplaceConnections } from '@/lib/db/schema'
 import { eq, and, or, ilike, gte, lte, desc, asc, sql, count, countDistinct, inArray, notInArray, isNotNull, isNull, exists } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { OrderFilters, MappingStatus, OrderStage, OrderStats } from './types'
@@ -23,6 +23,7 @@ const SABANGNET_MALL_NAMES_BY_MARKETPLACE: Record<string, string[]> = {
   ably: ['에이블리'],
   always: ['올웨이즈'],
   'banana-b2b': ['바나나B2B'],
+  'manual-txhMLo': ['베이비빌리'],
   cafe24: ['Cafe24(신) 유튜브쇼핑', '일오삼공', '집정리(cafe24)', '원룸만들기'],
   cjonestyle: ['CJ온스타일'],
   coupang: ['쿠팡', '쿠팡 로켓배송(신)'],
@@ -31,7 +32,7 @@ const SABANGNET_MALL_NAMES_BY_MARKETPLACE: Record<string, string[]> = {
   domesin: ['도매의신'],
   elevenst: ['11번가'],
   esm: ['ESM옥션', 'ESM지마켓'],
-  'funtastic-b2b': ['펀타스틱B2B', '펀타스틱 퍼스트몰'],
+  'funtastic-b2b': ['펀타스틱B2B'],
   'gs-shop': ['GS shop', 'GS샵'],
   'hyundai-hmall': ['현대홈쇼핑', '현대홈쇼핑(3)'],
   'kakao-gift': ['카카오선물하기', '카카오톡선물하기'],
@@ -43,6 +44,7 @@ const SABANGNET_MALL_NAMES_BY_MARKETPLACE: Record<string, string[]> = {
   ownerclan: ['오너클랜'],
   specialoffer: ['스페셜오퍼'],
   ssgmall: ['SSG'],
+  'manual-NUQyoT': ['펀타스틱 퍼스트몰'],
   tobizon: ['토비즈온', '투비즈온'],
   'toss-shopping': ['토스쇼핑'],
   zigzag: ['카카오스타일 (지그재그, 포스티)', '지그재그'],
@@ -904,6 +906,21 @@ export async function getOrders(filters: OrderFilters = {}) {
   })()
 
   const { orderRows, total: orderTotal } = await ordersAndCountPromise
+  const connectionIds = Array.from(new Set(
+    orderRows.map((order) => order.connectionId).filter((id): id is string => Boolean(id)),
+  ))
+  const connectionNameRows = connectionIds.length > 0
+    ? await db
+        .select({
+          id: marketplaceConnections.id,
+          systemMarketplaceName: sql<string | null>`NULLIF(${marketplaceConnections.metadata}->>'systemMarketplaceName', '')`,
+        })
+        .from(marketplaceConnections)
+        .where(inArray(marketplaceConnections.id, connectionIds))
+    : []
+  const systemMarketplaceNameByConnection = new Map(
+    connectionNameRows.map((connection) => [connection.id, connection.systemMarketplaceName]),
+  )
 
   // Fetch items/claims/shipments/shipmentGroups/scan summary in parallel.
   // Phase A 매핑 재설계: productNameMappings LEFT JOIN 제거. 확정상품명은
@@ -1399,7 +1416,9 @@ export async function getOrders(filters: OrderFilters = {}) {
       hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,
       mappingStatus: getComputedMappingStatus(order, orderItemsData),
-      marketplaceDisplayName: getOrderMarketplaceDisplayName(order),
+      marketplaceDisplayName: (
+        order.connectionId ? systemMarketplaceNameByConnection.get(order.connectionId) : null
+      ) || getOrderMarketplaceDisplayName(order),
       orderSourceType: isSabangnetOrderRawData(order) ? 'sabangnet' : 'saas',
       historicalClaimStatuses: getOrderHistoricalClaimStatuses(order),
     }
@@ -1446,6 +1465,15 @@ export async function getOrderById(id: string, userId?: string) {
   const [order] = await db.select().from(orders).where(whereClause)
 
   if (!order) return null
+  const [detailConnection] = order.connectionId
+    ? await db
+        .select({
+          systemMarketplaceName: sql<string | null>`NULLIF(${marketplaceConnections.metadata}->>'systemMarketplaceName', '')`,
+        })
+        .from(marketplaceConnections)
+        .where(eq(marketplaceConnections.id, order.connectionId))
+        .limit(1)
+    : []
 
   const [orderItemRows, claimRows, memoRows, shipmentRows, scanLogRows, changeLogRows] = await Promise.all([
     // 수집상품명(productName) + 확정상품명 동시 반환
@@ -1609,6 +1637,7 @@ export async function getOrderById(id: string, userId?: string) {
 
   return {
     ...order,
+    marketplaceDisplayName: detailConnection?.systemMarketplaceName || getOrderMarketplaceDisplayName(order),
     items,
     claims: claimRows,
     memos: memoRows,

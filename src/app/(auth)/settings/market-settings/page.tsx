@@ -59,7 +59,23 @@ export default async function MarketSettingsPage() {
         isCommon: true,
       }
     })
-  const rows = [...connectionRows, ...commonRows]
+  const knownMarketplaceIds = new Set(configs.map((config) => config.id))
+  const customRows: MarketSettingsItem[] = commonSettings
+    .filter((setting) => !knownMarketplaceIds.has(setting.marketplaceId) && !connectedMarketplaceIds.has(setting.marketplaceId))
+    .map((setting) => ({
+      id: `common:${setting.marketplaceId}`,
+      marketplaceId: setting.marketplaceId,
+      marketplaceName: setting.systemMarketplaceName || setting.marketplaceId,
+      storeAlias: '',
+      displayName: setting.systemMarketplaceName || setting.marketplaceId,
+      systemMarketplaceName: setting.systemMarketplaceName,
+      salesExportMarketplaceId: setting.salesExportMarketplaceId,
+      salesFeePercent: setting.salesFeePercent,
+      linkedMarketplaces: [],
+      isCommon: true,
+      isCustom: true,
+    }))
+  const rows = [...connectionRows, ...commonRows, ...customRows]
     .sort((a, b) => a.marketplaceName.localeCompare(b.marketplaceName, 'ko-KR') || a.storeAlias.localeCompare(b.storeAlias, 'ko-KR'))
 
   return (

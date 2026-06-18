@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { actualShippingCosts, shipments } from '@/lib/db/schema'
 import type { ActualShippingCostCarrier } from './actual-cost-types'
@@ -148,33 +148,38 @@ export async function importActualShippingCosts(data: {
     parsed.rows.map((row) => row.normalizedTrackingNumber),
   )
 
-  let imported = 0
+  const uniqueRows = Array.from(new Map(
+    parsed.rows.map((row) => [`${row.carrierId}:${row.normalizedTrackingNumber}`, row]),
+  ).values())
   let matched = 0
-  for (const row of parsed.rows) {
+  const insertRows = uniqueRows.map((row) => {
     const shipment = shipmentByTracking.get(row.normalizedTrackingNumber) ?? null
     if (shipment) matched += 1
+    return {
+      userId: data.userId,
+      carrierId: row.carrierId,
+      trackingNumber: row.trackingNumber,
+      normalizedTrackingNumber: row.normalizedTrackingNumber,
+      shipmentId: shipment?.id ?? null,
+      orderNumber: row.orderNumber,
+      acceptedAt: row.acceptedAt,
+      deliveredAt: row.deliveredAt,
+      actualFee: String(row.actualFee),
+      packageType: row.packageType,
+      quantity: row.quantity,
+      paymentType: row.paymentType,
+      shipmentType: row.shipmentType,
+      sourceFileName: data.sourceFileName,
+      rowNumber: row.rowNumber,
+      rawData: row.rawData,
+      updatedAt: new Date(),
+    }
+  })
 
+  for (const rows of chunks(insertRows, 250)) {
     await db
       .insert(actualShippingCosts)
-      .values({
-        userId: data.userId,
-        carrierId: row.carrierId,
-        trackingNumber: row.trackingNumber,
-        normalizedTrackingNumber: row.normalizedTrackingNumber,
-        shipmentId: shipment?.id ?? null,
-        orderNumber: row.orderNumber,
-        acceptedAt: row.acceptedAt,
-        deliveredAt: row.deliveredAt,
-        actualFee: String(row.actualFee),
-        packageType: row.packageType,
-        quantity: row.quantity,
-        paymentType: row.paymentType,
-        shipmentType: row.shipmentType,
-        sourceFileName: data.sourceFileName,
-        rowNumber: row.rowNumber,
-        rawData: row.rawData,
-        updatedAt: new Date(),
-      })
+      .values(rows)
       .onConflictDoUpdate({
         target: [
           actualShippingCosts.userId,
@@ -182,26 +187,25 @@ export async function importActualShippingCosts(data: {
           actualShippingCosts.normalizedTrackingNumber,
         ],
         set: {
-          trackingNumber: row.trackingNumber,
-          shipmentId: shipment?.id ?? null,
-          orderNumber: row.orderNumber,
-          acceptedAt: row.acceptedAt,
-          deliveredAt: row.deliveredAt,
-          actualFee: String(row.actualFee),
-          packageType: row.packageType,
-          quantity: row.quantity,
-          paymentType: row.paymentType,
-          shipmentType: row.shipmentType,
-          sourceFileName: data.sourceFileName,
-          rowNumber: row.rowNumber,
-          rawData: row.rawData,
-          updatedAt: new Date(),
+          trackingNumber: sql`excluded.tracking_number`,
+          shipmentId: sql`excluded.shipment_id`,
+          orderNumber: sql`excluded.order_number`,
+          acceptedAt: sql`excluded.accepted_at`,
+          deliveredAt: sql`excluded.delivered_at`,
+          actualFee: sql`excluded.actual_fee`,
+          packageType: sql`excluded.package_type`,
+          quantity: sql`excluded.quantity`,
+          paymentType: sql`excluded.payment_type`,
+          shipmentType: sql`excluded.shipment_type`,
+          sourceFileName: sql`excluded.source_file_name`,
+          rowNumber: sql`excluded.row_number`,
+          rawData: sql`excluded.raw_data`,
+          updatedAt: sql`excluded.updated_at`,
         },
       })
-
-    imported += 1
   }
 
+  const imported = uniqueRows.length
   return {
     carrierId: data.carrierId,
     totalRows: parsed.rows.length + parsed.errors.length,
@@ -236,23 +240,33 @@ async function findShipmentsByNormalizedTracking(userId: string, normalizedValue
   const matched = new Map<string, { id: string }>()
   if (values.length === 0) return matched
 
-  const rows = await db
-    .select({
-      id: shipments.id,
-      trackingNumber: shipments.trackingNumber,
-    })
-    .from(shipments)
-    .where(
-      and(
-        eq(shipments.userId, userId),
-        sql`regexp_replace(upper(${shipments.trackingNumber}), '[^A-Z0-9]', '', 'g') = ANY(${values})`,
-      ),
-    )
+  for (const valueChunk of chunks(values, 1000)) {
+    const rows = await db
+      .select({
+        id: shipments.id,
+        normalizedTrackingNumber: shipments.normalizedTrackingNumber,
+      })
+      .from(shipments)
+      .where(
+        and(
+          eq(shipments.userId, userId),
+          inArray(shipments.normalizedTrackingNumber, valueChunk),
+        ),
+      )
 
-  for (const row of rows) {
-    matched.set(normalizeTrackingNumber(row.trackingNumber), { id: row.id })
+    for (const row of rows) {
+      matched.set(row.normalizedTrackingNumber, { id: row.id })
+    }
   }
   return matched
+}
+
+function chunks<T>(values: T[], size: number): T[][] {
+  const result: T[][] = []
+  for (let index = 0; index < values.length; index += size) {
+    result.push(values.slice(index, index + size))
+  }
+  return result
 }
 
 function readHeader(ws: ExcelJS.Worksheet): HeaderMap {

@@ -77,18 +77,22 @@ export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection e
   if (!order) return sections.map((section) => ({ ...section, items: [...section.items] }))
 
   const sectionRank = new Map(order.sections.map((id, index) => [id, index]))
+  const defaultSectionRank = new Map(sections.map((section, index) => [section.id, index]))
   return sections
     .map((section) => {
       const itemRank = new Map((order.items[section.id] ?? []).map((href, index) => [href, index]))
+      const defaultItemRank = new Map(section.items.map((item, index) => [item.href, index]))
       return {
         ...section,
         items: [...section.items].sort((a, b) => (
           (itemRank.get(a.href) ?? Number.MAX_SAFE_INTEGER) - (itemRank.get(b.href) ?? Number.MAX_SAFE_INTEGER)
+          || (defaultItemRank.get(a.href) ?? Number.MAX_SAFE_INTEGER) - (defaultItemRank.get(b.href) ?? Number.MAX_SAFE_INTEGER)
         )),
       }
     })
     .sort((a, b) => (
       (sectionRank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (sectionRank.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+      || (defaultSectionRank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (defaultSectionRank.get(b.id) ?? Number.MAX_SAFE_INTEGER)
     ))
 }
 

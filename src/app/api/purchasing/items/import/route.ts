@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { importPurchasingItems } from '@/lib/purchasing/items'
@@ -18,6 +19,9 @@ export async function POST(request: NextRequest) {
       userId: await getWorkspaceUserId(user.id),
       fileBuffer: await file.arrayBuffer(),
     })
+    revalidatePath('/analytics')
+    revalidatePath('/products')
+    revalidatePath('/purchasing/items')
     return NextResponse.json(result)
   } catch (error) {
     console.error('[purchasing-items-import]', error)

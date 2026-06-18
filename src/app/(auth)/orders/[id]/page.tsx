@@ -151,7 +151,7 @@ export default async function OrderDetailPage({
               )}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {order.marketplaceId} · {fmtDateTime(order.orderedAt)}
+              {order.marketplaceDisplayName ?? order.marketplaceId} · {fmtDateTime(order.orderedAt)}
             </p>
           </div>
         </div>

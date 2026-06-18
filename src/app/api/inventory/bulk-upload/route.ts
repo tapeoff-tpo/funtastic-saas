@@ -13,8 +13,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products, inventory } from '@/lib/db/schema'
-import { sql } from 'drizzle-orm'
+import { products, productVariants, inventory } from '@/lib/db/schema'
+import { and, eq, inArray, sql } from 'drizzle-orm'
 
 /** Korean header → internal key (also supports 사방넷 multi-row headers like "현재고 가용") */
 const HEADER_MAP: Record<string, string> = {
@@ -290,6 +290,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
             updatedAt: new Date(),
           },
         })
+      await syncGroupedProductOptions(user.id, rows)
       successCount = rows.length
     } catch (err) {
       console.error('[bulk-upload] inventory upsert failed:', err)
@@ -349,4 +350,77 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json(result)
+}
+
+async function syncGroupedProductOptions(userId: string, rows: ParsedRow[]) {
+  const uniqueRows = Array.from(new Map(rows.map((row) => [row.sku, row])).values())
+  const groupedProducts = Array.from(new Map(uniqueRows.map((row) => {
+    const baseSku = baseProductCode(row.sku)
+    return [baseSku, { baseSku, name: row.productName }]
+  })).values())
+
+  await db.insert(products).values(groupedProducts.map((product) => ({
+    userId,
+    internalSku: product.baseSku,
+    name: product.name,
+    basePrice: '0',
+    manageInventory: true,
+    status: 'active' as const,
+  }))).onConflictDoUpdate({
+    target: [products.userId, products.internalSku],
+    set: {
+      name: sql`excluded.name`,
+      manageInventory: sql`true`,
+      status: sql`'active'::product_status`,
+      updatedAt: new Date(),
+    },
+  })
+
+  const productRows = await db.select({
+    id: products.id,
+    internalSku: products.internalSku,
+  }).from(products).where(and(
+    eq(products.userId, userId),
+    inArray(products.internalSku, groupedProducts.map((product) => product.baseSku)),
+  ))
+  const productIdBySku = new Map(productRows.map((product) => [product.internalSku, product.id]))
+
+  await db.insert(productVariants).values(uniqueRows.map((row) => {
+    const baseSku = baseProductCode(row.sku)
+    const optionCode = optionCodeFromSku(row.sku)
+    return {
+      productId: productIdBySku.get(baseSku)!,
+      sku: row.sku,
+      optionName: row.optionName ?? optionCode,
+      optionValues: { '단품코드': optionCode, '단품': row.optionName ?? optionCode },
+      sortOrder: Number(optionCode) || 0,
+      isActive: true,
+    }
+  })).onConflictDoUpdate({
+    target: [productVariants.productId, productVariants.sku],
+    set: {
+      optionName: sql`excluded.option_name`,
+      optionValues: sql`excluded.option_values`,
+      sortOrder: sql`excluded.sort_order`,
+      isActive: sql`true`,
+      updatedAt: new Date(),
+    },
+  })
+
+  await db.update(products).set({
+    status: 'deleted',
+    manageInventory: false,
+    updatedAt: new Date(),
+  }).where(and(
+    eq(products.userId, userId),
+    inArray(products.internalSku, uniqueRows.map((row) => row.sku)),
+  ))
+}
+
+function baseProductCode(sku: string): string {
+  return /^(.+)-\d{4}$/.exec(sku)?.[1] ?? sku
+}
+
+function optionCodeFromSku(sku: string): string {
+  return /^.+-(\d{4})$/.exec(sku)?.[1] ?? sku
 }

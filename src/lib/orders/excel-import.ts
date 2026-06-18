@@ -239,18 +239,21 @@ export async function parseOrderExcel(
 
   const getCellString = (row: ExcelJS.Row, key: string): string => {
     const mapping = normalizedMappings?.find((m) => m.field === key)
-    if (mapping?.fixedValue) return mapping.fixedValue
+    if (mapping?.fixedValue && !mapping.excelColumn && (mapping.extraColumns?.length ?? 0) === 0) {
+      return mapping.fixedValue
+    }
     const mappedColumns = mappedColumnNumbers.get(key)
     if (mappedColumns && mappedColumns.length > 0) {
-      return mappedColumns
+      const mappedValue = mappedColumns
         .map((colNumber) => {
           return readCellText(row.getCell(colNumber).value)
         })
         .filter(Boolean)
         .join(mapping?.joinSeparator ?? ' ')
+      return mappedValue || mapping?.fixedValue || ''
     }
-    if (!colMap[key]) return ''
-    return readCellText(row.getCell(colMap[key]).value)
+    if (!colMap[key]) return mapping?.fixedValue || ''
+    return readCellText(row.getCell(colMap[key]).value) || mapping?.fixedValue || ''
   }
 
   const getCellNumber = (row: ExcelJS.Row, key: string): number => {

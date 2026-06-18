@@ -10,6 +10,29 @@ export interface DefaultOrderImportTemplate {
 
 export const DEFAULT_ORDER_IMPORT_TEMPLATES: DefaultOrderImportTemplate[] = [
   {
+    id: 'default:sabangnet-sales-confirmation',
+    name: '사방넷 매출확인용',
+    isDefault: true,
+    aliases: ['sabangnet', '사방넷', '매출확인용', '주문서확인처리'],
+    mappings: [
+      { field: 'orderNumber', excelColumn: '사방넷 주문번호' },
+      { field: 'marketplaceItemId', excelColumn: '쇼핑몰 상품코드' },
+      { field: 'orderedAt', excelColumn: '출고완료일자' },
+      { field: 'buyerName', excelColumn: '주문자명', fixedValue: '사방넷' },
+      { field: 'buyerPhone', excelColumn: '', fixedValue: '' },
+      { field: 'recipientName', excelColumn: '주문자명', fixedValue: '사방넷' },
+      { field: 'recipientPhone', excelColumn: '', fixedValue: '' },
+      { field: 'recipientAddress', excelColumn: '', fixedValue: '사방넷 매출확인용' },
+      { field: 'productName', excelColumn: '사방넷 상품명' },
+      { field: 'optionText', excelColumn: '사방넷 옵션' },
+      { field: 'quantity', excelColumn: '실 출고수량' },
+      { field: 'totalAmount', excelColumn: '최종결제금액' },
+      { field: 'sku', excelColumn: '사방넷 상품코드' },
+      { field: 'deliveryMessage', excelColumn: '택배사', extraColumns: ['송장번호'], joinSeparator: ' ' },
+      { field: 'shippingFee', excelColumn: '배송비' },
+    ],
+  },
+  {
     id: 'default:rocket-delivery',
     name: '로켓배송 주문수집',
     isDefault: true,

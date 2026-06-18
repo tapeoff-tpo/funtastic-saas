@@ -6,7 +6,7 @@
  */
 
 import { db } from '@/lib/db'
-import { shipments, shipmentItems, orders, orderItems } from '@/lib/db/schema'
+import { shipments, shipmentItems, orders, orderItems, marketplaceConnections } from '@/lib/db/schema'
 import { eq, and, inArray, sql, desc, lt, isNull, isNotNull } from 'drizzle-orm'
 import type { InvoiceUploadStatus, ShipmentRecord } from './types'
 import { normalizeTrackingNumber } from './tracking-number'
@@ -48,6 +48,7 @@ export async function getHeldShipments(userId: string): Promise<HeldShipmentRow[
       marketplaceOrderId: orders.marketplaceOrderId,
       marketplaceId: orders.marketplaceId,
       marketplaceName: sql<string | null>`COALESCE(
+        NULLIF(${marketplaceConnections.metadata}->>'systemMarketplaceName', ''),
         NULLIF(${orders.rawData}->'sabangnetRaw'->>'쇼핑몰명', ''),
         NULLIF(${orders.rawData}->'sabangnetSync'->>'mallName', ''),
         NULLIF(CASE
@@ -94,6 +95,7 @@ export async function getHeldShipments(userId: string): Promise<HeldShipmentRow[
     })
     .from(shipments)
     .innerJoin(orders, eq(orders.id, shipments.orderId))
+    .leftJoin(marketplaceConnections, eq(marketplaceConnections.id, orders.connectionId))
     .leftJoin(orderItems, eq(orderItems.orderId, orders.id))
     .where(
       and(

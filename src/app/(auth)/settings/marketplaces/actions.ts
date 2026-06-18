@@ -354,8 +354,10 @@ export async function saveSalesExportSettings(
     return { error: '인증이 필요합니다.' }
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const connectionId = String(formData.get('connection_id') ?? '').trim()
+  const rawConnectionId = String(formData.get('connection_id') ?? '').trim()
+  const connectionId = rawConnectionId.startsWith('common:') ? '' : rawConnectionId
   const marketplaceId = String(formData.get('marketplace_id') ?? '').trim()
+    || (rawConnectionId.startsWith('common:') ? rawConnectionId.slice('common:'.length) : '')
   const systemMarketplaceName = String(formData.get('system_marketplace_name') ?? '').trim()
   const salesExportMarketplaceId = String(formData.get('sales_export_marketplace_id') ?? '').trim()
   const rawSalesFeePercent = String(formData.get('sales_fee_percent') ?? '').trim()
@@ -382,6 +384,7 @@ export async function saveSalesExportSettings(
         salesFeePercent,
       })
       revalidatePath('/settings/market-settings')
+      revalidatePath('/analytics')
       return { success: true, message: '마켓 공통 설정이 저장되었습니다.' }
     }
 
@@ -437,6 +440,7 @@ export async function saveSalesExportSettings(
 
   revalidatePath('/settings/marketplaces')
   revalidatePath('/settings/market-settings')
+  revalidatePath('/analytics')
   return { success: true, message: '마켓 설정이 저장되었습니다.' }
 }
 

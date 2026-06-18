@@ -10,7 +10,8 @@ import { getOrders } from '@/lib/orders/queries'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { AUTO_MARKETPLACE_OPTIONS, MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
-import { eq } from 'drizzle-orm'
+import { listMarketplaceBusinessSettings, type MarketplaceBusinessSetting } from '@/lib/marketplace/business-settings'
+import { eq, sql } from 'drizzle-orm'
 import { DataTable } from './data-table'
 import { OrderFilters } from './filters'
 import { OrderTabs } from './order-tabs'
@@ -82,7 +83,9 @@ function buildMarketplaceFilterOptions(
     marketplaceId: string
     displayName: string
     isManual: boolean
+    systemMarketplaceName: string | null
   }>,
+  businessSettings: MarketplaceBusinessSetting[],
 ): MarketplaceFilterOption[] {
   const options = new Map<string, string>()
 
@@ -90,12 +93,17 @@ function buildMarketplaceFilterOptions(
     options.set(marketplace.marketplaceId, marketplace.displayName)
   }
 
+  for (const setting of businessSettings) {
+    options.set(setting.marketplaceId, setting.systemMarketplaceName || setting.marketplaceId)
+  }
+
   for (const connection of connections) {
     options.set(
       connection.marketplaceId,
-      connection.isManual
-        ? connection.displayName
-        : (MARKETPLACE_DISPLAY_NAMES[connection.marketplaceId] ?? connection.displayName),
+      connection.systemMarketplaceName
+        || (connection.isManual
+          ? connection.displayName
+          : (MARKETPLACE_DISPLAY_NAMES[connection.marketplaceId] ?? connection.displayName)),
     )
   }
 
@@ -128,9 +136,11 @@ export default async function OrdersPage({
       marketplaceId: marketplaceConnections.marketplaceId,
       displayName: marketplaceConnections.displayName,
       isManual: marketplaceConnections.isManual,
+      systemMarketplaceName: sql<string | null>`NULLIF(${marketplaceConnections.metadata}->>'systemMarketplaceName', '')`,
     })
     .from(marketplaceConnections)
     .where(eq(marketplaceConnections.userId, workspaceUserId))
+  const businessSettingsPromise = listMarketplaceBusinessSettings(workspaceUserId)
 
   const isNewTab = singleStatus === 'new'
   const isConfirmedTab = singleStatus === 'confirmed'
@@ -138,7 +148,8 @@ export default async function OrdersPage({
   const isGeneralStatusTab = Boolean(params.status) && !params.claimType && !params.cancel && !params.held
   const needsMappingDetails = true
   const needsStockDetails = isNewTab || isConfirmedTab || isScanFilterTab
-  const shouldExcludeHeld = !params.held && Boolean(params.status || params.claimType || params.cancel)
+  const hasSearch = Boolean(params.search?.trim())
+  const shouldExcludeHeld = !params.held && !hasSearch && Boolean(params.status || params.claimType || params.cancel)
   const mappingFilter = params.mapping === 'all'
     ? undefined
     : ((params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined)
@@ -182,11 +193,12 @@ export default async function OrdersPage({
         includeStock: needsStockDetails,
       })
     : { orders: [] as Awaited<ReturnType<typeof getOrders>>['orders'], total: 0 }
-  const [connections, { orders: orderList, total }] = await Promise.all([
+  const [connections, businessSettings, { orders: orderList, total }] = await Promise.all([
     connectionsPromise,
+    businessSettingsPromise,
     ordersPromise,
   ])
-  const marketplaceOptions = buildMarketplaceFilterOptions(connections)
+  const marketplaceOptions = buildMarketplaceFilterOptions(connections, businessSettings)
 
   const data: OrderRow[] = orderList.map((o) => ({
     id: o.id,

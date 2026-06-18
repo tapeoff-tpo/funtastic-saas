@@ -249,6 +249,19 @@ function canUseFastShippedExportPath(searchParams: URLSearchParams): boolean {
   return !hasMeaningfulFilter('held') && !hasMeaningfulFilter('isHeld') && !hasMeaningfulFilter('cancelTab')
 }
 
+function getSalesInternalOrderNo(order: typeof orders.$inferSelect): string {
+  const rawData = order.rawData
+  if (
+    rawData
+    && typeof rawData === 'object'
+    && !Array.isArray(rawData)
+    && (rawData as Record<string, unknown>).source === 'sabangnet-review'
+  ) {
+    return order.marketplaceOrderId
+  }
+  return order.internalNo
+}
+
 async function getFastShippedExportOrderIds(
   searchParams: URLSearchParams,
   userId: string,
@@ -352,6 +365,12 @@ async function handleExportRequest(request: NextRequest, body: ExportRequestBody
           .where(inArray(marketplaceConnections.id, connectionIds))
       : []
     const connectionMap = new Map(connectionRows.map((c) => [c.id, c.displayName]))
+    const systemMarketplaceNameMap = new Map(connectionRows.map((connection) => [
+      connection.id,
+      typeof connection.metadata?.systemMarketplaceName === 'string'
+        ? connection.metadata.systemMarketplaceName.trim()
+        : '',
+    ]))
     const salesExportMarketplaceIdMap = new Map(connectionRows.map((connection) => [
       connection.id,
       typeof connection.metadata?.salesExportMarketplaceId === 'string'
@@ -439,7 +458,9 @@ async function handleExportRequest(request: NextRequest, body: ExportRequestBody
         : null
       const salesDiscountAndFee = calculateSalesFeeAmount(order.totalAmount, salesFeePercent)
 
-      const marketplaceName = getMarketplaceExportName(order)
+      const marketplaceName = (
+        order.connectionId ? systemMarketplaceNameMap.get(order.connectionId) : ''
+      ) || getMarketplaceExportName(order)
       const collectedDate = order.collectedAt ? new Date(order.collectedAt) : null
       const shippedDate = shipment?.shippedAt ? new Date(shipment.shippedAt) : null
       const exportRows = isSalesCheckTemplate && expandedRows.length > 0
@@ -466,7 +487,7 @@ async function handleExportRequest(request: NextRequest, body: ExportRequestBody
         return {
         // 사용자 노출용 8자리 내부 주문번호
         orderId: order.internalNo,
-        internalNo: order.internalNo,
+        internalNo: getSalesInternalOrderNo(order),
         marketplaceOrderId: order.marketplaceOrderId,
         shipmentGroupId,
         isCombinedShipment,

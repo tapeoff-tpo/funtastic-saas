@@ -1,6 +1,6 @@
-import { and, count, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { claims, inquiries, orderItems, orders } from '@/lib/db/schema'
+import { claims, inquiries, marketplaceConnections, orderItems, orders } from '@/lib/db/schema'
 import { MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
 import type { ClaimStatus, ClaimType } from '@/lib/orders/types'
 
@@ -303,19 +303,33 @@ export async function getCsTickets(
   )
 
   const productNameByOrderId = new Map<string, string>()
+  const marketplaceNameByOrderId = new Map<string, string>()
   if (orderIds.length > 0) {
-    const itemRows = await db
-      .select({
-        orderId: orderItems.orderId,
-        productName: orderItems.productName,
-      })
-      .from(orderItems)
-      .where(inArray(orderItems.orderId, orderIds))
+    const [itemRows, orderNameRows] = await Promise.all([
+      db
+        .select({
+          orderId: orderItems.orderId,
+          productName: orderItems.productName,
+        })
+        .from(orderItems)
+        .where(inArray(orderItems.orderId, orderIds)),
+      db
+        .select({
+          orderId: orders.id,
+          systemMarketplaceName: sql<string | null>`NULLIF(${marketplaceConnections.metadata}->>'systemMarketplaceName', '')`,
+        })
+        .from(orders)
+        .leftJoin(marketplaceConnections, eq(marketplaceConnections.id, orders.connectionId))
+        .where(inArray(orders.id, orderIds)),
+    ])
 
     for (const row of itemRows) {
       if (!productNameByOrderId.has(row.orderId)) {
         productNameByOrderId.set(row.orderId, row.productName)
       }
+    }
+    for (const row of orderNameRows) {
+      if (row.systemMarketplaceName) marketplaceNameByOrderId.set(row.orderId, row.systemMarketplaceName)
     }
   }
 
@@ -335,7 +349,7 @@ export async function getCsTickets(
       type,
       typeLabel: CLAIM_TYPE_LABELS[type] ?? type,
       marketplaceId: row.marketplaceId,
-      marketplaceName: marketplaceName(row.marketplaceId),
+      marketplaceName: marketplaceNameByOrderId.get(row.orderId) ?? marketplaceName(row.marketplaceId),
       marketplaceReferenceId: row.marketplaceClaimId,
       orderId: row.orderId,
       internalNo: row.internalNo,
@@ -365,7 +379,7 @@ export async function getCsTickets(
       type: row.inquiryType,
       typeLabel: INQUIRY_TYPE_LABELS[row.inquiryType] ?? row.inquiryType,
       marketplaceId: row.marketplaceId,
-      marketplaceName: marketplaceName(row.marketplaceId),
+      marketplaceName: (orderId ? marketplaceNameByOrderId.get(orderId) : null) ?? marketplaceName(row.marketplaceId),
       marketplaceReferenceId: row.marketplaceInquiryId,
       orderId,
       internalNo: row.orderInternalNo,

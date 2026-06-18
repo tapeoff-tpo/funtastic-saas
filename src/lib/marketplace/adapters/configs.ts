@@ -175,7 +175,7 @@ const elevenstAdapter: MarketplaceAdapter = {
 const gmarketAdapter: MarketplaceAdapter = {
   config: {
     id: 'gmarket',
-    name: '지마켓',
+    name: 'ESM지마켓',
     authType: 'api_key',
     rateLimitPerSecond: 30,
     requiredCredentials: ['master_id', 'secret_key', 'seller_id'],
@@ -215,7 +215,7 @@ const gmarketAdapter: MarketplaceAdapter = {
 const auctionAdapter: MarketplaceAdapter = {
   config: {
     id: 'auction',
-    name: '옥션',
+    name: 'ESM옥션',
     authType: 'api_key',
     rateLimitPerSecond: 30,
     requiredCredentials: ['master_id', 'secret_key', 'seller_id'],
@@ -312,7 +312,7 @@ const cjonestyleAdapter = createStubAdapter({
 
 const kakaoGiftAdapter = createStubAdapter({
   id: 'kakao-gift',
-  name: '카카오선물하기',
+  name: '카카오톡선물하기',
   authType: 'api_key',
   rateLimitPerSecond: 30,
   requiredCredentials: ['api_key', 'store_id'],
@@ -320,7 +320,7 @@ const kakaoGiftAdapter = createStubAdapter({
 
 const kakaoStoreAdapter = createStubAdapter({
   id: 'kakao-store',
-  name: '카카오쇼핑하기',
+  name: '카카오톡스토어',
   authType: 'api_key',
   rateLimitPerSecond: 30,
   requiredCredentials: ['admin_app_key', 'seller_app_key'],
@@ -396,7 +396,7 @@ const esmAdapter = createStubAdapter({
 
 const nsmallAdapter = createStubAdapter({
   id: 'nsmall',
-  name: 'NS홈쇼핑',
+  name: 'NS홈쇼핑(신)',
   authType: 'api_key',
   rateLimitPerSecond: 20,
   requiredCredentials: ['api_key', 'vendor_code'],

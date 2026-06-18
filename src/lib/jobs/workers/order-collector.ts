@@ -46,6 +46,8 @@ import type {
   NormalizedClaim,
 } from '@/lib/marketplace/types'
 
+type OrderMutationClient = Pick<typeof db, 'delete' | 'execute' | 'insert' | 'select' | 'update'>
+
 /**
  * Create a marketplace adapter instance with credentials.
  *
@@ -683,19 +685,14 @@ export async function collectOrdersForConnection(params: {
         : { ...order, items }
       const orderKey = `${order.marketplaceId}:${order.marketplaceOrderId}`
       const isExistingOrder = existingOrderMatches.upsertKeys.has(orderKey)
-      const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
-      let splitCopyIds: string[] = []
-
-      // Absolute order storage rule: every multi-item marketplace order is stored as split rows.
-      if (!isExistingOrder && items.length > 0) {
-        await normalizeBaseOrderItem(upsertedOrder.id, items[0])
-        splitCopyIds = await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
-      } else if (isExistingOrder) {
-        splitCopyIds = await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId, upsertedOrder.collectedAt)
-      }
-      if (isExistingOrder && marketplaceId === 'specialoffer') {
-        await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
-      }
+      const { upsertedOrder, splitCopyIds } = await saveOrderWithSplitRows({
+        order,
+        orderForSave,
+        items,
+        connectionId,
+        userId,
+        marketplaceId,
+      })
       ordersCollected++
       if (isExistingOrder) {
         ordersUpdated++
@@ -883,20 +880,14 @@ export async function saveNormalizedOrdersForConnection(params: {
       continue
     }
 
-    const isExistingOrder = existingOrderMatches.upsertKeys.has(orderKey)
-    const [upsertedOrder] = await upsertOrder(orderForSave, connectionId, userId)
-
-    // Absolute order storage rule: every multi-item marketplace order is stored as split rows.
-    if (!isExistingOrder && items.length > 0) {
-      await normalizeBaseOrderItem(upsertedOrder.id, items[0])
-      await createSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId)
-    } else if (isExistingOrder) {
-      await ensureSplitOrderCopies(order, items, upsertedOrder.id, connectionId, userId, upsertedOrder.collectedAt)
-    }
-
-    if (isExistingOrder && marketplaceId === 'specialoffer') {
-      await fillMissingSpecialofferOptionText(upsertedOrder.id, items[0])
-    }
+    await saveOrderWithSplitRows({
+      order,
+      orderForSave,
+      items,
+      connectionId,
+      userId,
+      marketplaceId,
+    })
     ordersCollected++
   }
 
@@ -1025,7 +1016,50 @@ function isProtectedExcelCollectedOrder(order: {
  * Deduplicates on (marketplace_id, marketplace_order_id) per D-04.
  * Preserves raw marketplace data per D-03.
  */
+async function saveOrderWithSplitRows(params: {
+  order: NormalizedOrder
+  orderForSave: NormalizedOrder
+  items: NormalizedOrderItem[]
+  connectionId: string
+  userId: string
+  marketplaceId: string
+}): Promise<{
+  upsertedOrder: { id: string; status: string; collectedAt: Date | null }
+  splitCopyIds: string[]
+}> {
+  const {
+    order,
+    orderForSave,
+    items,
+    connectionId,
+    userId,
+    marketplaceId,
+  } = params
+  const lockKey = ['order-collect', userId, order.marketplaceId, order.marketplaceOrderId].join(':')
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`)
+
+    const [upsertedOrder] = await upsertOrder(tx, orderForSave, connectionId, userId)
+    if (!upsertedOrder) {
+      throw new Error(`Failed to save order ${order.marketplaceId}:${order.marketplaceOrderId}`)
+    }
+
+    // Absolute order storage rule: every marketplace order item is stored in a single visible row.
+    const splitCopyIds = items.length > 0
+      ? await ensureSplitOrderCopies(tx, order, items, upsertedOrder.id, connectionId, userId, upsertedOrder.collectedAt)
+      : []
+
+    if (marketplaceId === 'specialoffer') {
+      await fillMissingSpecialofferOptionText(tx, upsertedOrder.id, items[0])
+    }
+
+    return { upsertedOrder, splitCopyIds }
+  })
+}
+
 async function upsertOrder(
+  client: OrderMutationClient,
   order: NormalizedOrder,
   connectionId: string,
   userId: string
@@ -1037,7 +1071,7 @@ async function upsertOrder(
   const updateStatus = collectedOrderUpdateStatus(order.status, order.marketplaceId)
   const marketplaceCollectionStatus = getMarketplaceCollectionStatus(order)
 
-  return db
+  return client
     .insert(orders)
     .values({
       internalNo: generateInternalNo(),
@@ -1367,8 +1401,12 @@ function orderItemInsertValue(orderId: string, item: NormalizedOrderItem) {
   }
 }
 
-async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrderItem): Promise<void> {
-  const existingItems = await db
+async function normalizeBaseOrderItem(
+  client: OrderMutationClient,
+  baseOrderId: string,
+  item: NormalizedOrderItem,
+): Promise<void> {
+  const existingItems = await client
     .select({ id: orderItems.id, lockedAt: orderItems.lockedAt })
     .from(orderItems)
     .where(eq(orderItems.orderId, baseOrderId))
@@ -1383,7 +1421,7 @@ async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrder
       .map((existingItem) => existingItem.id)
 
     if (deletableExtraItemIds.length > 0) {
-      await db
+      await client
         .delete(orderItems)
         .where(inArray(orderItems.id, deletableExtraItemIds))
     }
@@ -1392,7 +1430,7 @@ async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrder
   if (firstExistingItem) {
     if (firstExistingItem.lockedAt) return
 
-    await db
+    await client
       .update(orderItems)
       .set({
         marketplaceItemId: value.marketplaceItemId,
@@ -1404,18 +1442,22 @@ async function normalizeBaseOrderItem(baseOrderId: string, item: NormalizedOrder
       })
       .where(eq(orderItems.id, firstExistingItem.id))
   } else {
-    await db
+    await client
       .insert(orderItems)
       .values(value)
       .onConflictDoNothing()
   }
 }
 
-async function fillMissingSpecialofferOptionText(orderId: string, item?: NormalizedOrderItem): Promise<void> {
+async function fillMissingSpecialofferOptionText(
+  client: OrderMutationClient,
+  orderId: string,
+  item?: NormalizedOrderItem,
+): Promise<void> {
   const optionText = item?.optionText?.trim()
   if (!optionText) return
 
-  await db
+  await client
     .update(orderItems)
     .set({ optionText })
     .where(
@@ -1426,79 +1468,8 @@ async function fillMissingSpecialofferOptionText(orderId: string, item?: Normali
     )
 }
 
-async function createSplitOrderCopies(
-  order: NormalizedOrder,
-  items: NormalizedOrderItem[],
-  baseOrderId: string,
-  connectionId: string,
-  userId: string,
-): Promise<string[]> {
-  if (items.length <= 1) return []
-
-  const copyIds: string[] = []
-  const now = new Date()
-  const splitBase = {
-    sourceOrderId: baseOrderId,
-    splitAt: now.toISOString(),
-    totalParts: items.length,
-  }
-  const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
-  const shippingAddress = normalizeShippingAddress(order.shippingAddress)
-
-  await db
-    .update(orders)
-    .set({
-      rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [items[0]] }), {
-        ...splitBase,
-        partIndex: 1,
-        original: true,
-      }),
-      updatedAt: now,
-    })
-    .where(eq(orders.id, baseOrderId))
-
-  for (let index = 1; index < items.length; index += 1) {
-    const item = items[index]
-    const [copy] = await db
-      .insert(orders)
-      .values({
-        internalNo: generateInternalNo(),
-        userId,
-        connectionId,
-        marketplaceId: order.marketplaceId,
-        marketplaceOrderId: order.marketplaceOrderId,
-        status: copyStatus,
-        marketplaceStatus: order.marketplaceStatus,
-        marketplaceCollectionStatus: getMarketplaceCollectionStatus(order),
-        buyerName: order.buyerName,
-        buyerPhone: order.buyerPhone,
-        buyerPhone2: order.buyerPhone2,
-        recipientName: order.recipientName,
-        recipientPhone: order.recipientPhone,
-        recipientPhone2: order.recipientPhone2,
-        shippingAddress,
-        orderedAt: order.orderedAt,
-        totalAmount: String(lineTotalAmount(item)),
-        shippingFee: order.shippingFee != null ? String(order.shippingFee) : null,
-        deliveryMessage: order.deliveryMessage ?? null,
-        rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [item], totalAmount: lineTotalAmount(item) }), {
-          ...splitBase,
-          partIndex: index + 1,
-          originalOrderId: baseOrderId,
-        }),
-        collectedAt: now,
-        isCopy: true,
-      })
-      .returning({ id: orders.id })
-
-    await db.insert(orderItems).values(orderItemInsertValue(copy.id, item))
-    copyIds.push(copy.id)
-  }
-
-  return copyIds
-}
-
 async function ensureSplitOrderCopies(
+  client: OrderMutationClient,
   order: NormalizedOrder,
   items: NormalizedOrderItem[],
   baseOrderId: string,
@@ -1507,14 +1478,14 @@ async function ensureSplitOrderCopies(
   baseCollectedAt?: Date | null,
 ): Promise<string[]> {
   if (items.length <= 1) {
-    if (items[0]) await normalizeBaseOrderItem(baseOrderId, items[0])
-    await deleteUnreferencedSplitCopies(userId, order.marketplaceId, order.marketplaceOrderId)
+    if (items[0]) await normalizeBaseOrderItem(client, baseOrderId, items[0])
+    await deleteUnreferencedSplitCopies(client, userId, order.marketplaceId, order.marketplaceOrderId)
     return []
   }
 
-  await normalizeBaseOrderItem(baseOrderId, items[0])
+  await normalizeBaseOrderItem(client, baseOrderId, items[0])
 
-  const existingCopies = await db
+  const existingCopies = await client
     .select({ id: orders.id })
     .from(orders)
     .where(
@@ -1537,7 +1508,7 @@ async function ensureSplitOrderCopies(
   const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
   const shippingAddress = normalizeShippingAddress(order.shippingAddress)
 
-  await db
+  await client
     .update(orders)
     .set({
       rawData: itemSplitRawData(enrichOrderRawData({ ...order, items: [items[0]] }), {
@@ -1555,6 +1526,7 @@ async function ensureSplitOrderCopies(
 
   if (staleCopies.length > 0) {
     await deleteUnreferencedSplitCopies(
+      client,
       userId,
       order.marketplaceId,
       order.marketplaceOrderId,
@@ -1567,7 +1539,7 @@ async function ensureSplitOrderCopies(
     const item = items[index]
     const existingCopy = reusableCopies[index - 1]
     if (existingCopy) {
-      await updateSplitOrderCopy(existingCopy.id, order, item, connectionId, {
+      await updateSplitOrderCopy(client, existingCopy.id, order, item, connectionId, {
         ...splitBase,
         partIndex: index + 1,
         originalOrderId: baseOrderId,
@@ -1576,7 +1548,7 @@ async function ensureSplitOrderCopies(
       continue
     }
 
-    const [copy] = await db
+    const [copy] = await client
       .insert(orders)
       .values({
         internalNo: generateInternalNo(),
@@ -1608,7 +1580,7 @@ async function ensureSplitOrderCopies(
       })
       .returning({ id: orders.id })
 
-    await db.insert(orderItems).values(orderItemInsertValue(copy.id, item))
+    await client.insert(orderItems).values(orderItemInsertValue(copy.id, item))
     copyIds.push(copy.id)
   }
 
@@ -1616,6 +1588,7 @@ async function ensureSplitOrderCopies(
 }
 
 async function updateSplitOrderCopy(
+  client: OrderMutationClient,
   copyOrderId: string,
   order: NormalizedOrder,
   item: NormalizedOrderItem,
@@ -1625,7 +1598,7 @@ async function updateSplitOrderCopy(
   const now = new Date()
   const copyStatus = collectedOrderStatus(order.status, order.marketplaceId)
   const shippingAddress = normalizeShippingAddress(order.shippingAddress)
-  await db
+  await client
     .update(orders)
     .set({
       connectionId,
@@ -1648,10 +1621,11 @@ async function updateSplitOrderCopy(
     })
     .where(eq(orders.id, copyOrderId))
 
-  await normalizeBaseOrderItem(copyOrderId, item)
+  await normalizeBaseOrderItem(client, copyOrderId, item)
 }
 
 async function deleteUnreferencedSplitCopies(
+  client: OrderMutationClient,
   userId: string,
   marketplaceId: string,
   marketplaceOrderId: string,
@@ -1659,7 +1633,7 @@ async function deleteUnreferencedSplitCopies(
 ): Promise<void> {
   if (copyIds && copyIds.length === 0) return
 
-  await db
+  await client
     .delete(orders)
     .where(
       and(

@@ -71,9 +71,13 @@ interface ShippingActionsProps {
 }
 
 /** Download a file by fetching — allows catching errors from the server */
-async function downloadExcel(url: string, filename: string): Promise<{ success: true } | { success: false; error: string }> {
+async function downloadExcel(
+  url: string,
+  filename: string,
+  init?: RequestInit,
+): Promise<{ success: true } | { success: false; error: string }> {
   try {
-    const res = await fetch(url)
+    const res = await fetch(url, init)
     if (!res.ok) {
       // Try to parse error message
       const text = await res.text()
@@ -771,22 +775,35 @@ export function ShippingActions({
     setClassifying(true)
     try {
       const p = new URLSearchParams()
+      let exportUrl = ''
+      let exportInit: RequestInit | undefined
       if (exportScope === 'selected') {
-        p.set('orderIds', selectedScope.join(','))
+        exportUrl = '/api/shipping/export'
+        exportInit = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderIds: selectedScope,
+            type: 'carrier',
+            templateId: template.id,
+          }),
+        }
       } else {
         p.set('scope', 'filtered')
         searchParams.forEach((value, key) => {
           if (key === 'page' || key === 'pageSize') return
           p.set(key, value)
         })
+        p.set('type', 'carrier')
+        p.set('templateId', template.id)
+        exportUrl = `/api/shipping/export?${p.toString()}`
       }
-      p.set('type', 'carrier')
-      p.set('templateId', template.id)
       const date = new Date().toISOString().slice(0, 10)
       const filenameScope = exportScope === 'selected' ? '선택자료' : '전체자료'
       const result = await downloadExcel(
-        `/api/shipping/export?${p.toString()}`,
+        exportUrl,
         `${template.name}_${filenameScope}_${date}.xlsx`,
+        exportInit,
       )
       if (result.success) {
         const countText = exportScope === 'selected' ? ` ${selectedScope.length}건` : ''

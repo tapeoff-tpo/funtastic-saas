@@ -77,6 +77,57 @@ export interface OrderProfitAnalysisData {
   currentMonthLabel: string
 }
 
+export type OrderProfitSort =
+  | 'order'
+  | 'ordered-at'
+  | 'marketplace'
+  | 'product'
+  | 'calculation-status'
+  | 'sales'
+  | 'marketplace-fee'
+  | 'product-cost'
+  | 'paid-shipping'
+  | 'actual-shipping'
+  | 'box-cost'
+  | 'final-profit'
+  | 'profit-rate'
+
+export interface ProductProfitRow {
+  sku: string
+  productName: string
+  quantity: number
+  orderCount: number
+  sales: number
+  marketplaceFee: number
+  productCost: number
+  paidShippingFee: number
+  actualShippingFee: number
+  boxCost: number
+  finalProfit: number
+  profitRate: number | null
+}
+
+export interface ProductProfitAnalysisData {
+  rows: ProductProfitRow[]
+  totals: ProductProfitRow
+  currentMonthLabel: string
+}
+
+export type ProductProfitSort =
+  | 'product'
+  | 'quantity'
+  | 'order-count'
+  | 'sales'
+  | 'marketplace-fee'
+  | 'product-cost'
+  | 'paid-shipping'
+  | 'actual-shipping'
+  | 'box-cost'
+  | 'final-profit'
+  | 'profit-rate'
+
+export type SortDirection = 'asc' | 'desc'
+
 export type ProfitMissingIssue = 'all' | 'fee' | 'product-cost' | 'actual-shipping' | 'packaging'
 
 export interface SalesComparisonData {
@@ -150,17 +201,60 @@ type ProfitMissingSummaryQueryRow = {
   missingPackagingOrders: string | number | null
 }
 
+type CountQueryRow = {
+  count: string | number | null
+}
+
+type ProductProfitQueryRow = {
+  sku: string
+  productName: string | null
+  quantity: string | number | null
+  orderCount: string | number | null
+  sales: string | number | null
+  marketplaceFee: string | number | null
+  productCost: string | number | null
+  paidShippingFee: string | number | null
+  actualShippingFee: string | number | null
+  boxCost: string | number | null
+}
+
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
 const ORDER_PROFIT_PAGE_SIZE = 50
+const PURCHASING_ITEM_COST = sql`
+  NULLIF(
+    regexp_replace(
+      COALESCE(
+        NULLIF(p.metadata->'esa009m'->>'works 신규 원가', ''),
+        NULLIF(p.metadata->'esa009m'->>'works 기존 원가', ''),
+        ''
+      ),
+      '[^0-9.-]',
+      '',
+      'g'
+    ),
+    ''
+  )::numeric
+`
 
 export async function getOrderProfitAnalysisData(
   userId: string,
-  options: { page?: number; missingOnly?: boolean; issue?: ProfitMissingIssue; now?: Date } = {},
+  options: {
+    page?: number
+    missingOnly?: boolean
+    issue?: ProfitMissingIssue
+    now?: Date
+    search?: string
+    sort?: OrderProfitSort
+    direction?: SortDirection
+  } = {},
 ): Promise<OrderProfitAnalysisData> {
   const now = options.now ?? new Date()
   const page = Math.max(1, Math.floor(options.page ?? 1))
   const missingOnly = options.missingOnly ?? false
   const selectedIssue = options.issue ?? 'all'
+  const search = options.search?.trim() ?? ''
+  const sort = options.sort ?? 'ordered-at'
+  const direction = options.direction ?? 'desc'
   const monthStart = sqlDate(new Date(now.getFullYear(), now.getMonth(), 1))
   const nextMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() + 1, 1))
   const offset = (page - 1) * ORDER_PROFIT_PAGE_SIZE
@@ -175,6 +269,17 @@ export async function getOrderProfitAnalysisData(
           : missingOnly
             ? sql`AND (missing_fee OR missing_product_cost OR missing_actual_shipping OR missing_packaging)`
             : sql``
+  const searchFilter = search
+    ? sql`AND (
+        internal_no ILIKE ${`%${search}%`}
+        OR marketplace_order_id ILIKE ${`%${search}%`}
+        OR marketplace_name ILIKE ${`%${search}%`}
+        OR product_summary ILIKE ${`%${search}%`}
+        OR sku_summary ILIKE ${`%${search}%`}
+      )`
+    : sql``
+  const sortExpression = orderProfitSortExpression(sort)
+  const sortDirection = direction === 'asc' ? sql`ASC` : sql`DESC`
 
   const baseQuery = sql`
     WITH marketplace_fee_settings AS (
@@ -194,6 +299,28 @@ export async function getOrderProfitAnalysisData(
       WHERE user_id = ${userId}
       GROUP BY user_id, marketplace_id
     ),
+    active_skus AS (
+      SELECT user_id, internal_sku AS sku
+      FROM products
+      WHERE user_id = ${userId}
+        AND status::text <> 'deleted'
+      UNION
+      SELECT p.user_id, pv.sku
+      FROM product_variants pv
+      JOIN products p ON p.id = pv.product_id
+      WHERE p.user_id = ${userId}
+        AND p.status::text <> 'deleted'
+        AND pv.is_active = true
+    ),
+    claim_effects AS (
+      SELECT
+        order_id,
+        BOOL_OR(claim_type::text = 'return' AND claim_status::text <> 'rejected') AS has_return,
+        BOOL_OR(claim_type::text = 'exchange' AND claim_status::text <> 'rejected') AS has_exchange
+      FROM claims
+      WHERE user_id = ${userId}
+      GROUP BY order_id
+    ),
     inventory_packaging AS (
       SELECT
         i.user_id,
@@ -210,12 +337,12 @@ export async function getOrderProfitAnalysisData(
         STRING_AGG(DISTINCT COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''), '미매핑'), ', ') AS sku_summary,
         COALESCE(SUM(
           COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
-          * COALESCE(p.cost_price::numeric, 0)
+          * COALESCE(${PURCHASING_ITEM_COST}, 0)
         ), 0) AS product_cost,
         BOOL_OR(
           COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IS NULL
-          OR p.id IS NULL
-          OR p.cost_price IS NULL
+          OR active_skus.sku IS NULL
+          OR ${PURCHASING_ITEM_COST} IS NULL
         ) AS missing_product_cost,
         CASE
           WHEN COUNT(DISTINCT ip.packaging_unit) = 1 AND BOOL_AND(ip.packaging_unit IS NOT NULL)
@@ -227,6 +354,9 @@ export async function getOrderProfitAnalysisData(
       LEFT JOIN products p
         ON p.user_id = o.user_id
        AND p.internal_sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+      LEFT JOIN active_skus
+        ON active_skus.user_id = o.user_id
+       AND active_skus.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
       LEFT JOIN inventory_packaging ip
         ON ip.user_id = o.user_id
        AND ip.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
@@ -272,7 +402,10 @@ export async function getOrderProfitAnalysisData(
     profit_rows AS (
       SELECT
         o.id AS order_id,
-        o.internal_no,
+        CASE
+          WHEN o.raw_data->>'source' = 'sabangnet-review' THEN o.marketplace_order_id
+          ELSE o.internal_no
+        END AS internal_no,
         o.marketplace_order_id,
         COALESCE(
           NULLIF(mc.metadata->>'systemMarketplaceName', ''),
@@ -280,15 +413,27 @@ export async function getOrderProfitAnalysisData(
           NULLIF(mc.display_name, ''),
           NULLIF(mfs.fallback_display_name, ''),
           o.marketplace_id
-        ) AS marketplace_name,
+        )
+        || CASE
+          WHEN COALESCE(
+            NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
+            NULLIF(mfs.fallback_sales_export_id, '')
+          ) IS NOT NULL
+          THEN '(' || COALESCE(
+            NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
+            NULLIF(mfs.fallback_sales_export_id, '')
+          ) || ')'
+          ELSE ''
+        END AS marketplace_name,
         o.ordered_at,
         COALESCE(items.product_summary, '상품정보 없음') AS product_summary,
         COALESCE(items.sku_summary, '미매핑') AS sku_summary,
         COALESCE(shipments.package_summary, '박스명 없음') AS package_summary,
         COALESCE(shipments.tracking_summary, '송장 없음') AS tracking_summary,
-        o.total_amount::numeric AS sales,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales,
         (
-          o.total_amount::numeric
+          CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END
+          * o.total_amount::numeric
           * COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0)
           / 100
         ) AS marketplace_fee,
@@ -309,6 +454,7 @@ export async function getOrderProfitAnalysisData(
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN item_summary items ON items.order_id = o.id
       LEFT JOIN shipment_summary shipments ON shipments.order_id = o.id
+      LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
@@ -316,7 +462,18 @@ export async function getOrderProfitAnalysisData(
     )
   `
 
-  const [summaryResult, rowsResult] = await Promise.all([
+  const countResultPromise = search
+    ? db.execute<CountQueryRow>(sql`
+      ${baseQuery}
+      SELECT COUNT(*)::text AS count
+      FROM profit_rows
+      WHERE true
+      ${missingFilter}
+      ${searchFilter}
+    `)
+    : Promise.resolve<CountQueryRow[]>([])
+
+  const [summaryResult, countResult, rowsResult] = await Promise.all([
     db.execute<ProfitMissingSummaryQueryRow>(sql`
       ${baseQuery}
       SELECT
@@ -336,6 +493,7 @@ export async function getOrderProfitAnalysisData(
         COUNT(*) FILTER (WHERE missing_packaging)::text AS "missingPackagingOrders"
       FROM profit_rows
     `),
+    countResultPromise,
     db.execute<OrderProfitQueryRow>(sql`
       ${baseQuery}
       SELECT
@@ -361,7 +519,8 @@ export async function getOrderProfitAnalysisData(
       FROM profit_rows
       WHERE true
       ${missingFilter}
-      ORDER BY ordered_at DESC, internal_no DESC
+      ${searchFilter}
+      ORDER BY ${sortExpression} ${sortDirection}, ordered_at DESC, internal_no DESC
       LIMIT ${ORDER_PROFIT_PAGE_SIZE}
       OFFSET ${offset}
     `),
@@ -369,15 +528,17 @@ export async function getOrderProfitAnalysisData(
 
   const summaryRow = resultRows(summaryResult)[0]
   const summary = toProfitMissingSummary(summaryRow)
-  const filteredTotal = selectedIssue === 'fee'
-    ? summary.missingFeeOrders
-    : selectedIssue === 'product-cost'
-      ? summary.missingProductCostOrders
-      : selectedIssue === 'actual-shipping'
-        ? summary.missingActualShippingOrders
-        : selectedIssue === 'packaging'
-          ? summary.missingPackagingOrders
-          : missingOnly ? summary.incompleteOrders : summary.totalOrders
+  const filteredTotal = search
+    ? toNumber(resultRows(countResult)[0]?.count)
+    : selectedIssue === 'fee'
+      ? summary.missingFeeOrders
+      : selectedIssue === 'product-cost'
+        ? summary.missingProductCostOrders
+        : selectedIssue === 'actual-shipping'
+          ? summary.missingActualShippingOrders
+          : selectedIssue === 'packaging'
+            ? summary.missingPackagingOrders
+            : missingOnly ? summary.incompleteOrders : summary.totalOrders
 
   return {
     rows: resultRows(rowsResult).map(toOrderProfitRow),
@@ -397,7 +558,19 @@ export const getCachedOrderProfitAnalysisData = unstable_cache(
     page: number,
     missingOnly: boolean,
     issue: ProfitMissingIssue,
-  ) => getOrderProfitAnalysisData(userId, { page, missingOnly, issue }),
+    monthKey: string,
+    search: string,
+    sort: OrderProfitSort,
+    direction: SortDirection,
+  ) => getOrderProfitAnalysisData(userId, {
+    page,
+    missingOnly,
+    issue,
+    now: parseAnalyticsMonth(monthKey),
+    search,
+    sort,
+    direction,
+  }),
   ['order-profit-analysis'],
   { revalidate: 30 },
 )
@@ -429,8 +602,11 @@ export function emptyOrderProfitAnalysisData(
 export async function getSalesDashboardData(userId: string, now = new Date()): Promise<SalesDashboardData> {
   const monthStart = sqlDate(new Date(now.getFullYear(), now.getMonth(), 1))
   const nextMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() + 1, 1))
-  const lastMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() - 1, 1))
-  const lastMonthSameDayEnd = sqlDate(new Date(now.getFullYear(), now.getMonth() - 1, now.getDate() + 1))
+  const lastMonthStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const lastMonthEndDate = new Date(now.getFullYear(), now.getMonth(), 1)
+  const lastMonthSameDayEndDate = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate() + 1)
+  const lastMonthStart = sqlDate(lastMonthStartDate)
+  const lastMonthSameDayEnd = sqlDate(lastMonthSameDayEndDate > lastMonthEndDate ? lastMonthEndDate : lastMonthSameDayEndDate)
   const previousThreeMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() - 3, 1))
 
   const metricRowsPromise = db.execute<MetricRow>(sql`
@@ -448,10 +624,18 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE user_id = ${userId}
       GROUP BY user_id, marketplace_id
     ),
+    claim_effects AS (
+      SELECT
+        order_id,
+        BOOL_OR(claim_type::text = 'return' AND claim_status::text <> 'rejected') AS has_return
+      FROM claims
+      WHERE user_id = ${userId}
+      GROUP BY order_id
+    ),
     current_orders AS (
       SELECT
         o.id,
-        o.total_amount::numeric AS total_amount,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS shipping_fee,
         COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0) AS fee_percent
       FROM orders o
@@ -459,6 +643,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       LEFT JOIN marketplace_fee_settings mfs
         ON mfs.user_id = o.user_id
        AND mfs.marketplace_id = o.marketplace_id
+      LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
@@ -466,7 +651,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     ),
     current_costs AS (
       SELECT
-        COALESCE(SUM(oi.quantity * COALESCE(oi.sku_multiplier, 1) * COALESCE(p.cost_price::numeric, 0)), 0) AS product_cost
+        COALESCE(SUM(oi.quantity * COALESCE(oi.sku_multiplier, 1) * COALESCE(${PURCHASING_ITEM_COST}, 0)), 0) AS product_cost
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN products p
@@ -478,9 +663,10 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         AND o.status::text IN ${STATUS_FILTER}
     ),
     shipped_orders AS (
-      SELECT DISTINCT o.id, o.total_amount::numeric AS total_amount
+      SELECT DISTINCT o.id, (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS total_amount
       FROM orders o
       JOIN shipments s ON s.order_id = o.id
+      LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
         AND s.shipped_at >= ${monthStart}
         AND s.shipped_at < ${nextMonthStart}
@@ -489,8 +675,9 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     previous_months AS (
       SELECT
         to_char(o.ordered_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') AS month_key,
-        SUM(o.total_amount::numeric) AS sales
+        SUM(CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales
       FROM orders o
+      LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${previousThreeMonthStart}
         AND o.ordered_at < ${monthStart}
@@ -506,8 +693,9 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       )::text AS "currentProfitExcludingShipping",
       COALESCE((SELECT SUM(total_amount) FROM current_orders), 0)::text AS "currentPeriodSales",
       COALESCE((
-        SELECT SUM(o.total_amount::numeric)
+        SELECT SUM(CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric)
         FROM orders o
+        LEFT JOIN claim_effects ce ON ce.order_id = o.id
         WHERE o.user_id = ${userId}
           AND o.ordered_at >= ${lastMonthStart}
           AND o.ordered_at < ${lastMonthSameDayEnd}
@@ -533,6 +721,14 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE user_id = ${userId}
       GROUP BY user_id, marketplace_id
     ),
+    claim_effects AS (
+      SELECT
+        order_id,
+        BOOL_OR(claim_type::text = 'return' AND claim_status::text <> 'rejected') AS has_return
+      FROM claims
+      WHERE user_id = ${userId}
+      GROUP BY order_id
+    ),
     order_base AS (
       SELECT
         o.id,
@@ -548,8 +744,19 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
           NULLIF(mc.display_name, ''),
           NULLIF(mfs.fallback_display_name, ''),
           o.marketplace_id
-        ) AS marketplace_name,
-        o.total_amount::numeric AS total_amount,
+        )
+        || CASE
+          WHEN COALESCE(
+            NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
+            NULLIF(mfs.fallback_sales_export_id, '')
+          ) IS NOT NULL
+          THEN '(' || COALESCE(
+            NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
+            NULLIF(mfs.fallback_sales_export_id, '')
+          ) || ')'
+          ELSE ''
+        END AS marketplace_name,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
         COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0) AS fee_percent
       FROM orders o
@@ -565,7 +772,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     product_costs AS (
       SELECT
         ob.account_key,
-        COALESCE(SUM(oi.quantity * COALESCE(oi.sku_multiplier, 1) * COALESCE(p.cost_price::numeric, 0)), 0) AS product_cost
+        COALESCE(SUM(oi.quantity * COALESCE(oi.sku_multiplier, 1) * COALESCE(${PURCHASING_ITEM_COST}, 0)), 0) AS product_cost
       FROM order_base ob
       JOIN orders o ON o.id = ob.id
       JOIN order_items oi ON oi.order_id = ob.id
@@ -651,13 +858,13 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     cards: [
       {
         key: 'month-sales',
-        label: '당월매출',
+        label: '선택 월 매출',
         value: toNumber(metric?.monthSales),
-        subLabel: '주문일 기준 실시간',
+        subLabel: '주문일 기준',
       },
       {
         key: 'shipped-expected',
-        label: '당월 출고완료 매출예상금액',
+        label: '선택 월 출고완료 매출예상금액',
         value: toNumber(metric?.shippedExpectedSales),
         subLabel: '출고일 기준',
       },
@@ -689,17 +896,221 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
 }
 
 export const getCachedSalesDashboardData = unstable_cache(
-  async (userId: string) => getSalesDashboardData(userId),
+  async (userId: string, monthKey: string) => getSalesDashboardData(userId, parseAnalyticsMonth(monthKey)),
   ['sales-dashboard'],
   { revalidate: 30 },
 )
+
+export async function getProductProfitAnalysisData(
+  userId: string,
+  options: {
+    now?: Date
+    search?: string
+    sort?: ProductProfitSort
+    direction?: SortDirection
+  } = {},
+): Promise<ProductProfitAnalysisData> {
+  const now = options.now ?? new Date()
+  const search = options.search?.trim() ?? ''
+  const sort = options.sort ?? 'sales'
+  const direction = options.direction ?? 'desc'
+  const monthStart = sqlDate(new Date(now.getFullYear(), now.getMonth(), 1))
+  const nextMonthStart = sqlDate(new Date(now.getFullYear(), now.getMonth() + 1, 1))
+  const searchFilter = search
+    ? sql`WHERE product_name ILIKE ${`%${search}%`} OR sku ILIKE ${`%${search}%`}`
+    : sql``
+  const sortExpression = productProfitSortExpression(sort)
+  const sortDirection = direction === 'asc' ? sql`ASC` : sql`DESC`
+
+  const queryResult = await db.execute<ProductProfitQueryRow>(sql`
+    WITH marketplace_fee_settings AS (
+      SELECT
+        user_id,
+        marketplace_id,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE NULLIF(metadata->>'salesFeePercent', '') IS NULL) = 0
+            AND COUNT(DISTINCT NULLIF(metadata->>'salesFeePercent', '')::numeric) = 1
+            THEN MAX(NULLIF(metadata->>'salesFeePercent', '')::numeric)
+          ELSE NULL
+        END AS fallback_fee_percent
+      FROM marketplace_connections
+      WHERE user_id = ${userId}
+      GROUP BY user_id, marketplace_id
+    ),
+    claim_effects AS (
+      SELECT
+        order_id,
+        BOOL_OR(claim_type::text = 'return' AND claim_status::text <> 'rejected') AS has_return
+      FROM claims
+      WHERE user_id = ${userId}
+      GROUP BY order_id
+    ),
+    order_base AS (
+      SELECT
+        o.id,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales,
+        COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
+        (
+          CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END
+          * o.total_amount::numeric
+          * COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0)
+          / 100
+        ) AS marketplace_fee
+      FROM orders o
+      LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
+      LEFT JOIN marketplace_fee_settings mfs
+        ON mfs.user_id = o.user_id
+       AND mfs.marketplace_id = o.marketplace_id
+      LEFT JOIN claim_effects ce ON ce.order_id = o.id
+      WHERE o.user_id = ${userId}
+        AND o.ordered_at >= ${monthStart}
+        AND o.ordered_at < ${nextMonthStart}
+        AND o.status::text IN ${STATUS_FILTER}
+    ),
+    item_lines AS (
+      SELECT
+        ob.id AS order_id,
+        COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''), '미매핑') AS sku,
+        COALESCE(NULLIF(oi.locked_product_name, ''), NULLIF(p.name, ''), NULLIF(oi.product_name, ''), '상품명 없음') AS product_name,
+        COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))::numeric AS quantity,
+        GREATEST(COALESCE(oi.unit_price::numeric, 0) * COALESCE(oi.quantity, 0), 0) AS line_sales,
+        COALESCE(
+          COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+          * ${PURCHASING_ITEM_COST},
+          0
+        ) AS product_cost
+      FROM order_base ob
+      JOIN order_items oi ON oi.order_id = ob.id
+      LEFT JOIN products p
+        ON p.user_id = ${userId}
+       AND p.internal_sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+    ),
+    weighted_items AS (
+      SELECT
+        il.*,
+        CASE
+          WHEN SUM(il.line_sales) OVER (PARTITION BY il.order_id) > 0
+            THEN il.line_sales / SUM(il.line_sales) OVER (PARTITION BY il.order_id)
+          ELSE 1::numeric / NULLIF(COUNT(*) OVER (PARTITION BY il.order_id), 0)
+        END AS allocation_rate
+      FROM item_lines il
+    ),
+    order_packaging AS (
+      SELECT
+        ob.id AS order_id,
+        CASE
+          WHEN COUNT(DISTINCT NULLIF(BTRIM(i.packaging_unit), '')) = 1
+            AND BOOL_AND(NULLIF(BTRIM(i.packaging_unit), '') IS NOT NULL)
+            THEN MAX(NULLIF(BTRIM(i.packaging_unit), ''))
+          ELSE NULL
+        END AS fallback_package_name
+      FROM order_base ob
+      JOIN order_items oi ON oi.order_id = ob.id
+      LEFT JOIN inventory i
+        ON i.user_id = ${userId}
+       AND i.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+      GROUP BY ob.id
+    ),
+    shipment_costs AS (
+      SELECT
+        s.order_id,
+        COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
+        COALESCE(SUM(
+          COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
+        ), 0) AS box_cost
+      FROM shipments s
+      JOIN order_base ob ON ob.id = s.order_id
+      LEFT JOIN actual_shipping_costs ascost ON ascost.shipment_id = s.id
+      LEFT JOIN order_packaging op ON op.order_id = s.order_id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), op.fallback_package_name) AS package_name
+      ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT bcr.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates bcr
+        WHERE bcr.user_id = ${userId}
+          AND bcr.is_active = true
+          AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
+          AND bcr.effective_from <= (COALESCE(s.shipped_at, s.created_at) AT TIME ZONE 'Asia/Seoul')::date
+        ORDER BY bcr.effective_from DESC
+        LIMIT 1
+      ) rate ON true
+      WHERE s.user_id = ${userId}
+      GROUP BY s.order_id
+    )
+    , product_rows AS (
+      SELECT
+        wi.sku,
+        MAX(wi.product_name) AS product_name,
+        COALESCE(SUM(wi.quantity), 0) AS quantity,
+        COUNT(DISTINCT wi.order_id) AS order_count,
+        COALESCE(SUM(ob.sales * wi.allocation_rate), 0) AS sales,
+        COALESCE(SUM(ob.marketplace_fee * wi.allocation_rate), 0) AS marketplace_fee,
+        COALESCE(SUM(wi.product_cost), 0) AS product_cost,
+        COALESCE(SUM(ob.paid_shipping_fee * wi.allocation_rate), 0) AS paid_shipping_fee,
+        COALESCE(SUM(COALESCE(sc.actual_shipping_fee, 0) * wi.allocation_rate), 0) AS actual_shipping_fee,
+        COALESCE(SUM(COALESCE(sc.box_cost, 0) * wi.allocation_rate), 0) AS box_cost
+      FROM weighted_items wi
+      JOIN order_base ob ON ob.id = wi.order_id
+      LEFT JOIN shipment_costs sc ON sc.order_id = wi.order_id
+      GROUP BY wi.sku
+    )
+    SELECT
+      sku,
+      product_name AS "productName",
+      quantity::text AS quantity,
+      order_count::text AS "orderCount",
+      sales::text AS sales,
+      marketplace_fee::text AS "marketplaceFee",
+      product_cost::text AS "productCost",
+      paid_shipping_fee::text AS "paidShippingFee",
+      actual_shipping_fee::text AS "actualShippingFee",
+      box_cost::text AS "boxCost"
+    FROM product_rows
+    ${searchFilter}
+    ORDER BY ${sortExpression} ${sortDirection}, product_name ASC, sku ASC
+    LIMIT 1000
+  `)
+
+  const rows = resultRows(queryResult).map(toProductProfitRow)
+  return {
+    rows,
+    totals: buildProductTotals(rows),
+    currentMonthLabel: monthLabel(now),
+  }
+}
+
+export const getCachedProductProfitAnalysisData = unstable_cache(
+  async (
+    userId: string,
+    monthKey: string,
+    search: string,
+    sort: ProductProfitSort,
+    direction: SortDirection,
+  ) => getProductProfitAnalysisData(userId, {
+    now: parseAnalyticsMonth(monthKey),
+    search,
+    sort,
+    direction,
+  }),
+  ['product-profit-analysis'],
+  { revalidate: 30 },
+)
+
+export function emptyProductProfitAnalysisData(now = new Date()): ProductProfitAnalysisData {
+  return {
+    rows: [],
+    totals: buildProductTotals([]),
+    currentMonthLabel: monthLabel(now),
+  }
+}
 
 export function emptySalesDashboardData(now = new Date()): SalesDashboardData {
   return {
     currentMonthLabel: monthLabel(now),
     cards: [
-      { key: 'month-sales', label: '당월매출', value: 0, subLabel: '주문일 기준 실시간' },
-      { key: 'shipped-expected', label: '당월 출고완료 매출예상금액', value: 0, subLabel: '출고일 기준' },
+      { key: 'month-sales', label: '선택 월 매출', value: 0, subLabel: '주문일 기준' },
+      { key: 'shipped-expected', label: '선택 월 출고완료 매출예상금액', value: 0, subLabel: '출고일 기준' },
       { key: 'profit-excluding-shipping', label: '배송비 제외 현 이익금', value: 0, subLabel: '매출 - 수수료 - 상품원가 - 결제배송비' },
       { key: 'last-month-same-period', label: '지난달 동기간 대비', value: 0, suffix: '%', subLabel: '지난달 동기간 0원' },
       { key: 'three-month-average', label: '직전 3개월 평균 대비', value: 0, suffix: '%', subLabel: '3개월 평균 0원' },
@@ -824,6 +1235,31 @@ function toOrderProfitRow(row: OrderProfitQueryRow): OrderProfitRow {
   }
 }
 
+function toProductProfitRow(row: ProductProfitQueryRow): ProductProfitRow {
+  const sales = toNumber(row.sales)
+  const marketplaceFee = toNumber(row.marketplaceFee)
+  const productCost = toNumber(row.productCost)
+  const paidShippingFee = toNumber(row.paidShippingFee)
+  const actualShippingFee = toNumber(row.actualShippingFee)
+  const boxCost = toNumber(row.boxCost)
+  const finalProfit = sales - marketplaceFee - productCost + paidShippingFee - actualShippingFee - boxCost
+
+  return {
+    sku: row.sku,
+    productName: row.productName || '상품명 없음',
+    quantity: toNumber(row.quantity),
+    orderCount: toNumber(row.orderCount),
+    sales,
+    marketplaceFee,
+    productCost,
+    paidShippingFee,
+    actualShippingFee,
+    boxCost,
+    finalProfit,
+    profitRate: sales > 0 ? (finalProfit / sales) * 100 : null,
+  }
+}
+
 function toProfitMissingSummary(row: ProfitMissingSummaryQueryRow | undefined): ProfitMissingSummary {
   return {
     totalOrders: toNumber(row?.totalOrders),
@@ -864,6 +1300,84 @@ function buildTotals(rows: MarketplaceSalesRow[]): MarketplaceSalesRow {
   return totals
 }
 
+function buildProductTotals(rows: ProductProfitRow[]): ProductProfitRow {
+  const totals = rows.reduce<ProductProfitRow>((acc, row) => {
+    acc.quantity += row.quantity
+    acc.orderCount += row.orderCount
+    acc.sales += row.sales
+    acc.marketplaceFee += row.marketplaceFee
+    acc.productCost += row.productCost
+    acc.paidShippingFee += row.paidShippingFee
+    acc.actualShippingFee += row.actualShippingFee
+    acc.boxCost += row.boxCost
+    acc.finalProfit += row.finalProfit
+    return acc
+  }, {
+    sku: 'total',
+    productName: '합계',
+    quantity: 0,
+    orderCount: 0,
+    sales: 0,
+    marketplaceFee: 0,
+    productCost: 0,
+    paidShippingFee: 0,
+    actualShippingFee: 0,
+    boxCost: 0,
+    finalProfit: 0,
+    profitRate: null,
+  })
+  totals.profitRate = totals.sales > 0 ? (totals.finalProfit / totals.sales) * 100 : null
+  return totals
+}
+
+function productProfitSortExpression(sort: ProductProfitSort) {
+  switch (sort) {
+    case 'product': return sql`product_name`
+    case 'quantity': return sql`quantity`
+    case 'order-count': return sql`order_count`
+    case 'marketplace-fee': return sql`marketplace_fee`
+    case 'product-cost': return sql`product_cost`
+    case 'paid-shipping': return sql`paid_shipping_fee`
+    case 'actual-shipping': return sql`actual_shipping_fee`
+    case 'box-cost': return sql`box_cost`
+    case 'final-profit':
+      return sql`(sales - marketplace_fee - product_cost + paid_shipping_fee - actual_shipping_fee - box_cost)`
+    case 'profit-rate':
+      return sql`((sales - marketplace_fee - product_cost + paid_shipping_fee - actual_shipping_fee - box_cost) / NULLIF(sales, 0))`
+    case 'sales':
+    default:
+      return sql`sales`
+  }
+}
+
+function orderProfitSortExpression(sort: OrderProfitSort) {
+  switch (sort) {
+    case 'order': return sql`internal_no`
+    case 'marketplace': return sql`marketplace_name`
+    case 'product': return sql`product_summary`
+    case 'calculation-status':
+      return sql`(
+        missing_fee::int
+        + missing_product_cost::int
+        + missing_actual_shipping::int
+        + missing_packaging::int
+      )`
+    case 'sales': return sql`sales`
+    case 'marketplace-fee': return sql`marketplace_fee`
+    case 'product-cost': return sql`product_cost`
+    case 'paid-shipping': return sql`paid_shipping_fee`
+    case 'actual-shipping': return sql`actual_shipping_fee`
+    case 'box-cost': return sql`box_cost`
+    case 'final-profit':
+      return sql`(sales - marketplace_fee - product_cost + paid_shipping_fee - actual_shipping_fee - box_cost)`
+    case 'profit-rate':
+      return sql`((sales - marketplace_fee - product_cost + paid_shipping_fee - actual_shipping_fee - box_cost) / NULLIF(sales, 0))`
+    case 'ordered-at':
+    default:
+      return sql`ordered_at`
+  }
+}
+
 function toNumber(value: string | number | null | undefined): number {
   const number = Number(value ?? 0)
   return Number.isFinite(number) ? number : 0
@@ -875,6 +1389,23 @@ function resultRows<T>(result: T[] | { rows?: T[] }): T[] {
 
 function sqlDate(value: Date): string {
   return value.toISOString()
+}
+
+export function analyticsMonthKey(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+export function parseAnalyticsMonth(value?: string): Date {
+  const match = /^(\d{4})-(\d{2})$/.exec(value ?? '')
+  if (!match) return new Date()
+
+  const year = Number(match[1])
+  const monthIndex = Number(match[2]) - 1
+  if (monthIndex < 0 || monthIndex > 11) return new Date()
+
+  const today = new Date()
+  if (year === today.getFullYear() && monthIndex === today.getMonth()) return today
+  return new Date(year, monthIndex + 1, 0, 23, 59, 59, 999)
 }
 
 function percentChange(current: number, base: number): number {

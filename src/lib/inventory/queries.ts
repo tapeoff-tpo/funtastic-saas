@@ -10,7 +10,7 @@
  */
 
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, orders, products } from '@/lib/db/schema'
+import { inventory, inventoryHistory, orders, products, productVariants } from '@/lib/db/schema'
 import { eq, and, or, ilike, desc, asc, count, ne, sql, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
@@ -27,9 +27,11 @@ export async function getInventoryList(
 
   const conditions: SQL[] = [
     eq(products.userId, userId),
+    eq(inventory.userId, userId),
     ne(products.status, 'deleted'),
     // 재고관리 대상으로 체크된 상품만 노출 (migration 023)
     eq(products.manageInventory, true),
+    eq(productVariants.isActive, true),
   ]
 
   // 통합 검색 — 기존 호환성 유지: 품번 또는 상품명 OR 매칭
@@ -39,6 +41,9 @@ export async function getInventoryList(
       or(
         ilike(products.internalSku, searchPattern),
         ilike(products.name, searchPattern),
+        ilike(inventory.sku, searchPattern),
+        ilike(inventory.productName, searchPattern),
+        ilike(inventory.optionName, searchPattern),
       )!,
     )
   }
@@ -69,15 +74,15 @@ export async function getInventoryList(
 
   const sortColumn = (() => {
     switch (filters.sort) {
-      case 'sku': return products.internalSku
-      case 'productName': return products.name
+      case 'sku': return inventory.sku
+      case 'productName': return inventory.productName
       case 'warehouseZone': return sql`COALESCE(${inventory.warehouseZone}, '')`
       case 'sectorCode': return sql`COALESCE(${inventory.sectorCode}, '')`
       case 'totalStock': return sql`COALESCE(${inventory.totalStock}, 0)`
       case 'reservedStock': return sql`COALESCE(${inventory.reservedStock}, 0)`
       case 'availableStock': return sql`COALESCE(${inventory.availableStock}, 0)`
       case 'updatedAt': return products.updatedAt
-      default: return products.internalSku
+      default: return inventory.sku
     }
   })()
 
@@ -87,11 +92,11 @@ export async function getInventoryList(
   const [pageRows, [{ total }]] = await Promise.all([
     db
       .select({
-        id: sql<string>`COALESCE(${inventory.id}::text, ${products.id}::text)`,
+        id: inventory.id,
         inventoryId: inventory.id,
         productId: products.id,
-        sku: products.internalSku,
-        productName: products.name,
+        sku: inventory.sku,
+        productName: inventory.productName,
         optionName: inventory.optionName,
         packagingUnit: inventory.packagingUnit,
         warehouseZone: inventory.warehouseZone,
@@ -104,16 +109,18 @@ export async function getInventoryList(
         updatedAt: sql<Date>`COALESCE(${inventory.updatedAt}, ${products.updatedAt})`,
         userId: products.userId,
       })
-      .from(products)
-      .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
+      .from(inventory)
+      .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
+      .innerJoin(products, eq(products.id, productVariants.productId))
       .where(whereClause)
       .orderBy(sortDirection(sortColumn))
       .limit(pageSize)
       .offset(offset),
     db
       .select({ total: count() })
-      .from(products)
-      .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
+      .from(inventory)
+      .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
+      .innerJoin(products, eq(products.id, productVariants.productId))
       .where(whereClause),
   ])
 

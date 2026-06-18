@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, products } from '@/lib/db/schema'
+import { inventory, inventoryHistory, products, productVariants } from '@/lib/db/schema'
 import { eq, and, ne, sql, inArray } from 'drizzle-orm'
 
 export async function GET(req: NextRequest) {
@@ -31,15 +31,20 @@ export async function GET(req: NextRequest) {
   const nextYear = month === 12 ? year + 1 : year
   const monthEnd = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01 00:00:00+09`
 
-  const conditions = [eq(products.userId, user.id), ne(products.status, 'deleted')]
+  const conditions = [
+    eq(products.userId, user.id),
+    eq(inventory.userId, user.id),
+    ne(products.status, 'deleted'),
+    eq(productVariants.isActive, true),
+  ]
   if (skus && skus.length > 0) {
-    conditions.push(inArray(products.internalSku, skus))
+    conditions.push(inArray(inventory.sku, skus))
   }
 
   const rows = await db
     .select({
-      sku: products.internalSku,
-      productName: products.name,
+      sku: inventory.sku,
+      productName: inventory.productName,
       optionName: inventory.optionName,
       packagingUnit: inventory.packagingUnit,
       warehouseZone: inventory.warehouseZone,
@@ -52,12 +57,13 @@ export async function GET(req: NextRequest) {
       lastIncomingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ${inventoryHistory.createdAt} END)`,
       lastOutgoingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ${inventoryHistory.createdAt} END)`,
     })
-    .from(products)
-    .leftJoin(inventory, and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)))
+    .from(inventory)
+    .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
+    .innerJoin(products, eq(products.id, productVariants.productId))
     .leftJoin(inventoryHistory, eq(inventoryHistory.inventoryId, inventory.id))
     .where(and(...conditions))
     .groupBy(products.id, inventory.id)
-    .orderBy(products.internalSku)
+    .orderBy(inventory.sku)
 
   const monthLabel = `${year}년 ${month}월`
 

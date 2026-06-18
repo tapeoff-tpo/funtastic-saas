@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { db } from '@/lib/db'
-import { orderItems, orders, shipments } from '@/lib/db/schema'
+import { marketplaceConnections, orderItems, orders, shipments } from '@/lib/db/schema'
 import { MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
 import { createClient } from '@/lib/supabase/server'
 
@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
       orderId: orders.id,
       internalNo: orders.internalNo,
       marketplaceId: orders.marketplaceId,
+      systemMarketplaceName: sql<string | null>`NULLIF(${marketplaceConnections.metadata}->>'systemMarketplaceName', '')`,
       marketplaceOrderId: orders.marketplaceOrderId,
       status: orders.status,
       buyerName: orders.buyerName,
@@ -39,6 +40,7 @@ export async function GET(req: NextRequest) {
     })
     .from(shipments)
     .innerJoin(orders, eq(shipments.orderId, orders.id))
+    .leftJoin(marketplaceConnections, eq(marketplaceConnections.id, orders.connectionId))
     .where(and(
       eq(shipments.userId, workspaceUserId),
       eq(shipments.normalizedTrackingNumber, normalizedTrackingNumber),
@@ -68,7 +70,7 @@ export async function GET(req: NextRequest) {
     found: true,
     order: {
       ...row,
-      marketplaceName: MARKETPLACE_DISPLAY_NAMES[row.marketplaceId] ?? row.marketplaceId,
+      marketplaceName: row.systemMarketplaceName ?? MARKETPLACE_DISPLAY_NAMES[row.marketplaceId] ?? row.marketplaceId,
       orderedAt: row.orderedAt.toISOString(),
       shippedAt: row.shippedAt?.toISOString() ?? null,
       items,

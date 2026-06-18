@@ -28,7 +28,7 @@ const SSGMALL_CARRIER_CODES: Record<string, string> = {
 
 const SSGMALL_CONFIG: MarketplaceConfig = {
   id: 'ssgmall',
-  name: 'SSG',
+  name: '신세계몰',
   authType: 'api_key',
   rateLimitPerSecond: 5,
   requiredCredentials: ['api_key'],

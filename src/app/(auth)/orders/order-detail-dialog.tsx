@@ -54,6 +54,7 @@ interface OrderDetail {
   id: string
   marketplaceOrderId: string
   marketplaceId: string
+  marketplaceDisplayName?: string | null
   status: OrderStatus
   orderedAt: string
   collectedAt?: string | null
@@ -389,7 +390,7 @@ export function OrderDetailDialog({ orderId, open, onOpenChange }: Props) {
             </div>
             {order && (
               <p className="mt-0.5 text-xs text-muted-foreground">
-                {order.marketplaceId} · {fmtDateTime(order.orderedAt)}
+                {order.marketplaceDisplayName ?? order.marketplaceId} · {fmtDateTime(order.orderedAt)}
               </p>
             )}
           </div>

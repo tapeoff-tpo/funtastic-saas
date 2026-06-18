@@ -14,7 +14,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products, inventory } from '@/lib/db/schema'
+import { products, inventory, productVariants } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { eq, and, or, ilike, ne, sql } from 'drizzle-orm'
 
@@ -38,16 +38,18 @@ export async function GET(req: NextRequest) {
     // 같은 prefix 의 변형(단품)들을 통합해서 1행으로.
     const rowsResult = await db.execute(sql`
       SELECT
-        split_part(p.internal_sku, '-', 1)                              AS "internalSku",
+        p.internal_sku                                                   AS "internalSku",
         MAX(p.name)                                                     AS "name",
         MAX(p.warehouse_location)                                       AS "warehouseLocation",
         MAX(p.base_price)                                               AS "basePrice",
         MAX(p.cost_price)                                               AS "costPrice",
-        COUNT(DISTINCT p.internal_sku)::int                             AS "variantCount",
+        COUNT(DISTINCT pv.sku)::int                                     AS "variantCount",
         COALESCE(SUM(COALESCE(i.available_stock, 0)), 0)::int           AS "availableStock"
       FROM products p
+      LEFT JOIN product_variants pv
+        ON pv.product_id = p.id AND pv.is_active = true
       LEFT JOIN inventory i
-        ON i.sku = p.internal_sku AND i.user_id = p.user_id
+        ON i.sku = pv.sku AND i.user_id = p.user_id
       WHERE p.user_id = ${workspaceUserId}
         AND p.status <> 'deleted'
         AND p.manage_inventory = true
@@ -57,7 +59,7 @@ export async function GET(req: NextRequest) {
           OR i.product_name ILIKE ${pattern}
           OR i.option_name ILIKE ${pattern}
         )
-      GROUP BY split_part(p.internal_sku, '-', 1)
+      GROUP BY p.id
       ORDER BY MAX(p.name)
       LIMIT 50
     `)
@@ -89,34 +91,35 @@ export async function GET(req: NextRequest) {
   // mode = 'option' (기존 동작). 창고별 inventory 행은 SKU 기준으로 합산한다.
   const rows = await db
     .select({
-      id: products.id,
-      internalSku: products.internalSku,
-      name: products.name,
+      id: productVariants.id,
+      internalSku: inventory.sku,
+      name: inventory.productName,
       warehouseLocation: products.warehouseLocation,
       basePrice: products.basePrice,
       costPrice: products.costPrice,
       optionName: sql<string | null>`MAX(${inventory.optionName})`,
       availableStock: sql<number>`COALESCE(SUM(${inventory.availableStock}), 0)::int`,
     })
-    .from(products)
-    .leftJoin(
-      inventory,
-      and(eq(inventory.sku, products.internalSku), eq(inventory.userId, products.userId)),
-    )
+    .from(inventory)
+    .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
+    .innerJoin(products, eq(products.id, productVariants.productId))
     .where(
       and(
         eq(products.userId, workspaceUserId),
+        eq(inventory.userId, workspaceUserId),
         ne(products.status, 'deleted'),
         eq(products.manageInventory, true),
+        eq(productVariants.isActive, true),
         or(
           ilike(products.internalSku, pattern),
+          ilike(inventory.sku, pattern),
           ilike(products.name, pattern),
           ilike(inventory.productName, pattern),
           ilike(inventory.optionName, pattern),
         ),
       ),
     )
-    .groupBy(products.id)
+    .groupBy(products.id, productVariants.id, inventory.sku, inventory.productName)
     .limit(50)
 
   const results = rows.map((r) => ({ ...r, optionHint: r.optionName ?? null }))

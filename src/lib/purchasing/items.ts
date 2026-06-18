@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { and, asc, count, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 
@@ -27,33 +27,38 @@ export const ESA009M_HEADERS = [
 
 export type Esa009mHeader = (typeof ESA009M_HEADERS)[number]
 export type Esa009mData = Record<Esa009mHeader, string | null>
+export type PurchasingItemSortDirection = 'asc' | 'desc'
+
+const NUMERIC_HEADERS = new Set<Esa009mHeader>([
+  '기존원가(元)',
+  '신규원가(元)',
+  '상품원가(元)',
+  '배송비(元)',
+  'works 기존 원가',
+  'works 신규 원가',
+  '매입부가세',
+  '보통영수증 (%)',
+  '증취세영수증  (%)',
+])
 
 export async function getPurchasingItems(input: {
   userId: string
   page: number
   pageSize: number
   search?: string
+  filters?: Partial<Record<Esa009mHeader, string>>
+  sort?: Esa009mHeader | 'updatedAt'
+  direction?: PurchasingItemSortDirection
 }) {
-  const conditions = [
-    eq(products.userId, input.userId),
-    sql`${products.metadata}->'esa009m' IS NOT NULL`,
-  ]
-  if (input.search) {
-    const pattern = `%${input.search}%`
-    conditions.push(or(
-      ilike(products.internalSku, pattern),
-      ilike(products.name, pattern),
-      sql`${products.metadata}->'esa009m'->>'영문명' ILIKE ${pattern}`,
-      sql`${products.metadata}->'esa009m'->>'HS CODE' ILIKE ${pattern}`,
-    )!)
-  }
+  const conditions = purchasingItemConditions(input.userId, input.search, input.filters)
+  const orderBy = purchasingItemOrderBy(input.sort, input.direction)
   const where = and(...conditions)
   const [rows, [{ total }]] = await Promise.all([
     db.select({
       id: products.id,
       metadata: products.metadata,
       updatedAt: products.updatedAt,
-    }).from(products).where(where).orderBy(asc(products.internalSku))
+    }).from(products).where(where).orderBy(orderBy)
       .limit(input.pageSize).offset((input.page - 1) * input.pageSize),
     db.select({ total: count() }).from(products).where(where),
   ])
@@ -66,6 +71,22 @@ export async function getPurchasingItems(input: {
     })),
     total,
   }
+}
+
+export async function getAllPurchasingItems(userId: string) {
+  const rows = await db.select({
+    id: products.id,
+    metadata: products.metadata,
+    updatedAt: products.updatedAt,
+  }).from(products)
+    .where(and(...purchasingItemConditions(userId)))
+    .orderBy(asc(products.internalSku))
+
+  return rows.map((row) => ({
+    id: row.id,
+    data: normalizeEsaData(row.metadata?.esa009m),
+    updatedAt: row.updatedAt,
+  }))
 }
 
 export async function importPurchasingItems(input: { userId: string; fileBuffer: ArrayBuffer }) {
@@ -83,6 +104,9 @@ export async function importPurchasingItems(input: { userId: string; fileBuffer:
     }))).onConflictDoUpdate({
       target: [products.userId, products.internalSku],
       set: {
+        name: sql`excluded.name`,
+        costPrice: sql`excluded.cost_price`,
+        warehouseLocation: sql`excluded.warehouse_location`,
         metadata: sql`COALESCE(${products.metadata}, '{}'::jsonb) || excluded.metadata`,
         updatedAt: sql`NOW()`,
       },
@@ -139,6 +163,43 @@ function normalizeEsaData(value: unknown): Esa009mData {
     header,
     source[header] == null ? null : String(source[header]),
   ])) as Esa009mData
+}
+
+function purchasingItemConditions(
+  userId: string,
+  search?: string,
+  filters?: Partial<Record<Esa009mHeader, string>>,
+) {
+  const conditions = [
+    eq(products.userId, userId),
+    sql`${products.metadata}->'esa009m' IS NOT NULL`,
+  ]
+  if (search) {
+    const pattern = `%${search}%`
+    conditions.push(or(
+      ilike(products.internalSku, pattern),
+      ilike(products.name, pattern),
+      sql`${products.metadata}->'esa009m'->>'영문명' ILIKE ${pattern}`,
+      sql`${products.metadata}->'esa009m'->>'HS CODE' ILIKE ${pattern}`,
+    )!)
+  }
+  for (const header of ESA009M_HEADERS) {
+    const value = filters?.[header]?.trim()
+    if (value) conditions.push(sql`${products.metadata}->'esa009m'->>${header} ILIKE ${`%${value}%`}`)
+  }
+  return conditions
+}
+
+function purchasingItemOrderBy(
+  sort: Esa009mHeader | 'updatedAt' = '품목코드',
+  direction: PurchasingItemSortDirection = 'asc',
+) {
+  const field = sort === 'updatedAt'
+    ? products.updatedAt
+    : NUMERIC_HEADERS.has(sort)
+      ? sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>${sort}, ''), '[^0-9.-]', '', 'g'), '')::numeric`
+      : sql<string>`COALESCE(${products.metadata}->'esa009m'->>${sort}, '')`
+  return direction === 'desc' ? desc(field) : asc(field)
 }
 
 function cellText(value: ExcelJS.CellValue): string {

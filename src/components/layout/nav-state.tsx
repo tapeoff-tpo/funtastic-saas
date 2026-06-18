@@ -8,27 +8,19 @@ const FAVS_KEY = 'funtastic-favorites'
 const MAX_TABS = 12
 
 export interface OpenTab {
-  /** Full URL including query string (e.g. "/products/mapping?q=?リ섣???源?&page=3").
-   *  Stored full so reopening the tab restores nuqs/useQueryStates filter state. */
   href: string
   label: string
 }
 
-/** Strip query string ??tabs are identified by pathname only, but href remembers state. */
 function stripQuery(href: string): string {
   const i = href.indexOf('?')
   return i === -1 ? href : href.slice(0, i)
 }
 
-/** Public helper ??used by tab-bar to compare tab.href against current pathname. */
 export function tabPathname(tab: { href: string }): string {
   return stripQuery(tab.href)
 }
 
-/**
- * Static label map for known routes. For dynamic routes (/orders/[id]),
- * we fall back to a generic label or the segment.
- */
 const ROUTE_LABELS: Record<string, string> = {
   '/dashboard': '대시보드',
   '/orders': '주문 관리',
@@ -42,14 +34,14 @@ const ROUTE_LABELS: Record<string, string> = {
   '/purchasing/shipping': '배송',
   '/purchasing/arrivals': '도착',
   '/purchasing/quotes': '견적서',
-  '/cs': 'CS 작업함',
+  '/cs': 'CS 작업',
   '/cs/inquiries': '문의',
   '/shipping': '출고 작업',
   '/shipping/held': '미발송 관리',
   '/shipping/scan': '바코드 스캔',
   '/shipping/invoice': '송장 업로드',
   '/shipping/combined': '합포장 관리',
-  '/shipping/templates': '엑셀 양식 관리',
+  '/shipping/templates': '택배 양식 관리',
   '/shipping/print': '배송 라벨 인쇄',
   '/products': '상품 관리',
   '/products/new': '상품 등록',
@@ -59,8 +51,9 @@ const ROUTE_LABELS: Record<string, string> = {
   '/products/marketplace-categories': '마켓 카테고리 매핑',
   '/inventory': '재고관리',
   '/inventory/adjustments': '입출고관리',
-  '/costs': '품목',
   '/analytics': '매출분석',
+  '/analytics/sabangnet-review': '사방넷 검수',
+  '/analytics/short-meeting': '숏미팅',
   '/settings': '설정',
   '/settings/account': '계정 설정',
   '/settings/company': '회사 설정',
@@ -71,7 +64,6 @@ const ROUTE_LABELS: Record<string, string> = {
 
 export function getRouteLabel(pathname: string): string {
   if (ROUTE_LABELS[pathname]) return ROUTE_LABELS[pathname]
-  // Dynamic detail pages
   if (/^\/orders\/[^/]+$/.test(pathname)) return '주문 상세'
   if (/^\/products\/[^/]+$/.test(pathname)) return '상품 상세'
   const seg = pathname.split('/').filter(Boolean).pop()
@@ -97,11 +89,9 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
   const [favorites, setFavorites] = useState<string[]>([])
   const [hydrated, setHydrated] = useState(false)
 
-  // Hydrate from localStorage once on mount
   useEffect(() => {
     try {
       const t = localStorage.getItem(TABS_KEY)
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (t) setTabs(JSON.parse(t))
       const f = localStorage.getItem(FAVS_KEY)
       if (f) setFavorites(JSON.parse(f))
@@ -111,7 +101,6 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true)
   }, [])
 
-  // Persist tabs
   useEffect(() => {
     if (!hydrated) return
     try {
@@ -121,7 +110,6 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     }
   }, [tabs, hydrated])
 
-  // Persist favorites
   useEffect(() => {
     if (!hydrated) return
     try {
@@ -131,20 +119,15 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     }
   }, [favorites, hydrated])
 
-  // Track current route as a tab. /login and /dashboard root excluded from auto-add to avoid clutter.
-  // Tab is identified by pathname; href stores the *full* URL (with query string) so that
-  // reopening the tab restores filter/page/sort state held in URL search params.
   useEffect(() => {
     if (!hydrated) return
     if (!pathname || pathname === '/dashboard') return
     const search = searchParams?.toString() ?? ''
     const fullHref = search ? `${pathname}?${search}` : pathname
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTabs((prev) => {
-      const idx = prev.findIndex((t) => stripQuery(t.href) === pathname)
+      const idx = prev.findIndex((tab) => stripQuery(tab.href) === pathname)
       const label = getRouteLabel(pathname)
       if (idx >= 0) {
-        // Existing tab ??refresh its href to the latest URL so the next reopen restores state.
         if (prev[idx].href === fullHref && prev[idx].label === label) return prev
         const updated = prev.slice()
         updated[idx] = { ...prev[idx], href: fullHref, label }
@@ -156,15 +139,14 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
     })
   }, [pathname, searchParams, hydrated])
 
-  // Close handlers match by pathname ??caller may pass full href or bare path.
   const closeTab = useCallback((href: string) => {
     const path = stripQuery(href)
-    setTabs((prev) => prev.filter((t) => stripQuery(t.href) !== path))
+    setTabs((prev) => prev.filter((tab) => stripQuery(tab.href) !== path))
   }, [])
 
   const closeOthers = useCallback((href: string) => {
     const path = stripQuery(href)
-    setTabs((prev) => prev.filter((t) => stripQuery(t.href) === path))
+    setTabs((prev) => prev.filter((tab) => stripQuery(tab.href) === path))
   }, [])
 
   const closeAll = useCallback(() => {
@@ -173,7 +155,7 @@ export function NavStateProvider({ children }: { children: React.ReactNode }) {
 
   const toggleFavorite = useCallback((href: string) => {
     setFavorites((prev) =>
-      prev.includes(href) ? prev.filter((h) => h !== href) : [...prev, href],
+      prev.includes(href) ? prev.filter((item) => item !== href) : [...prev, href],
     )
   }, [])
 

@@ -114,6 +114,8 @@ export const navSections: NavSection[] = [
     title: '분석',
     items: [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
+      { href: '/analytics/sabangnet-review', label: '사방넷 검수', icon: FileSpreadsheet },
+      { href: '/analytics/short-meeting', label: '숏미팅', icon: ClipboardList },
     ],
   },
   {
@@ -136,8 +138,7 @@ export const navSections: NavSection[] = [
   },
 ]
 
-// Flat lookup so favorites can resolve label/icon from href
-const allNavItems: NavItem[] = navSections.flatMap((s) => s.items)
+const allNavItems: NavItem[] = navSections.flatMap((section) => section.items)
 
 interface SidebarProps {
   onCollapse?: () => void
@@ -157,7 +158,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         if (order) setOrderedSections(applySidebarMenuOrder(navSections, order))
       })
       .catch(() => {
-        // Local order remains usable if the account-level setting cannot be loaded.
+        // Keep the local menu order if account-level settings cannot be loaded.
       })
     window.addEventListener(SIDEBAR_MENU_ORDER_EVENT, syncOrder)
     window.addEventListener('storage', syncOrder)
@@ -175,12 +176,12 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
 
   const orderedNavItems = orderedSections.flatMap((section) => section.items)
   const favoriteItems = favorites
-    .map((href) => orderedNavItems.find((i) => i.href === href) ?? allNavItems.find((i) => i.href === href))
-    .filter((i): i is NavItem => Boolean(i))
+    .map((href) => orderedNavItems.find((item) => item.href === href) ?? allNavItems.find((item) => item.href === href))
+    .filter((item): item is NavItem => Boolean(item))
 
   function isItemActive(href: string) {
     const itemPath = href.split('?')[0]
-    if (itemPath === '/orders' || itemPath === '/cs' || itemPath === '/settings' || itemPath === '/products' || itemPath === '/inventory') {
+    if (itemPath === '/orders' || itemPath === '/cs' || itemPath === '/settings' || itemPath === '/products' || itemPath === '/inventory' || itemPath === '/analytics') {
       return pathname === itemPath
     }
     return pathname.startsWith(itemPath)
@@ -208,9 +209,9 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         {opts.showStar && (
           <button
             type="button"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
               toggleFavorite(item.href)
             }}
             aria-label={fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}
@@ -227,7 +228,6 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
 
   return (
     <aside className="flex h-full w-48 flex-col bg-gray-900 text-white">
-      {/* Logo */}
       <div className="flex h-10 items-center justify-between border-b border-gray-800 px-3">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-bold">Funtastic</span>
@@ -245,14 +245,11 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         )}
       </div>
 
-      {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-1.5">
-        {/* Dashboard */}
         <div className="space-y-px">
           {orderedSections.find((section) => section.id === 'dashboard')?.items.map((item) => renderNavItem(item, { showStar: false }))}
         </div>
 
-        {/* Favorites — directly below Dashboard */}
         {favoriteItems.length > 0 && (
           <div className="mt-2">
             <p className="mb-0.5 flex items-center gap-1 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
@@ -265,7 +262,6 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
           </div>
         )}
 
-        {/* Remaining sections */}
         {orderedSections.filter((section) => section.id !== 'dashboard').map((section) => (
           <div key={section.id} className="mt-2">
             {section.title && (
@@ -280,7 +276,6 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         ))}
       </nav>
 
-      {/* Sign Out */}
       <div className="border-t border-gray-800 px-2 py-1.5">
         <button
           type="button"

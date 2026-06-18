@@ -90,13 +90,14 @@ const KNOWN_MARKETPLACE_ALIASES: Array<{ marketplaceId: string; displayName: str
   { marketplaceId: 'ssgmall', displayName: '신세계몰', aliases: ['신세계몰', 'ssg', 'ssgmall'] },
   { marketplaceId: 'coupang', displayName: '쿠팡', aliases: ['쿠팡', 'coupang'] },
   { marketplaceId: 'elevenst', displayName: '11번가', aliases: ['11번가', 'elevenst'] },
-  { marketplaceId: 'gmarket', displayName: 'G마켓', aliases: ['g마켓', '지마켓', 'gmarket'] },
-  { marketplaceId: 'auction', displayName: '옥션', aliases: ['옥션', 'auction'] },
-  { marketplaceId: 'kakao-gift', displayName: '카카오톡선물하기', aliases: ['카카오톡선물하기', '카카오선물', 'kakao gift'] },
+  { marketplaceId: 'gmarket', displayName: 'G마켓', aliases: ['g마켓', '지마켓', 'esm지마켓', 'gmarket'] },
+  { marketplaceId: 'auction', displayName: '옥션', aliases: ['옥션', 'esm옥션', 'auction'] },
+  { marketplaceId: 'kakao-gift', displayName: '카카오톡선물하기', aliases: ['카카오톡선물하기', '카카오선물하기', '카카오선물', 'kakao gift'] },
   { marketplaceId: 'kakao-store', displayName: '카카오톡스토어', aliases: ['카카오톡스토어', '카카오스토어', 'kakao store'] },
   { marketplaceId: 'cjonestyle', displayName: 'CJ온스타일', aliases: ['cj온스타일', 'cjonestyle'] },
-  { marketplaceId: 'hyundai-hmall', displayName: '현대H몰', aliases: ['현대h몰', 'hmall', 'hyundai hmall'] },
+  { marketplaceId: 'hyundai-hmall', displayName: '현대홈쇼핑', aliases: ['현대h몰', '현대홈쇼핑', '현대홈쇼핑3', 'hmall', 'hyundai hmall'] },
   { marketplaceId: 'gs-shop', displayName: 'GS shop', aliases: ['gs shop', 'gsshop', 'gs샵'] },
+  { marketplaceId: 'nsmall', displayName: 'NS홈쇼핑(신)', aliases: ['ns홈쇼핑', 'ns홈쇼핑신', 'nsmall'] },
 ]
 
 const TABLE_SQL = sql`

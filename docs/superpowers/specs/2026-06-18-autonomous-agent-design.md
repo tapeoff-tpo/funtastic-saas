@@ -1,64 +1,61 @@
-# Funtastic SaaS Autonomous Agent Design
+# 펀타스틱 SaaS 자동형 에이전트 설계
 
-## Goal
+## 목적
 
-Configure the repository agent to complete clear development requests end to
-end without repeatedly asking for approval.
+명확한 개발 요청을 받으면 단계마다 승인을 반복해서 묻지 않고 처음부터
+끝까지 완료하도록 저장소 에이전트를 설정한다.
 
-## Default Workflow
+## 기본 작업 절차
 
-For a clear and scoped request, the agent should:
+요청이 명확하고 범위가 정해져 있으면 에이전트는 다음 절차를 수행한다.
 
-1. Inspect the relevant code and current repository state.
-2. Implement the smallest change that satisfies the request.
-3. Run focused tests, lint checks, and a production build when practical.
-4. Review the resulting diff for unrelated changes.
-5. Commit only the files related to the request.
-6. Push the commit to `origin main`.
-7. Verify the configured Railway production deployment and public URL.
-8. Report the change, verification results, commit, and deployment status.
+1. 관련 코드와 현재 저장소 상태를 확인한다.
+2. 요청을 충족하는 최소한의 변경을 구현한다.
+3. 관련 테스트와 린트를 실행하고, 가능하면 운영용 빌드도 확인한다.
+4. 변경 내역에 요청과 무관한 수정이 포함되지 않았는지 검토한다.
+5. 요청과 관련된 파일만 커밋한다.
+6. 커밋을 `origin main`에 푸시한다.
+7. 지정된 Railway 운영 배포와 공개 주소를 확인한다.
+8. 변경 내용, 검증 결과, 커밋 및 배포 상태를 사용자에게 보고한다.
 
-The agent should continue through this workflow without requesting approval at
-every step.
+에이전트는 위 절차를 진행하면서 단계마다 별도 승인을 요청하지 않는다.
 
-## Approval Boundaries
+## 사전 승인이 필요한 작업
 
-The agent must request approval before:
+다음 작업은 실행 전에 반드시 사용자 승인을 받는다.
 
-- deleting or irreversibly rewriting production data;
-- applying destructive or difficult-to-reverse production database changes;
-- changing, exposing, rotating, or removing credentials and secret values;
-- intentionally disabling a security or access-control safeguard;
-- deploying when the requested behavior or production target is ambiguous.
+- 운영 데이터를 삭제하거나 되돌리기 어렵게 덮어쓰는 작업
+- 파괴적이거나 복구가 어려운 운영 데이터베이스 변경
+- 인증 정보나 비밀값을 변경, 노출, 교체 또는 삭제하는 작업
+- 보안 또는 접근 제어 장치를 의도적으로 해제하는 작업
+- 요청 내용이나 운영 배포 대상이 불분명한 상태에서의 배포
 
-Normal source edits, tests, builds, commits, pushes, and deployment verification
-do not require separate approval when they are necessary to complete a clear
-request.
+명확한 요청을 완료하는 데 필요한 일반적인 코드 수정, 테스트, 빌드,
+커밋, 푸시 및 배포 확인은 별도 승인을 받지 않는다.
 
-## Existing Project Protections
+## 기존 프로젝트 보호 규칙
 
-All existing order immutability, duplicate-collection, marketplace isolation,
-workspace ownership, Next.js documentation, GitHub repository, Railway
-deployment, production branch, and production URL rules remain authoritative.
-Autonomous execution does not permit bypassing those protections.
+기존 주문 불변성, 중복 수집 방지, 마켓별 수집 분리, 작업공간 소유자,
+Next.js 문서 확인, GitHub 저장소, Railway 배포, 운영 브랜치 및 운영
+주소 규칙은 계속 최우선으로 적용한다. 자동형 실행을 이유로 이러한 보호
+규칙을 우회할 수 없다.
 
-## Dirty Worktree Handling
+## 작업 중인 파일 보호
 
-The agent must preserve user changes already present in the working tree. It
-should commit only files directly related to the current request and must not
-revert, overwrite, or silently include unrelated modifications.
+에이전트는 작업 폴더에 이미 존재하는 사용자 변경사항을 보존한다. 현재
+요청과 직접 관련된 파일만 커밋하며, 무관한 변경을 되돌리거나 덮어쓰거나
+몰래 커밋에 포함하지 않는다.
 
-## Failure Handling
+## 실패 처리
 
-- Do not push or deploy when required verification fails.
-- Diagnose and fix failures when they are caused by the current change.
-- Report unrelated pre-existing failures without modifying unrelated code.
-- Never include unrelated user changes in a commit.
+- 필수 검증에 실패하면 푸시하거나 배포하지 않는다.
+- 현재 변경 때문에 발생한 실패는 원인을 확인하고 수정한다.
+- 기존에 있던 무관한 실패는 관련 코드를 임의로 수정하지 않고 보고한다.
+- 사용자의 다른 작업을 현재 커밋에 포함하지 않는다.
 
-## Success Criteria
+## 완료 기준
 
-- Clear requests run from implementation through production verification with
-  no unnecessary approval pauses.
-- High-risk data, schema, credential, and security operations still require
-  explicit approval.
-- Existing project-specific safety rules remain unchanged.
+- 명확한 요청은 불필요한 승인 대기 없이 구현부터 운영 확인까지 진행된다.
+- 데이터, 데이터베이스, 인증 정보 및 보안 관련 고위험 작업은 사전 승인을
+  유지한다.
+- 기존 프로젝트별 보호 규칙은 변경하지 않는다.

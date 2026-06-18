@@ -10,7 +10,7 @@ import { splitPhonePair } from '@/lib/orders/phone-normalize'
 import { normalizeShippingAddress } from '@/lib/orders/shipping-address'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 
-export type SabangnetReviewStatus = 'ready' | 'blocked' | 'confirmed'
+export type SabangnetReviewStatus = 'ready' | 'blocked' | 'confirmed' | 'excluded'
 
 export type SabangnetReviewIssueCode =
   | 'duplicate_in_file'
@@ -468,6 +468,7 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
     id: string
     marketplaceId: string
     orderNumber: string
+    claimType: string | null
     parsedData: ParsedOrderRow
     rawData: RawExcelRow
   }>(sql`
@@ -475,6 +476,7 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
       id,
       marketplace_id AS "marketplaceId",
       order_number AS "orderNumber",
+      claim_type AS "claimType",
       parsed_data AS "parsedData",
       raw_data AS "rawData"
     FROM sabangnet_review_lines
@@ -486,9 +488,23 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
   `))
 
   let confirmed = 0
+  let excluded = 0
   await db.transaction(async (tx) => {
+    const excludedLines = lines.filter((line) => line.claimType === 'cancel' || line.claimType === 'return')
+    if (excludedLines.length > 0) {
+      await tx.execute(sql`
+        UPDATE sabangnet_review_lines
+        SET review_status = 'excluded',
+            confirmed_at = NOW(),
+            updated_at = NOW()
+        WHERE id IN (${sql.join(excludedLines.map((line) => sql`${line.id}::uuid`), sql`, `)})
+          AND user_id = ${userId}
+      `)
+      excluded += excludedLines.length
+    }
+
     const groupedLines = new Map<string, typeof lines>()
-    for (const line of lines) {
+    for (const line of lines.filter((line) => line.claimType !== 'cancel' && line.claimType !== 'return')) {
       const effectiveOrderNumber = getSabangnetOrderNumber(line.rawData) || line.orderNumber
       const groupKey = `${line.marketplaceId}:${effectiveOrderNumber}`
       const group = groupedLines.get(groupKey) ?? []
@@ -507,8 +523,11 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
         zipCode: parsed.zipCode ?? '',
         address1: parsed.recipientAddress,
       })
-      const orderTotalAmount = group.reduce((sum, line) => sum + Number(line.parsedData.totalAmount || 0), 0)
       const orderShippingFee = group.reduce((sum, line) => sum + Number(line.parsedData.shippingFee || 0), 0)
+      const hasExchange = group.some((line) => line.claimType === 'exchange')
+      const orderTotalAmount = hasExchange
+        ? 0
+        : group.reduce((sum, line) => sum + Number(line.parsedData.totalAmount || 0), 0)
 
       const [newOrder] = await tx.insert(orders).values({
         internalNo: generateInternalNo(),
@@ -526,7 +545,7 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
         shippingAddress,
         orderedAt,
         totalAmount: String(orderTotalAmount),
-        shippingFee: orderShippingFee > 0 ? String(orderShippingFee) : null,
+        shippingFee: !hasExchange && orderShippingFee > 0 ? String(orderShippingFee) : null,
         deliveryMessage: parsed.deliveryMessage ?? null,
         rawData: {
           source: 'sabangnet-review',
@@ -534,7 +553,10 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
           reviewBatchId: batchId,
           reviewLineOrderNumbers: group.map((line) => line.orderNumber),
           rawLines: group.map((line) => line.rawData),
-          analyticsPolicy: 'cancel-exclude-return-deduct-exchange-extra-cost',
+          analyticsPolicy: 'cancel-return-exclude-exchange-initial-shipping-x2',
+          analyticsClaimType: hasExchange ? 'exchange' : null,
+          exchangeInitialShippingFee: hasExchange ? orderShippingFee : null,
+          exchangeShippingCostMultiplier: hasExchange ? 2 : null,
         },
         marketplaceStatus: pickByHeaders(firstLine.rawData, ORDER_STATUS_HEADERS) || null,
         collectedAt: new Date(),
@@ -588,7 +610,7 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
     `)
   })
 
-  return { confirmed }
+  return { confirmed, excluded }
 }
 
 async function getMarketplaceConnections(userId: string): Promise<MarketplaceConnectionForReview[]> {
@@ -729,8 +751,6 @@ function buildReviewLine(input: {
     'shipping_fee_invalid',
     '배송비 오류',
   )
-  pushIssue(Boolean(claimType), 'claim_status', `${claimLabel(claimType)} 상태`)
-
   return {
     rowNumber: input.rowNumber,
     orderNumber: input.row.orderNumber,

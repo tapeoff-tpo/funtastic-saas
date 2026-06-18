@@ -54,7 +54,9 @@ export function SabangnetReviewActions({
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? '확정 반영에 실패했습니다.')
-      setMessage(`정상 주문 ${json.confirmed ?? 0}건을 확정 반영했습니다.`)
+      const confirmed = Number(json.confirmed ?? 0).toLocaleString('ko-KR')
+      const excluded = Number(json.excluded ?? 0).toLocaleString('ko-KR')
+      setMessage(`정상/교환 주문 ${confirmed}건을 확정 반영하고, 취소/반품 ${excluded}건은 매출 제외 처리했습니다.`)
       router.refresh()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '확정 반영에 실패했습니다.')

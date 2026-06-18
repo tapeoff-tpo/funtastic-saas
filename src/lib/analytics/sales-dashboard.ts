@@ -439,12 +439,20 @@ export async function getOrderProfitAnalysisData(
         ) AS marketplace_fee,
         COALESCE(items.product_cost, 0) AS product_cost,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
-        COALESCE(shipments.actual_shipping_fee, 0) AS actual_shipping_fee,
+        CASE
+          WHEN o.raw_data->>'analyticsClaimType' = 'exchange'
+            THEN COALESCE(NULLIF(o.raw_data->>'exchangeInitialShippingFee', '')::numeric, 0)
+              * COALESCE(NULLIF(o.raw_data->>'exchangeShippingCostMultiplier', '')::numeric, 2)
+          ELSE COALESCE(shipments.actual_shipping_fee, 0)
+        END AS actual_shipping_fee,
         COALESCE(shipments.box_cost, 0) AS box_cost,
         COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent) IS NULL AS missing_fee,
         COALESCE(items.missing_product_cost, true) AS missing_product_cost,
-        COALESCE(shipments.shipment_count, 0) = 0
-          OR COALESCE(shipments.unmatched_shipment_count, 0) > 0 AS missing_actual_shipping,
+        CASE
+          WHEN o.raw_data->>'analyticsClaimType' = 'exchange' THEN false
+          ELSE COALESCE(shipments.shipment_count, 0) = 0
+            OR COALESCE(shipments.unmatched_shipment_count, 0) > 0
+        END AS missing_actual_shipping,
         COALESCE(shipments.shipment_count, 0) = 0
           OR COALESCE(shipments.missing_box_cost_count, 0) > 0 AS missing_packaging
       FROM orders o
@@ -758,12 +766,19 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         END AS marketplace_name,
         (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
+        CASE
+          WHEN o.raw_data->>'analyticsClaimType' = 'exchange'
+            THEN COALESCE(NULLIF(o.raw_data->>'exchangeInitialShippingFee', '')::numeric, 0)
+              * COALESCE(NULLIF(o.raw_data->>'exchangeShippingCostMultiplier', '')::numeric, 2)
+          ELSE NULL
+        END AS exchange_actual_shipping_fee,
         COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0) AS fee_percent
       FROM orders o
       LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
       LEFT JOIN marketplace_fee_settings mfs
         ON mfs.user_id = o.user_id
        AND mfs.marketplace_id = o.marketplace_id
+      LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
         AND o.ordered_at < ${nextMonthStart}
@@ -833,7 +848,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       COALESCE(SUM(ob.total_amount * ob.fee_percent / 100), 0)::text AS "marketplaceFee",
       COALESCE(MAX(pc.product_cost), 0)::text AS "productCost",
       COALESCE(SUM(ob.paid_shipping_fee), 0)::text AS "paidShippingFee",
-      COALESCE(MAX(sc.actual_shipping_fee), 0)::text AS "actualShippingFee",
+      (COALESCE(MAX(sc.actual_shipping_fee), 0) + COALESCE(SUM(ob.exchange_actual_shipping_fee), 0))::text AS "actualShippingFee",
       COALESCE(MAX(sc.box_cost), 0)::text AS "boxCost"
     FROM order_base ob
     LEFT JOIN product_costs pc ON pc.account_key = ob.account_key
@@ -950,6 +965,12 @@ export async function getProductProfitAnalysisData(
         o.id,
         (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
+        CASE
+          WHEN o.raw_data->>'analyticsClaimType' = 'exchange'
+            THEN COALESCE(NULLIF(o.raw_data->>'exchangeInitialShippingFee', '')::numeric, 0)
+              * COALESCE(NULLIF(o.raw_data->>'exchangeShippingCostMultiplier', '')::numeric, 2)
+          ELSE NULL
+        END AS exchange_actual_shipping_fee,
         (
           CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END
           * o.total_amount::numeric
@@ -1048,7 +1069,7 @@ export async function getProductProfitAnalysisData(
         COALESCE(SUM(ob.marketplace_fee * wi.allocation_rate), 0) AS marketplace_fee,
         COALESCE(SUM(wi.product_cost), 0) AS product_cost,
         COALESCE(SUM(ob.paid_shipping_fee * wi.allocation_rate), 0) AS paid_shipping_fee,
-        COALESCE(SUM(COALESCE(sc.actual_shipping_fee, 0) * wi.allocation_rate), 0) AS actual_shipping_fee,
+        COALESCE(SUM(COALESCE(ob.exchange_actual_shipping_fee, sc.actual_shipping_fee, 0) * wi.allocation_rate), 0) AS actual_shipping_fee,
         COALESCE(SUM(COALESCE(sc.box_cost, 0) * wi.allocation_rate), 0) AS box_cost
       FROM weighted_items wi
       JOIN order_base ob ON ob.id = wi.order_id

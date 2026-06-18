@@ -330,6 +330,7 @@ function ReviewLineTable({
 
 function statusBadge(status: SabangnetReviewLine['reviewStatus']) {
   if (status === 'confirmed') return <Badge tone="done">확정</Badge>
+  if (status === 'excluded') return <Badge tone="default">제외</Badge>
   if (status === 'ready') return <Badge tone="ok">정상</Badge>
   return <Badge tone="warn">보류</Badge>
 }

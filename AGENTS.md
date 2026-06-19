@@ -43,3 +43,21 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - Production is deployed on Railway from the GitHub `main` branch.
 - After production fixes, run a production build when practical, commit changes, push to `origin main`, and verify the Railway URL responds.
+
+## 자동형 작업 운영
+
+요청이 명확하고 범위가 정해져 있으면 중간 승인을 반복해서 묻지 말고 관련 코드 확인, 구현, 검증, 커밋, `origin main` 푸시, Railway 운영 배포 및 공개 주소 확인까지 이어서 수행한다.
+
+- 요청과 직접 관련된 파일만 수정하고 커밋한다.
+- 필수 검증에 실패하면 푸시하거나 배포하지 않는다.
+- 현재 변경 때문에 발생한 실패는 원인을 확인하고 수정한다.
+- 기존에 있던 무관한 실패나 사용자 변경사항은 임의로 수정, 삭제, 되돌리거나 현재 커밋에 포함하지 않는다.
+- 완료 보고에는 변경 내용, 검증 결과, 커밋 및 배포 상태를 포함한다.
+
+다음 작업은 실행 전에 반드시 사용자 승인을 받는다.
+
+- 운영 데이터를 삭제하거나 되돌리기 어렵게 덮어쓰는 작업
+- 파괴적이거나 복구가 어려운 운영 데이터베이스 변경
+- 인증 정보나 비밀값을 변경, 노출, 교체 또는 삭제하는 작업
+- 보안 또는 접근 제어 장치를 의도적으로 해제하는 작업
+- 요청 내용이나 운영 배포 대상이 불분명한 상태에서의 배포

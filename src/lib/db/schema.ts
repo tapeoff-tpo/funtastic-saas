@@ -565,6 +565,158 @@ export const inventoryHistory = pgTable(
   ],
 )
 
+// Purchase workflow: Ecount Excel import -> purchase plan -> buying -> China warehouse arrival.
+export const purchaseRequestStatusEnum = pgEnum('purchase_request_status', [
+  'requested',
+  'purchased',
+  'china_arrived',
+  'outbound_requested',
+  'completed',
+])
+
+export const purchaseRequestBatches = pgTable(
+  'purchase_request_batches',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    sourceFileName: varchar('source_file_name', { length: 255 }).notNull(),
+    sourceSheetName: varchar('source_sheet_name', { length: 100 }).notNull().default('발주등록'),
+    totalRows: integer('total_rows').notNull().default(0),
+    importedRows: integer('imported_rows').notNull().default(0),
+    skippedRows: integer('skipped_rows').notNull().default(0),
+    uploadedByUserId: uuid('uploaded_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('purchase_request_batches_user_created').on(table.userId, table.createdAt),
+  ],
+)
+
+export const purchaseRequestItems = pgTable(
+  'purchase_request_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    batchId: uuid('batch_id')
+      .references(() => purchaseRequestBatches.id, { onDelete: 'set null' }),
+    rowNumber: integer('row_number').notNull(),
+    status: purchaseRequestStatusEnum('status').notNull().default('requested'),
+
+    requestDate: date('request_date'),
+    sequence: integer('sequence'),
+    managerCode: varchar('manager_code', { length: 50 }),
+    inboundWarehouseCode: varchar('inbound_warehouse_code', { length: 50 }),
+    tradeType: varchar('trade_type', { length: 50 }),
+    currency: varchar('currency', { length: 20 }),
+    exchangeRate: numeric('exchange_rate', { precision: 12, scale: 4 }),
+    dueDate: date('due_date'),
+    requester: varchar('requester', { length: 100 }),
+    extraBudgetYn: varchar('extra_budget_yn', { length: 10 }),
+
+    memo: text('memo'),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    productName: text('product_name').notNull(),
+    optionName: varchar('option_name', { length: 200 }),
+    requestedQuantity: integer('requested_quantity').notNull().default(0),
+    chinaArrivalRequestDate: date('china_arrival_request_date'),
+    packageSetQuantity: integer('package_set_quantity'),
+    actualPurchaseQuantity: integer('actual_purchase_quantity'),
+    purchaseManagementCode: varchar('purchase_management_code', { length: 100 }),
+    purchaseMemo: text('purchase_memo'),
+    prepackRequired: varchar('prepack_required', { length: 20 }),
+    barcodeName: text('barcode_name'),
+    barcodeNo: varchar('barcode_no', { length: 100 }),
+    stockMemo: text('stock_memo'),
+    unitPriceCny: numeric('unit_price_cny', { precision: 12, scale: 2 }),
+    totalPriceCny: numeric('total_price_cny', { precision: 14, scale: 2 }),
+    totalPriceKrw: numeric('total_price_krw', { precision: 14, scale: 2 }),
+    shippingFeeCny: numeric('shipping_fee_cny', { precision: 12, scale: 2 }),
+    productionProcess: text('production_process'),
+    purchaseNote: text('purchase_note'),
+    packageRequiredCode: varchar('package_required_code', { length: 50 }),
+    packageRequired: varchar('package_required', { length: 50 }),
+    koreanManualRequiredCode: varchar('korean_manual_required_code', { length: 50 }),
+    koreanManualRequired: varchar('korean_manual_required', { length: 50 }),
+    sourceCurrentState: varchar('source_current_state', { length: 100 }),
+    improvementFeedbackDate: date('improvement_feedback_date'),
+    expectedArrivalDate: date('expected_arrival_date'),
+    productType: varchar('product_type', { length: 100 }),
+    buyerName: varchar('buyer_name', { length: 100 }),
+    buyerCode: varchar('buyer_code', { length: 50 }),
+
+    supplierOrderNumber: varchar('supplier_order_number', { length: 100 }),
+    outboundExpectedDate: date('outbound_expected_date'),
+    purchaseMethod: varchar('purchase_method', { length: 100 }),
+    purchaseConfirmed: boolean('purchase_confirmed').notNull().default(false),
+    chinaReceivedQuantity: integer('china_received_quantity'),
+    chinaReceivedAt: timestamp('china_received_at', { withTimezone: true }),
+
+    recommendationBasis: varchar('recommendation_basis', { length: 50 }),
+    salesAverageWindowDays: integer('sales_average_window_days'),
+    manualAverageSales: numeric('manual_average_sales', { precision: 12, scale: 2 }),
+    isSeasonal: boolean('is_seasonal').notNull().default(false),
+    isNewProduct: boolean('is_new_product').notNull().default(false),
+    isSalesSurging: boolean('is_sales_surging').notNull().default(false),
+
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('purchase_request_items_user_status').on(table.userId, table.status),
+    index('purchase_request_items_user_sku').on(table.userId, table.sku),
+    index('purchase_request_items_batch').on(table.batchId),
+    uniqueIndex('purchase_request_items_user_management_code').on(table.userId, table.purchaseManagementCode),
+  ],
+)
+
+export const chinaWarehouseInventory = pgTable(
+  'china_warehouse_inventory',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    productName: text('product_name').notNull(),
+    optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
+    optionName: varchar('option_name', { length: 200 }),
+    totalQuantity: integer('total_quantity').notNull().default(0),
+    availableQuantity: integer('available_quantity').notNull().default(0),
+    lastArrivedAt: timestamp('last_arrived_at', { withTimezone: true }),
+    lastOutboundRequestedAt: timestamp('last_outbound_requested_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('china_warehouse_inventory_user_sku_option').on(table.userId, table.sku, table.optionKey),
+    index('china_warehouse_inventory_user_sku').on(table.userId, table.sku),
+  ],
+)
+
+export const chinaWarehouseInventoryMovements = pgTable(
+  'china_warehouse_inventory_movements',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    inventoryId: uuid('inventory_id')
+      .notNull()
+      .references(() => chinaWarehouseInventory.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull(),
+    purchaseRequestItemId: uuid('purchase_request_item_id')
+      .notNull()
+      .references(() => purchaseRequestItems.id, { onDelete: 'cascade' }),
+    movementType: varchar('movement_type', { length: 50 }).notNull(),
+    delta: integer('delta').notNull(),
+    quantityBefore: integer('quantity_before').notNull(),
+    quantityAfter: integer('quantity_after').notNull(),
+    note: text('note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('china_warehouse_movements_item_type').on(table.purchaseRequestItemId, table.movementType),
+    index('china_warehouse_movements_inventory_created').on(table.inventoryId, table.createdAt),
+    index('china_warehouse_movements_user_created').on(table.userId, table.createdAt),
+  ],
+)
+
 export const inventoryAdjustmentSlips = pgTable(
   'inventory_adjustment_slips',
   {

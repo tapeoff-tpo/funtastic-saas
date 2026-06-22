@@ -233,7 +233,12 @@ export function PurchaseStatusButton({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),
       })
-      if (response.ok) router.refresh()
+      if (response.ok) {
+        router.refresh()
+        return
+      }
+      const body = await response.json().catch(() => ({}))
+      window.alert(body.error ?? '진행상태 변경에 실패했습니다.')
     })
   }
 

@@ -233,6 +233,9 @@ export async function updatePurchaseRequestStatus(input: {
       await addChinaWarehouseStock(tx, current)
     }
     if (input.status === 'outbound_requested') {
+      if (current.status === 'china_arrived') {
+        await addChinaWarehouseStock(tx, current)
+      }
       await subtractChinaWarehouseStock(tx, current)
     }
 
@@ -370,15 +373,7 @@ async function addChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequestIt
   if (quantity <= 0) return
   const optionKey = item.optionName ?? ''
 
-  const [existingMovement] = await tx
-    .select({ id: chinaWarehouseInventoryMovements.id })
-    .from(chinaWarehouseInventoryMovements)
-    .where(and(
-      eq(chinaWarehouseInventoryMovements.purchaseRequestItemId, item.id),
-      eq(chinaWarehouseInventoryMovements.movementType, 'arrival'),
-    ))
-    .limit(1)
-  if (existingMovement) return
+  if (await hasChinaWarehouseMovement(tx, item.id, 'arrival')) return
 
   await tx
     .insert(chinaWarehouseInventory)
@@ -437,15 +432,10 @@ async function subtractChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequ
   if (quantity <= 0) return
   const optionKey = item.optionName ?? ''
 
-  const [existingMovement] = await tx
-    .select({ id: chinaWarehouseInventoryMovements.id })
-    .from(chinaWarehouseInventoryMovements)
-    .where(and(
-      eq(chinaWarehouseInventoryMovements.purchaseRequestItemId, item.id),
-      eq(chinaWarehouseInventoryMovements.movementType, 'outbound_request'),
-    ))
-    .limit(1)
-  if (existingMovement) return
+  if (await hasChinaWarehouseMovement(tx, item.id, 'outbound_request')) return
+  if (!await hasChinaWarehouseMovement(tx, item.id, 'arrival')) {
+    throw new Error('중국창고도착으로 입고된 발주 항목만 출고요청으로 이동할 수 있습니다.')
+  }
 
   const [inventoryRow] = await tx
     .select()
@@ -484,6 +474,23 @@ async function subtractChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequ
   }).onConflictDoNothing()
 
   await deleteEmptyChinaWarehouseInventory(tx, item.userId)
+}
+
+async function hasChinaWarehouseMovement(
+  tx: DbTransaction,
+  purchaseRequestItemId: string,
+  movementType: 'arrival' | 'outbound_request',
+) {
+  const [existingMovement] = await tx
+    .select({ id: chinaWarehouseInventoryMovements.id })
+    .from(chinaWarehouseInventoryMovements)
+    .where(and(
+      eq(chinaWarehouseInventoryMovements.purchaseRequestItemId, purchaseRequestItemId),
+      eq(chinaWarehouseInventoryMovements.movementType, movementType),
+    ))
+    .limit(1)
+
+  return Boolean(existingMovement)
 }
 
 async function deleteEmptyChinaWarehouseInventory(tx: DbTransaction, userId: string) {

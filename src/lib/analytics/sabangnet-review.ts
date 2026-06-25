@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { randomUUID } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { marketplaceConnections, orders, orderItems, products, productVariants } from '@/lib/db/schema'
@@ -462,7 +463,11 @@ export async function updateSabangnetReviewLine(
   }
 }
 
-export async function confirmSabangnetReviewBatch(userId: string, batchId: string) {
+export async function confirmSabangnetReviewBatch(
+  userId: string,
+  batchId: string,
+  options: { maxOrderGroups?: number } = {},
+) {
   await ensureSabangnetReviewTables()
   const lines = resultRows(await db.execute<{
     id: string
@@ -512,7 +517,15 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
       groupedLines.set(groupKey, group)
     }
 
-    for (const group of groupedLines.values()) {
+    const orderRows: Array<typeof orders.$inferInsert> = []
+    const itemRows: Array<typeof orderItems.$inferInsert> = []
+    const lineUpdates: Array<{ lineId: string; orderId: string }> = []
+
+    const groupsToConfirm = options.maxOrderGroups
+      ? Array.from(groupedLines.values()).slice(0, Math.max(0, options.maxOrderGroups))
+      : Array.from(groupedLines.values())
+
+    for (const group of groupsToConfirm) {
       const firstLine = group[0]
       const parsed = firstLine.parsedData
       const effectiveOrderNumber = getSabangnetOrderNumber(firstLine.rawData) || firstLine.orderNumber
@@ -529,7 +542,9 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
         ? 0
         : group.reduce((sum, line) => sum + Number(line.parsedData.totalAmount || 0), 0)
 
-      const [newOrder] = await tx.insert(orders).values({
+      const orderId = randomUUID()
+      orderRows.push({
+        id: orderId,
         internalNo: generateInternalNo(),
         userId,
         connectionId: null,
@@ -560,12 +575,12 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
         },
         marketplaceStatus: pickByHeaders(firstLine.rawData, ORDER_STATUS_HEADERS) || null,
         collectedAt: new Date(),
-      }).returning({ id: orders.id })
+      })
 
       for (const line of group) {
         const normalized = normalizeImportedOrderItem(line.parsedData, line.marketplaceId)
-        await tx.insert(orderItems).values({
-          orderId: newOrder.id,
+        itemRows.push({
+          orderId,
           marketplaceItemId: normalized.marketplaceItemId ?? null,
           productName: normalized.productName,
           optionText: normalized.optionText ?? null,
@@ -578,17 +593,32 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
           lockedQuantity: normalized.quantity,
           lockedAt: new Date(),
         })
-
-        await tx.execute(sql`
-          UPDATE sabangnet_review_lines
-          SET confirmed_order_id = ${newOrder.id}::uuid,
-              confirmed_at = NOW(),
-              review_status = 'confirmed',
-              updated_at = NOW()
-          WHERE id = ${line.id}::uuid
-        `)
+        lineUpdates.push({ lineId: line.id, orderId })
         confirmed += 1
       }
+    }
+
+    for (const chunk of chunks(orderRows, 500)) {
+      await tx.insert(orders).values(chunk)
+    }
+
+    for (const chunk of chunks(itemRows, 500)) {
+      await tx.insert(orderItems).values(chunk)
+    }
+
+    for (const chunk of chunks(lineUpdates, 500)) {
+      await tx.execute(sql`
+        UPDATE sabangnet_review_lines AS line
+        SET confirmed_order_id = updates.order_id,
+            confirmed_at = NOW(),
+            review_status = 'confirmed',
+            updated_at = NOW()
+        FROM (
+          VALUES ${sql.join(chunk.map((row) => sql`(${row.lineId}::uuid, ${row.orderId}::uuid)`), sql`, `)}
+        ) AS updates(line_id, order_id)
+        WHERE line.id = updates.line_id
+          AND line.user_id = ${userId}
+      `)
     }
 
     await tx.execute(sql`
@@ -610,7 +640,32 @@ export async function confirmSabangnetReviewBatch(userId: string, batchId: strin
     `)
   })
 
-  return { confirmed, excluded }
+  const [counts] = resultRows(await db.execute<{
+    readyRows: string | number
+    blockedRows: string | number
+    confirmedRows: string | number
+    excludedRows: string | number
+  }>(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE review_status = 'ready') AS "readyRows",
+      COUNT(*) FILTER (WHERE review_status = 'blocked') AS "blockedRows",
+      COUNT(*) FILTER (WHERE review_status = 'confirmed') AS "confirmedRows",
+      COUNT(*) FILTER (WHERE review_status = 'excluded') AS "excludedRows"
+    FROM sabangnet_review_lines
+    WHERE user_id = ${userId}
+      AND batch_id = ${batchId}::uuid
+  `))
+
+  const readyRows = Number(counts?.readyRows ?? 0)
+  return {
+    confirmed,
+    excluded,
+    readyRows,
+    blockedRows: Number(counts?.blockedRows ?? 0),
+    confirmedRows: Number(counts?.confirmedRows ?? 0),
+    excludedRows: Number(counts?.excludedRows ?? 0),
+    done: readyRows === 0,
+  }
 }
 
 async function getMarketplaceConnections(userId: string): Promise<MarketplaceConnectionForReview[]> {

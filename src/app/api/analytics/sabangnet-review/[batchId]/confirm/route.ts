@@ -22,7 +22,11 @@ export async function POST(
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   try {
-    const result = await confirmSabangnetReviewBatch(workspaceUserId, batchId)
+    const limitParam = Number(_request.nextUrl.searchParams.get('limit') ?? 500)
+    const maxOrderGroups = Number.isFinite(limitParam)
+      ? Math.min(Math.max(Math.trunc(limitParam), 1), 1000)
+      : 500
+    const result = await confirmSabangnetReviewBatch(workspaceUserId, batchId, { maxOrderGroups })
     revalidatePath('/analytics')
     revalidatePath('/analytics/sabangnet-review')
     revalidatePath('/orders')

@@ -48,13 +48,68 @@ export interface NavItem {
   icon: typeof LayoutDashboard
 }
 
+export interface NavGroup {
+  id: string
+  title: string
+  items: NavItem[]
+}
+
 export interface NavSection {
   id: string
   title?: string
   items: NavItem[]
+  groups?: NavGroup[]
   collapsible?: boolean
   defaultCollapsed?: boolean
 }
+
+const orderRelatedGroups: NavGroup[] = [
+  {
+    id: 'orders',
+    title: '주문',
+    items: [
+      { href: '/orders', label: '전체 주문', icon: ShoppingCart },
+      { href: '/orders/collect', label: '주문 수집', icon: Download },
+      { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
+    ],
+  },
+  {
+    id: 'cs',
+    title: 'CS',
+    items: [
+      { href: '/cs', label: '상품검수/CS', icon: Headphones },
+      { href: '/cs/inquiries', label: '문의', icon: MessageSquareText },
+    ],
+  },
+  {
+    id: 'shipping-work',
+    title: '출고작업',
+    items: [
+      { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
+      { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
+    ],
+  },
+  {
+    id: 'products',
+    title: '상품',
+    items: [
+      { href: '/products', label: '상품 관리', icon: Package },
+      { href: '/products/mapping', label: '매핑관리', icon: ArrowRightLeft },
+      { href: '/products/mapping-codes', label: '매핑코드 마스터', icon: ArrowRightLeft },
+      { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
+      { href: '/inventory', label: '재고관리', icon: Warehouse },
+      { href: '/inventory/adjustments', label: '입출고관리', icon: ArrowRightLeft },
+    ],
+  },
+  {
+    id: 'settings',
+    title: '설정',
+    items: [
+      { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
+      { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
+    ],
+  },
+]
 
 export const navSections: NavSection[] = [
   {
@@ -68,23 +123,8 @@ export const navSections: NavSection[] = [
     title: '주문관련',
     collapsible: true,
     defaultCollapsed: true,
-    items: [
-      { href: '/orders', label: '전체 주문', icon: ShoppingCart },
-      { href: '/orders/collect', label: '주문 수집', icon: Download },
-      { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
-      { href: '/cs', label: '상품검수/CS', icon: Headphones },
-      { href: '/cs/inquiries', label: '문의', icon: MessageSquareText },
-      { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
-      { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
-      { href: '/products', label: '상품 관리', icon: Package },
-      { href: '/products/mapping', label: '매핑관리', icon: ArrowRightLeft },
-      { href: '/products/mapping-codes', label: '매핑코드 마스터', icon: ArrowRightLeft },
-      { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
-      { href: '/inventory', label: '재고관리', icon: Warehouse },
-      { href: '/inventory/adjustments', label: '입출고관리', icon: ArrowRightLeft },
-      { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
-      { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
-    ],
+    groups: orderRelatedGroups,
+    items: orderRelatedGroups.flatMap((group) => group.items),
   },
   {
     id: 'purchasing',
@@ -215,6 +255,23 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
     )
   }
 
+  function renderSectionItems(section: NavSection) {
+    if (!section.groups?.length) {
+      return section.items.map((item) => renderNavItem(item, { showStar: true }))
+    }
+
+    return section.groups.map((group) => (
+      <div key={group.id} className="space-y-px">
+        <p className="px-2 pt-1 text-[9px] font-semibold text-gray-500">
+          {group.title}
+        </p>
+        <div className="space-y-px">
+          {group.items.map((item) => renderNavItem(item, { showStar: true }))}
+        </div>
+      </div>
+    ))
+  }
+
   return (
     <aside className="flex h-full w-48 flex-col bg-gray-900 text-white">
       <div className="flex h-10 items-center justify-between border-b border-gray-800 px-3">
@@ -281,7 +338,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
             )}
             {sectionIsOpen && (
               <div className="space-y-px">
-                {section.items.map((item) => renderNavItem(item, { showStar: true }))}
+                {renderSectionItems(section)}
               </div>
             )}
           </div>

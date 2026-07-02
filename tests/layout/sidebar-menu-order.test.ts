@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { applySidebarMenuOrder, createSidebarMenuOrder } from '@/components/layout/sidebar-menu-order'
+import { navSections } from '@/components/layout/sidebar'
 
 const sections = [
   { id: 'dashboard', items: [{ href: '/dashboard' }] },
@@ -55,6 +56,28 @@ describe('sidebar menu order', () => {
       'order-related',
       'purchasing',
       'admin',
+    ])
+  })
+
+  it('groups order-related menus under middle categories', () => {
+    const orderRelated = navSections.find((section) => section.id === 'order-related')
+
+    expect(orderRelated?.title).toBe('주문관련')
+    expect(orderRelated?.groups?.map((group) => group.title)).toEqual([
+      '주문',
+      'CS',
+      '출고작업',
+      '상품',
+      '설정',
+    ])
+    expect(orderRelated?.groups?.find((group) => group.title === '주문')?.items.map((item) => item.label)).toEqual([
+      '전체 주문',
+      '주문 수집',
+      '미발송 관리',
+    ])
+    expect(orderRelated?.groups?.find((group) => group.title === '설정')?.items.map((item) => item.label)).toEqual([
+      '마켓연동',
+      '마켓설정',
     ])
   })
 })

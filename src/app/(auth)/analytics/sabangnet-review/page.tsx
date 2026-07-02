@@ -17,6 +17,8 @@ import {
 import { SabangnetReviewActions } from './sabangnet-review-actions'
 import { SabangnetReviewLineEdit } from './sabangnet-review-line-edit'
 
+const REVIEW_LINE_DISPLAY_LIMIT = 300
+
 export const metadata: Metadata = {
   title: '사방넷 주문 검수',
 }
@@ -66,16 +68,19 @@ export default async function SabangnetReviewPage({
 
   const selectedBatchId = params?.batch ?? batches[0]?.id
   const lines = selectedBatchId
-    ? await getSabangnetReviewLines(workspaceUserId, selectedBatchId).catch((error) => {
+    ? await getSabangnetReviewLines(workspaceUserId, selectedBatchId, {
+      status: selectedStatus,
+      limit: REVIEW_LINE_DISPLAY_LIMIT,
+    }).catch((error) => {
       console.error('sabangnet review lines error:', error)
       return []
     })
     : []
-  const visibleLines = selectedStatus === 'all' ? lines : lines.filter((line) => line.reviewStatus === selectedStatus)
   const selectedBatch = batches.find((batch) => batch.id === selectedBatchId)
-  const readyRows = selectedBatch?.readyRows ?? lines.filter((line) => line.reviewStatus === 'ready').length
-  const blockedRows = selectedBatch?.blockedRows ?? lines.filter((line) => line.reviewStatus === 'blocked').length
-  const confirmedRows = selectedBatch?.confirmedRows ?? lines.filter((line) => line.reviewStatus === 'confirmed').length
+  const totalRows = selectedBatch?.totalRows ?? lines.length
+  const readyRows = selectedBatch?.readyRows ?? 0
+  const blockedRows = selectedBatch?.blockedRows ?? 0
+  const confirmedRows = selectedBatch?.confirmedRows ?? 0
 
   const templates = [
     ...DEFAULT_ORDER_IMPORT_TEMPLATES.map((template) => ({ id: template.id, label: `[기본] ${template.name}` })),
@@ -104,7 +109,7 @@ export default async function SabangnetReviewPage({
       />
 
       <div className="grid gap-3 sm:grid-cols-4">
-        <SummaryCard label="전체" value={selectedBatch?.totalRows ?? lines.length} icon="total" />
+        <SummaryCard label="전체" value={totalRows} icon="total" />
         <SummaryCard label="정상" value={readyRows} icon="ready" />
         <SummaryCard label="보류" value={blockedRows} icon="blocked" />
         <SummaryCard label="확정 반영" value={confirmedRows} icon="confirmed" />
@@ -117,13 +122,13 @@ export default async function SabangnetReviewPage({
             batchId={selectedBatchId}
             selectedStatus={selectedStatus}
             counts={{
-              all: selectedBatch?.totalRows ?? lines.length,
+              all: totalRows,
               blocked: blockedRows,
               ready: readyRows,
               confirmed: confirmedRows,
             }}
           />
-          <ReviewLineTable lines={visibleLines} marketplaces={marketplaces} />
+          <ReviewLineTable lines={lines} marketplaces={marketplaces} />
         </div>
       </div>
     </div>

@@ -147,6 +147,8 @@ const TABLE_SQL = sql`
     ON sabangnet_review_batches(user_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS sabangnet_review_lines_batch_idx
     ON sabangnet_review_lines(batch_id, row_number);
+  CREATE INDEX IF NOT EXISTS sabangnet_review_lines_batch_status_idx
+    ON sabangnet_review_lines(user_id, batch_id, review_status, row_number);
 `
 
 export async function ensureSabangnetReviewTables() {
@@ -275,7 +277,6 @@ export async function importSabangnetReviewBatch(input: {
 }
 
 export async function listSabangnetReviewBatches(userId: string): Promise<SabangnetReviewBatch[]> {
-  await ensureSabangnetReviewTables()
   return resultRows(await db.execute<SabangnetReviewBatch>(sql`
     SELECT
       id,
@@ -292,9 +293,16 @@ export async function listSabangnetReviewBatches(userId: string): Promise<Sabang
   `)).map((row) => ({ ...row, createdAt: new Date(row.createdAt) }))
 }
 
-export async function getSabangnetReviewLines(userId: string, batchId?: string): Promise<SabangnetReviewLine[]> {
-  await ensureSabangnetReviewTables()
+export async function getSabangnetReviewLines(
+  userId: string,
+  batchId?: string,
+  options: { status?: SabangnetReviewStatus | 'all'; limit?: number } = {},
+): Promise<SabangnetReviewLine[]> {
   const whereBatch = batchId ? sql`AND batch_id = ${batchId}::uuid` : sql``
+  const whereStatus = options.status && options.status !== 'all'
+    ? sql`AND review_status = ${options.status}`
+    : sql``
+  const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 300), 500))
   return resultRows(await db.execute<SabangnetReviewLine>(sql`
     SELECT
       id,
@@ -325,8 +333,9 @@ export async function getSabangnetReviewLines(userId: string, batchId?: string):
     FROM sabangnet_review_lines
     WHERE user_id = ${userId}
     ${whereBatch}
-    ORDER BY created_at DESC, row_number ASC
-    LIMIT 10000
+    ${whereStatus}
+    ORDER BY row_number ASC
+    LIMIT ${limit}
   `)).map((row) => ({
     ...row,
     quantity: Number(row.quantity),

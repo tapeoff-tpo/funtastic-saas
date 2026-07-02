@@ -30,6 +30,8 @@ import {
   Ship,
   PackageCheck,
   FileSpreadsheet,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -50,6 +52,8 @@ export interface NavSection {
   id: string
   title?: string
   items: NavItem[]
+  collapsible?: boolean
+  defaultCollapsed?: boolean
 }
 
 export const navSections: NavSection[] = [
@@ -64,8 +68,18 @@ export const navSections: NavSection[] = [
     title: '주문',
     items: [
       { href: '/orders', label: '전체 주문', icon: ShoppingCart },
-      { href: '/orders/collect', label: '주문 수집', icon: Download },
       { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
+    ],
+  },
+  {
+    id: 'order-collection',
+    title: '주문수집',
+    collapsible: true,
+    defaultCollapsed: true,
+    items: [
+      { href: '/orders/collect', label: '주문 수집', icon: Download },
+      { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
+      { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
     ],
   },
   {
@@ -122,8 +136,6 @@ export const navSections: NavSection[] = [
     id: 'settings',
     title: '설정',
     items: [
-      { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
-      { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
       { href: '/settings/menu', label: '메뉴', icon: Settings },
       { href: '/settings', label: '설정', icon: Settings },
     ],
@@ -149,6 +161,9 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const router = useRouter()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
   const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(navSections.map((section) => [section.id, !section.defaultCollapsed])),
+  )
 
   useEffect(() => {
     const syncOrder = () => setOrderedSections(applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
@@ -185,6 +200,10 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
       return pathname === itemPath
     }
     return pathname.startsWith(itemPath)
+  }
+
+  function isSectionActive(section: NavSection) {
+    return section.items.some((item) => isItemActive(item.href))
   }
 
   function renderNavItem(item: NavItem, opts: { showStar: boolean }) {
@@ -262,18 +281,42 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
           </div>
         )}
 
-        {orderedSections.filter((section) => section.id !== 'dashboard').map((section) => (
+        {orderedSections.filter((section) => section.id !== 'dashboard').map((section) => {
+          const sectionIsActive = isSectionActive(section)
+          const sectionIsOpen = section.collapsible
+            ? (openSections[section.id] ?? !section.defaultCollapsed) || sectionIsActive
+            : true
+          return (
           <div key={section.id} className="mt-2">
             {section.title && (
-              <p className="mb-0.5 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
-                {section.title}
-              </p>
+              section.collapsible ? (
+                <button
+                  type="button"
+                  onClick={() => setOpenSections((current) => ({
+                    ...current,
+                    [section.id]: !(current[section.id] ?? !section.defaultCollapsed),
+                  }))}
+                  className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-0.5 text-left text-[9px] font-semibold uppercase tracking-wider transition-colors ${
+                    sectionIsActive ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-800 hover:text-gray-300'
+                  }`}
+                >
+                  <span>{section.title}</span>
+                  {sectionIsOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </button>
+              ) : (
+                <p className="mb-0.5 px-2 text-[9px] font-semibold uppercase tracking-wider text-gray-500">
+                  {section.title}
+                </p>
+              )
             )}
-            <div className="space-y-px">
-              {section.items.map((item) => renderNavItem(item, { showStar: true }))}
-            </div>
+            {sectionIsOpen && (
+              <div className="space-y-px">
+                {section.items.map((item) => renderNavItem(item, { showStar: true }))}
+              </div>
+            )}
           </div>
-        ))}
+          )
+        })}
       </nav>
 
       <div className="border-t border-gray-800 px-2 py-1.5">

@@ -171,9 +171,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const router = useRouter()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
   const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(navSections.map((section) => [section.id, !section.defaultCollapsed])),
-  )
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
     const syncOrder = () => setOrderedSections(applySidebarMenuOrder(navSections, readSidebarMenuOrder()))
@@ -311,7 +309,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
         {orderedSections.filter((section) => section.id !== 'dashboard').map((section) => {
           const sectionIsActive = isSectionActive(section)
           const sectionIsOpen = section.collapsible
-            ? (openSections[section.id] ?? !section.defaultCollapsed) || sectionIsActive
+            ? openSections[section.id] ?? (sectionIsActive || !section.defaultCollapsed)
             : true
           return (
           <div key={section.id} className="mt-2">
@@ -321,7 +319,7 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
                   type="button"
                   onClick={() => setOpenSections((current) => ({
                     ...current,
-                    [section.id]: !(current[section.id] ?? !section.defaultCollapsed),
+                    [section.id]: !(current[section.id] ?? (sectionIsActive || !section.defaultCollapsed)),
                   }))}
                   className={`mb-0.5 flex w-full items-center justify-between rounded px-2 py-0.5 text-left text-[9px] font-semibold uppercase tracking-wider transition-colors ${
                     sectionIsActive ? 'text-gray-300' : 'text-gray-500 hover:bg-gray-800 hover:text-gray-300'

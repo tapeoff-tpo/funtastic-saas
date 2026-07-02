@@ -120,6 +120,13 @@ export interface OrderFilters {
   order?: 'asc' | 'desc'
   claimType?: ClaimType
   mapping?: 'mapped' | 'unmapped' | 'all'
+  /**
+   * 자동 보관 분류.
+   * mapping: 사방넷 검수에서 확정 반영되어 mappedAt 이 찍힌 주문만 조회.
+   * all: 보관 여부와 무관하게 조회.
+   * undefined: 기본 주문관리에서는 자동 보관 주문을 숨긴다.
+   */
+  archive?: 'mapping' | 'all'
   orderSource?: 'saas' | 'sabangnet'
   stage?: OrderStage
   /** Filter to only held (미발송) orders */

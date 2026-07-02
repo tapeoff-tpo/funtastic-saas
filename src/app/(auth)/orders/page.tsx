@@ -45,6 +45,7 @@ const searchParamsCache = createSearchParamsCache({
   carrier: parseAsString,
   scan: parseAsString,
   scanResult: parseAsString,
+  archive: parseAsString,
   held: parseAsBoolean,
   // Phase 8 — 취소 탭 통합 필터 (status='cancelled' OR claimType='cancel')
   cancel: parseAsBoolean,
@@ -183,6 +184,9 @@ export default async function OrdersPage({
         order: (params.order as 'asc' | 'desc') ?? undefined,
         claimType: (params.claimType ?? undefined) as ClaimType | undefined,
         mapping: mappingFilter,
+        archive: params.archive === 'mapping' || params.archive === 'all'
+          ? params.archive
+          : undefined,
         scan: isScanFilterTab ? (params.scan ?? undefined) as OrderFiltersParams['scan'] : undefined,
         scanResult: isScanFilterTab ? (params.scanResult ?? undefined) as OrderFiltersParams['scanResult'] : undefined,
         isHeld: params.held ?? undefined,

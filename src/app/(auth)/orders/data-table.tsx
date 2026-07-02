@@ -84,7 +84,7 @@ export function DataTable({
 
   const moveToProcessingTab = (tab: 'cancel' | 'return' | 'exchange') => {
     const params = new URLSearchParams(searchParams.toString())
-    for (const key of ['status', 'claimType', 'cancel', 'held', 'tab', 'page', 'mapping', 'scan', 'scanResult']) {
+    for (const key of ['status', 'claimType', 'cancel', 'held', 'archive', 'tab', 'page', 'mapping', 'scan', 'scanResult']) {
       params.delete(key)
     }
     if (tab === 'cancel') {

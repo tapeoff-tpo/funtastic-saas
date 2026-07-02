@@ -17,7 +17,7 @@
 import { useTransition } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 
-type TabKind = 'all' | 'status' | 'cancel' | 'claim' | 'held'
+type TabKind = 'all' | 'status' | 'cancel' | 'claim' | 'held' | 'archive'
 
 interface TabDef {
   id: string
@@ -39,6 +39,7 @@ const TABS: TabDef[] = [
   { id: 'exchange', label: '교환', kind: 'claim', accent: 'text-blue-600' },
   { id: 'return', label: '반품', kind: 'claim', accent: 'text-orange-600' },
   { id: 'held', label: '미발송', kind: 'held', accent: 'text-purple-600' },
+  { id: 'mapping-archive', label: '보관', kind: 'archive', accent: 'text-slate-600' },
 ]
 
 export function OrderTabs() {
@@ -52,8 +53,10 @@ export function OrderTabs() {
   const claimType = searchParams.get('claimType')
   const cancel = searchParams.get('cancel')
   const held = searchParams.get('held')
+  const archive = searchParams.get('archive')
   const tab = searchParams.get('tab')
   const currentTab: string | null = (() => {
+    if (archive === 'mapping') return 'mapping-archive'
     if (held === 'true' || held === '1') return 'held'
     if (cancel === 'true' || cancel === '1') return 'cancel'
     if (claimType === 'exchange') return 'exchange'
@@ -70,6 +73,7 @@ export function OrderTabs() {
     params.delete('claimType')
     params.delete('cancel')
     params.delete('held')
+    params.delete('archive')
     params.delete('tab')
     params.delete('page')
     params.delete('mapping')
@@ -94,6 +98,9 @@ export function OrderTabs() {
     } else if (tab.kind === 'held') {
       showAllDatesByDefault()
       params.set('held', 'true')
+    } else if (tab.kind === 'archive') {
+      showAllDatesByDefault()
+      params.set('archive', 'mapping')
     } else if (tab.kind === 'all') {
       // 전체 탭도 명시적으로 ?tab=all 을 붙여서 fetch 트리거
       params.set('tab', 'all')

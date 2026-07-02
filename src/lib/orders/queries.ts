@@ -476,6 +476,7 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) IN ('saas', 'order-excel', 'saas-excel')
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) LIKE 'saas-%'
   )`
+  const isMappingArchiveOrder = and(isSabangnetOrderSource, isNotNull(orders.mappedAt))!
   const hasSabangnetSibling = sql`EXISTS (
     SELECT 1
     FROM orders sabang_sibling
@@ -525,6 +526,12 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
 
   if (filters.userId) {
     conditions.push(eq(orders.userId, filters.userId))
+  }
+
+  if (filters.archive === 'mapping') {
+    conditions.push(isMappingArchiveOrder)
+  } else if (filters.archive !== 'all') {
+    conditions.push(sql`NOT ${isMappingArchiveOrder}`)
   }
 
   if (filters.status) {
@@ -867,6 +874,7 @@ export async function getOrders(filters: OrderFilters = {}) {
     && !filters.dateFrom
     && !filters.dateTo
     && !filters.mapping
+    && !filters.archive
     && !filters.orderSource
     && !filters.stage
     && !filters.isHeld

@@ -64,20 +64,24 @@ export const navSections: NavSection[] = [
     ],
   },
   {
-    id: 'orders',
-    title: '주문',
-    items: [
-      { href: '/orders', label: '전체 주문', icon: ShoppingCart },
-      { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
-    ],
-  },
-  {
-    id: 'order-collection',
-    title: '주문수집',
+    id: 'order-related',
+    title: '주문관련',
     collapsible: true,
     defaultCollapsed: true,
     items: [
+      { href: '/orders', label: '전체 주문', icon: ShoppingCart },
       { href: '/orders/collect', label: '주문 수집', icon: Download },
+      { href: '/shipping/held', label: '미발송 관리', icon: PackageX },
+      { href: '/cs', label: '상품검수/CS', icon: Headphones },
+      { href: '/cs/inquiries', label: '문의', icon: MessageSquareText },
+      { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
+      { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
+      { href: '/products', label: '상품 관리', icon: Package },
+      { href: '/products/mapping', label: '매핑관리', icon: ArrowRightLeft },
+      { href: '/products/mapping-codes', label: '매핑코드 마스터', icon: ArrowRightLeft },
+      { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
+      { href: '/inventory', label: '재고관리', icon: Warehouse },
+      { href: '/inventory/adjustments', label: '입출고관리', icon: ArrowRightLeft },
       { href: '/settings/marketplaces', label: '마켓연동', icon: Store },
       { href: '/settings/market-settings', label: '마켓설정', icon: Settings },
     ],
@@ -96,34 +100,6 @@ export const navSections: NavSection[] = [
     ],
   },
   {
-    id: 'cs',
-    title: 'CS',
-    items: [
-      { href: '/cs', label: '상품검수/CS', icon: Headphones },
-      { href: '/cs/inquiries', label: '문의', icon: MessageSquareText },
-    ],
-  },
-  {
-    id: 'shipping',
-    title: '출고 작업',
-    items: [
-      { href: '/shipping/scan', label: '바코드 스캔/출고', icon: Truck },
-      { href: '/shipping/invoice', label: '송장 업로드 현황', icon: Upload },
-    ],
-  },
-  {
-    id: 'products',
-    title: '상품',
-    items: [
-      { href: '/products', label: '상품 관리', icon: Package },
-      { href: '/products/mapping', label: '매핑관리', icon: ArrowRightLeft },
-      { href: '/products/mapping-codes', label: '매핑코드 마스터', icon: ArrowRightLeft },
-      { href: '/products/marketplace-categories', label: '카테고리 매핑', icon: FolderTree },
-      { href: '/inventory', label: '재고관리', icon: Warehouse },
-      { href: '/inventory/adjustments', label: '입출고관리', icon: ArrowRightLeft },
-    ],
-  },
-  {
     id: 'analytics',
     title: '분석',
     items: [
@@ -133,19 +109,13 @@ export const navSections: NavSection[] = [
     ],
   },
   {
-    id: 'settings',
-    title: '설정',
-    items: [
-      { href: '/settings/menu', label: '메뉴', icon: Settings },
-      { href: '/settings', label: '설정', icon: Settings },
-    ],
-  },
-  {
     id: 'admin',
     title: '관리자',
     items: [
       { href: '/admin/dev-log', label: '개발로그', icon: FileText },
       { href: '/admin/accounts', label: '계정관리', icon: Users },
+      { href: '/settings/menu', label: '메뉴', icon: Settings },
+      { href: '/settings', label: '설정', icon: Settings },
     ],
   },
 ]

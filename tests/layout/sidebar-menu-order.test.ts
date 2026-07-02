@@ -31,4 +31,29 @@ describe('sidebar menu order', () => {
       },
     })
   })
+
+  it('keeps new sections in their default position when they are missing from saved order', () => {
+    const nextSections = [
+      { id: 'dashboard', items: [{ href: '/dashboard' }] },
+      { id: 'orders', items: [{ href: '/orders' }] },
+      { id: 'order-collection', items: [{ href: '/orders/collect' }] },
+      { id: 'settings', items: [{ href: '/settings' }] },
+    ]
+
+    const ordered = applySidebarMenuOrder(nextSections, {
+      sections: ['dashboard', 'orders', 'settings'],
+      items: {
+        dashboard: ['/dashboard'],
+        orders: ['/orders'],
+        settings: ['/settings'],
+      },
+    })
+
+    expect(ordered.map((section) => section.id)).toEqual([
+      'dashboard',
+      'orders',
+      'order-collection',
+      'settings',
+    ])
+  })
 })

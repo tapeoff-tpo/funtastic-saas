@@ -78,6 +78,8 @@ export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection e
 
   const sectionRank = new Map(order.sections.map((id, index) => [id, index]))
   const defaultSectionRank = new Map(sections.map((section, index) => [section.id, index]))
+  const resolvedSectionRank = (sectionId: string): number =>
+    sectionRank.get(sectionId) ?? defaultSectionRank.get(sectionId) ?? Number.MAX_SAFE_INTEGER
   return sections
     .map((section) => {
       const itemRank = new Map((order.items[section.id] ?? []).map((href, index) => [href, index]))
@@ -91,7 +93,7 @@ export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection e
       }
     })
     .sort((a, b) => (
-      (sectionRank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (sectionRank.get(b.id) ?? Number.MAX_SAFE_INTEGER)
+      resolvedSectionRank(a.id) - resolvedSectionRank(b.id)
       || (defaultSectionRank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (defaultSectionRank.get(b.id) ?? Number.MAX_SAFE_INTEGER)
     ))
 }

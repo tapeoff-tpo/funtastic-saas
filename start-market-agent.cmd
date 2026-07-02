@@ -9,7 +9,7 @@ echo  Funtastic SaaS Local Market Agent
 echo ========================================
 echo.
 echo This window must stay open while collecting orders or uploading invoices.
-echo Close this window to stop the local RPA agent.
+echo Close this window to stop the local marketplace agent.
 echo.
 
 if not exist ".env.local" (

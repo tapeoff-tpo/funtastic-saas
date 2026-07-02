@@ -3,8 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { marketplaceConnections, jobLogs } from '@/lib/db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
-import { collectOrdersForConnection } from '@/lib/jobs/workers/order-collector'
-import { getMarketplaceScrapeQueue } from '@/lib/jobs/queues'
+import { getMarketplaceScrapeQueue, queueManualCollection } from '@/lib/jobs/queues'
 import { getIntegrationMethod } from '@/lib/marketplace/integration-methods'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createCollectionJobLogsWithLock } from '@/lib/jobs/collection-lock'
@@ -14,7 +13,8 @@ import { isRegisteredScraperMarketplace } from '@/scrapers/supported'
  * POST /api/orders/collect
  *
  * Manually trigger order collection for selected marketplaces.
- * Runs collection directly in the background (no BullMQ worker needed).
+ * Vercel only records/queues collection work. The local market agent or a
+ * dedicated worker process must perform the actual marketplace work.
  *
  * Body: { connectionIds: string[], manualLookbackDays?: number, manualDateFrom?: string, manualDateTo?: string }
  * Response: { jobLogIds: string[] }
@@ -170,8 +170,8 @@ export async function POST(request: NextRequest) {
       continue
     }
 
-    // Run in background — do not await
-    collectOrdersForConnection({
+    // Queue only; Vercel requests must not run marketplace collection directly.
+    await queueManualCollection({
       marketplaceId: conn.marketplaceId,
       connectionId: conn.id,
       userId: workspaceUserId,
@@ -180,8 +180,6 @@ export async function POST(request: NextRequest) {
       manualLookbackDays: safeManualLookbackDays,
       manualDateFrom: manualDateFrom ?? undefined,
       manualDateTo: manualDateTo ?? undefined,
-    }).catch((err) => {
-      console.error('[collect] Background collection failed:', err)
     })
   }
 

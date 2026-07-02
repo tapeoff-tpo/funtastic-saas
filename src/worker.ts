@@ -57,8 +57,13 @@ async function main() {
     console.error(`[OrderWorker] Worker error: ${err.message}`)
   })
 
-  // Schedule repeating jobs for all connected marketplaces
-  await scheduleAllCollections()
+  // Dedicated hosted workers may schedule repeat collection. The local agent
+  // only handles jobs explicitly queued from the SaaS buttons.
+  if (process.env.DISABLE_AUTO_COLLECTION_SCHEDULE === 'true') {
+    console.log('[Worker] Auto collection schedules disabled')
+  } else {
+    await scheduleAllCollections()
+  }
 
   // Graceful shutdown — Railway sends SIGTERM before stopping a container
   const shutdown = async (signal: string) => {

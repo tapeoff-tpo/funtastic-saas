@@ -1479,7 +1479,7 @@ function collectOhouseApiOrderRecords(payload: unknown): JsonRecord[] {
   return records
 }
 
-export function normalizeOhouseApiOrderRecord(
+function normalizeOhouseApiOrderRecord(
   record: JsonRecord,
   credentials: ScraperCredentials,
   index: number,
@@ -1504,7 +1504,7 @@ export function normalizeOhouseApiOrderRecord(
   const identity = orderNo || orderOptionNo
   if (!identity) return null
 
-  const quantity = Math.max(parseNumber(readDeepApiValue(record, ['quantity', 'qty', 'orderQuantity', 'orderCount', 'count', '수량'])), 1)
+  const quantity = Math.max(parseNumber(readDeepApiValue(record, ['quantity', 'qty', 'orderQuantity', 'count', '수량'])), 1)
   const itemTotal = parseNumber(readDeepApiValue(record, ['totalPrice', 'paymentAmount', 'productPrice', 'salePrice', 'price', '상품금액', '결제금액']))
   const productName = readDeepApiValue(record, ['productName', 'productionName', 'goodsName', 'itemName', 'orderProductName', 'name', '상품명']) || '오늘의집 상품'
   const optionText = readDeepApiValue(record, ['optionName', 'optionText', 'option', 'optionValue', '옵션', '상품옵션'])

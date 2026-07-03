@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { importPurchaseRequestWorkbook } from '@/lib/purchasing/purchase-requests'
+import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { importPurchasingItemOutgoingMetrics } from '@/lib/purchasing/items'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -12,21 +13,19 @@ export async function POST(request: NextRequest) {
     const form = await request.formData()
     const file = form.get('file')
     if (!(file instanceof File)) {
-      return NextResponse.json({ error: '발주 엑셀 파일을 선택해 주세요.' }, { status: 400 })
+      return NextResponse.json({ error: '출고수량 엑셀 파일을 선택해주세요.' }, { status: 400 })
     }
-
-    const result = await importPurchaseRequestWorkbook({
+    const result = await importPurchasingItemOutgoingMetrics({
       userId: await getWorkspaceUserId(user.id),
-      uploadedByUserId: user.id,
-      fileName: file.name,
       fileBuffer: await file.arrayBuffer(),
     })
-
+    revalidatePath('/costs')
+    revalidatePath('/purchasing/orders')
     return NextResponse.json(result)
   } catch (error) {
-    console.error('[purchase-requests-import]', error)
+    console.error('[purchasing-items-outgoing-import]', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : '발주 엑셀 업로드에 실패했습니다.' },
+      { error: error instanceof Error ? error.message : '출고수량 엑셀 업로드에 실패했습니다.' },
       { status: 500 },
     )
   }

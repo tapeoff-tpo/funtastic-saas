@@ -28,6 +28,14 @@ export const ESA009M_HEADERS = [
 export type Esa009mHeader = (typeof ESA009M_HEADERS)[number]
 export type Esa009mData = Record<Esa009mHeader, string | null>
 export type PurchasingItemSortDirection = 'asc' | 'desc'
+export const OUTGOING_METRIC_HEADERS = ['품목코드', '당월 출고수량', '3개월 평균 출고수량'] as const
+export type PurchasingItemOutgoingMetrics = {
+  currentMonthOutgoing: number
+  threeMonthAverageOutgoing: number
+}
+export type PurchasingItemOutgoingRow = PurchasingItemOutgoingMetrics & {
+  internalSku: string
+}
 
 const NUMERIC_HEADERS = new Set<Esa009mHeader>([
   '기존원가(元)',
@@ -67,6 +75,7 @@ export async function getPurchasingItems(input: {
     items: rows.map((row) => ({
       id: row.id,
       data: normalizeEsaData(row.metadata?.esa009m),
+      outgoingMetrics: normalizeOutgoingMetrics(row.metadata?.purchasingMetrics),
       updatedAt: row.updatedAt,
     })),
     total,
@@ -85,6 +94,7 @@ export async function getAllPurchasingItems(userId: string) {
   return rows.map((row) => ({
     id: row.id,
     data: normalizeEsaData(row.metadata?.esa009m),
+    outgoingMetrics: normalizeOutgoingMetrics(row.metadata?.purchasingMetrics),
     updatedAt: row.updatedAt,
   }))
 }
@@ -113,6 +123,55 @@ export async function importPurchasingItems(input: { userId: string; fileBuffer:
     })
   }
   return { total: parsed.total, imported: parsed.rows.length, skipped: parsed.skipped }
+}
+
+export async function importPurchasingItemOutgoingMetrics(input: { userId: string; fileBuffer: ArrayBuffer }) {
+  const parsed = await parsePurchasingItemOutgoingWorkbook(input.fileBuffer)
+  let imported = 0
+  let skipped = parsed.skipped
+
+  for (const row of parsed.rows) {
+    const result = await db
+      .update(products)
+      .set({
+        metadata: sql`COALESCE(${products.metadata}, '{}'::jsonb) || jsonb_build_object('purchasingMetrics', jsonb_build_object(
+          'currentMonthOutgoing', ${row.currentMonthOutgoing},
+          'threeMonthAverageOutgoing', ${row.threeMonthAverageOutgoing}
+        ))`,
+        updatedAt: sql`NOW()`,
+      })
+      .where(and(eq(products.userId, input.userId), eq(products.internalSku, row.internalSku)))
+      .returning({ id: products.id })
+
+    if (result.length > 0) imported += 1
+    else skipped += 1
+  }
+
+  return { total: parsed.total, imported, skipped }
+}
+
+export async function updatePurchasingItemOutgoingMetrics(input: {
+  userId: string
+  productId: string
+  currentMonthOutgoing: number
+  threeMonthAverageOutgoing: number
+}) {
+  const currentMonthOutgoing = cleanOutgoingNumber(input.currentMonthOutgoing)
+  const threeMonthAverageOutgoing = cleanOutgoingNumber(input.threeMonthAverageOutgoing)
+  const [updated] = await db
+    .update(products)
+    .set({
+      metadata: sql`COALESCE(${products.metadata}, '{}'::jsonb) || jsonb_build_object('purchasingMetrics', jsonb_build_object(
+        'currentMonthOutgoing', ${currentMonthOutgoing},
+        'threeMonthAverageOutgoing', ${threeMonthAverageOutgoing}
+      ))`,
+      updatedAt: sql`NOW()`,
+    })
+    .where(and(eq(products.userId, input.userId), eq(products.id, input.productId)))
+    .returning({ id: products.id })
+
+  if (!updated) throw new Error('품목을 찾을 수 없습니다.')
+  return { id: updated.id, currentMonthOutgoing, threeMonthAverageOutgoing }
 }
 
 export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
@@ -148,11 +207,59 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   return { rows, total, skipped }
 }
 
+export async function parsePurchasingItemOutgoingWorkbook(fileBuffer: ArrayBuffer) {
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(fileBuffer)
+  const sheet = workbook.worksheets[0]
+  if (!sheet) throw new Error('출고수량 시트를 찾을 수 없습니다.')
+
+  const headerRow = findOutgoingHeaderRow(sheet)
+  if (!headerRow) throw new Error('품목코드, 당월 출고수량, 3개월 평균 출고수량 헤더를 찾을 수 없습니다.')
+  const columnByHeader = new Map<string, number>()
+  sheet.getRow(headerRow).eachCell((cell, column) => columnByHeader.set(cellText(cell.value), column))
+
+  const rows: PurchasingItemOutgoingRow[] = []
+  let total = 0
+  let skipped = 0
+  sheet.eachRow((row, rowNumber) => {
+    if (rowNumber <= headerRow) return
+    const internalSku = cellText(row.getCell(columnByHeader.get('품목코드')!).value)
+    const currentMonthOutgoing = parseOutgoingNumber(cellText(row.getCell(columnByHeader.get('당월 출고수량')!).value))
+    const threeMonthAverageOutgoing = parseOutgoingNumber(cellText(row.getCell(columnByHeader.get('3개월 평균 출고수량')!).value))
+    if (!internalSku && currentMonthOutgoing === null && threeMonthAverageOutgoing === null) return
+    total += 1
+    if (!internalSku) {
+      skipped += 1
+      return
+    }
+    rows.push({
+      internalSku,
+      currentMonthOutgoing: currentMonthOutgoing ?? 0,
+      threeMonthAverageOutgoing: threeMonthAverageOutgoing ?? 0,
+    })
+  })
+
+  return { rows, total, skipped }
+}
+
 function findHeaderRow(sheet: ExcelJS.Worksheet): number | null {
   for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
     const values = new Set<string>()
     sheet.getRow(rowNumber).eachCell((cell) => values.add(cellText(cell.value)))
     if (values.has('품목코드') && values.has('품목명')) return rowNumber
+  }
+  return null
+}
+
+function findOutgoingHeaderRow(sheet: ExcelJS.Worksheet): number | null {
+  for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
+    const values = new Set<string>()
+    sheet.getRow(rowNumber).eachCell((cell) => values.add(cellText(cell.value)))
+    if (
+      values.has('품목코드') &&
+      values.has('당월 출고수량') &&
+      values.has('3개월 평균 출고수량')
+    ) return rowNumber
   }
   return null
 }
@@ -163,6 +270,14 @@ function normalizeEsaData(value: unknown): Esa009mData {
     header,
     source[header] == null ? null : String(source[header]),
   ])) as Esa009mData
+}
+
+export function normalizeOutgoingMetrics(value: unknown): PurchasingItemOutgoingMetrics {
+  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  return {
+    currentMonthOutgoing: cleanOutgoingNumber(source.currentMonthOutgoing),
+    threeMonthAverageOutgoing: cleanOutgoingNumber(source.threeMonthAverageOutgoing),
+  }
 }
 
 function purchasingItemConditions(
@@ -217,6 +332,19 @@ function numericText(value: string | null): string | null {
   if (!value) return null
   const number = Number(value.replace(/,/g, ''))
   return Number.isFinite(number) ? String(number) : null
+}
+
+function parseOutgoingNumber(value: string): number | null {
+  if (!value) return null
+  const number = Number(value.replace(/,/g, ''))
+  if (!Number.isFinite(number)) return null
+  return cleanOutgoingNumber(number)
+}
+
+function cleanOutgoingNumber(value: unknown): number {
+  const number = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(number)) return 0
+  return Math.max(0, Math.round(number * 10) / 10)
 }
 
 function chunks<T>(values: T[], size: number): T[][] {

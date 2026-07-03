@@ -15,10 +15,12 @@ export async function GET() {
 
   sheet.columns = [
     ...ESA009M_HEADERS.map((header) => ({ header, key: header, width: Math.max(14, Math.min(32, header.length + 6)) })),
+    { header: '당월 출고수량', key: 'currentMonthOutgoing', width: 16 },
+    { header: '3개월 평균 출고수량', key: 'threeMonthAverageOutgoing', width: 20 },
     { header: '최근 반영일', key: 'updatedAt', width: 22 },
   ]
   sheet.views = [{ state: 'frozen', ySplit: 1 }]
-  sheet.autoFilter = { from: 'A1', to: { row: 1, column: ESA009M_HEADERS.length + 1 } }
+  sheet.autoFilter = { from: 'A1', to: { row: 1, column: ESA009M_HEADERS.length + 3 } }
 
   const headerRow = sheet.getRow(1)
   headerRow.height = 24
@@ -31,6 +33,8 @@ export async function GET() {
   for (const item of items) {
     sheet.addRow({
       ...item.data,
+      currentMonthOutgoing: item.outgoingMetrics.currentMonthOutgoing,
+      threeMonthAverageOutgoing: item.outgoingMetrics.threeMonthAverageOutgoing,
       updatedAt: item.updatedAt.toLocaleString('ko-KR'),
     })
   }

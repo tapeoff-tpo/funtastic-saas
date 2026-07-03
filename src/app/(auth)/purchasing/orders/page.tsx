@@ -16,7 +16,6 @@ import {
   PurchaseDeleteButton,
   PurchasePlanFields,
   PurchaseRecommendationGenerator,
-  PurchaseRequestUpload,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
   PurchaseStatusButton,
@@ -74,13 +73,6 @@ export default async function PurchasingOrdersPage({
       </header>
 
       <PurchaseRecommendationGenerator />
-
-      <details className="rounded-md border bg-background p-3">
-        <summary className="cursor-pointer text-sm font-medium">엑셀 발주 가져오기</summary>
-        <div className="mt-3">
-          <PurchaseRequestUpload />
-        </div>
-      </details>
 
       <nav className="flex flex-wrap gap-2">
         {STATUSES.map((item) => {

@@ -3,14 +3,13 @@
 import {
   createContext,
   useContext,
-  useRef,
   useState,
   useTransition,
   type FormEvent,
   type ReactNode,
 } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Loader2, Save, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Check, Loader2, Save, Sparkles, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -155,63 +154,6 @@ function useBulkSelection() {
   const context = useContext(BulkSelectionContext)
   if (!context) throw new Error('Purchase bulk selection context is missing.')
   return context
-}
-
-export function PurchaseRequestUpload() {
-  const router = useRouter()
-  const fileRef = useRef<HTMLInputElement>(null)
-  const [message, setMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
-
-  function upload() {
-    const file = fileRef.current?.files?.[0]
-    if (!file) {
-      setError('업로드할 엑셀 파일을 선택해 주세요.')
-      return
-    }
-
-    setError(null)
-    setMessage(null)
-    const form = new FormData()
-    form.append('file', file)
-
-    startTransition(async () => {
-      const response = await fetch('/api/purchasing/purchase-requests/import', {
-        method: 'POST',
-        body: form,
-      })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setError(body.error ?? '업로드에 실패했습니다.')
-        return
-      }
-
-      setMessage(`총 ${body.total.toLocaleString('ko-KR')}건 중 ${body.imported.toLocaleString('ko-KR')}건을 가져왔습니다.`)
-      if (fileRef.current) fileRef.current.value = ''
-      router.refresh()
-    })
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-md border bg-background p-3 md:flex-row md:items-center md:justify-between">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">이카운트 발주 엑셀 가져오기</p>
-        <p className="text-xs text-muted-foreground">
-          발주등록 시트의 품목코드, 구매수량, 도착요청일, 담당자 정보를 발주요청으로 저장합니다.
-        </p>
-        {message && <p className="mt-1 text-xs text-emerald-700">{message}</p>}
-        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
-      </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <Input ref={fileRef} type="file" accept=".xlsx,.xls" className="w-64" />
-        <Button type="button" onClick={upload} disabled={isPending}>
-          {isPending ? <Loader2 className="animate-spin" /> : <Upload />}
-          업로드
-        </Button>
-      </div>
-    </div>
-  )
 }
 
 export function PurchaseRecommendationGenerator() {

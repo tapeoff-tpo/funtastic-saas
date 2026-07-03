@@ -2,7 +2,6 @@ import { and, eq, inArray, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   inventory,
-  inventoryHistory,
   products,
   productVariants,
   purchaseRequestBatches,
@@ -20,6 +19,17 @@ export type PurchaseRecommendationCalculation = {
   targetStockQuantity: number
   recommendedQuantity: number
   stockCoverageMonths: number | null
+}
+
+export function getManualOutgoingMetrics(metadata: unknown) {
+  const source = metadata && typeof metadata === 'object'
+    ? (metadata as Record<string, unknown>).purchasingMetrics
+    : null
+  const metrics = source && typeof source === 'object' ? source as Record<string, unknown> : {}
+  return {
+    currentMonthOutgoing: nonNegativeNumber(metrics.currentMonthOutgoing),
+    averageMonthlyOutgoing: nonNegativeNumber(metrics.threeMonthAverageOutgoing),
+  }
 }
 
 export function calculatePurchaseRecommendation(input: PurchaseRecommendationInput): PurchaseRecommendationCalculation {
@@ -53,15 +63,14 @@ export async function generatePurchaseRecommendations(input: {
 }) {
   const targetStockMonths = clampTargetMonths(input.targetStockMonths)
   const now = input.now ?? new Date()
-  const windows = getRecommendationWindows(now)
 
   const inventoryRows = await db
     .select({
-      inventoryId: inventory.id,
       sku: inventory.sku,
       productName: inventory.productName,
       optionName: inventory.optionName,
       availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,
+      productMetadata: products.metadata,
     })
     .from(inventory)
     .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
@@ -78,20 +87,7 @@ export async function generatePurchaseRecommendations(input: {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }
   }
 
-  const inventoryIds = inventoryRows.map((row) => row.inventoryId)
-  const [historyRows, activeRequestRows] = await Promise.all([
-    db
-      .select({
-        inventoryId: inventoryHistory.inventoryId,
-        previousThreeMonthOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND ${inventoryHistory.createdAt} >= ${windows.previousThreeMonthStart.toISOString()}::timestamptz AND ${inventoryHistory.createdAt} < ${windows.currentMonthStart.toISOString()}::timestamptz THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
-        currentMonthOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND ${inventoryHistory.createdAt} >= ${windows.currentMonthStart.toISOString()}::timestamptz AND ${inventoryHistory.createdAt} < ${windows.nextMonthStart.toISOString()}::timestamptz THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
-      })
-      .from(inventoryHistory)
-      .where(and(
-        eq(inventoryHistory.userId, input.userId),
-        inArray(inventoryHistory.inventoryId, inventoryIds),
-      ))
-      .groupBy(inventoryHistory.inventoryId),
+  const [activeRequestRows] = await Promise.all([
     db
       .select({ sku: purchaseRequestItems.sku })
       .from(purchaseRequestItems)
@@ -101,15 +97,12 @@ export async function generatePurchaseRecommendations(input: {
       )),
   ])
 
-  const historyByInventoryId = new Map(historyRows.map((row) => [row.inventoryId, row]))
   const activeRequestSkus = new Set(activeRequestRows.map((row) => row.sku))
   const recommendations = inventoryRows.flatMap((row) => {
     if (activeRequestSkus.has(row.sku)) return []
 
-    const history = historyByInventoryId.get(row.inventoryId)
-    const previousThreeMonthOutgoing = history?.previousThreeMonthOutgoing ?? 0
-    const currentMonthOutgoing = history?.currentMonthOutgoing ?? 0
-    const averageMonthlyOutgoing = previousThreeMonthOutgoing / 3
+    const { currentMonthOutgoing, averageMonthlyOutgoing } = getManualOutgoingMetrics(row.productMetadata)
+    const previousThreeMonthOutgoing = averageMonthlyOutgoing * 3
     const calculation = calculatePurchaseRecommendation({
       averageMonthlyOutgoing,
       currentMonthOutgoing,
@@ -161,7 +154,7 @@ export async function generatePurchaseRecommendations(input: {
       productName: item.row.productName,
       optionName: item.row.optionName,
       requestedQuantity: item.calculation.recommendedQuantity,
-      recommendationBasis: 'auto_stock_months',
+      recommendationBasis: 'manual_stock_months',
       salesAverageWindowDays: 90,
       rawData: {
         source: 'auto_purchase_recommendation',
@@ -186,13 +179,6 @@ export async function generatePurchaseRecommendations(input: {
   }
 }
 
-function getRecommendationWindows(now: Date) {
-  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-  const previousThreeMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1))
-  const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
-  return { previousThreeMonthStart, currentMonthStart, nextMonthStart }
-}
-
 function clampTargetMonths(value: number) {
   if (!Number.isFinite(value)) return 1.2
   return Math.min(12, Math.max(0.1, value))
@@ -200,6 +186,11 @@ function clampTargetMonths(value: number) {
 
 function finiteNumber(value: number) {
   return Number.isFinite(value) ? value : 0
+}
+
+function nonNegativeNumber(value: unknown) {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) ? Math.max(0, number) : 0
 }
 
 function roundToOneDecimal(value: number) {

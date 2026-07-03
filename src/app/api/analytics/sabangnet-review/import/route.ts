@@ -8,6 +8,7 @@ import { excelImportTemplates } from '@/lib/db/schema'
 import { DEFAULT_ORDER_IMPORT_TEMPLATES, findDefaultOrderImportTemplate } from '@/lib/orders/default-import-templates'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 import { importSabangnetReviewBatch } from '@/lib/analytics/sabangnet-review'
+import { InvalidExcelWorkbookError } from '@/lib/orders/excel-workbook-buffer'
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
     console.error('[SabangnetReviewImport] Error:', error)
     return NextResponse.json(
       { error: error instanceof Error ? error.message : '사방넷 검수 파일 처리 중 오류가 발생했습니다.' },
-      { status: 500 },
+      { status: error instanceof InvalidExcelWorkbookError ? 400 : 500 },
     )
   }
 }

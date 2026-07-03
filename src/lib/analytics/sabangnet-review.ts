@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { marketplaceConnections, orders, orderItems, products, productVariants } from '@/lib/db/schema'
 import { parseOrderExcel, type ParsedOrderRow } from '@/lib/orders/excel-import'
+import { normalizeExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
 import type { OrderImportMapping } from '@/lib/orders/excel-import-fields'
 import { parseImportedOrderedAt } from '@/lib/orders/import-date'
 import { normalizeImportedOrderItem } from '@/lib/orders/import-normalize'
@@ -163,8 +164,8 @@ export async function importSabangnetReviewBatch(input: {
   fallbackMarketplaceId?: string
   fallbackMarketplaceName?: string
 }) {
+  const buffer = normalizeExcelWorkbookBuffer(Buffer.from(input.fileBuffer))
   await ensureSabangnetReviewTables()
-  const buffer = Buffer.from(input.fileBuffer)
   const [parseResult, rawRows] = await Promise.all([
     parseOrderExcel(buffer, input.mappings),
     parseRawRows(buffer),

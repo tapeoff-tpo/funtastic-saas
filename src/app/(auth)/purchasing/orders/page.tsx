@@ -2,9 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import {
-  getPurchaseRequests,
-} from '@/lib/purchasing/purchase-requests'
+import { getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
 import {
   getNextPurchaseStatus,
   PURCHASE_REQUEST_STATUS_LABELS,
@@ -17,6 +15,7 @@ import {
   PurchaseBulkStatusButton,
   PurchaseDeleteButton,
   PurchasePlanFields,
+  PurchaseRecommendationGenerator,
   PurchaseRequestUpload,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
@@ -59,7 +58,7 @@ export default async function PurchasingOrdersPage({
         <div>
           <h1 className="text-2xl font-semibold">발주</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            이카운트 엑셀 흐름을 유지하면서 발주요청부터 중국창고 입고까지 진행상태를 관리합니다.
+            재고와 출고 이력을 기준으로 구매가 필요한 품목을 추천하고, 구매부터 중국창고 입고까지 관리합니다.
           </p>
         </div>
         <form className="flex items-center gap-2" action="/purchasing/orders">
@@ -74,7 +73,14 @@ export default async function PurchasingOrdersPage({
         </form>
       </header>
 
-      <PurchaseRequestUpload />
+      <PurchaseRecommendationGenerator />
+
+      <details className="rounded-md border bg-background p-3">
+        <summary className="cursor-pointer text-sm font-medium">엑셀 발주 가져오기</summary>
+        <div className="mt-3">
+          <PurchaseRequestUpload />
+        </div>
+      </details>
 
       <nav className="flex flex-wrap gap-2">
         {STATUSES.map((item) => {
@@ -108,7 +114,7 @@ export default async function PurchasingOrdersPage({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1580px] text-left text-sm">
+            <table className="w-full min-w-[1780px] text-left text-sm">
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-2 font-medium">
@@ -117,7 +123,8 @@ export default async function PurchasingOrdersPage({
                   <th className="w-28 px-3 py-2 font-medium">상태</th>
                   <th className="px-3 py-2 font-medium">상품</th>
                   <th className="w-24 px-3 py-2 font-medium">요청수량</th>
-                  <th className="w-32 px-3 py-2 font-medium">도착요청일</th>
+                  <th className="w-48 px-3 py-2 font-medium">추천 근거</th>
+                  <th className="w-32 px-3 py-2 font-medium">입고요청일</th>
                   <th className="w-32 px-3 py-2 font-medium">관리코드</th>
                   <th className="w-[540px] px-3 py-2 font-medium">발주 계획</th>
                   <th className="w-28 px-3 py-2 font-medium">담당자</th>
@@ -128,7 +135,7 @@ export default async function PurchasingOrdersPage({
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={11} className="px-3 py-12 text-center text-sm text-muted-foreground">
                       조건에 맞는 발주 항목이 없습니다.
                     </td>
                   </tr>
@@ -151,6 +158,9 @@ export default async function PurchasingOrdersPage({
                       </td>
                       <td className="px-3 py-2 tabular-nums">
                         {item.requestedQuantity.toLocaleString('ko-KR')}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                        <RecommendationBasis rawData={item.rawData} />
                       </td>
                       <td className="px-3 py-2">{formatDate(item.chinaArrivalRequestDate)}</td>
                       <td className="px-3 py-2">{item.purchaseManagementCode ?? '-'}</td>
@@ -182,6 +192,18 @@ export default async function PurchasingOrdersPage({
   )
 }
 
+function RecommendationBasis({ rawData }: { rawData: Record<string, unknown> }) {
+  if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
+
+  return (
+    <div className="space-y-0.5 tabular-nums">
+      <div>3개월 평균 {formatNumber(rawData.averageMonthlyOutgoing)}개/月</div>
+      <div>당월 출고 {formatNumber(rawData.currentMonthOutgoing)}개</div>
+      <div>현재고 {formatNumber(rawData.availableStock)}개 · 목표 {formatNumber(rawData.targetStockQuantity)}개</div>
+    </div>
+  )
+}
+
 function stringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
@@ -195,4 +217,10 @@ function formatDate(value: string | Date | null) {
   if (!value) return '-'
   if (value instanceof Date) return value.toISOString().slice(0, 10)
   return value
+}
+
+function formatNumber(value: unknown) {
+  const number = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(number)) return '-'
+  return number.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
 }

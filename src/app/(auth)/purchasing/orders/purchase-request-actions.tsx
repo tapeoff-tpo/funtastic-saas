@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Loader2, Save, Trash2, Upload } from 'lucide-react'
+import { Check, Loader2, Save, Sparkles, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -208,6 +208,76 @@ export function PurchaseRequestUpload() {
         <Button type="button" onClick={upload} disabled={isPending}>
           {isPending ? <Loader2 className="animate-spin" /> : <Upload />}
           업로드
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+export function PurchaseRecommendationGenerator() {
+  const router = useRouter()
+  const [targetStockMonths, setTargetStockMonths] = useState('1.2')
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function generate() {
+    const months = Number(targetStockMonths)
+    if (!Number.isFinite(months) || months < 0.1 || months > 12) {
+      setError('목표 보유개월수는 0.1~12 사이로 입력해주세요.')
+      return
+    }
+
+    setMessage(null)
+    setError(null)
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests/recommendations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetStockMonths: months }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setError(body.error ?? '자동 발주 추천 생성에 실패했습니다.')
+        return
+      }
+
+      setMessage(
+        `재고 ${body.evaluated.toLocaleString('ko-KR')}개 검수 · ` +
+        `발주추천 ${body.created.toLocaleString('ko-KR')}건 생성 · ` +
+        `제외 ${body.skipped.toLocaleString('ko-KR')}건`,
+      )
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border bg-background p-3 md:flex-row md:items-center md:justify-between">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">자동 발주 추천</p>
+        <p className="text-xs text-muted-foreground">
+          최근 완료된 3개월 월평균 출고수량과 현재고를 기준으로 부족한 품목만 발주요청에 생성합니다.
+        </p>
+        {message && <p className="mt-1 text-xs text-emerald-700">{message}</p>}
+        {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <label className="text-xs text-muted-foreground" htmlFor="target-stock-months">
+          목표 보유개월
+        </label>
+        <Input
+          id="target-stock-months"
+          type="number"
+          min="0.1"
+          max="12"
+          step="0.1"
+          value={targetStockMonths}
+          onChange={(event) => setTargetStockMonths(event.target.value)}
+          className="h-9 w-24"
+        />
+        <Button type="button" onClick={generate} disabled={isPending}>
+          {isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
+          추천 생성
         </Button>
       </div>
     </div>

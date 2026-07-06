@@ -53,17 +53,11 @@ function formatNumber(value: number, maximumFractionDigits = 0) {
 function StockBreakdownCell({ row }: { row: InventoryRow }) {
   const lowStock = row.availableStock <= 0
   return (
-    <div className="flex items-center justify-end gap-3 whitespace-nowrap tabular-nums">
-      <span>
-        <span className="text-muted-foreground">합계 </span>
-        <strong className={lowStock ? 'text-red-600' : ''}>{formatNumber(row.availableStock)}</strong>
-      </span>
-      <span className="text-border">|</span>
-      <span><span className="text-muted-foreground">1창고 </span>{formatNumber(row.oneWarehouseStock)}</span>
-      <span className="text-border">|</span>
-      <span><span className="text-muted-foreground">쿠팡 </span>{formatNumber(row.coupangWarehouseStock)}</span>
-      <span className="text-border">|</span>
-      <span><span className="text-muted-foreground">2창고 </span>{formatNumber(row.twoWarehouseStock)}</span>
+    <div className="grid w-full grid-cols-4 items-center text-center tabular-nums">
+      <strong className={lowStock ? 'text-red-600' : ''}>{formatNumber(row.availableStock)}</strong>
+      <span>{formatNumber(row.oneWarehouseStock)}</span>
+      <span>{formatNumber(row.twoWarehouseStock)}</span>
+      <span>{formatNumber(row.coupangWarehouseStock)}</span>
     </div>
   )
 }
@@ -263,8 +257,14 @@ export function InventoryTable({
       id: 'availableStock',
       size: 360,
       header: () => (
-        <button type="button" onClick={() => handleSort('availableStock')} className="hover:text-foreground">
-          현재고 (합계 / 1창고 / 쿠팡 / 2창고){getSortIndicator('availableStock')}
+        <button type="button" onClick={() => handleSort('availableStock')} className="w-full hover:text-foreground">
+          <span className="block pb-0.5">현재고{getSortIndicator('availableStock')}</span>
+          <span className="grid grid-cols-4 font-normal">
+            <span>합계</span>
+            <span>1창고</span>
+            <span>2창고</span>
+            <span>쿠팡</span>
+          </span>
         </button>
       ),
       cell: (info) => <StockBreakdownCell row={info.row.original} />,
@@ -304,7 +304,7 @@ export function InventoryTable({
       cell: (info) => {
         const row = info.row.original
         return (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center justify-center gap-1">
             <button
               type="button"
               onClick={() => setAdjustDialog({
@@ -494,7 +494,7 @@ export function InventoryTable({
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b">
                   {headerGroup.headers.map((header) => (
-                    <th key={header.id} style={{ width: header.getSize() }} className="relative whitespace-nowrap px-2 py-1.5 text-left font-medium text-muted-foreground">
+                    <th key={header.id} style={{ width: header.getSize() }} className="relative whitespace-nowrap px-2 py-1.5 text-center font-medium text-muted-foreground">
                       {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
                       {header.column.getCanResize() && (
                         <div
@@ -521,7 +521,7 @@ export function InventoryTable({
                 table.getRowModel().rows.map((row, index) => (
                   <tr key={row.id} className={`border-b transition-colors hover:bg-muted/50 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                     {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} style={{ width: cell.column.getSize() }} className="overflow-hidden whitespace-nowrap px-2 py-1">
+                      <td key={cell.id} style={{ width: cell.column.getSize() }} className="overflow-hidden whitespace-nowrap px-2 py-1 text-center">
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     ))}

@@ -146,9 +146,12 @@ export async function updatePurchaseRequestPlanFields(input: {
   chinaReceivedQuantity?: number | null
   outboundRequestedQuantity?: number | null
   supplierOrderNumber?: string | null
+  chinaArrivalRequestDate?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
   purchaseConfirmed?: boolean
+  buyerCode?: string | null
+  buyerName?: string | null
 }) {
   const requestedQuantity = normalizePurchaseRequestQuantity(input.requestedQuantity)
   const actualPurchaseQuantity = normalizeOptionalPurchaseRequestQuantity(input.actualPurchaseQuantity)
@@ -167,6 +170,9 @@ export async function updatePurchaseRequestPlanFields(input: {
   if (input.supplierOrderNumber !== undefined) {
     values.supplierOrderNumber = emptyToNull(input.supplierOrderNumber)
   }
+  if (input.chinaArrivalRequestDate !== undefined) {
+    values.chinaArrivalRequestDate = input.chinaArrivalRequestDate || null
+  }
   if (input.outboundExpectedDate !== undefined) {
     values.outboundExpectedDate = input.outboundExpectedDate || null
   }
@@ -175,6 +181,13 @@ export async function updatePurchaseRequestPlanFields(input: {
   }
   if (input.purchaseConfirmed !== undefined) {
     values.purchaseConfirmed = input.purchaseConfirmed
+  }
+  if (input.buyerCode !== undefined) {
+    const buyerCode = normalizePurchaseBuyerCode(input.buyerCode)
+    values.buyerCode = buyerCode
+    values.buyerName = PURCHASE_BUYERS[buyerCode]
+  } else if (input.buyerName !== undefined) {
+    values.buyerName = emptyToNull(input.buyerName)
   }
 
   return db.transaction(async (tx) => {

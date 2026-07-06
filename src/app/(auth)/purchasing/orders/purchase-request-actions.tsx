@@ -150,6 +150,109 @@ export function PurchaseBulkStatusButton() {
   )
 }
 
+const PURCHASE_BUYERS = [
+  { code: '1', name: '한상철' },
+  { code: '2', name: '김기환' },
+  { code: '3', name: '최종석' },
+  { code: '4', name: '오지은' },
+  { code: '5', name: '김소희' },
+]
+
+export function PurchaseBulkBuyerApply() {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [buyerCode, setBuyerCode] = useState('4')
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = context.selectedIds.size
+  const targetCount = selectedCount || context.ids.length
+
+  function apply() {
+    const ids = selectedCount ? Array.from(context.selectedIds) : context.ids
+    if (ids.length === 0) return
+    setMessage(null)
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests/bulk-update', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, buyerCode }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setMessage(body.error ?? '담당자 적용 실패')
+        return
+      }
+      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}건 적용`)
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={buyerCode}
+        onChange={(event) => setBuyerCode(event.target.value)}
+        className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+      >
+        {PURCHASE_BUYERS.map((buyer) => (
+          <option key={buyer.code} value={buyer.code}>{buyer.name}</option>
+        ))}
+      </select>
+      <Button type="button" size="sm" variant="outline" onClick={apply} disabled={isPending || targetCount === 0}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Check />}
+        담당자 전체적용
+      </Button>
+      {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
+    </div>
+  )
+}
+
+export function PurchaseBulkArrivalDateApply() {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [date, setDate] = useState(todayDateInput())
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = context.selectedIds.size
+  const targetCount = selectedCount || context.ids.length
+
+  function apply() {
+    const ids = selectedCount ? Array.from(context.selectedIds) : context.ids
+    if (ids.length === 0 || !date) return
+    setMessage(null)
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests/bulk-update', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, chinaArrivalRequestDate: date }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setMessage(body.error ?? '입고요청일 적용 실패')
+        return
+      }
+      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}건 적용`)
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Input
+        type="date"
+        value={date}
+        onChange={(event) => setDate(event.target.value)}
+        className="h-7 w-36 text-xs"
+      />
+      <Button type="button" size="sm" variant="outline" onClick={apply} disabled={isPending || targetCount === 0}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Check />}
+        입고요청일 전체적용
+      </Button>
+      {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
+    </div>
+  )
+}
+
 function useBulkSelection() {
   const context = useContext(BulkSelectionContext)
   if (!context) throw new Error('Purchase bulk selection context is missing.')
@@ -451,8 +554,138 @@ export function PurchasePlanFields({
   )
 }
 
+export function PurchasePlanFieldsV2({
+  id,
+  supplierOrderNumber,
+  outboundExpectedDate,
+  purchaseMethod,
+}: {
+  id: string
+  supplierOrderNumber: string | null
+  outboundExpectedDate: string | Date | null
+  purchaseMethod: string | null
+}) {
+  const router = useRouter()
+  const initialMethod = purchaseMethod === '개인' || purchaseMethod === '법인' ? purchaseMethod : purchaseMethod ? '직접입력' : '개인'
+  const [methodMode, setMethodMode] = useState(initialMethod)
+  const [customMethod, setCustomMethod] = useState(initialMethod === '직접입력' ? purchaseMethod ?? '' : '')
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const formData = new FormData(event.currentTarget)
+    setMessage(null)
+    startTransition(async () => {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplierOrderNumber: String(formData.get('supplierOrderNumber') ?? ''),
+          outboundExpectedDate: String(formData.get('outboundExpectedDate') ?? '') || null,
+          purchaseMethod: methodMode === '직접입력' ? customMethod : methodMode,
+        }),
+      })
+      setMessage(response.ok ? '저장됨' : '저장 실패')
+      if (response.ok) router.refresh()
+    })
+  }
+
+  return (
+    <form onSubmit={save} className="grid min-w-[500px] grid-cols-[1fr_120px_150px_82px] items-center gap-1">
+      <Input
+        name="supplierOrderNumber"
+        defaultValue={supplierOrderNumber ?? ''}
+        placeholder="주문서번호"
+        className="h-7 text-xs"
+      />
+      <Input
+        name="outboundExpectedDate"
+        type="date"
+        defaultValue={formatDateInput(outboundExpectedDate) || todayDateInput()}
+        className="h-7 text-xs"
+      />
+      <div className="flex items-center gap-1">
+        <select
+          value={methodMode}
+          onChange={(event) => setMethodMode(event.target.value)}
+          className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+        >
+          <option value="개인">개인</option>
+          <option value="법인">법인</option>
+          <option value="직접입력">직접입력</option>
+        </select>
+        {methodMode === '직접입력' ? (
+          <Input
+            value={customMethod}
+            onChange={(event) => setCustomMethod(event.target.value)}
+            placeholder="직접입력"
+            className="h-7 w-24 text-xs"
+          />
+        ) : null}
+      </div>
+      <Button type="submit" size="sm" variant="outline" disabled={isPending}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Save />}
+        {message ?? '저장'}
+      </Button>
+    </form>
+  )
+}
+
+export function PurchaseBuyerField({
+  id,
+  buyerCode,
+}: {
+  id: string
+  buyerCode: string | null
+}) {
+  const router = useRouter()
+  const [value, setValue] = useState(
+    buyerCode && PURCHASE_BUYERS.some((buyer) => buyer.code === buyerCode) ? buyerCode : '4',
+  )
+  const [isPending, startTransition] = useTransition()
+
+  function save(nextValue: string) {
+    setValue(nextValue)
+    startTransition(async () => {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ buyerCode: nextValue }),
+      })
+      if (response.ok) router.refresh()
+    })
+  }
+
+  return (
+    <select
+      value={value}
+      onChange={(event) => save(event.target.value)}
+      disabled={isPending}
+      className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+    >
+      {PURCHASE_BUYERS.map((buyer) => (
+        <option key={buyer.code} value={buyer.code}>{buyer.name}</option>
+      ))}
+    </select>
+  )
+}
+
 function formatDateInput(value: string | Date | null) {
   if (!value) return ''
   if (value instanceof Date) return value.toISOString().slice(0, 10)
   return value.slice(0, 10)
+}
+
+function todayDateInput() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const year = parts.find((part) => part.type === 'year')?.value ?? '0000'
+  const month = parts.find((part) => part.type === 'month')?.value ?? '00'
+  const day = parts.find((part) => part.type === 'day')?.value ?? '00'
+  return `${year}-${month}-${day}`
 }

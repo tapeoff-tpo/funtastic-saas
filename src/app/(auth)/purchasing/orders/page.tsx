@@ -13,10 +13,13 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
+  PurchaseBulkArrivalDateApply,
+  PurchaseBulkBuyerApply,
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
+  PurchaseBuyerField,
   PurchaseDeleteButton,
-  PurchasePlanFields,
+  PurchasePlanFieldsV2,
   PurchaseQuantityField,
   PurchaseRecommendationGenerator,
   PurchaseRowCheckbox,
@@ -152,7 +155,9 @@ export default async function PurchasingOrdersPage({
               <h2 className="text-sm font-semibold">{PURCHASE_REQUEST_STATUS_LABELS[status]} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
+              {status === 'outbound_requested' ? <PurchaseBulkArrivalDateApply /> : null}
               <Link
                 href={costToggleHref}
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
@@ -272,15 +277,16 @@ export default async function PurchasingOrdersPage({
                         </>
                       )}
                       <td className="px-3 py-2 align-middle">
-                        <PurchasePlanFields
+                        <PurchasePlanFieldsV2
                           id={item.id}
                           supplierOrderNumber={item.supplierOrderNumber}
                           outboundExpectedDate={item.outboundExpectedDate}
                           purchaseMethod={item.purchaseMethod}
-                          purchaseConfirmed={item.purchaseConfirmed}
                         />
                       </td>
-                      <td className="px-3 py-2 text-center align-middle">{item.buyerName ?? item.managerCode ?? '-'}</td>
+                      <td className="px-3 py-2 text-center align-middle">
+                        <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} />
+                      </td>
                       <td className="px-3 py-2 text-center align-middle">
                         <PurchaseStatusButton id={item.id} nextStatus={getNextPurchaseStatus(item.status)} />
                       </td>

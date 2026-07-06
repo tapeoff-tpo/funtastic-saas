@@ -112,10 +112,13 @@ export default async function PurchasingOrdersPage({
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" render={<Link href={costToggleHref} />}>
+              <Link
+                href={costToggleHref}
+                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
+              >
                 {showCosts ? <EyeOff /> : <Eye />}
                 {showCosts ? '원가 닫기' : '원가 보기'}
-              </Button>
+              </Link>
               <PurchaseBulkStatusButton />
             </div>
           </div>

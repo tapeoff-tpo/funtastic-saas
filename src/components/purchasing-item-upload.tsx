@@ -41,7 +41,7 @@ export function PurchasingItemUpload() {
       <input ref={inputRef} type="file" accept=".xlsx,.xls" className="h-9 max-w-72 rounded-md border bg-background px-2 py-1 text-sm" />
       <Button type="button" onClick={upload} disabled={isPending}>
         <Upload className="size-4" />
-        {isPending ? '반영 중' : 'ESA009M 업로드'}
+        {isPending ? '반영 중' : '파일 업로드'}
       </Button>
       {result ? (
         <span className="text-xs text-muted-foreground">

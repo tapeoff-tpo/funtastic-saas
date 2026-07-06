@@ -13,7 +13,7 @@ export const ESA009M_HEADERS = [
   '100KG 인증여부',
   'HS CODE',
   '재질',
-  '기존원가(元)',
+  '특가(元)',
   '신규원가(元)',
   '상품원가(元)',
   '배송비(元)',
@@ -37,7 +37,7 @@ export type PurchasingItemOutgoingMetricRow = PurchasingItemOutgoingMetrics & {
 }
 
 const NUMERIC_HEADERS = new Set<Esa009mHeader>([
-  '기존원가(元)',
+  '특가(元)',
   '신규원가(元)',
   '상품원가(元)',
   '배송비(元)',
@@ -140,6 +140,9 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   if (!headerRow) throw new Error('ESA009M 품목코드/품목명 헤더를 찾을 수 없습니다.')
   const columnByHeader = new Map<string, number>()
   sheet.getRow(headerRow).eachCell((cell, column) => columnByHeader.set(cellText(cell.value), column))
+  if (!columnByHeader.has('특가(元)') && columnByHeader.has('기존원가(元)')) {
+    columnByHeader.set('특가(元)', columnByHeader.get('기존원가(元)')!)
+  }
   const missing = ESA009M_HEADERS.filter((header) => !columnByHeader.has(header))
   if (missing.length > 0) throw new Error(`필수 열이 없습니다: ${missing.join(', ')}`)
 

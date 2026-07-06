@@ -45,7 +45,7 @@ export default async function PurchasingOrdersPage({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const { items, total, statusCounts } = await getPurchaseRequests({
+  const { items, total, costTotals, statusCounts } = await getPurchaseRequests({
     userId: workspaceUserId,
     status,
     search: search ?? undefined,
@@ -82,6 +82,26 @@ export default async function PurchasingOrdersPage({
       </header>
 
       <PurchaseRecommendationGenerator />
+
+      <section className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border bg-muted/20 px-3 py-2">
+        <span className="text-sm font-medium">
+          {PURCHASE_REQUEST_STATUS_LABELS[status]} 총 구매금액
+        </span>
+        <span className="text-sm tabular-nums">
+          <span className="text-muted-foreground">위안 </span>
+          <strong>{formatCost(costTotals.totalCostYuan, 2)}元</strong>
+        </span>
+        <span className="text-sm tabular-nums">
+          <span className="text-muted-foreground">원화 </span>
+          <strong>{formatCost(costTotals.totalCostKrw, 0)}원</strong>
+        </span>
+        {costTotals.missingYuanCostCount > 0 || costTotals.missingKrwCostCount > 0 ? (
+          <span className="text-xs text-amber-700">
+            원가 누락: 위안 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 ·
+            원화 {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건
+          </span>
+        ) : null}
+      </section>
 
       <nav className="flex flex-wrap gap-2">
         {STATUSES.map((item) => {
@@ -231,6 +251,16 @@ function RecommendationBasis({ rawData }: { rawData: Record<string, unknown> }) 
   return (
     <div className="space-y-0.5 tabular-nums">
       <div>3개월 평균 {formatNumber(rawData.averageMonthlyOutgoing)}개/月</div>
+      {rawData.salesAnomalyDetected === true ? (
+        <div className="font-medium text-amber-700">
+          급증 제외 · 적용 평균 {formatNumber(rawData.effectiveMonthlyOutgoing)}개/月
+        </div>
+      ) : null}
+      {Number(rawData.originalRecommendedQuantity) > Number(rawData.allocatedQuantity) ? (
+        <div className="font-medium text-blue-700">
+          예산 조정 {formatNumber(rawData.originalRecommendedQuantity)} → {formatNumber(rawData.allocatedQuantity)}개
+        </div>
+      ) : null}
       <div>당월 출고 {formatNumber(rawData.currentMonthOutgoing)}개</div>
       <div>현재고 {formatNumber(rawData.availableStock)}개 · 목표 {formatNumber(rawData.targetStockQuantity)}개</div>
     </div>

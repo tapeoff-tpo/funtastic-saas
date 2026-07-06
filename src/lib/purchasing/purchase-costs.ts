@@ -17,6 +17,27 @@ export function calculatePurchaseCosts(input: PurchaseCostInput) {
   }
 }
 
+export function sumPurchaseCosts(inputs: PurchaseCostInput[]) {
+  const totals = inputs.reduce((result, input) => {
+    const costs = calculatePurchaseCosts(input)
+    if (costs.totalCostYuan === null) result.missingYuanCostCount += 1
+    else result.totalCostYuan += costs.totalCostYuan
+    if (costs.totalCostKrw === null) result.missingKrwCostCount += 1
+    else result.totalCostKrw += costs.totalCostKrw
+    return result
+  }, {
+    totalCostYuan: 0,
+    totalCostKrw: 0,
+    missingYuanCostCount: 0,
+    missingKrwCostCount: 0,
+  })
+  return {
+    ...totals,
+    totalCostYuan: Math.round(totals.totalCostYuan * 100) / 100,
+    totalCostKrw: Math.round(totals.totalCostKrw),
+  }
+}
+
 function costNumber(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return null
   const number = typeof value === 'number'

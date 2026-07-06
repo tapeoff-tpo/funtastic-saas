@@ -1,10 +1,13 @@
 ﻿import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { notExists } from 'drizzle-orm'
 import {
   inventory,
+  products,
   purchaseRequestBatches,
   purchaseRequestItems,
 } from '@/lib/db/schema'
+import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics } from './items'
 
 export type PurchaseRecommendationInput = {
@@ -18,6 +21,80 @@ export type PurchaseRecommendationCalculation = {
   targetStockQuantity: number
   recommendedQuantity: number
   stockCoverageMonths: number | null
+}
+
+export type PurchaseBudgetCandidate = {
+  sku: string
+  recommendedQuantity: number
+  stockCoverageMonths: number | null
+  effectiveMonthlyOutgoing: number
+  unitCostKrw: number | null
+}
+
+export function calculateStableMonthlyOutgoing(input: {
+  currentMonthOutgoing: number
+  threeMonthAverageOutgoing: number
+}) {
+  const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
+  const threeMonthAverageOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
+  const previousTwoMonthAverageOutgoing = Math.max(
+    0,
+    (threeMonthAverageOutgoing * 3 - currentMonthOutgoing) / 2,
+  )
+  const salesAnomalyDetected = currentMonthOutgoing >= previousTwoMonthAverageOutgoing * 2
+    && currentMonthOutgoing - previousTwoMonthAverageOutgoing >= 20
+
+  return {
+    effectiveMonthlyOutgoing: roundToOneDecimal(
+      salesAnomalyDetected ? previousTwoMonthAverageOutgoing : threeMonthAverageOutgoing,
+    ),
+    previousTwoMonthAverageOutgoing: roundToOneDecimal(previousTwoMonthAverageOutgoing),
+    salesAnomalyDetected,
+  }
+}
+
+export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
+  candidates: T[],
+  budgetKrw: number,
+) {
+  const sorted = [...candidates].sort((left, right) => {
+    const coverageDifference = (left.stockCoverageMonths ?? Number.POSITIVE_INFINITY)
+      - (right.stockCoverageMonths ?? Number.POSITIVE_INFINITY)
+    if (coverageDifference !== 0) return coverageDifference
+    const outgoingDifference = right.effectiveMonthlyOutgoing - left.effectiveMonthlyOutgoing
+    if (outgoingDifference !== 0) return outgoingDifference
+    return left.sku.localeCompare(right.sku)
+  })
+
+  const items: Array<T & { allocatedQuantity: number }> = []
+  let spentBudgetKrw = 0
+  let missingCostExcluded = 0
+  let budgetLimitedCount = 0
+
+  for (const candidate of sorted) {
+    if (candidate.unitCostKrw === null || candidate.unitCostKrw <= 0) {
+      missingCostExcluded += 1
+      continue
+    }
+    const affordableQuantity = Math.max(
+      0,
+      Math.floor((budgetKrw - spentBudgetKrw) / candidate.unitCostKrw),
+    )
+    const allocatedQuantity = Math.min(candidate.recommendedQuantity, affordableQuantity)
+    if (allocatedQuantity < candidate.recommendedQuantity) budgetLimitedCount += 1
+    if (allocatedQuantity <= 0) continue
+
+    items.push({ ...candidate, allocatedQuantity })
+    spentBudgetKrw += allocatedQuantity * candidate.unitCostKrw
+  }
+
+  return {
+    items,
+    spentBudgetKrw,
+    remainingBudgetKrw: Math.max(0, budgetKrw - spentBudgetKrw),
+    missingCostExcluded,
+    budgetLimitedCount,
+  }
 }
 
 export function calculatePurchaseRecommendation(input: PurchaseRecommendationInput): PurchaseRecommendationCalculation {
@@ -47,9 +124,13 @@ export async function generatePurchaseRecommendations(input: {
   userId: string
   requestedByUserId: string
   targetStockMonths: number
+  budgetKrw?: number | null
   now?: Date
 }) {
   const targetStockMonths = clampTargetMonths(input.targetStockMonths)
+  const budgetKrw = input.budgetKrw == null
+    ? null
+    : Math.max(0, Math.trunc(finiteNumber(input.budgetKrw)))
   const now = input.now ?? new Date()
 
   const inventoryRows = await db
@@ -67,99 +148,191 @@ export async function generatePurchaseRecommendations(input: {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }
   }
 
-  const [activeRequestRows, outgoingMetricsBySku] = await Promise.all([
-    db
-      .select({ sku: purchaseRequestItems.sku })
-      .from(purchaseRequestItems)
-      .where(and(
-        eq(purchaseRequestItems.userId, input.userId),
-        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'china_arrived', 'outbound_requested']),
-      )),
+  const [outgoingMetricsBySku, productCostRows] = await Promise.all([
     getSkuOutgoingMetrics(input.userId, inventoryRows.map((row) => row.sku), now),
+    db.select({
+      sku: products.internalSku,
+      unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+      unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+    }).from(products).where(and(
+      eq(products.userId, input.userId),
+      inArray(products.internalSku, inventoryRows.map((row) => row.sku)),
+    )),
   ])
-
-  const activeRequestSkus = new Set(activeRequestRows.map((row) => row.sku))
-  const recommendations = inventoryRows.flatMap((row) => {
-    if (activeRequestSkus.has(row.sku)) return []
-
+  const productCostsBySku = new Map(productCostRows.map((row) => [row.sku, row]))
+  const assessedRows = inventoryRows.map((row) => {
     const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
     const currentMonthOutgoing = outgoingMetrics?.currentMonthOutgoing ?? 0
     const averageMonthlyOutgoing = outgoingMetrics?.threeMonthAverageOutgoing ?? 0
+    const stableOutgoing = calculateStableMonthlyOutgoing({
+      currentMonthOutgoing,
+      threeMonthAverageOutgoing: averageMonthlyOutgoing,
+    })
     const previousThreeMonthOutgoing = averageMonthlyOutgoing * 3
     const calculation = calculatePurchaseRecommendation({
-      averageMonthlyOutgoing,
+      averageMonthlyOutgoing: stableOutgoing.effectiveMonthlyOutgoing,
       currentMonthOutgoing,
       availableStock: row.availableStock,
       targetStockMonths,
     })
+    const productCosts = productCostsBySku.get(row.sku)
+    const costs = calculatePurchaseCosts({
+      requestedQuantity: 1,
+      unitCostYuan: productCosts?.unitCostYuan,
+      unitCostKrw: productCosts?.unitCostKrw,
+    })
 
-    if (calculation.recommendedQuantity <= 0) return []
-
-    return [{
+    return {
       row,
       previousThreeMonthOutgoing,
       averageMonthlyOutgoing,
       currentMonthOutgoing,
+      ...stableOutgoing,
       calculation,
-    }]
+      unitCostYuan: costs.unitCostYuan,
+      unitCostKrw: costs.unitCostKrw,
+      sku: row.sku,
+      recommendedQuantity: calculation.recommendedQuantity,
+      stockCoverageMonths: calculation.stockCoverageMonths,
+    }
   })
+  const recommendationCandidates = assessedRows.filter(
+    (item) => item.calculation.recommendedQuantity > 0,
+  )
+  const salesAnomalyCount = assessedRows.filter((item) => item.salesAnomalyDetected).length
 
-  if (recommendations.length === 0) {
-    return {
-      created: 0,
-      skipped: inventoryRows.length,
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${
+      `purchase-recommendations:${input.userId}`
+    }))`)
+    const activeRequestRows = await tx
+      .select({
+        id: purchaseRequestItems.id,
+        sku: purchaseRequestItems.sku,
+        status: purchaseRequestItems.status,
+        batchId: purchaseRequestItems.batchId,
+        rawData: purchaseRequestItems.rawData,
+      })
+      .from(purchaseRequestItems)
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'china_arrived', 'outbound_requested']),
+      ))
+
+    const replaceableRows = activeRequestRows.filter(
+      (row) => row.status === 'requested' && row.rawData.source === 'auto_purchase_recommendation',
+    )
+    const replaceableIds = new Set(replaceableRows.map((row) => row.id))
+    const blockedSkus = new Set(
+      activeRequestRows.filter((row) => !replaceableIds.has(row.id)).map((row) => row.sku),
+    )
+    const unblockedCandidates = recommendationCandidates.filter(
+      (item) => !blockedSkus.has(item.row.sku),
+    )
+    const allocation = budgetKrw === null
+      ? {
+          items: unblockedCandidates.map((item) => ({
+            ...item,
+            allocatedQuantity: item.calculation.recommendedQuantity,
+          })),
+          spentBudgetKrw: unblockedCandidates.reduce(
+            (total, item) => total + (item.unitCostKrw ?? 0) * item.calculation.recommendedQuantity,
+            0,
+          ),
+          remainingBudgetKrw: null,
+          missingCostExcluded: 0,
+          budgetLimitedCount: 0,
+        }
+      : allocatePurchaseBudget(unblockedCandidates, budgetKrw)
+
+    if (replaceableRows.length > 0) {
+      await tx.delete(purchaseRequestItems).where(inArray(
+        purchaseRequestItems.id,
+        replaceableRows.map((row) => row.id),
+      ))
+      const replaceableBatchIds = [...new Set(
+        replaceableRows.map((row) => row.batchId).filter((id): id is string => id !== null),
+      )]
+      if (replaceableBatchIds.length > 0) {
+        await tx.delete(purchaseRequestBatches).where(and(
+          inArray(purchaseRequestBatches.id, replaceableBatchIds),
+          notExists(
+            tx.select({ id: purchaseRequestItems.id })
+              .from(purchaseRequestItems)
+              .where(eq(purchaseRequestItems.batchId, purchaseRequestBatches.id)),
+          ),
+        ))
+      }
+    }
+
+    const resultBase = {
+      replaced: replaceableRows.length,
+      skipped: inventoryRows.length - allocation.items.length,
       evaluated: inventoryRows.length,
       targetStockMonths,
+      budgetKrw,
+      spentBudgetKrw: allocation.spentBudgetKrw,
+      remainingBudgetKrw: allocation.remainingBudgetKrw,
+      missingCostExcluded: allocation.missingCostExcluded,
+      budgetLimitedCount: allocation.budgetLimitedCount,
+      salesAnomalyCount,
     }
-  }
+    if (allocation.items.length === 0) return { ...resultBase, created: 0 }
 
-  const [batch] = await db
-    .insert(purchaseRequestBatches)
-    .values({
-      userId: input.userId,
-      sourceFileName: `auto_purchase_recommendation ${formatDate(now)}`,
-      sourceSheetName: 'auto_recommendation',
-      totalRows: inventoryRows.length,
-      importedRows: recommendations.length,
-      skippedRows: inventoryRows.length - recommendations.length,
-      uploadedByUserId: input.requestedByUserId,
-    })
-    .returning({ id: purchaseRequestBatches.id })
+    const [batch] = await tx
+      .insert(purchaseRequestBatches)
+      .values({
+        userId: input.userId,
+        sourceFileName: `auto_purchase_recommendation ${formatDate(now)}`,
+        sourceSheetName: 'auto_recommendation',
+        totalRows: inventoryRows.length,
+        importedRows: allocation.items.length,
+        skippedRows: inventoryRows.length - allocation.items.length,
+        uploadedByUserId: input.requestedByUserId,
+      })
+      .returning({ id: purchaseRequestBatches.id })
 
-  let rowNumber = 1
-  for (const chunk of chunks(recommendations, 250)) {
-    await db.insert(purchaseRequestItems).values(chunk.map((item, index) => ({
-      userId: input.userId,
+    let rowNumber = 1
+    for (const chunk of chunks(allocation.items, 250)) {
+      await tx.insert(purchaseRequestItems).values(chunk.map((item, index) => ({
+        userId: input.userId,
+        batchId: batch.id,
+        rowNumber: rowNumber + index,
+        requestDate: formatDate(now),
+        sku: item.row.sku,
+        productName: item.row.productName,
+        optionName: item.row.optionName,
+        requestedQuantity: item.allocatedQuantity,
+        recommendationBasis: 'manual_stock_months',
+        salesAverageWindowDays: 90,
+        rawData: {
+          source: 'auto_purchase_recommendation',
+          targetStockMonths,
+          budgetKrw,
+          averageMonthlyOutgoing: item.averageMonthlyOutgoing,
+          effectiveMonthlyOutgoing: item.effectiveMonthlyOutgoing,
+          previousTwoMonthAverageOutgoing: item.previousTwoMonthAverageOutgoing,
+          previousThreeMonthOutgoing: item.previousThreeMonthOutgoing,
+          currentMonthOutgoing: item.currentMonthOutgoing,
+          salesAnomalyDetected: item.salesAnomalyDetected,
+          availableStock: item.row.availableStock,
+          targetStockQuantity: item.calculation.targetStockQuantity,
+          originalRecommendedQuantity: item.calculation.recommendedQuantity,
+          allocatedQuantity: item.allocatedQuantity,
+          unitCostYuan: item.unitCostYuan,
+          unitCostKrw: item.unitCostKrw,
+          stockCoverageMonths: item.calculation.stockCoverageMonths,
+        },
+      })))
+      rowNumber += chunk.length
+    }
+
+    return {
+      ...resultBase,
       batchId: batch.id,
-      rowNumber: rowNumber + index,
-      requestDate: formatDate(now),
-      sku: item.row.sku,
-      productName: item.row.productName,
-      optionName: item.row.optionName,
-      requestedQuantity: item.calculation.recommendedQuantity,
-      recommendationBasis: 'manual_stock_months',
-      salesAverageWindowDays: 90,
-      rawData: {
-        source: 'auto_purchase_recommendation',
-        targetStockMonths,
-        averageMonthlyOutgoing: item.averageMonthlyOutgoing,
-        previousThreeMonthOutgoing: item.previousThreeMonthOutgoing,
-        currentMonthOutgoing: item.currentMonthOutgoing,
-        availableStock: item.row.availableStock,
-        targetStockQuantity: item.calculation.targetStockQuantity,
-        stockCoverageMonths: item.calculation.stockCoverageMonths,
-      },
-    })))
-    rowNumber += chunk.length
-  }
-
-  return {
-    batchId: batch.id,
-    created: recommendations.length,
-    skipped: inventoryRows.length - recommendations.length,
-    evaluated: inventoryRows.length,
-    targetStockMonths,
-  }
+      created: allocation.items.length,
+    }
+  })
 }
 
 function clampTargetMonths(value: number) {

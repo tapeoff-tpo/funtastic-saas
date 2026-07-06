@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 
 const bodySchema = z.object({
   targetStockMonths: z.coerce.number().min(0.1).max(12).default(1.2),
+  budgetKrw: z.coerce.number().positive().max(10_000_000_000).nullable().optional(),
 })
 
 export async function POST(request: NextRequest) {
@@ -23,6 +24,7 @@ export async function POST(request: NextRequest) {
       userId: await getWorkspaceUserId(user.id),
       requestedByUserId: user.id,
       targetStockMonths: body.data.targetStockMonths,
+      budgetKrw: body.data.budgetKrw,
     })
 
     return NextResponse.json(result)

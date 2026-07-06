@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculatePurchaseCosts } from './purchase-costs'
+import { calculatePurchaseCosts, sumPurchaseCosts } from './purchase-costs'
 
 describe('purchase costs', () => {
   it('calculates yuan and won totals from the requested quantity', () => {
@@ -25,6 +25,20 @@ describe('purchase costs', () => {
       unitCostKrw: null,
       totalCostYuan: null,
       totalCostKrw: null,
+    })
+  })
+})
+
+describe('purchase cost totals', () => {
+  it('adds available yuan and won totals and counts missing prices', () => {
+    expect(sumPurchaseCosts([
+      { requestedQuantity: 2, unitCostYuan: '10', unitCostKrw: '2000' },
+      { requestedQuantity: 3, unitCostYuan: null, unitCostKrw: '1000' },
+    ])).toEqual({
+      totalCostYuan: 20,
+      totalCostKrw: 7000,
+      missingYuanCostCount: 1,
+      missingKrwCostCount: 0,
     })
   })
 })

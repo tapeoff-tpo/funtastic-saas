@@ -7,6 +7,7 @@ import {
   products,
   purchaseRequestItems,
 } from '@/lib/db/schema'
+import { sumPurchaseCosts } from './purchase-costs'
 import type { PurchaseRequestStatus } from './purchase-request-status'
 
 export async function getPurchaseRequests(input: {
@@ -33,7 +34,7 @@ export async function getPurchaseRequests(input: {
   }
 
   const where = and(...conditions)
-  const [items, [{ total }], statusCounts] = await Promise.all([
+  const [items, [{ total }], statusCounts, costRows] = await Promise.all([
     db
       .select({
         ...getTableColumns(purchaseRequestItems),
@@ -58,11 +59,24 @@ export async function getPurchaseRequests(input: {
       .from(purchaseRequestItems)
       .where(eq(purchaseRequestItems.userId, input.userId))
       .groupBy(purchaseRequestItems.status),
+    db
+      .select({
+        requestedQuantity: purchaseRequestItems.requestedQuantity,
+        unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+        unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+      })
+      .from(purchaseRequestItems)
+      .leftJoin(products, and(
+        eq(products.userId, purchaseRequestItems.userId),
+        eq(products.internalSku, purchaseRequestItems.sku),
+      ))
+      .where(where),
   ])
 
   return {
     items,
     total,
+    costTotals: sumPurchaseCosts(costRows),
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row.total])) as Partial<Record<PurchaseRequestStatus, number>>,
   }
 }

@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Loader2, Save, Sparkles, Trash2 } from 'lucide-react'
+import { Check, Loader2, Save, Sparkles, Trash2, WalletCards } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -159,6 +159,7 @@ function useBulkSelection() {
 export function PurchaseRecommendationGenerator() {
   const router = useRouter()
   const [targetStockMonths, setTargetStockMonths] = useState('1.2')
+  const [budgetKrw, setBudgetKrw] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -169,6 +170,11 @@ export function PurchaseRecommendationGenerator() {
       setError('목표 보유개월수는 0.1~12 사이로 입력해주세요.')
       return
     }
+    const budget = budgetKrw.trim() === '' ? null : Number(budgetKrw)
+    if (budget !== null && (!Number.isFinite(budget) || budget <= 0 || budget > 10_000_000_000)) {
+      setError('구매예산은 1원~100억원 사이로 입력해주세요.')
+      return
+    }
 
     setMessage(null)
     setError(null)
@@ -176,7 +182,7 @@ export function PurchaseRecommendationGenerator() {
       const response = await fetch('/api/purchasing/purchase-requests/recommendations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetStockMonths: months }),
+        body: JSON.stringify({ targetStockMonths: months, budgetKrw: budget }),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -187,7 +193,13 @@ export function PurchaseRecommendationGenerator() {
       setMessage(
         `재고 ${body.evaluated.toLocaleString('ko-KR')}개 검수 · ` +
         `발주추천 ${body.created.toLocaleString('ko-KR')}건 생성 · ` +
-        `제외 ${body.skipped.toLocaleString('ko-KR')}건`,
+        `기존 자동추천 ${(body.replaced ?? 0).toLocaleString('ko-KR')}건 교체 · ` +
+        `급증 ${(body.salesAnomalyCount ?? 0).toLocaleString('ko-KR')}건 보정` +
+        (budget !== null
+          ? ` · 예산 ${(body.spentBudgetKrw ?? 0).toLocaleString('ko-KR')}원 사용 · ` +
+            `원가누락 ${(body.missingCostExcluded ?? 0).toLocaleString('ko-KR')}건 제외 · ` +
+            `예산조정 ${(body.budgetLimitedCount ?? 0).toLocaleString('ko-KR')}건`
+          : ''),
       )
       router.refresh()
     })
@@ -198,12 +210,12 @@ export function PurchaseRecommendationGenerator() {
       <div className="min-w-0">
         <p className="text-sm font-medium">자동 발주 추천</p>
         <p className="text-xs text-muted-foreground">
-          최근 완료된 3개월 월평균 출고수량과 현재고를 기준으로 부족한 품목만 발주요청에 생성합니다.
+          판매 급증을 보정하고 재고 소진 위험이 높은 품목부터 예산 안에서 발주수량을 배분합니다.
         </p>
         {message && <p className="mt-1 text-xs text-emerald-700">{message}</p>}
         {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
         <label className="text-xs text-muted-foreground" htmlFor="target-stock-months">
           목표 보유개월
         </label>
@@ -217,9 +229,26 @@ export function PurchaseRecommendationGenerator() {
           onChange={(event) => setTargetStockMonths(event.target.value)}
           className="h-9 w-24"
         />
+        <label className="text-xs text-muted-foreground" htmlFor="purchase-budget-krw">
+          구매예산
+        </label>
+        <div className="relative">
+          <WalletCards className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="purchase-budget-krw"
+            type="number"
+            min="1"
+            max="10000000000"
+            step="10000"
+            placeholder="원화 예산"
+            value={budgetKrw}
+            onChange={(event) => setBudgetKrw(event.target.value)}
+            className="h-9 w-36 pl-8"
+          />
+        </div>
         <Button type="button" onClick={generate} disabled={isPending}>
           {isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
-          추천 생성
+          추천 계산
         </Button>
       </div>
     </div>

@@ -13,7 +13,7 @@ export const PURCHASE_REQUEST_STATUS_LABELS: Record<PurchaseRequestStatus, strin
   purchased: '구매완료',
   china_arrived: '중국창고도착',
   outbound_requested: '출고요청',
-  completed: '완료',
+  completed: '출고완료',
 }
 
 const STATUS_FLOW: PurchaseRequestStatus[] = [

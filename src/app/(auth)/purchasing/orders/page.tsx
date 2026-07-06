@@ -4,7 +4,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
-import { getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
+import { getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
 import {
   getNextPurchaseStatus,
   PURCHASE_REQUEST_STATUS_LABELS,
@@ -159,7 +159,7 @@ export default async function PurchasingOrdersPage({
           </div>
 
           <div className="overflow-x-auto">
-            <table className={`w-full text-left text-sm ${showCosts ? 'min-w-[2260px]' : 'min-w-[1780px]'}`}>
+            <table className={`w-full text-left text-sm ${showCosts ? 'min-w-[2620px]' : 'min-w-[2140px]'}`}>
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-2 font-medium">
@@ -174,6 +174,9 @@ export default async function PurchasingOrdersPage({
                   <th className="w-32 px-3 py-2 font-medium">
                     <SortHeader label="요청수량" column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
                   </th>
+                  <th className="w-32 px-3 py-2 font-medium">구매수량</th>
+                  <th className="w-32 px-3 py-2 font-medium">중국도착수량</th>
+                  <th className="w-32 px-3 py-2 font-medium">출고요청수량</th>
                   {showCosts ? (
                     <>
                       <th className="w-28 px-3 py-2 text-right font-medium">
@@ -208,12 +211,13 @@ export default async function PurchasingOrdersPage({
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={showCosts ? 15 : 11} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={showCosts ? 18 : 14} className="px-3 py-12 text-center text-sm text-muted-foreground">
                       조건에 맞는 발주 항목이 없습니다.
                     </td>
                   </tr>
                 ) : (
                   items.map((item) => {
+                    const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const costs = calculatePurchaseCosts({
                       requestedQuantity: item.requestedQuantity,
                       unitCostYuan: item.unitCostYuan,
@@ -236,7 +240,28 @@ export default async function PurchasingOrdersPage({
                         </div>
                       </td>
                       <td className="px-3 py-2 tabular-nums">
-                        <PurchaseQuantityField id={item.id} requestedQuantity={item.requestedQuantity} />
+                        <PurchaseQuantityField id={item.id} field="requestedQuantity" quantity={item.requestedQuantity} />
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        <PurchaseQuantityField
+                          id={item.id}
+                          field="actualPurchaseQuantity"
+                          quantity={item.actualPurchaseQuantity ?? item.requestedQuantity}
+                        />
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        <PurchaseQuantityField
+                          id={item.id}
+                          field="chinaReceivedQuantity"
+                          quantity={item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity}
+                        />
+                      </td>
+                      <td className="px-3 py-2 tabular-nums">
+                        <PurchaseQuantityField
+                          id={item.id}
+                          field="outboundRequestedQuantity"
+                          quantity={outboundRequestedQuantity}
+                        />
                       </td>
                       {showCosts ? (
                         <>

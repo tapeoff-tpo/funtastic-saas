@@ -293,21 +293,24 @@ export function PurchaseStatusButton({
 
 export function PurchaseQuantityField({
   id,
-  requestedQuantity,
+  field,
+  quantity,
 }: {
   id: string
-  requestedQuantity: number
+  field: 'requestedQuantity' | 'actualPurchaseQuantity' | 'chinaReceivedQuantity' | 'outboundRequestedQuantity'
+  quantity: number
 }) {
   const router = useRouter()
-  const [quantity, setQuantity] = useState(String(requestedQuantity))
+  const [value, setValue] = useState(String(quantity))
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const nextQuantity = Number(quantity)
-    if (!Number.isInteger(nextQuantity) || nextQuantity < 1) {
-      setMessage('1 이상 정수')
+    const nextQuantity = Number(value)
+    const minimum = field === 'requestedQuantity' ? 1 : 0
+    if (!Number.isInteger(nextQuantity) || nextQuantity < minimum) {
+      setMessage(field === 'requestedQuantity' ? '1 이상 정수' : '0 이상 정수')
       return
     }
 
@@ -316,7 +319,7 @@ export function PurchaseQuantityField({
       const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestedQuantity: nextQuantity }),
+        body: JSON.stringify({ [field]: nextQuantity }),
       })
       setMessage(response.ok ? '저장됨' : '실패')
       if (response.ok) router.refresh()
@@ -327,10 +330,10 @@ export function PurchaseQuantityField({
     <form onSubmit={save} className="flex w-28 items-center gap-1">
       <Input
         type="number"
-        min={1}
+        min={field === 'requestedQuantity' ? 1 : 0}
         step={1}
-        value={quantity}
-        onChange={(event) => setQuantity(event.target.value)}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
         className="h-7 w-16 px-2 text-right text-xs tabular-nums"
       />
       <Button type="submit" size="sm" variant="outline" className="h-7 px-2" disabled={isPending}>

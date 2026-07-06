@@ -113,6 +113,9 @@ export async function updatePurchaseRequestStatus(input: {
       status: input.status,
       updatedAt: new Date(),
     }
+    if (input.status === 'purchased') {
+      values.actualPurchaseQuantity = current.actualPurchaseQuantity ?? current.requestedQuantity
+    }
     if (input.status === 'china_arrived') {
       values.chinaReceivedAt = current.chinaReceivedAt ?? new Date()
       values.chinaReceivedQuantity = current.chinaReceivedQuantity ?? purchaseQuantity(current)
@@ -132,17 +135,28 @@ export async function updatePurchaseRequestPlanFields(input: {
   userId: string
   id: string
   requestedQuantity?: number
+  actualPurchaseQuantity?: number | null
+  chinaReceivedQuantity?: number | null
+  outboundRequestedQuantity?: number | null
   supplierOrderNumber?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
   purchaseConfirmed?: boolean
 }) {
   const requestedQuantity = normalizePurchaseRequestQuantity(input.requestedQuantity)
+  const actualPurchaseQuantity = normalizeOptionalPurchaseRequestQuantity(input.actualPurchaseQuantity)
+  const chinaReceivedQuantity = normalizeOptionalPurchaseRequestQuantity(input.chinaReceivedQuantity)
+  const outboundRequestedQuantity = normalizeOptionalPurchaseRequestQuantity(input.outboundRequestedQuantity)
   if (requestedQuantity === null) return null
+  if (actualPurchaseQuantity === null) return null
+  if (chinaReceivedQuantity === null) return null
+  if (outboundRequestedQuantity === null) return null
   const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
     updatedAt: new Date(),
   }
   if (requestedQuantity !== undefined) values.requestedQuantity = requestedQuantity
+  if (actualPurchaseQuantity !== undefined) values.actualPurchaseQuantity = actualPurchaseQuantity
+  if (chinaReceivedQuantity !== undefined) values.chinaReceivedQuantity = chinaReceivedQuantity
   if (input.supplierOrderNumber !== undefined) {
     values.supplierOrderNumber = emptyToNull(input.supplierOrderNumber)
   }
@@ -156,13 +170,36 @@ export async function updatePurchaseRequestPlanFields(input: {
     values.purchaseConfirmed = input.purchaseConfirmed
   }
 
-  const [row] = await db
-    .update(purchaseRequestItems)
-    .set(values)
-    .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
-    .returning({ id: purchaseRequestItems.id })
+  return db.transaction(async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(purchaseRequestItems)
+      .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
+      .limit(1)
 
-  return row ?? null
+    if (!current) return null
+
+    if (outboundRequestedQuantity !== undefined) {
+      values.rawData = {
+        ...current.rawData,
+        outboundRequestedQuantity,
+      }
+    }
+    if (chinaReceivedQuantity !== undefined) {
+      await adjustChinaWarehouseArrivalQuantity(tx, current, chinaReceivedQuantity)
+    }
+    if (outboundRequestedQuantity !== undefined) {
+      await adjustChinaWarehouseOutboundQuantity(tx, current, outboundRequestedQuantity)
+    }
+
+    const [row] = await tx
+      .update(purchaseRequestItems)
+      .set(values)
+      .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
+      .returning({ id: purchaseRequestItems.id })
+
+    return row ?? null
+  })
 }
 
 export function normalizePurchaseRequestQuantity(value: unknown) {
@@ -170,6 +207,28 @@ export function normalizePurchaseRequestQuantity(value: unknown) {
   const quantity = typeof value === 'number' ? value : Number(value)
   if (!Number.isInteger(quantity) || quantity < 1) return null
   return quantity
+}
+
+export function normalizeOptionalPurchaseRequestQuantity(value: unknown) {
+  if (value === undefined) return undefined
+  if (value === null || value === '') return null
+  const quantity = typeof value === 'number' ? value : Number(value)
+  if (!Number.isInteger(quantity) || quantity < 0) return null
+  return quantity
+}
+
+export function getOutboundRequestedQuantity(item: {
+  rawData: Record<string, unknown>
+  chinaReceivedQuantity: number | null
+  actualPurchaseQuantity: number | null
+  requestedQuantity: number
+}) {
+  const rawQuantity = item.rawData.outboundRequestedQuantity
+  const outboundRequestedQuantity = typeof rawQuantity === 'number' ? rawQuantity : Number(rawQuantity)
+  if (Number.isInteger(outboundRequestedQuantity) && outboundRequestedQuantity >= 0) {
+    return outboundRequestedQuantity
+  }
+  return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity
 }
 
 export function purchaseRequestOrderBy(sort?: string, order?: string): SQL[] {
@@ -360,7 +419,7 @@ async function addChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequestIt
 }
 
 async function subtractChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequestItem) {
-  const quantity = purchaseQuantity(item)
+  const quantity = outboundQuantity(item)
   if (quantity <= 0) return
   const optionKey = item.optionName ?? ''
 
@@ -408,6 +467,103 @@ async function subtractChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequ
   await deleteEmptyChinaWarehouseInventory(tx, item.userId)
 }
 
+async function adjustChinaWarehouseArrivalQuantity(
+  tx: DbTransaction,
+  item: PurchaseRequestItem,
+  nextQuantity: number,
+) {
+  const [movement] = await tx
+    .select()
+    .from(chinaWarehouseInventoryMovements)
+    .where(and(
+      eq(chinaWarehouseInventoryMovements.purchaseRequestItemId, item.id),
+      eq(chinaWarehouseInventoryMovements.movementType, 'arrival'),
+    ))
+    .limit(1)
+
+  if (!movement) return
+  const difference = nextQuantity - movement.delta
+  if (difference === 0) return
+  if (difference < 0) {
+    const [inventoryRow] = await tx
+      .select({ availableQuantity: chinaWarehouseInventory.availableQuantity })
+      .from(chinaWarehouseInventory)
+      .where(eq(chinaWarehouseInventory.id, movement.inventoryId))
+      .limit(1)
+    if (!inventoryRow || inventoryRow.availableQuantity < Math.abs(difference)) {
+      throw new Error('이미 출고요청된 수량보다 중국도착수량을 적게 줄일 수 없습니다.')
+    }
+  }
+
+  await tx
+    .update(chinaWarehouseInventory)
+    .set({
+      totalQuantity: sql`${chinaWarehouseInventory.totalQuantity} + ${difference}`,
+      availableQuantity: sql`${chinaWarehouseInventory.availableQuantity} + ${difference}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(chinaWarehouseInventory.id, movement.inventoryId))
+
+  await tx
+    .update(chinaWarehouseInventoryMovements)
+    .set({
+      delta: nextQuantity,
+      quantityAfter: movement.quantityBefore + nextQuantity,
+    })
+    .where(eq(chinaWarehouseInventoryMovements.id, movement.id))
+
+  await deleteEmptyChinaWarehouseInventory(tx, item.userId)
+}
+
+async function adjustChinaWarehouseOutboundQuantity(
+  tx: DbTransaction,
+  item: PurchaseRequestItem,
+  nextQuantity: number,
+) {
+  const [movement] = await tx
+    .select()
+    .from(chinaWarehouseInventoryMovements)
+    .where(and(
+      eq(chinaWarehouseInventoryMovements.purchaseRequestItemId, item.id),
+      eq(chinaWarehouseInventoryMovements.movementType, 'outbound_request'),
+    ))
+    .limit(1)
+
+  if (!movement) return
+  const currentQuantity = Math.abs(movement.delta)
+  const difference = nextQuantity - currentQuantity
+  if (difference === 0) return
+
+  const [inventoryRow] = await tx
+    .select({ availableQuantity: chinaWarehouseInventory.availableQuantity })
+    .from(chinaWarehouseInventory)
+    .where(eq(chinaWarehouseInventory.id, movement.inventoryId))
+    .limit(1)
+  if (!inventoryRow) throw new Error('중국창고 재고를 찾을 수 없습니다.')
+  if (difference > 0 && inventoryRow.availableQuantity < difference) {
+    throw new Error(`중국창고 재고가 부족합니다. 현재 ${inventoryRow.availableQuantity}개, 추가 출고요청 ${difference}개`)
+  }
+
+  await tx
+    .update(chinaWarehouseInventory)
+    .set({
+      totalQuantity: sql`${chinaWarehouseInventory.totalQuantity} - ${difference}`,
+      availableQuantity: sql`${chinaWarehouseInventory.availableQuantity} - ${difference}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(chinaWarehouseInventory.id, movement.inventoryId))
+
+  await tx
+    .update(chinaWarehouseInventoryMovements)
+    .set({
+      delta: -nextQuantity,
+      quantityAfter: movement.quantityBefore - nextQuantity,
+    })
+    .where(eq(chinaWarehouseInventoryMovements.id, movement.id))
+
+  await deleteEmptyChinaWarehouseInventory(tx, item.userId)
+}
+
 async function hasChinaWarehouseMovement(
   tx: DbTransaction,
   purchaseRequestItemId: string,
@@ -437,6 +593,15 @@ async function deleteEmptyChinaWarehouseInventory(tx: DbTransaction, userId: str
 
 function purchaseQuantity(item: PurchaseRequestItem) {
   return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity ?? 0
+}
+
+function outboundQuantity(item: PurchaseRequestItem) {
+  return getOutboundRequestedQuantity({
+    rawData: item.rawData,
+    chinaReceivedQuantity: item.chinaReceivedQuantity,
+    actualPurchaseQuantity: item.actualPurchaseQuantity,
+    requestedQuantity: item.requestedQuantity,
+  })
 }
 
 function emptyToNull(value: string | null | undefined): string | null {

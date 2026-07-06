@@ -9,6 +9,9 @@ import { createClient } from '@/lib/supabase/server'
 
 const bodySchema = z.object({
   requestedQuantity: z.number().int().min(1).max(1_000_000).optional(),
+  actualPurchaseQuantity: z.number().int().min(0).max(1_000_000).optional(),
+  chinaReceivedQuantity: z.number().int().min(0).max(1_000_000).optional(),
+  outboundRequestedQuantity: z.number().int().min(0).max(1_000_000).optional(),
   supplierOrderNumber: z.string().max(100).nullable().optional(),
   outboundExpectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   purchaseMethod: z.string().max(100).nullable().optional(),

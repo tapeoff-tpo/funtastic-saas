@@ -34,7 +34,7 @@
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
 | BullMQ | ^5.72 | Job queue for marketplace API polling, order sync, invoice upload | **Use BullMQ, not Supabase pgmq.** Rationale: 30 marketplaces x polling every 5-15 min = hundreds of concurrent jobs with rate limiting, retries, and priority queues. BullMQ has mature rate limiting per queue (critical for marketplace API rate limits), job flow dependencies (collect orders -> process -> upload invoices), cron-based repeatable jobs, and 14M+ monthly npm downloads. Supabase pgmq is promising but too young for this scale of job orchestration -- it lacks per-queue rate limiting and job flow DAGs. |
-| Redis (Upstash or self-hosted) | 7.x | BullMQ backing store | Upstash Redis for serverless-friendly deployment. Alternatively, a small dedicated Redis instance on Railway/Fly.io. BullMQ requires Redis -- no way around this. |
+| Redis (Upstash or self-hosted) | 7.x | BullMQ backing store | Upstash Redis for serverless-friendly deployment. Alternatively, a small dedicated Redis instance can back long-running workers. BullMQ requires Redis -- no way around this. |
 ### Database & Data Layer
 | Technology | Version | Purpose | Why Recommended |
 |------------|---------|---------|-----------------|
@@ -121,7 +121,7 @@
 - Use a single Redis instance for both BullMQ and caching
 - Deploy with Docker Compose: `next-app` + `worker` + `redis`
 - Next.js app on Vercel (dashboard, API routes for webhooks)
-- BullMQ workers on Railway/Fly.io (separate long-running process)
+- BullMQ workers as a separate long-running process
 - Upstash Redis (serverless Redis, pay-per-request)
 - This split is mandatory -- Vercel serverless cannot run persistent BullMQ workers
 - Add horizontal worker scaling (multiple BullMQ worker instances)

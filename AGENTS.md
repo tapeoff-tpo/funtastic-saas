@@ -41,12 +41,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### Deployment
 
-- Production is deployed on Railway from the GitHub `main` branch.
-- After production fixes, run a production build when practical, commit changes, push to `origin main`, and verify the Railway URL responds.
+- Production is deployed on Vercel from the GitHub `main` branch.
+- After production fixes, run a production build when practical, commit changes, push to `origin main`, and verify the Vercel production URL responds.
 
 ## 자동형 작업 운영
 
-요청이 명확하고 범위가 정해져 있으면 중간 승인을 반복해서 묻지 말고 관련 코드 확인, 구현, 검증, 커밋, `origin main` 푸시, Railway 운영 배포 및 공개 주소 확인까지 이어서 수행한다.
+요청이 명확하고 범위가 정해져 있으면 중간 승인을 반복해서 묻지 말고 관련 코드 확인, 구현, 검증, 커밋, `origin main` 푸시, Vercel 운영 배포 및 공개 주소 확인까지 이어서 수행한다.
 
 - 요청과 직접 관련된 파일만 수정하고 커밋한다.
 - 필수 검증에 실패하면 푸시하거나 배포하지 않는다.

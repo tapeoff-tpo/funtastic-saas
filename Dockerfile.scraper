@@ -4,8 +4,8 @@
 # system deps (fonts, libraries) pre-installed. Avoids the headache of
 # managing Chromium runtime deps in nixpacks.
 #
-# Railway service configuration:
-#   - In Railway dashboard, create a new service named `scrape-worker`
+# Dedicated scraper worker service configuration:
+#   - Create a service named `scrape-worker`
 #   - Set Build → Source: this repo
 #   - Set Build → Builder: Dockerfile
 #   - Set Build → Dockerfile path: Dockerfile.scraper
@@ -27,7 +27,7 @@ RUN npm ci --omit=optional
 # Copy the rest of the project
 COPY . .
 
-# Headless by default in Railway (no display)
+# Headless by default in container environments (no display)
 ENV HEADLESS=true
 ENV NODE_ENV=production
 

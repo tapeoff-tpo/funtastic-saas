@@ -41,7 +41,7 @@ const CARRIER_NAMES: Record<string, string> = {
 }
 
 function formatDate(date: Date): string {
-  // Funtastic B2B filters dates as KST calendar days. Railway runs in UTC,
+  // Funtastic B2B filters dates as KST calendar days. Server runtimes can run in UTC,
   // so using local server dates can miss same-day Korean orders after midnight.
   const kst = new Date(date.getTime() + 9 * 60 * 60 * 1000)
   const yyyy = kst.getUTCFullYear()

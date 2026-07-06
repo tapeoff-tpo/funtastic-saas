@@ -10,7 +10,7 @@ Funtastic SaaS is an internal ecommerce operations dashboard for order managemen
 - Supabase
 - Drizzle ORM
 - Tailwind CSS
-- Railway deployment
+- Vercel deployment
 
 ## Development
 
@@ -29,11 +29,11 @@ npm run build
 
 ## Production
 
-Production is deployed on Railway from GitHub `main`.
+Production is deployed on Vercel from GitHub `main`.
 
 Production URL:
 
-- https://funtastic-saas-production.up.railway.app/dashboard
+- https://funtastic-saas-vercel.vercel.app
 
 ## Admin Account Policy
 

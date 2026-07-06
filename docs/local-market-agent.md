@@ -1,6 +1,6 @@
 # Local Market Agent
 
-This project can run RPA marketplaces from a staff PC instead of Railway.
+This project can run RPA marketplaces from a staff PC while the web app stays on Vercel.
 
 ## What It Does
 
@@ -45,4 +45,4 @@ Keep the terminal window open while using RPA collection or invoice upload.
 - Multiple staff can click SaaS buttons from different PCs.
 - The actual marketplace login happens from the PC running this agent.
 - If this PC sleeps, shuts down, or loses internet, RPA jobs will stop.
-- Leave Railway auto deploy disabled while Vercel is the web deployment target.
+- Keep Vercel as the web deployment target.

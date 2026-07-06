@@ -2,11 +2,11 @@
 
 > **에이전트 작업자 필수 사항:** 이 계획을 단계별로 구현할 때 `superpowers:subagent-driven-development`(권장) 또는 `superpowers:executing-plans`를 사용한다. 진행 상태는 체크박스로 관리한다.
 
-**목표:** 명확한 개발 요청을 구현부터 검증, 커밋, 푸시, Railway 운영 확인까지 중간 승인 없이 완료하도록 저장소 규칙을 설정한다.
+**목표:** 명확한 개발 요청을 구현부터 검증, 커밋, 푸시, Vercel 운영 확인까지 중간 승인 없이 완료하도록 저장소 규칙을 설정한다.
 
-**구조:** 저장소 루트의 기존 `AGENTS.md`에 한국어 자동형 운영 절을 추가한다. 기존 주문 및 수집 불변성과 Railway 배포 규칙은 수정하지 않고, 고위험 작업에만 사전 승인 경계를 둔다.
+**구조:** 저장소 루트의 기존 `AGENTS.md`에 한국어 자동형 운영 절을 추가한다. 기존 주문 및 수집 불변성과 Vercel 배포 규칙은 수정하지 않고, 고위험 작업에만 사전 승인 경계를 둔다.
 
-**기술 요소:** Markdown, Codex `AGENTS.md`, Git, Railway
+**기술 요소:** Markdown, Codex `AGENTS.md`, Git, Vercel
 
 ---
 
@@ -33,7 +33,7 @@ Get-Content -Encoding utf8 -Raw AGENTS.md
 ```md
 ## 자동형 작업 운영
 
-요청이 명확하고 범위가 정해져 있으면 중간 승인을 반복해서 묻지 말고 관련 코드 확인, 구현, 검증, 커밋, `origin main` 푸시, Railway 운영 배포 및 공개 주소 확인까지 이어서 수행한다.
+요청이 명확하고 범위가 정해져 있으면 중간 승인을 반복해서 묻지 말고 관련 코드 확인, 구현, 검증, 커밋, `origin main` 푸시, Vercel 운영 배포 및 공개 주소 확인까지 이어서 수행한다.
 
 - 요청과 직접 관련된 파일만 수정하고 커밋한다.
 - 필수 검증에 실패하면 푸시하거나 배포하지 않는다.
@@ -55,7 +55,7 @@ Get-Content -Encoding utf8 -Raw AGENTS.md
 실행:
 
 ```powershell
-Select-String -Path AGENTS.md -Encoding utf8 -Pattern '자동형 작업 운영|origin main|운영 데이터를 삭제|Railway'
+Select-String -Path AGENTS.md -Encoding utf8 -Pattern '자동형 작업 운영|origin main|운영 데이터를 삭제|Vercel'
 git diff --check
 git diff -- AGENTS.md
 ```

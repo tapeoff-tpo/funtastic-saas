@@ -9,7 +9,7 @@
  * Triggered by jobs in the `marketplace-scrape` queue.
  *
  * Boot via `npm run scrape-worker` (script defined in package.json).
- * In Railway, deploy as a dedicated service with start command: npm run scrape-worker
+ * Run as a dedicated long-running process with start command: npm run scrape-worker
  */
 
 import { Worker, type Job } from 'bullmq'
@@ -288,5 +288,5 @@ process.on('SIGTERM', shutdown)
 process.on('SIGINT', shutdown)
 
 console.log(
-  `[scrape-worker] online — listening on queue: marketplace-scrape commit=${process.env.RAILWAY_GIT_COMMIT_SHA ?? 'local'} deployment=${process.env.RAILWAY_DEPLOYMENT_ID ?? 'local'}`,
+  `[scrape-worker] online — listening on queue: marketplace-scrape commit=${process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT_SHA ?? 'local'} deployment=${process.env.VERCEL_DEPLOYMENT_ID ?? 'local'}`,
 )

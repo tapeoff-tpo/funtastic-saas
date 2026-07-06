@@ -8,7 +8,7 @@
  *   - invoice-upload:   uploads tracking numbers to marketplace APIs
  *
  * On startup, schedules repeating jobs for all active marketplace connections.
- * Handles graceful shutdown on SIGTERM/SIGINT (Railway sends SIGTERM on redeploy).
+ * Handles graceful shutdown on SIGTERM/SIGINT.
  */
 
 import '@/lib/marketplace/adapters/configs'
@@ -65,7 +65,7 @@ async function main() {
     await scheduleAllCollections()
   }
 
-  // Graceful shutdown — Railway sends SIGTERM before stopping a container
+  // Graceful shutdown before the worker process stops.
   const shutdown = async (signal: string) => {
     console.log(`[Worker] ${signal} received, draining workers...`)
     await Promise.all([

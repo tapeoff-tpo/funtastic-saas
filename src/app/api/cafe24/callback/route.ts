@@ -3,7 +3,8 @@ import { createClient } from '@/lib/supabase/server'
 import { readCredential, storeCredential } from '@/lib/supabase/admin'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
-const REDIRECT_URI = `${process.env.NEXT_PUBLIC_APP_URL ?? 'https://funtastic-saas-production.up.railway.app'}/api/cafe24/callback`
+const DEFAULT_APP_URL = 'https://funtastic-saas-vercel.vercel.app'
+const REDIRECT_URI = `${process.env.NEXT_PUBLIC_APP_URL ?? DEFAULT_APP_URL}/api/cafe24/callback`
 
 /**
  * Cafe24 OAuth callback — automatically exchanges the authorization code
@@ -94,8 +95,8 @@ export async function GET(req: NextRequest) {
     return html(`<h2 style="color:red">Vault 저장 실패</h2><p>${err instanceof Error ? err.message : '알 수 없는 오류'}</p>`)
   }
 
-  // Success — redirect to settings page (use APP_URL to avoid localhost redirect on Railway)
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'https://funtastic-saas-production.up.railway.app'
+  // Success — redirect to settings page using the configured public Vercel URL.
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? DEFAULT_APP_URL
   return NextResponse.redirect(`${appUrl}/settings/marketplaces?cafe24=token_updated`)
 }
 

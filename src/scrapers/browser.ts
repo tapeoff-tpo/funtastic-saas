@@ -23,7 +23,7 @@ export async function getBrowser(): Promise<Browser> {
     args: [
       '--disable-blink-features=AutomationControlled',
       '--disable-dev-shm-usage',
-      '--no-sandbox', // required when running in Railway/Docker
+      '--no-sandbox', // required when running in Docker
     ],
   })
   return _browser

@@ -135,7 +135,7 @@ interface ClaimItem {
 
 function fmtDate(d: Date): string {
   // 10x10 expects KST wall-clock time as YYYY-MM-DD HH:mm:ss.
-  // Railway hosts can run in UTC, which would otherwise miss same-day Korean orders.
+  // Server hosts can run in UTC, which would otherwise miss same-day Korean orders.
   const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
   const yyyy = kst.getUTCFullYear()
   const mm = String(kst.getUTCMonth() + 1).padStart(2, '0')

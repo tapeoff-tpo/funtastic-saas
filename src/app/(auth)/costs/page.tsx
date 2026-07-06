@@ -5,7 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { ESA009M_HEADERS, getPurchasingItems } from '@/lib/purchasing/items'
 import { PurchasingItemUpload } from '@/components/purchasing-item-upload'
 
-export const metadata: Metadata = { title: '諛쒖＜ ?덈ぉ' }
+export const metadata: Metadata = { title: '품목' }
 
 export default async function CostsPage({
   searchParams,

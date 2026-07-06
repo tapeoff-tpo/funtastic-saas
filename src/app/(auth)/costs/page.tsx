@@ -52,15 +52,13 @@ export default async function CostsPage({
               {ESA009M_HEADERS.map((header) => (
                 <th key={header} className="whitespace-nowrap px-3 py-2.5 text-left font-medium">{header}</th>
               ))}
-              <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium">당월 출고수량</th>
-              <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium">3개월 평균 출고수량</th>
               <th className="whitespace-nowrap px-3 py-2.5 text-left font-medium">최근 반영일</th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td colSpan={ESA009M_HEADERS.length + 3} className="h-40 text-center text-muted-foreground">
+                <td colSpan={ESA009M_HEADERS.length + 1} className="h-40 text-center text-muted-foreground">
                   표시할 품목이 없습니다. ESA009M 엑셀을 업로드해주세요.
                 </td>
               </tr>
@@ -71,8 +69,6 @@ export default async function CostsPage({
                     {item.data[header] || '-'}
                   </td>
                 ))}
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{item.outgoingMetrics.currentMonthOutgoing.toLocaleString('ko-KR')}</td>
-                <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{item.outgoingMetrics.threeMonthAverageOutgoing.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{item.updatedAt.toLocaleString('ko-KR')}</td>
               </tr>
             ))}

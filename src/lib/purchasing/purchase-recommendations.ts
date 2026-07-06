@@ -1,9 +1,7 @@
-﻿import { and, eq, inArray, ne, sql } from 'drizzle-orm'
+﻿import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   inventory,
-  products,
-  productVariants,
   purchaseRequestBatches,
   purchaseRequestItems,
 } from '@/lib/db/schema'
@@ -57,20 +55,13 @@ export async function generatePurchaseRecommendations(input: {
   const inventoryRows = await db
     .select({
       sku: inventory.sku,
-      productName: inventory.productName,
-      optionName: inventory.optionName,
-      availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,
+      productName: sql<string>`MAX(${inventory.productName})`,
+      optionName: sql<string | null>`MAX(${inventory.optionName})`,
+      availableStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
     })
     .from(inventory)
-    .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
-    .innerJoin(products, eq(products.id, productVariants.productId))
-    .where(and(
-      eq(inventory.userId, input.userId),
-      eq(products.userId, input.userId),
-      eq(products.manageInventory, true),
-      ne(products.status, 'deleted'),
-      eq(productVariants.isActive, true),
-    ))
+    .where(eq(inventory.userId, input.userId))
+    .groupBy(inventory.sku)
 
   if (inventoryRows.length === 0) {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }

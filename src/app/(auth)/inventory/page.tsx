@@ -94,25 +94,7 @@ export default async function InventoryPage({
       {/* Table */}
       <InventoryTable
         searched={searched}
-        data={items.map((item) => ({
-          id: item.id,
-          productId: item.productId,
-          sku: item.sku,
-          productName: item.productName,
-          optionName: item.optionName ?? null,
-          packagingUnit: item.packagingUnit ?? null,
-          warehouseZone: item.warehouseZone,
-          sectorCode: item.sectorCode,
-          totalStock: item.totalStock,
-          reservedStock: item.reservedStock,
-          availableStock: item.availableStock,
-          monthlyIncoming: item.monthlyIncoming,
-          monthlyOutgoing: item.monthlyOutgoing,
-          lastIncomingAt: item.lastIncomingAt ?? null,
-          lastOutgoingAt: item.lastOutgoingAt ?? null,
-          shippingCost: item.shippingCost,
-          updatedAt: item.updatedAt,
-        }))}
+        data={items}
         total={total}
         page={params.page}
         pageSize={params.pageSize}

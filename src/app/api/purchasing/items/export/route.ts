@@ -20,7 +20,7 @@ export async function GET() {
     { header: '최근 반영일', key: 'updatedAt', width: 22 },
   ]
   sheet.views = [{ state: 'frozen', ySplit: 1 }]
-  sheet.autoFilter = { from: 'A1', to: { row: 1, column: ESA009M_HEADERS.length + 3 } }
+  sheet.autoFilter = { from: 'A1', to: { row: 1, column: ESA009M_HEADERS.length + 1 } }
 
   const headerRow = sheet.getRow(1)
   headerRow.height = 24
@@ -33,8 +33,6 @@ export async function GET() {
   for (const item of items) {
     sheet.addRow({
       ...item.data,
-      currentMonthOutgoing: item.outgoingMetrics.currentMonthOutgoing,
-      threeMonthAverageOutgoing: item.outgoingMetrics.threeMonthAverageOutgoing,
       updatedAt: item.updatedAt.toLocaleString('ko-KR'),
     })
   }

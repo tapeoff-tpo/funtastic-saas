@@ -1,19 +1,9 @@
-/**
- * Inventory queries — driven by products table as source of truth.
- *
- * Performance strategy: paginate first, enrich after.
- * 1. Get 50 product rows (fast — no history join)
- * 2. Aggregate inventoryHistory only for those 50 rows
- * 3. Merge results in JS
- *
- * This avoids GROUP BY + inventoryHistory scan on all 3000+ rows.
- */
-
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, orders, products, productVariants } from '@/lib/db/schema'
-import { eq, and, or, ilike, desc, asc, count, ne, sql, inArray } from 'drizzle-orm'
+import { inventory, inventoryHistory, orders, products } from '@/lib/db/schema'
+import { eq, and, or, ilike, desc, asc, count, sql, inArray } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
+import { resolveOutgoingMetrics } from '@/lib/purchasing/items'
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -24,156 +14,94 @@ export async function getInventoryList(
   const page = filters.page ?? 1
   const pageSize = filters.pageSize ?? DEFAULT_PAGE_SIZE
   const offset = (page - 1) * pageSize
+  const conditions: SQL[] = [eq(inventory.userId, userId)]
 
-  const conditions: SQL[] = [
-    eq(products.userId, userId),
-    eq(inventory.userId, userId),
-    ne(products.status, 'deleted'),
-    // 재고관리 대상으로 체크된 상품만 노출 (migration 023)
-    eq(products.manageInventory, true),
-    eq(productVariants.isActive, true),
-  ]
-
-  // 통합 검색 — 기존 호환성 유지: 품번 또는 상품명 OR 매칭
   if (filters.search) {
-    const searchPattern = `%${filters.search}%`
-    conditions.push(
-      or(
-        ilike(products.internalSku, searchPattern),
-        ilike(products.name, searchPattern),
-        ilike(inventory.sku, searchPattern),
-        ilike(inventory.productName, searchPattern),
-        ilike(inventory.optionName, searchPattern),
-      )!,
-    )
+    const pattern = `%${filters.search}%`
+    conditions.push(or(
+      ilike(inventory.sku, pattern),
+      ilike(inventory.productName, pattern),
+      ilike(inventory.optionName, pattern),
+    )!)
   }
-
-  // 품번코드 검색 — products.internalSku 부분 일치
-  if (filters.productCode) {
-    conditions.push(ilike(products.internalSku, `%${filters.productCode}%`))
-  }
-
-  // 단품코드 검색 — inventory.optionName 또는 inventory.sku 부분 일치
+  if (filters.productCode) conditions.push(ilike(inventory.sku, `%${filters.productCode}%`))
   if (filters.optionCode) {
     const pattern = `%${filters.optionCode}%`
-    conditions.push(
-      or(ilike(inventory.optionName, pattern), ilike(inventory.sku, pattern))!,
-    )
+    conditions.push(or(ilike(inventory.optionName, pattern), ilike(inventory.sku, pattern))!)
   }
-
-  // 재고수량 N개 이하 — totalStock 이 NULL 이면 0 으로 취급
-  if (typeof filters.maxStock === 'number' && Number.isFinite(filters.maxStock)) {
-    conditions.push(sql`COALESCE(${inventory.totalStock}, 0) <= ${filters.maxStock}`)
-  }
-
-  if (filters.warehouseZone) {
-    conditions.push(eq(inventory.warehouseZone, filters.warehouseZone))
-  }
+  if (filters.warehouseZone) conditions.push(eq(inventory.warehouseZone, filters.warehouseZone))
 
   const whereClause = and(...conditions)
-
+  const purchasingStockSql = sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`
+  const havingClause = typeof filters.maxStock === 'number' && Number.isFinite(filters.maxStock)
+    ? sql`${purchasingStockSql} <= ${filters.maxStock}`
+    : undefined
   const sortColumn = (() => {
     switch (filters.sort) {
       case 'sku': return inventory.sku
-      case 'productName': return inventory.productName
-      case 'warehouseZone': return sql`COALESCE(${inventory.warehouseZone}, '')`
-      case 'sectorCode': return sql`COALESCE(${inventory.sectorCode}, '')`
-      case 'totalStock': return sql`COALESCE(${inventory.totalStock}, 0)`
-      case 'reservedStock': return sql`COALESCE(${inventory.reservedStock}, 0)`
-      case 'availableStock': return sql`COALESCE(${inventory.availableStock}, 0)`
-      case 'updatedAt': return products.updatedAt
+      case 'productName': return sql`MAX(${inventory.productName})`
+      case 'warehouseZone': return sql`STRING_AGG(DISTINCT COALESCE(${inventory.warehouseZone}, ''), '/' ORDER BY COALESCE(${inventory.warehouseZone}, ''))`
+      case 'totalStock':
+      case 'availableStock': return purchasingStockSql
+      case 'updatedAt': return sql`MAX(${inventory.updatedAt})`
       default: return inventory.sku
     }
   })()
-
   const sortDirection = filters.order === 'desc' ? desc : asc
+  const primaryOrderSql = sql`CASE ${inventory.warehouseZone} WHEN '1창고' THEN 0 WHEN '쿠팡창고' THEN 1 WHEN '쿠팡' THEN 1 WHEN '2창고' THEN 2 ELSE 3 END`
 
-  // ── Step 1: paginate products (no history join — fast) ──────────────────
-  const [pageRows, [{ total }]] = await Promise.all([
-    db
-      .select({
-        id: inventory.id,
-        inventoryId: inventory.id,
-        productId: products.id,
-        sku: inventory.sku,
-        productName: inventory.productName,
-        optionName: inventory.optionName,
-        packagingUnit: inventory.packagingUnit,
-        warehouseZone: inventory.warehouseZone,
-        sectorCode: inventory.sectorCode,
-        totalStock: sql<number>`COALESCE(${inventory.totalStock}, 0)::int`,
-        reservedStock: sql<number>`COALESCE(${inventory.reservedStock}, 0)::int`,
-        availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,
-        shippingCost: products.shippingCost,
-        createdAt: products.createdAt,
-        updatedAt: sql<Date>`COALESCE(${inventory.updatedAt}, ${products.updatedAt})`,
-        userId: products.userId,
-      })
-      .from(inventory)
-      .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
-      .innerJoin(products, eq(products.id, productVariants.productId))
-      .where(whereClause)
-      .orderBy(sortDirection(sortColumn))
-      .limit(pageSize)
-      .offset(offset),
-    db
-      .select({ total: count() })
-      .from(inventory)
-      .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
-      .innerJoin(products, eq(products.id, productVariants.productId))
-      .where(whereClause),
-  ])
+  const pageQuery = db.select({
+    id: sql<string>`(ARRAY_AGG(${inventory.id} ORDER BY ${primaryOrderSql}, ${inventory.createdAt} ASC))[1]`,
+    inventoryId: sql<string>`(ARRAY_AGG(${inventory.id} ORDER BY ${primaryOrderSql}, ${inventory.createdAt} ASC))[1]`,
+    sku: inventory.sku,
+    productName: sql<string>`MAX(${inventory.productName})`,
+    optionName: sql<string | null>`MAX(${inventory.optionName})`,
+    warehouseZone: sql<string | null>`NULLIF(STRING_AGG(DISTINCT COALESCE(${inventory.warehouseZone}, ''), '/' ORDER BY COALESCE(${inventory.warehouseZone}, '')), '')`,
+    availableStock: purchasingStockSql,
+    oneWarehouseStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} = '1창고' THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+    coupangWarehouseStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('쿠팡창고', '쿠팡') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+    twoWarehouseStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} = '2창고' THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+    primaryTotalStock: sql<number>`(ARRAY_AGG(${inventory.totalStock} ORDER BY ${primaryOrderSql}, ${inventory.createdAt} ASC))[1]::int`,
+    updatedAt: sql<Date>`MAX(${inventory.updatedAt})`,
+  }).from(inventory).where(whereClause).groupBy(inventory.sku).$dynamic()
 
-  // ── Step 2: aggregate history only for this page's inventory IDs ────────
-  const inventoryIds = pageRows.map((r) => r.inventoryId).filter((id): id is string => id !== null)
-
-  const historyMap = new Map<string, {
-    monthlyIncoming: number
-    monthlyOutgoing: number
-    lastIncomingAt: Date | null
-    lastOutgoingAt: Date | null
-  }>()
-
-  if (inventoryIds.length > 0) {
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
-
-    const stats = await db
-      .select({
-        inventoryId: inventoryHistory.inventoryId,
-        monthlyIncoming: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ${inventoryHistory.delta} ELSE 0 END), 0)::int`,
-        monthlyOutgoing: sql<number>`COALESCE(SUM(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' AND ${inventoryHistory.createdAt} >= ${monthStart}::timestamptz AND ${inventoryHistory.createdAt} < ${monthEnd}::timestamptz THEN ABS(${inventoryHistory.delta}) ELSE 0 END), 0)::int`,
-        lastIncomingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'incoming' THEN ${inventoryHistory.createdAt} END)`,
-        lastOutgoingAt: sql<Date | null>`MAX(CASE WHEN ${inventoryHistory.adjustmentReason} = 'order_ship' THEN ${inventoryHistory.createdAt} END)`,
-      })
-      .from(inventoryHistory)
-      .where(inArray(inventoryHistory.inventoryId, inventoryIds))
-      .groupBy(inventoryHistory.inventoryId)
-
-    for (const s of stats) {
-      historyMap.set(s.inventoryId, {
-        monthlyIncoming: s.monthlyIncoming,
-        monthlyOutgoing: s.monthlyOutgoing,
-        lastIncomingAt: s.lastIncomingAt,
-        lastOutgoingAt: s.lastOutgoingAt,
-      })
-    }
+  const countQuery = db.select({ sku: inventory.sku })
+    .from(inventory).where(whereClause).groupBy(inventory.sku).$dynamic()
+  if (havingClause) {
+    pageQuery.having(havingClause)
+    countQuery.having(havingClause)
   }
 
-  // ── Step 3: merge ───────────────────────────────────────────────────────
-  const items = pageRows.map((row) => {
-    const hist = row.inventoryId ? historyMap.get(row.inventoryId) : undefined
-    return {
-      ...row,
-      monthlyIncoming: hist?.monthlyIncoming ?? 0,
-      monthlyOutgoing: hist?.monthlyOutgoing ?? 0,
-      lastIncomingAt: hist?.lastIncomingAt ?? null,
-      lastOutgoingAt: hist?.lastOutgoingAt ?? null,
-    }
-  })
+  const [pageRows, countRows] = await Promise.all([
+    pageQuery.orderBy(sortDirection(sortColumn)).limit(pageSize).offset(offset),
+    countQuery,
+  ])
+  const metricRows = pageRows.length > 0
+    ? await db.select({ internalSku: products.internalSku, metadata: products.metadata })
+        .from(products).where(and(
+          eq(products.userId, userId),
+          inArray(products.internalSku, pageRows.map((row) => row.sku)),
+        ))
+    : []
+  const outgoingMetricsBySku = new Map(metricRows.map((row) => [
+    row.internalSku,
+    resolveOutgoingMetrics(row.metadata, {
+      currentMonthOutgoing: 0,
+      threeMonthAverageOutgoing: 0,
+    }),
+  ]))
 
-  return { items, total }
+  return {
+    items: pageRows.map((row) => {
+      const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
+      return {
+        ...row,
+        currentMonthOutgoing: outgoingMetrics?.currentMonthOutgoing ?? 0,
+        threeMonthAverageOutgoing: outgoingMetrics?.threeMonthAverageOutgoing ?? 0,
+      }
+    }),
+    total: countRows.length,
+  }
 }
 
 /**

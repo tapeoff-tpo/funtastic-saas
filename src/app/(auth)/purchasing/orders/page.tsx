@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
 import {
   getNextPurchaseStatus,
@@ -36,6 +38,7 @@ export default async function PurchasingOrdersPage({
   const status = parseStatus(stringParam(params.status)) ?? 'requested'
   const search = stringParam(params.search)
   const page = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
+  const showCosts = stringParam(params.showCosts) === '1'
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -50,6 +53,11 @@ export default async function PurchasingOrdersPage({
     pageSize: 50,
   })
   const nextStatus = getNextPurchaseStatus(status)
+  const costToggleParams = new URLSearchParams({ status })
+  if (search) costToggleParams.set('search', search)
+  if (page > 1) costToggleParams.set('page', String(page))
+  if (!showCosts) costToggleParams.set('showCosts', '1')
+  const costToggleHref = `/purchasing/orders?${costToggleParams.toString()}`
 
   return (
     <div className="space-y-4">
@@ -62,6 +70,7 @@ export default async function PurchasingOrdersPage({
         </div>
         <form className="flex items-center gap-2" action="/purchasing/orders">
           <input type="hidden" name="status" value={status} />
+          {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
           <input
             name="search"
             defaultValue={search ?? ''}
@@ -77,7 +86,7 @@ export default async function PurchasingOrdersPage({
       <nav className="flex flex-wrap gap-2">
         {STATUSES.map((item) => {
           const active = item === status
-          const href = `/purchasing/orders?status=${item}${search ? `&search=${encodeURIComponent(search)}` : ''}`
+          const href = `/purchasing/orders?status=${item}${search ? `&search=${encodeURIComponent(search)}` : ''}${showCosts ? '&showCosts=1' : ''}`
           return (
             <Link
               key={item}
@@ -102,11 +111,17 @@ export default async function PurchasingOrdersPage({
               <h2 className="text-sm font-semibold">{PURCHASE_REQUEST_STATUS_LABELS[status]} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
-            <PurchaseBulkStatusButton />
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" render={<Link href={costToggleHref} />}>
+                {showCosts ? <EyeOff /> : <Eye />}
+                {showCosts ? '원가 닫기' : '원가 보기'}
+              </Button>
+              <PurchaseBulkStatusButton />
+            </div>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1780px] text-left text-sm">
+            <table className={`w-full text-left text-sm ${showCosts ? 'min-w-[2260px]' : 'min-w-[1780px]'}`}>
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-2 font-medium">
@@ -115,6 +130,14 @@ export default async function PurchasingOrdersPage({
                   <th className="w-28 px-3 py-2 font-medium">상태</th>
                   <th className="px-3 py-2 font-medium">상품</th>
                   <th className="w-24 px-3 py-2 font-medium">요청수량</th>
+                  {showCosts ? (
+                    <>
+                      <th className="w-28 px-3 py-2 text-right font-medium">개당 원가(元)</th>
+                      <th className="w-28 px-3 py-2 text-right font-medium">개당 원가(원)</th>
+                      <th className="w-32 px-3 py-2 text-right font-medium">총 원가(元)</th>
+                      <th className="w-32 px-3 py-2 text-right font-medium">총 원가(원)</th>
+                    </>
+                  ) : null}
                   <th className="w-48 px-3 py-2 font-medium">추천 근거</th>
                   <th className="w-32 px-3 py-2 font-medium">입고요청일</th>
                   <th className="w-32 px-3 py-2 font-medium">관리코드</th>
@@ -127,13 +150,19 @@ export default async function PurchasingOrdersPage({
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={showCosts ? 15 : 11} className="px-3 py-12 text-center text-sm text-muted-foreground">
                       조건에 맞는 발주 항목이 없습니다.
                     </td>
                   </tr>
                 ) : (
-                  items.map((item) => (
-                    <tr key={item.id} className="border-t">
+                  items.map((item) => {
+                    const costs = calculatePurchaseCosts({
+                      requestedQuantity: item.requestedQuantity,
+                      unitCostYuan: item.unitCostYuan,
+                      unitCostKrw: item.unitCostKrw,
+                    })
+                    return (
+                      <tr key={item.id} className="border-t">
                       <td className="px-3 py-2">
                         <PurchaseRowCheckbox id={item.id} />
                       </td>
@@ -151,6 +180,14 @@ export default async function PurchasingOrdersPage({
                       <td className="px-3 py-2 tabular-nums">
                         {item.requestedQuantity.toLocaleString('ko-KR')}
                       </td>
+                      {showCosts ? (
+                        <>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostYuan, 2)}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostKrw, 0)}</td>
+                          <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostYuan, 2)}</td>
+                          <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>
+                        </>
+                      ) : null}
                       <td className="px-3 py-2 text-xs text-muted-foreground">
                         <RecommendationBasis rawData={item.rawData} />
                       </td>
@@ -172,8 +209,9 @@ export default async function PurchasingOrdersPage({
                       <td className="px-3 py-2">
                         <PurchaseDeleteButton id={item.id} productName={item.productName} />
                       </td>
-                    </tr>
-                  ))
+                      </tr>
+                    )
+                  })
                 )}
               </tbody>
             </table>
@@ -215,4 +253,12 @@ function formatNumber(value: unknown) {
   const number = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(number)) return '-'
   return number.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
+}
+
+function formatCost(value: number | null, maximumFractionDigits: number) {
+  if (value === null) return '-'
+  return value.toLocaleString('ko-KR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  })
 }

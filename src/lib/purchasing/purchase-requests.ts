@@ -1,9 +1,10 @@
-import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   chinaWarehouseInventory,
   chinaWarehouseInventoryMovements,
+  products,
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import type { PurchaseRequestStatus } from './purchase-request-status'
@@ -34,8 +35,16 @@ export async function getPurchaseRequests(input: {
   const where = and(...conditions)
   const [items, [{ total }], statusCounts] = await Promise.all([
     db
-      .select()
+      .select({
+        ...getTableColumns(purchaseRequestItems),
+        unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+        unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+      })
       .from(purchaseRequestItems)
+      .leftJoin(products, and(
+        eq(products.userId, purchaseRequestItems.userId),
+        eq(products.internalSku, purchaseRequestItems.sku),
+      ))
       .where(where)
       .orderBy(desc(purchaseRequestItems.createdAt))
       .limit(pageSize)

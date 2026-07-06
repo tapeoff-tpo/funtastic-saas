@@ -327,16 +327,16 @@ export function PurchaseQuantityField({
   }
 
   return (
-    <form onSubmit={save} className="flex w-28 items-center gap-1">
+    <form onSubmit={save} className="mx-auto flex w-[104px] items-center justify-center gap-1">
       <Input
         type="number"
         min={field === 'requestedQuantity' ? 1 : 0}
         step={1}
         value={value}
         onChange={(event) => setValue(event.target.value)}
-        className="h-7 w-16 px-2 text-right text-xs tabular-nums"
+        className="h-7 w-14 px-2 text-right text-xs tabular-nums"
       />
-      <Button type="submit" size="sm" variant="outline" className="h-7 px-2" disabled={isPending}>
+      <Button type="submit" size="sm" variant="outline" className="h-7 w-8 px-0" disabled={isPending}>
         {isPending ? <Loader2 className="animate-spin" /> : <Save />}
         <span className="sr-only">저장</span>
       </Button>

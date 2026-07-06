@@ -58,6 +58,7 @@ export default async function PurchasingOrdersPage({
     order,
   })
   const nextStatus = getNextPurchaseStatus(status)
+  const quantityColumn = getStageQuantityColumn(status)
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
@@ -159,24 +160,21 @@ export default async function PurchasingOrdersPage({
           </div>
 
           <div className="overflow-x-auto">
-            <table className={`w-full text-left text-sm ${showCosts ? 'min-w-[2620px]' : 'min-w-[2140px]'}`}>
+            <table className={`w-full table-fixed text-left text-sm ${showCosts ? 'min-w-[2260px]' : 'min-w-[1780px]'}`}>
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
-                  <th className="w-12 px-3 py-2 font-medium">
+                  <th className="w-12 px-3 py-2 text-center font-medium">
                     <PurchaseSelectAllCheckbox />
                   </th>
-                  <th className="w-28 px-3 py-2 font-medium">
-                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  <th className="w-28 px-3 py-2 text-center font-medium">
+                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
-                  <th className="px-3 py-2 font-medium">
+                  <th className="w-[340px] px-3 py-2 font-medium">
                     <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
                   </th>
-                  <th className="w-32 px-3 py-2 font-medium">
-                    <SortHeader label="요청수량" column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  <th className="w-32 px-3 py-2 text-center font-medium">
+                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
-                  <th className="w-32 px-3 py-2 font-medium">구매수량</th>
-                  <th className="w-32 px-3 py-2 font-medium">중국도착수량</th>
-                  <th className="w-32 px-3 py-2 font-medium">출고요청수량</th>
                   {showCosts ? (
                     <>
                       <th className="w-28 px-3 py-2 text-right font-medium">
@@ -193,74 +191,58 @@ export default async function PurchasingOrdersPage({
                       </th>
                     </>
                   ) : null}
-                  <th className="w-48 px-3 py-2 font-medium">추천 근거</th>
-                  <th className="w-32 px-3 py-2 font-medium">
-                    <SortHeader label="입고요청일" column="chinaArrivalRequestDate" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  <th className="w-52 px-3 py-2 font-medium">추천 근거</th>
+                  <th className="w-32 px-3 py-2 text-center font-medium">
+                    <SortHeader label="입고요청일" column="chinaArrivalRequestDate" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
-                  <th className="w-32 px-3 py-2 font-medium">
-                    <SortHeader label="관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  <th className="w-32 px-3 py-2 text-center font-medium">
+                    <SortHeader label="관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
                   <th className="w-[540px] px-3 py-2 font-medium">발주 계획</th>
-                  <th className="w-28 px-3 py-2 font-medium">
-                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  <th className="w-28 px-3 py-2 text-center font-medium">
+                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
-                  <th className="w-48 px-3 py-2 font-medium">상태 변경</th>
-                  <th className="w-24 px-3 py-2 font-medium">삭제</th>
+                  <th className="w-48 px-3 py-2 text-center font-medium">상태 변경</th>
+                  <th className="w-24 px-3 py-2 text-center font-medium">삭제</th>
                 </tr>
               </thead>
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={showCosts ? 18 : 14} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={showCosts ? 15 : 11} className="px-3 py-12 text-center text-sm text-muted-foreground">
                       조건에 맞는 발주 항목이 없습니다.
                     </td>
                   </tr>
                 ) : (
                   items.map((item) => {
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
+                    const stageQuantity = getStageQuantity(item, status, outboundRequestedQuantity)
                     const costs = calculatePurchaseCosts({
                       requestedQuantity: item.requestedQuantity,
                       unitCostYuan: item.unitCostYuan,
                       unitCostKrw: item.unitCostKrw,
                     })
                     return (
-                      <tr key={item.id} className="border-t">
-                      <td className="px-3 py-2">
+                      <tr key={item.id} className="border-t align-middle">
+                      <td className="px-3 py-2 text-center align-middle">
                         <PurchaseRowCheckbox id={item.id} />
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 text-center align-middle">
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
                         </Badge>
                       </td>
-                      <td className="px-3 py-2">
-                        <div className="font-medium">{item.productName}</div>
-                        <div className="text-xs text-muted-foreground">
+                      <td className="px-3 py-2 align-middle">
+                        <div className="truncate font-medium" title={item.productName}>{item.productName}</div>
+                        <div className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}`}>
                           {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                         </div>
                       </td>
-                      <td className="px-3 py-2 tabular-nums">
-                        <PurchaseQuantityField id={item.id} field="requestedQuantity" quantity={item.requestedQuantity} />
-                      </td>
-                      <td className="px-3 py-2 tabular-nums">
+                      <td className="px-3 py-2 text-center tabular-nums align-middle">
                         <PurchaseQuantityField
                           id={item.id}
-                          field="actualPurchaseQuantity"
-                          quantity={item.actualPurchaseQuantity ?? item.requestedQuantity}
-                        />
-                      </td>
-                      <td className="px-3 py-2 tabular-nums">
-                        <PurchaseQuantityField
-                          id={item.id}
-                          field="chinaReceivedQuantity"
-                          quantity={item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity}
-                        />
-                      </td>
-                      <td className="px-3 py-2 tabular-nums">
-                        <PurchaseQuantityField
-                          id={item.id}
-                          field="outboundRequestedQuantity"
-                          quantity={outboundRequestedQuantity}
+                          field={quantityColumn.field}
+                          quantity={stageQuantity}
                         />
                       </td>
                       {showCosts ? (
@@ -271,12 +253,12 @@ export default async function PurchasingOrdersPage({
                           <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>
                         </>
                       ) : null}
-                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                      <td className="px-3 py-2 text-xs text-muted-foreground align-middle">
                         <RecommendationBasis rawData={item.rawData} />
                       </td>
-                      <td className="px-3 py-2">{formatDate(item.chinaArrivalRequestDate)}</td>
-                      <td className="px-3 py-2">{item.purchaseManagementCode ?? '-'}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 text-center align-middle">{formatDate(item.chinaArrivalRequestDate)}</td>
+                      <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
+                      <td className="px-3 py-2 align-middle">
                         <PurchasePlanFields
                           id={item.id}
                           supplierOrderNumber={item.supplierOrderNumber}
@@ -285,11 +267,11 @@ export default async function PurchasingOrdersPage({
                           purchaseConfirmed={item.purchaseConfirmed}
                         />
                       </td>
-                      <td className="px-3 py-2">{item.buyerName ?? item.managerCode ?? '-'}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 text-center align-middle">{item.buyerName ?? item.managerCode ?? '-'}</td>
+                      <td className="px-3 py-2 text-center align-middle">
                         <PurchaseStatusButton id={item.id} nextStatus={getNextPurchaseStatus(item.status)} />
                       </td>
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2 text-center align-middle">
                         <PurchaseDeleteButton id={item.id} productName={item.productName} />
                       </td>
                       </tr>
@@ -322,7 +304,7 @@ function SortHeader({
   showCosts: boolean
   currentSort: string | undefined
   currentOrder: 'asc' | 'desc'
-  align?: 'left' | 'right'
+  align?: 'left' | 'center' | 'right'
 }) {
   const nextOrder = currentSort === column && currentOrder === 'asc' ? 'desc' : 'asc'
   const indicator = currentSort === column ? (currentOrder === 'asc' ? ' ↑' : ' ↓') : ''
@@ -338,13 +320,43 @@ function SortHeader({
     <Link
       href={href}
       className={`inline-flex w-full items-center gap-1 hover:text-foreground ${
-        align === 'right' ? 'justify-end' : 'justify-start'
+        align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'
       }`}
     >
       {label}
       <span className="text-muted-foreground">{indicator}</span>
     </Link>
   )
+}
+
+function getStageQuantityColumn(status: PurchaseRequestStatus) {
+  if (status === 'purchased') {
+    return { label: '구매수량', field: 'actualPurchaseQuantity' as const }
+  }
+  if (status === 'china_arrived') {
+    return { label: '중국도착수량', field: 'chinaReceivedQuantity' as const }
+  }
+  if (status === 'outbound_requested' || status === 'completed') {
+    return { label: '출고요청수량', field: 'outboundRequestedQuantity' as const }
+  }
+  return { label: '요청수량', field: 'requestedQuantity' as const }
+}
+
+function getStageQuantity(
+  item: {
+    requestedQuantity: number
+    actualPurchaseQuantity: number | null
+    chinaReceivedQuantity: number | null
+  },
+  status: PurchaseRequestStatus,
+  outboundRequestedQuantity: number,
+) {
+  if (status === 'purchased') return item.actualPurchaseQuantity ?? item.requestedQuantity
+  if (status === 'china_arrived') {
+    return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity
+  }
+  if (status === 'outbound_requested' || status === 'completed') return outboundRequestedQuantity
+  return item.requestedQuantity
 }
 
 function RecommendationBasis({ rawData }: { rawData: Record<string, unknown> }) {

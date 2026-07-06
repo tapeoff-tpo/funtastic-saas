@@ -59,6 +59,11 @@ export default async function PurchasingOrdersPage({
   })
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
+  const isRequestedStatus = status === 'requested'
+  const visibleColumnCount = (showCosts ? 15 : 11) - (isRequestedStatus ? 2 : 0)
+  const tableMinWidth = isRequestedStatus
+    ? showCosts ? 'min-w-[1980px]' : 'min-w-[1500px]'
+    : showCosts ? 'min-w-[2260px]' : 'min-w-[1780px]'
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
@@ -160,7 +165,7 @@ export default async function PurchasingOrdersPage({
           </div>
 
           <div className="overflow-x-auto">
-            <table className={`w-full table-fixed text-left text-sm ${showCosts ? 'min-w-[2260px]' : 'min-w-[1780px]'}`}>
+            <table className={`w-full table-fixed text-left text-sm ${tableMinWidth}`}>
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="w-12 px-3 py-2 text-center font-medium">
@@ -192,12 +197,16 @@ export default async function PurchasingOrdersPage({
                     </>
                   ) : null}
                   <th className="w-52 px-3 py-2 font-medium">추천 근거</th>
-                  <th className="w-32 px-3 py-2 text-center font-medium">
-                    <SortHeader label="입고요청일" column="chinaArrivalRequestDate" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
-                  </th>
-                  <th className="w-32 px-3 py-2 text-center font-medium">
-                    <SortHeader label="관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
-                  </th>
+                  {isRequestedStatus ? null : (
+                    <>
+                      <th className="w-32 px-3 py-2 text-center font-medium">
+                        <SortHeader label="입고요청일" column="chinaArrivalRequestDate" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                      </th>
+                      <th className="w-36 px-3 py-2 text-center font-medium">
+                        <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                      </th>
+                    </>
+                  )}
                   <th className="w-[540px] px-3 py-2 font-medium">발주 계획</th>
                   <th className="w-28 px-3 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
@@ -209,7 +218,7 @@ export default async function PurchasingOrdersPage({
               <tbody>
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={showCosts ? 15 : 11} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={visibleColumnCount} className="px-3 py-12 text-center text-sm text-muted-foreground">
                       조건에 맞는 발주 항목이 없습니다.
                     </td>
                   </tr>
@@ -256,8 +265,12 @@ export default async function PurchasingOrdersPage({
                       <td className="px-3 py-2 text-xs text-muted-foreground align-middle">
                         <RecommendationBasis rawData={item.rawData} />
                       </td>
-                      <td className="px-3 py-2 text-center align-middle">{formatDate(item.chinaArrivalRequestDate)}</td>
-                      <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
+                      {isRequestedStatus ? null : (
+                        <>
+                          <td className="px-3 py-2 text-center align-middle">{formatDate(item.chinaArrivalRequestDate)}</td>
+                          <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
+                        </>
+                      )}
                       <td className="px-3 py-2 align-middle">
                         <PurchasePlanFields
                           id={item.id}

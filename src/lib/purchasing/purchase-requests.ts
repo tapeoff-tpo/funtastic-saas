@@ -115,6 +115,13 @@ export async function updatePurchaseRequestStatus(input: {
     }
     if (input.status === 'purchased') {
       values.actualPurchaseQuantity = current.actualPurchaseQuantity ?? current.requestedQuantity
+      if (!current.purchaseManagementCode) {
+        const assignment = await nextPurchaseManagementAssignment(tx, current)
+        values.sequence = assignment.sequence
+        values.buyerCode = assignment.buyerCode
+        values.buyerName = current.buyerName ?? assignment.buyerName
+        values.purchaseManagementCode = assignment.purchaseManagementCode
+      }
     }
     if (input.status === 'china_arrived') {
       values.chinaReceivedAt = current.chinaReceivedAt ?? new Date()
@@ -602,6 +609,61 @@ function outboundQuantity(item: PurchaseRequestItem) {
     actualPurchaseQuantity: item.actualPurchaseQuantity,
     requestedQuantity: item.requestedQuantity,
   })
+}
+
+const PURCHASE_BUYERS: Record<string, string> = {
+  '1': '한상철',
+  '2': '김기환',
+  '3': '최종석',
+  '4': '오지은',
+  '5': '김소희',
+}
+
+async function nextPurchaseManagementAssignment(tx: DbTransaction, item: PurchaseRequestItem) {
+  const dateKey = formatSeoulDateKey(new Date())
+  const buyerCode = normalizePurchaseBuyerCode(item.buyerCode ?? item.managerCode)
+  const buyerName = PURCHASE_BUYERS[buyerCode]
+  const prefix = `${dateKey}-${buyerCode}-`
+  const rows = await tx
+    .select({
+      sequence: purchaseRequestItems.sequence,
+      purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
+    })
+    .from(purchaseRequestItems)
+    .where(and(
+      eq(purchaseRequestItems.userId, item.userId),
+      ilike(purchaseRequestItems.purchaseManagementCode, `${prefix}%`),
+    ))
+
+  const sequence = rows.reduce((maxSequence, row) => {
+    const suffix = row.purchaseManagementCode?.slice(prefix.length)
+    const codeSequence = suffix && /^\d+$/.test(suffix) ? Number(suffix) : 0
+    return Math.max(maxSequence, row.sequence ?? 0, codeSequence)
+  }, 0) + 1
+  return {
+    buyerCode,
+    buyerName,
+    sequence,
+    purchaseManagementCode: `${prefix}${sequence}`,
+  }
+}
+
+function normalizePurchaseBuyerCode(value: string | null | undefined) {
+  const code = value?.trim()
+  return code && PURCHASE_BUYERS[code] ? code : '4'
+}
+
+function formatSeoulDateKey(value: Date) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value)
+  const year = parts.find((part) => part.type === 'year')?.value ?? '0000'
+  const month = parts.find((part) => part.type === 'month')?.value ?? '00'
+  const day = parts.find((part) => part.type === 'day')?.value ?? '00'
+  return `${year}${month}${day}`
 }
 
 function emptyToNull(value: string | null | undefined): string | null {

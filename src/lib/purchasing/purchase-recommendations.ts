@@ -23,6 +23,15 @@ export type PurchaseRecommendationCalculation = {
   stockCoverageMonths: number | null
 }
 
+export type SpikeGuardPurchaseRecommendationInput = PurchaseRecommendationInput & {
+  effectiveMonthlyOutgoing: number
+}
+
+export type SpikeGuardPurchaseRecommendationCalculation = PurchaseRecommendationCalculation & {
+  originalRecommendedQuantity: number
+  spikeGuardAdjustedToMinimum: boolean
+}
+
 export type PurchaseBudgetCandidate = {
   sku: string
   recommendedQuantity: number
@@ -120,6 +129,34 @@ export function calculatePurchaseRecommendation(input: PurchaseRecommendationInp
   }
 }
 
+export function calculatePurchaseRecommendationWithSpikeGuard(
+  input: SpikeGuardPurchaseRecommendationInput,
+): SpikeGuardPurchaseRecommendationCalculation {
+  const originalCalculation = calculatePurchaseRecommendation({
+    averageMonthlyOutgoing: input.averageMonthlyOutgoing,
+    currentMonthOutgoing: input.currentMonthOutgoing,
+    availableStock: input.availableStock,
+    targetStockMonths: input.targetStockMonths,
+  })
+  const adjustedCalculation = calculatePurchaseRecommendation({
+    averageMonthlyOutgoing: input.effectiveMonthlyOutgoing,
+    currentMonthOutgoing: input.currentMonthOutgoing,
+    availableStock: input.availableStock,
+    targetStockMonths: input.targetStockMonths,
+  })
+  const spikeGuardAdjustedToMinimum = originalCalculation.recommendedQuantity > 0
+    && adjustedCalculation.recommendedQuantity === 0
+
+  return {
+    ...adjustedCalculation,
+    recommendedQuantity: spikeGuardAdjustedToMinimum
+      ? 1
+      : adjustedCalculation.recommendedQuantity,
+    originalRecommendedQuantity: originalCalculation.recommendedQuantity,
+    spikeGuardAdjustedToMinimum,
+  }
+}
+
 export async function generatePurchaseRecommendations(input: {
   userId: string
   requestedByUserId: string
@@ -169,8 +206,9 @@ export async function generatePurchaseRecommendations(input: {
       threeMonthAverageOutgoing: averageMonthlyOutgoing,
     })
     const previousThreeMonthOutgoing = averageMonthlyOutgoing * 3
-    const calculation = calculatePurchaseRecommendation({
-      averageMonthlyOutgoing: stableOutgoing.effectiveMonthlyOutgoing,
+    const calculation = calculatePurchaseRecommendationWithSpikeGuard({
+      averageMonthlyOutgoing,
+      effectiveMonthlyOutgoing: stableOutgoing.effectiveMonthlyOutgoing,
       currentMonthOutgoing,
       availableStock: row.availableStock,
       targetStockMonths,
@@ -317,7 +355,8 @@ export async function generatePurchaseRecommendations(input: {
           salesAnomalyDetected: item.salesAnomalyDetected,
           availableStock: item.row.availableStock,
           targetStockQuantity: item.calculation.targetStockQuantity,
-          originalRecommendedQuantity: item.calculation.recommendedQuantity,
+          originalRecommendedQuantity: item.calculation.originalRecommendedQuantity,
+          spikeGuardAdjustedToMinimum: item.calculation.spikeGuardAdjustedToMinimum,
           allocatedQuantity: item.allocatedQuantity,
           unitCostYuan: item.unitCostYuan,
           unitCostKrw: item.unitCostKrw,

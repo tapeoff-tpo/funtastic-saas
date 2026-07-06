@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   allocatePurchaseBudget,
+  calculatePurchaseRecommendationWithSpikeGuard,
   calculateStableMonthlyOutgoing,
 } from './purchase-recommendations'
 
@@ -25,6 +26,22 @@ describe('stable monthly outgoing', () => {
       previousTwoMonthAverageOutgoing: 40,
       salesAnomalyDetected: false,
     })
+  })
+})
+
+describe('purchase recommendation with sales spike guard', () => {
+  it('keeps an item recommended when only the spike-adjusted quantity falls to zero', () => {
+    const result = calculatePurchaseRecommendationWithSpikeGuard({
+      averageMonthlyOutgoing: 50,
+      effectiveMonthlyOutgoing: 25,
+      currentMonthOutgoing: 100,
+      availableStock: 40,
+      targetStockMonths: 1.2,
+    })
+
+    expect(result.recommendedQuantity).toBe(1)
+    expect(result.originalRecommendedQuantity).toBe(20)
+    expect(result.spikeGuardAdjustedToMinimum).toBe(true)
   })
 })
 

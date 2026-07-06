@@ -56,7 +56,7 @@ async function main() {
     let updated = 0
     await sql.begin(async (transaction) => {
       for (const batch of chunks(matched, 250)) {
-        const payload = JSON.stringify(batch.map((row) => ({
+        const payload = batch.map((row) => ({
           sku: row.internalSku,
           metrics: {
             currentMonthOutgoing: row.currentMonthOutgoing,
@@ -65,7 +65,7 @@ async function main() {
             referenceMonth: '2026-06',
             importedAt,
           },
-        })))
+        }))
         const result = await transaction<{ internal_sku: string }[]>`
           UPDATE products AS product
           SET
@@ -76,7 +76,7 @@ async function main() {
               true
             ),
             updated_at = NOW()
-          FROM jsonb_to_recordset(${payload}::jsonb) AS incoming(sku text, metrics jsonb)
+          FROM jsonb_to_recordset(${transaction.json(payload)}::jsonb) AS incoming(sku text, metrics jsonb)
           WHERE product.user_id = ${ownerId}
             AND product.internal_sku = incoming.sku
             AND product.metadata->'esa009m' IS NOT NULL

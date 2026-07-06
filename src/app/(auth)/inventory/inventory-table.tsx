@@ -53,13 +53,17 @@ function formatNumber(value: number, maximumFractionDigits = 0) {
 function StockBreakdownCell({ row }: { row: InventoryRow }) {
   const lowStock = row.availableStock <= 0
   return (
-    <div className="text-right tabular-nums">
-      <div className={lowStock ? 'font-semibold text-red-600' : 'font-semibold'}>
-        {formatNumber(row.availableStock)}
-      </div>
-      <div className="text-[11px] text-muted-foreground">
-        {formatNumber(row.oneWarehouseStock)} - {formatNumber(row.coupangWarehouseStock)} - {formatNumber(row.twoWarehouseStock)}
-      </div>
+    <div className="flex items-center justify-end gap-3 whitespace-nowrap tabular-nums">
+      <span>
+        <span className="text-muted-foreground">합계 </span>
+        <strong className={lowStock ? 'text-red-600' : ''}>{formatNumber(row.availableStock)}</strong>
+      </span>
+      <span className="text-border">|</span>
+      <span><span className="text-muted-foreground">1창고 </span>{formatNumber(row.oneWarehouseStock)}</span>
+      <span className="text-border">|</span>
+      <span><span className="text-muted-foreground">쿠팡 </span>{formatNumber(row.coupangWarehouseStock)}</span>
+      <span className="text-border">|</span>
+      <span><span className="text-muted-foreground">2창고 </span>{formatNumber(row.twoWarehouseStock)}</span>
     </div>
   )
 }
@@ -257,10 +261,10 @@ export function InventoryTable({
     }),
     columnHelper.display({
       id: 'availableStock',
-      size: 170,
+      size: 360,
       header: () => (
         <button type="button" onClick={() => handleSort('availableStock')} className="hover:text-foreground">
-          현재고(total-1창고-쿠팡-2창고){getSortIndicator('availableStock')}
+          현재고 (합계 / 1창고 / 쿠팡 / 2창고){getSortIndicator('availableStock')}
         </button>
       ),
       cell: (info) => <StockBreakdownCell row={info.row.original} />,
@@ -329,7 +333,7 @@ export function InventoryTable({
   ]
 
   const pageCount = Math.ceil(total / pageSize)
-  const [columnSizing, setColumnSizing] = useColumnSizing('inventory-table-v2')
+  const [columnSizing, setColumnSizing] = useColumnSizing('inventory-table-v3')
   const table = useReactTable({
     data,
     columns,
@@ -485,7 +489,7 @@ export function InventoryTable({
         </div>
       ) : (
         <SyncedScrollContainer>
-          <table className="text-xs" style={{ width: table.getTotalSize() }}>
+          <table className="w-full text-xs" style={{ minWidth: table.getTotalSize() }}>
             <thead className="sticky top-0 z-[1] bg-muted/50">
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b">

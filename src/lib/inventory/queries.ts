@@ -7,6 +7,11 @@ import { resolveOutgoingMetrics } from '@/lib/purchasing/items'
 
 const DEFAULT_PAGE_SIZE = 50
 
+export function buildWarehouseSelectionHaving(warehouseZone: string | undefined) {
+  if (!warehouseZone) return undefined
+  return sql`BOOL_OR(${inventory.warehouseZone} = ${warehouseZone})`
+}
+
 export async function getInventoryList(
   userId: string,
   filters: InventoryFilters = {},
@@ -29,13 +34,15 @@ export async function getInventoryList(
     const pattern = `%${filters.optionCode}%`
     conditions.push(or(ilike(inventory.optionName, pattern), ilike(inventory.sku, pattern))!)
   }
-  if (filters.warehouseZone) conditions.push(eq(inventory.warehouseZone, filters.warehouseZone))
-
   const whereClause = and(...conditions)
   const purchasingStockSql = sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`
-  const havingClause = typeof filters.maxStock === 'number' && Number.isFinite(filters.maxStock)
-    ? sql`${purchasingStockSql} <= ${filters.maxStock}`
-    : undefined
+  const havingConditions = [
+    buildWarehouseSelectionHaving(filters.warehouseZone),
+    typeof filters.maxStock === 'number' && Number.isFinite(filters.maxStock)
+      ? sql`${purchasingStockSql} <= ${filters.maxStock}`
+      : undefined,
+  ].filter((condition): condition is SQL => condition !== undefined)
+  const havingClause = havingConditions.length > 0 ? and(...havingConditions) : undefined
   const sortColumn = (() => {
     switch (filters.sort) {
       case 'sku': return inventory.sku

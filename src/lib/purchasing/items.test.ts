@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs'
 import {
   ESA009M_HEADERS,
   parseEsa009mWorkbook,
+  resolveOutgoingMetrics,
 } from './items'
 
 describe('parseEsa009mWorkbook', () => {
@@ -50,5 +51,43 @@ describe('parseEsa009mWorkbook', () => {
     expect(ESA009M_HEADERS).not.toContain('기존원가(元)')
     expect(parsedRow['특가(元)']).toBe('12.5')
     expect(parsedRow['기존원가(元)']).toBeUndefined()
+  })
+})
+
+describe('resolveOutgoingMetrics', () => {
+  it('prefers stored monthly sales metrics over calculated metrics', () => {
+    const result = resolveOutgoingMetrics(
+      {
+        purchasingOutgoingMetrics: {
+          currentMonthOutgoing: 20,
+          threeMonthAverageOutgoing: 12.3,
+          source: 'monthly-sales-calculator',
+          referenceMonth: '2026-06',
+        },
+      },
+      {
+        currentMonthOutgoing: 4,
+        threeMonthAverageOutgoing: 5,
+      },
+    )
+
+    expect(result).toEqual({
+      currentMonthOutgoing: 20,
+      threeMonthAverageOutgoing: 12.3,
+    })
+  })
+
+  it('uses calculated metrics when stored values are invalid', () => {
+    const calculated = {
+      currentMonthOutgoing: 4,
+      threeMonthAverageOutgoing: 5,
+    }
+
+    expect(resolveOutgoingMetrics({
+      purchasingOutgoingMetrics: {
+        currentMonthOutgoing: -1,
+        threeMonthAverageOutgoing: 12.3,
+      },
+    }, calculated)).toEqual(calculated)
   })
 })

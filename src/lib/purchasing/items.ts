@@ -1,5 +1,5 @@
 import ExcelJS from 'exceljs'
-import { and, asc, count, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 
@@ -193,42 +193,81 @@ export async function getSkuOutgoingMetrics(
 
   const { currentMonthStart, previousThreeMonthStart, nextMonthStart } = getOutgoingMetricWindows(now)
   const skuSql = sql.join(uniqueSkus.map((sku) => sql`${sku}`), sql`, `)
-  const result = await db.execute<PurchasingItemOutgoingMetricRow>(sql`
-    SELECT
-      COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) AS "internalSku",
-      COALESCE(SUM(
-        CASE
-          WHEN o.ordered_at >= ${currentMonthStart.toISOString()}::timestamptz
-           AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
-          THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
-          ELSE 0
-        END
-      ), 0)::numeric AS "currentMonthOutgoing",
-      (COALESCE(SUM(
-        CASE
-          WHEN o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
-           AND o.ordered_at < ${currentMonthStart.toISOString()}::timestamptz
-          THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
-          ELSE 0
-        END
-      ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
-    FROM orders o
-    JOIN order_items oi ON oi.order_id = o.id
-    WHERE o.user_id = ${userId}
-      AND o.raw_data->>'source' = 'sabangnet-review'
-      AND o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
-      AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
-      AND COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IN (${skuSql})
-    GROUP BY COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
-  `)
+  const [storedRows, result] = await Promise.all([
+    db.select({
+      internalSku: products.internalSku,
+      metadata: products.metadata,
+    }).from(products).where(and(
+      eq(products.userId, userId),
+      inArray(products.internalSku, uniqueSkus),
+    )),
+    db.execute<PurchasingItemOutgoingMetricRow>(sql`
+      SELECT
+        COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) AS "internalSku",
+        COALESCE(SUM(
+          CASE
+            WHEN o.ordered_at >= ${currentMonthStart.toISOString()}::timestamptz
+             AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
+            THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+            ELSE 0
+          END
+        ), 0)::numeric AS "currentMonthOutgoing",
+        (COALESCE(SUM(
+          CASE
+            WHEN o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
+             AND o.ordered_at < ${currentMonthStart.toISOString()}::timestamptz
+            THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+            ELSE 0
+          END
+        ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
+      FROM orders o
+      JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.user_id = ${userId}
+        AND o.raw_data->>'source' = 'sabangnet-review'
+        AND o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
+        AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
+        AND COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IN (${skuSql})
+      GROUP BY COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+    `),
+  ])
 
-  return new Map(resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
+  const metricsBySku = new Map(resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
     row.internalSku,
     {
       currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
       threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
     },
   ]))
+  for (const row of storedRows) {
+    const calculated = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
+    metricsBySku.set(row.internalSku, resolveOutgoingMetrics(row.metadata, calculated))
+  }
+  return metricsBySku
+}
+
+export function resolveOutgoingMetrics(
+  metadata: unknown,
+  calculated: PurchasingItemOutgoingMetrics,
+): PurchasingItemOutgoingMetrics {
+  if (!metadata || typeof metadata !== 'object') return calculated
+  const stored = (metadata as Record<string, unknown>).purchasingOutgoingMetrics
+  if (!stored || typeof stored !== 'object') return calculated
+
+  const values = stored as Record<string, unknown>
+  const currentMonthOutgoing = Number(values.currentMonthOutgoing)
+  const threeMonthAverageOutgoing = Number(values.threeMonthAverageOutgoing)
+  if (
+    !Number.isFinite(currentMonthOutgoing)
+    || !Number.isFinite(threeMonthAverageOutgoing)
+    || currentMonthOutgoing < 0
+    || threeMonthAverageOutgoing < 0
+  ) {
+    return calculated
+  }
+  return {
+    currentMonthOutgoing: cleanOutgoingNumber(currentMonthOutgoing),
+    threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
+  }
 }
 
 function purchasingItemConditions(

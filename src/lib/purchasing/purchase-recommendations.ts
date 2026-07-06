@@ -1,4 +1,4 @@
-import { and, eq, inArray, ne, sql } from 'drizzle-orm'
+﻿import { and, eq, inArray, ne, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   inventory,
@@ -7,6 +7,7 @@ import {
   purchaseRequestBatches,
   purchaseRequestItems,
 } from '@/lib/db/schema'
+import { getSkuOutgoingMetrics } from './items'
 
 export type PurchaseRecommendationInput = {
   averageMonthlyOutgoing: number
@@ -19,17 +20,6 @@ export type PurchaseRecommendationCalculation = {
   targetStockQuantity: number
   recommendedQuantity: number
   stockCoverageMonths: number | null
-}
-
-export function getManualOutgoingMetrics(metadata: unknown) {
-  const source = metadata && typeof metadata === 'object'
-    ? (metadata as Record<string, unknown>).purchasingMetrics
-    : null
-  const metrics = source && typeof source === 'object' ? source as Record<string, unknown> : {}
-  return {
-    currentMonthOutgoing: nonNegativeNumber(metrics.currentMonthOutgoing),
-    averageMonthlyOutgoing: nonNegativeNumber(metrics.threeMonthAverageOutgoing),
-  }
 }
 
 export function calculatePurchaseRecommendation(input: PurchaseRecommendationInput): PurchaseRecommendationCalculation {
@@ -70,7 +60,6 @@ export async function generatePurchaseRecommendations(input: {
       productName: inventory.productName,
       optionName: inventory.optionName,
       availableStock: sql<number>`COALESCE(${inventory.availableStock}, 0)::int`,
-      productMetadata: products.metadata,
     })
     .from(inventory)
     .innerJoin(productVariants, eq(productVariants.sku, inventory.sku))
@@ -87,7 +76,7 @@ export async function generatePurchaseRecommendations(input: {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }
   }
 
-  const [activeRequestRows] = await Promise.all([
+  const [activeRequestRows, outgoingMetricsBySku] = await Promise.all([
     db
       .select({ sku: purchaseRequestItems.sku })
       .from(purchaseRequestItems)
@@ -95,13 +84,16 @@ export async function generatePurchaseRecommendations(input: {
         eq(purchaseRequestItems.userId, input.userId),
         inArray(purchaseRequestItems.status, ['requested', 'purchased', 'china_arrived', 'outbound_requested']),
       )),
+    getSkuOutgoingMetrics(input.userId, inventoryRows.map((row) => row.sku), now),
   ])
 
   const activeRequestSkus = new Set(activeRequestRows.map((row) => row.sku))
   const recommendations = inventoryRows.flatMap((row) => {
     if (activeRequestSkus.has(row.sku)) return []
 
-    const { currentMonthOutgoing, averageMonthlyOutgoing } = getManualOutgoingMetrics(row.productMetadata)
+    const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
+    const currentMonthOutgoing = outgoingMetrics?.currentMonthOutgoing ?? 0
+    const averageMonthlyOutgoing = outgoingMetrics?.threeMonthAverageOutgoing ?? 0
     const previousThreeMonthOutgoing = averageMonthlyOutgoing * 3
     const calculation = calculatePurchaseRecommendation({
       averageMonthlyOutgoing,
@@ -134,8 +126,8 @@ export async function generatePurchaseRecommendations(input: {
     .insert(purchaseRequestBatches)
     .values({
       userId: input.userId,
-      sourceFileName: `자동 발주 추천 ${formatDate(now)}`,
-      sourceSheetName: '자동추천',
+      sourceFileName: `auto_purchase_recommendation ${formatDate(now)}`,
+      sourceSheetName: 'auto_recommendation',
       totalRows: inventoryRows.length,
       importedRows: recommendations.length,
       skippedRows: inventoryRows.length - recommendations.length,
@@ -188,10 +180,6 @@ function finiteNumber(value: number) {
   return Number.isFinite(value) ? value : 0
 }
 
-function nonNegativeNumber(value: unknown) {
-  const number = typeof value === 'number' ? value : Number(value)
-  return Number.isFinite(number) ? Math.max(0, number) : 0
-}
 
 function roundToOneDecimal(value: number) {
   return Math.round(value * 10) / 10

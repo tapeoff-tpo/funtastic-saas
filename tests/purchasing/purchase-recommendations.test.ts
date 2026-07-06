@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   calculatePurchaseRecommendation,
-  getManualOutgoingMetrics,
 } from '@/lib/purchasing/purchase-recommendations'
 
 describe('calculatePurchaseRecommendation', () => {
@@ -43,19 +42,5 @@ describe('calculatePurchaseRecommendation', () => {
     expect(result.recommendedQuantity).toBe(0)
     expect(result.targetStockQuantity).toBe(0)
     expect(result.stockCoverageMonths).toBeNull()
-  })
-})
-
-describe('getManualOutgoingMetrics', () => {
-  it('uses outgoing quantities stored on the purchasing item metadata', () => {
-    expect(getManualOutgoingMetrics({
-      purchasingMetrics: {
-        currentMonthOutgoing: 8,
-        threeMonthAverageOutgoing: 21.5,
-      },
-    })).toEqual({
-      currentMonthOutgoing: 8,
-      averageMonthlyOutgoing: 21.5,
-    })
   })
 })

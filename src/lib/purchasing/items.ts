@@ -28,12 +28,11 @@ export const ESA009M_HEADERS = [
 export type Esa009mHeader = (typeof ESA009M_HEADERS)[number]
 export type Esa009mData = Record<Esa009mHeader, string | null>
 export type PurchasingItemSortDirection = 'asc' | 'desc'
-export const OUTGOING_METRIC_HEADERS = ['품목코드', '당월 출고수량', '3개월 평균 출고수량'] as const
 export type PurchasingItemOutgoingMetrics = {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
 }
-export type PurchasingItemOutgoingRow = PurchasingItemOutgoingMetrics & {
+export type PurchasingItemOutgoingMetricRow = PurchasingItemOutgoingMetrics & {
   internalSku: string
 }
 
@@ -64,6 +63,7 @@ export async function getPurchasingItems(input: {
   const [rows, [{ total }]] = await Promise.all([
     db.select({
       id: products.id,
+      internalSku: products.internalSku,
       metadata: products.metadata,
       updatedAt: products.updatedAt,
     }).from(products).where(where).orderBy(orderBy)
@@ -71,11 +71,13 @@ export async function getPurchasingItems(input: {
     db.select({ total: count() }).from(products).where(where),
   ])
 
+  const metricsBySku = await getSkuOutgoingMetrics(input.userId, rows.map((row) => row.internalSku))
+
   return {
     items: rows.map((row) => ({
       id: row.id,
       data: normalizeEsaData(row.metadata?.esa009m),
-      outgoingMetrics: normalizeOutgoingMetrics(row.metadata?.purchasingMetrics),
+      outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
       updatedAt: row.updatedAt,
     })),
     total,
@@ -85,16 +87,19 @@ export async function getPurchasingItems(input: {
 export async function getAllPurchasingItems(userId: string) {
   const rows = await db.select({
     id: products.id,
+    internalSku: products.internalSku,
     metadata: products.metadata,
     updatedAt: products.updatedAt,
   }).from(products)
     .where(and(...purchasingItemConditions(userId)))
     .orderBy(asc(products.internalSku))
 
+  const metricsBySku = await getSkuOutgoingMetrics(userId, rows.map((row) => row.internalSku))
+
   return rows.map((row) => ({
     id: row.id,
     data: normalizeEsaData(row.metadata?.esa009m),
-    outgoingMetrics: normalizeOutgoingMetrics(row.metadata?.purchasingMetrics),
+    outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
     updatedAt: row.updatedAt,
   }))
 }
@@ -123,55 +128,6 @@ export async function importPurchasingItems(input: { userId: string; fileBuffer:
     })
   }
   return { total: parsed.total, imported: parsed.rows.length, skipped: parsed.skipped }
-}
-
-export async function importPurchasingItemOutgoingMetrics(input: { userId: string; fileBuffer: ArrayBuffer }) {
-  const parsed = await parsePurchasingItemOutgoingWorkbook(input.fileBuffer)
-  let imported = 0
-  let skipped = parsed.skipped
-
-  for (const row of parsed.rows) {
-    const result = await db
-      .update(products)
-      .set({
-        metadata: sql`COALESCE(${products.metadata}, '{}'::jsonb) || jsonb_build_object('purchasingMetrics', jsonb_build_object(
-          'currentMonthOutgoing', ${row.currentMonthOutgoing},
-          'threeMonthAverageOutgoing', ${row.threeMonthAverageOutgoing}
-        ))`,
-        updatedAt: sql`NOW()`,
-      })
-      .where(and(eq(products.userId, input.userId), eq(products.internalSku, row.internalSku)))
-      .returning({ id: products.id })
-
-    if (result.length > 0) imported += 1
-    else skipped += 1
-  }
-
-  return { total: parsed.total, imported, skipped }
-}
-
-export async function updatePurchasingItemOutgoingMetrics(input: {
-  userId: string
-  productId: string
-  currentMonthOutgoing: number
-  threeMonthAverageOutgoing: number
-}) {
-  const currentMonthOutgoing = cleanOutgoingNumber(input.currentMonthOutgoing)
-  const threeMonthAverageOutgoing = cleanOutgoingNumber(input.threeMonthAverageOutgoing)
-  const [updated] = await db
-    .update(products)
-    .set({
-      metadata: sql`COALESCE(${products.metadata}, '{}'::jsonb) || jsonb_build_object('purchasingMetrics', jsonb_build_object(
-        'currentMonthOutgoing', ${currentMonthOutgoing},
-        'threeMonthAverageOutgoing', ${threeMonthAverageOutgoing}
-      ))`,
-      updatedAt: sql`NOW()`,
-    })
-    .where(and(eq(products.userId, input.userId), eq(products.id, input.productId)))
-    .returning({ id: products.id })
-
-  if (!updated) throw new Error('품목을 찾을 수 없습니다.')
-  return { id: updated.id, currentMonthOutgoing, threeMonthAverageOutgoing }
 }
 
 export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
@@ -207,59 +163,11 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   return { rows, total, skipped }
 }
 
-export async function parsePurchasingItemOutgoingWorkbook(fileBuffer: ArrayBuffer) {
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(fileBuffer)
-  const sheet = workbook.worksheets[0]
-  if (!sheet) throw new Error('출고수량 시트를 찾을 수 없습니다.')
-
-  const headerRow = findOutgoingHeaderRow(sheet)
-  if (!headerRow) throw new Error('품목코드, 당월 출고수량, 3개월 평균 출고수량 헤더를 찾을 수 없습니다.')
-  const columnByHeader = new Map<string, number>()
-  sheet.getRow(headerRow).eachCell((cell, column) => columnByHeader.set(cellText(cell.value), column))
-
-  const rows: PurchasingItemOutgoingRow[] = []
-  let total = 0
-  let skipped = 0
-  sheet.eachRow((row, rowNumber) => {
-    if (rowNumber <= headerRow) return
-    const internalSku = cellText(row.getCell(columnByHeader.get('품목코드')!).value)
-    const currentMonthOutgoing = parseOutgoingNumber(cellText(row.getCell(columnByHeader.get('당월 출고수량')!).value))
-    const threeMonthAverageOutgoing = parseOutgoingNumber(cellText(row.getCell(columnByHeader.get('3개월 평균 출고수량')!).value))
-    if (!internalSku && currentMonthOutgoing === null && threeMonthAverageOutgoing === null) return
-    total += 1
-    if (!internalSku) {
-      skipped += 1
-      return
-    }
-    rows.push({
-      internalSku,
-      currentMonthOutgoing: currentMonthOutgoing ?? 0,
-      threeMonthAverageOutgoing: threeMonthAverageOutgoing ?? 0,
-    })
-  })
-
-  return { rows, total, skipped }
-}
-
 function findHeaderRow(sheet: ExcelJS.Worksheet): number | null {
   for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
     const values = new Set<string>()
     sheet.getRow(rowNumber).eachCell((cell) => values.add(cellText(cell.value)))
     if (values.has('품목코드') && values.has('품목명')) return rowNumber
-  }
-  return null
-}
-
-function findOutgoingHeaderRow(sheet: ExcelJS.Worksheet): number | null {
-  for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
-    const values = new Set<string>()
-    sheet.getRow(rowNumber).eachCell((cell) => values.add(cellText(cell.value)))
-    if (
-      values.has('품목코드') &&
-      values.has('당월 출고수량') &&
-      values.has('3개월 평균 출고수량')
-    ) return rowNumber
   }
   return null
 }
@@ -272,12 +180,52 @@ function normalizeEsaData(value: unknown): Esa009mData {
   ])) as Esa009mData
 }
 
-export function normalizeOutgoingMetrics(value: unknown): PurchasingItemOutgoingMetrics {
-  const source = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  return {
-    currentMonthOutgoing: cleanOutgoingNumber(source.currentMonthOutgoing),
-    threeMonthAverageOutgoing: cleanOutgoingNumber(source.threeMonthAverageOutgoing),
-  }
+export async function getSkuOutgoingMetrics(
+  userId: string,
+  skus: string[],
+  now = new Date(),
+): Promise<Map<string, PurchasingItemOutgoingMetrics>> {
+  const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
+  if (uniqueSkus.length === 0) return new Map()
+
+  const { currentMonthStart, previousThreeMonthStart, nextMonthStart } = getOutgoingMetricWindows(now)
+  const skuSql = sql.join(uniqueSkus.map((sku) => sql`${sku}`), sql`, `)
+  const result = await db.execute<PurchasingItemOutgoingMetricRow>(sql`
+    SELECT
+      COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) AS "internalSku",
+      COALESCE(SUM(
+        CASE
+          WHEN o.ordered_at >= ${currentMonthStart.toISOString()}::timestamptz
+           AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
+          THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+          ELSE 0
+        END
+      ), 0)::numeric AS "currentMonthOutgoing",
+      (COALESCE(SUM(
+        CASE
+          WHEN o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
+           AND o.ordered_at < ${currentMonthStart.toISOString()}::timestamptz
+          THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+          ELSE 0
+        END
+      ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
+    FROM orders o
+    JOIN order_items oi ON oi.order_id = o.id
+    WHERE o.user_id = ${userId}
+      AND o.raw_data->>'source' = 'sabangnet-review'
+      AND o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
+      AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
+      AND COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IN (${skuSql})
+    GROUP BY COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
+  `)
+
+  return new Map(resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
+    row.internalSku,
+    {
+      currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
+      threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
+    },
+  ]))
 }
 
 function purchasingItemConditions(
@@ -334,17 +282,29 @@ function numericText(value: string | null): string | null {
   return Number.isFinite(number) ? String(number) : null
 }
 
-function parseOutgoingNumber(value: string): number | null {
-  if (!value) return null
-  const number = Number(value.replace(/,/g, ''))
-  if (!Number.isFinite(number)) return null
-  return cleanOutgoingNumber(number)
-}
-
 function cleanOutgoingNumber(value: unknown): number {
   const number = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(number)) return 0
   return Math.max(0, Math.round(number * 10) / 10)
+}
+
+function emptyOutgoingMetrics(): PurchasingItemOutgoingMetrics {
+  return { currentMonthOutgoing: 0, threeMonthAverageOutgoing: 0 }
+}
+
+function getOutgoingMetricWindows(now: Date) {
+  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+  const previousThreeMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1))
+  const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+  return { currentMonthStart, previousThreeMonthStart, nextMonthStart }
+}
+
+function resultRows<T>(result: unknown): T[] {
+  if (Array.isArray(result)) return result as T[]
+  if (result && typeof result === 'object' && 'rows' in result && Array.isArray((result as { rows: unknown }).rows)) {
+    return (result as { rows: T[] }).rows
+  }
+  return []
 }
 
 function chunks<T>(values: T[], size: number): T[][] {

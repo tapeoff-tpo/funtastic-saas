@@ -4,7 +4,6 @@ import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { ESA009M_HEADERS, getPurchasingItems } from '@/lib/purchasing/items'
 import { PurchasingItemUpload } from '@/components/purchasing-item-upload'
-import { PurchasingItemOutgoingFields, PurchasingItemOutgoingUpload } from '@/components/purchasing-item-outgoing'
 
 export const metadata: Metadata = { title: '諛쒖＜ ?덈ぉ' }
 
@@ -38,10 +37,7 @@ export default async function CostsPage({
             ESA009M 전체 항목 · {total.toLocaleString('ko-KR')}개 품목
           </p>
         </div>
-        <div className="flex flex-col gap-2">
-          <PurchasingItemUpload />
-          <PurchasingItemOutgoingUpload />
-        </div>
+        <PurchasingItemUpload />
       </div>
 
       <form className="flex max-w-xl gap-2">
@@ -58,14 +54,13 @@ export default async function CostsPage({
               ))}
               <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium">당월 출고수량</th>
               <th className="whitespace-nowrap px-3 py-2.5 text-right font-medium">3개월 평균 출고수량</th>
-              <th className="whitespace-nowrap px-3 py-2.5 text-left font-medium">출고수량 수정</th>
               <th className="whitespace-nowrap px-3 py-2.5 text-left font-medium">최근 반영일</th>
             </tr>
           </thead>
           <tbody>
             {items.length === 0 ? (
               <tr>
-                <td colSpan={ESA009M_HEADERS.length + 4} className="h-40 text-center text-muted-foreground">
+                <td colSpan={ESA009M_HEADERS.length + 3} className="h-40 text-center text-muted-foreground">
                   표시할 품목이 없습니다. ESA009M 엑셀을 업로드해주세요.
                 </td>
               </tr>
@@ -78,13 +73,6 @@ export default async function CostsPage({
                 ))}
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{item.outgoingMetrics.currentMonthOutgoing.toLocaleString('ko-KR')}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">{item.outgoingMetrics.threeMonthAverageOutgoing.toLocaleString('ko-KR', { maximumFractionDigits: 1 })}</td>
-                <td className="whitespace-nowrap px-3 py-2">
-                  <PurchasingItemOutgoingFields
-                    productId={item.id}
-                    currentMonthOutgoing={item.outgoingMetrics.currentMonthOutgoing}
-                    threeMonthAverageOutgoing={item.outgoingMetrics.threeMonthAverageOutgoing}
-                  />
-                </td>
                 <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{item.updatedAt.toLocaleString('ko-KR')}</td>
               </tr>
             ))}

@@ -291,6 +291,57 @@ export function PurchaseStatusButton({
   )
 }
 
+export function PurchaseQuantityField({
+  id,
+  requestedQuantity,
+}: {
+  id: string
+  requestedQuantity: number
+}) {
+  const router = useRouter()
+  const [quantity, setQuantity] = useState(String(requestedQuantity))
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const nextQuantity = Number(quantity)
+    if (!Number.isInteger(nextQuantity) || nextQuantity < 1) {
+      setMessage('1 이상 정수')
+      return
+    }
+
+    setMessage(null)
+    startTransition(async () => {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestedQuantity: nextQuantity }),
+      })
+      setMessage(response.ok ? '저장됨' : '실패')
+      if (response.ok) router.refresh()
+    })
+  }
+
+  return (
+    <form onSubmit={save} className="flex w-28 items-center gap-1">
+      <Input
+        type="number"
+        min={1}
+        step={1}
+        value={quantity}
+        onChange={(event) => setQuantity(event.target.value)}
+        className="h-7 w-16 px-2 text-right text-xs tabular-nums"
+      />
+      <Button type="submit" size="sm" variant="outline" className="h-7 px-2" disabled={isPending}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Save />}
+        <span className="sr-only">저장</span>
+      </Button>
+      {message ? <span className="sr-only">{message}</span> : null}
+    </form>
+  )
+}
+
 export function PurchaseDeleteButton({
   id,
   productName,

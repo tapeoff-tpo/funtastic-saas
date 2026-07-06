@@ -16,6 +16,8 @@ export async function getPurchaseRequests(input: {
   search?: string
   page?: number
   pageSize?: number
+  sort?: string
+  order?: string
 }) {
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
@@ -34,6 +36,7 @@ export async function getPurchaseRequests(input: {
   }
 
   const where = and(...conditions)
+  const orderBy = purchaseRequestOrderBy(input.sort, input.order)
   const [items, [{ total }], statusCounts, costRows] = await Promise.all([
     db
       .select({
@@ -47,7 +50,7 @@ export async function getPurchaseRequests(input: {
         eq(products.internalSku, purchaseRequestItems.sku),
       ))
       .where(where)
-      .orderBy(desc(purchaseRequestItems.createdAt))
+      .orderBy(...orderBy)
       .limit(pageSize)
       .offset((page - 1) * pageSize),
     db.select({ total: count() }).from(purchaseRequestItems).where(where),
@@ -128,24 +131,86 @@ export async function updatePurchaseRequestStatus(input: {
 export async function updatePurchaseRequestPlanFields(input: {
   userId: string
   id: string
+  requestedQuantity?: number
   supplierOrderNumber?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
   purchaseConfirmed?: boolean
 }) {
+  const requestedQuantity = normalizePurchaseRequestQuantity(input.requestedQuantity)
+  if (requestedQuantity === null) return null
+  const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
+    updatedAt: new Date(),
+  }
+  if (requestedQuantity !== undefined) values.requestedQuantity = requestedQuantity
+  if (input.supplierOrderNumber !== undefined) {
+    values.supplierOrderNumber = emptyToNull(input.supplierOrderNumber)
+  }
+  if (input.outboundExpectedDate !== undefined) {
+    values.outboundExpectedDate = input.outboundExpectedDate || null
+  }
+  if (input.purchaseMethod !== undefined) {
+    values.purchaseMethod = emptyToNull(input.purchaseMethod)
+  }
+  if (input.purchaseConfirmed !== undefined) {
+    values.purchaseConfirmed = input.purchaseConfirmed
+  }
+
   const [row] = await db
     .update(purchaseRequestItems)
-    .set({
-      supplierOrderNumber: emptyToNull(input.supplierOrderNumber),
-      outboundExpectedDate: input.outboundExpectedDate || null,
-      purchaseMethod: emptyToNull(input.purchaseMethod),
-      purchaseConfirmed: input.purchaseConfirmed ?? false,
-      updatedAt: new Date(),
-    })
+    .set(values)
     .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
     .returning({ id: purchaseRequestItems.id })
 
   return row ?? null
+}
+
+export function normalizePurchaseRequestQuantity(value: unknown) {
+  if (value === undefined || value === null || value === '') return undefined
+  const quantity = typeof value === 'number' ? value : Number(value)
+  if (!Number.isInteger(quantity) || quantity < 1) return null
+  return quantity
+}
+
+export function purchaseRequestOrderBy(sort?: string, order?: string): SQL[] {
+  const direction = order === 'asc' ? asc : desc
+  const unitCostYuan = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'신규원가(元)', ''), '[^0-9.-]', '', 'g'), '')::numeric`
+  const unitCostKrw = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'works 신규 원가', ''), '[^0-9.-]', '', 'g'), '')::numeric`
+  const totalCostYuan = sql<number>`COALESCE(${unitCostYuan}, 0) * ${purchaseRequestItems.requestedQuantity}`
+  const totalCostKrw = sql<number>`COALESCE(${unitCostKrw}, 0) * ${purchaseRequestItems.requestedQuantity}`
+
+  switch (sort) {
+    case 'status':
+      return [direction(purchaseRequestItems.status), desc(purchaseRequestItems.createdAt)]
+    case 'productName':
+      return [
+        direction(purchaseRequestItems.productName),
+        asc(purchaseRequestItems.sku),
+        desc(purchaseRequestItems.createdAt),
+      ]
+    case 'sku':
+      return [direction(purchaseRequestItems.sku), desc(purchaseRequestItems.createdAt)]
+    case 'requestedQuantity':
+      return [direction(purchaseRequestItems.requestedQuantity), desc(purchaseRequestItems.createdAt)]
+    case 'unitCostYuan':
+      return [direction(unitCostYuan), desc(purchaseRequestItems.createdAt)]
+    case 'unitCostKrw':
+      return [direction(unitCostKrw), desc(purchaseRequestItems.createdAt)]
+    case 'totalCostYuan':
+      return [direction(totalCostYuan), desc(purchaseRequestItems.createdAt)]
+    case 'totalCostKrw':
+      return [direction(totalCostKrw), desc(purchaseRequestItems.createdAt)]
+    case 'chinaArrivalRequestDate':
+      return [direction(purchaseRequestItems.chinaArrivalRequestDate), desc(purchaseRequestItems.createdAt)]
+    case 'purchaseManagementCode':
+      return [direction(purchaseRequestItems.purchaseManagementCode), desc(purchaseRequestItems.createdAt)]
+    case 'buyerName':
+      return [direction(purchaseRequestItems.buyerName), desc(purchaseRequestItems.createdAt)]
+    case 'createdAt':
+      return [direction(purchaseRequestItems.createdAt)]
+    default:
+      return [desc(purchaseRequestItems.createdAt)]
+  }
 }
 
 export async function deletePurchaseRequestItem(input: {

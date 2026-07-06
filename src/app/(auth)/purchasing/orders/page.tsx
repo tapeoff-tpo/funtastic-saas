@@ -17,6 +17,7 @@ import {
   PurchaseBulkStatusButton,
   PurchaseDeleteButton,
   PurchasePlanFields,
+  PurchaseQuantityField,
   PurchaseRecommendationGenerator,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
@@ -39,6 +40,8 @@ export default async function PurchasingOrdersPage({
   const search = stringParam(params.search)
   const page = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const showCosts = stringParam(params.showCosts) === '1'
+  const sort = stringParam(params.sort)
+  const order = parseOrder(stringParam(params.order)) ?? 'desc'
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -51,11 +54,15 @@ export default async function PurchasingOrdersPage({
     search: search ?? undefined,
     page,
     pageSize: 50,
+    sort: sort ?? undefined,
+    order,
   })
   const nextStatus = getNextPurchaseStatus(status)
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
+  if (sort) costToggleParams.set('sort', sort)
+  if (order) costToggleParams.set('order', order)
   if (!showCosts) costToggleParams.set('showCosts', '1')
   const costToggleHref = `/purchasing/orders?${costToggleParams.toString()}`
 
@@ -71,6 +78,8 @@ export default async function PurchasingOrdersPage({
         <form className="flex items-center gap-2" action="/purchasing/orders">
           <input type="hidden" name="status" value={status} />
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
+          {sort ? <input type="hidden" name="sort" value={sort} /> : null}
+          {order ? <input type="hidden" name="order" value={order} /> : null}
           <input
             name="search"
             defaultValue={search ?? ''}
@@ -106,7 +115,13 @@ export default async function PurchasingOrdersPage({
       <nav className="flex flex-wrap gap-2">
         {STATUSES.map((item) => {
           const active = item === status
-          const href = `/purchasing/orders?status=${item}${search ? `&search=${encodeURIComponent(search)}` : ''}${showCosts ? '&showCosts=1' : ''}`
+          const href = purchaseOrdersHref({
+            status: item,
+            search,
+            showCosts,
+            sort,
+            order,
+          })
           return (
             <Link
               key={item}
@@ -150,22 +165,42 @@ export default async function PurchasingOrdersPage({
                   <th className="w-12 px-3 py-2 font-medium">
                     <PurchaseSelectAllCheckbox />
                   </th>
-                  <th className="w-28 px-3 py-2 font-medium">상태</th>
-                  <th className="px-3 py-2 font-medium">상품</th>
-                  <th className="w-24 px-3 py-2 font-medium">요청수량</th>
+                  <th className="w-28 px-3 py-2 font-medium">
+                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  </th>
+                  <th className="px-3 py-2 font-medium">
+                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  </th>
+                  <th className="w-32 px-3 py-2 font-medium">
+                    <SortHeader label="요청수량" column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  </th>
                   {showCosts ? (
                     <>
-                      <th className="w-28 px-3 py-2 text-right font-medium">개당 원가(元)</th>
-                      <th className="w-28 px-3 py-2 text-right font-medium">개당 원가(원)</th>
-                      <th className="w-32 px-3 py-2 text-right font-medium">총 원가(元)</th>
-                      <th className="w-32 px-3 py-2 text-right font-medium">총 원가(원)</th>
+                      <th className="w-28 px-3 py-2 text-right font-medium">
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                      </th>
+                      <th className="w-28 px-3 py-2 text-right font-medium">
+                        <SortHeader label="개당 원가(원)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                      </th>
+                      <th className="w-32 px-3 py-2 text-right font-medium">
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                      </th>
+                      <th className="w-32 px-3 py-2 text-right font-medium">
+                        <SortHeader label="총 원가(원)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                      </th>
                     </>
                   ) : null}
                   <th className="w-48 px-3 py-2 font-medium">추천 근거</th>
-                  <th className="w-32 px-3 py-2 font-medium">입고요청일</th>
-                  <th className="w-32 px-3 py-2 font-medium">관리코드</th>
+                  <th className="w-32 px-3 py-2 font-medium">
+                    <SortHeader label="입고요청일" column="chinaArrivalRequestDate" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  </th>
+                  <th className="w-32 px-3 py-2 font-medium">
+                    <SortHeader label="관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  </th>
                   <th className="w-[540px] px-3 py-2 font-medium">발주 계획</th>
-                  <th className="w-28 px-3 py-2 font-medium">담당자</th>
+                  <th className="w-28 px-3 py-2 font-medium">
+                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                  </th>
                   <th className="w-48 px-3 py-2 font-medium">상태 변경</th>
                   <th className="w-24 px-3 py-2 font-medium">삭제</th>
                 </tr>
@@ -201,7 +236,7 @@ export default async function PurchasingOrdersPage({
                         </div>
                       </td>
                       <td className="px-3 py-2 tabular-nums">
-                        {item.requestedQuantity.toLocaleString('ko-KR')}
+                        <PurchaseQuantityField id={item.id} requestedQuantity={item.requestedQuantity} />
                       </td>
                       {showCosts ? (
                         <>
@@ -245,6 +280,48 @@ export default async function PurchasingOrdersPage({
   )
 }
 
+function SortHeader({
+  label,
+  column,
+  status,
+  search,
+  showCosts,
+  currentSort,
+  currentOrder,
+  align = 'left',
+}: {
+  label: string
+  column: string
+  status: PurchaseRequestStatus
+  search: string | undefined
+  showCosts: boolean
+  currentSort: string | undefined
+  currentOrder: 'asc' | 'desc'
+  align?: 'left' | 'right'
+}) {
+  const nextOrder = currentSort === column && currentOrder === 'asc' ? 'desc' : 'asc'
+  const indicator = currentSort === column ? (currentOrder === 'asc' ? ' ↑' : ' ↓') : ''
+  const href = purchaseOrdersHref({
+    status,
+    search,
+    showCosts,
+    sort: column,
+    order: nextOrder,
+  })
+
+  return (
+    <Link
+      href={href}
+      className={`inline-flex w-full items-center gap-1 hover:text-foreground ${
+        align === 'right' ? 'justify-end' : 'justify-start'
+      }`}
+    >
+      {label}
+      <span className="text-muted-foreground">{indicator}</span>
+    </Link>
+  )
+}
+
 function RecommendationBasis({ rawData }: { rawData: Record<string, unknown> }) {
   if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
 
@@ -274,6 +351,31 @@ function stringParam(value: string | string[] | undefined) {
 function parseStatus(value: string | undefined): PurchaseRequestStatus | null {
   if (!value) return null
   return STATUSES.includes(value as PurchaseRequestStatus) ? value as PurchaseRequestStatus : null
+}
+
+function parseOrder(value: string | undefined): 'asc' | 'desc' | null {
+  return value === 'asc' || value === 'desc' ? value : null
+}
+
+function purchaseOrdersHref({
+  status,
+  search,
+  showCosts,
+  sort,
+  order,
+}: {
+  status: PurchaseRequestStatus
+  search?: string
+  showCosts?: boolean
+  sort?: string
+  order?: 'asc' | 'desc'
+}) {
+  const params = new URLSearchParams({ status })
+  if (search) params.set('search', search)
+  if (showCosts) params.set('showCosts', '1')
+  if (sort) params.set('sort', sort)
+  if (order) params.set('order', order)
+  return `/purchasing/orders?${params.toString()}`
 }
 
 function formatDate(value: string | Date | null) {

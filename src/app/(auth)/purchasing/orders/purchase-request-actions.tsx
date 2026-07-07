@@ -391,11 +391,13 @@ export function PurchaseQuantityField({
   id,
   field,
   quantity,
+  stockLimit,
   costSummary,
 }: {
   id: string
   field: 'requestedQuantity' | 'actualPurchaseQuantity' | 'chinaReceivedQuantity' | 'outboundRequestedQuantity'
   quantity: number
+  stockLimit?: number | null
   costSummary?: {
     unitCostYuan: number | null
     unitCostKrw: number | null
@@ -451,18 +453,25 @@ export function PurchaseQuantityField({
 
   return (
     <div className="mx-auto w-[128px]">
-      <Input
-        type="number"
-        min={field === 'requestedQuantity' ? 1 : 0}
-        step={1}
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        onBlur={save}
-        onKeyDown={saveOnEnter}
-        disabled={isPending}
-        aria-label="수량"
-        className="mx-auto h-7 w-20 px-2 text-center text-xs tabular-nums"
-      />
+      <div className="flex items-center justify-center gap-1">
+        <Input
+          type="number"
+          min={field === 'requestedQuantity' ? 1 : 0}
+          step={1}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onBlur={save}
+          onKeyDown={saveOnEnter}
+          disabled={isPending}
+          aria-label="수량"
+          className="h-7 w-16 px-2 text-center text-xs tabular-nums"
+        />
+        {stockLimit !== undefined && stockLimit !== null ? (
+          <span className="text-xs text-muted-foreground tabular-nums">
+            /{stockLimit.toLocaleString('ko-KR')}
+          </span>
+        ) : null}
+      </div>
       {costSummary ? (
         <div className="mt-1 space-y-0.5 text-center text-[11px] leading-tight tabular-nums">
           <div className="whitespace-nowrap font-semibold text-foreground">

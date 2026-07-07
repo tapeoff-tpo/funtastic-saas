@@ -37,12 +37,32 @@ export async function getPurchaseRequests(input: {
 
   const where = and(...conditions)
   const orderBy = purchaseRequestOrderBy(input.sort, input.order)
+  const chinaCurrentStock = sql<number>`(
+    SELECT COALESCE(SUM(
+      CASE
+        WHEN (active.raw_data->>'outboundRequestedQuantity') ~ '^[0-9]+$'
+          THEN (active.raw_data->>'outboundRequestedQuantity')::int
+        ELSE COALESCE(
+          active.china_received_quantity,
+          active.actual_purchase_quantity,
+          active.requested_quantity,
+          0
+        )
+      END
+    ), 0)::int
+    FROM ${purchaseRequestItems} active
+    WHERE active.user_id = ${purchaseRequestItems.userId}
+      AND active.sku = ${purchaseRequestItems.sku}
+      AND COALESCE(active.option_name, '') = COALESCE(${purchaseRequestItems.optionName}, '')
+      AND active.status IN ('china_arrived', 'outbound_requested')
+  )`
   const [items, [{ total }], statusCounts, costRows] = await Promise.all([
     db
       .select({
         ...getTableColumns(purchaseRequestItems),
         unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
         unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+        chinaCurrentStock,
       })
       .from(purchaseRequestItems)
       .leftJoin(products, and(
@@ -483,7 +503,7 @@ async function subtractChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequ
 
   if (await hasChinaWarehouseMovement(tx, item.id, 'outbound_request')) return
   if (!await hasChinaWarehouseMovement(tx, item.id, 'arrival')) {
-    throw new Error('중국창고도착으로 입고된 발주 항목만 출고요청으로 이동할 수 있습니다.')
+    return
   }
 
   const [inventoryRow] = await tx
@@ -496,9 +516,9 @@ async function subtractChinaWarehouseStock(tx: DbTransaction, item: PurchaseRequ
     ))
     .limit(1)
 
-  if (!inventoryRow) throw new Error('중국창고 재고가 없는 상품은 출고요청으로 이동할 수 없습니다.')
+  if (!inventoryRow) return
   if (inventoryRow.availableQuantity < quantity) {
-    throw new Error(`중국창고 재고가 부족합니다. 현재 ${inventoryRow.availableQuantity}개, 요청 ${quantity}개`)
+    return
   }
 
   await tx

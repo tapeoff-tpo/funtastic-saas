@@ -262,6 +262,7 @@ export default async function PurchasingOrdersPage({
                           id={item.id}
                           field={quantityColumn.field}
                           quantity={stageQuantity}
+                          stockLimit={status === 'outbound_requested' ? item.chinaCurrentStock : undefined}
                           costSummary={isRequestedStatus ? {
                             unitCostYuan: costs.unitCostYuan,
                             unitCostKrw: costs.unitCostKrw,

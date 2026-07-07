@@ -6,10 +6,9 @@ import { createClient } from '@/lib/supabase/server'
 
 const bodySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(200),
-  chinaArrivalRequestDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   buyerCode: z.enum(['1', '2', '3', '4', '5']).nullable().optional(),
 }).refine(
-  (body) => body.chinaArrivalRequestDate !== undefined || body.buyerCode !== undefined,
+  (body) => body.buyerCode !== undefined,
   { message: '변경할 값이 없습니다.' },
 )
 
@@ -32,7 +31,6 @@ export async function PATCH(request: NextRequest) {
       const row = await updatePurchaseRequestPlanFields({
         userId: workspaceUserId,
         id,
-        chinaArrivalRequestDate: body.data.chinaArrivalRequestDate,
         buyerCode: body.data.buyerCode,
       })
       if (row) updated.push(row.id)

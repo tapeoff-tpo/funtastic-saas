@@ -146,7 +146,6 @@ export async function updatePurchaseRequestPlanFields(input: {
   chinaReceivedQuantity?: number | null
   outboundRequestedQuantity?: number | null
   supplierOrderNumber?: string | null
-  chinaArrivalRequestDate?: string | null
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
   purchaseConfirmed?: boolean
@@ -169,9 +168,6 @@ export async function updatePurchaseRequestPlanFields(input: {
   if (chinaReceivedQuantity !== undefined) values.chinaReceivedQuantity = chinaReceivedQuantity
   if (input.supplierOrderNumber !== undefined) {
     values.supplierOrderNumber = emptyToNull(input.supplierOrderNumber)
-  }
-  if (input.chinaArrivalRequestDate !== undefined) {
-    values.chinaArrivalRequestDate = input.chinaArrivalRequestDate || null
   }
   if (input.outboundExpectedDate !== undefined) {
     values.outboundExpectedDate = input.outboundExpectedDate || null
@@ -279,8 +275,6 @@ export function purchaseRequestOrderBy(sort?: string, order?: string): SQL[] {
       return [direction(totalCostYuan), desc(purchaseRequestItems.createdAt)]
     case 'totalCostKrw':
       return [direction(totalCostKrw), desc(purchaseRequestItems.createdAt)]
-    case 'chinaArrivalRequestDate':
-      return [direction(purchaseRequestItems.chinaArrivalRequestDate), desc(purchaseRequestItems.createdAt)]
     case 'purchaseManagementCode':
       return [direction(purchaseRequestItems.purchaseManagementCode), desc(purchaseRequestItems.createdAt)]
     case 'buyerName':

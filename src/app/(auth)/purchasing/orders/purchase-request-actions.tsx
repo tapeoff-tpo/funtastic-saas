@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 
 import {
   createContext,
@@ -75,7 +75,7 @@ export function PurchaseSelectAllCheckbox() {
   return (
     <input
       type="checkbox"
-      aria-label="현재 목록 전체 선택"
+      aria-label="?꾩옱 紐⑸줉 ?꾩껜 ?좏깮"
       checked={checked}
       ref={(node) => {
         if (node) node.indeterminate = indeterminate
@@ -92,7 +92,7 @@ export function PurchaseRowCheckbox({ id }: { id: string }) {
   return (
     <input
       type="checkbox"
-      aria-label="발주 항목 선택"
+      aria-label="諛쒖＜ ??ぉ ?좏깮"
       checked={context.selectedIds.has(id)}
       onChange={() => context.toggle(id)}
       className="h-4 w-4"
@@ -122,13 +122,13 @@ export function PurchaseBulkStatusButton() {
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok || (Array.isArray(body.failed) && body.failed.length > 0)) {
-        setMessage(body.error ?? '선택 항목 이동에 실패했습니다.')
+        setMessage(body.error ?? '?좏깮 ??ぉ ?대룞???ㅽ뙣?덉뒿?덈떎.')
         router.refresh()
         return
       }
 
       context.clear()
-      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}건 이동 완료`)
+      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}嫄??대룞 ?꾨즺`)
       router.refresh()
     })
   }
@@ -143,7 +143,7 @@ export function PurchaseBulkStatusButton() {
         disabled={isPending || selectedCount === 0}
       >
         {isPending ? <Loader2 className="animate-spin" /> : <Check />}
-        선택 {selectedCount.toLocaleString('ko-KR')}건 {PURCHASE_REQUEST_STATUS_LABELS[context.nextStatus]}로 이동
+        ?좏깮 {selectedCount.toLocaleString('ko-KR')}嫄?{PURCHASE_REQUEST_STATUS_LABELS[context.nextStatus]}濡??대룞
       </Button>
       {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
     </div>
@@ -165,7 +165,6 @@ export function PurchaseBulkBuyerApply() {
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedCount = context.selectedIds.size
-  const targetCount = selectedCount || context.ids.length
 
   function apply() {
     const ids = selectedCount ? Array.from(context.selectedIds) : context.ids
@@ -179,10 +178,10 @@ export function PurchaseBulkBuyerApply() {
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
-        setMessage(body.error ?? '담당자 적용 실패')
+        setMessage(body.error ?? '?대떦???곸슜 ?ㅽ뙣')
         return
       }
-      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}건 적용`)
+      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}嫄??곸슜`)
       router.refresh()
     })
   }
@@ -200,53 +199,45 @@ export function PurchaseBulkBuyerApply() {
       </select>
       <Button type="button" size="sm" variant="outline" onClick={apply} disabled={isPending || targetCount === 0}>
         {isPending ? <Loader2 className="animate-spin" /> : <Check />}
-        담당자 전체적용
+        ?대떦???꾩껜?곸슜
       </Button>
       {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
     </div>
   )
 }
 
-export function PurchaseBulkArrivalDateApply() {
+
+export function PurchaseBulkDeleteButton() {
   const router = useRouter()
   const context = useBulkSelection()
-  const [date, setDate] = useState(todayDateInput())
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedCount = context.selectedIds.size
-  const targetCount = selectedCount || context.ids.length
 
-  function apply() {
-    const ids = selectedCount ? Array.from(context.selectedIds) : context.ids
-    if (ids.length === 0 || !date) return
+  function removeSelected() {
+    const ids = Array.from(context.selectedIds)
+    if (ids.length === 0) return
+    if (!window.confirm(`?좏깮??${ids.length.toLocaleString('ko-KR')}嫄댁쓣 ??젣?좉퉴??`)) return
     setMessage(null)
     startTransition(async () => {
-      const response = await fetch('/api/purchasing/purchase-requests/bulk-update', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids, chinaArrivalRequestDate: date }),
-      })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setMessage(body.error ?? '입고요청일 적용 실패')
-        return
+      let deletedCount = 0
+      for (const id of ids) {
+        const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+          method: 'DELETE',
+        })
+        if (response.ok) deletedCount += 1
       }
-      setMessage(`${body.updatedCount.toLocaleString('ko-KR')}건 적용`)
+      context.clear()
+      setMessage(`${deletedCount.toLocaleString('ko-KR')}嫄???젣`)
       router.refresh()
     })
   }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Input
-        type="date"
-        value={date}
-        onChange={(event) => setDate(event.target.value)}
-        className="h-7 w-36 text-xs"
-      />
-      <Button type="button" size="sm" variant="outline" onClick={apply} disabled={isPending || targetCount === 0}>
-        {isPending ? <Loader2 className="animate-spin" /> : <Check />}
-        입고요청일 전체적용
+      <Button type="button" size="sm" variant="destructive" onClick={removeSelected} disabled={isPending || selectedCount === 0}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+        ?좏깮 ??젣 {selectedCount.toLocaleString('ko-KR')}
       </Button>
       {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
     </div>
@@ -270,12 +261,12 @@ export function PurchaseRecommendationGenerator() {
   function generate() {
     const months = Number(targetStockMonths)
     if (!Number.isFinite(months) || months < 0.1 || months > 12) {
-      setError('목표 보유개월수는 0.1~12 사이로 입력해주세요.')
+      setError('紐⑺몴 蹂댁쑀媛쒖썡?섎뒗 0.1~12 ?ъ씠濡??낅젰?댁＜?몄슂.')
       return
     }
     const budget = budgetKrw.trim() === '' ? null : Number(budgetKrw)
     if (budget !== null && (!Number.isFinite(budget) || budget <= 0 || budget > 10_000_000_000)) {
-      setError('구매예산은 1원~100억원 사이로 입력해주세요.')
+      setError('援щℓ?덉궛? 1??100?듭썝 ?ъ씠濡??낅젰?댁＜?몄슂.')
       return
     }
 
@@ -289,18 +280,18 @@ export function PurchaseRecommendationGenerator() {
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
-        setError(body.error ?? '자동 발주 추천 생성에 실패했습니다.')
+        setError(body.error ?? '?먮룞 諛쒖＜ 異붿쿇 ?앹꽦???ㅽ뙣?덉뒿?덈떎.')
         return
       }
 
       setMessage(
-        `재고 ${body.evaluated.toLocaleString('ko-KR')}개 검수 · ` +
+        `재고 ${body.evaluated.toLocaleString('ko-KR')}개 검색 · ` +
         `발주추천 ${body.created.toLocaleString('ko-KR')}건 생성 · ` +
         `기존 자동추천 ${(body.replaced ?? 0).toLocaleString('ko-KR')}건 교체 · ` +
         `급증 ${(body.salesAnomalyCount ?? 0).toLocaleString('ko-KR')}건 보정` +
         (budget !== null
           ? ` · 예산 ${(body.spentBudgetKrw ?? 0).toLocaleString('ko-KR')}원 사용 · ` +
-            `원가누락 ${(body.missingCostExcluded ?? 0).toLocaleString('ko-KR')}건 제외 · ` +
+            `원가 누락 ${(body.missingCostExcluded ?? 0).toLocaleString('ko-KR')}건 제외 · ` +
             `예산조정 ${(body.budgetLimitedCount ?? 0).toLocaleString('ko-KR')}건`
           : ''),
       )
@@ -311,16 +302,16 @@ export function PurchaseRecommendationGenerator() {
   return (
     <div className="flex flex-col gap-3 rounded-md border bg-background p-3 md:flex-row md:items-center md:justify-between">
       <div className="min-w-0">
-        <p className="text-sm font-medium">자동 발주 추천</p>
+        <p className="text-sm font-medium">?먮룞 諛쒖＜ 異붿쿇</p>
         <p className="text-xs text-muted-foreground">
-          판매 급증을 보정하고 재고 소진 위험이 높은 품목부터 예산 안에서 발주수량을 배분합니다.
+          ?먮ℓ 湲됱쬆??蹂댁젙?섍퀬 ?ш퀬 ?뚯쭊 ?꾪뿕???믪? ?덈ぉ遺???덉궛 ?덉뿉??諛쒖＜?섎웾??諛곕텇?⑸땲??
         </p>
         {message && <p className="mt-1 text-xs text-emerald-700">{message}</p>}
         {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
         <label className="text-xs text-muted-foreground" htmlFor="target-stock-months">
-          목표 보유개월
+          紐⑺몴 蹂댁쑀媛쒖썡
         </label>
         <Input
           id="target-stock-months"
@@ -333,7 +324,7 @@ export function PurchaseRecommendationGenerator() {
           className="h-9 w-24"
         />
         <label className="text-xs text-muted-foreground" htmlFor="purchase-budget-krw">
-          구매예산
+          援щℓ?덉궛
         </label>
         <div className="relative">
           <WalletCards className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -343,7 +334,7 @@ export function PurchaseRecommendationGenerator() {
             min="1"
             max="10000000000"
             step="10000"
-            placeholder="원화 예산"
+            placeholder="?먰솕 ?덉궛"
             value={budgetKrw}
             onChange={(event) => setBudgetKrw(event.target.value)}
             className="h-9 w-36 pl-8"
@@ -351,7 +342,7 @@ export function PurchaseRecommendationGenerator() {
         </div>
         <Button type="button" onClick={generate} disabled={isPending}>
           {isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
-          추천 계산
+          異붿쿇 怨꾩궛
         </Button>
       </div>
     </div>
@@ -413,7 +404,7 @@ export function PurchaseQuantityField({
     const nextQuantity = Number(value)
     const minimum = field === 'requestedQuantity' ? 1 : 0
     if (!Number.isInteger(nextQuantity) || nextQuantity < minimum) {
-      setMessage(field === 'requestedQuantity' ? '1 이상 정수' : '0 이상 정수')
+      setMessage(field === 'requestedQuantity' ? '1 ?댁긽 ?뺤닔' : '0 ?댁긽 ?뺤닔')
       return
     }
 
@@ -424,7 +415,7 @@ export function PurchaseQuantityField({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: nextQuantity }),
       })
-      setMessage(response.ok ? '저장됨' : '실패')
+      setMessage(response.ok ? '??λ맖' : '?ㅽ뙣')
       if (response.ok) router.refresh()
     })
   }
@@ -459,7 +450,7 @@ export function PurchaseDeleteButton({
   const [isPending, startTransition] = useTransition()
 
   function remove() {
-    if (!window.confirm(`${productName} 발주 항목을 삭제할까요?`)) return
+    if (!window.confirm(`${productName} 諛쒖＜ ??ぉ????젣?좉퉴??`)) return
     startTransition(async () => {
       const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
         method: 'DELETE',
@@ -467,7 +458,7 @@ export function PurchaseDeleteButton({
       if (response.ok) router.refresh()
       else {
         const body = await response.json().catch(() => ({}))
-        window.alert(body.error ?? '삭제에 실패했습니다.')
+        window.alert(body.error ?? '??젣???ㅽ뙣?덉뒿?덈떎.')
       }
     })
   }
@@ -475,82 +466,8 @@ export function PurchaseDeleteButton({
   return (
     <Button type="button" size="sm" variant="destructive" onClick={remove} disabled={isPending}>
       {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
-      삭제
+      ??젣
     </Button>
-  )
-}
-
-export function PurchasePlanFields({
-  id,
-  supplierOrderNumber,
-  outboundExpectedDate,
-  purchaseMethod,
-  purchaseConfirmed,
-}: {
-  id: string
-  supplierOrderNumber: string | null
-  outboundExpectedDate: string | Date | null
-  purchaseMethod: string | null
-  purchaseConfirmed: boolean
-}) {
-  const router = useRouter()
-  const [message, setMessage] = useState<string | null>(null)
-  const [isPending, startTransition] = useTransition()
-
-  function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const formData = new FormData(event.currentTarget)
-    setMessage(null)
-    startTransition(async () => {
-      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          supplierOrderNumber: String(formData.get('supplierOrderNumber') ?? ''),
-          outboundExpectedDate: String(formData.get('outboundExpectedDate') ?? '') || null,
-          purchaseMethod: String(formData.get('purchaseMethod') ?? ''),
-          purchaseConfirmed: formData.get('purchaseConfirmed') === 'on',
-        }),
-      })
-      setMessage(response.ok ? '저장됨' : '저장 실패')
-      if (response.ok) router.refresh()
-    })
-  }
-
-  return (
-    <form onSubmit={save} className="grid min-w-[520px] grid-cols-[1fr_120px_120px_72px_82px] items-center gap-1">
-      <Input
-        name="supplierOrderNumber"
-        defaultValue={supplierOrderNumber ?? ''}
-        placeholder="주문서번호"
-        className="h-7 text-xs"
-      />
-      <Input
-        name="outboundExpectedDate"
-        type="date"
-        defaultValue={formatDateInput(outboundExpectedDate)}
-        className="h-7 text-xs"
-      />
-      <Input
-        name="purchaseMethod"
-        defaultValue={purchaseMethod ?? ''}
-        placeholder="구매방식"
-        className="h-7 text-xs"
-      />
-      <label className="flex items-center justify-center gap-1 text-xs text-muted-foreground">
-        <input
-          name="purchaseConfirmed"
-          type="checkbox"
-          defaultChecked={purchaseConfirmed}
-          className="h-3.5 w-3.5"
-        />
-        구매
-      </label>
-      <Button type="submit" size="sm" variant="outline" disabled={isPending}>
-        {isPending ? <Loader2 className="animate-spin" /> : <Save />}
-        {message ?? '저장'}
-      </Button>
-    </form>
   )
 }
 

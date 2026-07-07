@@ -1,4 +1,4 @@
-import Link from 'next/link'
+﻿import Link from 'next/link'
 import type { Metadata } from 'next'
 import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
@@ -13,8 +13,8 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
-  PurchaseBulkArrivalDateApply,
   PurchaseBulkBuyerApply,
+  PurchaseBulkDeleteButton,
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
   PurchaseBuyerField,
@@ -28,7 +28,7 @@ import {
 } from './purchase-request-actions'
 
 export const metadata: Metadata = {
-  title: '발주',
+  title: '諛쒖＜',
 }
 
 const STATUSES = Object.keys(PURCHASE_REQUEST_STATUS_LABELS) as PurchaseRequestStatus[]
@@ -63,10 +63,12 @@ export default async function PurchasingOrdersPage({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
-  const visibleColumnCount = (showCosts ? 15 : 11) - (isRequestedStatus ? 2 : 0)
+  const visibleColumnCount = showCosts
+    ? isRequestedStatus ? 12 : 14
+    : isRequestedStatus ? 8 : 10
   const tableMinWidth = isRequestedStatus
-    ? showCosts ? 'min-w-[1980px]' : 'min-w-[1500px]'
-    : showCosts ? 'min-w-[2260px]' : 'min-w-[1780px]'
+    ? showCosts ? 'min-w-[1940px]' : 'min-w-[1460px]'
+    : showCosts ? 'min-w-[2140px]' : 'min-w-[1660px]'
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
@@ -79,9 +81,9 @@ export default async function PurchasingOrdersPage({
     <div className="space-y-4">
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">발주</h1>
+          <h1 className="text-2xl font-semibold">諛쒖＜</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            재고와 출고 이력을 기준으로 구매가 필요한 품목을 추천하고, 구매부터 중국창고 입고까지 관리합니다.
+            ?ш퀬? 異쒓퀬 ?대젰??湲곗??쇰줈 援щℓ媛 ?꾩슂???덈ぉ??異붿쿇?섍퀬, 援щℓ遺??以묎뎅李쎄퀬 ?낃퀬源뚯? 愿由ы빀?덈떎.
           </p>
         </div>
         <form className="flex items-center gap-2" action="/purchasing/orders">
@@ -92,7 +94,7 @@ export default async function PurchasingOrdersPage({
           <input
             name="search"
             defaultValue={search ?? ''}
-            placeholder="품목코드, 상품명, 주문번호"
+            placeholder="?덈ぉ肄붾뱶, ?곹뭹紐? 二쇰Ц踰덊샇"
             className="h-8 w-64 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           <Button type="submit" variant="outline">검색</Button>
@@ -107,16 +109,15 @@ export default async function PurchasingOrdersPage({
         </span>
         <span className="text-sm tabular-nums">
           <span className="text-muted-foreground">위안 </span>
-          <strong>{formatCost(costTotals.totalCostYuan, 2)}元</strong>
+          <strong>{formatCost(costTotals.totalCostYuan, 2)}</strong>
         </span>
         <span className="text-sm tabular-nums">
           <span className="text-muted-foreground">원화 </span>
-          <strong>{formatCost(costTotals.totalCostKrw, 0)}원</strong>
+          <strong>{formatCost(costTotals.totalCostKrw, 0)}</strong>
         </span>
         {costTotals.missingYuanCostCount > 0 || costTotals.missingKrwCostCount > 0 ? (
           <span className="text-xs text-amber-700">
-            원가 누락: 위안 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 ·
-            원화 {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건
+            원가 누락: 위안 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 / 원화 {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건
           </span>
         ) : null}
       </section>
@@ -152,19 +153,19 @@ export default async function PurchasingOrdersPage({
         <section className="overflow-hidden rounded-md border bg-background">
           <div className="flex flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-sm font-semibold">{PURCHASE_REQUEST_STATUS_LABELS[status]} 목록</h2>
+              <h2 className="text-sm font-semibold">{PURCHASE_REQUEST_STATUS_LABELS[status]} 紐⑸줉</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
-              {status === 'outbound_requested' ? <PurchaseBulkArrivalDateApply /> : null}
               <Link
                 href={costToggleHref}
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
               >
                 {showCosts ? <EyeOff /> : <Eye />}
-                {showCosts ? '원가 닫기' : '원가 보기'}
+                {showCosts ? '?먭? ?リ린' : '?먭? 蹂닿린'}
               </Link>
+              <PurchaseBulkDeleteButton />
               <PurchaseBulkStatusButton />
             </div>
           </div>
@@ -177,10 +178,10 @@ export default async function PurchasingOrdersPage({
                     <PurchaseSelectAllCheckbox />
                   </th>
                   <th className="w-28 px-3 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                    <SortHeader label="?곹깭" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
                   <th className="w-[340px] px-3 py-2 font-medium">
-                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                    <SortHeader label="?곹뭹" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
                   </th>
                   <th className="w-32 px-3 py-2 text-center font-medium">
                     <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
@@ -188,31 +189,26 @@ export default async function PurchasingOrdersPage({
                   {showCosts ? (
                     <>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="媛쒕떦 ?먭?(??" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(원)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="媛쒕떦 ?먭?(??" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="珥??먭?(??" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(원)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="珥??먭?(??" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                     </>
                   ) : null}
-                  <th className="w-52 px-3 py-2 font-medium">추천 근거</th>
+                  <th className="w-[460px] px-3 py-2 text-center font-medium">추천 근거</th>
                   {isRequestedStatus ? null : (
-                    <>
-                      <th className="w-32 px-3 py-2 text-center font-medium">
-                        <SortHeader label="입고요청일" column="chinaArrivalRequestDate" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
-                      </th>
-                      <th className="w-36 px-3 py-2 text-center font-medium">
-                        <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
-                      </th>
-                    </>
+                    <th className="w-36 px-3 py-2 text-center font-medium">
+                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                    </th>
                   )}
-                  <th className="w-[540px] px-3 py-2 font-medium">발주 계획</th>
+                  {isRequestedStatus ? null : <th className="w-[540px] px-3 py-2 font-medium">발주 계획</th>}
                   <th className="w-28 px-3 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
@@ -224,7 +220,7 @@ export default async function PurchasingOrdersPage({
                 {items.length === 0 ? (
                   <tr>
                     <td colSpan={visibleColumnCount} className="px-3 py-12 text-center text-sm text-muted-foreground">
-                      조건에 맞는 발주 항목이 없습니다.
+                      議곌굔??留욌뒗 諛쒖＜ ??ぉ???놁뒿?덈떎.
                     </td>
                   </tr>
                 ) : (
@@ -248,8 +244,8 @@ export default async function PurchasingOrdersPage({
                       </td>
                       <td className="px-3 py-2 align-middle">
                         <div className="truncate font-medium" title={item.productName}>{item.productName}</div>
-                        <div className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}`}>
-                          {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
+                        <div className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` 쨌 ${item.optionName}` : ''}`}>
+                          {item.sku}{item.optionName ? ` 쨌 ${item.optionName}` : ''}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-center tabular-nums align-middle">
@@ -258,6 +254,7 @@ export default async function PurchasingOrdersPage({
                           field={quantityColumn.field}
                           quantity={stageQuantity}
                         />
+                        {isRequestedStatus ? <PurchaseCostSummary costs={costs} /> : null}
                       </td>
                       {showCosts ? (
                         <>
@@ -268,22 +265,21 @@ export default async function PurchasingOrdersPage({
                         </>
                       ) : null}
                       <td className="px-3 py-2 text-xs text-muted-foreground align-middle">
-                        <RecommendationBasis rawData={item.rawData} />
+                        <RecommendationBasisGrid rawData={item.rawData} />
                       </td>
                       {isRequestedStatus ? null : (
-                        <>
-                          <td className="px-3 py-2 text-center align-middle">{formatDate(item.chinaArrivalRequestDate)}</td>
-                          <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
-                        </>
+                        <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
                       )}
-                      <td className="px-3 py-2 align-middle">
-                        <PurchasePlanFieldsV2
-                          id={item.id}
-                          supplierOrderNumber={item.supplierOrderNumber}
-                          outboundExpectedDate={item.outboundExpectedDate}
-                          purchaseMethod={item.purchaseMethod}
-                        />
-                      </td>
+                      {isRequestedStatus ? null : (
+                        <td className="px-3 py-2 align-middle">
+                          <PurchasePlanFieldsV2
+                            id={item.id}
+                            supplierOrderNumber={item.supplierOrderNumber}
+                            outboundExpectedDate={item.outboundExpectedDate}
+                            purchaseMethod={item.purchaseMethod}
+                          />
+                        </td>
+                      )}
                       <td className="px-3 py-2 text-center align-middle">
                         <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} />
                       </td>
@@ -326,7 +322,7 @@ function SortHeader({
   align?: 'left' | 'center' | 'right'
 }) {
   const nextOrder = currentSort === column && currentOrder === 'asc' ? 'desc' : 'asc'
-  const indicator = currentSort === column ? (currentOrder === 'asc' ? ' ↑' : ' ↓') : ''
+  const indicator = currentSort === column ? (currentOrder === 'asc' ? '↑' : '↓') : ''
   const href = purchaseOrdersHref({
     status,
     search,
@@ -350,15 +346,15 @@ function SortHeader({
 
 function getStageQuantityColumn(status: PurchaseRequestStatus) {
   if (status === 'purchased') {
-    return { label: '구매수량', field: 'actualPurchaseQuantity' as const }
+    return { label: '援щℓ?섎웾', field: 'actualPurchaseQuantity' as const }
   }
   if (status === 'china_arrived') {
-    return { label: '중국도착수량', field: 'chinaReceivedQuantity' as const }
+    return { label: '以묎뎅?꾩갑?섎웾', field: 'chinaReceivedQuantity' as const }
   }
   if (status === 'outbound_requested' || status === 'completed') {
-    return { label: '출고요청수량', field: 'outboundRequestedQuantity' as const }
+    return { label: '異쒓퀬?붿껌?섎웾', field: 'outboundRequestedQuantity' as const }
   }
-  return { label: '요청수량', field: 'requestedQuantity' as const }
+  return { label: '?붿껌?섎웾', field: 'requestedQuantity' as const }
 }
 
 function getStageQuantity(
@@ -378,24 +374,49 @@ function getStageQuantity(
   return item.requestedQuantity
 }
 
-function RecommendationBasis({ rawData }: { rawData: Record<string, unknown> }) {
+function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown> }) {
   if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
 
   return (
-    <div className="space-y-0.5 tabular-nums">
-      <div>3개월 평균 {formatNumber(rawData.averageMonthlyOutgoing)}개/月</div>
+    <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
+      <Metric label="현재고" value={formatNumber(rawData.availableStock)} />
+      <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
+      <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
+      <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
       {rawData.salesAnomalyDetected === true ? (
-        <div className="font-medium text-amber-700">
-          급증 제외 · 적용 평균 {formatNumber(rawData.effectiveMonthlyOutgoing)}개/月
+        <div className="col-span-4 text-[11px] font-medium text-amber-700">
+          급증 제외 적용평균 {formatNumber(rawData.effectiveMonthlyOutgoing)}
         </div>
       ) : null}
       {Number(rawData.originalRecommendedQuantity) > Number(rawData.allocatedQuantity) ? (
-        <div className="font-medium text-blue-700">
-          예산 조정 {formatNumber(rawData.originalRecommendedQuantity)} → {formatNumber(rawData.allocatedQuantity)}개
+        <div className="col-span-4 text-[11px] font-medium text-blue-700">
+          예산 조정 {formatNumber(rawData.originalRecommendedQuantity)} → {formatNumber(rawData.allocatedQuantity)}
         </div>
       ) : null}
-      <div>당월 출고 {formatNumber(rawData.currentMonthOutgoing)}개</div>
-      <div>현재고 {formatNumber(rawData.availableStock)}개 · 목표 {formatNumber(rawData.targetStockQuantity)}개</div>
+    </div>
+  )
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="font-medium text-foreground">{value}</div>
+    </div>
+  )
+}
+
+function PurchaseCostSummary({
+  costs,
+}: {
+  costs: ReturnType<typeof calculatePurchaseCosts>
+}) {
+  return (
+    <div className="mt-1 space-y-0.5 text-center text-[11px] leading-tight tabular-nums">
+      <div className="font-semibold text-foreground">
+        짜{formatCost(costs.totalCostYuan, 2)} / {formatCost(costs.totalCostKrw, 0)}??      </div>
+      <div className="text-muted-foreground">
+        媛쒕떦 짜{formatCost(costs.unitCostYuan, 2)} / {formatCost(costs.unitCostKrw, 0)}??      </div>
     </div>
   )
 }
@@ -432,12 +453,6 @@ function purchaseOrdersHref({
   if (sort) params.set('sort', sort)
   if (order) params.set('order', order)
   return `/purchasing/orders?${params.toString()}`
-}
-
-function formatDate(value: string | Date | null) {
-  if (!value) return '-'
-  if (value instanceof Date) return value.toISOString().slice(0, 10)
-  return value
 }
 
 function formatNumber(value: unknown) {

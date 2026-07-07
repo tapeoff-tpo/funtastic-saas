@@ -175,10 +175,10 @@ export default async function PurchasingOrdersPage({
             <table className={`w-full table-fixed text-left text-sm ${tableMinWidth}`}>
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
-                  <th className="w-12 px-3 py-2 text-center font-medium">
+                  <th className="sticky left-0 z-20 w-12 bg-muted px-3 py-2 text-center font-medium">
                     <PurchaseSelectAllCheckbox />
                   </th>
-                  <th className="w-14 px-3 py-2 text-center font-medium">No.</th>
+                  <th className="sticky left-12 z-20 w-14 bg-muted px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-28 px-3 py-2 text-center font-medium">
                     <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
@@ -237,10 +237,10 @@ export default async function PurchasingOrdersPage({
                     })
                     return (
                       <tr key={item.id} className="border-t align-middle">
-                      <td className="px-3 py-2 text-center align-middle">
+                      <td className="sticky left-0 z-10 bg-background px-3 py-2 text-center align-middle">
                         <PurchaseRowCheckbox id={item.id} />
                       </td>
-                      <td className="px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle">
+                      <td className="sticky left-12 z-10 bg-background px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle">
                         {rowNumber.toLocaleString('ko-KR')}
                       </td>
                       <td className="px-3 py-2 text-center align-middle">

@@ -253,6 +253,7 @@ export function purchaseRequestOrderBy(sort?: string, order?: string): SQL[] {
   const unitCostKrw = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'works 신규 원가', ''), '[^0-9.-]', '', 'g'), '')::numeric`
   const totalCostYuan = sql<number>`COALESCE(${unitCostYuan}, 0) * ${purchaseRequestItems.requestedQuantity}`
   const totalCostKrw = sql<number>`COALESCE(${unitCostKrw}, 0) * ${purchaseRequestItems.requestedQuantity}`
+  const purchaseDate = sql<Date>`COALESCE(${purchaseRequestItems.requestDate}, ${purchaseRequestItems.createdAt}::date)`
 
   switch (sort) {
     case 'status':
@@ -282,7 +283,13 @@ export function purchaseRequestOrderBy(sort?: string, order?: string): SQL[] {
     case 'createdAt':
       return [direction(purchaseRequestItems.createdAt)]
     default:
-      return [desc(purchaseRequestItems.createdAt)]
+      return [
+        desc(purchaseDate),
+        asc(purchaseRequestItems.productName),
+        asc(purchaseRequestItems.sku),
+        asc(purchaseRequestItems.optionName),
+        desc(purchaseRequestItems.createdAt),
+      ]
   }
 }
 

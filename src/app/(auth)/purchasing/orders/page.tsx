@@ -63,12 +63,13 @@ export default async function PurchasingOrdersPage({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
+  const pageSize = 50
   const visibleColumnCount = showCosts
-    ? isRequestedStatus ? 12 : 14
-    : isRequestedStatus ? 8 : 10
+    ? isRequestedStatus ? 13 : 15
+    : isRequestedStatus ? 9 : 11
   const tableMinWidth = isRequestedStatus
-    ? showCosts ? 'min-w-[1940px]' : 'min-w-[1460px]'
-    : showCosts ? 'min-w-[2140px]' : 'min-w-[1660px]'
+    ? showCosts ? 'min-w-[2000px]' : 'min-w-[1520px]'
+    : showCosts ? 'min-w-[2200px]' : 'min-w-[1720px]'
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
@@ -177,6 +178,7 @@ export default async function PurchasingOrdersPage({
                   <th className="w-12 px-3 py-2 text-center font-medium">
                     <PurchaseSelectAllCheckbox />
                   </th>
+                  <th className="w-14 px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-28 px-3 py-2 text-center font-medium">
                     <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
@@ -224,7 +226,8 @@ export default async function PurchasingOrdersPage({
                     </td>
                   </tr>
                 ) : (
-                  items.map((item) => {
+                  items.map((item, index) => {
+                    const rowNumber = (page - 1) * pageSize + index + 1
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const stageQuantity = getStageQuantity(item, status, outboundRequestedQuantity)
                     const costs = calculatePurchaseCosts({
@@ -236,6 +239,9 @@ export default async function PurchasingOrdersPage({
                       <tr key={item.id} className="border-t align-middle">
                       <td className="px-3 py-2 text-center align-middle">
                         <PurchaseRowCheckbox id={item.id} />
+                      </td>
+                      <td className="px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle">
+                        {rowNumber.toLocaleString('ko-KR')}
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>

@@ -6,6 +6,7 @@ import {
   useState,
   useTransition,
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
 } from 'react'
 import { useRouter } from 'next/navigation'
@@ -401,6 +402,7 @@ export function PurchaseQuantityField({
   }
 }) {
   const [value, setValue] = useState(String(quantity))
+  const [savedValue, setSavedValue] = useState(String(quantity))
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const previewQuantity = parseQuantityPreview(value, quantity)
@@ -411,43 +413,56 @@ export function PurchaseQuantityField({
     ? null
     : costSummary.unitCostKrw * previewQuantity
 
-  function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  function save() {
     const nextQuantity = Number(value)
     const minimum = field === 'requestedQuantity' ? 1 : 0
     if (!Number.isInteger(nextQuantity) || nextQuantity < minimum) {
       setMessage(field === 'requestedQuantity' ? '1 이상 정수' : '0 이상 정수')
       return
     }
+    if (String(nextQuantity) === savedValue) {
+      setMessage(null)
+      return
+    }
 
-    setMessage(null)
+    setMessage('저장 중')
     startTransition(async () => {
       const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ [field]: nextQuantity }),
       })
-      setMessage(response.ok ? '저장됨' : '실패')
+      if (response.ok) {
+        const nextValue = String(nextQuantity)
+        setSavedValue(nextValue)
+        setValue(nextValue)
+        setMessage(null)
+        return
+      }
+      setMessage('저장 실패')
     })
+  }
+
+  function saveOnEnter(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') return
+    event.preventDefault()
+    event.currentTarget.blur()
   }
 
   return (
     <div className="mx-auto w-[128px]">
-      <form onSubmit={save} className="flex items-center justify-center gap-1">
-        <Input
-          type="number"
-          min={field === 'requestedQuantity' ? 1 : 0}
-          step={1}
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          className="h-7 w-16 px-2 text-right text-xs tabular-nums"
-        />
-        <Button type="submit" size="sm" variant="outline" className="h-7 w-8 px-0" disabled={isPending}>
-          {isPending ? <Loader2 className="animate-spin" /> : <Save />}
-          <span className="sr-only">저장</span>
-        </Button>
-        {message ? <span className="sr-only">{message}</span> : null}
-      </form>
+      <Input
+        type="number"
+        min={field === 'requestedQuantity' ? 1 : 0}
+        step={1}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onBlur={save}
+        onKeyDown={saveOnEnter}
+        disabled={isPending}
+        aria-label="수량"
+        className="mx-auto h-7 w-20 px-2 text-center text-xs tabular-nums"
+      />
       {costSummary ? (
         <div className="mt-1 space-y-0.5 text-center text-[11px] leading-tight tabular-nums">
           <div className="whitespace-nowrap font-semibold text-foreground">
@@ -456,6 +471,11 @@ export function PurchaseQuantityField({
           <div className="whitespace-nowrap text-muted-foreground">
             개당 元 {formatCostValue(costSummary.unitCostYuan, 2)} / ₩ {formatCostValue(costSummary.unitCostKrw, 0)}
           </div>
+        </div>
+      ) : null}
+      {message ? (
+        <div className={message === '저장 중' ? 'sr-only' : 'mt-1 text-center text-[11px] text-destructive'}>
+          {message}
         </div>
       ) : null}
     </div>

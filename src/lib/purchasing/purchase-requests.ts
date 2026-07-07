@@ -106,6 +106,11 @@ export async function updatePurchaseRequestStatus(input: {
       if (current.status === 'china_arrived') {
         await addChinaWarehouseStock(tx, current)
       }
+    }
+    if (input.status === 'completed') {
+      if (current.status === 'china_arrived') {
+        await addChinaWarehouseStock(tx, current)
+      }
       await subtractChinaWarehouseStock(tx, current)
     }
 
@@ -204,7 +209,7 @@ export async function updatePurchaseRequestPlanFields(input: {
     if (chinaReceivedQuantity !== undefined) {
       await adjustChinaWarehouseArrivalQuantity(tx, current, chinaReceivedQuantity)
     }
-    if (outboundRequestedQuantity !== undefined) {
+    if (outboundRequestedQuantity !== undefined && current.status === 'completed') {
       await adjustChinaWarehouseOutboundQuantity(tx, current, outboundRequestedQuantity)
     }
 
@@ -350,28 +355,60 @@ export async function getChinaWarehouseInventory(input: {
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
   const conditions: SQL[] = [
-    eq(chinaWarehouseInventory.userId, input.userId),
-    sql`${chinaWarehouseInventory.totalQuantity} > 0`,
+    eq(purchaseRequestItems.userId, input.userId),
+    sql`${purchaseRequestItems.status} IN ('china_arrived', 'outbound_requested')`,
   ]
   if (input.search) {
     const pattern = `%${input.search}%`
     conditions.push(or(
-      ilike(chinaWarehouseInventory.sku, pattern),
-      ilike(chinaWarehouseInventory.productName, pattern),
-      ilike(chinaWarehouseInventory.optionName, pattern),
+      ilike(purchaseRequestItems.sku, pattern),
+      ilike(purchaseRequestItems.productName, pattern),
+      ilike(purchaseRequestItems.optionName, pattern),
     )!)
   }
 
   const where = and(...conditions)
+  const optionKey = sql<string>`COALESCE(${purchaseRequestItems.optionName}, '')`
+  const warehouseQuantity = sql<number>`COALESCE(SUM(
+    CASE
+      WHEN (${purchaseRequestItems.rawData}->>'outboundRequestedQuantity') ~ '^[0-9]+$'
+        THEN (${purchaseRequestItems.rawData}->>'outboundRequestedQuantity')::int
+      ELSE COALESCE(
+        ${purchaseRequestItems.chinaReceivedQuantity},
+        ${purchaseRequestItems.actualPurchaseQuantity},
+        ${purchaseRequestItems.requestedQuantity},
+        0
+      )
+    END
+  ), 0)::int`
   const [items, [{ total }]] = await Promise.all([
     db
-      .select()
-      .from(chinaWarehouseInventory)
+      .select({
+        id: sql<string>`MIN(${purchaseRequestItems.id}::text)`,
+        userId: purchaseRequestItems.userId,
+        sku: purchaseRequestItems.sku,
+        productName: sql<string>`MAX(${purchaseRequestItems.productName})`,
+        optionKey,
+        optionName: purchaseRequestItems.optionName,
+        totalQuantity: warehouseQuantity,
+        availableQuantity: warehouseQuantity,
+        lastArrivedAt: sql<Date | null>`MAX(${purchaseRequestItems.chinaReceivedAt})`,
+        lastOutboundRequestedAt: sql<Date | null>`MAX(CASE WHEN ${purchaseRequestItems.status} = 'outbound_requested' THEN ${purchaseRequestItems.updatedAt} ELSE NULL END)`,
+        createdAt: sql<Date>`MIN(${purchaseRequestItems.createdAt})`,
+        updatedAt: sql<Date>`MAX(${purchaseRequestItems.updatedAt})`,
+      })
+      .from(purchaseRequestItems)
       .where(where)
-      .orderBy(asc(chinaWarehouseInventory.sku), asc(chinaWarehouseInventory.optionKey))
+      .groupBy(purchaseRequestItems.userId, purchaseRequestItems.sku, purchaseRequestItems.optionName)
+      .orderBy(asc(purchaseRequestItems.sku), asc(optionKey))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
-    db.select({ total: count() }).from(chinaWarehouseInventory).where(where),
+    db
+      .select({
+        total: sql<number>`COUNT(DISTINCT (${purchaseRequestItems.sku}, COALESCE(${purchaseRequestItems.optionName}, '')))::int`,
+      })
+      .from(purchaseRequestItems)
+      .where(where),
   ])
 
   return { items, total }

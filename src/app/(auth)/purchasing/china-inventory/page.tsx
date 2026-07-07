@@ -37,7 +37,7 @@ export default async function ChinaInventoryPage({
         <div>
           <h1 className="text-2xl font-semibold">중국재고</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            발주 항목이 중국창고도착으로 이동하면 입고되고, 출고요청으로 이동하면 차감됩니다.
+            중국창고도착 또는 출고요청 단계의 발주 항목을 조회합니다. 출고완료로 이동하면 목록에서 제외됩니다.
           </p>
         </div>
         <form className="flex items-center gap-2" action="/purchasing/china-inventory">

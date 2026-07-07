@@ -414,9 +414,11 @@ function PurchaseCostSummary({
   return (
     <div className="mt-1 space-y-0.5 text-center text-[11px] leading-tight tabular-nums">
       <div className="font-semibold text-foreground">
-        짜{formatCost(costs.totalCostYuan, 2)} / {formatCost(costs.totalCostKrw, 0)}??      </div>
+        ¥{formatCost(costs.totalCostYuan, 2)} / {formatCost(costs.totalCostKrw, 0)}원
+      </div>
       <div className="text-muted-foreground">
-        媛쒕떦 짜{formatCost(costs.unitCostYuan, 2)} / {formatCost(costs.unitCostKrw, 0)}??      </div>
+        개당 ¥{formatCost(costs.unitCostYuan, 2)} / {formatCost(costs.unitCostKrw, 0)}원
+      </div>
     </div>
   )
 }

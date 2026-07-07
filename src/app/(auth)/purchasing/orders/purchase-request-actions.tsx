@@ -390,15 +390,26 @@ export function PurchaseQuantityField({
   id,
   field,
   quantity,
+  costSummary,
 }: {
   id: string
   field: 'requestedQuantity' | 'actualPurchaseQuantity' | 'chinaReceivedQuantity' | 'outboundRequestedQuantity'
   quantity: number
+  costSummary?: {
+    unitCostYuan: number | null
+    unitCostKrw: number | null
+  }
 }) {
-  const router = useRouter()
   const [value, setValue] = useState(String(quantity))
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const previewQuantity = parseQuantityPreview(value, quantity)
+  const totalCostYuan = costSummary?.unitCostYuan === null || costSummary?.unitCostYuan === undefined
+    ? null
+    : costSummary.unitCostYuan * previewQuantity
+  const totalCostKrw = costSummary?.unitCostKrw === null || costSummary?.unitCostKrw === undefined
+    ? null
+    : costSummary.unitCostKrw * previewQuantity
 
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -417,26 +428,37 @@ export function PurchaseQuantityField({
         body: JSON.stringify({ [field]: nextQuantity }),
       })
       setMessage(response.ok ? '저장됨' : '실패')
-      if (response.ok) router.refresh()
     })
   }
 
   return (
-    <form onSubmit={save} className="mx-auto flex w-[104px] items-center justify-center gap-1">
-      <Input
-        type="number"
-        min={field === 'requestedQuantity' ? 1 : 0}
-        step={1}
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
-        className="h-7 w-14 px-2 text-right text-xs tabular-nums"
-      />
-      <Button type="submit" size="sm" variant="outline" className="h-7 w-8 px-0" disabled={isPending}>
-        {isPending ? <Loader2 className="animate-spin" /> : <Save />}
-        <span className="sr-only">저장</span>
-      </Button>
-      {message ? <span className="sr-only">{message}</span> : null}
-    </form>
+    <div className="mx-auto w-[128px]">
+      <form onSubmit={save} className="flex items-center justify-center gap-1">
+        <Input
+          type="number"
+          min={field === 'requestedQuantity' ? 1 : 0}
+          step={1}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          className="h-7 w-16 px-2 text-right text-xs tabular-nums"
+        />
+        <Button type="submit" size="sm" variant="outline" className="h-7 w-8 px-0" disabled={isPending}>
+          {isPending ? <Loader2 className="animate-spin" /> : <Save />}
+          <span className="sr-only">저장</span>
+        </Button>
+        {message ? <span className="sr-only">{message}</span> : null}
+      </form>
+      {costSummary ? (
+        <div className="mt-1 space-y-0.5 text-center text-[11px] leading-tight tabular-nums">
+          <div className="whitespace-nowrap font-semibold text-foreground">
+            총 元 {formatCostValue(totalCostYuan, 2)} / ₩ {formatCostValue(totalCostKrw, 0)}
+          </div>
+          <div className="whitespace-nowrap text-muted-foreground">
+            개당 元 {formatCostValue(costSummary.unitCostYuan, 2)} / ₩ {formatCostValue(costSummary.unitCostKrw, 0)}
+          </div>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -587,6 +609,20 @@ export function PurchaseBuyerField({
       ))}
     </select>
   )
+}
+
+function parseQuantityPreview(value: string, fallback: number) {
+  const next = Number(value)
+  if (!Number.isFinite(next) || next < 0) return fallback
+  return next
+}
+
+function formatCostValue(value: number | null, maximumFractionDigits: number) {
+  if (value === null) return '-'
+  return value.toLocaleString('ko-KR', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  })
 }
 
 function formatDateInput(value: string | Date | null) {

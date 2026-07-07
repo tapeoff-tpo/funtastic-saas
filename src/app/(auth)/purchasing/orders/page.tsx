@@ -108,16 +108,16 @@ export default async function PurchasingOrdersPage({
           {PURCHASE_REQUEST_STATUS_LABELS[status]} 총 구매금액
         </span>
         <span className="text-sm tabular-nums">
-          <span className="text-muted-foreground">위안 </span>
+          <span className="text-muted-foreground">元 </span>
           <strong>{formatCost(costTotals.totalCostYuan, 2)}</strong>
         </span>
         <span className="text-sm tabular-nums">
-          <span className="text-muted-foreground">원화 </span>
+          <span className="text-muted-foreground">₩ </span>
           <strong>{formatCost(costTotals.totalCostKrw, 0)}</strong>
         </span>
         {costTotals.missingYuanCostCount > 0 || costTotals.missingKrwCostCount > 0 ? (
           <span className="text-xs text-amber-700">
-            원가 누락: 위안 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 / 원화 {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건
+            원가 누락: 元 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 / ₩ {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건
           </span>
         ) : null}
       </section>
@@ -189,16 +189,16 @@ export default async function PurchasingOrdersPage({
                   {showCosts ? (
                     <>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(위안)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(원)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(위안)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(원)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                     </>
                   ) : null}
@@ -253,8 +253,11 @@ export default async function PurchasingOrdersPage({
                           id={item.id}
                           field={quantityColumn.field}
                           quantity={stageQuantity}
+                          costSummary={isRequestedStatus ? {
+                            unitCostYuan: costs.unitCostYuan,
+                            unitCostKrw: costs.unitCostKrw,
+                          } : undefined}
                         />
-                        {isRequestedStatus ? <PurchaseCostSummary costs={costs} /> : null}
                       </td>
                       {showCosts ? (
                         <>
@@ -376,14 +379,12 @@ function getStageQuantity(
 
 function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown> }) {
   if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
-  const notes = [
-    rawData.salesAnomalyDetected === true
-      ? `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
-      : null,
-    Number(rawData.originalRecommendedQuantity) > Number(rawData.allocatedQuantity)
-      ? `예산 조정 ${formatNumber(rawData.originalRecommendedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
-      : null,
-  ].filter(Boolean)
+  const anomalyNote = rawData.salesAnomalyDetected === true
+    ? `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
+    : null
+  const budgetNote = Number(rawData.originalRecommendedQuantity) > Number(rawData.allocatedQuantity)
+    ? `예산 조정 ${formatNumber(rawData.originalRecommendedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
+    : null
 
   return (
     <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
@@ -391,9 +392,10 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {notes.length > 0 ? (
-        <div className="col-span-4 text-[11px] font-medium text-blue-700">
-          {notes.join(' · ')}
+      {anomalyNote || budgetNote ? (
+        <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
+          {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}
+          {budgetNote ? <span className="text-blue-700">{budgetNote}</span> : null}
         </div>
       ) : null}
     </div>
@@ -405,23 +407,6 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="min-w-0">
       <div className="text-[11px] text-muted-foreground">{label}</div>
       <div className="font-medium text-foreground">{value}</div>
-    </div>
-  )
-}
-
-function PurchaseCostSummary({
-  costs,
-}: {
-  costs: ReturnType<typeof calculatePurchaseCosts>
-}) {
-  return (
-    <div className="mt-1 space-y-0.5 text-center text-[11px] leading-tight tabular-nums">
-      <div className="font-semibold text-foreground">
-        위안 {formatCost(costs.totalCostYuan, 2)} / 원 {formatCost(costs.totalCostKrw, 0)}
-      </div>
-      <div className="text-muted-foreground">
-        개당 위안 {formatCost(costs.unitCostYuan, 2)} / 원 {formatCost(costs.unitCostKrw, 0)}
-      </div>
     </div>
   )
 }

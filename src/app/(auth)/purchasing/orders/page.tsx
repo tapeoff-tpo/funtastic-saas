@@ -28,7 +28,7 @@ import {
 } from './purchase-request-actions'
 
 export const metadata: Metadata = {
-  title: '諛쒖＜',
+  title: '발주',
 }
 
 const STATUSES = Object.keys(PURCHASE_REQUEST_STATUS_LABELS) as PurchaseRequestStatus[]
@@ -81,9 +81,9 @@ export default async function PurchasingOrdersPage({
     <div className="space-y-4">
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">諛쒖＜</h1>
+          <h1 className="text-2xl font-semibold">발주</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            ?ш퀬? 異쒓퀬 ?대젰??湲곗??쇰줈 援щℓ媛 ?꾩슂???덈ぉ??異붿쿇?섍퀬, 援щℓ遺??以묎뎅李쎄퀬 ?낃퀬源뚯? 愿由ы빀?덈떎.
+            재고와 출고 이력을 기준으로 구매가 필요한 품목을 추천하고, 구매부터 중국창고 입고까지 관리합니다.
           </p>
         </div>
         <form className="flex items-center gap-2" action="/purchasing/orders">
@@ -94,7 +94,7 @@ export default async function PurchasingOrdersPage({
           <input
             name="search"
             defaultValue={search ?? ''}
-            placeholder="?덈ぉ肄붾뱶, ?곹뭹紐? 二쇰Ц踰덊샇"
+            placeholder="품목코드, 상품명, 주문번호"
             className="h-8 w-64 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           <Button type="submit" variant="outline">검색</Button>
@@ -153,7 +153,7 @@ export default async function PurchasingOrdersPage({
         <section className="overflow-hidden rounded-md border bg-background">
           <div className="flex flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-sm font-semibold">{PURCHASE_REQUEST_STATUS_LABELS[status]} 紐⑸줉</h2>
+              <h2 className="text-sm font-semibold">{PURCHASE_REQUEST_STATUS_LABELS[status]} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -163,7 +163,7 @@ export default async function PurchasingOrdersPage({
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
               >
                 {showCosts ? <EyeOff /> : <Eye />}
-                {showCosts ? '?먭? ?リ린' : '?먭? 蹂닿린'}
+                {showCosts ? '원가 닫기' : '원가 보기'}
               </Link>
               <PurchaseBulkDeleteButton />
               <PurchaseBulkStatusButton />
@@ -178,10 +178,10 @@ export default async function PurchasingOrdersPage({
                     <PurchaseSelectAllCheckbox />
                   </th>
                   <th className="w-28 px-3 py-2 text-center font-medium">
-                    <SortHeader label="?곹깭" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
                   <th className="w-[340px] px-3 py-2 font-medium">
-                    <SortHeader label="?곹뭹" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
                   </th>
                   <th className="w-32 px-3 py-2 text-center font-medium">
                     <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
@@ -189,16 +189,16 @@ export default async function PurchasingOrdersPage({
                   {showCosts ? (
                     <>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="媛쒕떦 ?먭?(??" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="개당 원가(위안)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="媛쒕떦 ?먭?(??" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="개당 원가(원)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="珥??먭?(??" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="총 원가(위안)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="珥??먭?(??" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="총 원가(원)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
                       </th>
                     </>
                   ) : null}
@@ -220,7 +220,7 @@ export default async function PurchasingOrdersPage({
                 {items.length === 0 ? (
                   <tr>
                     <td colSpan={visibleColumnCount} className="px-3 py-12 text-center text-sm text-muted-foreground">
-                      議곌굔??留욌뒗 諛쒖＜ ??ぉ???놁뒿?덈떎.
+                      조건에 맞는 발주 항목이 없습니다.
                     </td>
                   </tr>
                 ) : (
@@ -244,8 +244,8 @@ export default async function PurchasingOrdersPage({
                       </td>
                       <td className="px-3 py-2 align-middle">
                         <div className="truncate font-medium" title={item.productName}>{item.productName}</div>
-                        <div className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` 쨌 ${item.optionName}` : ''}`}>
-                          {item.sku}{item.optionName ? ` 쨌 ${item.optionName}` : ''}
+                        <div className="truncate text-xs text-muted-foreground" title={`${item.sku}${item.optionName ? ` · ${item.optionName}` : ''}`}>
+                          {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-center tabular-nums align-middle">
@@ -346,15 +346,15 @@ function SortHeader({
 
 function getStageQuantityColumn(status: PurchaseRequestStatus) {
   if (status === 'purchased') {
-    return { label: '援щℓ?섎웾', field: 'actualPurchaseQuantity' as const }
+    return { label: '구매수량', field: 'actualPurchaseQuantity' as const }
   }
   if (status === 'china_arrived') {
-    return { label: '以묎뎅?꾩갑?섎웾', field: 'chinaReceivedQuantity' as const }
+    return { label: '중국도착수량', field: 'chinaReceivedQuantity' as const }
   }
   if (status === 'outbound_requested' || status === 'completed') {
-    return { label: '異쒓퀬?붿껌?섎웾', field: 'outboundRequestedQuantity' as const }
+    return { label: '출고요청수량', field: 'outboundRequestedQuantity' as const }
   }
-  return { label: '?붿껌?섎웾', field: 'requestedQuantity' as const }
+  return { label: '요청수량', field: 'requestedQuantity' as const }
 }
 
 function getStageQuantity(
@@ -376,6 +376,14 @@ function getStageQuantity(
 
 function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown> }) {
   if (rawData.source !== 'auto_purchase_recommendation') return <span>-</span>
+  const notes = [
+    rawData.salesAnomalyDetected === true
+      ? `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
+      : null,
+    Number(rawData.originalRecommendedQuantity) > Number(rawData.allocatedQuantity)
+      ? `예산 조정 ${formatNumber(rawData.originalRecommendedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
+      : null,
+  ].filter(Boolean)
 
   return (
     <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
@@ -383,14 +391,9 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {rawData.salesAnomalyDetected === true ? (
-        <div className="col-span-4 text-[11px] font-medium text-amber-700">
-          급증 제외 적용평균 {formatNumber(rawData.effectiveMonthlyOutgoing)}
-        </div>
-      ) : null}
-      {Number(rawData.originalRecommendedQuantity) > Number(rawData.allocatedQuantity) ? (
+      {notes.length > 0 ? (
         <div className="col-span-4 text-[11px] font-medium text-blue-700">
-          예산 조정 {formatNumber(rawData.originalRecommendedQuantity)} → {formatNumber(rawData.allocatedQuantity)}
+          {notes.join(' · ')}
         </div>
       ) : null}
     </div>
@@ -414,10 +417,10 @@ function PurchaseCostSummary({
   return (
     <div className="mt-1 space-y-0.5 text-center text-[11px] leading-tight tabular-nums">
       <div className="font-semibold text-foreground">
-        ¥{formatCost(costs.totalCostYuan, 2)} / {formatCost(costs.totalCostKrw, 0)}원
+        위안 {formatCost(costs.totalCostYuan, 2)} / 원 {formatCost(costs.totalCostKrw, 0)}
       </div>
       <div className="text-muted-foreground">
-        개당 ¥{formatCost(costs.unitCostYuan, 2)} / {formatCost(costs.unitCostKrw, 0)}원
+        개당 위안 {formatCost(costs.unitCostYuan, 2)} / 원 {formatCost(costs.unitCostKrw, 0)}
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-export const PURCHASE_REQUEST_STATUSES = [
+﻿export const PURCHASE_REQUEST_STATUSES = [
   'requested',
   'purchased',
   'china_arrived',

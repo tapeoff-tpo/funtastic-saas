@@ -165,6 +165,7 @@ export function PurchaseBulkBuyerApply() {
   const [message, setMessage] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedCount = context.selectedIds.size
+  const targetCount = selectedCount || context.ids.length
 
   function apply() {
     const ids = selectedCount ? Array.from(context.selectedIds) : context.ids

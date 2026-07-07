@@ -64,6 +64,9 @@ export default async function PurchasingOrdersPage({
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
   const pageSize = 50
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const pageEnd = Math.min(total, page * pageSize)
   const visibleColumnCount = showCosts
     ? isRequestedStatus ? 13 : 15
     : isRequestedStatus ? 9 : 11
@@ -305,6 +308,52 @@ export default async function PurchasingOrdersPage({
               </tbody>
             </table>
           </div>
+          <div className="flex flex-col gap-2 border-t px-3 py-2 text-sm md:flex-row md:items-center md:justify-between">
+            <div className="text-xs text-muted-foreground">
+              {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <Link
+                href={purchaseOrdersHref({
+                  status,
+                  search,
+                  showCosts,
+                  sort,
+                  order,
+                  page: Math.max(1, page - 1),
+                })}
+                aria-disabled={page <= 1}
+                className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-xs font-medium ${
+                  page <= 1
+                    ? 'pointer-events-none border-border bg-muted text-muted-foreground'
+                    : 'border-border bg-background hover:bg-muted'
+                }`}
+              >
+                이전
+              </Link>
+              <span className="text-xs text-muted-foreground">
+                {page.toLocaleString('ko-KR')} / {totalPages.toLocaleString('ko-KR')}
+              </span>
+              <Link
+                href={purchaseOrdersHref({
+                  status,
+                  search,
+                  showCosts,
+                  sort,
+                  order,
+                  page: Math.min(totalPages, page + 1),
+                })}
+                aria-disabled={page >= totalPages}
+                className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-xs font-medium ${
+                  page >= totalPages
+                    ? 'pointer-events-none border-border bg-muted text-muted-foreground'
+                    : 'border-border bg-background hover:bg-muted'
+                }`}
+              >
+                다음
+              </Link>
+            </div>
+          </div>
         </section>
       </PurchaseBulkSelectionProvider>
     </div>
@@ -436,18 +485,21 @@ function purchaseOrdersHref({
   showCosts,
   sort,
   order,
+  page,
 }: {
   status: PurchaseRequestStatus
   search?: string
   showCosts?: boolean
   sort?: string
   order?: 'asc' | 'desc'
+  page?: number
 }) {
   const params = new URLSearchParams({ status })
   if (search) params.set('search', search)
   if (showCosts) params.set('showCosts', '1')
   if (sort) params.set('sort', sort)
   if (order) params.set('order', order)
+  if (page && page > 1) params.set('page', String(page))
   return `/purchasing/orders?${params.toString()}`
 }
 

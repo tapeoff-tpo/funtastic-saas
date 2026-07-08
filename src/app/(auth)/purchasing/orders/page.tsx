@@ -192,7 +192,7 @@ export default async function PurchasingOrdersPage({
                     <PurchaseSelectAllCheckbox />
                   </th>
                   <th className="sticky left-12 z-20 w-14 bg-muted px-3 py-2 text-center font-medium">No.</th>
-                  <th className="w-28 px-3 py-2 text-center font-medium">
+                  <th className="w-32 px-3 py-2 text-center font-medium">
                     <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
                   <th className="w-[340px] px-3 py-2 font-medium">
@@ -259,14 +259,17 @@ export default async function PurchasingOrdersPage({
                       <td className={`sticky left-12 z-10 px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle ${stickyCellClassName}`}>
                         {rowNumber.toLocaleString('ko-KR')}
                       </td>
-                      <td className="px-3 py-2 text-center align-middle">
+                      <td className="px-2 py-2 text-center align-middle">
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
                         </Badge>
                         {isArrivalOverdue ? (
                           <div className="mt-1">
-                            <Badge className="border-red-200 bg-red-100 text-red-800 hover:bg-red-100">
-                              구매날짜 기준 {purchaseDateElapsedDays}일 경과
+                            <Badge
+                              className="max-w-full border-red-200 bg-red-100 px-1.5 text-[11px] text-red-800 hover:bg-red-100"
+                              title={`구매날짜 기준 ${purchaseDateElapsedDays}일 경과`}
+                            >
+                              {purchaseDateElapsedDays}일 지연
                             </Badge>
                           </div>
                         ) : null}

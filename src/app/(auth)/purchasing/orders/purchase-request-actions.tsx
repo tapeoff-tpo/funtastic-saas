@@ -564,7 +564,7 @@ export function PurchasePlanFieldsV2({
   }
 
   return (
-    <form onSubmit={save} className="grid min-w-[590px] grid-cols-[1fr_130px_190px_82px] items-end gap-1.5">
+    <form onSubmit={save} className="grid min-w-0 grid-cols-[minmax(120px,1fr)_126px_148px_64px] items-end gap-1.5">
       <label className="space-y-1">
         <span className="block text-[11px] font-medium text-muted-foreground">주문서번호</span>
         <Input
@@ -600,12 +600,12 @@ export function PurchasePlanFieldsV2({
               value={customMethod}
               onChange={(event) => setCustomMethod(event.target.value)}
               placeholder="직접입력"
-              className="h-7 w-24 text-xs"
+              className="h-7 w-20 text-xs"
             />
           ) : null}
         </div>
       </label>
-      <Button type="submit" size="sm" variant="outline" disabled={isPending}>
+      <Button type="submit" size="sm" variant="outline" disabled={isPending} className="px-2">
         {isPending ? <Loader2 className="animate-spin" /> : <Save />}
         {message ?? '저장'}
       </Button>
@@ -643,7 +643,7 @@ export function PurchaseBuyerField({
       value={value}
       onChange={(event) => save(event.target.value)}
       disabled={isPending}
-      className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+      className="h-7 w-full min-w-[92px] rounded-md border border-input bg-background px-2 text-xs"
     >
       {PURCHASE_BUYERS.map((buyer) => (
         <option key={buyer.code} value={buyer.code}>{buyer.name}</option>

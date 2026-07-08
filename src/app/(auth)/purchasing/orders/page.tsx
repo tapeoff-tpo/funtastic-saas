@@ -106,13 +106,13 @@ export async function PurchasingOrdersView({
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (isRequestedStatus ? 0 : 2)
-  const tableMinWidth = isRequestedStatus
+  const tableWidth = isRequestedStatus
     ? showCosts
-      ? showRecommendationBasis ? 'min-w-[1640px]' : 'min-w-[1260px]'
-      : showRecommendationBasis ? 'min-w-[1180px]' : 'min-w-[860px]'
+      ? showRecommendationBasis ? 'w-[1750px]' : 'w-[1410px]'
+      : showRecommendationBasis ? 'w-[1250px]' : 'w-[920px]'
     : showCosts
-      ? showRecommendationBasis ? 'min-w-[1840px]' : 'min-w-[1460px]'
-      : showRecommendationBasis ? 'min-w-[1400px]' : 'min-w-[1080px]'
+      ? showRecommendationBasis ? 'w-[2260px]' : 'w-[1920px]'
+      : showRecommendationBasis ? 'w-[1760px]' : 'w-[1420px]'
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
@@ -244,7 +244,7 @@ export async function PurchasingOrdersView({
           </div>
 
           <div className="overflow-x-auto">
-            <table className={`w-full table-fixed text-left text-sm ${tableMinWidth}`}>
+            <table className={`table-fixed text-left text-sm ${tableWidth}`}>
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
                   <th className="sticky left-0 z-20 w-12 bg-muted px-3 py-2 text-center font-medium">
@@ -283,7 +283,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="w-[400px] px-3 py-2 font-medium">구매 정보</th>}
-                  <th className="w-24 px-2 py-2 text-center font-medium">
+                  <th className="w-32 px-2 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="w-36 px-2 py-2 text-center font-medium">상태 변경</th>
@@ -377,7 +377,7 @@ export async function PurchasingOrdersView({
                           />
                         </td>
                       )}
-                      <td className="px-3 py-2 text-center align-middle">
+                      <td className="px-2 py-2 text-center align-middle">
                         <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} />
                       </td>
                       <td className="px-3 py-2 text-center align-middle">

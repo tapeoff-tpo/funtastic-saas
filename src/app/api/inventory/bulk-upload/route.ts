@@ -14,7 +14,8 @@ import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { products, productVariants, inventory } from '@/lib/db/schema'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 
 /** Korean header → internal key (also supports 사방넷 multi-row headers like "현재고 가용") */
 const HEADER_MAP: Record<string, string> = {
@@ -158,6 +159,8 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
   }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+
   // Parse multipart form
   let formData: FormData
   try {
@@ -260,37 +263,70 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
 
   if (rows.length > 0) {
     try {
-      await db
-        .insert(inventory)
-        .values(
-          rows.map((r) => ({
-            userId: user.id,
-            sku: r.sku,
-            productName: r.productName,
-            totalStock: r.totalStock,
-            reservedStock: 0,
-            availableStock: r.totalStock,
-            warehouseZone: r.warehouseZone ?? null,
-            sectorCode: r.sectorCode ?? null,
-            optionName: r.optionName ?? null,
-            packagingUnit: r.packagingUnit ?? null,
-          })),
-        )
-        .onConflictDoUpdate({
-          target: [inventory.userId, inventory.sku, inventory.warehouseZone, inventory.sectorCode],
-          set: {
-            productName: sql`excluded.product_name`,
-            totalStock: sql`excluded.total_stock`,
-            // available = new total − existing reserved
-            availableStock: sql`excluded.total_stock - ${inventory.reservedStock}`,
-            warehouseZone: sql`excluded.warehouse_zone`,
-            sectorCode: sql`excluded.sector_code`,
-            optionName: sql`excluded.option_name`,
-            packagingUnit: sql`excluded.packaging_unit`,
-            updatedAt: new Date(),
-          },
-        })
-      await syncGroupedProductOptions(user.id, rows)
+      await db.transaction(async (tx) => {
+        for (const r of rows) {
+          const warehouseKey = r.warehouseZone ?? ''
+          const sectorKey = r.sectorCode ?? ''
+          const exactMatches = await tx.select({
+            id: inventory.id,
+            reservedStock: inventory.reservedStock,
+          }).from(inventory).where(and(
+            eq(inventory.userId, workspaceUserId),
+            eq(inventory.sku, r.sku),
+            sql`COALESCE(${inventory.warehouseZone}, '') = ${warehouseKey}`,
+            sql`COALESCE(${inventory.sectorCode}, '') = ${sectorKey}`,
+          )).orderBy(desc(inventory.updatedAt), desc(inventory.createdAt))
+
+          const [primary, ...duplicates] = exactMatches
+          if (primary) {
+            await tx.update(inventory).set({
+              productName: r.productName,
+              totalStock: r.totalStock,
+              availableStock: r.totalStock - primary.reservedStock,
+              warehouseZone: r.warehouseZone ?? null,
+              sectorCode: r.sectorCode ?? null,
+              optionName: r.optionName ?? null,
+              packagingUnit: r.packagingUnit ?? null,
+              updatedAt: new Date(),
+            }).where(eq(inventory.id, primary.id))
+          } else {
+            await tx.insert(inventory).values({
+              userId: workspaceUserId,
+              sku: r.sku,
+              productName: r.productName,
+              totalStock: r.totalStock,
+              reservedStock: 0,
+              availableStock: r.totalStock,
+              warehouseZone: r.warehouseZone ?? null,
+              sectorCode: r.sectorCode ?? null,
+              optionName: r.optionName ?? null,
+              packagingUnit: r.packagingUnit ?? null,
+            })
+          }
+
+          if (duplicates.length > 0) {
+            await tx.update(inventory).set({
+              totalStock: 0,
+              availableStock: sql`0 - ${inventory.reservedStock}`,
+              updatedAt: new Date(),
+            }).where(inArray(inventory.id, duplicates.map((row) => row.id)))
+          }
+
+          if (!r.sectorCode) {
+            await tx.update(inventory).set({
+              totalStock: 0,
+              availableStock: sql`0 - ${inventory.reservedStock}`,
+              updatedAt: new Date(),
+            }).where(and(
+              eq(inventory.userId, workspaceUserId),
+              eq(inventory.sku, r.sku),
+              sql`COALESCE(${inventory.warehouseZone}, '') = ${warehouseKey}`,
+              isNotNull(inventory.sectorCode),
+            ))
+          }
+        }
+      })
+      await syncGroupedProductOptions(workspaceUserId, rows)
       successCount = rows.length
     } catch (err) {
       console.error('[bulk-upload] inventory upsert failed:', err)
@@ -310,7 +346,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
           rows.map((r) => {
             const location = [r.warehouseZone, r.sectorCode].filter(Boolean).join(' ').trim() || null
             return {
-              userId: user.id,
+              userId: workspaceUserId,
               internalSku: r.sku,
               name: r.productName,
               basePrice: r.basePrice ?? '0',

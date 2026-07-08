@@ -106,13 +106,6 @@ export async function PurchasingOrdersView({
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (isRequestedStatus ? 0 : 2)
-  const tableWidth = isRequestedStatus
-    ? showCosts
-      ? showRecommendationBasis ? 'w-[1750px]' : 'w-[1410px]'
-      : showRecommendationBasis ? 'w-[1250px]' : 'w-[920px]'
-    : showCosts
-      ? showRecommendationBasis ? 'w-[2260px]' : 'w-[1920px]'
-      : showRecommendationBasis ? 'w-[1760px]' : 'w-[1420px]'
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
@@ -244,50 +237,50 @@ export async function PurchasingOrdersView({
           </div>
 
           <div className="overflow-x-auto">
-            <table className={`table-fixed text-left text-sm ${tableWidth}`}>
+            <table className="w-full table-auto text-left text-sm">
               <thead className="bg-muted/60 text-xs text-muted-foreground">
                 <tr>
-                  <th className="sticky left-0 z-20 w-12 bg-muted px-3 py-2 text-center font-medium">
+                  <th className="sticky left-0 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">
                     <PurchaseSelectAllCheckbox />
                   </th>
-                  <th className="sticky left-12 z-20 w-14 bg-muted px-3 py-2 text-center font-medium">No.</th>
-                  <th className="w-24 px-2 py-2 text-center font-medium">
+                  <th className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
+                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
-                  <th className="w-[240px] px-3 py-2 font-medium">
+                  <th className="min-w-[280px] px-3 py-2 font-medium">
                     <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
                   </th>
-                  <th className="w-28 px-2 py-2 text-center font-medium">
+                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   {showCosts ? (
                     <>
-                      <th className="w-28 px-3 py-2 text-right font-medium">
+                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
-                      <th className="w-28 px-3 py-2 text-right font-medium">
+                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
-                      <th className="w-32 px-3 py-2 text-right font-medium">
+                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
-                      <th className="w-32 px-3 py-2 text-right font-medium">
+                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                     </>
                   ) : null}
-                  {showRecommendationBasis ? <th className="w-[340px] px-3 py-2 text-center font-medium">추천근거</th> : null}
+                  {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
-                    <th className="w-28 px-2 py-2 text-center font-medium">
+                    <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                     </th>
                   )}
-                  {isRequestedStatus ? null : <th className="w-[400px] px-3 py-2 font-medium">구매 정보</th>}
-                  <th className="w-32 px-2 py-2 text-center font-medium">
+                  {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
+                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
-                  <th className="w-36 px-2 py-2 text-center font-medium">상태 변경</th>
-                  <th className="w-20 px-2 py-2 text-center font-medium">삭제</th>
+                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
+                  <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>
                 </tr>
               </thead>
               <tbody>

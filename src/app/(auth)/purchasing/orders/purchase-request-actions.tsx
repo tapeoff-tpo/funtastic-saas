@@ -455,7 +455,7 @@ export function PurchaseQuantityField({
   }
 
   return (
-    <div className="mx-auto w-[128px]">
+    <div className="mx-auto w-[112px]">
       <div className="flex items-center justify-center gap-1">
         <Input
           type="number"

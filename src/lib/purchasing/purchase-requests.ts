@@ -38,7 +38,11 @@ export async function getPurchaseRequests(input: {
   const where = and(...conditions)
   const orderBy = purchaseRequestOrderBy(input.sort, input.order, input.status)
   const overduePurchasedWhere = input.status === 'purchased'
-    ? and(where, sql`${purchaseRequestItems.updatedAt} <= NOW() - INTERVAL '7 days'`)
+    ? and(
+      where,
+      sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
+      sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
+    )
     : undefined
   const chinaCurrentStock = sql<number>`(
     SELECT COALESCE(SUM(
@@ -287,7 +291,7 @@ export function purchaseRequestOrderBy(sort?: string, order?: string, status?: P
   const totalCostKrw = sql<number>`COALESCE(${unitCostKrw}, 0) * ${purchaseRequestItems.requestedQuantity}`
   const purchaseDate = sql<Date>`COALESCE(${purchaseRequestItems.requestDate}, ${purchaseRequestItems.createdAt}::date)`
   const overdueFirst = status === 'purchased'
-    ? [desc(sql<number>`CASE WHEN ${purchaseRequestItems.updatedAt} <= NOW() - INTERVAL '7 days' THEN 1 ELSE 0 END`)]
+    ? [desc(sql<number>`CASE WHEN ${purchaseRequestItems.outboundExpectedDate} IS NOT NULL AND ${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days' THEN 1 ELSE 0 END`)]
     : []
 
   switch (sort) {

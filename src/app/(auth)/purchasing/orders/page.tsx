@@ -111,7 +111,7 @@ export default async function PurchasingOrdersPage({
         <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           <strong>도착 지연 확인 필요</strong>
           <span className="ml-2">
-            구매완료 처리 후 7일이 지난 항목 {overduePurchasedCount.toLocaleString('ko-KR')}건이 있습니다.
+            구매날짜 기준 7일이 지난 항목 {overduePurchasedCount.toLocaleString('ko-KR')}건이 있습니다.
             지연 항목은 목록 상단에 빨간색으로 표시됩니다.
           </span>
         </section>
@@ -223,7 +223,7 @@ export default async function PurchasingOrdersPage({
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                     </th>
                   )}
-                  {isRequestedStatus ? null : <th className="w-[540px] px-3 py-2 font-medium">발주 계획</th>}
+                  {isRequestedStatus ? null : <th className="w-[620px] px-3 py-2 font-medium">구매 정보</th>}
                   <th className="w-28 px-3 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
                   </th>
@@ -243,7 +243,8 @@ export default async function PurchasingOrdersPage({
                     const rowNumber = (page - 1) * pageSize + index + 1
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const stageQuantity = getStageQuantity(item, status, outboundRequestedQuantity)
-                    const isArrivalOverdue = status === 'purchased' && isPurchasedArrivalOverdue(item.updatedAt)
+                    const purchaseDateElapsedDays = item.outboundExpectedDate ? daysSinceDateOnly(item.outboundExpectedDate) : 0
+                    const isArrivalOverdue = status === 'purchased' && purchaseDateElapsedDays >= 7
                     const stickyCellClassName = isArrivalOverdue ? 'bg-red-50' : 'bg-background'
                     const costs = calculatePurchaseCosts({
                       requestedQuantity: item.requestedQuantity,
@@ -265,7 +266,7 @@ export default async function PurchasingOrdersPage({
                         {isArrivalOverdue ? (
                           <div className="mt-1">
                             <Badge className="border-red-200 bg-red-100 text-red-800 hover:bg-red-100">
-                              도착 지연 {daysSince(item.updatedAt)}일
+                              구매날짜 기준 {purchaseDateElapsedDays}일 경과
                             </Badge>
                           </div>
                         ) : null}
@@ -499,15 +500,14 @@ function parseOrder(value: string | undefined): 'asc' | 'desc' | null {
   return value === 'asc' || value === 'desc' ? value : null
 }
 
-function isPurchasedArrivalOverdue(updatedAt: Date | string) {
-  return daysSince(updatedAt) >= 7
-}
-
-function daysSince(value: Date | string) {
+function daysSinceDateOnly(value: Date | string) {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return 0
+  const today = new Date()
+  const start = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  const end = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
   const millisecondsPerDay = 24 * 60 * 60 * 1000
-  return Math.floor((Date.now() - date.getTime()) / millisecondsPerDay)
+  return Math.floor((end - start) / millisecondsPerDay)
 }
 
 function purchaseOrdersHref({

@@ -561,38 +561,47 @@ export function PurchasePlanFieldsV2({
   }
 
   return (
-    <form onSubmit={save} className="grid min-w-[500px] grid-cols-[1fr_120px_150px_82px] items-center gap-1">
-      <Input
-        name="supplierOrderNumber"
-        defaultValue={supplierOrderNumber ?? ''}
-        placeholder="주문서번호"
-        className="h-7 text-xs"
-      />
-      <Input
-        name="outboundExpectedDate"
-        type="date"
-        defaultValue={formatDateInput(outboundExpectedDate) || todayDateInput()}
-        className="h-7 text-xs"
-      />
-      <div className="flex items-center gap-1">
-        <select
-          value={methodMode}
-          onChange={(event) => setMethodMode(event.target.value)}
-          className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
-        >
-          <option value="개인">개인</option>
-          <option value="법인">법인</option>
-          <option value="직접입력">직접입력</option>
-        </select>
-        {methodMode === '직접입력' ? (
-          <Input
-            value={customMethod}
-            onChange={(event) => setCustomMethod(event.target.value)}
-            placeholder="직접입력"
-            className="h-7 w-24 text-xs"
-          />
-        ) : null}
-      </div>
+    <form onSubmit={save} className="grid min-w-[590px] grid-cols-[1fr_130px_190px_82px] items-end gap-1.5">
+      <label className="space-y-1">
+        <span className="block text-[11px] font-medium text-muted-foreground">주문서번호</span>
+        <Input
+          name="supplierOrderNumber"
+          defaultValue={supplierOrderNumber ?? ''}
+          placeholder="주문서번호"
+          className="h-7 text-xs"
+        />
+      </label>
+      <label className="space-y-1">
+        <span className="block text-[11px] font-medium text-muted-foreground">구매날짜</span>
+        <Input
+          name="outboundExpectedDate"
+          type="date"
+          defaultValue={formatDateInput(outboundExpectedDate) || todayDateInput()}
+          className="h-7 text-xs"
+        />
+      </label>
+      <label className="space-y-1">
+        <span className="block text-[11px] font-medium text-muted-foreground">구매방법</span>
+        <div className="flex items-center gap-1">
+          <select
+            value={methodMode}
+            onChange={(event) => setMethodMode(event.target.value)}
+            className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+          >
+            <option value="개인">개인</option>
+            <option value="법인">법인</option>
+            <option value="직접입력">직접입력</option>
+          </select>
+          {methodMode === '직접입력' ? (
+            <Input
+              value={customMethod}
+              onChange={(event) => setCustomMethod(event.target.value)}
+              placeholder="직접입력"
+              className="h-7 w-24 text-xs"
+            />
+          ) : null}
+        </div>
+      </label>
       <Button type="submit" size="sm" variant="outline" disabled={isPending}>
         {isPending ? <Loader2 className="animate-spin" /> : <Save />}
         {message ?? '저장'}

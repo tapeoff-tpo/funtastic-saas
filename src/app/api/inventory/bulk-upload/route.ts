@@ -234,7 +234,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
       parseErrors.push({ sku, error: '상품명이 비어있습니다.' })
       return
     }
-    if (!Number.isFinite(totalStock) || totalStock < 0) {
+    if (!Number.isFinite(totalStock)) {
       parseErrors.push({ sku, error: `수량이 유효하지 않습니다: "${stockRaw}"` })
       return
     }

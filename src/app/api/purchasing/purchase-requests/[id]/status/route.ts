@@ -8,7 +8,7 @@ import { PURCHASE_REQUEST_STATUS_LABELS } from '@/lib/purchasing/purchase-reques
 import { createClient } from '@/lib/supabase/server'
 
 const bodySchema = z.object({
-  status: z.enum(['requested', 'purchased', 'china_arrived', 'outbound_requested', 'completed']),
+  status: z.enum(['requested', 'purchased', 'purchase_completed', 'china_arrived', 'outbound_requested', 'completed']),
 })
 
 export async function PATCH(

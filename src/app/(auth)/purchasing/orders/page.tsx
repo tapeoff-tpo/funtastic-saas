@@ -7,6 +7,7 @@ import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
 import {
   getNextPurchaseStatus,
+  PURCHASE_REQUEST_STATUSES,
   PURCHASE_REQUEST_STATUS_LABELS,
   type PurchaseRequestStatus,
 } from '@/lib/purchasing/purchase-request-status'
@@ -31,15 +32,44 @@ export const metadata: Metadata = {
   title: '발주',
 }
 
-const STATUSES = Object.keys(PURCHASE_REQUEST_STATUS_LABELS) as PurchaseRequestStatus[]
+const ORDER_STATUSES = PURCHASE_REQUEST_STATUSES.filter((status) => status !== 'requested')
 
 export default async function PurchasingOrdersPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
+  return (
+    <PurchasingOrdersView
+      searchParams={searchParams}
+      defaultStatus="purchased"
+      allowedStatuses={ORDER_STATUSES}
+      basePath="/purchasing/orders"
+      title="발주"
+      description="발주요청부터 구매완료, 중국창고도착, 중국출고요청, 중국출고완료까지 한 화면에서 관리합니다."
+    />
+  )
+}
+
+export async function PurchasingOrdersView({
+  searchParams,
+  defaultStatus,
+  allowedStatuses,
+  basePath,
+  title,
+  description,
+  showRecommendationGenerator = false,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+  defaultStatus: PurchaseRequestStatus
+  allowedStatuses: readonly PurchaseRequestStatus[]
+  basePath: string
+  title: string
+  description: string
+  showRecommendationGenerator?: boolean
+}) {
   const params = await searchParams
-  const status = parseStatus(stringParam(params.status)) ?? 'requested'
+  const status = parseStatus(stringParam(params.status), allowedStatuses) ?? defaultStatus
   const search = stringParam(params.search)
   const page = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const showCosts = stringParam(params.showCosts) === '1'
@@ -79,18 +109,18 @@ export default async function PurchasingOrdersPage({
   if (sort) costToggleParams.set('sort', sort)
   if (order) costToggleParams.set('order', order)
   if (!showCosts) costToggleParams.set('showCosts', '1')
-  const costToggleHref = `/purchasing/orders?${costToggleParams.toString()}`
+  const costToggleHref = `${basePath}?${costToggleParams.toString()}`
 
   return (
     <div className="space-y-4">
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">발주</h1>
+          <h1 className="text-2xl font-semibold">{title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            재고와 출고 이력을 기준으로 구매가 필요한 품목을 추천하고, 구매부터 중국창고 입고까지 관리합니다.
+            {description}
           </p>
         </div>
-        <form className="flex items-center gap-2" action="/purchasing/orders">
+        <form className="flex items-center gap-2" action={basePath}>
           <input type="hidden" name="status" value={status} />
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
           {sort ? <input type="hidden" name="sort" value={sort} /> : null}
@@ -105,9 +135,9 @@ export default async function PurchasingOrdersPage({
         </form>
       </header>
 
-      <PurchaseRecommendationGenerator />
+      {showRecommendationGenerator ? <PurchaseRecommendationGenerator /> : null}
 
-      {status === 'purchased' && overduePurchasedCount > 0 ? (
+      {status === 'purchase_completed' && overduePurchasedCount > 0 ? (
         <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           <strong>도착 지연 확인 필요</strong>
           <span className="ml-2">
@@ -137,9 +167,10 @@ export default async function PurchasingOrdersPage({
       </section>
 
       <nav className="flex flex-wrap gap-2">
-        {STATUSES.map((item) => {
+        {allowedStatuses.map((item) => {
           const active = item === status
           const href = purchaseOrdersHref({
+            basePath,
             status: item,
             search,
             showCosts,
@@ -193,39 +224,39 @@ export default async function PurchasingOrdersPage({
                   </th>
                   <th className="sticky left-12 z-20 w-14 bg-muted px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-32 px-3 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="w-[340px] px-3 py-2 font-medium">
-                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} />
+                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} />
                   </th>
                   <th className="w-32 px-3 py-2 text-center font-medium">
-                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   {showCosts ? (
                     <>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="right" />
+                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                     </>
                   ) : null}
                   <th className="w-[460px] px-3 py-2 text-center font-medium">추천 근거</th>
                   {isRequestedStatus ? null : (
                     <th className="w-36 px-3 py-2 text-center font-medium">
-                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="w-[620px] px-3 py-2 font-medium">구매 정보</th>}
                   <th className="w-28 px-3 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} align="center" />
+                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="w-48 px-3 py-2 text-center font-medium">상태 변경</th>
                   <th className="w-24 px-3 py-2 text-center font-medium">삭제</th>
@@ -244,7 +275,7 @@ export default async function PurchasingOrdersPage({
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const stageQuantity = getStageQuantity(item, status, outboundRequestedQuantity)
                     const purchaseDateElapsedDays = item.outboundExpectedDate ? daysSinceDateOnly(item.outboundExpectedDate) : 0
-                    const isArrivalOverdue = status === 'purchased' && purchaseDateElapsedDays >= 7
+                    const isArrivalOverdue = status === 'purchase_completed' && purchaseDateElapsedDays >= 7
                     const stickyCellClassName = isArrivalOverdue ? 'bg-red-50' : 'bg-background'
                     const costs = calculatePurchaseCosts({
                       requestedQuantity: item.requestedQuantity,
@@ -339,6 +370,7 @@ export default async function PurchasingOrdersPage({
             <div className="flex items-center justify-end gap-2">
               <Link
                 href={purchaseOrdersHref({
+                  basePath,
                   status,
                   search,
                   showCosts,
@@ -360,6 +392,7 @@ export default async function PurchasingOrdersPage({
               </span>
               <Link
                 href={purchaseOrdersHref({
+                  basePath,
                   status,
                   search,
                   showCosts,
@@ -392,6 +425,7 @@ function SortHeader({
   showCosts,
   currentSort,
   currentOrder,
+  basePath,
   align = 'left',
 }: {
   label: string
@@ -401,11 +435,13 @@ function SortHeader({
   showCosts: boolean
   currentSort: string | undefined
   currentOrder: 'asc' | 'desc'
+  basePath: string
   align?: 'left' | 'center' | 'right'
 }) {
   const nextOrder = currentSort === column && currentOrder === 'asc' ? 'desc' : 'asc'
   const indicator = currentSort === column ? (currentOrder === 'asc' ? '↑' : '↓') : ''
   const href = purchaseOrdersHref({
+    basePath,
     status,
     search,
     showCosts,
@@ -427,7 +463,7 @@ function SortHeader({
 }
 
 function getStageQuantityColumn(status: PurchaseRequestStatus) {
-  if (status === 'purchased') {
+  if (status === 'purchased' || status === 'purchase_completed') {
     return { label: '구매수량', field: 'actualPurchaseQuantity' as const }
   }
   if (status === 'china_arrived') {
@@ -448,7 +484,7 @@ function getStageQuantity(
   status: PurchaseRequestStatus,
   outboundRequestedQuantity: number,
 ) {
-  if (status === 'purchased') return item.actualPurchaseQuantity ?? item.requestedQuantity
+  if (status === 'purchased' || status === 'purchase_completed') return item.actualPurchaseQuantity ?? item.requestedQuantity
   if (status === 'china_arrived') {
     return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity
   }
@@ -494,9 +530,9 @@ function stringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
 
-function parseStatus(value: string | undefined): PurchaseRequestStatus | null {
+function parseStatus(value: string | undefined, allowedStatuses: readonly PurchaseRequestStatus[]): PurchaseRequestStatus | null {
   if (!value) return null
-  return STATUSES.includes(value as PurchaseRequestStatus) ? value as PurchaseRequestStatus : null
+  return allowedStatuses.includes(value as PurchaseRequestStatus) ? value as PurchaseRequestStatus : null
 }
 
 function parseOrder(value: string | undefined): 'asc' | 'desc' | null {
@@ -514,6 +550,7 @@ function daysSinceDateOnly(value: Date | string) {
 }
 
 function purchaseOrdersHref({
+  basePath,
   status,
   search,
   showCosts,
@@ -521,6 +558,7 @@ function purchaseOrdersHref({
   order,
   page,
 }: {
+  basePath: string
   status: PurchaseRequestStatus
   search?: string
   showCosts?: boolean
@@ -534,7 +572,7 @@ function purchaseOrdersHref({
   if (sort) params.set('sort', sort)
   if (order) params.set('order', order)
   if (page && page > 1) params.set('page', String(page))
-  return `/purchasing/orders?${params.toString()}`
+  return `${basePath}?${params.toString()}`
 }
 
 function formatNumber(value: unknown) {

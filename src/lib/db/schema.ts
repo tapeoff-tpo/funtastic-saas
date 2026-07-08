@@ -569,6 +569,7 @@ export const inventoryHistory = pgTable(
 export const purchaseRequestStatusEnum = pgEnum('purchase_request_status', [
   'requested',
   'purchased',
+  'purchase_completed',
   'china_arrived',
   'outbound_requested',
   'completed',

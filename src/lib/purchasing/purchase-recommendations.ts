@@ -254,7 +254,7 @@ export async function generatePurchaseRecommendations(input: {
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'china_arrived', 'outbound_requested']),
+        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'china_arrived', 'outbound_requested']),
       ))
 
     const replaceableRows = activeRequestRows.filter(

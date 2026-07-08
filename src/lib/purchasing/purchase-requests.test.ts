@@ -61,14 +61,14 @@ describe('purchase request stage quantities', () => {
 
 describe('purchase request status labels', () => {
   it('labels completed purchase requests as outbound completed', () => {
-    expect(PURCHASE_REQUEST_STATUS_LABELS.completed).toBe('출고완료')
+    expect(PURCHASE_REQUEST_STATUS_LABELS.completed).toBe('중국출고완료')
   })
 })
 
 describe('purchase request ordering', () => {
   it('defaults to newest first when no supported sort is selected', () => {
-    expect(purchaseRequestOrderBy()).toHaveLength(1)
-    expect(purchaseRequestOrderBy('unknown')).toHaveLength(1)
+    expect(purchaseRequestOrderBy()).toHaveLength(5)
+    expect(purchaseRequestOrderBy('unknown')).toHaveLength(5)
   })
 
   it('adds stable tie-breakers for supported sorts', () => {

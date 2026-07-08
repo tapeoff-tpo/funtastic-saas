@@ -253,7 +253,6 @@ function useBulkSelection() {
 }
 
 export function PurchaseRecommendationGenerator() {
-  const router = useRouter()
   const [targetStockMonths, setTargetStockMonths] = useState('1.2')
   const [budgetKrw, setBudgetKrw] = useState('')
   const [message, setMessage] = useState<string | null>(null)
@@ -286,6 +285,11 @@ export function PurchaseRecommendationGenerator() {
         return
       }
 
+      if (body.accepted) {
+        setMessage('추천 계산을 시작했습니다. 계산 중에도 다른 탭으로 이동할 수 있습니다. 잠시 뒤 발주검토를 새로고침하면 결과가 반영됩니다.')
+        return
+      }
+
       setMessage(
         `재고 ${body.evaluated.toLocaleString('ko-KR')}개 검색 · ` +
         `발주추천 ${body.created.toLocaleString('ko-KR')}건 생성 · ` +
@@ -297,7 +301,6 @@ export function PurchaseRecommendationGenerator() {
             `예산조정 ${(body.budgetLimitedCount ?? 0).toLocaleString('ko-KR')}건`
           : ''),
       )
-      router.refresh()
     })
   }
 

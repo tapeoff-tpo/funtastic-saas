@@ -93,23 +93,42 @@ export async function PurchasingOrdersView({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
+  const recommendationBasisParam = stringParam(params.showRecommendationBasis)
+  const showRecommendationBasis = recommendationBasisParam === undefined
+    ? isRequestedStatus
+    : recommendationBasisParam === '1'
   const pageSize = 50
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1
   const pageEnd = Math.min(total, page * pageSize)
-  const visibleColumnCount = showCosts
-    ? isRequestedStatus ? 13 : 15
-    : isRequestedStatus ? 9 : 11
+  const visibleColumnCount =
+    8 +
+    (showCosts ? 4 : 0) +
+    (showRecommendationBasis ? 1 : 0) +
+    (isRequestedStatus ? 0 : 2)
   const tableMinWidth = isRequestedStatus
-    ? showCosts ? 'min-w-[2000px]' : 'min-w-[1520px]'
-    : showCosts ? 'min-w-[2200px]' : 'min-w-[1720px]'
+    ? showCosts
+      ? showRecommendationBasis ? 'min-w-[1640px]' : 'min-w-[1260px]'
+      : showRecommendationBasis ? 'min-w-[1180px]' : 'min-w-[860px]'
+    : showCosts
+      ? showRecommendationBasis ? 'min-w-[1840px]' : 'min-w-[1460px]'
+      : showRecommendationBasis ? 'min-w-[1400px]' : 'min-w-[1080px]'
   const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
   if (sort) costToggleParams.set('sort', sort)
   if (order) costToggleParams.set('order', order)
+  costToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (!showCosts) costToggleParams.set('showCosts', '1')
   const costToggleHref = `${basePath}?${costToggleParams.toString()}`
+  const basisToggleParams = new URLSearchParams({ status })
+  if (search) basisToggleParams.set('search', search)
+  if (page > 1) basisToggleParams.set('page', String(page))
+  if (sort) basisToggleParams.set('sort', sort)
+  if (order) basisToggleParams.set('order', order)
+  if (showCosts) basisToggleParams.set('showCosts', '1')
+  basisToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '0' : '1')
+  const basisToggleHref = `${basePath}?${basisToggleParams.toString()}`
 
   return (
     <div className="space-y-4">
@@ -123,6 +142,7 @@ export async function PurchasingOrdersView({
         <form className="flex items-center gap-2" action={basePath}>
           <input type="hidden" name="status" value={status} />
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
+          <input type="hidden" name="showRecommendationBasis" value={showRecommendationBasis ? '1' : '0'} />
           {sort ? <input type="hidden" name="sort" value={sort} /> : null}
           {order ? <input type="hidden" name="order" value={order} /> : null}
           <input
@@ -174,6 +194,7 @@ export async function PurchasingOrdersView({
             status: item,
             search,
             showCosts,
+            showRecommendationBasis,
             sort,
             order,
           })
@@ -210,6 +231,13 @@ export async function PurchasingOrdersView({
                 {showCosts ? <EyeOff /> : <Eye />}
                 {showCosts ? '원가 닫기' : '원가 보기'}
               </Link>
+              <Link
+                href={basisToggleHref}
+                className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
+              >
+                {showRecommendationBasis ? <EyeOff /> : <Eye />}
+                {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
+              </Link>
               <PurchaseBulkDeleteButton />
               <PurchaseBulkStatusButton />
             </div>
@@ -223,43 +251,43 @@ export async function PurchasingOrdersView({
                     <PurchaseSelectAllCheckbox />
                   </th>
                   <th className="sticky left-12 z-20 w-14 bg-muted px-3 py-2 text-center font-medium">No.</th>
-                  <th className="w-32 px-3 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                  <th className="w-24 px-2 py-2 text-center font-medium">
+                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
-                  <th className="w-[340px] px-3 py-2 font-medium">
-                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} />
+                  <th className="w-[240px] px-3 py-2 font-medium">
+                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
                   </th>
-                  <th className="w-32 px-3 py-2 text-center font-medium">
-                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                  <th className="w-28 px-2 py-2 text-center font-medium">
+                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   {showCosts ? (
                     <>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-28 px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-32 px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                     </>
                   ) : null}
-                  <th className="w-[460px] px-3 py-2 text-center font-medium">추천 근거</th>
+                  {showRecommendationBasis ? <th className="w-[340px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
-                    <th className="w-36 px-3 py-2 text-center font-medium">
-                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <th className="w-28 px-2 py-2 text-center font-medium">
+                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                     </th>
                   )}
-                  {isRequestedStatus ? null : <th className="w-[620px] px-3 py-2 font-medium">구매 정보</th>}
-                  <th className="w-28 px-3 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                  {isRequestedStatus ? null : <th className="w-[400px] px-3 py-2 font-medium">구매 정보</th>}
+                  <th className="w-24 px-2 py-2 text-center font-medium">
+                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
-                  <th className="w-48 px-3 py-2 text-center font-medium">상태 변경</th>
-                  <th className="w-24 px-3 py-2 text-center font-medium">삭제</th>
+                  <th className="w-36 px-2 py-2 text-center font-medium">상태 변경</th>
+                  <th className="w-20 px-2 py-2 text-center font-medium">삭제</th>
                 </tr>
               </thead>
               <tbody>
@@ -311,7 +339,7 @@ export async function PurchasingOrdersView({
                           {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-center tabular-nums align-middle">
+                      <td className="px-2 py-2 text-center tabular-nums align-middle">
                         <PurchaseQuantityField
                           id={item.id}
                           field={quantityColumn.field}
@@ -331,9 +359,11 @@ export async function PurchasingOrdersView({
                           <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>
                         </>
                       ) : null}
-                      <td className="px-3 py-2 text-xs text-muted-foreground align-middle">
-                        <RecommendationBasisGrid rawData={item.rawData} />
-                      </td>
+                      {showRecommendationBasis ? (
+                        <td className="px-3 py-2 text-xs text-muted-foreground align-middle">
+                          <RecommendationBasisGrid rawData={item.rawData} />
+                        </td>
+                      ) : null}
                       {isRequestedStatus ? null : (
                         <td className="px-3 py-2 text-center align-middle">{item.purchaseManagementCode ?? '-'}</td>
                       )}
@@ -374,6 +404,7 @@ export async function PurchasingOrdersView({
                   status,
                   search,
                   showCosts,
+                  showRecommendationBasis,
                   sort,
                   order,
                   page: Math.max(1, page - 1),
@@ -396,6 +427,7 @@ export async function PurchasingOrdersView({
                   status,
                   search,
                   showCosts,
+                  showRecommendationBasis,
                   sort,
                   order,
                   page: Math.min(totalPages, page + 1),
@@ -423,6 +455,7 @@ function SortHeader({
   status,
   search,
   showCosts,
+  showRecommendationBasis,
   currentSort,
   currentOrder,
   basePath,
@@ -433,6 +466,7 @@ function SortHeader({
   status: PurchaseRequestStatus
   search: string | undefined
   showCosts: boolean
+  showRecommendationBasis: boolean
   currentSort: string | undefined
   currentOrder: 'asc' | 'desc'
   basePath: string
@@ -445,6 +479,7 @@ function SortHeader({
     status,
     search,
     showCosts,
+    showRecommendationBasis,
     sort: column,
     order: nextOrder,
   })
@@ -554,6 +589,7 @@ function purchaseOrdersHref({
   status,
   search,
   showCosts,
+  showRecommendationBasis,
   sort,
   order,
   page,
@@ -562,6 +598,7 @@ function purchaseOrdersHref({
   status: PurchaseRequestStatus
   search?: string
   showCosts?: boolean
+  showRecommendationBasis?: boolean
   sort?: string
   order?: 'asc' | 'desc'
   page?: number
@@ -569,6 +606,7 @@ function purchaseOrdersHref({
   const params = new URLSearchParams({ status })
   if (search) params.set('search', search)
   if (showCosts) params.set('showCosts', '1')
+  if (showRecommendationBasis !== undefined) params.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (sort) params.set('sort', sort)
   if (order) params.set('order', order)
   if (page && page > 1) params.set('page', String(page))

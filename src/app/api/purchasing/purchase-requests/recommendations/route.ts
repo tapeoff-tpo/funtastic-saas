@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { after, NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { generatePurchaseRecommendations } from '@/lib/purchasing/purchase-recommendations'
@@ -16,18 +16,34 @@ export async function POST(request: NextRequest) {
 
   const body = bodySchema.safeParse(await request.json().catch(() => ({})))
   if (!body.success) {
-    return NextResponse.json({ error: '목표 보유개월수는 0.1~12 사이로 입력해주세요.' }, { status: 400 })
+    return NextResponse.json({ error: '목표 보유개월은 0.1~12 사이로 입력해주세요.' }, { status: 400 })
   }
 
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const requestedByUserId = user.id
+  const targetStockMonths = body.data.targetStockMonths
+  const budgetKrw = body.data.budgetKrw ?? null
+
   try {
-    const result = await generatePurchaseRecommendations({
-      userId: await getWorkspaceUserId(user.id),
-      requestedByUserId: user.id,
-      targetStockMonths: body.data.targetStockMonths,
-      budgetKrw: body.data.budgetKrw,
+    after(async () => {
+      try {
+        const result = await generatePurchaseRecommendations({
+          userId: workspaceUserId,
+          requestedByUserId,
+          targetStockMonths,
+          budgetKrw,
+        })
+        console.info('[purchase-recommendations] completed', result)
+      } catch (error) {
+        console.error('[purchase-recommendations] background failed', error)
+      }
     })
 
-    return NextResponse.json(result)
+    return NextResponse.json({
+      accepted: true,
+      targetStockMonths,
+      budgetKrw,
+    })
   } catch (error) {
     console.error('[purchase-recommendations]', error)
     return NextResponse.json(

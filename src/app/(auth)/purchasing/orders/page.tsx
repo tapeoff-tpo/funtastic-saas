@@ -51,7 +51,7 @@ export default async function PurchasingOrdersPage({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const { items, total, costTotals, statusCounts } = await getPurchaseRequests({
+  const { items, total, costTotals, statusCounts, overduePurchasedCount } = await getPurchaseRequests({
     userId: workspaceUserId,
     status,
     search: search ?? undefined,
@@ -106,6 +106,16 @@ export default async function PurchasingOrdersPage({
       </header>
 
       <PurchaseRecommendationGenerator />
+
+      {status === 'purchased' && overduePurchasedCount > 0 ? (
+        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <strong>도착 지연 확인 필요</strong>
+          <span className="ml-2">
+            구매완료 처리 후 7일이 지난 항목 {overduePurchasedCount.toLocaleString('ko-KR')}건이 있습니다.
+            지연 항목은 목록 상단에 빨간색으로 표시됩니다.
+          </span>
+        </section>
+      ) : null}
 
       <section className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border bg-muted/20 px-3 py-2">
         <span className="text-sm font-medium">
@@ -233,23 +243,32 @@ export default async function PurchasingOrdersPage({
                     const rowNumber = (page - 1) * pageSize + index + 1
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const stageQuantity = getStageQuantity(item, status, outboundRequestedQuantity)
+                    const isArrivalOverdue = status === 'purchased' && isPurchasedArrivalOverdue(item.updatedAt)
+                    const stickyCellClassName = isArrivalOverdue ? 'bg-red-50' : 'bg-background'
                     const costs = calculatePurchaseCosts({
                       requestedQuantity: item.requestedQuantity,
                       unitCostYuan: item.unitCostYuan,
                       unitCostKrw: item.unitCostKrw,
                     })
                     return (
-                      <tr key={item.id} className="border-t align-middle">
-                      <td className="sticky left-0 z-10 bg-background px-3 py-2 text-center align-middle">
+                      <tr key={item.id} className={`border-t align-middle ${isArrivalOverdue ? 'bg-red-50/80' : ''}`}>
+                      <td className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
                         <PurchaseRowCheckbox id={item.id} />
                       </td>
-                      <td className="sticky left-12 z-10 bg-background px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle">
+                      <td className={`sticky left-12 z-10 px-3 py-2 text-center text-xs text-muted-foreground tabular-nums align-middle ${stickyCellClassName}`}>
                         {rowNumber.toLocaleString('ko-KR')}
                       </td>
                       <td className="px-3 py-2 text-center align-middle">
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
                         </Badge>
+                        {isArrivalOverdue ? (
+                          <div className="mt-1">
+                            <Badge className="border-red-200 bg-red-100 text-red-800 hover:bg-red-100">
+                              도착 지연 {daysSince(item.updatedAt)}일
+                            </Badge>
+                          </div>
+                        ) : null}
                       </td>
                       <td className="px-3 py-2 align-middle">
                         <div className="truncate font-medium" title={item.productName}>{item.productName}</div>
@@ -478,6 +497,17 @@ function parseStatus(value: string | undefined): PurchaseRequestStatus | null {
 
 function parseOrder(value: string | undefined): 'asc' | 'desc' | null {
   return value === 'asc' || value === 'desc' ? value : null
+}
+
+function isPurchasedArrivalOverdue(updatedAt: Date | string) {
+  return daysSince(updatedAt) >= 7
+}
+
+function daysSince(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return 0
+  const millisecondsPerDay = 24 * 60 * 60 * 1000
+  return Math.floor((Date.now() - date.getTime()) / millisecondsPerDay)
 }
 
 function purchaseOrdersHref({

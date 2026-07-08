@@ -1,0 +1,588 @@
+.quoteWorkspace {
+  --quote-bg: #f4f4ef;
+  --quote-surface: #ffffff;
+  --quote-border: #dddddd;
+  --quote-strong-border: #b9b9b9;
+  --quote-text: #1a1a1a;
+  --quote-muted: #555555;
+  --quote-soft: #fafaf8;
+  --quote-focus: #1a4f8a;
+  --quote-focus-bg: #e8f0fb;
+  --quote-radius: 8px;
+  min-height: calc(100vh - 48px);
+  margin: -1.5rem;
+  background: var(--quote-bg);
+  color: var(--quote-text);
+  font-family: "Apple SD Gothic Neo", "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--quote-text);
+  padding: 0 2rem;
+  color: #ffffff;
+}
+
+.toolbarLogo {
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.toolbarActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.toolbarButton,
+.lightButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: var(--quote-radius);
+  font-family: inherit;
+  font-weight: 600;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+
+.toolbarButton {
+  min-height: 34px;
+  border: 1px solid rgb(255 255 255 / 25%);
+  background: rgb(255 255 255 / 10%);
+  padding: 7px 14px;
+  color: #ffffff;
+  font-size: 13px;
+}
+
+.toolbarButton:hover {
+  background: rgb(255 255 255 / 18%);
+}
+
+.toolbarButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.printButton {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: var(--quote-text);
+}
+
+.printButton:hover {
+  background: #eeeeee;
+}
+
+.icon {
+  width: 15px;
+  height: 15px;
+}
+
+.smallIcon {
+  width: 13px;
+  height: 13px;
+}
+
+.quoteSelect {
+  width: min(280px, 34vw);
+  min-width: 170px;
+  height: 34px;
+  border: 1px solid rgb(255 255 255 / 25%);
+  border-radius: var(--quote-radius);
+  background: #ffffff;
+  color: var(--quote-text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  padding: 0 10px;
+}
+
+.page {
+  max-width: 840px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+.quotePaper {
+  border: 1px solid var(--quote-border);
+  border-radius: var(--quote-radius);
+  background: var(--quote-surface);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 6%);
+  padding: 2.5rem;
+}
+
+.quoteTitle {
+  margin-bottom: 1.5rem;
+  border-bottom: 3px double var(--quote-text);
+  padding-bottom: 1rem;
+  text-align: center;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+}
+
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--quote-border);
+}
+
+.infoLeft {
+  border-right: 1px solid var(--quote-border);
+}
+
+.infoRow {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  border-bottom: 1px solid var(--quote-border);
+}
+
+.compactInfoRow {
+  min-height: 34px;
+}
+
+.lastInfoRow {
+  border-bottom: 0;
+}
+
+.infoLabel {
+  min-width: 70px;
+  align-self: stretch;
+  border-right: 1px solid var(--quote-border);
+  background: var(--quote-soft);
+  color: var(--quote-muted);
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.compactInfoRow .infoLabel {
+  min-width: 64px;
+}
+
+.infoValue {
+  flex: 1;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.introRow {
+  padding: 8px 12px;
+}
+
+.supplierWrap {
+  display: flex;
+  min-width: 0;
+}
+
+.supplierRibbon {
+  min-width: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--quote-text);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  padding: 12px 6px;
+  text-orientation: upright;
+  writing-mode: vertical-lr;
+}
+
+.supplierFields {
+  flex: 1;
+  min-width: 0;
+  border-left: 1px solid var(--quote-border);
+}
+
+.splitRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  border-bottom: 1px solid var(--quote-border);
+}
+
+.splitRow .infoRow {
+  border-bottom: 0;
+}
+
+.splitRow .infoRow + .infoRow {
+  border-left: 1px solid var(--quote-border);
+}
+
+.editable,
+.editableInline,
+.noteText {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--quote-text);
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.editable {
+  border-radius: 3px;
+  padding: 2px 4px;
+  transition: background 0.15s;
+}
+
+.editable:hover {
+  background: #f0f0f0;
+}
+
+.editable:focus,
+.editableInline:focus,
+.noteText:focus {
+  border-radius: 3px;
+  background: var(--quote-focus-bg);
+  outline: 1px solid var(--quote-focus);
+}
+
+.totalBox {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 1.25rem;
+  border: 2px solid var(--quote-text);
+  border-radius: var(--quote-radius);
+  padding: 12px 16px;
+}
+
+.totalLabel {
+  color: var(--quote-muted);
+  font-size: 13px;
+}
+
+.totalLabel span {
+  font-size: 11px;
+}
+
+.totalAmount {
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.totalText {
+  margin-top: 2px;
+  color: var(--quote-muted);
+  font-size: 13px;
+}
+
+.actionRow {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 1rem;
+}
+
+.lightButton {
+  border: 1px solid var(--quote-strong-border);
+  background: var(--quote-surface);
+  color: var(--quote-text);
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 6px 12px;
+}
+
+.lightButton:hover {
+  background: var(--quote-bg);
+}
+
+.deleteButton {
+  border-color: #e8b4b4;
+  color: #b42318;
+  padding: 5px 8px;
+}
+
+.deleteButton:hover {
+  background: #fdf0f0;
+}
+
+.tableScroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.itemsTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1rem;
+  font-size: 13px;
+}
+
+.itemsTable th {
+  border: 1px solid #333333;
+  background: var(--quote-text);
+  color: #ffffff;
+  font-weight: 600;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.itemsTable td {
+  border: 1px solid var(--quote-border);
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.itemsTable tr:hover td {
+  background: var(--quote-soft);
+}
+
+.itemsTable tfoot td {
+  border-top: 2px solid var(--quote-text);
+  background: var(--quote-soft);
+  font-weight: 700;
+}
+
+.itemsTable textarea.editable {
+  display: block;
+  min-height: 34px;
+  overflow: hidden;
+  resize: none;
+  line-height: 1.5;
+}
+
+.itemName {
+  min-width: 220px;
+  height: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.numberInput {
+  min-width: 64px;
+  appearance: textfield;
+  text-align: right;
+}
+
+.numberInput::-webkit-inner-spin-button,
+.numberInput::-webkit-outer-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.numericText {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.centerText {
+  text-align: center;
+}
+
+.vatToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.noColumn {
+  width: 36px;
+}
+
+.specColumn {
+  width: 60px;
+}
+
+.qtyColumn {
+  width: 76px;
+}
+
+.priceColumn {
+  width: 90px;
+}
+
+.amountColumn {
+  width: 100px;
+}
+
+.vatColumn {
+  width: 90px;
+}
+
+.noteColumn {
+  width: 70px;
+}
+
+.deleteColumn {
+  width: 42px;
+}
+
+.notes {
+  margin-top: 1rem;
+}
+
+.noteItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.notePrefix {
+  color: var(--quote-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.noteText {
+  flex: 1;
+  min-height: 24px;
+  color: var(--quote-muted);
+  line-height: 1.5;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  resize: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 720px) {
+  .quoteWorkspace {
+    margin: -1rem;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 0.75rem 1rem;
+  }
+
+  .toolbarActions {
+    justify-content: flex-start;
+  }
+
+  .quoteSelect {
+    width: min(100%, 280px);
+  }
+
+  .page {
+    padding: 1rem 0.5rem 3rem;
+  }
+
+  .quotePaper {
+    padding: 1.25rem 1rem;
+  }
+
+  .quoteTitle {
+    font-size: 20px;
+    letter-spacing: 0.15em;
+  }
+
+  .infoLeft {
+    border-right: 0;
+    border-bottom: 1px solid var(--quote-border);
+  }
+
+  .splitRow {
+    grid-template-columns: 1fr;
+  }
+
+  .splitRow .infoRow + .infoRow {
+    border-left: 0;
+    border-top: 1px solid var(--quote-border);
+  }
+
+  .itemsTable {
+    min-width: 760px;
+    font-size: 11px;
+  }
+
+  .itemsTable th,
+  .itemsTable td {
+    padding: 4px;
+  }
+}
+
+@media print {
+  @page {
+    margin: 1cm;
+    size: A4;
+  }
+
+  .quoteWorkspace {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    margin: 0;
+    min-height: auto;
+    overflow: visible;
+    background: #ffffff;
+  }
+
+  .toolbar,
+  .actionRow,
+  .noPrint {
+    display: none !important;
+  }
+
+  .page {
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  .quotePaper {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .editable,
+  .editableInline,
+  .noteText {
+    background: transparent !important;
+  }
+
+  .itemsTable textarea.editable,
+  .noteText {
+    height: auto !important;
+    min-height: 1.5em;
+    overflow: visible !important;
+  }
+
+  .itemsTable tr:hover td {
+    background: transparent;
+  }
+
+  .itemsTable tfoot td,
+  .infoLabel {
+    background: var(--quote-soft) !important;
+  }
+
+  .supplierRibbon,
+  .itemsTable th {
+    background: var(--quote-text) !important;
+    color: #ffffff !important;
+  }
+
+  .quoteWorkspace * {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

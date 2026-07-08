@@ -33,6 +33,13 @@ export const metadata: Metadata = {
 }
 
 const ORDER_STATUSES = PURCHASE_REQUEST_STATUSES.filter((status) => status !== 'requested')
+const PURCHASE_OVERDUE_TAB = 'purchase_overdue'
+type PurchaseOrdersTab = PurchaseRequestStatus | typeof PURCHASE_OVERDUE_TAB
+
+const PURCHASE_TAB_LABELS: Record<PurchaseOrdersTab, string> = {
+  ...PURCHASE_REQUEST_STATUS_LABELS,
+  [PURCHASE_OVERDUE_TAB]: '구매/입고지연',
+}
 
 export default async function PurchasingOrdersPage({
   searchParams,
@@ -69,7 +76,12 @@ export async function PurchasingOrdersView({
   showRecommendationGenerator?: boolean
 }) {
   const params = await searchParams
-  const status = parseStatus(stringParam(params.status), allowedStatuses) ?? defaultStatus
+  const allowedTabs = basePath === '/purchasing/orders'
+    ? [...allowedStatuses, PURCHASE_OVERDUE_TAB] satisfies PurchaseOrdersTab[]
+    : allowedStatuses
+  const selectedTab = parseTab(stringParam(params.status), allowedTabs) ?? defaultStatus
+  const isOverdueTab = selectedTab === PURCHASE_OVERDUE_TAB
+  const status: PurchaseRequestStatus = isOverdueTab ? 'purchase_completed' : selectedTab
   const search = stringParam(params.search)
   const page = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const showCosts = stringParam(params.showCosts) === '1'
@@ -84,6 +96,7 @@ export async function PurchasingOrdersView({
   const { items, total, costTotals, statusCounts, overduePurchasedCount } = await getPurchaseRequests({
     userId: workspaceUserId,
     status,
+    overdueOnly: isOverdueTab,
     search: search ?? undefined,
     page,
     pageSize: 50,
@@ -106,7 +119,7 @@ export async function PurchasingOrdersView({
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (isRequestedStatus ? 0 : 2)
-  const costToggleParams = new URLSearchParams({ status })
+  const costToggleParams = new URLSearchParams({ status: selectedTab })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
   if (sort) costToggleParams.set('sort', sort)
@@ -114,7 +127,7 @@ export async function PurchasingOrdersView({
   costToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (!showCosts) costToggleParams.set('showCosts', '1')
   const costToggleHref = `${basePath}?${costToggleParams.toString()}`
-  const basisToggleParams = new URLSearchParams({ status })
+  const basisToggleParams = new URLSearchParams({ status: selectedTab })
   if (search) basisToggleParams.set('search', search)
   if (page > 1) basisToggleParams.set('page', String(page))
   if (sort) basisToggleParams.set('sort', sort)
@@ -133,7 +146,7 @@ export async function PurchasingOrdersView({
           </p>
         </div>
         <form className="flex items-center gap-2" action={basePath}>
-          <input type="hidden" name="status" value={status} />
+          <input type="hidden" name="status" value={selectedTab} />
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
           <input type="hidden" name="showRecommendationBasis" value={showRecommendationBasis ? '1' : '0'} />
           {sort ? <input type="hidden" name="sort" value={sort} /> : null}
@@ -155,14 +168,14 @@ export async function PurchasingOrdersView({
           <strong>도착 지연 확인 필요</strong>
           <span className="ml-2">
             구매날짜 기준 7일이 지난 항목 {overduePurchasedCount.toLocaleString('ko-KR')}건이 있습니다.
-            지연 항목은 목록 상단에 빨간색으로 표시됩니다.
+            지연 항목은 빨간색으로 표시되며 구매/입고지연 탭에서 따로 볼 수 있습니다.
           </span>
         </section>
       ) : null}
 
       <section className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border bg-muted/20 px-3 py-2">
         <span className="text-sm font-medium">
-          {PURCHASE_REQUEST_STATUS_LABELS[status]} 총 구매금액
+          {PURCHASE_TAB_LABELS[selectedTab]} 총 구매금액
         </span>
         <span className="text-sm tabular-nums">
           <span className="text-muted-foreground">元 </span>
@@ -180,8 +193,8 @@ export async function PurchasingOrdersView({
       </section>
 
       <nav className="flex flex-wrap gap-2">
-        {allowedStatuses.map((item) => {
-          const active = item === status
+        {allowedTabs.map((item) => {
+          const active = item === selectedTab
           const href = purchaseOrdersHref({
             basePath,
             status: item,
@@ -199,9 +212,9 @@ export async function PurchasingOrdersView({
                 active ? 'border-foreground bg-foreground text-background' : 'border-border bg-background hover:bg-muted'
               }`}
             >
-              {PURCHASE_REQUEST_STATUS_LABELS[item]}
+              {PURCHASE_TAB_LABELS[item]}
               <span className={active ? 'text-background/70' : 'text-muted-foreground'}>
-                {(statusCounts[item] ?? 0).toLocaleString('ko-KR')}
+                {(item === PURCHASE_OVERDUE_TAB ? overduePurchasedCount : statusCounts[item] ?? 0).toLocaleString('ko-KR')}
               </span>
             </Link>
           )
@@ -212,7 +225,7 @@ export async function PurchasingOrdersView({
         <section className="overflow-hidden rounded-md border bg-background">
           <div className="flex flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-sm font-semibold">{PURCHASE_REQUEST_STATUS_LABELS[status]} 목록</h2>
+              <h2 className="text-sm font-semibold">{PURCHASE_TAB_LABELS[selectedTab]} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -245,39 +258,39 @@ export async function PurchasingOrdersView({
                   </th>
                   <th className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label="상태" column="status" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="min-w-[280px] px-3 py-2 font-medium">
-                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
+                    <SortHeader label="상품" column="productName" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
                   </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   {showCosts ? (
                     <>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                     </>
                   ) : null}
                   {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label="담당자" column="buyerName" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>
@@ -394,7 +407,7 @@ export async function PurchasingOrdersView({
               <Link
                 href={purchaseOrdersHref({
                   basePath,
-                  status,
+                  status: selectedTab,
                   search,
                   showCosts,
                   showRecommendationBasis,
@@ -417,7 +430,7 @@ export async function PurchasingOrdersView({
               <Link
                 href={purchaseOrdersHref({
                   basePath,
-                  status,
+                  status: selectedTab,
                   search,
                   showCosts,
                   showRecommendationBasis,
@@ -456,7 +469,7 @@ function SortHeader({
 }: {
   label: string
   column: string
-  status: PurchaseRequestStatus
+  status: PurchaseOrdersTab
   search: string | undefined
   showCosts: boolean
   showRecommendationBasis: boolean
@@ -558,9 +571,9 @@ function stringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
 
-function parseStatus(value: string | undefined, allowedStatuses: readonly PurchaseRequestStatus[]): PurchaseRequestStatus | null {
+function parseTab(value: string | undefined, allowedStatuses: readonly PurchaseOrdersTab[]): PurchaseOrdersTab | null {
   if (!value) return null
-  return allowedStatuses.includes(value as PurchaseRequestStatus) ? value as PurchaseRequestStatus : null
+  return allowedStatuses.includes(value as PurchaseOrdersTab) ? value as PurchaseOrdersTab : null
 }
 
 function parseOrder(value: string | undefined): 'asc' | 'desc' | null {
@@ -588,7 +601,7 @@ function purchaseOrdersHref({
   page,
 }: {
   basePath: string
-  status: PurchaseRequestStatus
+  status: PurchaseOrdersTab
   search?: string
   showCosts?: boolean
   showRecommendationBasis?: boolean

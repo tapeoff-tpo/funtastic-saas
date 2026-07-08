@@ -13,6 +13,7 @@ import type { PurchaseRequestStatus } from './purchase-request-status'
 export async function getPurchaseRequests(input: {
   userId: string
   status?: PurchaseRequestStatus
+  overdueOnly?: boolean
   search?: string
   page?: number
   pageSize?: number
@@ -24,6 +25,10 @@ export async function getPurchaseRequests(input: {
   const conditions: SQL[] = [eq(purchaseRequestItems.userId, input.userId)]
 
   if (input.status) conditions.push(eq(purchaseRequestItems.status, input.status))
+  if (input.overdueOnly) {
+    conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`)
+    conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`)
+  }
   if (input.search) {
     const pattern = `%${input.search}%`
     conditions.push(or(
@@ -37,13 +42,23 @@ export async function getPurchaseRequests(input: {
 
   const where = and(...conditions)
   const orderBy = purchaseRequestOrderBy(input.sort, input.order, input.status)
-  const overduePurchasedWhere = input.status === 'purchase_completed'
-    ? and(
-      where,
-      sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
-      sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
-    )
-    : undefined
+  const overduePurchasedConditions: SQL[] = [
+    eq(purchaseRequestItems.userId, input.userId),
+    eq(purchaseRequestItems.status, 'purchase_completed'),
+    sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
+    sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
+  ]
+  if (input.search) {
+    const pattern = `%${input.search}%`
+    overduePurchasedConditions.push(or(
+      ilike(purchaseRequestItems.sku, pattern),
+      ilike(purchaseRequestItems.productName, pattern),
+      ilike(purchaseRequestItems.optionName, pattern),
+      ilike(purchaseRequestItems.purchaseManagementCode, pattern),
+      ilike(purchaseRequestItems.supplierOrderNumber, pattern),
+    )!)
+  }
+  const overduePurchasedWhere = and(...overduePurchasedConditions)
   const chinaCurrentStock = sql<number>`(
     SELECT COALESCE(SUM(
       CASE
@@ -101,9 +116,7 @@ export async function getPurchaseRequests(input: {
         eq(products.internalSku, purchaseRequestItems.sku),
       ))
       .where(where),
-    overduePurchasedWhere
-      ? db.select({ total: count() }).from(purchaseRequestItems).where(overduePurchasedWhere)
-      : Promise.resolve([{ total: 0 }]),
+    db.select({ total: count() }).from(purchaseRequestItems).where(overduePurchasedWhere),
   ])
 
   return {
@@ -290,41 +303,36 @@ export function purchaseRequestOrderBy(sort?: string, order?: string, status?: P
   const totalCostYuan = sql<number>`COALESCE(${unitCostYuan}, 0) * ${purchaseRequestItems.requestedQuantity}`
   const totalCostKrw = sql<number>`COALESCE(${unitCostKrw}, 0) * ${purchaseRequestItems.requestedQuantity}`
   const purchaseDate = sql<Date>`COALESCE(${purchaseRequestItems.requestDate}, ${purchaseRequestItems.createdAt}::date)`
-  const overdueFirst = status === 'purchase_completed'
-    ? [desc(sql<number>`CASE WHEN ${purchaseRequestItems.outboundExpectedDate} IS NOT NULL AND ${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days' THEN 1 ELSE 0 END`)]
-    : []
 
   switch (sort) {
     case 'status':
-      return [...overdueFirst, direction(purchaseRequestItems.status), desc(purchaseRequestItems.createdAt)]
+      return [direction(purchaseRequestItems.status), desc(purchaseRequestItems.createdAt)]
     case 'productName':
       return [
-        ...overdueFirst,
         direction(purchaseRequestItems.productName),
         asc(purchaseRequestItems.sku),
         desc(purchaseRequestItems.createdAt),
       ]
     case 'sku':
-      return [...overdueFirst, direction(purchaseRequestItems.sku), desc(purchaseRequestItems.createdAt)]
+      return [direction(purchaseRequestItems.sku), desc(purchaseRequestItems.createdAt)]
     case 'requestedQuantity':
-      return [...overdueFirst, direction(purchaseRequestItems.requestedQuantity), desc(purchaseRequestItems.createdAt)]
+      return [direction(purchaseRequestItems.requestedQuantity), desc(purchaseRequestItems.createdAt)]
     case 'unitCostYuan':
-      return [...overdueFirst, direction(unitCostYuan), desc(purchaseRequestItems.createdAt)]
+      return [direction(unitCostYuan), desc(purchaseRequestItems.createdAt)]
     case 'unitCostKrw':
-      return [...overdueFirst, direction(unitCostKrw), desc(purchaseRequestItems.createdAt)]
+      return [direction(unitCostKrw), desc(purchaseRequestItems.createdAt)]
     case 'totalCostYuan':
-      return [...overdueFirst, direction(totalCostYuan), desc(purchaseRequestItems.createdAt)]
+      return [direction(totalCostYuan), desc(purchaseRequestItems.createdAt)]
     case 'totalCostKrw':
-      return [...overdueFirst, direction(totalCostKrw), desc(purchaseRequestItems.createdAt)]
+      return [direction(totalCostKrw), desc(purchaseRequestItems.createdAt)]
     case 'purchaseManagementCode':
-      return [...overdueFirst, direction(purchaseRequestItems.purchaseManagementCode), desc(purchaseRequestItems.createdAt)]
+      return [direction(purchaseRequestItems.purchaseManagementCode), desc(purchaseRequestItems.createdAt)]
     case 'buyerName':
-      return [...overdueFirst, direction(purchaseRequestItems.buyerName), desc(purchaseRequestItems.createdAt)]
+      return [direction(purchaseRequestItems.buyerName), desc(purchaseRequestItems.createdAt)]
     case 'createdAt':
-      return [...overdueFirst, direction(purchaseRequestItems.createdAt)]
+      return [direction(purchaseRequestItems.createdAt)]
     default:
       return [
-        ...overdueFirst,
         desc(purchaseDate),
         asc(purchaseRequestItems.productName),
         asc(purchaseRequestItems.sku),

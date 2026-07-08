@@ -24,10 +24,31 @@ export async function getPurchaseRequests(input: {
   const pageSize = input.pageSize ?? 50
   const conditions: SQL[] = [eq(purchaseRequestItems.userId, input.userId)]
 
-  if (input.status) conditions.push(eq(purchaseRequestItems.status, input.status))
   if (input.overdueOnly) {
-    conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`)
-    conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`)
+    if (input.status === 'purchased') {
+      conditions.push(eq(purchaseRequestItems.status, 'purchased'))
+      conditions.push(sql`${purchaseRequestItems.requestDate} IS NOT NULL`)
+      conditions.push(sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`)
+    } else if (input.status === 'purchase_completed') {
+      conditions.push(eq(purchaseRequestItems.status, 'purchase_completed'))
+      conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`)
+      conditions.push(sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`)
+    } else {
+      conditions.push(or(
+        and(
+          eq(purchaseRequestItems.status, 'purchased'),
+          sql`${purchaseRequestItems.requestDate} IS NOT NULL`,
+          sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
+        ),
+        and(
+          eq(purchaseRequestItems.status, 'purchase_completed'),
+          sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
+          sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
+        ),
+      )!)
+    }
+  } else if (input.status) {
+    conditions.push(eq(purchaseRequestItems.status, input.status))
   }
   if (input.search) {
     const pattern = `%${input.search}%`
@@ -42,7 +63,13 @@ export async function getPurchaseRequests(input: {
 
   const where = and(...conditions)
   const orderBy = purchaseRequestOrderBy(input.sort, input.order, input.status)
-  const overduePurchasedConditions: SQL[] = [
+  const overduePurchaseRequestConditions: SQL[] = [
+    eq(purchaseRequestItems.userId, input.userId),
+    eq(purchaseRequestItems.status, 'purchased'),
+    sql`${purchaseRequestItems.requestDate} IS NOT NULL`,
+    sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
+  ]
+  const overduePurchaseCompletedConditions: SQL[] = [
     eq(purchaseRequestItems.userId, input.userId),
     eq(purchaseRequestItems.status, 'purchase_completed'),
     sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
@@ -50,15 +77,18 @@ export async function getPurchaseRequests(input: {
   ]
   if (input.search) {
     const pattern = `%${input.search}%`
-    overduePurchasedConditions.push(or(
+    const searchCondition = or(
       ilike(purchaseRequestItems.sku, pattern),
       ilike(purchaseRequestItems.productName, pattern),
       ilike(purchaseRequestItems.optionName, pattern),
       ilike(purchaseRequestItems.purchaseManagementCode, pattern),
       ilike(purchaseRequestItems.supplierOrderNumber, pattern),
-    )!)
+    )!
+    overduePurchaseRequestConditions.push(searchCondition)
+    overduePurchaseCompletedConditions.push(searchCondition)
   }
-  const overduePurchasedWhere = and(...overduePurchasedConditions)
+  const overduePurchaseRequestWhere = and(...overduePurchaseRequestConditions)
+  const overduePurchaseCompletedWhere = and(...overduePurchaseCompletedConditions)
   const chinaCurrentStock = sql<number>`(
     SELECT COALESCE(SUM(
       CASE
@@ -78,7 +108,7 @@ export async function getPurchaseRequests(input: {
       AND COALESCE(active.option_name, '') = COALESCE(${purchaseRequestItems.optionName}, '')
       AND active.status IN ('china_arrived', 'outbound_requested')
   )`
-  const [items, [{ total }], statusCounts, costRows, overduePurchasedRows] = await Promise.all([
+  const [items, [{ total }], statusCounts, costRows, overduePurchaseRequestRows, overduePurchaseCompletedRows] = await Promise.all([
     db
       .select({
         ...getTableColumns(purchaseRequestItems),
@@ -116,14 +146,20 @@ export async function getPurchaseRequests(input: {
         eq(products.internalSku, purchaseRequestItems.sku),
       ))
       .where(where),
-    db.select({ total: count() }).from(purchaseRequestItems).where(overduePurchasedWhere),
+    db.select({ total: count() }).from(purchaseRequestItems).where(overduePurchaseRequestWhere),
+    db.select({ total: count() }).from(purchaseRequestItems).where(overduePurchaseCompletedWhere),
   ])
+  const overduePurchaseRequestCount = overduePurchaseRequestRows[0]?.total ?? 0
+  const overduePurchaseCompletedCount = overduePurchaseCompletedRows[0]?.total ?? 0
 
   return {
     items,
     total,
     costTotals: sumPurchaseCosts(costRows),
-    overduePurchasedCount: overduePurchasedRows[0]?.total ?? 0,
+    overduePurchasedCount: overduePurchaseCompletedCount,
+    overduePurchaseRequestCount,
+    overduePurchaseCompletedCount,
+    overdueTotalCount: overduePurchaseRequestCount + overduePurchaseCompletedCount,
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row.total])) as Partial<Record<PurchaseRequestStatus, number>>,
   }
 }
@@ -163,6 +199,7 @@ export async function updatePurchaseRequestStatus(input: {
       updatedAt: new Date(),
     }
     if (input.status === 'purchased') {
+      values.requestDate = current.requestDate ?? todayKstDate()
       values.actualPurchaseQuantity = current.actualPurchaseQuantity ?? current.requestedQuantity
       if (!current.purchaseManagementCode) {
         const assignment = await nextPurchaseManagementAssignment(tx, current)
@@ -190,6 +227,7 @@ export async function updatePurchaseRequestStatus(input: {
 export async function updatePurchaseRequestPlanFields(input: {
   userId: string
   id: string
+  requestDate?: string | null
   requestedQuantity?: number
   actualPurchaseQuantity?: number | null
   chinaReceivedQuantity?: number | null
@@ -213,6 +251,9 @@ export async function updatePurchaseRequestPlanFields(input: {
     updatedAt: new Date(),
   }
   if (requestedQuantity !== undefined) values.requestedQuantity = requestedQuantity
+  if (input.requestDate !== undefined) {
+    values.requestDate = input.requestDate || null
+  }
   if (actualPurchaseQuantity !== undefined) values.actualPurchaseQuantity = actualPurchaseQuantity
   if (chinaReceivedQuantity !== undefined) values.chinaReceivedQuantity = chinaReceivedQuantity
   if (input.supplierOrderNumber !== undefined) {
@@ -759,6 +800,11 @@ function formatSeoulDateKey(value: Date) {
   const month = parts.find((part) => part.type === 'month')?.value ?? '00'
   const day = parts.find((part) => part.type === 'day')?.value ?? '00'
   return `${year}${month}${day}`
+}
+
+function todayKstDate() {
+  const key = formatSeoulDateKey(new Date())
+  return `${key.slice(0, 4)}-${key.slice(4, 6)}-${key.slice(6, 8)}`
 }
 
 function emptyToNull(value: string | null | undefined): string | null {

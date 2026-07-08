@@ -33,13 +33,6 @@ export const metadata: Metadata = {
 }
 
 const ORDER_STATUSES = PURCHASE_REQUEST_STATUSES.filter((status) => status !== 'requested')
-const PURCHASE_OVERDUE_TAB = 'purchase_overdue'
-type PurchaseOrdersTab = PurchaseRequestStatus | typeof PURCHASE_OVERDUE_TAB
-
-const PURCHASE_TAB_LABELS: Record<PurchaseOrdersTab, string> = {
-  ...PURCHASE_REQUEST_STATUS_LABELS,
-  [PURCHASE_OVERDUE_TAB]: '구매/입고지연',
-}
 
 export default async function PurchasingOrdersPage({
   searchParams,
@@ -66,6 +59,8 @@ export async function PurchasingOrdersView({
   title,
   description,
   showRecommendationGenerator = false,
+  overdueOnly = false,
+  showStatusTabs = true,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>
   defaultStatus: PurchaseRequestStatus
@@ -74,14 +69,11 @@ export async function PurchasingOrdersView({
   title: string
   description: string
   showRecommendationGenerator?: boolean
+  overdueOnly?: boolean
+  showStatusTabs?: boolean
 }) {
   const params = await searchParams
-  const allowedTabs = basePath === '/purchasing/orders'
-    ? [...allowedStatuses, PURCHASE_OVERDUE_TAB] satisfies PurchaseOrdersTab[]
-    : allowedStatuses
-  const selectedTab = parseTab(stringParam(params.status), allowedTabs) ?? defaultStatus
-  const isOverdueTab = selectedTab === PURCHASE_OVERDUE_TAB
-  const status: PurchaseRequestStatus = isOverdueTab ? 'purchase_completed' : selectedTab
+  const status = parseStatus(stringParam(params.status), allowedStatuses) ?? defaultStatus
   const search = stringParam(params.search)
   const page = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const showCosts = stringParam(params.showCosts) === '1'
@@ -93,10 +85,19 @@ export async function PurchasingOrdersView({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const { items, total, costTotals, statusCounts, overduePurchasedCount } = await getPurchaseRequests({
+  const {
+    items,
+    total,
+    costTotals,
+    statusCounts,
+    overduePurchasedCount,
+    overduePurchaseRequestCount,
+    overduePurchaseCompletedCount,
+    overdueTotalCount,
+  } = await getPurchaseRequests({
     userId: workspaceUserId,
-    status,
-    overdueOnly: isOverdueTab,
+    status: overdueOnly ? undefined : status,
+    overdueOnly,
     search: search ?? undefined,
     page,
     pageSize: 50,
@@ -119,7 +120,8 @@ export async function PurchasingOrdersView({
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (isRequestedStatus ? 0 : 2)
-  const costToggleParams = new URLSearchParams({ status: selectedTab })
+  const listLabel = overdueOnly ? title : PURCHASE_REQUEST_STATUS_LABELS[status]
+  const costToggleParams = new URLSearchParams({ status })
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
   if (sort) costToggleParams.set('sort', sort)
@@ -127,7 +129,7 @@ export async function PurchasingOrdersView({
   costToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (!showCosts) costToggleParams.set('showCosts', '1')
   const costToggleHref = `${basePath}?${costToggleParams.toString()}`
-  const basisToggleParams = new URLSearchParams({ status: selectedTab })
+  const basisToggleParams = new URLSearchParams({ status })
   if (search) basisToggleParams.set('search', search)
   if (page > 1) basisToggleParams.set('page', String(page))
   if (sort) basisToggleParams.set('sort', sort)
@@ -146,7 +148,7 @@ export async function PurchasingOrdersView({
           </p>
         </div>
         <form className="flex items-center gap-2" action={basePath}>
-          <input type="hidden" name="status" value={selectedTab} />
+          <input type="hidden" name="status" value={status} />
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
           <input type="hidden" name="showRecommendationBasis" value={showRecommendationBasis ? '1' : '0'} />
           {sort ? <input type="hidden" name="sort" value={sort} /> : null}
@@ -163,19 +165,39 @@ export async function PurchasingOrdersView({
 
       {showRecommendationGenerator ? <PurchaseRecommendationGenerator /> : null}
 
-      {status === 'purchase_completed' && overduePurchasedCount > 0 ? (
+      {!overdueOnly && status === 'purchased' && overduePurchaseRequestCount > 0 ? (
+        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <strong>구매 지연 확인 필요</strong>
+          <span className="ml-2">
+            발주요청 날짜 기준 7일이 지난 항목 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건이 있습니다.
+            지연 항목은 빨간색으로 표시되며 구매/입고지연 메뉴에서 따로 볼 수 있습니다.
+          </span>
+        </section>
+      ) : null}
+
+      {!overdueOnly && status === 'purchase_completed' && overduePurchasedCount > 0 ? (
         <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           <strong>도착 지연 확인 필요</strong>
           <span className="ml-2">
             구매날짜 기준 7일이 지난 항목 {overduePurchasedCount.toLocaleString('ko-KR')}건이 있습니다.
-            지연 항목은 빨간색으로 표시되며 구매/입고지연 탭에서 따로 볼 수 있습니다.
+            지연 항목은 빨간색으로 표시되며 구매/입고지연 메뉴에서 따로 볼 수 있습니다.
+          </span>
+        </section>
+      ) : null}
+
+      {overdueOnly && overdueTotalCount > 0 ? (
+        <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+          <strong>구매/입고지연</strong>
+          <span className="ml-2">
+            발주요청 지연 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건,
+            구매완료 입고지연 {overduePurchaseCompletedCount.toLocaleString('ko-KR')}건입니다.
           </span>
         </section>
       ) : null}
 
       <section className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border bg-muted/20 px-3 py-2">
         <span className="text-sm font-medium">
-          {PURCHASE_TAB_LABELS[selectedTab]} 총 구매금액
+          {listLabel} 총 구매금액
         </span>
         <span className="text-sm tabular-nums">
           <span className="text-muted-foreground">元 </span>
@@ -192,9 +214,10 @@ export async function PurchasingOrdersView({
         ) : null}
       </section>
 
+      {showStatusTabs ? (
       <nav className="flex flex-wrap gap-2">
-        {allowedTabs.map((item) => {
-          const active = item === selectedTab
+        {allowedStatuses.map((item) => {
+          const active = item === status
           const href = purchaseOrdersHref({
             basePath,
             status: item,
@@ -212,20 +235,21 @@ export async function PurchasingOrdersView({
                 active ? 'border-foreground bg-foreground text-background' : 'border-border bg-background hover:bg-muted'
               }`}
             >
-              {PURCHASE_TAB_LABELS[item]}
+              {PURCHASE_REQUEST_STATUS_LABELS[item]}
               <span className={active ? 'text-background/70' : 'text-muted-foreground'}>
-                {(item === PURCHASE_OVERDUE_TAB ? overduePurchasedCount : statusCounts[item] ?? 0).toLocaleString('ko-KR')}
+                {(statusCounts[item] ?? 0).toLocaleString('ko-KR')}
               </span>
             </Link>
           )
         })}
       </nav>
+      ) : null}
 
       <PurchaseBulkSelectionProvider ids={items.map((item) => item.id)} nextStatus={nextStatus}>
         <section className="overflow-hidden rounded-md border bg-background">
           <div className="flex flex-col gap-2 border-b px-3 py-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-sm font-semibold">{PURCHASE_TAB_LABELS[selectedTab]} 목록</h2>
+              <h2 className="text-sm font-semibold">{listLabel} 목록</h2>
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
@@ -245,7 +269,7 @@ export async function PurchasingOrdersView({
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
               </Link>
               <PurchaseBulkDeleteButton />
-              <PurchaseBulkStatusButton />
+              {overdueOnly ? null : <PurchaseBulkStatusButton />}
             </div>
           </div>
 
@@ -258,39 +282,39 @@ export async function PurchasingOrdersView({
                   </th>
                   <th className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="min-w-[280px] px-3 py-2 font-medium">
-                    <SortHeader label="상품" column="productName" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
+                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
                   </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   {showCosts ? (
                     <>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                     </>
                   ) : null}
                   {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" status={selectedTab} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>
@@ -307,17 +331,20 @@ export async function PurchasingOrdersView({
                   items.map((item, index) => {
                     const rowNumber = (page - 1) * pageSize + index + 1
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
-                    const stageQuantity = getStageQuantity(item, status, outboundRequestedQuantity)
+                    const stageQuantity = getStageQuantity(item, item.status, outboundRequestedQuantity)
+                    const requestDateElapsedDays = item.requestDate ? daysSinceDateOnly(item.requestDate) : 0
                     const purchaseDateElapsedDays = item.outboundExpectedDate ? daysSinceDateOnly(item.outboundExpectedDate) : 0
-                    const isArrivalOverdue = status === 'purchase_completed' && purchaseDateElapsedDays >= 7
-                    const stickyCellClassName = isArrivalOverdue ? 'bg-red-50' : 'bg-background'
+                    const isPurchaseRequestOverdue = item.status === 'purchased' && requestDateElapsedDays >= 7
+                    const isArrivalOverdue = item.status === 'purchase_completed' && purchaseDateElapsedDays >= 7
+                    const isOverdueRow = isPurchaseRequestOverdue || isArrivalOverdue
+                    const stickyCellClassName = isOverdueRow ? 'bg-red-50' : 'bg-background'
                     const costs = calculatePurchaseCosts({
                       requestedQuantity: item.requestedQuantity,
                       unitCostYuan: item.unitCostYuan,
                       unitCostKrw: item.unitCostKrw,
                     })
                     return (
-                      <tr key={item.id} className={`border-t align-middle ${isArrivalOverdue ? 'bg-red-50/80' : ''}`}>
+                      <tr key={item.id} className={`border-t align-middle ${isOverdueRow ? 'bg-red-50/80' : ''}`}>
                       <td className={`sticky left-0 z-10 px-3 py-2 text-center align-middle ${stickyCellClassName}`}>
                         <PurchaseRowCheckbox id={item.id} />
                       </td>
@@ -328,6 +355,16 @@ export async function PurchasingOrdersView({
                         <Badge variant={item.status === 'completed' ? 'default' : 'secondary'}>
                           {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
                         </Badge>
+                        {isPurchaseRequestOverdue ? (
+                          <div className="mt-1">
+                            <Badge
+                              className="max-w-full border-red-200 bg-red-100 px-1.5 text-[11px] text-red-800 hover:bg-red-100"
+                              title={`발주요청 날짜 기준 ${requestDateElapsedDays}일 경과`}
+                            >
+                              {requestDateElapsedDays}일 지연
+                            </Badge>
+                          </div>
+                        ) : null}
                         {isArrivalOverdue ? (
                           <div className="mt-1">
                             <Badge
@@ -350,7 +387,7 @@ export async function PurchasingOrdersView({
                           id={item.id}
                           field={quantityColumn.field}
                           quantity={stageQuantity}
-                          stockLimit={status === 'outbound_requested' ? item.chinaCurrentStock : undefined}
+                          stockLimit={item.status === 'outbound_requested' ? item.chinaCurrentStock : undefined}
                           costSummary={isRequestedStatus ? {
                             unitCostYuan: costs.unitCostYuan,
                             unitCostKrw: costs.unitCostKrw,
@@ -378,7 +415,9 @@ export async function PurchasingOrdersView({
                           <PurchasePlanFieldsV2
                             id={item.id}
                             supplierOrderNumber={item.supplierOrderNumber}
-                            outboundExpectedDate={item.outboundExpectedDate}
+                            dateValue={item.status === 'purchased' ? item.requestDate : item.outboundExpectedDate}
+                            dateField={item.status === 'purchased' ? 'requestDate' : 'outboundExpectedDate'}
+                            dateLabel={item.status === 'purchased' ? '발주요청 날짜' : '구매날짜'}
                             purchaseMethod={item.purchaseMethod}
                           />
                         </td>
@@ -407,7 +446,7 @@ export async function PurchasingOrdersView({
               <Link
                 href={purchaseOrdersHref({
                   basePath,
-                  status: selectedTab,
+                  status,
                   search,
                   showCosts,
                   showRecommendationBasis,
@@ -430,7 +469,7 @@ export async function PurchasingOrdersView({
               <Link
                 href={purchaseOrdersHref({
                   basePath,
-                  status: selectedTab,
+                  status,
                   search,
                   showCosts,
                   showRecommendationBasis,
@@ -469,7 +508,7 @@ function SortHeader({
 }: {
   label: string
   column: string
-  status: PurchaseOrdersTab
+  status: PurchaseRequestStatus
   search: string | undefined
   showCosts: boolean
   showRecommendationBasis: boolean
@@ -571,9 +610,9 @@ function stringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
 
-function parseTab(value: string | undefined, allowedStatuses: readonly PurchaseOrdersTab[]): PurchaseOrdersTab | null {
+function parseStatus(value: string | undefined, allowedStatuses: readonly PurchaseRequestStatus[]): PurchaseRequestStatus | null {
   if (!value) return null
-  return allowedStatuses.includes(value as PurchaseOrdersTab) ? value as PurchaseOrdersTab : null
+  return allowedStatuses.includes(value as PurchaseRequestStatus) ? value as PurchaseRequestStatus : null
 }
 
 function parseOrder(value: string | undefined): 'asc' | 'desc' | null {
@@ -601,7 +640,7 @@ function purchaseOrdersHref({
   page,
 }: {
   basePath: string
-  status: PurchaseOrdersTab
+  status: PurchaseRequestStatus
   search?: string
   showCosts?: boolean
   showRecommendationBasis?: boolean

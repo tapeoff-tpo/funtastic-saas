@@ -529,12 +529,16 @@ export function PurchaseDeleteButton({
 export function PurchasePlanFieldsV2({
   id,
   supplierOrderNumber,
-  outboundExpectedDate,
+  dateValue,
+  dateField,
+  dateLabel,
   purchaseMethod,
 }: {
   id: string
   supplierOrderNumber: string | null
-  outboundExpectedDate: string | Date | null
+  dateValue: string | Date | null
+  dateField: 'requestDate' | 'outboundExpectedDate'
+  dateLabel: string
   purchaseMethod: string | null
 }) {
   const router = useRouter()
@@ -554,7 +558,7 @@ export function PurchasePlanFieldsV2({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           supplierOrderNumber: String(formData.get('supplierOrderNumber') ?? ''),
-          outboundExpectedDate: String(formData.get('outboundExpectedDate') ?? '') || null,
+          [dateField]: String(formData.get(dateField) ?? '') || null,
           purchaseMethod: methodMode === '직접입력' ? customMethod : methodMode,
         }),
       })
@@ -575,11 +579,11 @@ export function PurchasePlanFieldsV2({
         />
       </label>
       <label className="space-y-1">
-        <span className="block text-[11px] font-medium text-muted-foreground">구매날짜</span>
+        <span className="block text-[11px] font-medium text-muted-foreground">{dateLabel}</span>
         <Input
-          name="outboundExpectedDate"
+          name={dateField}
           type="date"
-          defaultValue={formatDateInput(outboundExpectedDate) || todayDateInput()}
+          defaultValue={formatDateInput(dateValue) || todayDateInput()}
           className="h-7 text-xs"
         />
       </label>

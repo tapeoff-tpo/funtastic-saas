@@ -132,6 +132,7 @@ export const navSections: NavSection[] = [
       { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
       { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
       { href: '/purchasing/purchases', label: '발주검토', icon: CreditCard },
+      { href: '/purchasing/overdue', label: '구매/입고지연', icon: ClipboardList },
       { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
     ],
   },

@@ -6,7 +6,10 @@ import {
   addAiAccountMessage,
   addAiAccountUserCandidate,
   createAiAccount,
+  deleteAiAccount,
   deleteAiAccountUserCandidate,
+  deleteAiAccountUserCandidates,
+  updateAiAccount,
   updateAiAccountLimits,
 } from '@/lib/operations/ai-accounts'
 import { createClient } from '@/lib/supabase/server'
@@ -25,6 +28,7 @@ export async function createAiAccountAction(
     userId: await getWorkspaceUserId(user.id),
     name,
     email,
+    secondaryEmail: String(formData.get('secondaryEmail') ?? ''),
   })
 
   if ('error' in result) return { error: result.error }
@@ -96,6 +100,42 @@ export async function deleteAiAccountUserCandidateAction(formData: FormData) {
   await deleteAiAccountUserCandidate({
     userId,
     id: String(formData.get('id') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function deleteAiAccountUserCandidatesAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await deleteAiAccountUserCandidates({
+    userId,
+    ids: formData.getAll('ids').map((value) => String(value)),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function updateAiAccountAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await updateAiAccount({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
+    name: String(formData.get('name') ?? ''),
+    email: String(formData.get('email') ?? ''),
+    secondaryEmail: String(formData.get('secondaryEmail') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function deleteAiAccountAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await deleteAiAccount({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
   })
   revalidatePath('/operations/ai-accounts')
 }

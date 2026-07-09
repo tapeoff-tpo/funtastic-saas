@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { gptAccountMessages, gptAccounts, gptAccountUsers } from '@/lib/db/schema'
 
@@ -30,6 +30,7 @@ export async function ensureAiAccountTables() {
       "user_id" uuid NOT NULL,
       "name" varchar(100) NOT NULL,
       "email" varchar(255),
+      "secondary_email" varchar(255),
       "status" varchar(30) NOT NULL DEFAULT 'available',
       "current_user_name" varchar(100),
       "daily_reset_time" varchar(10),
@@ -43,6 +44,7 @@ export async function ensureAiAccountTables() {
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL
     )
   `)
+  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "secondary_email" varchar(255)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit" varchar(100)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit_period" varchar(10)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100)`)
@@ -223,14 +225,55 @@ export async function deleteAiAccountUserCandidate(input: {
   return { success: true }
 }
 
+export async function deleteAiAccountUserCandidates(input: {
+  userId: string
+  ids: string[]
+}) {
+  await ensureAiAccountTables()
+  const ids = Array.from(new Set(input.ids.map((id) => id.trim()).filter(Boolean)))
+  if (!ids.length) return { error: '삭제할 사용자를 선택해주세요.' as const }
+
+  const rows = await db.delete(gptAccountUsers)
+    .where(and(eq(gptAccountUsers.userId, input.userId), inArray(gptAccountUsers.id, ids)))
+    .returning({ name: gptAccountUsers.name })
+
+  const deletedNames = rows.map((row) => row.name)
+  if (!deletedNames.length) return { error: '사용자를 찾을 수 없습니다.' as const }
+
+  const accounts = await db
+    .select({ id: gptAccounts.id, currentUserName: gptAccounts.currentUserName, status: gptAccounts.status })
+    .from(gptAccounts)
+    .where(eq(gptAccounts.userId, input.userId))
+
+  for (const account of accounts) {
+    const activeUsers = (account.currentUserName || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean)
+      .filter((name) => !deletedNames.includes(name))
+    const nextStatus = account.status === 'in_use' && !activeUsers.length ? 'available' : account.status
+    await db.update(gptAccounts)
+      .set({
+        currentUserName: activeUsers.join(', ') || null,
+        status: nextStatus,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, account.id)))
+  }
+
+  return { success: true }
+}
+
 export async function createAiAccount(input: {
   userId: string
   name: string
   email?: string | null
+  secondaryEmail?: string | null
 }) {
   await seedDefaultAiAccounts(input.userId)
   const name = input.name.trim()
   const email = input.email?.trim() || null
+  const secondaryEmail = input.secondaryEmail?.trim() || null
   if (!name) return { error: '계정 이름을 입력해주세요.' as const }
 
   const [{ nextSortOrder }] = await db.select({
@@ -242,6 +285,7 @@ export async function createAiAccount(input: {
       userId: input.userId,
       name,
       email,
+      secondaryEmail,
       sortOrder: nextSortOrder,
       status: 'available',
       fiveHourLimit: '5시간 한도',
@@ -261,6 +305,53 @@ export async function createAiAccount(input: {
     message: `${name} 계정을 추가했습니다.`,
   })
   return { id: row.id }
+}
+
+export async function updateAiAccount(input: {
+  userId: string
+  accountId: string
+  name: string
+  email?: string | null
+  secondaryEmail?: string | null
+}) {
+  await ensureAiAccountTables()
+  const name = input.name.trim()
+  const email = input.email?.trim() || null
+  const secondaryEmail = input.secondaryEmail?.trim() || null
+  if (!name) return { error: '계정 이름을 입력해주세요.' as const }
+
+  const [duplicate] = await db
+    .select({ id: gptAccounts.id })
+    .from(gptAccounts)
+    .where(sql`${gptAccounts.userId} = ${input.userId} AND ${gptAccounts.name} = ${name} AND ${gptAccounts.id} <> ${input.accountId}`)
+    .limit(1)
+  if (duplicate) return { error: '이미 같은 이름의 AI 계정이 있습니다.' as const }
+
+  const [row] = await db.update(gptAccounts)
+    .set({
+      name,
+      email,
+      secondaryEmail,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .returning({ id: gptAccounts.id })
+
+  if (!row) return { error: '계정을 찾을 수 없습니다.' as const }
+  return { success: true }
+}
+
+export async function deleteAiAccount(input: {
+  userId: string
+  accountId: string
+}) {
+  await ensureAiAccountTables()
+  const [row] = await db.delete(gptAccounts)
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .returning({ id: gptAccounts.id })
+
+  if (!row) return { error: '계정을 찾을 수 없습니다.' as const }
+  return { success: true }
 }
 
 export async function addAiAccountMessage(input: {

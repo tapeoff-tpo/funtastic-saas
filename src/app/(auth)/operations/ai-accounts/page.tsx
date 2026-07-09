@@ -80,13 +80,19 @@ export default async function AiAccountsPage() {
         </Card>
       </section>
 
-      <AiAccountForm />
+      <AiAccountForm
+        userCandidates={userCandidates.map((candidate) => ({
+          id: candidate.id,
+          name: candidate.name,
+        }))}
+      />
 
       <AiAccountBoard
         accounts={accounts.map((account) => ({
           id: account.id,
           name: account.name,
           email: account.email,
+          secondaryEmail: account.secondaryEmail,
           status: account.status,
           currentUserName: account.currentUserName,
           fiveHourLimit: account.fiveHourLimit,

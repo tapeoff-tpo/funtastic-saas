@@ -1,14 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronDown, Copy, MessageSquare, Plus, Save, Trash2 } from 'lucide-react'
+import { ChevronDown, Copy, MessageSquare, Save, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   addAiAccountMessageAction,
-  addAiAccountUserCandidateAction,
   deleteAiAccountUserCandidateAction,
   updateAiAccountLimitsAction,
 } from './actions'
@@ -135,32 +134,11 @@ export function AiAccountBoard({
         </div>
       </div>
 
-      <div className="border-b px-4 py-3">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h3 className="text-sm font-semibold">사용자 후보</h3>
-            <p className="text-xs text-muted-foreground">채팅 사용자 선택 드롭다운에 표시됩니다.</p>
-          </div>
-          <form action={addAiAccountUserCandidateAction} className="flex gap-2">
-            <Input name="name" placeholder="사용자 이름" className="h-9 w-44" required />
-            <Button type="submit" className="h-9">
-              <Plus className="h-4 w-4" />
-              추가
-            </Button>
-          </form>
-        </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {userCandidates.map((candidate) => (
-            <form key={candidate.id} id={`delete-ai-user-${candidate.id}`} action={deleteAiAccountUserCandidateAction} className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs">
-              <input type="hidden" name="id" value={candidate.id} />
-              <span className="font-medium">{candidate.name}</span>
-              <Button type="submit" variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-destructive" title="사용자 삭제">
-                <Trash2 className="h-3 w-3" />
-              </Button>
-            </form>
-          ))}
-        </div>
-      </div>
+      {userCandidates.map((candidate) => (
+        <form key={candidate.id} id={`delete-ai-user-${candidate.id}`} action={deleteAiAccountUserCandidateAction} className="hidden">
+          <input type="hidden" name="id" value={candidate.id} />
+        </form>
+      ))}
 
       <div className="grid gap-0 lg:grid-cols-[minmax(0,680px)_minmax(520px,1fr)]">
         <div className="min-w-0 border-b lg:border-b-0 lg:border-r">
@@ -335,7 +313,7 @@ export function AiAccountBoard({
 
               <form action={addAiAccountMessageAction} className="rounded-md border bg-background p-3" onSubmit={() => clearSelectedUsers(selectedAccount.id)}>
                 <input type="hidden" name="accountId" value={selectedAccount.id} />
-                <h3 className="mb-3 text-sm font-semibold">채팅 남기기</h3>
+                <h3 className="mb-3 text-sm font-semibold">메모 남기기</h3>
                 <div className="grid gap-2">
                   <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_150px_auto] xl:items-end">
                     <div className="space-y-1">
@@ -407,7 +385,7 @@ export function AiAccountBoard({
 
               <div className="rounded-md border bg-background">
                 <div className="border-b px-3 py-2">
-                  <h3 className="text-sm font-semibold">채팅</h3>
+                  <h3 className="text-sm font-semibold">메모</h3>
                 </div>
                 <div className="max-h-[420px] overflow-y-auto divide-y">
                   {selectedMessages.length ? selectedMessages.map((message) => (
@@ -419,13 +397,13 @@ export function AiAccountBoard({
                       <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{message.message}</p>
                     </div>
                   )) : (
-                    <p className="px-3 py-6 text-sm text-muted-foreground">아직 채팅이 없습니다.</p>
+                    <p className="px-3 py-6 text-sm text-muted-foreground">아직 메모가 없습니다.</p>
                   )}
                 </div>
               </div>
             </div>
           ) : (
-            <p className="p-4 text-sm text-muted-foreground">계정을 추가하면 채팅 패널이 표시됩니다.</p>
+            <p className="p-4 text-sm text-muted-foreground">계정을 추가하면 메모 패널이 표시됩니다.</p>
           )}
         </aside>
       </div>

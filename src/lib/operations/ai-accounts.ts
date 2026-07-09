@@ -278,7 +278,11 @@ export async function addAiAccountMessage(input: {
   if (!messageType && !message) return { error: '내용을 입력해주세요.' as const }
 
   const [account] = await db
-    .select({ id: gptAccounts.id })
+    .select({
+      id: gptAccounts.id,
+      currentUserName: gptAccounts.currentUserName,
+      status: gptAccounts.status,
+    })
     .from(gptAccounts)
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
     .limit(1)
@@ -298,10 +302,25 @@ export async function addAiAccountMessage(input: {
         target: [gptAccountUsers.userId, gptAccountUsers.name],
       })
   }
+  const activeUsers = Array.from(new Set((account.currentUserName || '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean)))
+  const nextActiveUsers = messageType === '사용시작'
+    ? Array.from(new Set([...activeUsers, ...authorNames]))
+    : messageType.startsWith('종료')
+      ? activeUsers.filter((name) => !authorNames.includes(name))
+      : activeUsers
+  const nextStatus = messageType === '사용시작'
+    ? 'in_use'
+    : messageType.startsWith('종료')
+      ? (nextActiveUsers.length ? 'in_use' : 'limit_reached')
+      : account.status
+
   await db.update(gptAccounts)
     .set({
-      currentUserName: authorName,
-      status: messageType.includes('종료') || messageType.includes('한도초과') ? 'limit_reached' : 'in_use',
+      currentUserName: nextActiveUsers.join(', ') || null,
+      status: nextStatus,
       updatedAt: new Date(),
     })
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))

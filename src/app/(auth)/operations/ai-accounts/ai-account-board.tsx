@@ -13,7 +13,7 @@ import {
   updateAiAccountLimitsAction,
 } from './actions'
 
-const CHAT_MESSAGE_TYPES = ['사용시작', '종료(한도초과)', '직접입력'] as const
+const CHAT_MESSAGE_TYPES = ['사용시작', '종료(5시간초과)', '종료(주간초과)', '직접입력'] as const
 
 type AiAccountRow = {
   id: string
@@ -118,6 +118,12 @@ export function AiAccountBoard({
         : [...selected, name]
       return { ...current, [accountId]: next }
     })
+  }
+
+  function clearSelectedUsers(accountId: string) {
+    window.setTimeout(() => {
+      setSelectedUsersByAccount((current) => ({ ...current, [accountId]: [] }))
+    }, 0)
   }
 
   return (
@@ -327,7 +333,7 @@ export function AiAccountBoard({
                 </div>
               </form>
 
-              <form action={addAiAccountMessageAction} className="rounded-md border bg-background p-3">
+              <form action={addAiAccountMessageAction} className="rounded-md border bg-background p-3" onSubmit={() => clearSelectedUsers(selectedAccount.id)}>
                 <input type="hidden" name="accountId" value={selectedAccount.id} />
                 <h3 className="mb-3 text-sm font-semibold">채팅 남기기</h3>
                 <div className="grid gap-2">
@@ -343,17 +349,31 @@ export function AiAccountBoard({
                         </summary>
                         <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-background p-2 shadow-lg">
                           {userCandidates.map((candidate) => (
-                            <label key={candidate.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
-                              <input
-                                type="checkbox"
-                                name="authorNames"
-                                value={candidate.name}
-                                checked={selectedUsers.includes(candidate.name)}
-                                onChange={() => toggleSelectedUser(selectedAccount.id, candidate.name)}
-                                className="h-4 w-4"
-                              />
-                              <span>{candidate.name}</span>
-                            </label>
+                            <div key={candidate.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  name="authorNames"
+                                  value={candidate.name}
+                                  checked={selectedUsers.includes(candidate.name)}
+                                  onChange={() => toggleSelectedUser(selectedAccount.id, candidate.name)}
+                                  className="h-4 w-4"
+                                />
+                                <span className="truncate">{candidate.name}</span>
+                              </label>
+                              <Button
+                                type="submit"
+                                formAction={deleteAiAccountUserCandidateAction}
+                                name="id"
+                                value={candidate.id}
+                                variant="ghost"
+                                size="icon"
+                                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+                                title="사용자 삭제"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
                           ))}
                         </div>
                       </details>

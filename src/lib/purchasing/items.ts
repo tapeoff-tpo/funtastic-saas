@@ -135,6 +135,55 @@ export async function importPurchasingItems(input: { userId: string; fileBuffer:
   return { total: parsed.total, imported: parsed.rows.length, skipped: parsed.skipped }
 }
 
+export async function createPurchasingItem(input: {
+  userId: string
+  data: Partial<Record<Esa009mHeader, string | null>>
+}) {
+  const nextData = {
+    ...normalizeEsaData({}),
+    ...Object.fromEntries(
+      Object.entries(input.data)
+        .filter(([header]) => ESA009M_HEADERS.includes(header as Esa009mHeader))
+        .map(([header, value]) => [header, value?.trim() || null]),
+    ),
+  } as Esa009mData
+
+  const internalSku = nextData[ESA009M_HEADERS[0]]?.trim()
+  const name = nextData[ESA009M_HEADERS[1]]?.trim()
+  if (!internalSku || !name) {
+    return { error: '품목코드와 품목명은 필수입니다.' as const }
+  }
+
+  nextData[ESA009M_HEADERS[0]] = internalSku
+  nextData[ESA009M_HEADERS[1]] = name
+  const [existing] = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(and(eq(products.userId, input.userId), eq(products.internalSku, internalSku)))
+    .limit(1)
+
+  if (existing) return { error: '이미 같은 품목코드가 있습니다.' as const }
+
+  const [row] = await db
+    .insert(products)
+    .values({
+      userId: input.userId,
+      internalSku,
+      name,
+      basePrice: '0',
+      costPrice: numericText(nextData[ESA009M_HEADERS[14]] || nextData[ESA009M_HEADERS[13]]),
+      warehouseLocation: nextData[ESA009M_HEADERS[3]],
+      status: 'active' as const,
+      metadata: { esa009m: nextData },
+    })
+    .returning({
+      id: products.id,
+      updatedAt: products.updatedAt,
+    })
+
+  return { row }
+}
+
 export async function updatePurchasingItem(input: {
   userId: string
   id: string

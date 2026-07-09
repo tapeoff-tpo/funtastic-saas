@@ -33,6 +33,8 @@ export async function GET() {
   for (const item of items) {
     sheet.addRow({
       ...item.data,
+      currentMonthOutgoing: item.outgoingMetrics.currentMonthOutgoing,
+      threeMonthAverageOutgoing: item.outgoingMetrics.threeMonthAverageOutgoing,
       updatedAt: item.updatedAt.toLocaleString('ko-KR'),
     })
   }

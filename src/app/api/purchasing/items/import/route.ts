@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
     })
     revalidatePath('/analytics')
     revalidatePath('/products')
+    revalidatePath('/costs')
     revalidatePath('/purchasing/items')
     return NextResponse.json(result)
   } catch (error) {

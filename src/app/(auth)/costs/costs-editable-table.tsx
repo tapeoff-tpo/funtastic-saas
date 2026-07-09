@@ -16,6 +16,7 @@ type TableColumn =
   | { type: 'data'; header: string }
   | { type: 'collapse'; group: 'warehouse' | 'extra'; label: string }
   | { type: 'updatedAt' }
+  | { type: 'purchaseUrl' }
 
 const PURCHASE_URL_HEADER = '구매 URL'
 const UPDATED_AT_HEADER = '최근 반영일'
@@ -67,6 +68,8 @@ export function CostsEditableTable({
     const extraStart = headers.indexOf(EXTRA_GROUP.start)
 
     for (let index = 0; index < headers.length; index += 1) {
+      const header = headers[index]
+      if (header === PURCHASE_URL_HEADER) continue
       if (!openGroups.warehouse && index === warehouseStart && warehouseEnd >= warehouseStart) {
         columns.push({ type: 'collapse', group: 'warehouse', label: WAREHOUSE_GROUP.label })
         index = warehouseEnd
@@ -76,10 +79,11 @@ export function CostsEditableTable({
         columns.push({ type: 'collapse', group: 'extra', label: EXTRA_GROUP.label })
         break
       }
-      columns.push({ type: 'data', header: headers[index] })
+      columns.push({ type: 'data', header })
     }
 
-    if (openGroups.extra) columns.push({ type: 'updatedAt' })
+    columns.push({ type: 'updatedAt' })
+    columns.push({ type: 'purchaseUrl' })
     return columns
   }, [headers, openGroups.extra, openGroups.warehouse])
 
@@ -158,12 +162,12 @@ export function CostsEditableTable({
         href={href}
         target="_blank"
         rel="noreferrer"
-        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-primary hover:bg-muted"
+        className="inline-flex max-w-full items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-primary hover:bg-muted"
         onClick={(event) => event.stopPropagation()}
         title={value ?? undefined}
       >
-        URL
-        <ExternalLink className="size-3" />
+        <span className="truncate">{value}</span>
+        <ExternalLink className="size-3 shrink-0" />
       </a>
     )
   }
@@ -196,6 +200,9 @@ export function CostsEditableTable({
                 if (column.type === 'updatedAt') {
                   return <th key="updated-at" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">{UPDATED_AT_HEADER}</th>
                 }
+                if (column.type === 'purchaseUrl') {
+                  return <th key="purchase-url" className="w-[240px] px-3 py-2.5 text-left font-medium">{PURCHASE_URL_HEADER}</th>
+                }
                 return (
                   <th key={column.header} className={headerClassName(column.header)}>
                     {renderHeader(column.header)}
@@ -223,6 +230,17 @@ export function CostsEditableTable({
                     return (
                       <td key={`${row.id}-updated-at`} className="whitespace-nowrap px-3 py-2 text-muted-foreground">
                         {new Date(row.updatedAt).toLocaleString('ko-KR')}
+                      </td>
+                    )
+                  }
+                  if (column.type === 'purchaseUrl') {
+                    return (
+                      <td
+                        key={`${row.id}-purchase-url`}
+                        className="max-w-[280px] px-3 py-2 align-top"
+                        title={row.data[PURCHASE_URL_HEADER] ?? undefined}
+                      >
+                        {renderCell(row, PURCHASE_URL_HEADER)}
                       </td>
                     )
                   }

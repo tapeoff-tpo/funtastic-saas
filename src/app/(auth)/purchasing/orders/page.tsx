@@ -23,6 +23,7 @@ import {
   PurchasePlanFieldsV2,
   PurchaseQuantityField,
   PurchaseRecommendationGenerator,
+  PurchaseRequestExcelActions,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
   PurchaseStatusButton,
@@ -137,6 +138,11 @@ export async function PurchasingOrdersView({
   if (showCosts) basisToggleParams.set('showCosts', '1')
   basisToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '0' : '1')
   const basisToggleHref = `${basePath}?${basisToggleParams.toString()}`
+  const excelExportParams = new URLSearchParams()
+  if (!overdueOnly) excelExportParams.set('status', status)
+  if (overdueOnly) excelExportParams.set('overdueOnly', '1')
+  if (search) excelExportParams.set('search', search)
+  const excelExportHref = `/api/purchasing/purchase-requests/export?${excelExportParams.toString()}`
 
   return (
     <div className="space-y-4">
@@ -253,6 +259,7 @@ export async function PurchasingOrdersView({
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
               <Link
                 href={costToggleHref}

@@ -1,7 +1,8 @@
 'use client'
 
 import { useRef, useState, useTransition } from 'react'
-import { Upload } from 'lucide-react'
+import { Download, Upload } from 'lucide-react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -38,6 +39,13 @@ export function PurchasingItemUpload() {
 
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <Link
+        href="/api/purchasing/items/export"
+        className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-muted"
+      >
+        <Download className="size-4" />
+        엑셀 다운로드
+      </Link>
       <input ref={inputRef} type="file" accept=".xlsx,.xls" className="h-9 max-w-72 rounded-md border bg-background px-2 py-1 text-sm" />
       <Button type="button" onClick={upload} disabled={isPending}>
         <Upload className="size-4" />

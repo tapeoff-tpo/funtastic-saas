@@ -3,6 +3,7 @@
 import {
   createContext,
   useContext,
+  useRef,
   useState,
   useTransition,
   type FormEvent,
@@ -10,7 +11,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Loader2, Save, Sparkles, Trash2, WalletCards } from 'lucide-react'
+import { Check, Download, Loader2, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -204,6 +205,73 @@ export function PurchaseBulkBuyerApply() {
         담당자 전체적용
       </Button>
       {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
+    </div>
+  )
+}
+
+export function PurchaseRequestExcelActions({
+  exportHref,
+  defaultStatus,
+}: {
+  exportHref: string
+  defaultStatus: PurchaseRequestStatus
+}) {
+  const router = useRouter()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function upload() {
+    const file = inputRef.current?.files?.[0]
+    if (!file) {
+      setError('업로드할 엑셀 파일을 선택해주세요.')
+      return
+    }
+    setMessage(null)
+    setError(null)
+    startTransition(async () => {
+      const form = new FormData()
+      form.set('file', file)
+      const response = await fetch(`/api/purchasing/purchase-requests/import?defaultStatus=${defaultStatus}`, {
+        method: 'POST',
+        body: form,
+      })
+      const body = await response.json().catch(() => ({})) as Partial<PurchaseRequestExcelResult> & { error?: string }
+      if (!response.ok) {
+        setError(body.error ?? '발주 엑셀 업로드에 실패했습니다.')
+        return
+      }
+      const skippedText = body.skipped ? ` · 제외 ${body.skipped.toLocaleString('ko-KR')}건` : ''
+      setMessage(
+        `생성 ${(body.created ?? 0).toLocaleString('ko-KR')}건 · 수정 ${(body.updated ?? 0).toLocaleString('ko-KR')}건${skippedText}`,
+      )
+      if (inputRef.current) inputRef.current.value = ''
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <a
+        href={exportHref}
+        className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
+      >
+        <Download />
+        엑셀 다운로드
+      </a>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="h-7 max-w-52 rounded-md border border-input bg-background px-2 py-0.5 text-xs"
+      />
+      <Button type="button" size="sm" variant="outline" onClick={upload} disabled={isPending}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Upload />}
+        엑셀 업로드
+      </Button>
+      {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
+      {error ? <span className="text-xs text-destructive">{error}</span> : null}
     </div>
   )
 }
@@ -613,6 +681,14 @@ export function PurchasePlanFieldsV2({
       </Button>
     </form>
   )
+}
+
+type PurchaseRequestExcelResult = {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  errors?: Array<{ row: number; message: string }>
 }
 
 export function PurchaseBuyerField({

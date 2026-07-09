@@ -335,13 +335,11 @@ export function PurchaseRecommendationGenerator() {
           <WalletCards className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             id="purchase-budget-krw"
-            type="number"
-            min="1"
-            max="10000000000"
-            step="10000"
+            type="text"
+            inputMode="numeric"
             placeholder="원화 예산"
-            value={budgetKrw}
-            onChange={(event) => setBudgetKrw(event.target.value)}
+            value={formatBudgetKrwInput(budgetKrw)}
+            onChange={(event) => setBudgetKrw(event.target.value.replace(/\D/g, '').slice(0, 11))}
             className="h-9 w-36 pl-8"
           />
         </div>
@@ -668,6 +666,13 @@ function formatCostValue(value: number | null, maximumFractionDigits: number) {
     minimumFractionDigits: 0,
     maximumFractionDigits,
   })
+}
+
+function formatBudgetKrwInput(value: string) {
+  if (!value) return ''
+  const number = Number(value)
+  if (!Number.isFinite(number)) return ''
+  return `${number.toLocaleString('ko-KR')}원`
 }
 
 function formatDateInput(value: string | Date | null) {

@@ -130,6 +130,60 @@ export async function importPurchasingItems(input: { userId: string; fileBuffer:
   return { total: parsed.total, imported: parsed.rows.length, skipped: parsed.skipped }
 }
 
+export async function updatePurchasingItem(input: {
+  userId: string
+  id: string
+  data: Partial<Record<Esa009mHeader, string | null>>
+}) {
+  const [current] = await db
+    .select({
+      id: products.id,
+      internalSku: products.internalSku,
+      name: products.name,
+      metadata: products.metadata,
+    })
+    .from(products)
+    .where(and(eq(products.userId, input.userId), eq(products.id, input.id)))
+    .limit(1)
+
+  if (!current) return null
+
+  const nextData = {
+    ...normalizeEsaData(current.metadata?.esa009m),
+    ...Object.fromEntries(
+      Object.entries(input.data)
+        .filter(([header]) => ESA009M_HEADERS.includes(header as Esa009mHeader))
+        .map(([header, value]) => [header, value?.trim() || null]),
+    ),
+  } as Esa009mData
+
+  nextData[ESA009M_HEADERS[0]] = current.internalSku
+  const nextName = nextData[ESA009M_HEADERS[1]] || current.name
+  const warehouseLocation = nextData[ESA009M_HEADERS[3]]
+  const costPrice = numericText(nextData[ESA009M_HEADERS[14]] || nextData[ESA009M_HEADERS[13]])
+  const metadata = {
+    ...(current.metadata ?? {}),
+    esa009m: nextData,
+  }
+
+  const [row] = await db
+    .update(products)
+    .set({
+      name: nextName,
+      costPrice,
+      warehouseLocation,
+      metadata,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(products.userId, input.userId), eq(products.id, input.id)))
+    .returning({
+      id: products.id,
+      updatedAt: products.updatedAt,
+    })
+
+  return row ?? null
+}
+
 export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(fileBuffer)

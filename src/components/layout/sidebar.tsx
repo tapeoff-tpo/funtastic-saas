@@ -28,6 +28,7 @@ import {
   ClipboardList,
   CreditCard,
   FileSpreadsheet,
+  Bot,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react'
@@ -133,6 +134,13 @@ export const navSections: NavSection[] = [
       { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
       { href: '/purchasing/purchases', label: '발주검토', icon: CreditCard },
       { href: '/purchasing/overdue', label: '구매/입고지연', icon: ClipboardList },
+    ],
+  },
+  {
+    id: 'operations',
+    title: '운영',
+    items: [
+      { href: '/operations/ai-accounts', label: 'AI 계정공유', icon: Bot },
       { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
     ],
   },

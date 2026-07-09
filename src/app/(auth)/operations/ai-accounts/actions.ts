@@ -57,12 +57,23 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
   const userId = await getWorkspaceIdForAction()
   if (!userId) return
 
+  const fiveHourHour = String(formData.get('fiveHourHour') ?? '').trim()
+  const fiveHourMinute = String(formData.get('fiveHourMinute') ?? '').trim()
+  const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') ?? '').trim()
+  const weeklyLimitDate = String(formData.get('weeklyLimitDate') ?? '').trim()
+  const fiveHourLimit = fiveHourHour || fiveHourMinute
+    ? `${fiveHourHour.padStart(2, '0')}:${fiveHourMinute.padStart(2, '0')}`
+    : String(formData.get('fiveHourLimit') ?? '')
+  const weeklyLimit = weeklyRemainingPercent || weeklyLimitDate
+    ? `잔여 ${weeklyRemainingPercent || '-'}% / ${weeklyLimitDate || '-'}`
+    : String(formData.get('weeklyLimit') ?? '')
+
   await updateAiAccountLimits({
     userId,
     accountId: String(formData.get('accountId') ?? ''),
-    fiveHourLimit: String(formData.get('fiveHourLimit') ?? ''),
+    fiveHourLimit,
     fiveHourLimitPeriod: String(formData.get('fiveHourLimitPeriod') ?? ''),
-    weeklyLimit: String(formData.get('weeklyLimit') ?? ''),
+    weeklyLimit,
   })
   revalidatePath('/operations/ai-accounts')
 }

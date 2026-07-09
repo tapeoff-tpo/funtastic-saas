@@ -59,6 +59,20 @@ function formatDateTime(value: string) {
   }).format(new Date(value))
 }
 
+function parseFiveHourLimit(value: string | null) {
+  const match = value?.match(/(\d{1,2})\s*:\s*(\d{1,2})/)
+  return {
+    hour: match?.[1]?.padStart(2, '0') || '',
+    minute: match?.[2]?.padStart(2, '0') || '',
+  }
+}
+
+function parseWeeklyLimit(value: string | null) {
+  const percent = value?.match(/(\d{1,3})\s*%/)?.[1] || ''
+  const date = value?.match(/\d{4}-\d{2}-\d{2}/)?.[0] || ''
+  return { percent, date }
+}
+
 export function AiAccountBoard({
   accounts,
   messages,
@@ -78,6 +92,8 @@ export function AiAccountBoard({
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
   const selectedUsers = selectedAccount ? selectedUsersByAccount[selectedAccount.id] || [] : []
   const selectedPeriod = selectedAccount ? periodByAccount[selectedAccount.id] || 'PM' : 'PM'
+  const selectedFiveHourLimit = parseFiveHourLimit(selectedAccount?.fiveHourLimit || null)
+  const selectedWeeklyLimit = parseWeeklyLimit(selectedAccount?.weeklyLimit || null)
   const messagesByAccount = useMemo(() => {
     return messages.reduce<Record<string, AiAccountMessage[]>>((acc, message) => {
       acc[message.accountId] = acc[message.accountId] || []
@@ -240,11 +256,11 @@ export function AiAccountBoard({
                 </div>
               </div>
 
-              <form action={updateAiAccountLimitsAction} className="rounded-md border bg-background p-3">
+              <form key={`limits-${selectedAccount.id}`} action={updateAiAccountLimitsAction} className="rounded-md border bg-background p-3">
                 <input type="hidden" name="accountId" value={selectedAccount.id} />
                 <input type="hidden" name="fiveHourLimitPeriod" value={selectedPeriod} />
                 <h3 className="mb-3 text-sm font-semibold">한도 설정</h3>
-                <div className="grid gap-2">
+                <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
                   <label className="space-y-1">
                     <span className="text-xs font-medium text-muted-foreground">5시간 한도</span>
                     <div className="flex gap-2">
@@ -263,12 +279,46 @@ export function AiAccountBoard({
                           </button>
                         ))}
                       </div>
-                      <Input name="fiveHourLimit" defaultValue={selectedAccount.fiveHourLimit || ''} placeholder="예: Codex 5시간 한도" className="h-9" />
+                      <div className="flex items-center gap-1">
+                        <Input
+                          name="fiveHourHour"
+                          defaultValue={selectedFiveHourLimit.hour}
+                          type="number"
+                          min="0"
+                          max="23"
+                          placeholder="00"
+                          className="h-9 w-14 text-center"
+                        />
+                        <span className="text-sm font-semibold text-muted-foreground">:</span>
+                        <Input
+                          name="fiveHourMinute"
+                          defaultValue={selectedFiveHourLimit.minute}
+                          type="number"
+                          min="0"
+                          max="59"
+                          placeholder="00"
+                          className="h-9 w-14 text-center"
+                        />
+                      </div>
                     </div>
                   </label>
                   <label className="space-y-1">
                     <span className="text-xs font-medium text-muted-foreground">1주일 한도</span>
-                    <Input name="weeklyLimit" defaultValue={selectedAccount.weeklyLimit || ''} placeholder="예: 주간 한도" className="h-9" />
+                    <div className="grid grid-cols-[90px_minmax(0,1fr)] gap-2">
+                      <div className="relative">
+                        <Input
+                          name="weeklyRemainingPercent"
+                          defaultValue={selectedWeeklyLimit.percent}
+                          type="number"
+                          min="0"
+                          max="100"
+                          placeholder="잔여"
+                          className="h-9 pr-7"
+                        />
+                        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+                      </div>
+                      <Input name="weeklyLimitDate" type="date" defaultValue={selectedWeeklyLimit.date} className="h-9" />
+                    </div>
                   </label>
                   <Button type="submit" className="h-9 justify-self-start">
                     <Save className="h-4 w-4" />
@@ -281,44 +331,50 @@ export function AiAccountBoard({
                 <input type="hidden" name="accountId" value={selectedAccount.id} />
                 <h3 className="mb-3 text-sm font-semibold">채팅 남기기</h3>
                 <div className="grid gap-2">
-                  <div className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">사용자</span>
-                    <details className="group relative">
-                      <summary className="flex h-9 cursor-pointer list-none items-center justify-between rounded-md border bg-background px-3 text-sm">
-                        <span className={cn('truncate', !selectedUsers.length && 'text-muted-foreground')}>
-                          {selectedUsers.length ? selectedUsers.join(', ') : '사용자 선택'}
-                        </span>
-                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
-                      </summary>
-                      <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-background p-2 shadow-lg">
-                        {userCandidates.map((candidate) => (
-                          <label key={candidate.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
-                            <input
-                              type="checkbox"
-                              name="authorNames"
-                              value={candidate.name}
-                              checked={selectedUsers.includes(candidate.name)}
-                              onChange={() => toggleSelectedUser(selectedAccount.id, candidate.name)}
-                              className="h-4 w-4"
-                            />
-                            <span>{candidate.name}</span>
-                          </label>
+                  <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_150px_auto] xl:items-end">
+                    <div className="space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">사용자</span>
+                      <details className="group relative">
+                        <summary className="flex h-9 cursor-pointer list-none items-center justify-between rounded-md border bg-background px-3 text-sm">
+                          <span className={cn('truncate', !selectedUsers.length && 'text-muted-foreground')}>
+                            {selectedUsers.length ? selectedUsers.join(', ') : '사용자 선택'}
+                          </span>
+                          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                        </summary>
+                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-background p-2 shadow-lg">
+                          {userCandidates.map((candidate) => (
+                            <label key={candidate.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                              <input
+                                type="checkbox"
+                                name="authorNames"
+                                value={candidate.name}
+                                checked={selectedUsers.includes(candidate.name)}
+                                onChange={() => toggleSelectedUser(selectedAccount.id, candidate.name)}
+                                className="h-4 w-4"
+                              />
+                              <span>{candidate.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </details>
+                    </div>
+                    <label className="space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">내용 선택</span>
+                      <select
+                        name="messageType"
+                        defaultValue="사용시작"
+                        className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      >
+                        {CHAT_MESSAGE_TYPES.map((type) => (
+                          <option key={type} value={type}>{type}</option>
                         ))}
-                      </div>
-                    </details>
+                      </select>
+                    </label>
+                    <Button type="submit" className="h-9">
+                      <MessageSquare className="h-4 w-4" />
+                      등록
+                    </Button>
                   </div>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">내용 선택</span>
-                    <select
-                      name="messageType"
-                      defaultValue="사용시작"
-                      className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                    >
-                      {CHAT_MESSAGE_TYPES.map((type) => (
-                        <option key={type} value={type}>{type}</option>
-                      ))}
-                    </select>
-                  </label>
                   <label className="space-y-1">
                     <span className="text-xs font-medium text-muted-foreground">직접 입력</span>
                     <textarea
@@ -328,10 +384,6 @@ export function AiAccountBoard({
                       className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     />
                   </label>
-                  <Button type="submit" className="h-9 justify-self-start">
-                    <MessageSquare className="h-4 w-4" />
-                    채팅 등록
-                  </Button>
                 </div>
               </form>
 

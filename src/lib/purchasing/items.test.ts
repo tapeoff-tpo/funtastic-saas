@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import {
   ESA009M_HEADERS,
+  PURCHASE_URL_HEADER,
   parseEsa009mWorkbook,
   resolveOutgoingMetrics,
 } from './items'
@@ -51,6 +52,24 @@ describe('parseEsa009mWorkbook', () => {
     expect(ESA009M_HEADERS).not.toContain('기존원가(元)')
     expect(parsedRow['특가(元)']).toBe('12.5')
     expect(parsedRow['기존원가(元)']).toBeUndefined()
+  })
+
+  it('accepts older files without the purchase URL column', async () => {
+    const [codeHeader, nameHeader] = ESA009M_HEADERS
+    const headersWithoutPurchaseUrl = ESA009M_HEADERS.filter((header) => header !== PURCHASE_URL_HEADER)
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('items')
+    sheet.addRow(headersWithoutPurchaseUrl)
+    sheet.addRow(headersWithoutPurchaseUrl.map((header) => {
+      if (header === codeHeader) return 'A001'
+      if (header === nameHeader) return 'Test item'
+      return `${header} value`
+    }))
+    const buffer = await workbook.xlsx.writeBuffer()
+
+    const result = await parseEsa009mWorkbook(buffer as ArrayBuffer)
+
+    expect(result.rows[0][PURCHASE_URL_HEADER]).toBeNull()
   })
 })
 

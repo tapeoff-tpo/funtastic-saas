@@ -3,6 +3,8 @@ import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 
+export const PURCHASE_URL_HEADER = '구매 URL'
+
 export const ESA009M_HEADERS = [
   '품목코드',
   '품목명',
@@ -23,6 +25,7 @@ export const ESA009M_HEADERS = [
   '매입부가세',
   '보통영수증 (%)',
   '증취세영수증  (%)',
+  PURCHASE_URL_HEADER,
 ] as const
 
 export type Esa009mHeader = (typeof ESA009M_HEADERS)[number]
@@ -47,6 +50,8 @@ const NUMERIC_HEADERS = new Set<Esa009mHeader>([
   '보통영수증 (%)',
   '증취세영수증  (%)',
 ])
+
+const REQUIRED_ESA009M_HEADERS = ESA009M_HEADERS.filter((header) => header !== PURCHASE_URL_HEADER)
 
 export async function getPurchasingItems(input: {
   userId: string
@@ -197,7 +202,7 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   if (!columnByHeader.has('특가(元)') && columnByHeader.has('기존원가(元)')) {
     columnByHeader.set('특가(元)', columnByHeader.get('기존원가(元)')!)
   }
-  const missing = ESA009M_HEADERS.filter((header) => !columnByHeader.has(header))
+  const missing = REQUIRED_ESA009M_HEADERS.filter((header) => !columnByHeader.has(header))
   if (missing.length > 0) throw new Error(`필수 열이 없습니다: ${missing.join(', ')}`)
 
   const rows: Esa009mData[] = []
@@ -206,7 +211,8 @@ export async function parseEsa009mWorkbook(fileBuffer: ArrayBuffer) {
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber <= headerRow) return
     const data = Object.fromEntries(ESA009M_HEADERS.map((header) => {
-      const value = cellText(row.getCell(columnByHeader.get(header)!).value)
+      const column = columnByHeader.get(header)
+      const value = column ? cellText(row.getCell(column).value) : ''
       return [header, value || null]
     })) as Esa009mData
     if (!Object.values(data).some(Boolean)) return
@@ -340,6 +346,7 @@ function purchasingItemConditions(
       ilike(products.name, pattern),
       sql`${products.metadata}->'esa009m'->>'영문명' ILIKE ${pattern}`,
       sql`${products.metadata}->'esa009m'->>'HS CODE' ILIKE ${pattern}`,
+      sql`${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER} ILIKE ${pattern}`,
     )!)
   }
   for (const header of ESA009M_HEADERS) {

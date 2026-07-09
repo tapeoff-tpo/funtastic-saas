@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { Pencil, Save, X } from 'lucide-react'
+import { ExternalLink, Pencil, Save, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,14 @@ export type CostEditableRow = {
   id: string
   data: Record<string, string | null>
   updatedAt: string
+}
+
+const PURCHASE_URL_HEADER = '구매 URL'
+
+function purchaseHref(value: string | null | undefined) {
+  const trimmed = value?.trim()
+  if (!trimmed) return null
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
 export function CostsEditableTable({
@@ -64,6 +72,28 @@ export function CostsEditableTable({
     })
   }
 
+  function renderCell(row: CostEditableRow, header: string) {
+    const value = row.data[header]
+    if (header !== PURCHASE_URL_HEADER) return value || '-'
+
+    const href = purchaseHref(value)
+    if (!href) return '-'
+
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium text-primary hover:bg-muted"
+        onClick={(event) => event.stopPropagation()}
+        title={value ?? undefined}
+      >
+        URL
+        <ExternalLink className="size-3" />
+      </a>
+    )
+  }
+
   return (
     <>
       <div className="overflow-x-auto rounded-md border">
@@ -95,7 +125,7 @@ export function CostsEditableTable({
                     className={`max-w-80 px-3 py-2 align-top ${header === nameHeader ? 'whitespace-normal' : 'whitespace-nowrap'}`}
                     title={row.data[header] ?? undefined}
                   >
-                    {row.data[header] || '-'}
+                    {renderCell(row, header)}
                   </td>
                 ))}
                 <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">
@@ -134,6 +164,7 @@ export function CostsEditableTable({
                 <label key={header} className="space-y-1">
                   <span className="text-xs font-medium text-muted-foreground">{header}</span>
                   <Input
+                    type={header === PURCHASE_URL_HEADER ? 'url' : 'text'}
                     value={draft[header] ?? ''}
                     onChange={(event) => setDraft((current) => ({ ...current, [header]: event.target.value }))}
                     className="text-xs"

@@ -46,7 +46,8 @@ export async function addAiAccountMessageAction(formData: FormData) {
   await addAiAccountMessage({
     userId,
     accountId: String(formData.get('accountId') ?? ''),
-    authorName: String(formData.get('authorName') ?? ''),
+    authorNames: formData.getAll('authorNames').map((value) => String(value)),
+    messageType: String(formData.get('messageType') ?? ''),
     message: String(formData.get('message') ?? ''),
   })
   revalidatePath('/operations/ai-accounts')

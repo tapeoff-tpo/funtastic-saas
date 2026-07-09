@@ -13,6 +13,8 @@ import {
   updateAiAccountLimitsAction,
 } from './actions'
 
+const CHAT_MESSAGE_TYPES = ['사용시작', '종료(한도초과)', '직접입력'] as const
+
 type AiAccountRow = {
   id: string
   name: string
@@ -65,13 +67,13 @@ export function AiAccountBoard({
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(accounts[0]?.id ?? null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [selectedUsersByAccount, setSelectedUsersByAccount] = useState<Record<string, string[]>>({})
   const [periodByAccount, setPeriodByAccount] = useState<Record<string, 'AM' | 'PM'>>(() => {
     return accounts.reduce<Record<string, 'AM' | 'PM'>>((acc, account) => {
       acc[account.id] = account.fiveHourLimitPeriod === 'AM' ? 'AM' : 'PM'
       return acc
     }, {})
   })
-  const userCandidateNames = useMemo(() => userCandidates.map((candidate) => candidate.name), [userCandidates])
   const messagesByAccount = useMemo(() => {
     return messages.reduce<Record<string, AiAccountMessage[]>>((acc, message) => {
       acc[message.accountId] = acc[message.accountId] || []
@@ -85,6 +87,16 @@ export function AiAccountBoard({
     await navigator.clipboard.writeText(account.email)
     setCopiedId(account.id)
     window.setTimeout(() => setCopiedId((current) => current === account.id ? null : current), 1200)
+  }
+
+  function toggleSelectedUser(accountId: string, name: string) {
+    setSelectedUsersByAccount((current) => {
+      const selected = current[accountId] || []
+      const next = selected.includes(name)
+        ? selected.filter((item) => item !== name)
+        : [...selected, name]
+      return { ...current, [accountId]: next }
+    })
   }
 
   return (
@@ -136,8 +148,8 @@ export function AiAccountBoard({
         {accounts.map((account) => {
           const isExpanded = expandedId === account.id
           const accountMessages = messagesByAccount[account.id] || []
-          const datalistId = `ai-account-users-${account.id}`
           const selectedPeriod = periodByAccount[account.id] || 'PM'
+          const selectedUsers = selectedUsersByAccount[account.id] || []
 
           return (
             <article key={account.id}>
@@ -239,23 +251,51 @@ export function AiAccountBoard({
                         <input type="hidden" name="accountId" value={account.id} />
                         <h3 className="mb-3 text-sm font-semibold">채팅 남기기</h3>
                         <div className="grid gap-2">
-                          <label className="space-y-1">
+                          <div className="space-y-1">
                             <span className="text-xs font-medium text-muted-foreground">사용자</span>
-                            <Input name="authorName" list={datalistId} placeholder="이름 선택 또는 직접 입력" className="h-9" required />
-                            <datalist id={datalistId}>
-                              {userCandidateNames.map((name) => (
-                                <option key={name} value={name} />
+                            <details className="group relative">
+                              <summary className="flex h-9 cursor-pointer list-none items-center justify-between rounded-md border bg-background px-3 text-sm">
+                                <span className={cn('truncate', !selectedUsers.length && 'text-muted-foreground')}>
+                                  {selectedUsers.length ? selectedUsers.join(', ') : '사용자 선택'}
+                                </span>
+                                <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+                              </summary>
+                              <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-background p-2 shadow-lg">
+                                {userCandidates.map((candidate) => (
+                                  <label key={candidate.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
+                                    <input
+                                      type="checkbox"
+                                      name="authorNames"
+                                      value={candidate.name}
+                                      checked={selectedUsers.includes(candidate.name)}
+                                      onChange={() => toggleSelectedUser(account.id, candidate.name)}
+                                      className="h-4 w-4"
+                                    />
+                                    <span>{candidate.name}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </details>
+                          </div>
+                          <label className="space-y-1">
+                            <span className="text-xs font-medium text-muted-foreground">내용 선택</span>
+                            <select
+                              name="messageType"
+                              defaultValue="사용시작"
+                              className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                            >
+                              {CHAT_MESSAGE_TYPES.map((type) => (
+                                <option key={type} value={type}>{type}</option>
                               ))}
-                            </datalist>
+                            </select>
                           </label>
                           <label className="space-y-1">
-                            <span className="text-xs font-medium text-muted-foreground">내용</span>
+                            <span className="text-xs font-medium text-muted-foreground">직접 입력</span>
                             <textarea
                               name="message"
                               rows={3}
-                              placeholder="사용 시작, 한도 도달, 반납 예정 등 필요한 내용을 입력"
+                              placeholder="필요한 내용을 수기로 입력"
                               className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                              required
                             />
                           </label>
                           <Button type="submit" className="h-9 justify-self-start">

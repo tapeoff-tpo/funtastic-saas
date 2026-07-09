@@ -264,14 +264,18 @@ export async function createAiAccount(input: {
 export async function addAiAccountMessage(input: {
   userId: string
   accountId: string
-  authorName: string
+  authorNames: string[]
   message: string
+  messageType: string
 }) {
   await ensureAiAccountTables()
-  const authorName = input.authorName.trim()
+  const authorNames = Array.from(new Set(input.authorNames.map((name) => name.trim()).filter(Boolean)))
+  const authorName = authorNames.join(', ')
   const message = input.message.trim()
-  if (!authorName) return { error: '사용자를 입력해주세요.' as const }
-  if (!message) return { error: '내용을 입력해주세요.' as const }
+  const messageType = input.messageType.trim() || '직접입력'
+  const fullMessage = message ? `[${messageType}] ${message}` : `[${messageType}]`
+  if (!authorNames.length) return { error: '사용자를 선택해주세요.' as const }
+  if (!messageType && !message) return { error: '내용을 입력해주세요.' as const }
 
   const [account] = await db
     .select({ id: gptAccounts.id })
@@ -285,17 +289,19 @@ export async function addAiAccountMessage(input: {
     accountId: input.accountId,
     authorName,
     eventType: 'chat',
-    message,
+    message: fullMessage,
   })
-  await db.insert(gptAccountUsers)
-    .values({ userId: input.userId, name: authorName })
-    .onConflictDoNothing({
-      target: [gptAccountUsers.userId, gptAccountUsers.name],
-    })
+  for (const name of authorNames) {
+    await db.insert(gptAccountUsers)
+      .values({ userId: input.userId, name })
+      .onConflictDoNothing({
+        target: [gptAccountUsers.userId, gptAccountUsers.name],
+      })
+  }
   await db.update(gptAccounts)
     .set({
       currentUserName: authorName,
-      status: 'in_use',
+      status: messageType.includes('종료') || messageType.includes('한도초과') ? 'limit_reached' : 'in_use',
       updatedAt: new Date(),
     })
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))

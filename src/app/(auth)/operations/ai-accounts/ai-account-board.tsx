@@ -151,7 +151,7 @@ export function AiAccountBoard({
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           {userCandidates.map((candidate) => (
-            <form key={candidate.id} action={deleteAiAccountUserCandidateAction} className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs">
+            <form key={candidate.id} id={`delete-ai-user-${candidate.id}`} action={deleteAiAccountUserCandidateAction} className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs">
               <input type="hidden" name="id" value={candidate.id} />
               <span className="font-medium">{candidate.name}</span>
               <Button type="submit" variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-destructive" title="사용자 삭제">
@@ -363,9 +363,7 @@ export function AiAccountBoard({
                               </label>
                               <Button
                                 type="submit"
-                                formAction={deleteAiAccountUserCandidateAction}
-                                name="id"
-                                value={candidate.id}
+                                form={`delete-ai-user-${candidate.id}`}
                                 variant="ghost"
                                 size="icon"
                                 className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"

@@ -13,7 +13,7 @@ import {
   updateAiAccountLimitsAction,
 } from './actions'
 
-const CHAT_MESSAGE_TYPES = ['사용시작', '사용종료', '한도종료(5시간)', '한도종료(주간)', '직접입력'] as const
+const CHAT_MESSAGE_TYPES = ['사용시작', '사용종료', '사용종료(5시간초과)', '사용종료(주간초과)', '직접입력'] as const
 
 type AiAccountRow = {
   id: string
@@ -45,7 +45,7 @@ type Props = {
 function statusClassName(status: string) {
   if (status === 'in_use') return 'border-blue-200 bg-blue-50 text-blue-700'
   if (status === 'limit_warning') return 'border-amber-200 bg-amber-50 text-amber-700'
-  if (status === 'limit_reached' || status === 'needs_check') return 'border-red-200 bg-red-50 text-red-700'
+  if (status === 'limit_reached' || status === 'five_hour_limit_reached' || status === 'weekly_limit_reached' || status === 'needs_check') return 'border-red-200 bg-red-50 text-red-700'
   return 'border-emerald-200 bg-emerald-50 text-emerald-700'
 }
 
@@ -377,7 +377,7 @@ export function AiAccountBoard({
                       </details>
                     </div>
                     <label className="space-y-1">
-                      <span className="text-xs font-medium text-muted-foreground">내용 선택</span>
+                      <span className="text-xs font-medium text-muted-foreground">상태변경</span>
                       <select
                         name="messageType"
                         defaultValue="사용시작"

@@ -16,6 +16,8 @@ export const AI_ACCOUNT_STATUS_LABELS: Record<string, string> = {
   in_use: '사용 중',
   limit_warning: '한도 임박',
   limit_reached: '한도 초과',
+  five_hour_limit_reached: '사용종료(5시간초과)',
+  weekly_limit_reached: '사용종료(주간초과)',
   needs_check: '확인 필요',
 }
 
@@ -306,17 +308,24 @@ export async function addAiAccountMessage(input: {
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean)))
-  const shouldEndUsage = messageType === '사용종료' || messageType.startsWith('한도종료')
+  const isFiveHourLimitEnd = messageType === '사용종료(5시간초과)'
+  const isWeeklyLimitEnd = messageType === '사용종료(주간초과)'
+  const shouldEndUsage = messageType === '사용종료' || isFiveHourLimitEnd || isWeeklyLimitEnd
   const nextActiveUsers = messageType === '사용시작'
     ? Array.from(new Set([...activeUsers, ...authorNames]))
     : shouldEndUsage
       ? activeUsers.filter((name) => !authorNames.includes(name))
       : activeUsers
-  const nextStatus = messageType === '사용시작'
-    ? 'in_use'
-    : shouldEndUsage
-      ? (nextActiveUsers.length ? 'in_use' : 'limit_reached')
-      : account.status
+  let nextStatus = account.status
+  if (messageType === '사용시작') {
+    nextStatus = 'in_use'
+  } else if (isFiveHourLimitEnd) {
+    nextStatus = 'five_hour_limit_reached'
+  } else if (isWeeklyLimitEnd) {
+    nextStatus = 'weekly_limit_reached'
+  } else if (shouldEndUsage) {
+    nextStatus = nextActiveUsers.length ? 'in_use' : 'available'
+  }
 
   await db.update(gptAccounts)
     .set({

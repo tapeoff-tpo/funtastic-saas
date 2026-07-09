@@ -54,6 +54,8 @@ const EXACT_TRANSLATIONS: Record<string, string> = {
   '재고 등록': '登记库存',
   '가용재고': '可用库存',
   '총재고': '总库存',
+  '가용 재고': '可用库存',
+  '총 재고': '总库存',
   '최근 입고': '最近入库',
   '최근 중국출고요청': '最近中国出库请求',
   '목록': '列表',
@@ -163,6 +165,11 @@ const SAFE_INLINE_LABELS = new Set([
   '도착 지연 확인 필요',
 ])
 
+const SAFE_INLINE_PATTERNS = [
+  /발주요청 지연 [\d,]+건/,
+  /구매완료 입고지연 [\d,]+건/,
+]
+
 const textOriginals = new WeakMap<Text, string>()
 const attrOriginals = new WeakMap<Element, Map<string, string>>()
 
@@ -200,6 +207,7 @@ function shouldTranslateNode(node: Node, original: string) {
   const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
   if (!element || !trimmed) return false
   if (SAFE_INLINE_LABELS.has(trimmed)) return true
+  if (SAFE_INLINE_PATTERNS.some((pattern) => pattern.test(trimmed))) return true
   if (element.closest(TRANSLATABLE_ELEMENT_SELECTOR)) return true
   return false
 }

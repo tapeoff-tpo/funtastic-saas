@@ -140,9 +140,9 @@ export function AiAccountBoard({
         </form>
       ))}
 
-      <div className="grid gap-0 lg:grid-cols-[minmax(0,680px)_minmax(520px,1fr)]">
-        <div className="min-w-0 border-b lg:border-b-0 lg:border-r">
-          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[100px_200px_90px_110px_120px] md:items-center md:gap-2">
+      <div className="grid gap-0 xl:grid-cols-[minmax(720px,760px)_minmax(480px,1fr)]">
+        <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
+          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[96px_minmax(230px,1fr)_86px_110px_128px] md:items-center md:gap-2">
             <div>계정명</div>
             <div>계정아이디</div>
             <div>상태</div>
@@ -161,7 +161,7 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[100px_200px_90px_110px_120px] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[96px_minmax(230px,1fr)_86px_110px_128px] md:items-center md:gap-2',
                     isSelected && 'bg-muted',
                   )}
                   onClick={() => setSelectedAccountId(account.id)}
@@ -244,7 +244,7 @@ export function AiAccountBoard({
                 <input type="hidden" name="accountId" value={selectedAccount.id} />
                 <input type="hidden" name="fiveHourLimitPeriod" value={selectedPeriod} />
                 <h3 className="mb-3 text-sm font-semibold">한도 설정</h3>
-                <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+                <div className="grid gap-2 xl:grid-cols-[max-content_minmax(360px,1fr)_auto] xl:items-end">
                   <label className="space-y-1">
                     <span className="text-xs font-medium text-muted-foreground">5시간 한도</span>
                     <div className="flex gap-2">
@@ -315,7 +315,7 @@ export function AiAccountBoard({
                 <input type="hidden" name="accountId" value={selectedAccount.id} />
                 <h3 className="mb-3 text-sm font-semibold">메모 남기기</h3>
                 <div className="grid gap-2">
-                  <div className="grid gap-2 xl:grid-cols-[minmax(0,1fr)_150px_auto] xl:items-end">
+                  <div className="grid gap-2 xl:grid-cols-[minmax(320px,520px)_150px_auto] xl:items-end">
                     <div className="space-y-1">
                       <span className="text-xs font-medium text-muted-foreground">사용자</span>
                       <details className="group relative">

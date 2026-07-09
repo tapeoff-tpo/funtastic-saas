@@ -1189,6 +1189,8 @@ export const gptAccounts = pgTable(
     currentUserName: varchar('current_user_name', { length: 100 }),
     dailyResetTime: varchar('daily_reset_time', { length: 10 }),
     weeklyResetAt: timestamp('weekly_reset_at', { withTimezone: true }),
+    fiveHourLimit: varchar('five_hour_limit', { length: 100 }),
+    weeklyLimit: varchar('weekly_limit', { length: 100 }),
     notes: text('notes'),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

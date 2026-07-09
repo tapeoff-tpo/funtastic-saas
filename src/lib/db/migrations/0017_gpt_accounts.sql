@@ -7,11 +7,16 @@ CREATE TABLE IF NOT EXISTS "gpt_accounts" (
   "current_user_name" varchar(100),
   "daily_reset_time" varchar(10),
   "weekly_reset_at" timestamp with time zone,
+  "five_hour_limit" varchar(100),
+  "weekly_limit" varchar(100),
   "notes" text,
   "sort_order" integer NOT NULL DEFAULT 0,
   "created_at" timestamp with time zone DEFAULT now() NOT NULL,
   "updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
+
+ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit" varchar(100);
+ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100);
 
 CREATE UNIQUE INDEX IF NOT EXISTS "gpt_accounts_user_name_uniq"
 ON "gpt_accounts" USING btree ("user_id", "name");

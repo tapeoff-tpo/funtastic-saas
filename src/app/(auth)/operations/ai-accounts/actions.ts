@@ -2,7 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { createAiAccount } from '@/lib/operations/ai-accounts'
+import {
+  addAiAccountMessage,
+  createAiAccount,
+  updateAiAccountLimits,
+} from '@/lib/operations/ai-accounts'
 import { createClient } from '@/lib/supabase/server'
 
 export async function createAiAccountAction(
@@ -24,4 +28,37 @@ export async function createAiAccountAction(
   if ('error' in result) return { error: result.error }
   revalidatePath('/operations/ai-accounts')
   return { success: true }
+}
+
+async function getWorkspaceIdForAction() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  return getWorkspaceUserId(user.id)
+}
+
+export async function addAiAccountMessageAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await addAiAccountMessage({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
+    authorName: String(formData.get('authorName') ?? ''),
+    message: String(formData.get('message') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function updateAiAccountLimitsAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await updateAiAccountLimits({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
+    fiveHourLimit: String(formData.get('fiveHourLimit') ?? ''),
+    weeklyLimit: String(formData.get('weeklyLimit') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
 }

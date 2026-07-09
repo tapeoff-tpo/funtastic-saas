@@ -334,7 +334,10 @@ export function AiAccountBoard({
                                   name="authorNames"
                                   value={candidate.name}
                                   checked={selectedUsers.includes(candidate.name)}
-                                  onChange={() => toggleSelectedUser(selectedAccount.id, candidate.name)}
+                                  onChange={(event) => {
+                                    toggleSelectedUser(selectedAccount.id, candidate.name)
+                                    event.currentTarget.closest('details')?.removeAttribute('open')
+                                  }}
                                   className="h-4 w-4"
                                 />
                                 <span className="truncate">{candidate.name}</span>

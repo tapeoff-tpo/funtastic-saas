@@ -276,7 +276,6 @@ export async function addAiAccountMessage(input: {
   const message = input.message.trim()
   const messageType = input.messageType.trim() || '직접입력'
   const fullMessage = message ? `[${messageType}] ${message}` : `[${messageType}]`
-  if (!authorNames.length) return { error: '사용자를 선택해주세요.' as const }
   if (!messageType && !message) return { error: '내용을 입력해주세요.' as const }
 
   const [account] = await db
@@ -293,7 +292,7 @@ export async function addAiAccountMessage(input: {
   await db.insert(gptAccountMessages).values({
     userId: input.userId,
     accountId: input.accountId,
-    authorName,
+    authorName: authorName || null,
     eventType: 'chat',
     message: fullMessage,
   })
@@ -312,9 +311,13 @@ export async function addAiAccountMessage(input: {
   const isWeeklyLimitEnd = messageType === '사용종료(주간초과)'
   const shouldEndUsage = messageType === '사용종료' || isFiveHourLimitEnd || isWeeklyLimitEnd
   const nextActiveUsers = messageType === '사용시작'
-    ? Array.from(new Set([...activeUsers, ...authorNames]))
+    ? authorNames.length
+      ? Array.from(new Set([...activeUsers, ...authorNames]))
+      : activeUsers
     : shouldEndUsage
-      ? activeUsers.filter((name) => !authorNames.includes(name))
+      ? authorNames.length
+        ? activeUsers.filter((name) => !authorNames.includes(name))
+        : []
       : activeUsers
   let nextStatus = account.status
   if (messageType === '사용시작') {

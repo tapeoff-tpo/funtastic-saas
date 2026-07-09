@@ -306,14 +306,15 @@ export async function addAiAccountMessage(input: {
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean)))
+  const shouldEndUsage = messageType === '사용종료' || messageType.startsWith('한도종료')
   const nextActiveUsers = messageType === '사용시작'
     ? Array.from(new Set([...activeUsers, ...authorNames]))
-    : messageType.startsWith('종료')
+    : shouldEndUsage
       ? activeUsers.filter((name) => !authorNames.includes(name))
       : activeUsers
   const nextStatus = messageType === '사용시작'
     ? 'in_use'
-    : messageType.startsWith('종료')
+    : shouldEndUsage
       ? (nextActiveUsers.length ? 'in_use' : 'limit_reached')
       : account.status
 

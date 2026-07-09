@@ -13,7 +13,7 @@ import {
   updateAiAccountLimitsAction,
 } from './actions'
 
-const CHAT_MESSAGE_TYPES = ['사용시작', '종료(5시간초과)', '종료(주간초과)', '직접입력'] as const
+const CHAT_MESSAGE_TYPES = ['사용시작', '사용종료', '한도종료(5시간)', '한도종료(주간)', '직접입력'] as const
 
 type AiAccountRow = {
   id: string

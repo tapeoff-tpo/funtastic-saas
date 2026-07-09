@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS "gpt_accounts" (
   "daily_reset_time" varchar(10),
   "weekly_reset_at" timestamp with time zone,
   "five_hour_limit" varchar(100),
+  "five_hour_limit_period" varchar(10),
   "weekly_limit" varchar(100),
   "notes" text,
   "sort_order" integer NOT NULL DEFAULT 0,
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS "gpt_accounts" (
 );
 
 ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit" varchar(100);
+ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit_period" varchar(10);
 ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100);
 
 CREATE UNIQUE INDEX IF NOT EXISTS "gpt_accounts_user_name_uniq"
@@ -74,3 +76,18 @@ ON "gpt_account_waitlist" USING btree ("account_id", "status", "created_at");
 
 CREATE INDEX IF NOT EXISTS "gpt_account_waitlist_user_status_idx"
 ON "gpt_account_waitlist" USING btree ("user_id", "status");
+
+CREATE TABLE IF NOT EXISTS "gpt_account_users" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "user_id" uuid NOT NULL,
+  "name" varchar(100) NOT NULL,
+  "sort_order" integer NOT NULL DEFAULT 0,
+  "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+  "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "gpt_account_users_user_name_uniq"
+ON "gpt_account_users" USING btree ("user_id", "name");
+
+CREATE INDEX IF NOT EXISTS "gpt_account_users_user_sort_idx"
+ON "gpt_account_users" USING btree ("user_id", "sort_order");

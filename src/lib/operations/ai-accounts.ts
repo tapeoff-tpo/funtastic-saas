@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { gptAccountMessages, gptAccounts } from '@/lib/db/schema'
+import { gptAccountMessages, gptAccounts, gptAccountUsers } from '@/lib/db/schema'
 
 export const DEFAULT_AI_ACCOUNTS = [
   { name: '한상철', email: 'tapeoff@naver.com' },
@@ -33,6 +33,7 @@ export async function ensureAiAccountTables() {
       "daily_reset_time" varchar(10),
       "weekly_reset_at" timestamp with time zone,
       "five_hour_limit" varchar(100),
+      "five_hour_limit_period" varchar(10),
       "weekly_limit" varchar(100),
       "notes" text,
       "sort_order" integer NOT NULL DEFAULT 0,
@@ -41,6 +42,7 @@ export async function ensureAiAccountTables() {
     )
   `)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit" varchar(100)`)
+  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit_period" varchar(10)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100)`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "gpt_accounts_user_name_uniq" ON "gpt_accounts" ("user_id", "name")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_sort_idx" ON "gpt_accounts" ("user_id", "sort_order")`)
@@ -84,10 +86,38 @@ export async function ensureAiAccountTables() {
   `)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_waitlist_account_status_idx" ON "gpt_account_waitlist" ("account_id", "status", "created_at")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_waitlist_user_status_idx" ON "gpt_account_waitlist" ("user_id", "status")`)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "gpt_account_users" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "user_id" uuid NOT NULL,
+      "name" varchar(100) NOT NULL,
+      "sort_order" integer NOT NULL DEFAULT 0,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `)
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "gpt_account_users_user_name_uniq" ON "gpt_account_users" ("user_id", "name")`)
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_users_user_sort_idx" ON "gpt_account_users" ("user_id", "sort_order")`)
+}
+
+export async function seedDefaultAiAccountUsers(userId: string) {
+  await ensureAiAccountTables()
+  const rows = DEFAULT_USER_CANDIDATES.map((name, index) => ({
+    userId,
+    name,
+    sortOrder: index + 1,
+  }))
+
+  await db.insert(gptAccountUsers)
+    .values(rows)
+    .onConflictDoNothing({
+      target: [gptAccountUsers.userId, gptAccountUsers.name],
+    })
 }
 
 export async function seedDefaultAiAccounts(userId: string) {
   await ensureAiAccountTables()
+  await seedDefaultAiAccountUsers(userId)
   const rows = DEFAULT_AI_ACCOUNTS.map((account, index) => ({
     userId,
     name: account.name,
@@ -95,6 +125,7 @@ export async function seedDefaultAiAccounts(userId: string) {
     sortOrder: index + 1,
     status: 'available',
     fiveHourLimit: '5시간 한도',
+    fiveHourLimitPeriod: 'PM',
     weeklyLimit: '1주일 한도',
   }))
 
@@ -139,21 +170,55 @@ export async function listRecentAiAccountMessages(userId: string) {
 }
 
 export async function listAiAccountUserCandidates(userId: string) {
-  await ensureAiAccountTables()
-  const accountUsers = await db
-    .select({ name: gptAccounts.currentUserName })
-    .from(gptAccounts)
-    .where(eq(gptAccounts.userId, userId))
-  const messageUsers = await db
-    .select({ name: gptAccountMessages.authorName })
-    .from(gptAccountMessages)
-    .where(eq(gptAccountMessages.userId, userId))
+  await seedDefaultAiAccountUsers(userId)
+  return db
+    .select({
+      id: gptAccountUsers.id,
+      name: gptAccountUsers.name,
+    })
+    .from(gptAccountUsers)
+    .where(eq(gptAccountUsers.userId, userId))
+    .orderBy(asc(gptAccountUsers.sortOrder), asc(gptAccountUsers.createdAt))
+}
 
-  return Array.from(new Set([
-    ...DEFAULT_USER_CANDIDATES,
-    ...accountUsers.map((row) => row.name),
-    ...messageUsers.map((row) => row.name),
-  ].filter((name): name is string => Boolean(name?.trim())))).sort((a, b) => a.localeCompare(b, 'ko-KR'))
+export async function addAiAccountUserCandidate(input: {
+  userId: string
+  name: string
+}) {
+  await seedDefaultAiAccountUsers(input.userId)
+  const name = input.name.trim()
+  if (!name) return { error: '사용자 이름을 입력해주세요.' as const }
+
+  const [{ nextSortOrder }] = await db.select({
+    nextSortOrder: sql<number>`COALESCE(MAX(${gptAccountUsers.sortOrder}), 0)::int + 1`,
+  }).from(gptAccountUsers).where(eq(gptAccountUsers.userId, input.userId))
+
+  const [row] = await db.insert(gptAccountUsers)
+    .values({
+      userId: input.userId,
+      name,
+      sortOrder: nextSortOrder,
+    })
+    .onConflictDoNothing({
+      target: [gptAccountUsers.userId, gptAccountUsers.name],
+    })
+    .returning({ id: gptAccountUsers.id })
+
+  if (!row) return { error: '이미 등록된 사용자입니다.' as const }
+  return { id: row.id }
+}
+
+export async function deleteAiAccountUserCandidate(input: {
+  userId: string
+  id: string
+}) {
+  await ensureAiAccountTables()
+  const [row] = await db.delete(gptAccountUsers)
+    .where(and(eq(gptAccountUsers.userId, input.userId), eq(gptAccountUsers.id, input.id)))
+    .returning({ id: gptAccountUsers.id })
+
+  if (!row) return { error: '사용자를 찾을 수 없습니다.' as const }
+  return { success: true }
 }
 
 export async function createAiAccount(input: {
@@ -178,6 +243,7 @@ export async function createAiAccount(input: {
       sortOrder: nextSortOrder,
       status: 'available',
       fiveHourLimit: '5시간 한도',
+      fiveHourLimitPeriod: 'PM',
       weeklyLimit: '1주일 한도',
     })
     .onConflictDoNothing({
@@ -221,6 +287,11 @@ export async function addAiAccountMessage(input: {
     eventType: 'chat',
     message,
   })
+  await db.insert(gptAccountUsers)
+    .values({ userId: input.userId, name: authorName })
+    .onConflictDoNothing({
+      target: [gptAccountUsers.userId, gptAccountUsers.name],
+    })
   await db.update(gptAccounts)
     .set({
       currentUserName: authorName,
@@ -236,12 +307,15 @@ export async function updateAiAccountLimits(input: {
   userId: string
   accountId: string
   fiveHourLimit?: string | null
+  fiveHourLimitPeriod?: string | null
   weeklyLimit?: string | null
 }) {
   await ensureAiAccountTables()
+  const period = input.fiveHourLimitPeriod === 'AM' ? 'AM' : 'PM'
   const [row] = await db.update(gptAccounts)
     .set({
       fiveHourLimit: input.fiveHourLimit?.trim() || null,
+      fiveHourLimitPeriod: period,
       weeklyLimit: input.weeklyLimit?.trim() || null,
       updatedAt: new Date(),
     })

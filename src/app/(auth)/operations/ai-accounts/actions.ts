@@ -4,7 +4,9 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   addAiAccountMessage,
+  addAiAccountUserCandidate,
   createAiAccount,
+  deleteAiAccountUserCandidate,
   updateAiAccountLimits,
 } from '@/lib/operations/ai-accounts'
 import { createClient } from '@/lib/supabase/server'
@@ -58,7 +60,30 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
     userId,
     accountId: String(formData.get('accountId') ?? ''),
     fiveHourLimit: String(formData.get('fiveHourLimit') ?? ''),
+    fiveHourLimitPeriod: String(formData.get('fiveHourLimitPeriod') ?? ''),
     weeklyLimit: String(formData.get('weeklyLimit') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function addAiAccountUserCandidateAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await addAiAccountUserCandidate({
+    userId,
+    name: String(formData.get('name') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function deleteAiAccountUserCandidateAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await deleteAiAccountUserCandidate({
+    userId,
+    id: String(formData.get('id') ?? ''),
   })
   revalidatePath('/operations/ai-accounts')
 }

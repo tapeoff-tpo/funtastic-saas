@@ -90,6 +90,7 @@ export default async function AiAccountsPage() {
           status: account.status,
           currentUserName: account.currentUserName,
           fiveHourLimit: account.fiveHourLimit,
+          fiveHourLimitPeriod: account.fiveHourLimitPeriod,
           weeklyLimit: account.weeklyLimit,
         }))}
         messages={messages.map((message) => ({
@@ -100,7 +101,10 @@ export default async function AiAccountsPage() {
           message: message.message,
           createdAt: message.createdAt.toISOString(),
         }))}
-        userCandidates={userCandidates}
+        userCandidates={userCandidates.map((candidate) => ({
+          id: candidate.id,
+          name: candidate.name,
+        }))}
         statusLabels={AI_ACCOUNT_STATUS_LABELS}
       />
     </div>

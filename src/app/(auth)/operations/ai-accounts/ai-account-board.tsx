@@ -1,13 +1,15 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { ChevronDown, Copy, MessageSquare, Save } from 'lucide-react'
+import { ChevronDown, Copy, MessageSquare, Plus, Save, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   addAiAccountMessageAction,
+  addAiAccountUserCandidateAction,
+  deleteAiAccountUserCandidateAction,
   updateAiAccountLimitsAction,
 } from './actions'
 
@@ -18,6 +20,7 @@ type AiAccountRow = {
   status: string
   currentUserName: string | null
   fiveHourLimit: string | null
+  fiveHourLimitPeriod: string | null
   weeklyLimit: string | null
 }
 
@@ -33,7 +36,7 @@ type AiAccountMessage = {
 type Props = {
   accounts: AiAccountRow[]
   messages: AiAccountMessage[]
-  userCandidates: string[]
+  userCandidates: { id: string; name: string }[]
   statusLabels: Record<string, string>
 }
 
@@ -62,6 +65,13 @@ export function AiAccountBoard({
 }: Props) {
   const [expandedId, setExpandedId] = useState<string | null>(accounts[0]?.id ?? null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [periodByAccount, setPeriodByAccount] = useState<Record<string, 'AM' | 'PM'>>(() => {
+    return accounts.reduce<Record<string, 'AM' | 'PM'>>((acc, account) => {
+      acc[account.id] = account.fiveHourLimitPeriod === 'AM' ? 'AM' : 'PM'
+      return acc
+    }, {})
+  })
+  const userCandidateNames = useMemo(() => userCandidates.map((candidate) => candidate.name), [userCandidates])
   const messagesByAccount = useMemo(() => {
     return messages.reduce<Record<string, AiAccountMessage[]>>((acc, message) => {
       acc[message.accountId] = acc[message.accountId] || []
@@ -86,6 +96,33 @@ export function AiAccountBoard({
         </div>
       </div>
 
+      <div className="border-b px-4 py-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">사용자 후보</h3>
+            <p className="text-xs text-muted-foreground">채팅 입력창 자동완성에 표시됩니다.</p>
+          </div>
+          <form action={addAiAccountUserCandidateAction} className="flex gap-2">
+            <Input name="name" placeholder="사용자 이름" className="h-9 w-44" required />
+            <Button type="submit" className="h-9">
+              <Plus className="h-4 w-4" />
+              추가
+            </Button>
+          </form>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {userCandidates.map((candidate) => (
+            <form key={candidate.id} action={deleteAiAccountUserCandidateAction} className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs">
+              <input type="hidden" name="id" value={candidate.id} />
+              <span className="font-medium">{candidate.name}</span>
+              <Button type="submit" variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-destructive" title="사용자 삭제">
+                <Trash2 className="h-3 w-3" />
+              </Button>
+            </form>
+          ))}
+        </div>
+      </div>
+
       <div className="hidden border-b bg-muted/40 px-4 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[150px_minmax(220px,1fr)_120px_130px_160px_110px] md:items-center md:gap-3">
         <div>계정명</div>
         <div>계정아이디</div>
@@ -100,6 +137,7 @@ export function AiAccountBoard({
           const isExpanded = expandedId === account.id
           const accountMessages = messagesByAccount[account.id] || []
           const datalistId = `ai-account-users-${account.id}`
+          const selectedPeriod = periodByAccount[account.id] || 'PM'
 
           return (
             <article key={account.id}>
@@ -139,7 +177,7 @@ export function AiAccountBoard({
                   <p className="text-xs text-muted-foreground md:hidden">현재사용자</p>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  <p>{account.fiveHourLimit || '5시간 한도 미설정'}</p>
+                  <p>{account.fiveHourLimit ? `${account.fiveHourLimitPeriod || 'PM'} ${account.fiveHourLimit}` : '5시간 한도 미설정'}</p>
                   <p>{account.weeklyLimit || '1주일 한도 미설정'}</p>
                 </div>
                 <div className="flex justify-end">
@@ -162,11 +200,29 @@ export function AiAccountBoard({
                     <div className="space-y-3">
                       <form action={updateAiAccountLimitsAction} className="rounded-md border bg-background p-3">
                         <input type="hidden" name="accountId" value={account.id} />
+                        <input type="hidden" name="fiveHourLimitPeriod" value={selectedPeriod} />
                         <h3 className="mb-3 text-sm font-semibold">한도 설정</h3>
                         <div className="grid gap-2">
                           <label className="space-y-1">
                             <span className="text-xs font-medium text-muted-foreground">5시간 한도</span>
-                            <Input name="fiveHourLimit" defaultValue={account.fiveHourLimit || ''} placeholder="예: Codex 5시간 한도" className="h-9" />
+                            <div className="flex gap-2">
+                              <div className="grid grid-cols-2 overflow-hidden rounded-md border">
+                                {(['AM', 'PM'] as const).map((period) => (
+                                  <button
+                                    key={period}
+                                    type="button"
+                                    className={cn(
+                                      'h-9 px-3 text-xs font-semibold transition-colors',
+                                      selectedPeriod === period ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:bg-muted',
+                                    )}
+                                    onClick={() => setPeriodByAccount((current) => ({ ...current, [account.id]: period }))}
+                                  >
+                                    {period}
+                                  </button>
+                                ))}
+                              </div>
+                              <Input name="fiveHourLimit" defaultValue={account.fiveHourLimit || ''} placeholder="예: Codex 5시간 한도" className="h-9" />
+                            </div>
                           </label>
                           <label className="space-y-1">
                             <span className="text-xs font-medium text-muted-foreground">1주일 한도</span>
@@ -187,7 +243,7 @@ export function AiAccountBoard({
                             <span className="text-xs font-medium text-muted-foreground">사용자</span>
                             <Input name="authorName" list={datalistId} placeholder="이름 선택 또는 직접 입력" className="h-9" required />
                             <datalist id={datalistId}>
-                              {userCandidates.map((name) => (
+                              {userCandidateNames.map((name) => (
                                 <option key={name} value={name} />
                               ))}
                             </datalist>

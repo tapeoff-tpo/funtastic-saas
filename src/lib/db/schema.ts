@@ -1190,6 +1190,7 @@ export const gptAccounts = pgTable(
     dailyResetTime: varchar('daily_reset_time', { length: 10 }),
     weeklyResetAt: timestamp('weekly_reset_at', { withTimezone: true }),
     fiveHourLimit: varchar('five_hour_limit', { length: 100 }),
+    fiveHourLimitPeriod: varchar('five_hour_limit_period', { length: 10 }),
     weeklyLimit: varchar('weekly_limit', { length: 100 }),
     notes: text('notes'),
     sortOrder: integer('sort_order').notNull().default(0),
@@ -1257,5 +1258,21 @@ export const gptAccountWaitlist = pgTable(
   (table) => [
     index('gpt_account_waitlist_account_status_idx').on(table.accountId, table.status, table.createdAt),
     index('gpt_account_waitlist_user_status_idx').on(table.userId, table.status),
+  ],
+)
+
+export const gptAccountUsers = pgTable(
+  'gpt_account_users',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('gpt_account_users_user_name_uniq').on(table.userId, table.name),
+    index('gpt_account_users_user_sort_idx').on(table.userId, table.sortOrder),
   ],
 )

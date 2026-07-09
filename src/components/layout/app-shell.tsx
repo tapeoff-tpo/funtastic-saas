@@ -5,6 +5,7 @@ import { ChevronsRight } from 'lucide-react'
 import { Sidebar } from './sidebar'
 import { TabBar } from './tab-bar'
 import { NavStateProvider } from './nav-state'
+import { PurchasingLanguageSwitcher } from '@/components/purchasing-language-switcher'
 
 interface AppShellProps {
   children: React.ReactNode
@@ -50,7 +51,10 @@ export function AppShell({ children }: AppShellProps) {
         )}
         <div className="flex flex-1 flex-col overflow-hidden">
           <TabBar />
-          <main className="flex-1 overflow-auto bg-gray-50 p-6">{children}</main>
+          <main className="flex-1 overflow-auto bg-gray-50 p-6">
+            <PurchasingLanguageSwitcher />
+            {children}
+          </main>
         </div>
       </div>
     </NavStateProvider>

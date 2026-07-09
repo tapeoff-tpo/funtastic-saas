@@ -16,8 +16,8 @@ export const AI_ACCOUNT_STATUS_LABELS: Record<string, string> = {
   in_use: '사용 중',
   limit_warning: '한도 임박',
   limit_reached: '한도 초과',
-  five_hour_limit_reached: '사용종료(5시간초과)',
-  weekly_limit_reached: '사용종료(주간초과)',
+  five_hour_limit_reached: '한도초과',
+  weekly_limit_reached: '한도초과',
   needs_check: '확인 필요',
 }
 

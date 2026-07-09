@@ -1175,3 +1175,85 @@ export const scanLogs = pgTable(
     index('scan_logs_user_id_scanned_at_idx').on(table.userId, table.scannedAt),
   ],
 )
+
+// Operations: shared AI account usage board.
+
+export const gptAccounts = pgTable(
+  'gpt_accounts',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    email: varchar('email', { length: 255 }),
+    status: varchar('status', { length: 30 }).notNull().default('available'),
+    currentUserName: varchar('current_user_name', { length: 100 }),
+    dailyResetTime: varchar('daily_reset_time', { length: 10 }),
+    weeklyResetAt: timestamp('weekly_reset_at', { withTimezone: true }),
+    notes: text('notes'),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('gpt_accounts_user_name_uniq').on(table.userId, table.name),
+    index('gpt_accounts_user_sort_idx').on(table.userId, table.sortOrder),
+    index('gpt_accounts_user_status_idx').on(table.userId, table.status),
+  ],
+)
+
+export const gptAccountMessages = pgTable(
+  'gpt_account_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => gptAccounts.id, { onDelete: 'cascade' }),
+    authorName: varchar('author_name', { length: 100 }),
+    eventType: varchar('event_type', { length: 50 }).notNull().default('memo'),
+    message: text('message').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('gpt_account_messages_account_created_idx').on(table.accountId, table.createdAt),
+    index('gpt_account_messages_user_created_idx').on(table.userId, table.createdAt),
+  ],
+)
+
+export const gptAccountSessions = pgTable(
+  'gpt_account_sessions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => gptAccounts.id, { onDelete: 'cascade' }),
+    userName: varchar('user_name', { length: 100 }).notNull(),
+    startedAt: timestamp('started_at', { withTimezone: true }).defaultNow().notNull(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+    status: varchar('status', { length: 30 }).notNull().default('active'),
+  },
+  (table) => [
+    index('gpt_account_sessions_account_started_idx').on(table.accountId, table.startedAt),
+    index('gpt_account_sessions_user_status_idx').on(table.userId, table.status),
+  ],
+)
+
+export const gptAccountWaitlist = pgTable(
+  'gpt_account_waitlist',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    accountId: uuid('account_id')
+      .notNull()
+      .references(() => gptAccounts.id, { onDelete: 'cascade' }),
+    userName: varchar('user_name', { length: 100 }).notNull(),
+    status: varchar('status', { length: 30 }).notNull().default('waiting'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('gpt_account_waitlist_account_status_idx').on(table.accountId, table.status, table.createdAt),
+    index('gpt_account_waitlist_user_status_idx').on(table.userId, table.status),
+  ],
+)

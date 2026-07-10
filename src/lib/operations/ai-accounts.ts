@@ -106,6 +106,13 @@ export async function ensureAiAccountTables() {
 
 export async function seedDefaultAiAccountUsers(userId: string) {
   await ensureAiAccountTables()
+  const existingUsers = await db
+    .select({ id: gptAccountUsers.id })
+    .from(gptAccountUsers)
+    .where(eq(gptAccountUsers.userId, userId))
+    .limit(1)
+  if (existingUsers.length) return
+
   const rows = DEFAULT_USER_CANDIDATES.map((name, index) => ({
     userId,
     name,
@@ -122,22 +129,30 @@ export async function seedDefaultAiAccountUsers(userId: string) {
 export async function seedDefaultAiAccounts(userId: string) {
   await ensureAiAccountTables()
   await seedDefaultAiAccountUsers(userId)
-  const rows = DEFAULT_AI_ACCOUNTS.map((account, index) => ({
-    userId,
-    name: account.name,
-    email: account.email,
-    sortOrder: index + 1,
-    status: 'available',
-    fiveHourLimit: '5시간 한도',
-    fiveHourLimitPeriod: 'PM',
-    weeklyLimit: '1주일 한도',
-  }))
+  const existingAccounts = await db
+    .select({ id: gptAccounts.id })
+    .from(gptAccounts)
+    .where(eq(gptAccounts.userId, userId))
+    .limit(1)
 
-  await db.insert(gptAccounts)
-    .values(rows)
-    .onConflictDoNothing({
-      target: [gptAccounts.userId, gptAccounts.name],
-    })
+  if (!existingAccounts.length) {
+    const rows = DEFAULT_AI_ACCOUNTS.map((account, index) => ({
+      userId,
+      name: account.name,
+      email: account.email,
+      sortOrder: index + 1,
+      status: 'available',
+      fiveHourLimit: '5시간 한도',
+      fiveHourLimitPeriod: 'PM',
+      weeklyLimit: '1주일 한도',
+    }))
+
+    await db.insert(gptAccounts)
+      .values(rows)
+      .onConflictDoNothing({
+        target: [gptAccounts.userId, gptAccounts.name],
+      })
+  }
 
   for (const account of DEFAULT_AI_ACCOUNTS) {
     await db.update(gptAccounts)

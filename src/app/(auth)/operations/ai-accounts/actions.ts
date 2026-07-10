@@ -63,10 +63,14 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
 
   const fiveHourHour = String(formData.get('fiveHourHour') ?? '').trim()
   const fiveHourMinute = String(formData.get('fiveHourMinute') ?? '').trim()
+  const fiveHourLimitDate = String(formData.get('fiveHourLimitDate') ?? '').trim()
   const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') ?? '').trim()
   const weeklyLimitDate = String(formData.get('weeklyLimitDate') ?? '').trim()
-  const fiveHourLimit = fiveHourHour || fiveHourMinute
+  const fiveHourTime = fiveHourHour || fiveHourMinute
     ? `${fiveHourHour.padStart(2, '0')}:${fiveHourMinute.padStart(2, '0')}`
+    : ''
+  const fiveHourLimit = fiveHourTime || fiveHourLimitDate
+    ? [fiveHourTime, fiveHourLimitDate].filter(Boolean).join(' / ')
     : String(formData.get('fiveHourLimit') ?? '')
   const weeklyLimit = weeklyRemainingPercent || weeklyLimitDate
     ? `잔여 ${weeklyRemainingPercent || '-'}% / ${weeklyLimitDate || '-'}`

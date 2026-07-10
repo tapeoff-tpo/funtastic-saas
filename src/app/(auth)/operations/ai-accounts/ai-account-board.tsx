@@ -62,9 +62,11 @@ function formatDateTime(value: string) {
 
 function parseFiveHourLimit(value: string | null) {
   const match = value?.match(/(\d{1,2})\s*:\s*(\d{1,2})/)
+  const date = value?.match(/\d{4}-\d{2}-\d{2}/)?.[0] || ''
   return {
     hour: match?.[1]?.padStart(2, '0') || '',
     minute: match?.[2]?.padStart(2, '0') || '',
+    date,
   }
 }
 
@@ -266,7 +268,7 @@ export function AiAccountBoard({
                 <div className="grid gap-2 xl:grid-cols-[max-content_minmax(360px,1fr)_auto] xl:items-end">
                   <label className="space-y-1">
                     <span className="text-xs font-medium text-muted-foreground">5시간 한도</span>
-                    <div className="flex gap-2">
+                    <div className="grid gap-2 md:grid-cols-[max-content_max-content_minmax(150px,1fr)]">
                       <div className="grid grid-cols-2 overflow-hidden rounded-md border">
                         {(['AM', 'PM'] as const).map((period) => (
                           <button
@@ -303,6 +305,12 @@ export function AiAccountBoard({
                           className="h-9 w-14 text-center"
                         />
                       </div>
+                      <Input
+                        name="fiveHourLimitDate"
+                        type="date"
+                        defaultValue={selectedFiveHourLimit.date}
+                        className="h-9"
+                      />
                     </div>
                   </label>
                   <label className="space-y-1">

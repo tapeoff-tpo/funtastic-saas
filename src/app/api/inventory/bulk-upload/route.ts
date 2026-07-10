@@ -14,8 +14,14 @@ import ExcelJS from 'exceljs'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { products, productVariants, inventory } from '@/lib/db/schema'
-import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { normalizeExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
+
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
+const DB_BATCH_SIZE = 500
 
 /** Korean header → internal key (also supports 사방넷 multi-row headers like "현재고 가용") */
 const HEADER_MAP: Record<string, string> = {
@@ -116,6 +122,30 @@ interface UploadResult {
   success: number
   failed: number
   errors: Array<{ sku: string; error: string }>
+  warnings?: string[]
+}
+
+function chunkArray<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size))
+  }
+  return chunks
+}
+
+function inventoryLocationKey(
+  sku: string,
+  warehouseZone: string | null | undefined,
+  sectorCode: string | null | undefined,
+): string {
+  return [sku, warehouseZone ?? '', sectorCode ?? ''].join('\u0000')
+}
+
+function inventoryWarehouseKey(
+  sku: string,
+  warehouseZone: string | null | undefined,
+): string {
+  return [sku, warehouseZone ?? ''].join('\u0000')
 }
 
 function cellText(cell: ExcelJS.Cell): string {
@@ -174,13 +204,21 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'file 필드가 없습니다.' }, { status: 400 })
   }
 
-  // Read file into ArrayBuffer (ExcelJS types accept ArrayBuffer here)
-  const arrayBuffer = await file.arrayBuffer()
+  let workbookBuffer: Buffer
+  try {
+    // ExcelJS reads xlsx only. Normalize legacy xls files before parsing.
+    workbookBuffer = normalizeExcelWorkbookBuffer(Buffer.from(await file.arrayBuffer()) as unknown as Buffer)
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Excel 파일을 읽을 수 없습니다.' },
+      { status: 400 },
+    )
+  }
 
   // Parse Excel
   const workbook = new ExcelJS.Workbook()
   try {
-    await workbook.xlsx.load(arrayBuffer)
+    await workbook.xlsx.load(workbookBuffer as unknown as ArrayBuffer)
   } catch {
     return NextResponse.json({ error: 'Excel 파일을 읽을 수 없습니다. xlsx 형식인지 확인해주세요.' }, { status: 400 })
   }
@@ -256,77 +294,181 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
     })
   })
 
-  // Bulk UPSERT — single INSERT...ON CONFLICT DO UPDATE for all rows at once.
-  // Drops the per-row transaction + history-log overhead (was 2900+ round trips).
+  // Save the uploaded workbook as an inventory snapshot in bounded DB batches.
   let successCount = 0
   const dbErrors: Array<{ sku: string; error: string }> = []
+  const warnings: string[] = []
 
   if (rows.length > 0) {
     try {
       await db.transaction(async (tx) => {
-        for (const r of rows) {
-          const warehouseKey = r.warehouseZone ?? ''
-          const sectorKey = r.sectorCode ?? ''
-          const exactMatches = await tx.select({
+        const latestRowsByLocation = new Map<string, { row: ParsedRow; rowIndex: number }>()
+        for (const [rowIndex, row] of rows.entries()) {
+          latestRowsByLocation.set(
+            inventoryLocationKey(row.sku, row.warehouseZone, row.sectorCode),
+            { row, rowIndex },
+          )
+        }
+        const rowsToSave = Array.from(latestRowsByLocation.values())
+          .sort((a, b) => a.rowIndex - b.rowIndex)
+        const existingByLocation = new Map<string, Array<{ id: string; reservedStock: number }>>()
+        const existingByWarehouse = new Map<string, Array<{
+          id: string
+          sku: string
+          warehouseZone: string | null
+          sectorCode: string | null
+        }>>()
+        const latestNoSectorRowIndexByWarehouse = new Map<string, number>()
+
+        for (const entry of rowsToSave) {
+          if (!entry.row.sectorCode) {
+            latestNoSectorRowIndexByWarehouse.set(
+              inventoryWarehouseKey(entry.row.sku, entry.row.warehouseZone),
+              entry.rowIndex,
+            )
+          }
+        }
+
+        for (const skuChunk of chunkArray(
+          Array.from(new Set(rowsToSave.map(({ row }) => row.sku))),
+          DB_BATCH_SIZE,
+        )) {
+          const existingRows = await tx.select({
             id: inventory.id,
+            sku: inventory.sku,
+            warehouseZone: inventory.warehouseZone,
+            sectorCode: inventory.sectorCode,
             reservedStock: inventory.reservedStock,
           }).from(inventory).where(and(
             eq(inventory.userId, workspaceUserId),
-            eq(inventory.sku, r.sku),
-            sql`COALESCE(${inventory.warehouseZone}, '') = ${warehouseKey}`,
-            sql`COALESCE(${inventory.sectorCode}, '') = ${sectorKey}`,
+            inArray(inventory.sku, skuChunk),
           )).orderBy(desc(inventory.updatedAt), desc(inventory.createdAt))
+
+          for (const existing of existingRows) {
+            const key = inventoryLocationKey(existing.sku, existing.warehouseZone, existing.sectorCode)
+            const matches = existingByLocation.get(key) ?? []
+            matches.push({ id: existing.id, reservedStock: existing.reservedStock })
+            existingByLocation.set(key, matches)
+
+            const warehouseKey = inventoryWarehouseKey(existing.sku, existing.warehouseZone)
+            const warehouseMatches = existingByWarehouse.get(warehouseKey) ?? []
+            warehouseMatches.push({
+              id: existing.id,
+              sku: existing.sku,
+              warehouseZone: existing.warehouseZone,
+              sectorCode: existing.sectorCode,
+            })
+            existingByWarehouse.set(warehouseKey, warehouseMatches)
+          }
+        }
+
+        const inventoryUpdates: Array<{ id: string; row: ParsedRow }> = []
+        const inventoryInserts: Array<{ row: ParsedRow; shouldZero: boolean }> = []
+        const zeroedInventoryIds = new Set<string>()
+
+        for (const entry of rowsToSave) {
+          const r = entry.row
+          const warehouseKey = r.warehouseZone ?? ''
+          const sectorKey = r.sectorCode ?? ''
+          const noSectorRowIndex = latestNoSectorRowIndexByWarehouse.get(
+            inventoryWarehouseKey(r.sku, warehouseKey),
+          )
+          const shouldZero = Boolean(
+            r.sectorCode
+            && noSectorRowIndex !== undefined
+            && entry.rowIndex <= noSectorRowIndex,
+          )
+          const exactMatches = existingByLocation.get(
+            inventoryLocationKey(r.sku, warehouseKey, sectorKey),
+          ) ?? []
 
           const [primary, ...duplicates] = exactMatches
           if (primary) {
-            await tx.update(inventory).set({
-              productName: r.productName,
-              totalStock: r.totalStock,
-              availableStock: r.totalStock - primary.reservedStock,
-              warehouseZone: r.warehouseZone ?? null,
-              sectorCode: r.sectorCode ?? null,
-              optionName: r.optionName ?? null,
-              packagingUnit: r.packagingUnit ?? null,
-              updatedAt: new Date(),
-            }).where(eq(inventory.id, primary.id))
+            inventoryUpdates.push({ id: primary.id, row: r })
+            if (shouldZero) zeroedInventoryIds.add(primary.id)
           } else {
-            await tx.insert(inventory).values({
-              userId: workspaceUserId,
-              sku: r.sku,
-              productName: r.productName,
-              totalStock: r.totalStock,
-              reservedStock: 0,
-              availableStock: r.totalStock,
-              warehouseZone: r.warehouseZone ?? null,
-              sectorCode: r.sectorCode ?? null,
-              optionName: r.optionName ?? null,
-              packagingUnit: r.packagingUnit ?? null,
-            })
+            inventoryInserts.push({ row: r, shouldZero })
           }
 
-          if (duplicates.length > 0) {
-            await tx.update(inventory).set({
-              totalStock: 0,
-              availableStock: sql`0 - ${inventory.reservedStock}`,
-              updatedAt: new Date(),
-            }).where(inArray(inventory.id, duplicates.map((row) => row.id)))
-          }
-
-          if (!r.sectorCode) {
-            await tx.update(inventory).set({
-              totalStock: 0,
-              availableStock: sql`0 - ${inventory.reservedStock}`,
-              updatedAt: new Date(),
-            }).where(and(
-              eq(inventory.userId, workspaceUserId),
-              eq(inventory.sku, r.sku),
-              sql`COALESCE(${inventory.warehouseZone}, '') = ${warehouseKey}`,
-              isNotNull(inventory.sectorCode),
-            ))
+          for (const duplicate of duplicates) {
+            zeroedInventoryIds.add(duplicate.id)
           }
         }
+
+        for (const [warehouseKey, noSectorRowIndex] of latestNoSectorRowIndexByWarehouse) {
+          for (const existing of existingByWarehouse.get(warehouseKey) ?? []) {
+            if (existing.sectorCode === null) continue
+
+            const sourceEntry = latestRowsByLocation.get(
+              inventoryLocationKey(existing.sku, existing.warehouseZone, existing.sectorCode),
+            )
+            if (!sourceEntry || (
+              Boolean(sourceEntry.row.sectorCode)
+              && sourceEntry.rowIndex <= noSectorRowIndex
+            )) {
+              zeroedInventoryIds.add(existing.id)
+            }
+          }
+        }
+
+        for (const updateChunk of chunkArray(inventoryUpdates, DB_BATCH_SIZE)) {
+          await tx.execute(sql`
+            UPDATE inventory AS target
+            SET product_name = source.product_name,
+                total_stock = source.total_stock,
+                available_stock = source.total_stock - target.reserved_stock,
+                warehouse_zone = source.warehouse_zone,
+                sector_code = source.sector_code,
+                option_name = source.option_name,
+                packaging_unit = source.packaging_unit,
+                updated_at = now()
+            FROM (VALUES ${sql.join(
+              updateChunk.map(({ id, row }) => sql`(
+                ${id}::uuid,
+                ${row.productName}::text,
+                ${row.totalStock}::integer,
+                ${row.warehouseZone ?? null}::varchar,
+                ${row.sectorCode ?? null}::varchar,
+                ${row.optionName ?? null}::varchar,
+                ${row.packagingUnit ?? null}::varchar
+              )`),
+              sql`, `,
+            )}) AS source(
+              id,
+              product_name,
+              total_stock,
+              warehouse_zone,
+              sector_code,
+              option_name,
+              packaging_unit
+            )
+            WHERE target.id = source.id
+          `)
+        }
+
+        for (const insertChunk of chunkArray(inventoryInserts, DB_BATCH_SIZE)) {
+          await tx.insert(inventory).values(insertChunk.map(({ row, shouldZero }) => ({
+            userId: workspaceUserId,
+            sku: row.sku,
+            productName: row.productName,
+            totalStock: shouldZero ? 0 : row.totalStock,
+            reservedStock: 0,
+            availableStock: shouldZero ? 0 : row.totalStock,
+            warehouseZone: row.warehouseZone ?? null,
+            sectorCode: row.sectorCode ?? null,
+            optionName: row.optionName ?? null,
+            packagingUnit: row.packagingUnit ?? null,
+          })))
+        }
+
+        for (const zeroedIdChunk of chunkArray(Array.from(zeroedInventoryIds), DB_BATCH_SIZE)) {
+          await tx.update(inventory).set({
+            totalStock: 0,
+            availableStock: sql`0 - ${inventory.reservedStock}`,
+            updatedAt: new Date(),
+          }).where(inArray(inventory.id, zeroedIdChunk))
+        }
       })
-      await syncGroupedProductOptions(workspaceUserId, rows)
       successCount = rows.length
     } catch (err) {
       console.error('[bulk-upload] inventory upsert failed:', err)
@@ -338,12 +480,24 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
   }
 
   // Sync products table — one bulk upsert too
-  if (rows.length > 0) {
+  if (successCount > 0) {
     try {
-      await db
-        .insert(products)
-        .values(
-          rows.map((r) => {
+      await syncGroupedProductOptions(workspaceUserId, rows)
+    } catch (err) {
+      console.error('[bulk-upload] product option sync failed:', err)
+      warnings.push('재고는 저장됐지만 품목 옵션 동기화에 실패했습니다. 관리자에게 문의해주세요.')
+    }
+  }
+
+  const uniqueProductRows = Array.from(new Map(rows.map((row) => [row.sku, row])).values())
+
+  if (successCount > 0) {
+    try {
+      for (const productRows of chunkArray(uniqueProductRows, DB_BATCH_SIZE)) {
+        await db
+          .insert(products)
+          .values(
+            productRows.map((r) => {
             const location = [r.warehouseZone, r.sectorCode].filter(Boolean).join(' ').trim() || null
             return {
               userId: workspaceUserId,
@@ -357,22 +511,24 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
               manageInventory: true,
               status: 'active' as const,
             }
-          }),
-        )
-        .onConflictDoUpdate({
-          target: [products.userId, products.internalSku],
-          set: {
-            name: sql`excluded.name`,
-            warehouseLocation: sql`excluded.warehouse_location`,
-            costPrice: sql`excluded.cost_price`,
-            basePrice: sql`excluded.base_price`,
-            manageInventory: sql`true`,
-            defaultCarrierId: sql`excluded.default_carrier_id`,
-            updatedAt: new Date(),
-          },
-        })
+            }),
+          )
+          .onConflictDoUpdate({
+            target: [products.userId, products.internalSku],
+            set: {
+              name: sql`excluded.name`,
+              warehouseLocation: sql`excluded.warehouse_location`,
+              costPrice: sql`excluded.cost_price`,
+              basePrice: sql`excluded.base_price`,
+              manageInventory: sql`true`,
+              defaultCarrierId: sql`excluded.default_carrier_id`,
+              updatedAt: new Date(),
+            },
+          })
+      }
     } catch (err) {
       console.error('[bulk-upload] products upsert failed:', err)
+      warnings.push('재고는 저장됐지만 품목 정보 동기화에 실패했습니다. 관리자에게 문의해주세요.')
       // Non-fatal — inventory already updated
     }
   }
@@ -383,6 +539,7 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
     success: successCount,
     failed: parseErrors.length + dbErrors.length,
     errors: allErrors,
+    warnings,
   }
 
   return NextResponse.json(result)
@@ -395,14 +552,15 @@ async function syncGroupedProductOptions(userId: string, rows: ParsedRow[]) {
     return [baseSku, { baseSku, name: row.productName }]
   })).values())
 
-  await db.insert(products).values(groupedProducts.map((product) => ({
+  for (const productChunk of chunkArray(groupedProducts, DB_BATCH_SIZE)) {
+    await db.insert(products).values(productChunk.map((product) => ({
     userId,
     internalSku: product.baseSku,
     name: product.name,
     basePrice: '0',
     manageInventory: true,
     status: 'active' as const,
-  }))).onConflictDoUpdate({
+    }))).onConflictDoUpdate({
     target: [products.userId, products.internalSku],
     set: {
       name: sql`excluded.name`,
@@ -410,18 +568,24 @@ async function syncGroupedProductOptions(userId: string, rows: ParsedRow[]) {
       status: sql`'active'::product_status`,
       updatedAt: new Date(),
     },
-  })
+    })
+  }
 
-  const productRows = await db.select({
-    id: products.id,
-    internalSku: products.internalSku,
-  }).from(products).where(and(
-    eq(products.userId, userId),
-    inArray(products.internalSku, groupedProducts.map((product) => product.baseSku)),
-  ))
+  const productRows: Array<{ id: string; internalSku: string }> = []
+  for (const productChunk of chunkArray(groupedProducts, DB_BATCH_SIZE)) {
+    const foundProducts = await db.select({
+      id: products.id,
+      internalSku: products.internalSku,
+    }).from(products).where(and(
+      eq(products.userId, userId),
+      inArray(products.internalSku, productChunk.map((product) => product.baseSku)),
+    ))
+    productRows.push(...foundProducts)
+  }
   const productIdBySku = new Map(productRows.map((product) => [product.internalSku, product.id]))
 
-  await db.insert(productVariants).values(uniqueRows.map((row) => {
+  for (const variantChunk of chunkArray(uniqueRows, DB_BATCH_SIZE)) {
+    await db.insert(productVariants).values(variantChunk.map((row) => {
     const baseSku = baseProductCode(row.sku)
     const optionCode = optionCodeFromSku(row.sku)
     return {
@@ -432,7 +596,7 @@ async function syncGroupedProductOptions(userId: string, rows: ParsedRow[]) {
       sortOrder: Number(optionCode) || 0,
       isActive: true,
     }
-  })).onConflictDoUpdate({
+    })).onConflictDoUpdate({
     target: [productVariants.productId, productVariants.sku],
     set: {
       optionName: sql`excluded.option_name`,
@@ -441,16 +605,19 @@ async function syncGroupedProductOptions(userId: string, rows: ParsedRow[]) {
       isActive: sql`true`,
       updatedAt: new Date(),
     },
-  })
+    })
+  }
 
-  await db.update(products).set({
-    status: 'deleted',
-    manageInventory: false,
-    updatedAt: new Date(),
-  }).where(and(
-    eq(products.userId, userId),
-    inArray(products.internalSku, uniqueRows.map((row) => row.sku)),
-  ))
+  for (const skuChunk of chunkArray(uniqueRows.map((row) => row.sku), DB_BATCH_SIZE)) {
+    await db.update(products).set({
+      status: 'deleted',
+      manageInventory: false,
+      updatedAt: new Date(),
+    }).where(and(
+      eq(products.userId, userId),
+      inArray(products.internalSku, skuChunk),
+    ))
+  }
 }
 
 function baseProductCode(sku: string): string {

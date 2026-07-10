@@ -8,6 +8,7 @@ interface UploadResult {
   success: number
   failed: number
   errors: Array<{ sku: string; error: string }>
+  warnings?: string[]
 }
 
 interface ExcelUploadDialogProps {
@@ -122,6 +123,14 @@ export function ExcelUploadDialog({ onClose }: ExcelUploadDialogProps) {
                       <p key={i} className="text-sm text-red-600">
                         상품코드: {err.sku} - {err.error}
                       </p>
+                    ))}
+                  </div>
+                )}
+
+                {result.warnings && result.warnings.length > 0 && (
+                  <div className="mt-3 space-y-1 text-sm text-amber-700">
+                    {result.warnings.map((warning, i) => (
+                      <p key={i}>{warning}</p>
                     ))}
                   </div>
                 )}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, Copy, MessageSquare, Save, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -50,6 +50,50 @@ function statusClassName(status: string) {
   return 'border-emerald-200 bg-emerald-50 text-emerald-700'
 }
 
+function parseFiveHourLimitEnd(account: AiAccountRow, now: Date) {
+  const value = account.fiveHourLimit?.trim()
+  if (!value) return null
+
+  const timeMatch = value.match(/(\d{1,2})\s*:\s*(\d{1,2})/) || value.match(/(\d{1,2})\s*시(?:\s*(\d{1,2})\s*분?)?/)
+  if (!timeMatch) return null
+
+  let hour = Number(timeMatch[1])
+  const minute = Number(timeMatch[2] || 0)
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null
+  }
+
+  const periodText = `${account.fiveHourLimitPeriod || ''} ${value}`
+  const isPm = /PM|오후/i.test(periodText)
+  const isAm = /AM|오전/i.test(periodText)
+  if (isPm && hour > 0 && hour < 12) hour += 12
+  if (isAm && hour === 12) hour = 0
+
+  const dateMatch = value.match(/\d{4}-\d{2}-\d{2}/)?.[0]
+  const endAt = dateMatch ? new Date(`${dateMatch}T00:00:00`) : new Date(now)
+  endAt.setHours(hour, minute, 0, 0)
+  return endAt
+}
+
+function isAvailableAfterFiveHourLimit(account: AiAccountRow, now: Date | null) {
+  if (!now || account.status !== 'five_hour_limit_reached') return false
+  const endAt = parseFiveHourLimitEnd(account, now)
+  return !!endAt && now.getTime() >= endAt.getTime()
+}
+
+function fiveHourLimitNotice(account: AiAccountRow, now: Date | null) {
+  if (!now || account.status !== 'five_hour_limit_reached') return null
+  const endAt = parseFiveHourLimitEnd(account, now)
+  if (!endAt) return null
+  if (now.getTime() >= endAt.getTime()) return '한도 종료, 사용가능'
+  const time = new Intl.DateTimeFormat('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(endAt)
+  return `${time} 이후 사용가능`
+}
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('ko-KR', {
     month: '2-digit',
@@ -84,6 +128,7 @@ export function AiAccountBoard({
 }: Props) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(accounts[0]?.id ?? null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [now, setNow] = useState<Date | null>(null)
   const [selectedUsersByAccount, setSelectedUsersByAccount] = useState<Record<string, string[]>>({})
   const [periodByAccount, setPeriodByAccount] = useState<Record<string, 'AM' | 'PM'>>(() => {
     return accounts.reduce<Record<string, 'AM' | 'PM'>>((acc, account) => {
@@ -91,6 +136,15 @@ export function AiAccountBoard({
       return acc
     }, {})
   })
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => setNow(new Date()), 0)
+    const interval = window.setInterval(() => setNow(new Date()), 60_000)
+    return () => {
+      window.clearTimeout(initial)
+      window.clearInterval(interval)
+    }
+  }, [])
 
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
   const selectedUsers = selectedAccount ? selectedUsersByAccount[selectedAccount.id] || [] : []
@@ -105,6 +159,13 @@ export function AiAccountBoard({
     }, {})
   }, [messages])
   const selectedMessages = selectedAccount ? messagesByAccount[selectedAccount.id] || [] : []
+  const selectedReleased = selectedAccount ? isAvailableAfterFiveHourLimit(selectedAccount, now) : false
+  const selectedDisplayStatus = selectedAccount
+    ? selectedReleased ? 'available' : selectedAccount.status
+    : 'available'
+  const selectedDisplayLabel = selectedAccount
+    ? selectedReleased ? '사용가능' : statusLabels[selectedAccount.status] || selectedAccount.status
+    : '사용가능'
 
   async function copyAccountId(account: AiAccountRow) {
     if (!account.email) return
@@ -151,6 +212,10 @@ export function AiAccountBoard({
           <div className="divide-y">
             {accounts.map((account) => {
               const isSelected = selectedAccount?.id === account.id
+              const isReleased = isAvailableAfterFiveHourLimit(account, now)
+              const displayStatus = isReleased ? 'available' : account.status
+              const displayLabel = isReleased ? '사용가능' : statusLabels[account.status] || account.status
+              const limitNotice = fiveHourLimitNotice(account, now)
 
               return (
                 <div
@@ -160,6 +225,7 @@ export function AiAccountBoard({
                   className={cn(
                     'cursor-pointer',
                     'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[96px_minmax(230px,1fr)_86px_110px_128px] md:items-center md:gap-2',
+                    isReleased && 'bg-emerald-50/60 hover:bg-emerald-50',
                     isSelected && 'bg-muted',
                   )}
                   onClick={() => setSelectedAccountId(account.id)}
@@ -205,8 +271,8 @@ export function AiAccountBoard({
                     {copiedId === account.id ? <p className="mt-1 hidden text-xs text-emerald-700 md:block">복사됨</p> : null}
                   </div>
                   <div>
-                    <Badge variant="outline" className={cn('rounded-full', statusClassName(account.status))}>
-                      {statusLabels[account.status] || account.status}
+                    <Badge variant="outline" className={cn('rounded-full', statusClassName(displayStatus))}>
+                      {displayLabel}
                     </Badge>
                   </div>
                   <div className="text-sm">
@@ -215,6 +281,11 @@ export function AiAccountBoard({
                   </div>
                   <div className="text-xs text-muted-foreground">
                     <p>{account.fiveHourLimit ? `${account.fiveHourLimitPeriod || 'PM'} ${account.fiveHourLimit}` : '5시간 한도 미설정'}</p>
+                    {limitNotice ? (
+                      <p className={cn(isReleased ? 'font-medium text-emerald-700' : 'font-medium text-red-700')}>
+                        {limitNotice}
+                      </p>
+                    ) : null}
                     <p>{account.weeklyLimit || '1주일 한도 미설정'}</p>
                   </div>
                 </div>
@@ -235,8 +306,14 @@ export function AiAccountBoard({
                   <div className="grid gap-2 xl:grid-cols-[150px_minmax(220px,1fr)_auto_auto_auto] xl:items-center">
                     <Input name="name" defaultValue={selectedAccount.name} className="h-9 font-semibold" required />
                     <Input name="email" defaultValue={selectedAccount.email || ''} placeholder="계정 아이디" className="h-9" />
-                    <Badge variant="outline" className={cn('h-7 justify-center rounded-full', statusClassName(selectedAccount.status))}>
-                      {statusLabels[selectedAccount.status] || selectedAccount.status}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        'h-7 justify-center rounded-full',
+                        statusClassName(selectedDisplayStatus),
+                      )}
+                    >
+                      {selectedDisplayLabel}
                     </Badge>
                     <Button type="submit" className="h-9">
                       <Save className="h-4 w-4" />

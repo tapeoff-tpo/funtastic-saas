@@ -115,11 +115,12 @@ export function PriceTableGrid({
         </div>
 
         <div className="flex items-center justify-between gap-2 sm:justify-end">
-          <span className="text-xs text-muted-foreground">{columnCount}개 열 표시</span>
+          <span className="hidden whitespace-nowrap text-xs text-muted-foreground sm:inline">{columnCount}개 열 표시</span>
           <details className="relative">
             <summary className="flex h-8 cursor-pointer list-none items-center gap-1.5 rounded-md border bg-background px-2.5 text-sm font-medium hover:bg-muted [&::-webkit-details-marker]:hidden">
               <Columns3 className="size-4" />
-              표시 열
+              <span className="sm:hidden">열 선택</span>
+              <span className="hidden sm:inline">표시 열</span>
             </summary>
             <div className="absolute right-0 z-40 mt-1 w-[290px] rounded-md border bg-popover p-3 text-popover-foreground shadow-lg">
               <div className="mb-2 flex items-center justify-between">

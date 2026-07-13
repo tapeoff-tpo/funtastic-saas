@@ -22,6 +22,7 @@ const BUYER_CODES = {
 const DEFAULT_DIR = 'D:\\발주 saas'
 const apply = process.argv.includes('--apply')
 const includeCompleted = process.argv.includes('--include-completed')
+const pendingArrivalOnly = process.argv.includes('--pending-arrival-only')
 const sourceDir = flagValue('--dir') ?? DEFAULT_DIR
 const since = flagValue('--since') ?? '2026-06-01'
 
@@ -79,7 +80,12 @@ async function main() {
     ]))
 
     const combined = combineStages({ requestRows, purchaseRows, arrivalRows, outboundRows })
-    const latestRows = combined.rows.filter((row) => row.latestDate >= since)
+    const latestRows = combined.rows.filter((row) => {
+      if (!pendingArrivalOnly) return row.latestDate >= since
+      return row.sourceRows.request !== null
+        && row.requestDate >= since
+        && (row.status === 'purchased' || row.status === 'purchase_completed')
+    })
     const matchedRows = latestRows.filter((row) => productSkus.has(row.sku))
     const missingProductRows = latestRows.filter((row) => !productSkus.has(row.sku))
     const selectedRows = matchedRows.filter((row) => {
@@ -136,6 +142,7 @@ async function main() {
       mode: apply ? 'apply' : 'dry-run',
       since,
       includeCompleted,
+      pendingArrivalOnly,
       sourceDir,
       sourceRows: {
         request: requestRows.length,

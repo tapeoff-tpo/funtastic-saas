@@ -58,7 +58,9 @@ interface MappingTarget {
 const SELECTED_TEMPLATE_KEY = 'orders.export.selectedTemplateId'
 const EXPORT_SCOPE_KEY = 'orders.export.scope'
 const EXACT_OPTION_ID = '__exact__'
-const RPA_INVOICE_POLL_INTERVAL_MS = 1500
+const RPA_INVOICE_INITIAL_POLL_INTERVAL_MS = 3_000
+const RPA_INVOICE_ACTIVE_POLL_INTERVAL_MS = 5_000
+const RPA_INVOICE_BACKGROUND_POLL_INTERVAL_MS = 15_000
 type ExportScope = 'filtered' | 'selected'
 
 interface ShippingActionsProps {
@@ -133,6 +135,13 @@ function reportTime(date: Date): string {
     second: '2-digit',
     hour12: false,
   }).format(date)
+}
+
+function getRpaInvoicePollDelay(startedAt: number): number {
+  if (typeof document !== 'undefined' && document.hidden) return RPA_INVOICE_BACKGROUND_POLL_INTERVAL_MS
+  return Date.now() - startedAt < RPA_INVOICE_INITIAL_POLL_INTERVAL_MS
+    ? RPA_INVOICE_INITIAL_POLL_INTERVAL_MS
+    : RPA_INVOICE_ACTIVE_POLL_INTERVAL_MS
 }
 
 function createInvoiceTransmissionReport(mode: 'API' | 'RPA', selected: OrderRow[]): InvoiceTransmissionReport {
@@ -284,12 +293,12 @@ export function ShippingActions({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null)
   const [exportScope, setExportScope] = useState<ExportScope>('filtered')
   const exportMenuRef = useRef<HTMLDivElement>(null)
-  const rpaInvoicePollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const rpaInvoicePollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rpaInvoicePollStartedAtRef = useRef<number | null>(null)
 
   const stopRpaInvoicePolling = () => {
     if (rpaInvoicePollTimerRef.current) {
-      clearInterval(rpaInvoicePollTimerRef.current)
+      clearTimeout(rpaInvoicePollTimerRef.current)
       rpaInvoicePollTimerRef.current = null
     }
     rpaInvoicePollStartedAtRef.current = null
@@ -636,17 +645,31 @@ export function ShippingActions({
       router.refresh()
     }
 
+    const scheduleNextPoll = () => {
+      if (!rpaInvoicePollStartedAtRef.current) return
+      rpaInvoicePollTimerRef.current = setTimeout(
+        () => void poll(),
+        getRpaInvoicePollDelay(rpaInvoicePollStartedAtRef.current),
+      )
+    }
+
     const poll = async () => {
       try {
         const res = await fetch(`/api/orders/collect/status?ids=${encodeURIComponent(idsParam)}&orderIds=${encodeURIComponent(orderIdsParam)}`)
-        if (!res.ok) return
+        if (!res.ok) {
+          scheduleNextPoll()
+          return
+        }
 
         const data = await res.json() as {
           allDone?: boolean
           logs?: Array<{ id: string; status: string; errorMessage?: string | null; progressMessage?: string | null }>
           shipmentStatuses?: Array<{ orderId: string; uploadStatus: string; errorMessage?: string | null }>
         }
-        if (!data.logs) return
+        if (!data.logs) {
+          scheduleNextPoll()
+          return
+        }
 
         const logsById = new Map(data.logs.map((log) => [log.id, log]))
         const shipmentsByOrderId = new Map((data.shipmentStatuses ?? []).map((shipment) => [shipment.orderId, shipment]))
@@ -672,7 +695,10 @@ export function ShippingActions({
           appendInvoiceTransmissionStep(report, `-> ${progress}`)
         }
         updateInvoiceTransmissionWindow(reportWindow, report)
-        if (!report.entries.every((entry) => entry.status === 'success' || entry.status === 'failed')) return
+        if (!report.entries.every((entry) => entry.status === 'success' || entry.status === 'failed')) {
+          scheduleNextPoll()
+          return
+        }
 
         const completed = report.entries.filter((entry) => entry.status === 'success').length
         const failedEntries = report.entries.filter((entry) => entry.status === 'failed')
@@ -705,12 +731,12 @@ export function ShippingActions({
           toast.error(message)
         }
       } catch {
+        scheduleNextPoll()
         // 네트워크 오류는 다음 폴링에서 다시 확인
       }
     }
 
     void poll()
-    rpaInvoicePollTimerRef.current = setInterval(() => void poll(), RPA_INVOICE_POLL_INTERVAL_MS)
   }
 
   // 현재 선택된 양식 — localStorage 에 저장된 ID 가 목록에 없으면 첫 번째로 fallback

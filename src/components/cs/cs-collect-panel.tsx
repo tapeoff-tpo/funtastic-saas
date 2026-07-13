@@ -4,7 +4,19 @@ import { useCallback, useRef, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { JobLogResult } from '@/lib/hooks/use-collect-poll'
 
-const POLL_INTERVAL = 1500
+const INITIAL_POLL_INTERVAL_MS = 3_000
+const ACTIVE_POLL_INTERVAL_MS = 5_000
+const BACKGROUND_POLL_INTERVAL_MS = 15_000
+
+function getNextPollDelay(startedAt: number): number {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    return BACKGROUND_POLL_INTERVAL_MS
+  }
+
+  return Date.now() - startedAt < INITIAL_POLL_INTERVAL_MS
+    ? INITIAL_POLL_INTERVAL_MS
+    : ACTIVE_POLL_INTERVAL_MS
+}
 
 type CsCollectScope = 'all' | 'claims' | 'inquiries'
 type CsCollectMethod = 'all' | 'api' | 'rpa'
@@ -30,30 +42,48 @@ export function CsCollectPanel({
 }: CsCollectPanelProps) {
   const [collecting, setCollecting] = useState(false)
   const [logs, setLogs] = useState<JobLogResult[] | null>(null)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pollStartedAtRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
     if (timerRef.current) {
-      clearInterval(timerRef.current)
+      clearTimeout(timerRef.current)
       timerRef.current = null
     }
+    pollStartedAtRef.current = null
   }, [])
 
   const pollStatus = useCallback((ids: string[]) => {
     const idsParam = ids.join(',')
-    const poll = async () => {
-      const res = await fetch(`/api/cs/collect/status?ids=${idsParam}`)
-      if (!res.ok) return
-      const data = await res.json()
-      setLogs(data.logs)
-      if (data.allDone) {
-        stopPolling()
-        setCollecting(false)
-      }
+    pollStartedAtRef.current = Date.now()
+
+    const scheduleNextPoll = () => {
+      if (!pollStartedAtRef.current) return
+      timerRef.current = setTimeout(() => void poll(), getNextPollDelay(pollStartedAtRef.current))
     }
 
-    poll()
-    timerRef.current = setInterval(poll, POLL_INTERVAL)
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/cs/collect/status?ids=${idsParam}`)
+        if (!res.ok) {
+          scheduleNextPoll()
+          return
+        }
+        const data = await res.json()
+        setLogs(data.logs)
+        if (data.allDone) {
+          stopPolling()
+          setCollecting(false)
+          return
+        }
+      } catch {
+        // network error - keep polling
+      }
+
+      scheduleNextPoll()
+    }
+
+    void poll()
   }, [stopPolling])
 
   const startCollect = async () => {

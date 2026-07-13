@@ -28,9 +28,21 @@ interface UseCollectPollReturn {
   clearResults: () => void
 }
 
-const POLL_INTERVAL = 1500
+const INITIAL_POLL_INTERVAL_MS = 3_000
+const ACTIVE_POLL_INTERVAL_MS = 5_000
+const BACKGROUND_POLL_INTERVAL_MS = 15_000
 const MAX_POLL_DURATION = 13 * 60 * 1000
 const POLL_TIMEOUT_MESSAGE = 'RPA 작업이 제한시간 안에 끝나지 않았습니다. 다시 시도해주세요.'
+
+function getNextPollDelay(startedAt: number): number {
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    return BACKGROUND_POLL_INTERVAL_MS
+  }
+
+  return Date.now() - startedAt < INITIAL_POLL_INTERVAL_MS
+    ? INITIAL_POLL_INTERVAL_MS
+    : ACTIVE_POLL_INTERVAL_MS
+}
 
 function formatActiveCollectionError(error: string, activeJob: unknown): string {
   if (!activeJob || typeof activeJob !== 'object') return error
@@ -57,12 +69,12 @@ export function useCollectPoll(): UseCollectPollReturn {
   const [collecting, setCollecting] = useState(false)
   const [logs, setLogs] = useState<JobLogResult[] | null>(null)
   const [jobLogIds, setJobLogIds] = useState<string[]>([])
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pollStartedAtRef = useRef<number | null>(null)
 
   const stopPolling = useCallback(() => {
     if (timerRef.current) {
-      clearInterval(timerRef.current)
+      clearTimeout(timerRef.current)
       timerRef.current = null
     }
     pollStartedAtRef.current = null
@@ -115,6 +127,11 @@ export function useCollectPoll(): UseCollectPollReturn {
         })
       }
 
+      const scheduleNextPoll = () => {
+        if (!pollStartedAtRef.current) return
+        timerRef.current = setTimeout(() => void poll(), getNextPollDelay(pollStartedAtRef.current))
+      }
+
       const poll = async () => {
         if (pollStartedAtRef.current && Date.now() - pollStartedAtRef.current > MAX_POLL_DURATION) {
           failTimedOutPoll()
@@ -123,21 +140,26 @@ export function useCollectPoll(): UseCollectPollReturn {
 
         try {
           const res = await fetch(`/api/orders/collect/status?ids=${idsParam}`)
-          if (!res.ok) return
+          if (!res.ok) {
+            scheduleNextPoll()
+            return
+          }
           const data = await res.json()
           setLogs(data.logs)
           if (data.allDone) {
             stopPolling()
             setCollecting(false)
+            return
           }
         } catch {
           // network error — keep polling
         }
+
+        scheduleNextPoll()
       }
 
       // First poll immediately
-      poll()
-      timerRef.current = setInterval(poll, POLL_INTERVAL)
+      void poll()
     },
     [stopPolling]
   )
@@ -184,7 +206,7 @@ export function useCollectPoll(): UseCollectPollReturn {
             ? activeJob.status
             : null
 
-          if (activeJobId && activeJobStatus) {
+          if (activeJob && activeJobId && activeJobStatus) {
             const activeMessage = formatActiveCollectionError(data.error || '주문 수집 요청 실패', activeJob)
             setJobLogIds([activeJobId])
             setLogs([

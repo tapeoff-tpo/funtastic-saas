@@ -1277,3 +1277,68 @@ export const gptAccountUsers = pgTable(
     index('gpt_account_users_user_sort_idx').on(table.userId, table.sortOrder),
   ],
 )
+
+// Android SMS bridge for short-lived PicklePlus verification messages.
+export const smsBridgePairings = pgTable(
+  'sms_bridge_pairings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    accountId: uuid('account_id').references(() => gptAccounts.id, { onDelete: 'set null' }),
+    deviceLabel: varchar('device_label', { length: 100 }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('sms_bridge_pairings_token_hash_uniq').on(table.tokenHash),
+    index('sms_bridge_pairings_user_expires_idx').on(table.userId, table.expiresAt),
+  ],
+)
+
+export const smsBridgeDevices = pgTable(
+  'sms_bridge_devices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    accountId: uuid('account_id').references(() => gptAccounts.id, { onDelete: 'set null' }),
+    name: varchar('name', { length: 100 }).notNull(),
+    phoneLabel: varchar('phone_label', { length: 100 }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    appVersion: varchar('app_version', { length: 30 }),
+    platform: varchar('platform', { length: 30 }).notNull().default('android'),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('sms_bridge_devices_token_hash_uniq').on(table.tokenHash),
+    index('sms_bridge_devices_user_idx').on(table.userId, table.createdAt),
+    index('sms_bridge_devices_account_idx').on(table.accountId),
+  ],
+)
+
+export const smsBridgeMessages = pgTable(
+  'sms_bridge_messages',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    deviceId: uuid('device_id').notNull().references(() => smsBridgeDevices.id, { onDelete: 'cascade' }),
+    accountId: uuid('account_id').references(() => gptAccounts.id, { onDelete: 'set null' }),
+    provider: varchar('provider', { length: 30 }).notNull().default('pickleplus'),
+    sender: varchar('sender', { length: 100 }),
+    body: text('body').notNull(),
+    verificationCode: varchar('verification_code', { length: 12 }),
+    dedupeHash: varchar('dedupe_hash', { length: 64 }).notNull(),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('sms_bridge_messages_dedupe_hash_uniq').on(table.dedupeHash),
+    index('sms_bridge_messages_user_received_idx').on(table.userId, table.receivedAt),
+    index('sms_bridge_messages_account_received_idx').on(table.accountId, table.receivedAt),
+  ],
+)

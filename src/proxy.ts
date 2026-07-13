@@ -7,7 +7,17 @@ export async function proxy(request: NextRequest) {
   })
 
   // Public endpoints do not need a remote auth lookup.
-  if (pathname === '/api/health' || pathname.startsWith('/api/debug/') || pathname.startsWith('/auth/callback')) {
+  const isSmsBridgeDeviceEndpoint =
+    pathname === '/api/sms-bridge/pair'
+    || pathname === '/api/sms-bridge/messages'
+    || pathname === '/api/sms-bridge/heartbeat'
+
+  if (
+    pathname === '/api/health'
+    || pathname.startsWith('/api/debug/')
+    || pathname.startsWith('/auth/callback')
+    || isSmsBridgeDeviceEndpoint
+  ) {
     return supabaseResponse
   }
 

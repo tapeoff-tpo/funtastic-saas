@@ -1,5 +1,4 @@
 import { eq, and, gte, lt, sql, desc, inArray } from 'drizzle-orm'
-import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { orderMemos, orders, products } from '@/lib/db/schema'
 import { ShoppingCart, Calendar, Package, Wallet, TrendingUp, PackageX, Bell, CheckCircle2, Image as ImageIcon } from 'lucide-react'
@@ -13,22 +12,33 @@ import {
   type MonthlyPoint,
 } from './charts'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import type { Metadata } from 'next'
+import { Suspense } from 'react'
 
 export const metadata: Metadata = {
   title: '대시보드',
 }
 
 export default async function DashboardPage() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   if (!user) {
     return null
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
+
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold">대시보드</h1>
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardContent workspaceUserId={workspaceUserId} />
+      </Suspense>
+    </div>
+  )
+}
+
+async function DashboardContent({ workspaceUserId }: { workspaceUserId: string }) {
 
   const now = new Date()
   // 당일 시작/종료 (서버 로컬 기준 — 가능하면 KST 환경)
@@ -172,8 +182,6 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">대시보드</h1>
-
       {recentInspectionMemos.length > 0 && (
         <section className="rounded-lg border border-blue-200 bg-blue-50">
           <div className="flex items-center justify-between border-b border-blue-100 px-4 py-3">
@@ -286,6 +294,23 @@ export default async function DashboardPage() {
         <ChartCard title="월별 매출 (최근 12개월)">
           <MonthlySalesChart data={monthlyData} />
         </ChartCard>
+      </div>
+    </div>
+  )
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6" aria-label="대시보드 통계 불러오는 중">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div key={index} className="h-28 animate-pulse rounded-lg border bg-gray-100" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="h-72 animate-pulse rounded-lg border bg-gray-100" />
+        ))}
       </div>
     </div>
   )

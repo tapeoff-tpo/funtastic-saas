@@ -15,6 +15,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
+import { unstable_cache } from 'next/cache'
 
 export const metadata: Metadata = {
   title: '대시보드',
@@ -38,8 +39,7 @@ export default async function DashboardPage() {
   )
 }
 
-async function DashboardContent({ workspaceUserId }: { workspaceUserId: string }) {
-
+const getDashboardData = unstable_cache(async (workspaceUserId: string) => {
   const now = new Date()
   // 당일 시작/종료 (서버 로컬 기준 — 가능하면 KST 환경)
   const dayStart = new Date(now)
@@ -180,6 +180,36 @@ async function DashboardContent({ workspaceUserId }: { workspaceUserId: string }
     })
   }
 
+  return {
+    currentDay: now.getDate(),
+    currentMonth: now.getMonth() + 1,
+    dailyData,
+    heldOrderCount,
+    monthOrderCount,
+    monthSales,
+    monthlyData,
+    newOrderCount,
+    productCount,
+    recentInspectionMemos,
+    todaySales,
+  }
+}, ['dashboard-data'], { revalidate: 60 })
+
+async function DashboardContent({ workspaceUserId }: { workspaceUserId: string }) {
+  const {
+    currentDay,
+    currentMonth,
+    dailyData,
+    heldOrderCount,
+    monthOrderCount,
+    monthSales,
+    monthlyData,
+    newOrderCount,
+    productCount,
+    recentInspectionMemos,
+    todaySales,
+  } = await getDashboardData(workspaceUserId)
+
   return (
     <div className="space-y-6">
       {recentInspectionMemos.length > 0 && (
@@ -253,21 +283,21 @@ async function DashboardContent({ workspaceUserId }: { workspaceUserId: string }
         <StatCard
           label="당월 주문"
           value={monthOrderCount.toLocaleString('ko-KR')}
-          hint={`${now.getMonth() + 1}월 누적`}
+          hint={`${currentMonth}월 누적`}
           icon={<Calendar className="h-5 w-5 text-emerald-500" />}
           href="/analytics"
         />
         <StatCard
           label="당일 판매금액"
           value={`₩${todaySales.toLocaleString('ko-KR')}`}
-          hint={`${now.getMonth() + 1}/${now.getDate()} 매출`}
+          hint={`${currentMonth}/${currentDay} 매출`}
           icon={<Wallet className="h-5 w-5 text-amber-500" />}
           href="/analytics"
         />
         <StatCard
           label="당월 판매금액"
           value={`₩${monthSales.toLocaleString('ko-KR')}`}
-          hint={`${now.getMonth() + 1}월 누적 매출`}
+          hint={`${currentMonth}월 누적 매출`}
           icon={<TrendingUp className="h-5 w-5 text-rose-500" />}
           href="/analytics/sales"
         />

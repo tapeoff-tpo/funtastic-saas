@@ -373,19 +373,30 @@ export async function getOrderProfitAnalysisData(
         STRING_AGG(DISTINCT s.tracking_number, ', ') AS tracking_summary,
         STRING_AGG(DISTINCT COALESCE(resolved.package_name, '박스명 없음'), ', ') AS package_summary,
         COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
-        COUNT(DISTINCT s.id) FILTER (WHERE ascost.id IS NULL) AS unmatched_shipment_count,
+        COUNT(DISTINCT s.id) FILTER (WHERE matched_cost.id IS NULL) AS unmatched_shipment_count,
         COALESCE(SUM(
           COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
         ), 0) AS box_cost,
         COUNT(DISTINCT s.id) FILTER (
-          WHERE resolved.package_name IS NULL OR rate.unit_cost IS NULL
+          WHERE matched_resolved.package_name IS NULL OR matched_rate.unit_cost IS NULL
         ) AS missing_box_cost_count
       FROM shipments s
       LEFT JOIN actual_shipping_costs ascost ON ascost.shipment_id = s.id
+      LEFT JOIN LATERAL (
+        SELECT a.id, a.package_type
+        FROM actual_shipping_costs a
+        WHERE a.user_id = s.user_id
+          AND a.normalized_tracking_number = s.normalized_tracking_number
+        ORDER BY (a.shipment_id = s.id) DESC, a.updated_at DESC
+        LIMIT 1
+      ) matched_cost ON true
       LEFT JOIN item_summary items ON items.order_id = s.order_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) AS package_name
       ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(matched_cost.package_type), ''), items.fallback_package_name) AS package_name
+      ) matched_resolved ON true
       LEFT JOIN LATERAL (
         SELECT bcr.unit_cost::numeric AS unit_cost
         FROM box_cost_rates bcr
@@ -396,6 +407,16 @@ export async function getOrderProfitAnalysisData(
         ORDER BY bcr.effective_from DESC
         LIMIT 1
       ) rate ON true
+      LEFT JOIN LATERAL (
+        SELECT bcr.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates bcr
+        WHERE bcr.user_id = ${userId}
+          AND bcr.is_active = true
+          AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(matched_resolved.package_name))
+          AND bcr.effective_from <= (COALESCE(s.shipped_at, s.created_at) AT TIME ZONE 'Asia/Seoul')::date
+        ORDER BY bcr.effective_from DESC
+        LIMIT 1
+      ) matched_rate ON true
       WHERE s.user_id = ${userId}
       GROUP BY s.order_id
     ),
@@ -414,8 +435,15 @@ export async function getOrderProfitAnalysisData(
         ) AS missing_box_cost_count
       FROM actual_shipping_costs ascost
       JOIN orders o
-        ON o.id = ascost.order_id
-       AND o.user_id = ascost.user_id
+        ON o.user_id = ascost.user_id
+       AND (
+         o.id = ascost.order_id
+         OR (
+           ascost.shipment_id IS NULL
+           AND ascost.order_number IS NOT NULL
+           AND ascost.order_number IN (o.marketplace_order_id, o.internal_no)
+         )
+       )
       LEFT JOIN item_summary items ON items.order_id = o.id
       LEFT JOIN LATERAL (
         SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) AS package_name

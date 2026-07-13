@@ -141,6 +141,14 @@ export async function ensureActualShippingCostsTable(): Promise<void> {
     CREATE INDEX IF NOT EXISTS actual_shipping_costs_order_idx
       ON actual_shipping_costs(order_id)
   `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS actual_shipping_costs_user_tracking_lookup_idx
+      ON actual_shipping_costs(user_id, normalized_tracking_number)
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS actual_shipping_costs_user_order_number_idx
+      ON actual_shipping_costs(user_id, order_number)
+  `)
 }
 
 export function normalizeTrackingNumber(value: unknown): string {

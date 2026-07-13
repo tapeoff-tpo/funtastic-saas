@@ -33,10 +33,12 @@ export interface ActualShippingCostImportResult {
   relinked: number
   skipped: number
   errors: Array<{ row: number; reason: string }>
-  unmatchedRows: ActualShippingCostUnmatchedRow[]
+  shipmentMatchedRows: ActualShippingCostResultRow[]
+  orderMatchedRows: ActualShippingCostResultRow[]
+  unmatchedRows: ActualShippingCostResultRow[]
 }
 
-export interface ActualShippingCostUnmatchedRow {
+export interface ActualShippingCostResultRow {
   rowNumber: number
   trackingNumber: string
   orderNumber: string | null
@@ -227,27 +229,27 @@ export async function importActualShippingCosts(data: {
   ).values())
   let shipmentMatched = 0
   let orderMatched = 0
-  const unmatchedRows: ActualShippingCostUnmatchedRow[] = []
+  const shipmentMatchedRows: ActualShippingCostResultRow[] = []
+  const orderMatchedRows: ActualShippingCostResultRow[] = []
+  const unmatchedRows: ActualShippingCostResultRow[] = []
   const insertRows = uniqueRows.map((row) => {
     const shipment = shipmentByTracking.get(row.normalizedTrackingNumber) ?? null
     const order = shipment?.orderId
       ? { id: shipment.orderId }
       : orderByNumber.get(normalizeOrderNumber(row.orderNumber)) ?? null
-    if (shipment) shipmentMatched += 1
-    else if (order) orderMatched += 1
-    else {
+    const resultRow = toResultRow(row)
+    if (shipment) {
+      shipmentMatched += 1
+      shipmentMatchedRows.push({ ...resultRow, reason: '운송장번호로 매칭되었습니다.' })
+    } else if (order) {
+      orderMatched += 1
+      orderMatchedRows.push({ ...resultRow, reason: '주문번호로 매칭되었습니다.' })
+    } else {
       unmatchedRows.push({
-        rowNumber: row.rowNumber,
-        trackingNumber: row.trackingNumber,
-        orderNumber: row.orderNumber,
-        actualFee: row.actualFee,
-        packageType: row.packageType,
-        acceptedAt: row.acceptedAt,
-        deliveredAt: row.deliveredAt,
+        ...resultRow,
         reason: row.orderNumber
           ? '운송장번호와 주문번호 모두 SaaS 데이터에서 찾지 못했습니다.'
           : '운송장번호를 SaaS 송장 데이터에서 찾지 못했고, 파일에 주문번호도 없습니다.',
-        rawData: row.rawData,
       })
     }
     return {
@@ -316,7 +318,23 @@ export async function importActualShippingCosts(data: {
     relinked,
     skipped: parsed.errors.length,
     errors: parsed.errors,
+    shipmentMatchedRows,
+    orderMatchedRows,
     unmatchedRows,
+  }
+}
+
+function toResultRow(row: ParsedActualShippingCostRow): ActualShippingCostResultRow {
+  return {
+    rowNumber: row.rowNumber,
+    trackingNumber: row.trackingNumber,
+    orderNumber: row.orderNumber,
+    actualFee: row.actualFee,
+    packageType: row.packageType,
+    acceptedAt: row.acceptedAt,
+    deliveredAt: row.deliveredAt,
+    reason: '',
+    rawData: row.rawData,
   }
 }
 

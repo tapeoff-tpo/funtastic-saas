@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { ACTUAL_SHIPPING_COST_CARRIERS, type ActualShippingCostCarrier } from '@/lib/shipping/actual-cost-types'
 
-type UnmatchedRow = {
+type ResultRow = {
   rowNumber: number
   trackingNumber: string
   orderNumber: string | null
@@ -15,6 +15,11 @@ type UnmatchedRow = {
   packageType: string | null
   acceptedAt: string | null
   deliveredAt: string | null
+  reason: string
+}
+
+type ErrorRow = {
+  row: number
   reason: string
 }
 
@@ -27,11 +32,13 @@ type ImportResult = {
   unmatched: number
   relinked?: number
   skipped: number
-  errors: Array<{ row: number; reason: string }>
-  unmatchedRows?: UnmatchedRow[]
+  errors: ErrorRow[]
+  shipmentMatchedRows?: ResultRow[]
+  orderMatchedRows?: ResultRow[]
+  unmatchedRows?: ResultRow[]
 }
 
-type ResultView = 'summary' | 'unmatched'
+type ResultView = 'summary' | 'imported' | 'shipment' | 'order' | 'unmatched' | 'skipped'
 
 export function ActualShippingCostUpload() {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -71,14 +78,17 @@ export function ActualShippingCostUpload() {
 
   const shipmentMatched = result?.shipmentMatched ?? result?.matched ?? 0
   const orderMatched = result?.orderMatched ?? Math.max((result?.matched ?? 0) - shipmentMatched, 0)
+  const shipmentRows = result?.shipmentMatchedRows ?? []
+  const orderRows = result?.orderMatchedRows ?? []
   const unmatchedRows = result?.unmatchedRows ?? []
+  const importedRows = [...shipmentRows, ...orderRows, ...unmatchedRows].sort((a, b) => a.rowNumber - b.rowNumber)
 
   return (
     <div className="space-y-3 rounded-lg border bg-card p-4">
       <div className="flex flex-col gap-1">
         <h2 className="text-base font-semibold">실제배송비 업로드</h2>
         <p className="text-sm text-muted-foreground">
-          택배사별 운송요금 파일을 선택하면 운송장번호를 먼저 확인하고, 없으면 주문번호로 보조 매칭합니다.
+          운송장번호를 먼저 확인하고, 없으면 주문번호로 보조 매칭합니다.
         </p>
       </div>
 
@@ -107,25 +117,43 @@ export function ActualShippingCostUpload() {
       {result ? (
         <div className="space-y-3">
           <div className="grid gap-2 text-sm sm:grid-cols-6">
-            <ResultBox label="읽은 행" value={result.totalRows} />
-            <ResultBox label="반영" value={result.imported} />
-            <ResultBox label="송장매칭" value={shipmentMatched} />
-            <ResultBox label="주문매칭" value={orderMatched} />
+            <ResultBox label="읽은 행" value={result.totalRows} active={view === 'summary'} onClick={() => setView('summary')} />
+            <ResultBox label="반영" value={result.imported} active={view === 'imported'} onClick={() => setView('imported')} />
+            <ResultBox label="송장매칭" value={shipmentMatched} active={view === 'shipment'} onClick={() => setView('shipment')} />
+            <ResultBox label="주문매칭" value={orderMatched} active={view === 'order'} onClick={() => setView('order')} />
             <ResultBox
               label="미매칭"
               value={result.unmatched}
               active={view === 'unmatched'}
               tone={result.unmatched > 0 ? 'warn' : 'default'}
-              onClick={() => setView(view === 'unmatched' ? 'summary' : 'unmatched')}
+              onClick={() => setView('unmatched')}
             />
-            <ResultBox label="제외" value={result.skipped} />
+            <ResultBox
+              label="제외"
+              value={result.skipped}
+              active={view === 'skipped'}
+              tone={result.skipped > 0 ? 'warn' : 'default'}
+              onClick={() => setView('skipped')}
+            />
           </div>
 
-          {view === 'unmatched' ? (
-            <UnmatchedTable rows={unmatchedRows} />
-          ) : null}
+          {view === 'summary' ? <SummaryPanel result={result} /> : null}
+          {view === 'imported' ? <ResultTable title="반영 행" rows={importedRows} /> : null}
+          {view === 'shipment' ? <ResultTable title="송장매칭 행" rows={shipmentRows} /> : null}
+          {view === 'order' ? <ResultTable title="주문매칭 행" rows={orderRows} /> : null}
+          {view === 'unmatched' ? <ResultTable title="미매칭 행" rows={unmatchedRows} warn /> : null}
+          {view === 'skipped' ? <ErrorTable rows={result.errors} /> : null}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+function SummaryPanel({ result }: { result: ImportResult }) {
+  return (
+    <div className="rounded-md border bg-muted/30 px-3 py-3 text-sm text-muted-foreground">
+      카드들을 클릭하면 해당 행만 필터링해서 볼 수 있습니다.
+      {result.relinked ? <span className="ml-2">기존 업로드 재연결 {result.relinked.toLocaleString()}건</span> : null}
     </div>
   )
 }
@@ -141,36 +169,28 @@ function ResultBox({
   value: number
   active?: boolean
   tone?: 'default' | 'warn'
-  onClick?: () => void
+  onClick: () => void
 }) {
   const className = [
-    'rounded-md border bg-background px-3 py-2 text-left transition',
-    onClick ? 'cursor-pointer hover:bg-muted' : '',
-    active ? 'border-primary bg-primary text-primary-foreground hover:bg-primary' : '',
+    'rounded-md border px-3 py-2 text-left transition',
+    'cursor-pointer hover:bg-muted',
+    active ? 'border-primary bg-primary text-primary-foreground hover:bg-primary' : 'bg-background',
     !active && tone === 'warn' ? 'border-amber-200 bg-amber-50 text-amber-900' : '',
   ].filter(Boolean).join(' ')
 
-  const content = (
-    <>
-      <div className={active ? 'text-xs text-primary-foreground/80' : 'text-xs text-muted-foreground'}>{label}</div>
-      <div className="text-lg font-semibold">{value.toLocaleString()}</div>
-    </>
-  )
-
-  if (!onClick) return <div className={className}>{content}</div>
-
   return (
     <button type="button" className={className} onClick={onClick}>
-      {content}
+      <div className={active ? 'text-xs text-primary-foreground/80' : 'text-xs text-muted-foreground'}>{label}</div>
+      <div className="text-lg font-semibold">{value.toLocaleString()}</div>
     </button>
   )
 }
 
-function UnmatchedTable({ rows }: { rows: UnmatchedRow[] }) {
+function ResultTable({ title, rows, warn = false }: { title: string; rows: ResultRow[]; warn?: boolean }) {
   if (rows.length === 0) {
     return (
       <div className="rounded-md border bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
-        미매칭 행이 없습니다.
+        표시할 행이 없습니다.
       </div>
     )
   }
@@ -178,7 +198,7 @@ function UnmatchedTable({ rows }: { rows: UnmatchedRow[] }) {
   return (
     <div className="overflow-hidden rounded-md border">
       <div className="border-b bg-muted/40 px-3 py-2 text-sm font-medium">
-        미매칭 {rows.length.toLocaleString()}건
+        {title} {rows.length.toLocaleString()}건
       </div>
       <div className="max-h-[420px] overflow-auto">
         <table className="w-full min-w-[860px] text-sm">
@@ -191,7 +211,7 @@ function UnmatchedTable({ rows }: { rows: UnmatchedRow[] }) {
               <Th>포장</Th>
               <Th>접수일</Th>
               <Th>배송일</Th>
-              <Th>사유</Th>
+              <Th>상태</Th>
             </tr>
           </thead>
           <tbody>
@@ -204,6 +224,42 @@ function UnmatchedTable({ rows }: { rows: UnmatchedRow[] }) {
                 <Td>{row.packageType || '-'}</Td>
                 <Td>{row.acceptedAt || '-'}</Td>
                 <Td>{row.deliveredAt || '-'}</Td>
+                <Td className={warn ? 'text-amber-700' : 'text-emerald-700'}>{row.reason}</Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function ErrorTable({ rows }: { rows: ErrorRow[] }) {
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-md border bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
+        제외된 행이 없습니다.
+      </div>
+    )
+  }
+
+  return (
+    <div className="overflow-hidden rounded-md border">
+      <div className="border-b bg-muted/40 px-3 py-2 text-sm font-medium">
+        제외 {rows.length.toLocaleString()}건
+      </div>
+      <div className="max-h-[420px] overflow-auto">
+        <table className="w-full min-w-[520px] text-sm">
+          <thead className="sticky top-0 bg-muted text-xs text-muted-foreground">
+            <tr>
+              <Th>행</Th>
+              <Th>사유</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.row}-${row.reason}`} className="border-t">
+                <Td>{row.row}</Td>
                 <Td className="text-amber-700">{row.reason}</Td>
               </tr>
             ))}

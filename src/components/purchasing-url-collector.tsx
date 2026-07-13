@@ -125,7 +125,7 @@ export function PurchasingUrlCollector() {
         }
         if (body.status === 'not_found') {
           notFound += 1
-          issues.unshift(`${body.orderNumber}: 1688 상품 링크를 찾지 못했습니다.`)
+          issues.unshift(`${body.orderNumber}: ${message.message?.trim() || '1688 상품 링크를 찾지 못했습니다.'}`)
         }
         if (body.status === 'unmatched') {
           failed += 1

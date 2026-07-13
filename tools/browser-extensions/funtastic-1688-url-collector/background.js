@@ -20,6 +20,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === TIMEOUT_ALARM) void handlePageTimeout()
 })
 
+chrome.tabs.onCreated.addListener((tab) => {
+  void registerCaptureTab(tab)
+})
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const url = changeInfo.url || tab.url
+  if (url) void captureDetailNavigation(tabId, url, tab.openerTabId)
+})
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   void getRun().then((run) => {
     if (run?.collectorTabId === tabId && run.status === 'running') {
@@ -53,8 +62,55 @@ async function handleMessage(message, sender) {
       && sender.tab?.id === run.collectorTabId,
     )
     return active
-      ? { active: true, runId: run.runId, orderNumber: run.orders[run.index]?.orderNumber }
+      ? {
+          active: true,
+          runId: run.runId,
+          orderNumber: run.orders[run.index]?.orderNumber,
+          candidates: run.capturedCandidates || [],
+        }
       : { active: false }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_FRAME_REPORT') {
+    const run = await getRun()
+    const current = run?.orders[run.index]
+    if (!run || sender.tab?.id !== run.collectorTabId || message.orderNumber !== current?.orderNumber) {
+      return { ok: false }
+    }
+
+    const report = {
+      frameId: Number.isInteger(sender.frameId) ? sender.frameId : -1,
+      url: typeof message.url === 'string' ? message.url.slice(0, 500) : '',
+      isTop: Boolean(message.isTop),
+      textLength: Math.max(0, Math.min(Number(message.textLength) || 0, 1_000_000)),
+      hasOrder: Boolean(message.hasOrder),
+    }
+    const reports = [...(run.frameReports || [])]
+    const existingIndex = reports.findIndex((item) => (
+      item.frameId === report.frameId && item.url === report.url
+    ))
+    if (existingIndex >= 0) reports[existingIndex] = report
+    else reports.push(report)
+    run.frameReports = reports.slice(-30)
+    await setRun(run)
+    return { ok: true }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_CAPTURE_URL') {
+    const run = await getRun()
+    if (!run || sender.tab?.id !== run.collectorTabId) return { ok: false, candidates: [] }
+    await addCapturedCandidate(run, message.url)
+    return { ok: true, candidates: run.capturedCandidates || [] }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_GET_CAPTURED') {
+    const run = await getRun()
+    if (!run || sender.tab?.id !== run.collectorTabId) return { ok: false, candidates: [] }
+    return {
+      ok: true,
+      candidates: run.capturedCandidates || [],
+      frameReports: run.frameReports || [],
+    }
   }
 
   if (message.type === 'FUNTASTIC_1688_PAGE_RESULT') {
@@ -72,7 +128,10 @@ async function handleMessage(message, sender) {
       } else {
         await advanceRun(run, {
           orderNumber: current.orderNumber,
-          candidates: Array.isArray(message.candidates) ? message.candidates.slice(0, 30) : [],
+          candidates: uniqueCandidateUrls([
+            ...(run.capturedCandidates || []),
+            ...(Array.isArray(message.candidates) ? message.candidates : []),
+          ]).slice(0, 30),
           message: typeof message.message === 'string' ? message.message : null,
         })
       }
@@ -113,6 +172,9 @@ async function startRun(message, sourceTabId) {
     index: 0,
     status: 'running',
     startedAt: Date.now(),
+    capturedCandidates: [],
+    captureTabIds: [],
+    frameReports: [],
   }
   await setRun(run)
   await scheduleTimeout()
@@ -125,6 +187,7 @@ async function startRun(message, sourceTabId) {
 
 async function advanceRun(run, result) {
   await chrome.alarms.clear(TIMEOUT_ALARM)
+  await closeCaptureTabs(run)
   await sendToSaas(run, {
     type: 'FUNTASTIC_1688_RESULT',
     orderNumber: result.orderNumber,
@@ -133,6 +196,9 @@ async function advanceRun(run, result) {
   })
 
   run.index += 1
+  run.capturedCandidates = []
+  run.captureTabIds = []
+  run.frameReports = []
   if (run.index >= run.orders.length) {
     await sendToSaas(run, {
       type: 'FUNTASTIC_1688_COMPLETE',
@@ -199,9 +265,64 @@ async function clearRun(run, closeCollectorTab) {
     chrome.alarms.clear(TIMEOUT_ALARM),
     chrome.storage.session.remove(STATE_KEY),
   ])
+  await closeCaptureTabs(run)
   if (closeCollectorTab && run.collectorTabId) {
     await chrome.tabs.remove(run.collectorTabId).catch(() => {})
   }
+}
+
+async function registerCaptureTab(tab) {
+  if (!tab.id) return
+  const run = await getRun()
+  if (!run || run.status !== 'running' || tab.openerTabId !== run.collectorTabId) return
+
+  run.captureTabIds = Array.from(new Set([...(run.captureTabIds || []), tab.id]))
+  await setRun(run)
+  if (tab.url) await captureDetailNavigation(tab.id, tab.url, tab.openerTabId)
+}
+
+async function captureDetailNavigation(tabId, value, openerTabId) {
+  const url = canonicalOfferUrl(value)
+  if (!url) return
+
+  const run = await getRun()
+  if (!run || run.status !== 'running') return
+  const isCollector = tabId === run.collectorTabId
+  const isCaptureTab = openerTabId === run.collectorTabId
+    || (run.captureTabIds || []).includes(tabId)
+  if (!isCollector && !isCaptureTab) return
+
+  await addCapturedCandidate(run, url)
+
+  if (isCollector) {
+    const current = run.orders[run.index]
+    if (current) {
+      await chrome.tabs.update(run.collectorTabId, { url: orderUrl(current.orderNumber) }).catch(() => {})
+    }
+    return
+  }
+
+  run.captureTabIds = (run.captureTabIds || []).filter((id) => id !== tabId)
+  await setRun(run)
+  await chrome.tabs.remove(tabId).catch(() => {})
+  await chrome.tabs.update(run.collectorTabId, { active: true }).catch(() => {})
+}
+
+async function addCapturedCandidate(run, value) {
+  const url = canonicalOfferUrl(value)
+  if (!url) return false
+  const candidates = new Set(run.capturedCandidates || [])
+  const previousSize = candidates.size
+  candidates.add(url)
+  run.capturedCandidates = Array.from(candidates).slice(0, 30)
+  if (candidates.size !== previousSize) await setRun(run)
+  return candidates.size !== previousSize
+}
+
+async function closeCaptureTabs(run) {
+  const tabIds = Array.from(new Set(run.captureTabIds || []))
+  if (tabIds.length === 0) return
+  await Promise.all(tabIds.map((tabId) => chrome.tabs.remove(tabId).catch(() => {})))
 }
 
 async function sendToSaas(run, payload) {
@@ -234,6 +355,35 @@ function orderUrl(orderNumber) {
   return url.toString()
 }
 
+function canonicalOfferUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return null
+  try {
+    const decoded = safeDecodeURIComponent(value.trim()).replace(/\\\//g, '/')
+    const url = new URL(decoded.startsWith('//') ? `https:${decoded}` : decoded)
+    if (!['http:', 'https:'].includes(url.protocol) || url.hostname !== 'detail.1688.com') return null
+    const match = url.pathname.match(/^\/offer\/(\d{6,30})\.html\/?$/i)
+    return match ? `https://detail.1688.com/offer/${match[1]}.html` : null
+  } catch {
+    return null
+  }
+}
+
+function uniqueCandidateUrls(values) {
+  const candidates = new Map()
+  for (const value of values) {
+    const raw = typeof value === 'string' ? value : value?.url
+    const url = canonicalOfferUrl(raw)
+    if (!url || candidates.has(url)) continue
+    candidates.set(url, {
+      url,
+      title: typeof value === 'object' && typeof value?.title === 'string'
+        ? value.title.slice(0, 1_000)
+        : null,
+    })
+  }
+  return Array.from(candidates.values())
+}
+
 function uniqueOrders(value) {
   if (!Array.isArray(value)) return []
   const seen = new Set()
@@ -261,4 +411,12 @@ function isSaasUrl(value) {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function safeDecodeURIComponent(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
 }

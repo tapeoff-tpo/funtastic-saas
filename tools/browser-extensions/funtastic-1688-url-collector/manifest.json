@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Funtastic 1688 URL Collector",
   "description": "Funtastic SaaS 발주 주문번호로 1688 구매 URL을 수집합니다.",
-  "version": "1.0.0",
+  "version": "1.0.5",
   "permissions": [
     "alarms",
     "storage",
@@ -29,8 +29,20 @@
     },
     {
       "matches": ["https://*.1688.com/*"],
+      "js": ["1688-page-capture.js"],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true,
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://*.1688.com/*"],
       "js": ["1688-collector.js"],
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
     }
   ]
 }

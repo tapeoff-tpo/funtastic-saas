@@ -11,6 +11,7 @@ type ImportResult = {
   imported: number
   matched: number
   unmatched: number
+  relinked?: number
   skipped: number
   errors: Array<{ row: number; reason: string }>
 }
@@ -44,7 +45,7 @@ export function ActualShippingCostUpload() {
       }
 
       setResult(body)
-      toast.success(`실제배송비 ${body.imported}건을 반영했습니다.`)
+      toast.success(`실제배송비 ${body.imported.toLocaleString()}건을 반영했습니다.`)
       if (fileRef.current) fileRef.current.value = ''
     })
   }
@@ -54,7 +55,7 @@ export function ActualShippingCostUpload() {
       <div className="flex flex-col gap-1">
         <h2 className="text-base font-semibold">실제배송비 업로드</h2>
         <p className="text-sm text-muted-foreground">
-          택배사별 엑셀을 선택하면 송장번호로 출고 건과 자동 매칭합니다.
+          택배사별 운송요금 파일을 선택하면 운송장번호로 출고 건과 자동 매칭합니다.
         </p>
       </div>
 
@@ -81,10 +82,11 @@ export function ActualShippingCostUpload() {
       </div>
 
       {result ? (
-        <div className="grid gap-2 text-sm sm:grid-cols-5">
+        <div className="grid gap-2 text-sm sm:grid-cols-6">
           <ResultBox label="읽은 행" value={result.totalRows} />
           <ResultBox label="반영" value={result.imported} />
           <ResultBox label="매칭" value={result.matched} />
+          <ResultBox label="재연결" value={result.relinked ?? 0} />
           <ResultBox label="미매칭" value={result.unmatched} />
           <ResultBox label="제외" value={result.skipped} />
         </div>

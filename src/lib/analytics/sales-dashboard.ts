@@ -399,6 +399,45 @@ export async function getOrderProfitAnalysisData(
       WHERE s.user_id = ${userId}
       GROUP BY s.order_id
     ),
+    order_actual_costs AS (
+      SELECT
+        o.id AS order_id,
+        STRING_AGG(DISTINCT ascost.tracking_number, ', ') AS tracking_summary,
+        STRING_AGG(DISTINCT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name, '박스명 없음'), ', ') AS package_summary,
+        COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
+        COALESCE(SUM(
+          COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
+        ), 0) AS box_cost,
+        COUNT(*) FILTER (
+          WHERE COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) IS NULL
+            OR rate.unit_cost IS NULL
+        ) AS missing_box_cost_count
+      FROM actual_shipping_costs ascost
+      JOIN orders o
+        ON o.id = ascost.order_id
+       AND o.user_id = ascost.user_id
+      LEFT JOIN item_summary items ON items.order_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) AS package_name
+      ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT bcr.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates bcr
+        WHERE bcr.user_id = ${userId}
+          AND bcr.is_active = true
+          AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
+          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, o.ordered_at::date)
+        ORDER BY bcr.effective_from DESC
+        LIMIT 1
+      ) rate ON true
+      WHERE ascost.user_id = ${userId}
+        AND ascost.shipment_id IS NULL
+        AND ascost.order_id IS NOT NULL
+        AND o.ordered_at >= ${monthStart}
+        AND o.ordered_at < ${nextMonthStart}
+        AND o.status::text IN ${STATUS_FILTER}
+      GROUP BY o.id
+    ),
     profit_rows AS (
       SELECT
         o.id AS order_id,
@@ -428,8 +467,8 @@ export async function getOrderProfitAnalysisData(
         o.ordered_at,
         COALESCE(items.product_summary, '상품정보 없음') AS product_summary,
         COALESCE(items.sku_summary, '미매핑') AS sku_summary,
-        COALESCE(shipments.package_summary, '박스명 없음') AS package_summary,
-        COALESCE(shipments.tracking_summary, '송장 없음') AS tracking_summary,
+        COALESCE(shipments.package_summary, order_costs.package_summary, '박스명 없음') AS package_summary,
+        COALESCE(shipments.tracking_summary, order_costs.tracking_summary, '송장 없음') AS tracking_summary,
         (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales,
         (
           CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END
@@ -443,18 +482,19 @@ export async function getOrderProfitAnalysisData(
           WHEN o.raw_data->>'analyticsClaimType' = 'exchange'
             THEN COALESCE(NULLIF(o.raw_data->>'exchangeInitialShippingFee', '')::numeric, 0)
               * COALESCE(NULLIF(o.raw_data->>'exchangeShippingCostMultiplier', '')::numeric, 2)
-          ELSE COALESCE(shipments.actual_shipping_fee, 0)
+          ELSE COALESCE(shipments.actual_shipping_fee, 0) + COALESCE(order_costs.actual_shipping_fee, 0)
         END AS actual_shipping_fee,
-        COALESCE(shipments.box_cost, 0) AS box_cost,
+        COALESCE(shipments.box_cost, 0) + COALESCE(order_costs.box_cost, 0) AS box_cost,
         COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent) IS NULL AS missing_fee,
         COALESCE(items.missing_product_cost, true) AS missing_product_cost,
         CASE
           WHEN o.raw_data->>'analyticsClaimType' = 'exchange' THEN false
-          ELSE COALESCE(shipments.shipment_count, 0) = 0
-            OR COALESCE(shipments.unmatched_shipment_count, 0) > 0
+          ELSE (COALESCE(shipments.shipment_count, 0) = 0 AND COALESCE(order_costs.actual_shipping_fee, 0) = 0)
+            OR (COALESCE(shipments.unmatched_shipment_count, 0) > 0 AND COALESCE(order_costs.actual_shipping_fee, 0) = 0)
         END AS missing_actual_shipping,
-        COALESCE(shipments.shipment_count, 0) = 0
-          OR COALESCE(shipments.missing_box_cost_count, 0) > 0 AS missing_packaging
+        (COALESCE(shipments.shipment_count, 0) = 0 AND COALESCE(order_costs.actual_shipping_fee, 0) = 0)
+          OR COALESCE(shipments.missing_box_cost_count, 0) > 0
+          OR COALESCE(order_costs.missing_box_cost_count, 0) > 0 AS missing_packaging
       FROM orders o
       LEFT JOIN marketplace_connections mc ON mc.id = o.connection_id
       LEFT JOIN marketplace_fee_settings mfs
@@ -462,6 +502,7 @@ export async function getOrderProfitAnalysisData(
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN item_summary items ON items.order_id = o.id
       LEFT JOIN shipment_summary shipments ON shipments.order_id = o.id
+      LEFT JOIN order_actual_costs order_costs ON order_costs.order_id = o.id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
         AND o.ordered_at >= ${monthStart}
@@ -840,6 +881,37 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       ) rate ON true
       WHERE s.user_id = ${userId}
       GROUP BY ob.account_key
+    ),
+    order_actual_costs AS (
+      SELECT
+        ob.account_key,
+        COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
+        COALESCE(SUM(
+          COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
+        ), 0) AS box_cost
+      FROM actual_shipping_costs ascost
+      JOIN orders o
+        ON o.id = ascost.order_id
+       AND o.user_id = ascost.user_id
+      JOIN order_base ob ON ob.id = o.id
+      LEFT JOIN order_packaging op ON op.order_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), op.fallback_package_name) AS package_name
+      ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT bcr.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates bcr
+        WHERE bcr.user_id = ${userId}
+          AND bcr.is_active = true
+          AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
+          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, o.ordered_at::date)
+        ORDER BY bcr.effective_from DESC
+        LIMIT 1
+      ) rate ON true
+      WHERE ascost.user_id = ${userId}
+        AND ascost.shipment_id IS NULL
+        AND ascost.order_id IS NOT NULL
+      GROUP BY ob.account_key
     )
     SELECT
       ob.account_key AS "marketplaceId",
@@ -848,11 +920,16 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       COALESCE(SUM(ob.total_amount * ob.fee_percent / 100), 0)::text AS "marketplaceFee",
       COALESCE(MAX(pc.product_cost), 0)::text AS "productCost",
       COALESCE(SUM(ob.paid_shipping_fee), 0)::text AS "paidShippingFee",
-      (COALESCE(MAX(sc.actual_shipping_fee), 0) + COALESCE(SUM(ob.exchange_actual_shipping_fee), 0))::text AS "actualShippingFee",
-      COALESCE(MAX(sc.box_cost), 0)::text AS "boxCost"
+      (
+        COALESCE(MAX(sc.actual_shipping_fee), 0)
+        + COALESCE(MAX(oac.actual_shipping_fee), 0)
+        + COALESCE(SUM(ob.exchange_actual_shipping_fee), 0)
+      )::text AS "actualShippingFee",
+      (COALESCE(MAX(sc.box_cost), 0) + COALESCE(MAX(oac.box_cost), 0))::text AS "boxCost"
     FROM order_base ob
     LEFT JOIN product_costs pc ON pc.account_key = ob.account_key
     LEFT JOIN shipment_costs sc ON sc.account_key = ob.account_key
+    LEFT JOIN order_actual_costs oac ON oac.account_key = ob.account_key
     GROUP BY ob.account_key
     ORDER BY SUM(ob.total_amount) DESC
   `)
@@ -1059,6 +1136,37 @@ export async function getProductProfitAnalysisData(
       WHERE s.user_id = ${userId}
       GROUP BY s.order_id
     )
+    , order_actual_costs AS (
+      SELECT
+        o.id AS order_id,
+        COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
+        COALESCE(SUM(
+          COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
+        ), 0) AS box_cost
+      FROM actual_shipping_costs ascost
+      JOIN orders o
+        ON o.id = ascost.order_id
+       AND o.user_id = ascost.user_id
+      JOIN order_base ob ON ob.id = o.id
+      LEFT JOIN order_packaging op ON op.order_id = o.id
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), op.fallback_package_name) AS package_name
+      ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT bcr.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates bcr
+        WHERE bcr.user_id = ${userId}
+          AND bcr.is_active = true
+          AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
+          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, o.ordered_at::date)
+        ORDER BY bcr.effective_from DESC
+        LIMIT 1
+      ) rate ON true
+      WHERE ascost.user_id = ${userId}
+        AND ascost.shipment_id IS NULL
+        AND ascost.order_id IS NOT NULL
+      GROUP BY o.id
+    )
     , product_rows AS (
       SELECT
         wi.sku,
@@ -1069,11 +1177,12 @@ export async function getProductProfitAnalysisData(
         COALESCE(SUM(ob.marketplace_fee * wi.allocation_rate), 0) AS marketplace_fee,
         COALESCE(SUM(wi.product_cost), 0) AS product_cost,
         COALESCE(SUM(ob.paid_shipping_fee * wi.allocation_rate), 0) AS paid_shipping_fee,
-        COALESCE(SUM(COALESCE(ob.exchange_actual_shipping_fee, sc.actual_shipping_fee, 0) * wi.allocation_rate), 0) AS actual_shipping_fee,
-        COALESCE(SUM(COALESCE(sc.box_cost, 0) * wi.allocation_rate), 0) AS box_cost
+        COALESCE(SUM(COALESCE(ob.exchange_actual_shipping_fee, COALESCE(sc.actual_shipping_fee, 0) + COALESCE(oac.actual_shipping_fee, 0), 0) * wi.allocation_rate), 0) AS actual_shipping_fee,
+        COALESCE(SUM((COALESCE(sc.box_cost, 0) + COALESCE(oac.box_cost, 0)) * wi.allocation_rate), 0) AS box_cost
       FROM weighted_items wi
       JOIN order_base ob ON ob.id = wi.order_id
       LEFT JOIN shipment_costs sc ON sc.order_id = wi.order_id
+      LEFT JOIN order_actual_costs oac ON oac.order_id = wi.order_id
       GROUP BY wi.sku
     )
     SELECT

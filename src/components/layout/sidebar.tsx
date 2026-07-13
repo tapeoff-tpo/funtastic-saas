@@ -31,6 +31,7 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
+  CalendarDays,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -140,6 +141,7 @@ export const navSections: NavSection[] = [
     id: 'operations',
     title: '운영',
     items: [
+      { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
       { href: '/operations/ai-accounts', label: 'AI 계정공유', icon: Bot },
       { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
     ],

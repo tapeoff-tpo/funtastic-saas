@@ -1342,3 +1342,33 @@ export const smsBridgeMessages = pgTable(
     index('sms_bridge_messages_account_received_idx').on(table.accountId, table.receivedAt),
   ],
 )
+
+export const dealEvents = pgTable(
+  'deal_events',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    dealType: varchar('deal_type', { length: 30 }).notNull(),
+    title: text('title').notNull(),
+    productId: varchar('product_id', { length: 100 }),
+    productCode: varchar('product_code', { length: 100 }),
+    options: text('options'),
+    regularPrice: integer('regular_price'),
+    dealPrice: integer('deal_price').notNull(),
+    unitCost: integer('unit_cost'),
+    shippingCost: integer('shipping_cost').notNull().default(0),
+    stock: integer('stock').notNull().default(500),
+    dailyCapacity: integer('daily_capacity').notNull().default(500),
+    startsOn: date('starts_on').notNull(),
+    endsOn: date('ends_on').notNull(),
+    status: varchar('status', { length: 30 }).notNull().default('draft'),
+    contact: varchar('contact', { length: 50 }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('deal_events_user_date_idx').on(table.userId, table.startsOn),
+    index('deal_events_user_status_idx').on(table.userId, table.status),
+  ],
+)

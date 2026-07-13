@@ -4,6 +4,7 @@ import { Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
+import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
 import {
   getNextPurchaseStatus,
@@ -175,7 +176,7 @@ export async function PurchasingOrdersView({
         <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
           <strong>구매 지연 확인 필요</strong>
           <span className="ml-2">
-            발주요청 날짜 기준 7일이 지난 항목 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건이 있습니다.
+            2026년 7월 1일 이후 발주요청 중 날짜 기준 7일이 지난 항목 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건이 있습니다.
             지연 항목은 빨간색으로 표시되며 구매/입고지연 메뉴에서 따로 볼 수 있습니다.
           </span>
         </section>
@@ -341,7 +342,9 @@ export async function PurchasingOrdersView({
                     const stageQuantity = getStageQuantity(item, item.status, outboundRequestedQuantity)
                     const requestDateElapsedDays = item.requestDate ? daysSinceDateOnly(item.requestDate) : 0
                     const purchaseDateElapsedDays = item.outboundExpectedDate ? daysSinceDateOnly(item.outboundExpectedDate) : 0
-                    const isPurchaseRequestOverdue = item.status === 'purchased' && requestDateElapsedDays >= 7
+                    const isPurchaseRequestOverdue = item.status === 'purchased'
+                      && isPurchaseDelayTrackingDate(item.requestDate)
+                      && requestDateElapsedDays >= 7
                     const isArrivalOverdue = item.status === 'purchase_completed' && purchaseDateElapsedDays >= 7
                     const isOverdueRow = isPurchaseRequestOverdue || isArrivalOverdue
                     const stickyCellClassName = isOverdueRow ? 'bg-red-50' : 'bg-background'

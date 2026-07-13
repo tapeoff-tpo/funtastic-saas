@@ -3,6 +3,7 @@ import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { purchaseRequestItems } from '@/lib/db/schema'
+import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
 import {
   PURCHASE_REQUEST_STATUS_LABELS,
   PURCHASE_REQUEST_STATUSES,
@@ -207,6 +208,7 @@ async function getPurchaseRequestRowsForExcel(input: {
       and(
         eq(purchaseRequestItems.status, 'purchased'),
         sql`${purchaseRequestItems.requestDate} IS NOT NULL`,
+        sql`${purchaseRequestItems.requestDate} >= ${PURCHASE_DELAY_TRACKING_START_DATE}::date`,
         sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
       ),
       and(

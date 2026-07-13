@@ -8,6 +8,7 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { sumPurchaseCosts } from './purchase-costs'
+import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
 import type { PurchaseRequestStatus } from './purchase-request-status'
 
 export async function getPurchaseRequests(input: {
@@ -28,6 +29,7 @@ export async function getPurchaseRequests(input: {
     if (input.status === 'purchased') {
       conditions.push(eq(purchaseRequestItems.status, 'purchased'))
       conditions.push(sql`${purchaseRequestItems.requestDate} IS NOT NULL`)
+      conditions.push(sql`${purchaseRequestItems.requestDate} >= ${PURCHASE_DELAY_TRACKING_START_DATE}::date`)
       conditions.push(sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`)
     } else if (input.status === 'purchase_completed') {
       conditions.push(eq(purchaseRequestItems.status, 'purchase_completed'))
@@ -38,6 +40,7 @@ export async function getPurchaseRequests(input: {
         and(
           eq(purchaseRequestItems.status, 'purchased'),
           sql`${purchaseRequestItems.requestDate} IS NOT NULL`,
+          sql`${purchaseRequestItems.requestDate} >= ${PURCHASE_DELAY_TRACKING_START_DATE}::date`,
           sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
         ),
         and(
@@ -67,6 +70,7 @@ export async function getPurchaseRequests(input: {
     eq(purchaseRequestItems.userId, input.userId),
     eq(purchaseRequestItems.status, 'purchased'),
     sql`${purchaseRequestItems.requestDate} IS NOT NULL`,
+    sql`${purchaseRequestItems.requestDate} >= ${PURCHASE_DELAY_TRACKING_START_DATE}::date`,
     sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
   ]
   const overduePurchaseCompletedConditions: SQL[] = [

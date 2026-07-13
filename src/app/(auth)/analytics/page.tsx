@@ -138,6 +138,7 @@ export default async function AnalyticsPage({
           <TabLink href={analyticsHref('missing', month)} active={tab === 'missing'}>계산 누락</TabLink>
           <TabLink href={analyticsHref('uploads', month)} active={tab === 'uploads'}>업로드</TabLink>
           <TabLink href={analyticsHref('settings', month)} active={tab === 'settings'}>설정</TabLink>
+          <TopNavLink href="/analytics/price-table">판매가 테이블</TopNavLink>
           <TopNavLink href="/analytics/sabangnet-review">사방넷 검수</TopNavLink>
           <TopNavLink href="/analytics/short-meeting">숏미팅</TopNavLink>
         </div>

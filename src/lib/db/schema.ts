@@ -432,6 +432,29 @@ export const boxCostRates = pgTable(
   ],
 )
 
+export const analyticsPriceTableRows = pgTable(
+  'analytics_price_table_rows',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    sourceFileName: varchar('source_file_name', { length: 255 }),
+    sourceSheetName: varchar('source_sheet_name', { length: 100 }).notNull(),
+    rowNumber: integer('row_number').notNull(),
+    productCode: varchar('product_code', { length: 100 }),
+    productName: text('product_name'),
+    optionName: text('option_name'),
+    registeredProductName: text('registered_product_name'),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull().default({}),
+    importedAt: timestamp('imported_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('analytics_price_table_rows_user_imported_idx').on(table.userId, table.importedAt),
+    index('analytics_price_table_rows_user_sheet_idx').on(table.userId, table.sourceSheetName),
+    index('analytics_price_table_rows_user_product_code_idx').on(table.userId, table.productCode),
+  ],
+)
+
 export const shipmentGroups = pgTable('shipment_groups', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull(),

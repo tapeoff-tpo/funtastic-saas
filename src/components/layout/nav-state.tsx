@@ -51,6 +51,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/inventory': '재고관리',
   '/inventory/adjustments': '입출고관리',
   '/analytics': '매출분석',
+  '/analytics/price-table': '판매가 테이블',
   '/analytics/sabangnet-review': '사방넷 검수',
   '/analytics/short-meeting': '숏미팅',
   '/operations/deal-calendar': '딜 캘린더',

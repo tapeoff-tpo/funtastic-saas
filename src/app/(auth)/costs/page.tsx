@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { ESA009M_HEADERS, getPurchasingItems } from '@/lib/purchasing/items'
 import { PurchasingItemUpload } from '@/components/purchasing-item-upload'
+import { PurchasingUrlCollector } from '@/components/purchasing-url-collector'
 import { CostsEditableTable } from './costs-editable-table'
 
 export const metadata: Metadata = { title: '품목' }
@@ -38,7 +39,10 @@ export default async function CostsPage({
             ESA009M 전체 항목 · {total.toLocaleString('ko-KR')}개 품목
           </p>
         </div>
-        <PurchasingItemUpload />
+        <div className="flex flex-wrap items-start justify-end gap-2">
+          <PurchasingUrlCollector />
+          <PurchasingItemUpload />
+        </div>
       </div>
 
       <form className="flex max-w-xl gap-2">

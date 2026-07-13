@@ -3,7 +3,6 @@ import { redirect } from 'next/navigation'
 import { Activity, Clock3, UsersRound } from 'lucide-react'
 import { AiAccountBoard } from './ai-account-board'
 import { AiAccountForm } from './ai-account-form'
-import { SmsVerificationPanel } from './sms-verification-panel'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -13,7 +12,6 @@ import {
   listAiAccounts,
   listAiAccountUserCandidates,
 } from '@/lib/operations/ai-accounts'
-import { listSmsBridgeDevices, listSmsBridgeMessages } from '@/lib/operations/sms-bridge'
 
 export const dynamic = 'force-dynamic'
 
@@ -26,12 +24,10 @@ export default async function AiAccountsPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [accounts, messages, userCandidates, smsDevices, smsMessages] = await Promise.all([
+  const [accounts, messages, userCandidates] = await Promise.all([
     listAiAccounts(workspaceUserId),
     listAiAccountMessages(workspaceUserId),
     listAiAccountUserCandidates(workspaceUserId),
-    listSmsBridgeDevices(workspaceUserId),
-    listSmsBridgeMessages(workspaceUserId),
   ])
   const availableCount = accounts.filter((account) => account.status === 'available').length
   const inUseCount = accounts.filter((account) => account.status === 'in_use').length
@@ -43,7 +39,7 @@ export default async function AiAccountsPage() {
         <div>
           <h1 className="text-2xl font-semibold">AI 계정공유</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            공용 GPT/Codex 계정별 아이디, 사용자 채팅, 한도 상태를 한 화면에서 관리합니다.
+            공용 GPT/Codex 계정의 사용자 배정과 주간 한도 상태를 관리합니다.
           </p>
         </div>
       </header>
@@ -83,12 +79,6 @@ export default async function AiAccountsPage() {
           </CardContent>
         </Card>
       </section>
-
-      <SmsVerificationPanel
-        accounts={accounts.map((account) => ({ id: account.id, name: account.name, email: account.email }))}
-        initialDevices={smsDevices}
-        initialMessages={smsMessages}
-      />
 
       <AiAccountForm
         userCandidates={userCandidates.map((candidate) => ({

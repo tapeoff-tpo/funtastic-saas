@@ -1,7 +1,7 @@
 import ExcelJS from 'exceljs'
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { actualShippingCosts, shipments } from '@/lib/db/schema'
+import { actualShippingCosts, orders, shipments } from '@/lib/db/schema'
 import type { ActualShippingCostCarrier } from './actual-cost-types'
 
 type HeaderMap = Map<string, number>
@@ -28,14 +28,55 @@ export interface ActualShippingCostImportResult {
   imported: number
   matched: number
   unmatched: number
+  relinked: number
   skipped: number
   errors: Array<{ row: number; reason: string }>
 }
 
-const CARRIER_REQUIRED_HEADERS: Record<ActualShippingCostCarrier, string[]> = {
-  CJGLS: ['운송장번호', '운임'],
-  KDEXP: ['운송장번호', '운임합계'],
-  DAESIN: ['운송장번호', '총운임'],
+const HEADER_CANDIDATES: Record<ActualShippingCostCarrier, {
+  tracking: string[]
+  fee: string[]
+  orderNumber: string[]
+  acceptedAt: string[]
+  deliveredAt: string[]
+  packageType: string[]
+  quantity: string[]
+  paymentType: string[]
+  shipmentType: string[]
+}> = {
+  CJGLS: {
+    tracking: ['운송장번호', '운송장 번호', '송장번호', '송장 번호'],
+    fee: ['운임', '총운임', '배송비', '택배비', '운송요금'],
+    orderNumber: ['주문번호', '고객주문번호', '쇼핑몰주문번호'],
+    acceptedAt: ['접수일자', '접수일', '인수일자'],
+    deliveredAt: ['배송일자', '배송완료일', '배달일자'],
+    packageType: ['박스크기', '포장', '포장구분', '포장형태'],
+    quantity: ['수량', '박스수량', '박스수'],
+    paymentType: ['운임구분', '결제구분', '지불방법'],
+    shipmentType: ['접수구분', '운송상품', '배송구분'],
+  },
+  KDEXP: {
+    tracking: ['운송장번호', '운송장 번호', '송장번호', '송장 번호'],
+    fee: ['운임합계', '총운임', '운임', '배송비', '택배비', '운송요금'],
+    orderNumber: ['고객사주문번호', '주문번호', '쇼핑몰주문번호'],
+    acceptedAt: ['발송접수일', '접수일자', '접수일'],
+    deliveredAt: ['인수완료일시', '배송완료일', '배달일자'],
+    packageType: ['포장상태', '박스크기', '포장'],
+    quantity: ['수량', '박스수량', '박스수'],
+    paymentType: ['결제구분', '운임구분', '지불방법'],
+    shipmentType: ['발송구분', '운송상품', '배송구분'],
+  },
+  DAESIN: {
+    tracking: ['운송장번호', '운송장 번호', '송장번호', '송장 번호'],
+    fee: ['총운임', '운임합계', '운임', '배송비', '택배비', '운송요금'],
+    orderNumber: ['품명', '주문번호', '고객사주문번호', '쇼핑몰주문번호'],
+    acceptedAt: ['접수일자', '접수일', '발송접수일'],
+    deliveredAt: ['배송완료일', '배달일자', '인수완료일시'],
+    packageType: ['포장', '박스크기', '포장상태'],
+    quantity: ['수량', '박스수량', '박스수'],
+    paymentType: ['지불방법', '결제구분', '운임구분'],
+    shipmentType: ['운송상품', '발송구분', '배송구분'],
+  },
 }
 
 export async function ensureActualShippingCostsTable(): Promise<void> {
@@ -47,6 +88,7 @@ export async function ensureActualShippingCostsTable(): Promise<void> {
       tracking_number varchar(100) NOT NULL,
       normalized_tracking_number varchar(100) NOT NULL,
       shipment_id uuid REFERENCES shipments(id) ON DELETE SET NULL,
+      order_id uuid REFERENCES orders(id) ON DELETE SET NULL,
       order_number varchar(200),
       accepted_at date,
       delivered_at date,
@@ -74,6 +116,14 @@ export async function ensureActualShippingCostsTable(): Promise<void> {
     CREATE INDEX IF NOT EXISTS actual_shipping_costs_shipment_idx
       ON actual_shipping_costs(shipment_id)
   `)
+  await db.execute(sql`
+    ALTER TABLE actual_shipping_costs
+      ADD COLUMN IF NOT EXISTS order_id uuid REFERENCES orders(id) ON DELETE SET NULL
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS actual_shipping_costs_order_idx
+      ON actual_shipping_costs(order_id)
+  `)
 }
 
 export function normalizeTrackingNumber(value: unknown): string {
@@ -93,10 +143,15 @@ export async function parseActualShippingCostWorkbook(
   if (!ws) throw new Error('엑셀 시트를 찾을 수 없습니다.')
 
   const header = readHeader(ws)
-  for (const required of CARRIER_REQUIRED_HEADERS[carrierId]) {
-    if (!header.has(required)) {
-      throw new Error(`${required} 열이 없습니다. 택배사 양식이 맞는지 확인해주세요.`)
-    }
+  const candidates = HEADER_CANDIDATES[carrierId]
+  const trackingHeader = findHeader(header, candidates.tracking)
+  const feeHeader = findHeader(header, candidates.fee)
+
+  if (!trackingHeader) {
+    throw new Error(`운송장번호 열이 없습니다. 현재 인식한 열: ${Array.from(header.keys()).join(', ')}`)
+  }
+  if (!feeHeader) {
+    throw new Error(`운임/총운임 열이 없습니다. 현재 인식한 열: ${Array.from(header.keys()).join(', ')}`)
   }
 
   const rows: ParsedActualShippingCostRow[] = []
@@ -104,12 +159,12 @@ export async function parseActualShippingCostWorkbook(
 
   ws.eachRow((row, rowNumber) => {
     if (rowNumber === 1) return
-    const rawTracking = readCell(row, header, '운송장번호')
+    const rawTracking = readCell(row, header, trackingHeader)
     const trackingNumber = stringify(rawTracking)
     const normalizedTrackingNumber = normalizeTrackingNumber(trackingNumber)
     if (!normalizedTrackingNumber) return
 
-    const fee = parseMoney(readFee(row, header, carrierId))
+    const fee = parseMoney(readCell(row, header, feeHeader))
     if (fee == null) {
       errors.push({ row: rowNumber, reason: '실제배송비 금액을 읽지 못했습니다.' })
       return
@@ -119,14 +174,14 @@ export async function parseActualShippingCostWorkbook(
       carrierId,
       trackingNumber,
       normalizedTrackingNumber,
-      orderNumber: readOrderNumber(row, header, carrierId),
-      acceptedAt: readDate(row, header, acceptedDateHeader(carrierId)),
-      deliveredAt: readDate(row, header, deliveredDateHeader(carrierId)),
+      orderNumber: readFirstText(row, header, candidates.orderNumber),
+      acceptedAt: readFirstDate(row, header, candidates.acceptedAt),
+      deliveredAt: readFirstDate(row, header, candidates.deliveredAt),
       actualFee: fee,
-      packageType: readText(row, header, packageHeader(carrierId)),
-      quantity: parseInteger(readCell(row, header, quantityHeader())) ?? 1,
-      paymentType: readText(row, header, paymentHeader(carrierId)),
-      shipmentType: readText(row, header, shipmentTypeHeader(carrierId)),
+      packageType: readFirstText(row, header, candidates.packageType),
+      quantity: parseInteger(readFirstCell(row, header, candidates.quantity)) ?? 1,
+      paymentType: readFirstText(row, header, candidates.paymentType),
+      shipmentType: readFirstText(row, header, candidates.shipmentType),
       rowNumber,
       rawData: readRawData(row, header),
     })
@@ -147,6 +202,10 @@ export async function importActualShippingCosts(data: {
     data.userId,
     parsed.rows.map((row) => row.normalizedTrackingNumber),
   )
+  const orderByNumber = await findOrdersByNumber(
+    data.userId,
+    parsed.rows.map((row) => row.orderNumber),
+  )
 
   const uniqueRows = Array.from(new Map(
     parsed.rows.map((row) => [`${row.carrierId}:${row.normalizedTrackingNumber}`, row]),
@@ -154,6 +213,9 @@ export async function importActualShippingCosts(data: {
   let matched = 0
   const insertRows = uniqueRows.map((row) => {
     const shipment = shipmentByTracking.get(row.normalizedTrackingNumber) ?? null
+    const order = shipment?.orderId
+      ? { id: shipment.orderId }
+      : orderByNumber.get(normalizeOrderNumber(row.orderNumber)) ?? null
     if (shipment) matched += 1
     return {
       userId: data.userId,
@@ -161,6 +223,7 @@ export async function importActualShippingCosts(data: {
       trackingNumber: row.trackingNumber,
       normalizedTrackingNumber: row.normalizedTrackingNumber,
       shipmentId: shipment?.id ?? null,
+      orderId: order?.id ?? null,
       orderNumber: row.orderNumber,
       acceptedAt: row.acceptedAt,
       deliveredAt: row.deliveredAt,
@@ -189,6 +252,7 @@ export async function importActualShippingCosts(data: {
         set: {
           trackingNumber: sql`excluded.tracking_number`,
           shipmentId: sql`excluded.shipment_id`,
+          orderId: sql`excluded.order_id`,
           orderNumber: sql`excluded.order_number`,
           acceptedAt: sql`excluded.accepted_at`,
           deliveredAt: sql`excluded.delivered_at`,
@@ -205,6 +269,7 @@ export async function importActualShippingCosts(data: {
       })
   }
 
+  const relinked = await relinkActualShippingCosts(data.userId)
   const imported = uniqueRows.length
   return {
     carrierId: data.carrierId,
@@ -212,6 +277,7 @@ export async function importActualShippingCosts(data: {
     imported,
     matched,
     unmatched: imported - matched,
+    relinked,
     skipped: parsed.errors.length,
     errors: parsed.errors,
   }
@@ -235,15 +301,54 @@ export async function getActualShippingCostRecentImports(userId: string) {
     .limit(20)
 }
 
+export async function relinkActualShippingCosts(userId: string): Promise<number> {
+  await ensureActualShippingCostsTable()
+  const shipmentLinked = await db.execute<{ count: string | number }>(sql`
+    WITH updated AS (
+      UPDATE actual_shipping_costs a
+      SET
+        shipment_id = s.id,
+        order_id = s.order_id,
+        updated_at = now()
+      FROM shipments s
+      WHERE a.user_id = ${userId}
+        AND a.shipment_id IS NULL
+        AND s.user_id = a.user_id
+        AND s.normalized_tracking_number = a.normalized_tracking_number
+      RETURNING a.id
+    )
+    SELECT COUNT(*)::text AS count FROM updated
+  `)
+  const orderLinked = await db.execute<{ count: string | number }>(sql`
+    WITH updated AS (
+      UPDATE actual_shipping_costs a
+      SET
+        order_id = o.id,
+        updated_at = now()
+      FROM orders o
+      WHERE a.user_id = ${userId}
+        AND a.order_id IS NULL
+        AND a.shipment_id IS NULL
+        AND o.user_id = a.user_id
+        AND a.order_number IN (o.marketplace_order_id, o.internal_no)
+      RETURNING a.id
+    )
+    SELECT COUNT(*)::text AS count FROM updated
+  `)
+
+  return Number(shipmentLinked[0]?.count ?? 0) + Number(orderLinked[0]?.count ?? 0)
+}
+
 async function findShipmentsByNormalizedTracking(userId: string, normalizedValues: string[]) {
   const values = Array.from(new Set(normalizedValues.filter(Boolean)))
-  const matched = new Map<string, { id: string }>()
+  const matched = new Map<string, { id: string; orderId: string }>()
   if (values.length === 0) return matched
 
   for (const valueChunk of chunks(values, 1000)) {
     const rows = await db
       .select({
         id: shipments.id,
+        orderId: shipments.orderId,
         normalizedTrackingNumber: shipments.normalizedTrackingNumber,
       })
       .from(shipments)
@@ -255,10 +360,48 @@ async function findShipmentsByNormalizedTracking(userId: string, normalizedValue
       )
 
     for (const row of rows) {
-      matched.set(row.normalizedTrackingNumber, { id: row.id })
+      matched.set(row.normalizedTrackingNumber, { id: row.id, orderId: row.orderId })
     }
   }
   return matched
+}
+
+async function findOrdersByNumber(userId: string, rawValues: Array<string | null>) {
+  const values = Array.from(new Set(rawValues.map(normalizeOrderNumber).filter(Boolean)))
+  const matched = new Map<string, { id: string }>()
+  if (values.length === 0) return matched
+
+  for (const valueChunk of chunks(values, 1000)) {
+    const rows = await db
+      .select({
+        id: orders.id,
+        internalNo: orders.internalNo,
+        marketplaceOrderId: orders.marketplaceOrderId,
+      })
+      .from(orders)
+      .where(
+        and(
+          eq(orders.userId, userId),
+          or(
+            inArray(orders.marketplaceOrderId, valueChunk),
+            inArray(orders.internalNo, valueChunk),
+          ),
+        ),
+      )
+
+    for (const row of rows) {
+      const marketplaceOrderId = normalizeOrderNumber(row.marketplaceOrderId)
+      const internalNo = normalizeOrderNumber(row.internalNo)
+      if (marketplaceOrderId) matched.set(marketplaceOrderId, { id: row.id })
+      if (internalNo) matched.set(internalNo, { id: row.id })
+    }
+  }
+
+  return matched
+}
+
+function normalizeOrderNumber(value: unknown): string {
+  return String(value ?? '').trim()
 }
 
 function chunks<T>(values: T[], size: number): T[][] {
@@ -273,20 +416,41 @@ function readHeader(ws: ExcelJS.Worksheet): HeaderMap {
   const map: HeaderMap = new Map()
   const row = ws.getRow(1)
   row.eachCell((cell, colNumber) => {
-    const key = stringify(cell.value)
+    const key = normalizeHeader(stringify(cell.value))
     if (key) map.set(key, colNumber)
   })
   return map
 }
 
+function normalizeHeader(value: string): string {
+  return value.replace(/\s+/g, '').trim()
+}
+
+function findHeader(header: HeaderMap, candidates: string[]): string | null {
+  for (const candidate of candidates) {
+    const key = normalizeHeader(candidate)
+    if (header.has(key)) return key
+  }
+
+  for (const key of header.keys()) {
+    if (candidates.some((candidate) => key.includes(normalizeHeader(candidate)))) return key
+  }
+
+  return null
+}
+
 function readCell(row: ExcelJS.Row, header: HeaderMap, name: string): unknown {
-  const col = header.get(name)
+  const col = header.get(normalizeHeader(name))
   return col ? row.getCell(col).value : null
 }
 
-function readText(row: ExcelJS.Row, header: HeaderMap, name: string | null): string | null {
-  if (!name) return null
-  const value = stringify(readCell(row, header, name))
+function readFirstCell(row: ExcelJS.Row, header: HeaderMap, names: string[]): unknown {
+  const name = findHeader(header, names)
+  return name ? readCell(row, header, name) : null
+}
+
+function readFirstText(row: ExcelJS.Row, header: HeaderMap, names: string[]): string | null {
+  const value = stringify(readFirstCell(row, header, names))
   return value || null
 }
 
@@ -303,7 +467,7 @@ function stringify(value: unknown): string {
 function parseMoney(value: unknown): number | null {
   const text = stringify(value).replace(/,/g, '')
   if (!text) return null
-  const parsed = Number(text)
+  const parsed = Number(text.replace(/[^0-9.-]/g, ''))
   return Number.isFinite(parsed) ? parsed : null
 }
 
@@ -313,9 +477,8 @@ function parseInteger(value: unknown): number | null {
   return Math.max(1, Math.trunc(parsed))
 }
 
-function readDate(row: ExcelJS.Row, header: HeaderMap, name: string | null): string | null {
-  if (!name) return null
-  const value = readCell(row, header, name)
+function readFirstDate(row: ExcelJS.Row, header: HeaderMap, names: string[]): string | null {
+  const value = readFirstCell(row, header, names)
   if (value instanceof Date) return value.toISOString().slice(0, 10)
   const text = stringify(value)
   if (!text) return null
@@ -331,49 +494,4 @@ function readRawData(row: ExcelJS.Row, header: HeaderMap): Record<string, unknow
     raw[name] = stringify(row.getCell(col).value)
   }
   return raw
-}
-
-function readFee(row: ExcelJS.Row, header: HeaderMap, carrierId: ActualShippingCostCarrier): unknown {
-  if (carrierId === 'CJGLS') return readCell(row, header, '운임')
-  if (carrierId === 'KDEXP') return readCell(row, header, '운임합계')
-  return readCell(row, header, '총운임')
-}
-
-function readOrderNumber(row: ExcelJS.Row, header: HeaderMap, carrierId: ActualShippingCostCarrier): string | null {
-  const name = carrierId === 'KDEXP' ? '고객사주문번호' : carrierId === 'DAESIN' ? '품명' : '주문번호'
-  return readText(row, header, name)
-}
-
-function acceptedDateHeader(carrierId: ActualShippingCostCarrier): string {
-  if (carrierId === 'CJGLS') return '접수일자'
-  if (carrierId === 'KDEXP') return '발송접수일'
-  return '접수일자'
-}
-
-function deliveredDateHeader(carrierId: ActualShippingCostCarrier): string | null {
-  if (carrierId === 'CJGLS') return '배송일자'
-  if (carrierId === 'KDEXP') return '인수완료일시'
-  return null
-}
-
-function packageHeader(carrierId: ActualShippingCostCarrier): string {
-  if (carrierId === 'CJGLS') return '박스타입'
-  if (carrierId === 'KDEXP') return '포장상태'
-  return '포장'
-}
-
-function quantityHeader(): string {
-  return '수량'
-}
-
-function paymentHeader(carrierId: ActualShippingCostCarrier): string {
-  if (carrierId === 'CJGLS') return '운임구분'
-  if (carrierId === 'KDEXP') return '결제구분'
-  return '지불방법'
-}
-
-function shipmentTypeHeader(carrierId: ActualShippingCostCarrier): string {
-  if (carrierId === 'CJGLS') return '접수구분'
-  if (carrierId === 'KDEXP') return '발송구분'
-  return '운송상품'
 }

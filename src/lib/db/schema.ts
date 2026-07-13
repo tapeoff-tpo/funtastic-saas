@@ -385,6 +385,7 @@ export const actualShippingCosts = pgTable(
     trackingNumber: varchar('tracking_number', { length: 100 }).notNull(),
     normalizedTrackingNumber: varchar('normalized_tracking_number', { length: 100 }).notNull(),
     shipmentId: uuid('shipment_id').references(() => shipments.id, { onDelete: 'set null' }),
+    orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
     orderNumber: varchar('order_number', { length: 200 }),
     acceptedAt: date('accepted_at'),
     deliveredAt: date('delivered_at'),
@@ -407,6 +408,7 @@ export const actualShippingCosts = pgTable(
     ),
     index('actual_shipping_costs_user_imported_idx').on(table.userId, table.importedAt),
     index('actual_shipping_costs_shipment_idx').on(table.shipmentId),
+    index('actual_shipping_costs_order_idx').on(table.orderId),
   ],
 )
 

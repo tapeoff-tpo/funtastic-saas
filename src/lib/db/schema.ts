@@ -1377,6 +1377,7 @@ export const dealEvents = pgTable(
   {
     id: uuid('id').defaultRandom().primaryKey(),
     userId: uuid('user_id').notNull(),
+    platform: varchar('platform', { length: 30 }).notNull().default('kakao'),
     dealType: varchar('deal_type', { length: 30 }).notNull(),
     title: text('title').notNull(),
     productId: varchar('product_id', { length: 100 }),
@@ -1390,6 +1391,13 @@ export const dealEvents = pgTable(
     dailyCapacity: integer('daily_capacity').notNull().default(500),
     startsOn: date('starts_on').notNull(),
     endsOn: date('ends_on').notNull(),
+    applicationStartsOn: date('application_starts_on'),
+    applicationEndsOn: date('application_ends_on'),
+    minimumDiscountRate: integer('minimum_discount_rate'),
+    appliedProductCount: integer('applied_product_count'),
+    discountCode: varchar('discount_code', { length: 50 }),
+    externalPromotionId: varchar('external_promotion_id', { length: 50 }),
+    sourceKey: varchar('source_key', { length: 100 }),
     status: varchar('status', { length: 30 }).notNull().default('draft'),
     contact: varchar('contact', { length: 50 }),
     notes: text('notes'),
@@ -1399,5 +1407,6 @@ export const dealEvents = pgTable(
   (table) => [
     index('deal_events_user_date_idx').on(table.userId, table.startsOn),
     index('deal_events_user_status_idx').on(table.userId, table.status),
+    uniqueIndex('deal_events_user_source_key_uniq').on(table.userId, table.sourceKey),
   ],
 )

@@ -65,6 +65,7 @@ export function PriceTableGrid({
   const visibleCoreColumns = CORE_COLUMNS.filter((column) => visibleColumnIds.has(column.id))
   const visiblePriceColumns = priceColumns.filter((column) => visibleColumnIds.has(column.id))
   const columnCount = visibleCoreColumns.length + visiblePriceColumns.length
+  const hasAdditionalPriceColumns = priceColumns.some((column) => !column.defaultVisible)
 
   function updateSort(nextSortKey: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -106,9 +107,11 @@ export function PriceTableGrid({
           <PresetButton active={sameSet(visibleColumnIds, new Set(getCorePresetIds(sheetName)))} onClick={showCoreOnly}>
             기본정보만
           </PresetButton>
-          <PresetButton active={visiblePriceColumns.length === priceColumns.length} onClick={showAllPrices}>
-            가격 전체
-          </PresetButton>
+          {hasAdditionalPriceColumns ? (
+            <PresetButton active={visiblePriceColumns.length === priceColumns.length} onClick={showAllPrices}>
+              가격 전체
+            </PresetButton>
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-2 sm:justify-end">

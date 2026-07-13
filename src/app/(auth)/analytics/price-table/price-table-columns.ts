@@ -113,7 +113,7 @@ const mainColumns: PriceTableDisplayColumn[] = [
     valueLabel: '마진액',
     format: 'money',
     defaultVisible: true,
-    details: [{ key: '변경 후 b2b 마진률', label: '마진률', format: 'text' }],
+    details: [{ key: '변경 후 b2b 마진률', label: '마진률', format: 'money' }],
   },
   {
     id: 'b2c-margin',
@@ -122,7 +122,7 @@ const mainColumns: PriceTableDisplayColumn[] = [
     valueLabel: '마진액',
     format: 'money',
     defaultVisible: true,
-    details: [{ key: '0.2 b2c 마진률', label: '마진률', format: 'text' }],
+    details: [{ key: '0.2 b2c 마진률', label: '마진률', format: 'money' }],
   },
 ]
 

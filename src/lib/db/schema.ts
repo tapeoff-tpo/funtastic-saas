@@ -667,7 +667,11 @@ export const purchaseRequestItems = pgTable(
     index('purchase_request_items_user_status').on(table.userId, table.status),
     index('purchase_request_items_user_sku').on(table.userId, table.sku),
     index('purchase_request_items_batch').on(table.batchId),
-    uniqueIndex('purchase_request_items_user_management_code').on(table.userId, table.purchaseManagementCode),
+    uniqueIndex('purchase_request_items_user_management_code_sku').on(
+      table.userId,
+      table.purchaseManagementCode,
+      table.sku,
+    ),
   ],
 )
 

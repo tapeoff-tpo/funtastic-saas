@@ -16,8 +16,8 @@ export const AI_ACCOUNT_STATUS_LABELS: Record<string, string> = {
   in_use: '사용 중',
   limit_warning: '한도 임박',
   limit_reached: '한도 초과',
-  five_hour_limit_reached: '한도초과',
-  weekly_limit_reached: '한도초과',
+  five_hour_limit_reached: '사용 가능',
+  weekly_limit_reached: '주간 소진',
   needs_check: '확인 필요',
 }
 
@@ -142,9 +142,6 @@ export async function seedDefaultAiAccounts(userId: string) {
       email: account.email,
       sortOrder: index + 1,
       status: 'available',
-      fiveHourLimit: '5시간 한도',
-      fiveHourLimitPeriod: 'PM',
-      weeklyLimit: '1주일 한도',
     }))
 
     await db.insert(gptAccounts)
@@ -303,9 +300,6 @@ export async function createAiAccount(input: {
       secondaryEmail,
       sortOrder: nextSortOrder,
       status: 'available',
-      fiveHourLimit: '5시간 한도',
-      fiveHourLimitPeriod: 'PM',
-      weeklyLimit: '1주일 한도',
     })
     .onConflictDoNothing({
       target: [gptAccounts.userId, gptAccounts.name],
@@ -413,9 +407,8 @@ export async function addAiAccountMessage(input: {
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean)))
-  const isFiveHourLimitEnd = messageType === '사용종료(5시간초과)'
-  const isWeeklyLimitEnd = messageType === '사용종료(주간초과)'
-  const shouldEndUsage = messageType === '사용종료' || isFiveHourLimitEnd || isWeeklyLimitEnd
+  const isWeeklyLimitEnd = messageType === '사용종료(주간소진)' || messageType === '사용종료(주간초과)'
+  const shouldEndUsage = messageType === '사용종료' || isWeeklyLimitEnd
   const nextActiveUsers = messageType === '사용시작'
     ? authorNames.length
       ? Array.from(new Set([...activeUsers, ...authorNames]))
@@ -428,8 +421,6 @@ export async function addAiAccountMessage(input: {
   let nextStatus = account.status
   if (messageType === '사용시작') {
     nextStatus = 'in_use'
-  } else if (isFiveHourLimitEnd) {
-    nextStatus = 'five_hour_limit_reached'
   } else if (isWeeklyLimitEnd) {
     nextStatus = 'weekly_limit_reached'
   } else if (shouldEndUsage) {
@@ -450,17 +441,18 @@ export async function addAiAccountMessage(input: {
 export async function updateAiAccountLimits(input: {
   userId: string
   accountId: string
-  fiveHourLimit?: string | null
-  fiveHourLimitPeriod?: string | null
-  weeklyLimit?: string | null
+  weeklyRemainingPercent?: string | null
+  weeklyResetAt?: Date | null
 }) {
   await ensureAiAccountTables()
-  const period = input.fiveHourLimitPeriod === 'AM' ? 'AM' : 'PM'
+  const parsedPercent = Number(input.weeklyRemainingPercent)
+  const weeklyLimit = input.weeklyRemainingPercent?.trim() && Number.isFinite(parsedPercent)
+    ? `잔여 ${Math.min(100, Math.max(0, Math.round(parsedPercent)))}%`
+    : null
   const [row] = await db.update(gptAccounts)
     .set({
-      fiveHourLimit: input.fiveHourLimit?.trim() || null,
-      fiveHourLimitPeriod: period,
-      weeklyLimit: input.weeklyLimit?.trim() || null,
+      weeklyLimit,
+      weeklyResetAt: input.weeklyResetAt || null,
       updatedAt: new Date(),
     })
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
@@ -471,7 +463,7 @@ export async function updateAiAccountLimits(input: {
     userId: input.userId,
     accountId: input.accountId,
     eventType: 'limit_updated',
-    message: '한도 설정을 수정했습니다.',
+    message: '주간 한도 설정을 수정했습니다.',
   })
   return { success: true }
 }

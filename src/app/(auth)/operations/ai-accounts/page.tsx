@@ -35,7 +35,7 @@ export default async function AiAccountsPage() {
   ])
   const availableCount = accounts.filter((account) => account.status === 'available').length
   const inUseCount = accounts.filter((account) => account.status === 'in_use').length
-  const attentionCount = accounts.filter((account) => account.status === 'limit_warning' || account.status === 'limit_reached' || account.status === 'needs_check').length
+  const attentionCount = accounts.filter((account) => account.status === 'limit_warning' || account.status === 'limit_reached' || account.status === 'weekly_limit_reached' || account.status === 'needs_check').length
 
   return (
     <div className="space-y-4">
@@ -105,9 +105,8 @@ export default async function AiAccountsPage() {
           secondaryEmail: account.secondaryEmail,
           status: account.status,
           currentUserName: account.currentUserName,
-          fiveHourLimit: account.fiveHourLimit,
-          fiveHourLimitPeriod: account.fiveHourLimitPeriod,
           weeklyLimit: account.weeklyLimit,
+          weeklyResetAt: account.weeklyResetAt?.toISOString() || null,
         }))}
         messages={messages.map((message) => ({
           id: message.id,

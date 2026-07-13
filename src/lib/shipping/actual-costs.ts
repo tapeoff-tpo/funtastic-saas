@@ -27,10 +27,25 @@ export interface ActualShippingCostImportResult {
   totalRows: number
   imported: number
   matched: number
+  shipmentMatched: number
+  orderMatched: number
   unmatched: number
   relinked: number
   skipped: number
   errors: Array<{ row: number; reason: string }>
+  unmatchedRows: ActualShippingCostUnmatchedRow[]
+}
+
+export interface ActualShippingCostUnmatchedRow {
+  rowNumber: number
+  trackingNumber: string
+  orderNumber: string | null
+  actualFee: number
+  packageType: string | null
+  acceptedAt: string | null
+  deliveredAt: string | null
+  reason: string
+  rawData: Record<string, unknown>
 }
 
 const HEADER_CANDIDATES: Record<ActualShippingCostCarrier, {
@@ -210,13 +225,31 @@ export async function importActualShippingCosts(data: {
   const uniqueRows = Array.from(new Map(
     parsed.rows.map((row) => [`${row.carrierId}:${row.normalizedTrackingNumber}`, row]),
   ).values())
-  let matched = 0
+  let shipmentMatched = 0
+  let orderMatched = 0
+  const unmatchedRows: ActualShippingCostUnmatchedRow[] = []
   const insertRows = uniqueRows.map((row) => {
     const shipment = shipmentByTracking.get(row.normalizedTrackingNumber) ?? null
     const order = shipment?.orderId
       ? { id: shipment.orderId }
       : orderByNumber.get(normalizeOrderNumber(row.orderNumber)) ?? null
-    if (shipment) matched += 1
+    if (shipment) shipmentMatched += 1
+    else if (order) orderMatched += 1
+    else {
+      unmatchedRows.push({
+        rowNumber: row.rowNumber,
+        trackingNumber: row.trackingNumber,
+        orderNumber: row.orderNumber,
+        actualFee: row.actualFee,
+        packageType: row.packageType,
+        acceptedAt: row.acceptedAt,
+        deliveredAt: row.deliveredAt,
+        reason: row.orderNumber
+          ? '운송장번호와 주문번호 모두 SaaS 데이터에서 찾지 못했습니다.'
+          : '운송장번호를 SaaS 송장 데이터에서 찾지 못했고, 파일에 주문번호도 없습니다.',
+        rawData: row.rawData,
+      })
+    }
     return {
       userId: data.userId,
       carrierId: row.carrierId,
@@ -271,15 +304,19 @@ export async function importActualShippingCosts(data: {
 
   const relinked = await relinkActualShippingCosts(data.userId)
   const imported = uniqueRows.length
+  const matched = shipmentMatched + orderMatched
   return {
     carrierId: data.carrierId,
     totalRows: parsed.rows.length + parsed.errors.length,
     imported,
     matched,
-    unmatched: imported - matched,
+    shipmentMatched,
+    orderMatched,
+    unmatched: unmatchedRows.length,
     relinked,
     skipped: parsed.errors.length,
     errors: parsed.errors,
+    unmatchedRows,
   }
 }
 

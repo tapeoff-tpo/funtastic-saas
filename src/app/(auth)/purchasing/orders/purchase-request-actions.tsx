@@ -10,10 +10,13 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
+import { Dialog } from '@base-ui/react/dialog'
 import { useRouter } from 'next/navigation'
-import { Check, Download, Loader2, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
+import { Check, Download, Loader2, Plus, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   PURCHASE_REQUEST_STATUS_LABELS,
   type PurchaseRequestStatus,
@@ -209,6 +212,129 @@ export function PurchaseBulkBuyerApply() {
   )
 }
 
+export function PurchaseRequestCreateDialog() {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function addPurchaseRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
+    const requestedQuantity = Number(form.get('requestedQuantity'))
+
+    setError(null)
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sku: String(form.get('sku') ?? '').trim(),
+          productName: String(form.get('productName') ?? '').trim(),
+          optionName: String(form.get('optionName') ?? '').trim() || null,
+          requestedQuantity,
+        }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setError(body.error ?? '발주 항목을 추가하지 못했습니다.')
+        return
+      }
+
+      formElement.reset()
+      setOpen(false)
+      toast.success('발주검토에 항목을 추가했습니다.')
+      router.refresh()
+    })
+  }
+
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (nextOpen) setError(null)
+      }}
+    >
+      <Dialog.Trigger
+        render={(props) => (
+          <Button {...props} type="button" size="sm" variant="outline">
+            <Plus />
+            수동 추가
+          </Button>
+        )}
+      />
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[min(900px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl">
+          <Dialog.Title className="text-base font-semibold">발주 항목 수동 추가</Dialog.Title>
+          <Dialog.Description className="sr-only">
+            상품코드, 상품명, 옵션, 수량을 입력해 발주검토에 추가합니다.
+          </Dialog.Description>
+          <form onSubmit={addPurchaseRequest} className="mt-4">
+            <div className="grid gap-3 md:grid-cols-[1.1fr_1.8fr_1.2fr_100px]">
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-purchase-sku">상품코드</Label>
+                <Input
+                  id="manual-purchase-sku"
+                  name="sku"
+                  maxLength={100}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-purchase-product-name">상품명</Label>
+                <Input
+                  id="manual-purchase-product-name"
+                  name="productName"
+                  maxLength={500}
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-purchase-option-name">옵션</Label>
+                <Input
+                  id="manual-purchase-option-name"
+                  name="optionName"
+                  maxLength={200}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="manual-purchase-quantity">수량</Label>
+                <Input
+                  id="manual-purchase-quantity"
+                  name="requestedQuantity"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={1_000_000}
+                  step={1}
+                  defaultValue={1}
+                  required
+                />
+              </div>
+            </div>
+            {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <Dialog.Close
+                render={(props) => (
+                  <Button {...props} type="button" variant="outline" disabled={isPending}>취소</Button>
+                )}
+              />
+              <Button type="submit" disabled={isPending}>
+                {isPending ? <Loader2 className="animate-spin" /> : <Plus />}
+                추가
+              </Button>
+            </div>
+          </form>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
 export function PurchaseRequestExcelActions({
   exportHref,
   defaultStatus,
@@ -242,10 +368,19 @@ export function PurchaseRequestExcelActions({
         setError(body.error ?? '발주 엑셀 업로드에 실패했습니다.')
         return
       }
+      if (body.duplicate) {
+        setMessage('이미 반영된 동일 파일입니다.')
+        if (inputRef.current) inputRef.current.value = ''
+        return
+      }
       const skippedText = body.skipped ? ` · 제외 ${body.skipped.toLocaleString('ko-KR')}건` : ''
       setMessage(
         `생성 ${(body.created ?? 0).toLocaleString('ko-KR')}건 · 수정 ${(body.updated ?? 0).toLocaleString('ko-KR')}건${skippedText}`,
       )
+      if (body.errors?.length) {
+        const firstError = body.errors[0]
+        setError(`${firstError.row.toLocaleString('ko-KR')}행: ${firstError.message}`)
+      }
       if (inputRef.current) inputRef.current.value = ''
       router.refresh()
     })
@@ -688,6 +823,7 @@ type PurchaseRequestExcelResult = {
   created: number
   updated: number
   skipped: number
+  duplicate?: boolean
   errors?: Array<{ row: number; message: string }>
 }
 

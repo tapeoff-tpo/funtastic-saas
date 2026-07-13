@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto'
 import ExcelJS from 'exceljs'
 import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { purchaseRequestItems } from '@/lib/db/schema'
+import { purchaseRequestWriteLockKey } from './purchase-request-create'
 import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
 import {
   PURCHASE_REQUEST_STATUS_LABELS,
@@ -40,6 +42,13 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
 
 type PurchaseRequestExcelHeader = (typeof PURCHASE_REQUEST_EXCEL_HEADERS)[number]
 type PurchaseRequestExcelRow = Record<PurchaseRequestExcelHeader, string>
+
+const PURCHASE_REQUEST_EXCEL_HEADER_ALIASES: Partial<Record<PurchaseRequestExcelHeader, readonly string[]>> = {
+  품목코드: ['상품코드', '제품코드', '품번코드', '품번', '단품코드', 'SKU'],
+  상품명: ['품명', '품목명', '제품명'],
+  옵션명: ['옵션', '옵션정보', '규격'],
+  요청수량: ['수량', '발주수량', '구매수량', '발주요청수량', '주문수량'],
+}
 
 export async function exportPurchaseRequestsExcel(input: {
   userId: string
@@ -97,6 +106,7 @@ export async function importPurchaseRequestsExcel(input: {
   userId: string
   fileBuffer: ArrayBuffer
   defaultStatus?: PurchaseRequestStatus
+  sourceFileName?: string
 }) {
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(input.fileBuffer)
@@ -105,95 +115,126 @@ export async function importPurchaseRequestsExcel(input: {
 
   const headerRow = findHeaderRow(sheet)
   if (!headerRow) throw new Error('발주 엑셀 헤더를 찾을 수 없습니다.')
-  const columnByHeader = new Map<string, number>()
-  sheet.getRow(headerRow).eachCell((cell, column) => columnByHeader.set(cellText(cell.value), column))
+  const columnByHeader = purchaseRequestColumnMap(sheet.getRow(headerRow))
 
   const missing = ['품목코드', '상품명', '요청수량'].filter((header) => !columnByHeader.has(header))
   if (missing.length > 0) throw new Error(`필수 열이 없습니다: ${missing.join(', ')}`)
+  const fileFingerprint = createHash('sha256')
+    .update(input.defaultStatus ?? 'requested')
+    .update('\0')
+    .update(Buffer.from(input.fileBuffer))
+    .digest('hex')
 
-  const [{ maxRowNumber }] = await db.select({
-    maxRowNumber: sql<number>`COALESCE(MAX(${purchaseRequestItems.rowNumber}), 0)::int`,
-  }).from(purchaseRequestItems).where(eq(purchaseRequestItems.userId, input.userId))
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${purchaseRequestWriteLockKey(input.userId)})::bigint)`)
 
-  let nextRowNumber = maxRowNumber
-  let total = 0
-  let created = 0
-  let updated = 0
-  let skipped = 0
-  const errors: Array<{ row: number; message: string }> = []
-
-  for (let rowNumber = headerRow + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
-    const row = sheet.getRow(rowNumber)
-    const data = readExcelRow(row, columnByHeader)
-    if (!Object.values(data).some(Boolean)) continue
-    total += 1
-
-    const id = data.ID.trim()
-    const sku = data.품목코드.trim()
-    const productName = data.상품명.trim()
-    const requestedQuantity = optionalInteger(data.요청수량)
-    if (!sku || !productName || requestedQuantity == null || requestedQuantity < 1) {
-      skipped += 1
-      errors.push({ row: rowNumber, message: '품목코드, 상품명, 요청수량을 확인해주세요.' })
-      continue
-    }
-
-    const status = parsePurchaseStatus(data.상태) ?? input.defaultStatus ?? 'requested'
-    const outboundQuantity = optionalInteger(data.중국출고요청수량)
-    const buyerCode = normalizeBuyerCode(data.담당자코드)
-    const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
-      status,
-      sku,
-      productName,
-      optionName: emptyToNull(data.옵션명),
-      requestedQuantity,
-      actualPurchaseQuantity: optionalInteger(data.실제구매수량),
-      chinaReceivedQuantity: optionalInteger(data.중국입고수량),
-      purchaseManagementCode: emptyToNull(data.구입관리코드),
-      supplierOrderNumber: emptyToNull(data.주문서번호),
-      requestDate: optionalDate(data['발주요청 날짜']),
-      outboundExpectedDate: optionalDate(data.구매날짜),
-      purchaseMethod: emptyToNull(data.구매방법),
-      buyerCode,
-      buyerName: buyerCode ? PURCHASE_BUYERS[buyerCode] : emptyToNull(data.담당자),
-      memo: emptyToNull(data.메모),
-      updatedAt: new Date(),
-    }
-
-    if (id) {
-      const [current] = await db.select({
-        id: purchaseRequestItems.id,
-        rawData: purchaseRequestItems.rawData,
-      }).from(purchaseRequestItems).where(and(
+    const [duplicateImport] = await tx
+      .select({ id: purchaseRequestItems.id })
+      .from(purchaseRequestItems)
+      .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        eq(purchaseRequestItems.id, id),
-      )).limit(1)
+        sql`${purchaseRequestItems.rawData}->>'importFileFingerprint' = ${fileFingerprint}`,
+      ))
+      .limit(1)
 
-      if (!current) {
+    if (duplicateImport) {
+      return { total: 0, created: 0, updated: 0, skipped: 0, errors: [], duplicate: true }
+    }
+
+    const [{ maxRowNumber }] = await tx.select({
+      maxRowNumber: sql<number>`COALESCE(MAX(${purchaseRequestItems.rowNumber}), 0)::int`,
+    }).from(purchaseRequestItems).where(eq(purchaseRequestItems.userId, input.userId))
+
+    let nextRowNumber = maxRowNumber
+    let total = 0
+    let created = 0
+    let updated = 0
+    let skipped = 0
+    const errors: Array<{ row: number; message: string }> = []
+    const rowsToInsert: Array<typeof purchaseRequestItems.$inferInsert> = []
+
+    for (let rowNumber = headerRow + 1; rowNumber <= sheet.rowCount; rowNumber += 1) {
+      const row = sheet.getRow(rowNumber)
+      const data = readExcelRow(row, columnByHeader)
+      if (!Object.values(data).some(Boolean)) continue
+      total += 1
+
+      const id = data.ID.trim()
+      const sku = data.품목코드.trim()
+      const productName = data.상품명.trim()
+      const requestedQuantity = optionalInteger(data.요청수량)
+      if (!sku || !productName || requestedQuantity == null || requestedQuantity < 1) {
         skipped += 1
-        errors.push({ row: rowNumber, message: 'ID에 해당하는 발주 항목을 찾을 수 없습니다.' })
+        errors.push({ row: rowNumber, message: '품목코드, 상품명, 요청수량을 확인해주세요.' })
         continue
       }
 
-      values.rawData = mergeOutboundQuantity(current.rawData, outboundQuantity)
-      await db.update(purchaseRequestItems)
-        .set(values)
-        .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, id)))
-      updated += 1
-      continue
+      const status = parsePurchaseStatus(data.상태) ?? input.defaultStatus ?? 'requested'
+      const outboundQuantity = optionalInteger(data.중국출고요청수량)
+      const buyerCode = normalizeBuyerCode(data.담당자코드)
+      const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
+        status,
+        sku,
+        productName,
+        optionName: emptyToNull(data.옵션명),
+        requestedQuantity,
+        actualPurchaseQuantity: optionalInteger(data.실제구매수량),
+        chinaReceivedQuantity: optionalInteger(data.중국입고수량),
+        purchaseManagementCode: emptyToNull(data.구입관리코드),
+        supplierOrderNumber: emptyToNull(data.주문서번호),
+        requestDate: optionalDate(data['발주요청 날짜']),
+        outboundExpectedDate: optionalDate(data.구매날짜),
+        purchaseMethod: emptyToNull(data.구매방법),
+        buyerCode,
+        buyerName: buyerCode ? PURCHASE_BUYERS[buyerCode] : emptyToNull(data.담당자),
+        memo: emptyToNull(data.메모),
+        updatedAt: new Date(),
+      }
+
+      if (id) {
+        const [current] = await tx.select({
+          id: purchaseRequestItems.id,
+          rawData: purchaseRequestItems.rawData,
+        }).from(purchaseRequestItems).where(and(
+          eq(purchaseRequestItems.userId, input.userId),
+          eq(purchaseRequestItems.id, id),
+        )).limit(1)
+
+        if (!current) {
+          skipped += 1
+          errors.push({ row: rowNumber, message: 'ID에 해당하는 발주 항목을 찾을 수 없습니다.' })
+          continue
+        }
+
+        values.rawData = mergeOutboundQuantity(current.rawData, outboundQuantity)
+        await tx.update(purchaseRequestItems)
+          .set(values)
+          .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, id)))
+        updated += 1
+        continue
+      }
+
+      nextRowNumber += 1
+      rowsToInsert.push({
+        ...values,
+        userId: input.userId,
+        rowNumber: nextRowNumber,
+        rawData: mergeOutboundQuantity({
+          source: 'purchase_request_excel',
+          sourceFileName: input.sourceFileName ?? null,
+          importFileFingerprint: fileFingerprint,
+        }, outboundQuantity),
+      } as typeof purchaseRequestItems.$inferInsert)
     }
 
-    nextRowNumber += 1
-    await db.insert(purchaseRequestItems).values({
-      ...values,
-      userId: input.userId,
-      rowNumber: nextRowNumber,
-      rawData: mergeOutboundQuantity({}, outboundQuantity),
-    } as typeof purchaseRequestItems.$inferInsert)
-    created += 1
-  }
+    for (let index = 0; index < rowsToInsert.length; index += 500) {
+      const chunk = rowsToInsert.slice(index, index + 500)
+      await tx.insert(purchaseRequestItems).values(chunk)
+      created += chunk.length
+    }
 
-  return { total, created, updated, skipped, errors }
+    return { total, created, updated, skipped, errors, duplicate: false }
+  })
 }
 
 async function getPurchaseRequestRowsForExcel(input: {
@@ -246,11 +287,35 @@ async function getPurchaseRequestRowsForExcel(input: {
 
 function findHeaderRow(sheet: ExcelJS.Worksheet) {
   for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
-    const values = new Set<string>()
-    sheet.getRow(rowNumber).eachCell((cell) => values.add(cellText(cell.value)))
-    if (values.has('품목코드') && values.has('상품명') && values.has('요청수량')) return rowNumber
+    const columns = purchaseRequestColumnMap(sheet.getRow(rowNumber))
+    if (columns.has('품목코드') && columns.has('상품명') && columns.has('요청수량')) return rowNumber
   }
   return null
+}
+
+function purchaseRequestColumnMap(row: ExcelJS.Row) {
+  const columns = new Map<string, number>()
+  row.eachCell((cell, column) => {
+    const header = canonicalPurchaseRequestExcelHeader(cellText(cell.value))
+    if (header && !columns.has(header)) columns.set(header, column)
+  })
+  return columns
+}
+
+export function canonicalPurchaseRequestExcelHeader(value: string): PurchaseRequestExcelHeader | null {
+  const normalizedValue = normalizeExcelHeader(value)
+  if (!normalizedValue) return null
+
+  for (const header of PURCHASE_REQUEST_EXCEL_HEADERS) {
+    const candidates = [header, ...(PURCHASE_REQUEST_EXCEL_HEADER_ALIASES[header] ?? [])]
+    if (candidates.some((candidate) => normalizeExcelHeader(candidate) === normalizedValue)) return header
+  }
+
+  return null
+}
+
+function normalizeExcelHeader(value: string) {
+  return value.trim().replace(/[\s_-]+/g, '').toLocaleLowerCase('ko-KR')
 }
 
 function readExcelRow(row: ExcelJS.Row, columnByHeader: Map<string, number>) {

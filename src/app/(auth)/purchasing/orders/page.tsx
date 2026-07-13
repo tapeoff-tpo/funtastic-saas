@@ -24,6 +24,7 @@ import {
   PurchasePlanFieldsV2,
   PurchaseQuantityField,
   PurchaseRecommendationGenerator,
+  PurchaseRequestCreateDialog,
   PurchaseRequestExcelActions,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
@@ -303,6 +304,7 @@ export async function PurchasingOrdersView({
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {isRequestedStatus ? <PurchaseRequestCreateDialog /> : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
               <Link

@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       userId: await getWorkspaceUserId(user.id),
       fileBuffer: await file.arrayBuffer(),
       defaultStatus: parseStatus(request.nextUrl.searchParams.get('defaultStatus')),
+      sourceFileName: file.name.slice(0, 255),
     })
 
     revalidatePath('/purchasing/purchases')

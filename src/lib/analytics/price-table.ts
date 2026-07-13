@@ -17,10 +17,13 @@ export interface PriceTableImportResult {
 export interface PriceTableListResult {
   rows: PriceTableRow[]
   total: number
+  overallTotal: number
   page: number
   pageSize: number
   sheets: string[]
+  sheetCounts: Array<{ name: string; count: number }>
   latestImport: Date | null
+  sourceFileName: string | null
 }
 
 type ParsedPriceTableRow = {
@@ -74,44 +77,57 @@ export async function listPriceTableRows(data: {
   page?: number
   search?: string
   sheetName?: string
+  sortKey?: string
+  sortOrder?: 'asc' | 'desc'
 }): Promise<PriceTableListResult> {
   await ensurePriceTableSchema()
   const page = Math.max(1, data.page ?? 1)
   const whereClause = buildWhereClause(data.userId, data.search, data.sheetName)
+  const orderBy = buildOrderBy(data.sortKey, data.sortOrder)
 
-  const [{ value: total }] = await db
-    .select({ value: count() })
-    .from(analyticsPriceTableRows)
-    .where(whereClause)
+  const [totalRows, rows, sheetRows, latestRows] = await Promise.all([
+    db
+      .select({ value: count() })
+      .from(analyticsPriceTableRows)
+      .where(whereClause),
+    db
+      .select()
+      .from(analyticsPriceTableRows)
+      .where(whereClause)
+      .orderBy(...orderBy)
+      .limit(PAGE_SIZE)
+      .offset((page - 1) * PAGE_SIZE),
+    db
+      .select({ name: analyticsPriceTableRows.sourceSheetName, value: count() })
+      .from(analyticsPriceTableRows)
+      .where(eq(analyticsPriceTableRows.userId, data.userId))
+      .groupBy(analyticsPriceTableRows.sourceSheetName)
+      .orderBy(analyticsPriceTableRows.sourceSheetName),
+    db
+      .select({
+        importedAt: analyticsPriceTableRows.importedAt,
+        sourceFileName: analyticsPriceTableRows.sourceFileName,
+      })
+      .from(analyticsPriceTableRows)
+      .where(eq(analyticsPriceTableRows.userId, data.userId))
+      .orderBy(desc(analyticsPriceTableRows.importedAt))
+      .limit(1),
+  ])
 
-  const rows = await db
-    .select()
-    .from(analyticsPriceTableRows)
-    .where(whereClause)
-    .orderBy(asc(analyticsPriceTableRows.sourceSheetName), asc(analyticsPriceTableRows.rowNumber))
-    .limit(PAGE_SIZE)
-    .offset((page - 1) * PAGE_SIZE)
-
-  const sheetRows = await db
-    .selectDistinct({ name: analyticsPriceTableRows.sourceSheetName })
-    .from(analyticsPriceTableRows)
-    .where(eq(analyticsPriceTableRows.userId, data.userId))
-    .orderBy(analyticsPriceTableRows.sourceSheetName)
-
-  const [latest] = await db
-    .select({ importedAt: analyticsPriceTableRows.importedAt })
-    .from(analyticsPriceTableRows)
-    .where(eq(analyticsPriceTableRows.userId, data.userId))
-    .orderBy(desc(analyticsPriceTableRows.importedAt))
-    .limit(1)
+  const total = totalRows[0]?.value ?? 0
+  const latest = latestRows[0]
+  const sheetCounts = sheetRows.map((row) => ({ name: row.name, count: row.value }))
 
   return {
     rows,
     total,
+    overallTotal: sheetCounts.reduce((sum, sheet) => sum + sheet.count, 0),
     page,
     pageSize: PAGE_SIZE,
-    sheets: sheetRows.map((row) => row.name),
+    sheets: sheetCounts.map((row) => row.name),
+    sheetCounts,
     latestImport: latest?.importedAt ?? null,
+    sourceFileName: latest?.sourceFileName ?? null,
   }
 }
 
@@ -257,6 +273,48 @@ function buildWhereClause(userId: string, search?: string, sheetName?: string) {
   }
 
   return and(...conditions)!
+}
+
+function buildOrderBy(sortKey?: string, sortOrder?: 'asc' | 'desc') {
+  const direction = sortOrder === 'desc' ? desc : asc
+  const coreColumn = (() => {
+    switch (sortKey) {
+      case 'productCode': return analyticsPriceTableRows.productCode
+      case 'productName': return analyticsPriceTableRows.productName
+      case 'optionName': return analyticsPriceTableRows.optionName
+      case 'registeredProductName': return analyticsPriceTableRows.registeredProductName
+      case 'rowNumber': return analyticsPriceTableRows.rowNumber
+      default: return null
+    }
+  })()
+
+  if (coreColumn) {
+    return [
+      asc(sql`${coreColumn} IS NULL`),
+      direction(coreColumn),
+      asc(analyticsPriceTableRows.rowNumber),
+    ]
+  }
+
+  const rawKey = sortKey?.startsWith('raw:') ? sortKey.slice(4).trim() : ''
+  if (rawKey && rawKey.length <= 180) {
+    const rawValue = sql<string>`NULLIF(${analyticsPriceTableRows.rawData} ->> ${rawKey}, '')`
+    const numericValue = sql<number>`CASE
+      WHEN ${rawValue} ~ '^-?[0-9]+([.][0-9]+)?$' THEN (${rawValue})::numeric
+      ELSE NULL
+    END`
+    return [
+      asc(sql`${rawValue} IS NULL`),
+      direction(numericValue),
+      direction(sql`LOWER(${rawValue})`),
+      asc(analyticsPriceTableRows.rowNumber),
+    ]
+  }
+
+  return [
+    asc(analyticsPriceTableRows.sourceSheetName),
+    asc(analyticsPriceTableRows.rowNumber),
+  ]
 }
 
 async function ensurePriceTableSchema() {

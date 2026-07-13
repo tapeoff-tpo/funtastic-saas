@@ -1,19 +1,28 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { Search } from 'lucide-react'
+import { ChevronDown, FileSpreadsheet, Search, X } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { listPriceTableRows, type PriceTableRow } from '@/lib/analytics/price-table'
+import { listPriceTableRows } from '@/lib/analytics/price-table'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { PriceTableGrid, type PriceTableGridRow } from './price-table-grid'
 import { PriceTableUpload } from './price-table-upload'
 
 export const metadata: Metadata = {
   title: '판매가 테이블',
 }
 
+const SHEET_ORDER = ['상품등록', '메인', '뉴도매']
+
 export default async function PriceTablePage({
   searchParams,
 }: {
-  searchParams?: Promise<{ page?: string; q?: string; sheet?: string }>
+  searchParams?: Promise<{
+    page?: string
+    q?: string
+    sheet?: string
+    sort?: string
+    order?: string
+  }>
 }) {
   const user = await getCurrentUser()
   if (!user) return null
@@ -21,20 +30,46 @@ export default async function PriceTablePage({
   const params = await searchParams
   const page = Math.max(1, Number.parseInt(params?.page ?? '1', 10) || 1)
   const search = params?.q?.trim() ?? ''
-  const sheetName = params?.sheet?.trim() ?? ''
+  const activeSheet = params?.sheet?.trim() || '상품등록'
+  const sortKey = params?.sort?.trim() || 'productCode'
+  const sortOrder = params?.order === 'desc' ? 'desc' : 'asc'
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const data = await listPriceTableRows({
     userId: workspaceUserId,
     page,
     search,
-    sheetName,
+    sheetName: activeSheet,
+    sortKey,
+    sortOrder,
   }).catch((error) => {
     console.error('price table list error:', error)
-    return { rows: [], total: 0, page, pageSize: 100, sheets: [], latestImport: null }
+    return {
+      rows: [],
+      total: 0,
+      overallTotal: 0,
+      page,
+      pageSize: 100,
+      sheets: [],
+      sheetCounts: [],
+      latestImport: null,
+      sourceFileName: null,
+    }
   })
 
   const totalPages = Math.max(1, Math.ceil(data.total / data.pageSize))
+  const sheetCounts = [...data.sheetCounts].sort((left, right) => (
+    SHEET_ORDER.indexOf(left.name) - SHEET_ORDER.indexOf(right.name)
+  ))
+  const gridRows: PriceTableGridRow[] = data.rows.map((row) => ({
+    id: row.id,
+    rowNumber: row.rowNumber,
+    productCode: row.productCode,
+    productName: row.productName,
+    optionName: row.optionName,
+    registeredProductName: row.registeredProductName,
+    rawData: row.rawData as Record<string, string>,
+  }))
 
   return (
     <div className="space-y-4">
@@ -42,7 +77,7 @@ export default async function PriceTablePage({
         <div>
           <h1 className="text-xl font-bold">판매가 테이블</h1>
           <p className="text-sm text-muted-foreground">
-            등록 상품의 상품코드, 상품명, 등록상품명, 플랫폼별 판매가 원본 데이터를 분석합니다.
+            상품별 판매가와 배송비를 플랫폼 단위로 비교합니다.
           </p>
         </div>
         <Link href="/analytics" className="w-fit rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
@@ -50,110 +85,120 @@ export default async function PriceTablePage({
         </Link>
       </div>
 
-      <PriceTableUpload />
-
-      <div className="grid gap-3 sm:grid-cols-3">
-        <SummaryCard label="전체 행" value={data.total.toLocaleString('ko-KR')} />
-        <SummaryCard label="시트" value={data.sheets.length.toLocaleString('ko-KR')} />
-        <SummaryCard label="최근 업로드" value={formatDateTime(data.latestImport)} />
+      <div className="grid overflow-hidden rounded-md border bg-card sm:grid-cols-3 sm:divide-x">
+        <SummaryItem label="전체 데이터" value={`${data.overallTotal.toLocaleString('ko-KR')}건`} />
+        <SummaryItem
+          label={search ? '검색 결과' : `${activeSheet} 데이터`}
+          value={`${data.total.toLocaleString('ko-KR')}건`}
+        />
+        <SummaryItem label="최근 업로드" value={formatDateTime(data.latestImport)} />
       </div>
 
-      <form className="grid gap-2 rounded-lg border bg-card p-4 md:grid-cols-[180px_1fr_auto]">
-        <select name="sheet" defaultValue={sheetName} className="h-9 rounded-md border bg-background px-3 text-sm">
-          <option value="">전체 시트</option>
-          {data.sheets.map((sheet) => (
-            <option key={sheet} value={sheet}>{sheet}</option>
+      <details className="group rounded-md border bg-card">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
+          <div className="flex min-w-0 items-center gap-2">
+            <FileSpreadsheet className="size-4 shrink-0 text-muted-foreground" />
+            <span className="text-sm font-medium">원본 파일 교체</span>
+            {data.sourceFileName ? <span className="truncate text-xs text-muted-foreground">{data.sourceFileName}</span> : null}
+          </div>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+        </summary>
+        <div className="border-t p-4">
+          <PriceTableUpload />
+        </div>
+      </details>
+
+      <section className="overflow-hidden rounded-md border bg-card">
+        <div className="flex gap-1 overflow-x-auto border-b px-3 pt-1">
+          {sheetCounts.map((sheet) => (
+            <Link
+              key={sheet.name}
+              href={sheetHref(sheet.name, search)}
+              className={`inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium ${
+                activeSheet === sheet.name
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {sheet.name}
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] tabular-nums">
+                {sheet.count.toLocaleString('ko-KR')}
+              </span>
+            </Link>
           ))}
-        </select>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            name="q"
-            defaultValue={search}
-            placeholder="상품코드, 상품명, 등록상품명, 플랫폼 가격 원본 검색"
-            className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm"
-          />
         </div>
-        <button type="submit" className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">
-          검색
-        </button>
-      </form>
 
-      <div className="overflow-hidden rounded-lg border bg-card">
-        <div className="overflow-x-auto">
-          <table className="min-w-[1100px] w-full text-sm">
-            <thead className="bg-muted/60 text-left text-xs text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">시트</th>
-                <th className="px-3 py-2 font-medium">상품코드</th>
-                <th className="px-3 py-2 font-medium">상품명</th>
-                <th className="px-3 py-2 font-medium">옵션</th>
-                <th className="px-3 py-2 font-medium">등록상품명</th>
-                <th className="px-3 py-2 font-medium">주요 가격/배송비</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {data.rows.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-3 py-12 text-center text-muted-foreground">
-                    업로드된 판매가 테이블 데이터가 없습니다.
-                  </td>
-                </tr>
-              ) : data.rows.map((row) => (
-                <tr key={row.id} className="align-top hover:bg-muted/40">
-                  <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{row.sourceSheetName}</td>
-                  <td className="whitespace-nowrap px-3 py-2 font-medium">{row.productCode ?? '-'}</td>
-                  <td className="max-w-[220px] px-3 py-2">{row.productName ?? '-'}</td>
-                  <td className="max-w-[180px] px-3 py-2 text-muted-foreground">{row.optionName ?? '-'}</td>
-                  <td className="max-w-[300px] px-3 py-2">{row.registeredProductName ?? '-'}</td>
-                  <td className="px-3 py-2">
-                    <PricePreview row={row} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+        <form className="flex flex-col gap-2 p-3 sm:flex-row">
+          <input type="hidden" name="sheet" value={activeSheet} />
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              name="q"
+              defaultValue={search}
+              placeholder="상품코드, 상품명, 등록상품명, 플랫폼 값 검색"
+              className="h-9 w-full rounded-md border bg-background pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring/30"
+            />
+          </div>
+          <button type="submit" className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            검색
+          </button>
+          {search ? (
+            <Link
+              href={`/analytics/price-table?sheet=${encodeURIComponent(activeSheet)}`}
+              className="inline-flex h-9 items-center justify-center gap-1 rounded-md border px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <X className="size-4" />
+              초기화
+            </Link>
+          ) : null}
+        </form>
+      </section>
 
-      <div className="flex items-center justify-between text-sm">
+      <PriceTableGrid
+        key={activeSheet}
+        rows={gridRows}
+        sheetName={activeSheet}
+        sortKey={sortKey}
+        sortOrder={sortOrder}
+      />
+
+      <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="text-muted-foreground">
           {data.total.toLocaleString('ko-KR')}건 중 {data.rows.length.toLocaleString('ko-KR')}건 표시
         </div>
         <div className="flex items-center gap-2">
-          <PageLink page={page - 1} disabled={page <= 1} search={search} sheetName={sheetName}>이전</PageLink>
-          <span className="text-muted-foreground">{page} / {totalPages}</span>
-          <PageLink page={page + 1} disabled={page >= totalPages} search={search} sheetName={sheetName}>다음</PageLink>
+          <PageLink
+            page={page - 1}
+            disabled={page <= 1}
+            search={search}
+            sheetName={activeSheet}
+            sortKey={sortKey}
+            sortOrder={sortOrder}
+          >
+            이전
+          </PageLink>
+          <span className="min-w-[70px] text-center text-muted-foreground">{page} / {totalPages}</span>
+          <PageLink
+            page={page + 1}
+            disabled={page >= totalPages}
+            search={search}
+            sheetName={activeSheet}
+            sortKey={sortKey}
+            sortOrder={sortOrder}
+          >
+            다음
+          </PageLink>
         </div>
       </div>
     </div>
   )
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function SummaryItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-card px-4 py-3">
+    <div className="border-b px-4 py-3 last:border-b-0 sm:border-b-0">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 text-lg font-semibold">{value}</div>
-    </div>
-  )
-}
-
-function PricePreview({ row }: { row: PriceTableRow }) {
-  const entries = Object.entries(row.rawData ?? {})
-    .filter(([key, value]) => value && /(판매가|가격|금액|배송비|원가|추가금|수수료|정산)/.test(key))
-    .slice(0, 8)
-
-  if (entries.length === 0) return <span className="text-muted-foreground">-</span>
-
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {entries.map(([key, value]) => (
-        <span key={`${row.id}-${key}`} className="rounded-md border bg-background px-2 py-1 text-xs">
-          <span className="text-muted-foreground">{key}</span>
-          <span className="ml-1 font-medium">{String(value)}</span>
-        </span>
-      ))}
+      <div className="mt-0.5 text-base font-semibold tabular-nums">{value}</div>
     </div>
   )
 }
@@ -163,12 +208,16 @@ function PageLink({
   disabled,
   search,
   sheetName,
+  sortKey,
+  sortOrder,
   children,
 }: {
   page: number
   disabled: boolean
   search: string
   sheetName: string
+  sortKey: string
+  sortOrder: 'asc' | 'desc'
   children: React.ReactNode
 }) {
   if (disabled) {
@@ -177,9 +226,20 @@ function PageLink({
   const params = new URLSearchParams()
   if (page > 1) params.set('page', String(page))
   if (search) params.set('q', search)
-  if (sheetName) params.set('sheet', sheetName)
-  const href = params.size ? `/analytics/price-table?${params}` : '/analytics/price-table'
-  return <Link href={href} className="rounded-md border bg-background px-3 py-1.5 hover:bg-muted">{children}</Link>
+  params.set('sheet', sheetName)
+  if (sortKey !== 'productCode') params.set('sort', sortKey)
+  if (sortOrder !== 'asc') params.set('order', sortOrder)
+  return (
+    <Link href={`/analytics/price-table?${params}`} className="rounded-md border bg-background px-3 py-1.5 hover:bg-muted">
+      {children}
+    </Link>
+  )
+}
+
+function sheetHref(sheetName: string, search: string) {
+  const params = new URLSearchParams({ sheet: sheetName })
+  if (search) params.set('q', search)
+  return `/analytics/price-table?${params}`
 }
 
 function formatDateTime(value: Date | null) {

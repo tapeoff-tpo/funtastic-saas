@@ -47,7 +47,7 @@ export function PriceTableUpload() {
   }
 
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4">
+    <div className="space-y-3">
       <div className="flex flex-col gap-1">
         <h2 className="text-base font-semibold">판매가 테이블 업로드</h2>
         <p className="text-sm text-muted-foreground">

@@ -98,8 +98,9 @@ export default async function PriceTablePage({
         <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
           <div className="flex min-w-0 items-center gap-2">
             <FileSpreadsheet className="size-4 shrink-0 text-muted-foreground" />
-            <span className="text-sm font-medium">원본 파일 교체</span>
-            {data.sourceFileName ? <span className="truncate text-xs text-muted-foreground">{data.sourceFileName}</span> : null}
+            <span className="whitespace-nowrap text-sm font-medium sm:hidden">파일 교체</span>
+            <span className="hidden whitespace-nowrap text-sm font-medium sm:inline">원본 파일 교체</span>
+            {data.sourceFileName ? <span className="hidden truncate text-xs text-muted-foreground sm:inline">{data.sourceFileName}</span> : null}
           </div>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
         </summary>

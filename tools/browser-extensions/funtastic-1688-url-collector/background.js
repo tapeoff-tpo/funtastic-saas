@@ -1,12 +1,20 @@
 const STATE_KEY = 'funtastic1688ActiveRun'
+const QUEUE_KEY = 'funtastic1688ActiveQueue'
+const CHECKPOINT_KEY = 'funtastic1688QueueCheckpoint'
 const NEXT_ALARM = 'funtastic-1688-next'
 const TIMEOUT_ALARM = 'funtastic-1688-timeout'
+const SAVE_TIMEOUT_ALARM = 'funtastic-1688-save-timeout'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const ORDER_LIST_URL = 'https://air.1688.com/app/ctf-page/trade-order-list/buyer-order-list.html'
+const LOCAL_QUEUE_FILE = 'order-queue.json'
 const ORDER_DELAY_MS = 2_500
 const PAGE_TIMEOUT_MS = 40_000
+const SAVE_TIMEOUT_MS = 30_000
+const MAX_ORDERS = 10_000
+const CHECKPOINT_INTERVAL = 10
 
 let resultInFlight = false
+let checkpointCache = null
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void handleMessage(message, sender)
@@ -18,6 +26,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === NEXT_ALARM) void navigateToCurrentOrder()
   if (alarm.name === TIMEOUT_ALARM) void handlePageTimeout()
+  if (alarm.name === SAVE_TIMEOUT_ALARM) void handleSaveTimeout()
 })
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -54,6 +63,35 @@ async function handleMessage(message, sender) {
     return { ok: true }
   }
 
+  if (message.type === 'FUNTASTIC_1688_GET_STATUS') {
+    const run = await getRun()
+    if (!run) {
+      const checkpoint = await getCheckpoint()
+      return {
+        ok: true,
+        running: false,
+        checkpoint: checkpoint ? checkpointStatus(checkpoint) : null,
+      }
+    }
+
+    if (sender.tab?.id && isSaasUrl(sender.tab.url)) {
+      run.sourceTabId = sender.tab.id
+      await setRun(run)
+      if (run.pendingResult) {
+        setTimeout(() => void resendPendingResult(), 500)
+      }
+    }
+    return {
+      ok: true,
+      running: true,
+      runId: run.runId,
+      index: run.index,
+      total: run.orders.length,
+      summary: run.summary,
+      queueSource: run.queueSource,
+    }
+  }
+
   if (message.type === 'FUNTASTIC_1688_READY') {
     const run = await getRun()
     const active = Boolean(
@@ -69,6 +107,20 @@ async function handleMessage(message, sender) {
           candidates: run.capturedCandidates || [],
         }
       : { active: false }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_RESULT_SAVED') {
+    const run = await getRun()
+    if (
+      !run
+      || sender.tab?.id !== run.sourceTabId
+      || !run.pendingResult
+      || message.runId !== run.runId
+      || message.orderNumber !== run.pendingResult.orderNumber
+    ) return { ok: false }
+
+    await completeCurrentOrder(run, message)
+    return { ok: true }
   }
 
   if (message.type === 'FUNTASTIC_1688_FRAME_REPORT') {
@@ -115,7 +167,7 @@ async function handleMessage(message, sender) {
 
   if (message.type === 'FUNTASTIC_1688_PAGE_RESULT') {
     const run = await getRun()
-    if (!run || sender.tab?.id !== run.collectorTabId || resultInFlight) {
+    if (!run || sender.tab?.id !== run.collectorTabId || resultInFlight || run.pendingResult) {
       return { ok: false }
     }
     const current = run.orders[run.index]
@@ -126,7 +178,7 @@ async function handleMessage(message, sender) {
       if (message.fatal) {
         await failRun(run, message.message || '1688 로그인을 확인해주세요.', true)
       } else {
-        await advanceRun(run, {
+        await queueResultForSave(run, {
           orderNumber: current.orderNumber,
           candidates: uniqueCandidateUrls([
             ...(run.capturedCandidates || []),
@@ -141,18 +193,13 @@ async function handleMessage(message, sender) {
     return { ok: true }
   }
 
-  if (message.type === 'FUNTASTIC_1688_GET_STATUS') {
-    const run = await getRun()
-    return run
-      ? { ok: true, running: true, index: run.index, total: run.orders.length }
-      : { ok: true, running: false }
-  }
-
   return { ok: false }
 }
 
 async function startRun(message, sourceTabId) {
-  const orders = uniqueOrders(message.orders)
+  const localQueue = await loadLocalQueue()
+  const serverOrders = uniqueOrders(message.orders)
+  const orders = localQueue?.orders.length ? localQueue.orders : serverOrders
   if (!message.runId || orders.length === 0) {
     return { ok: false, error: '수집할 주문번호가 없습니다.' }
   }
@@ -160,62 +207,108 @@ async function startRun(message, sourceTabId) {
   const previous = await getRun()
   if (previous) await clearRun(previous, true)
 
-  const firstUrl = orderUrl(orders[0].orderNumber)
+  const queueId = localQueue?.queueId || queueFingerprint(orders)
+  const previousCheckpoint = await getCheckpoint()
+  const canResume = previousCheckpoint?.queueId === queueId
+    && previousCheckpoint.total === orders.length
+    && previousCheckpoint.nextIndex > 0
+    && previousCheckpoint.nextIndex < orders.length
+  const checkpoint = canResume
+    ? normalizeCheckpoint(previousCheckpoint, queueId, orders.length)
+    : createCheckpoint(queueId, orders.length)
+  checkpointCache = checkpoint
+  await saveCheckpoint(true)
+
+  const index = canResume ? checkpoint.nextIndex : 0
+  const firstUrl = orderUrl(orders[index].orderNumber)
   const collectorTab = await chrome.tabs.create({ url: firstUrl, active: true })
   if (!collectorTab.id) throw new Error('1688 주문조회 탭을 열지 못했습니다.')
 
   const run = {
     runId: String(message.runId),
+    queueId,
+    queueSource: localQueue?.orders.length ? 'excel' : 'saas',
     sourceTabId,
     collectorTabId: collectorTab.id,
     orders,
-    index: 0,
+    index,
     status: 'running',
-    startedAt: Date.now(),
+    startedAt: checkpoint.startedAt,
+    summary: normalizeSummary(checkpoint.summary),
+    pendingResult: null,
     capturedCandidates: [],
     captureTabIds: [],
     frameReports: [],
   }
+  await setQueue(orders)
   await setRun(run)
   await scheduleTimeout()
   await sendToSaas(run, {
     type: 'FUNTASTIC_1688_ACK',
     total: orders.length,
+    resumedFrom: index,
+    queueSource: run.queueSource,
+    summary: run.summary,
   })
-  return { ok: true, total: orders.length }
+  return { ok: true, total: orders.length, resumedFrom: index }
 }
 
-async function advanceRun(run, result) {
+async function queueResultForSave(run, result) {
   await chrome.alarms.clear(TIMEOUT_ALARM)
   await closeCaptureTabs(run)
-  await sendToSaas(run, {
-    type: 'FUNTASTIC_1688_RESULT',
+  const current = run.orders[run.index]
+  if (!current || current.orderNumber !== result.orderNumber) return
+
+  run.pendingResult = {
     orderNumber: result.orderNumber,
+    items: current.items || [],
     candidates: result.candidates,
     message: result.message,
-  })
+    saveAttempts: 1,
+  }
+  await setRun(run)
+  await scheduleSaveTimeout()
+  try {
+    await sendPendingResult(run)
+  } catch {
+    await failRun(run, 'SaaS 화면에 수집 결과를 전달하지 못했습니다. 다시 시작하면 이어서 진행합니다.', false)
+  }
+}
 
+async function completeCurrentOrder(run, acknowledgement) {
+  await chrome.alarms.clear(SAVE_TIMEOUT_ALARM)
+  const pendingResult = run.pendingResult
+  if (!pendingResult) return
+
+  updateSummary(run, pendingResult, acknowledgement)
+  updateCheckpoint(run, pendingResult, acknowledgement)
   run.index += 1
+  run.pendingResult = null
   run.capturedCandidates = []
   run.captureTabIds = []
   run.frameReports = []
+
   if (run.index >= run.orders.length) {
+    if (checkpointCache) checkpointCache.completedAt = new Date().toISOString()
+    await saveCheckpoint(true)
     await sendToSaas(run, {
       type: 'FUNTASTIC_1688_COMPLETE',
       total: run.orders.length,
-    })
+      summary: run.summary,
+    }).catch(() => {})
     await clearRun(run, true)
     await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
     return
   }
 
   await setRun(run)
+  await saveCheckpoint(run.index % CHECKPOINT_INTERVAL === 0)
   await chrome.alarms.create(NEXT_ALARM, { when: Date.now() + ORDER_DELAY_MS })
 }
 
 async function navigateToCurrentOrder() {
   const run = await getRun()
-  if (!run || run.status !== 'running') return
+  if (!run || run.status !== 'running' || run.pendingResult) return
   const current = run.orders[run.index]
   if (!current) return
 
@@ -229,13 +322,13 @@ async function navigateToCurrentOrder() {
 
 async function handlePageTimeout() {
   const run = await getRun()
-  if (!run || run.status !== 'running' || resultInFlight) return
+  if (!run || run.status !== 'running' || resultInFlight || run.pendingResult) return
   const current = run.orders[run.index]
   if (!current) return
 
   resultInFlight = true
   try {
-    await advanceRun(run, {
+    await queueResultForSave(run, {
       orderNumber: current.orderNumber,
       candidates: [],
       message: '1688 페이지 응답 시간 초과',
@@ -245,14 +338,53 @@ async function handlePageTimeout() {
   }
 }
 
+async function handleSaveTimeout() {
+  const run = await getRun()
+  if (!run?.pendingResult) return
+  if (run.pendingResult.saveAttempts >= 3) {
+    await failRun(run, 'SaaS 저장 응답이 없어 수집을 멈췄습니다. 다시 시작하면 같은 주문부터 이어집니다.', false)
+    return
+  }
+
+  run.pendingResult.saveAttempts += 1
+  await setRun(run)
+  await scheduleSaveTimeout()
+  try {
+    await sendPendingResult(run)
+  } catch {
+    await failRun(run, 'SaaS 화면과 연결이 끊겼습니다. 다시 시작하면 같은 주문부터 이어집니다.', false)
+  }
+}
+
+async function resendPendingResult() {
+  const run = await getRun()
+  if (!run?.pendingResult) return
+  await sendPendingResult(run).catch(() => {})
+}
+
+async function sendPendingResult(run) {
+  if (!run.pendingResult) return
+  await sendToSaas(run, {
+    type: 'FUNTASTIC_1688_RESULT',
+    orderNumber: run.pendingResult.orderNumber,
+    items: run.pendingResult.items,
+    candidates: run.pendingResult.candidates,
+    message: run.pendingResult.message,
+  })
+}
+
 async function cancelRun(run) {
-  await sendToSaas(run, { type: 'FUNTASTIC_1688_CANCELLED' })
+  await syncCheckpointFromRun(run)
+  await saveCheckpoint(true)
+  await sendToSaas(run, { type: 'FUNTASTIC_1688_CANCELLED' }).catch(() => {})
   await clearRun(run, true)
   await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
 }
 
 async function failRun(run, message, keepCollectorTab) {
-  await sendToSaas(run, { type: 'FUNTASTIC_1688_ERROR', message })
+  await syncCheckpointFromRun(run)
+  await saveCheckpoint(true)
+  await sendToSaas(run, { type: 'FUNTASTIC_1688_ERROR', message }).catch(() => {})
   await clearRun(run, !keepCollectorTab)
   if (!keepCollectorTab) {
     await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
@@ -263,7 +395,8 @@ async function clearRun(run, closeCollectorTab) {
   await Promise.all([
     chrome.alarms.clear(NEXT_ALARM),
     chrome.alarms.clear(TIMEOUT_ALARM),
-    chrome.storage.session.remove(STATE_KEY),
+    chrome.alarms.clear(SAVE_TIMEOUT_ALARM),
+    chrome.storage.session.remove([STATE_KEY, QUEUE_KEY]),
   ])
   await closeCaptureTabs(run)
   if (closeCollectorTab && run.collectorTabId) {
@@ -338,13 +471,191 @@ async function scheduleTimeout() {
   await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + PAGE_TIMEOUT_MS })
 }
 
+async function scheduleSaveTimeout() {
+  await chrome.alarms.clear(SAVE_TIMEOUT_ALARM)
+  await chrome.alarms.create(SAVE_TIMEOUT_ALARM, { when: Date.now() + SAVE_TIMEOUT_MS })
+}
+
 async function getRun() {
-  const stored = await chrome.storage.session.get(STATE_KEY)
-  return stored[STATE_KEY] || null
+  const stored = await chrome.storage.session.get([STATE_KEY, QUEUE_KEY])
+  const state = stored[STATE_KEY]
+  const orders = stored[QUEUE_KEY]
+  return state && Array.isArray(orders) ? { ...state, orders } : null
 }
 
 async function setRun(run) {
-  await chrome.storage.session.set({ [STATE_KEY]: run })
+  const { orders: _orders, ...state } = run
+  await chrome.storage.session.set({ [STATE_KEY]: state })
+}
+
+async function setQueue(orders) {
+  await chrome.storage.session.set({ [QUEUE_KEY]: orders })
+}
+
+async function loadLocalQueue() {
+  try {
+    const response = await fetch(chrome.runtime.getURL(LOCAL_QUEUE_FILE), { cache: 'no-store' })
+    if (!response.ok) return null
+    const value = await response.json()
+    const orders = uniqueOrders(value?.orders)
+    if (orders.length === 0) return null
+    return {
+      queueId: typeof value?.queueId === 'string' && value.queueId.length <= 120
+        ? value.queueId
+        : queueFingerprint(orders),
+      orders,
+    }
+  } catch {
+    return null
+  }
+}
+
+async function getCheckpoint() {
+  if (checkpointCache) return checkpointCache
+  const stored = await chrome.storage.local.get(CHECKPOINT_KEY)
+  checkpointCache = stored[CHECKPOINT_KEY] || null
+  return checkpointCache
+}
+
+async function saveCheckpoint(force) {
+  if (!checkpointCache) return
+  if (!force && checkpointCache.nextIndex % CHECKPOINT_INTERVAL !== 0) return
+  checkpointCache.updatedAt = new Date().toISOString()
+  await chrome.storage.local.set({ [CHECKPOINT_KEY]: checkpointCache })
+}
+
+async function syncCheckpointFromRun(run) {
+  const checkpoint = await getCheckpoint()
+  if (!checkpoint || checkpoint.queueId !== run.queueId) return
+  checkpoint.nextIndex = run.index
+  checkpoint.summary = normalizeSummary(run.summary)
+}
+
+function createCheckpoint(queueId, total) {
+  const now = new Date().toISOString()
+  return {
+    version: 1,
+    queueId,
+    total,
+    nextIndex: 0,
+    summary: emptySummary(),
+    notFound: [],
+    ambiguous: [],
+    failed: [],
+    startedAt: now,
+    updatedAt: now,
+    completedAt: null,
+  }
+}
+
+function normalizeCheckpoint(value, queueId, total) {
+  return {
+    version: 1,
+    queueId,
+    total,
+    nextIndex: Math.min(Math.max(Number(value.nextIndex) || 0, 0), total),
+    summary: normalizeSummary(value.summary),
+    notFound: Array.isArray(value.notFound) ? value.notFound : [],
+    ambiguous: Array.isArray(value.ambiguous) ? value.ambiguous : [],
+    failed: Array.isArray(value.failed) ? value.failed : [],
+    startedAt: typeof value.startedAt === 'string' ? value.startedAt : new Date().toISOString(),
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
+    completedAt: typeof value.completedAt === 'string' ? value.completedAt : null,
+  }
+}
+
+function checkpointStatus(checkpoint) {
+  return {
+    queueId: checkpoint.queueId,
+    total: checkpoint.total,
+    nextIndex: checkpoint.nextIndex,
+    summary: normalizeSummary(checkpoint.summary),
+    completedAt: checkpoint.completedAt,
+  }
+}
+
+function updateSummary(run, result, acknowledgement) {
+  const summary = normalizeSummary(run.summary)
+  summary.processed = run.index + 1
+  let issue = null
+
+  if (!acknowledgement.ok) {
+    summary.failed += 1
+    issue = `${result.orderNumber}: ${acknowledgement.message || 'SaaS 저장 실패'}`
+  } else if (acknowledgement.status === 'updated') {
+    summary.updated += Math.max(0, Number(acknowledgement.updatedCount) || 0)
+  } else if (acknowledgement.status === 'ambiguous') {
+    summary.review += 1
+    issue = `${result.orderNumber}: 상품 링크가 여러 개라 확인 필요`
+  } else if (acknowledgement.status === 'not_found') {
+    summary.notFound += 1
+    issue = `${result.orderNumber}: ${result.message || '상품 링크 미발견'}`
+  } else if (acknowledgement.status === 'unmatched') {
+    summary.failed += 1
+    issue = `${result.orderNumber}: 품목코드 매칭 실패`
+  } else if (acknowledgement.status === 'already_set') {
+    summary.alreadySet += 1
+  }
+
+  if (issue) summary.recentIssues = [issue, ...summary.recentIssues].slice(0, 6)
+  run.summary = summary
+}
+
+function updateCheckpoint(run, result, acknowledgement) {
+  if (!checkpointCache || checkpointCache.queueId !== run.queueId) return
+  checkpointCache.nextIndex = run.index + 1
+  checkpointCache.summary = normalizeSummary(run.summary)
+  removeReportEntry(checkpointCache, result.orderNumber)
+
+  if (!acknowledgement.ok || acknowledgement.status === 'unmatched') {
+    checkpointCache.failed.push({
+      orderNumber: result.orderNumber,
+      message: acknowledgement.message || '품목코드 매칭 또는 저장 실패',
+    })
+  } else if (acknowledgement.status === 'not_found') {
+    checkpointCache.notFound.push({
+      orderNumber: result.orderNumber,
+      message: result.message || '상품 링크 미발견',
+    })
+  } else if (acknowledgement.status === 'ambiguous') {
+    checkpointCache.ambiguous.push({
+      orderNumber: result.orderNumber,
+      candidates: result.candidates.map((candidate) => candidate.url),
+    })
+  }
+}
+
+function removeReportEntry(checkpoint, orderNumber) {
+  checkpoint.notFound = checkpoint.notFound.filter((item) => item.orderNumber !== orderNumber)
+  checkpoint.ambiguous = checkpoint.ambiguous.filter((item) => item.orderNumber !== orderNumber)
+  checkpoint.failed = checkpoint.failed.filter((item) => item.orderNumber !== orderNumber)
+}
+
+function emptySummary() {
+  return {
+    processed: 0,
+    updated: 0,
+    alreadySet: 0,
+    review: 0,
+    notFound: 0,
+    failed: 0,
+    recentIssues: [],
+  }
+}
+
+function normalizeSummary(value) {
+  const summary = value && typeof value === 'object' ? value : {}
+  return {
+    processed: Math.max(0, Number(summary.processed) || 0),
+    updated: Math.max(0, Number(summary.updated) || 0),
+    alreadySet: Math.max(0, Number(summary.alreadySet) || 0),
+    review: Math.max(0, Number(summary.review) || 0),
+    notFound: Math.max(0, Number(summary.notFound) || 0),
+    failed: Math.max(0, Number(summary.failed) || 0),
+    recentIssues: Array.isArray(summary.recentIssues)
+      ? summary.recentIssues.filter((item) => typeof item === 'string').slice(0, 6)
+      : [],
+  }
 }
 
 function orderUrl(orderNumber) {
@@ -386,16 +697,34 @@ function uniqueCandidateUrls(values) {
 
 function uniqueOrders(value) {
   if (!Array.isArray(value)) return []
-  const seen = new Set()
-  const orders = []
+  const orders = new Map()
   for (const item of value) {
     const orderNumber = String(item?.orderNumber || '').trim()
-    if (!/^\d{10,40}$/.test(orderNumber) || seen.has(orderNumber)) continue
-    seen.add(orderNumber)
-    orders.push({ orderNumber })
-    if (orders.length >= 300) break
+    if (!/^\d{10,40}$/.test(orderNumber)) continue
+    const existing = orders.get(orderNumber) || { orderNumber, items: [] }
+    const skuSet = new Set(existing.items.map((entry) => entry.sku))
+    for (const candidate of Array.isArray(item?.items) ? item.items : []) {
+      const sku = String(candidate?.sku || '').trim()
+      if (!sku || sku.length > 100 || skuSet.has(sku) || existing.items.length >= 200) continue
+      skuSet.add(sku)
+      existing.items.push({ sku })
+    }
+    orders.set(orderNumber, existing)
+    if (orders.size >= MAX_ORDERS) break
   }
-  return orders
+  return Array.from(orders.values())
+}
+
+function queueFingerprint(orders) {
+  let hash = 2166136261
+  for (const order of orders) {
+    const value = `${order.orderNumber}:${order.items.map((item) => item.sku).join(',')}|`
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index)
+      hash = Math.imul(hash, 16777619)
+    }
+  }
+  return `queue-${orders.length}-${(hash >>> 0).toString(16)}`
 }
 
 function isSaasUrl(value) {

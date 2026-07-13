@@ -99,11 +99,11 @@ export function resolvePurchaseUrlAssignments(
 
 export async function getPurchaseUrlCollectionQueue(input: {
   userId: string
-  orderPrefix: string
+  orderPrefix?: string
   limit?: number
 }) {
   const limit = Math.min(Math.max(input.limit ?? 200, 1), 300)
-  const prefix = input.orderPrefix.trim()
+  const prefix = input.orderPrefix?.trim()
   const rows = await db
     .select({
       requestId: purchaseRequestItems.id,
@@ -120,7 +120,9 @@ export async function getPurchaseUrlCollectionQueue(input: {
     ))
     .where(and(
       eq(purchaseRequestItems.userId, input.userId),
-      sql`BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')) LIKE ${`${prefix}%`}`,
+      prefix
+        ? sql`BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')) LIKE ${`${prefix}%`}`
+        : undefined,
       sql`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '') IS NULL`,
     ))
     .orderBy(desc(purchaseRequestItems.updatedAt))
@@ -162,6 +164,7 @@ export async function applyPurchaseUrlCollectionResult(input: {
   userId: string
   orderNumber: string
   candidates: PurchaseUrlCandidate[]
+  skus?: string[]
 }) {
   const orderNumber = input.orderNumber.trim()
   const canonicalCandidates = uniqueCanonicalUrls(input.candidates)
@@ -177,7 +180,10 @@ export async function applyPurchaseUrlCollectionResult(input: {
         sql`BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')) = ${orderNumber}`,
       ))
 
-    const skus = Array.from(new Set(requests.map((row) => row.sku)))
+    const skus = Array.from(new Set([
+      ...requests.map((row) => row.sku.trim()),
+      ...(input.skus ?? []).map((sku) => sku.trim()),
+    ].filter(Boolean)))
     if (skus.length === 0) {
       return {
         status: 'unmatched' as const,
@@ -200,6 +206,15 @@ export async function applyPurchaseUrlCollectionResult(input: {
         inArray(products.internalSku, skus),
       ))
       .for('update')
+
+    if (lockedProducts.length === 0) {
+      return {
+        status: 'unmatched' as const,
+        orderNumber,
+        updated: [],
+        candidates: canonicalCandidates,
+      }
+    }
 
     const matchedProducts = lockedProducts.map((product) => ({
       productId: product.id,

@@ -17,7 +17,10 @@ const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector.zip'
 
 type QueueResponse = {
-  orders: Array<{ orderNumber: string }>
+  orders: Array<{
+    orderNumber: string
+    items?: Array<{ sku: string }>
+  }>
   totalItems: number
   skippedInvalid: number
   hasMore: boolean
@@ -35,8 +38,12 @@ type CollectorMessage = {
   runId?: string
   total?: number
   orderNumber?: string
+  items?: Array<{ sku: string }>
   candidates?: Candidate[]
   message?: string
+  running?: boolean
+  index?: number
+  summary?: Partial<Pick<Progress, 'processed' | 'updated' | 'review' | 'notFound' | 'failed'>>
 }
 
 type SaveResponse = {
@@ -98,6 +105,12 @@ export function PurchasingUrlCollector() {
   const saveResult = useCallback(async (message: CollectorMessage) => {
     if (!message.orderNumber) return
     pendingSavesRef.current += 1
+    let acknowledgement: {
+      ok: boolean
+      status?: SaveResponse['status']
+      updatedCount?: number
+      message?: string
+    } = { ok: false, message: '구매 URL 저장에 실패했습니다.' }
 
     try {
       const response = await fetch('/api/purchasing/purchase-urls', {
@@ -105,11 +118,17 @@ export function PurchasingUrlCollector() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orderNumber: message.orderNumber,
+          skus: Array.from(new Set((message.items ?? []).map((item) => item.sku))),
           candidates: message.candidates ?? [],
         }),
       })
       const body = await response.json() as SaveResponse
       if (!response.ok) throw new Error(body.error ?? '구매 URL 저장에 실패했습니다.')
+      acknowledgement = {
+        ok: true,
+        status: body.status,
+        updatedCount: body.updated?.length ?? 0,
+      }
 
       setProgress((current) => {
         const issues = [...current.issues]
@@ -144,6 +163,10 @@ export function PurchasingUrlCollector() {
         }
       })
     } catch (error) {
+      acknowledgement = {
+        ok: false,
+        message: error instanceof Error ? error.message : '저장 실패',
+      }
       setProgress((current) => ({
         ...current,
         processed: Math.min(current.total, current.processed + 1),
@@ -155,6 +178,13 @@ export function PurchasingUrlCollector() {
         ].slice(0, 6),
       }))
     } finally {
+      window.postMessage({
+        source: PAGE_SOURCE,
+        type: 'FUNTASTIC_1688_RESULT_SAVED',
+        runId: message.runId,
+        orderNumber: message.orderNumber,
+        ...acknowledgement,
+      }, window.location.origin)
       pendingSavesRef.current -= 1
       finalizeRun()
     }
@@ -168,6 +198,20 @@ export function PurchasingUrlCollector() {
 
       if (message.type === 'FUNTASTIC_1688_PONG') {
         setExtensionReady(true)
+        if (message.running && message.runId) {
+          runIdRef.current = message.runId
+          setRunning(true)
+          setProgress((current) => ({
+            ...current,
+            total: message.total ?? current.total,
+            processed: message.summary?.processed ?? message.index ?? current.processed,
+            updated: message.summary?.updated ?? current.updated,
+            review: message.summary?.review ?? current.review,
+            notFound: message.summary?.notFound ?? current.notFound,
+            failed: message.summary?.failed ?? current.failed,
+            message: '진행 중인 1688 수집에 다시 연결했습니다.',
+          }))
+        }
         return
       }
       if (message.runId && message.runId !== runIdRef.current) return
@@ -232,18 +276,11 @@ export function PurchasingUrlCollector() {
     setRunning(true)
     setProgress({ ...EMPTY_PROGRESS, message: '수집할 발주건을 확인하고 있습니다.' })
     try {
-      const response = await fetch('/api/purchasing/purchase-urls?prefix=3&limit=200', {
+      const response = await fetch('/api/purchasing/purchase-urls?limit=300', {
         cache: 'no-store',
       })
       const body = await response.json() as QueueResponse
       if (!response.ok) throw new Error(body.error ?? '수집 목록을 불러오지 못했습니다.')
-      if (body.orders.length === 0) {
-        setRunning(false)
-        setProgress(EMPTY_PROGRESS)
-        toast.success('자동수집할 1688 구매 URL이 없습니다.')
-        return
-      }
-
       const runId = crypto.randomUUID()
       runIdRef.current = runId
       pendingSavesRef.current = 0
@@ -264,7 +301,10 @@ export function PurchasingUrlCollector() {
         source: PAGE_SOURCE,
         type: 'FUNTASTIC_1688_START',
         runId,
-        orders: body.orders.map(({ orderNumber }) => ({ orderNumber })),
+        orders: body.orders.map(({ orderNumber, items }) => ({
+          orderNumber,
+          items: (items ?? []).map(({ sku }) => ({ sku })),
+        })),
       }, window.location.origin)
     } catch (error) {
       setRunning(false)

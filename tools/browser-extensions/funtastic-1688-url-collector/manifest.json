@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Funtastic 1688 URL Collector",
-  "description": "Funtastic SaaS 발주 주문번호로 1688 구매 URL을 수집합니다.",
-  "version": "1.0.5",
+  "description": "발주 엑셀 주문번호로 1688 구매 URL을 수집하고 중단 지점부터 이어갑니다.",
+  "version": "1.1.0",
   "permissions": [
     "alarms",
     "storage",

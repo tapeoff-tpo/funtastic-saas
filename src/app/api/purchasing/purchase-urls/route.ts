@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/server'
 
 const resultSchema = z.object({
   orderNumber: z.string().trim().regex(/^\d{10,40}$/),
+  skus: z.array(z.string().trim().min(1).max(100)).max(200).default([]),
   candidates: z.array(z.object({
     url: z.string().trim().max(2_000),
     title: z.string().trim().max(1_000).nullable().optional(),
@@ -21,16 +22,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
   }
 
-  const prefix = request.nextUrl.searchParams.get('prefix')?.trim() || '3'
-  if (!/^\d{1,4}$/.test(prefix)) {
-    return NextResponse.json({ error: '주문번호 계정 규칙이 올바르지 않습니다.' }, { status: 400 })
-  }
-  const limit = Math.min(Math.max(Number(request.nextUrl.searchParams.get('limit')) || 200, 1), 300)
+  const limit = Math.min(Math.max(Number(request.nextUrl.searchParams.get('limit')) || 200, 1), 10_000)
 
   try {
     return NextResponse.json(await getPurchaseUrlCollectionQueue({
       userId: workspaceUserId,
-      orderPrefix: prefix,
       limit,
     }))
   } catch (error) {

@@ -14,15 +14,23 @@ window.addEventListener('message', (event) => {
     } catch {
       return
     }
-    window.postMessage({
-      source: EXTENSION_SOURCE,
-      type: 'FUNTASTIC_1688_PONG',
-      version,
-    }, window.location.origin)
+    chrome.runtime.sendMessage({ type: 'FUNTASTIC_1688_GET_STATUS' }, (response) => {
+      if (chrome.runtime.lastError) return
+      window.postMessage({
+        source: EXTENSION_SOURCE,
+        type: 'FUNTASTIC_1688_PONG',
+        version,
+        ...response,
+      }, window.location.origin)
+    })
     return
   }
 
-  if (message.type !== 'FUNTASTIC_1688_START' && message.type !== 'FUNTASTIC_1688_CANCEL') return
+  if (
+    message.type !== 'FUNTASTIC_1688_START'
+    && message.type !== 'FUNTASTIC_1688_CANCEL'
+    && message.type !== 'FUNTASTIC_1688_RESULT_SAVED'
+  ) return
   try {
     if (!chrome.runtime?.id) return
     chrome.runtime.sendMessage(message, (response) => {

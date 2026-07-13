@@ -75,7 +75,9 @@ export async function PurchasingOrdersView({
   showStatusTabs?: boolean
 }) {
   const params = await searchParams
-  const status = parseStatus(stringParam(params.status), allowedStatuses) ?? defaultStatus
+  const parsedStatus = parseStatus(stringParam(params.status), allowedStatuses)
+  const status = parsedStatus ?? defaultStatus
+  const selectedStatus = overdueOnly ? parsedStatus ?? undefined : status
   const search = stringParam(params.search)
   const page = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const showCosts = stringParam(params.showCosts) === '1'
@@ -98,7 +100,7 @@ export async function PurchasingOrdersView({
     overdueTotalCount,
   } = await getPurchaseRequests({
     userId: workspaceUserId,
-    status: overdueOnly ? undefined : status,
+    status: selectedStatus,
     overdueOnly,
     search: search ?? undefined,
     page,
@@ -122,8 +124,15 @@ export async function PurchasingOrdersView({
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (isRequestedStatus ? 0 : 2)
-  const listLabel = overdueOnly ? title : PURCHASE_REQUEST_STATUS_LABELS[status]
-  const costToggleParams = new URLSearchParams({ status })
+  const listLabel = overdueOnly
+    ? selectedStatus === 'purchased'
+      ? '발주요청 지연'
+      : selectedStatus === 'purchase_completed'
+        ? '구매완료 입고지연'
+        : title
+    : PURCHASE_REQUEST_STATUS_LABELS[status]
+  const costToggleParams = new URLSearchParams()
+  if (selectedStatus) costToggleParams.set('status', selectedStatus)
   if (search) costToggleParams.set('search', search)
   if (page > 1) costToggleParams.set('page', String(page))
   if (sort) costToggleParams.set('sort', sort)
@@ -131,7 +140,8 @@ export async function PurchasingOrdersView({
   costToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (!showCosts) costToggleParams.set('showCosts', '1')
   const costToggleHref = `${basePath}?${costToggleParams.toString()}`
-  const basisToggleParams = new URLSearchParams({ status })
+  const basisToggleParams = new URLSearchParams()
+  if (selectedStatus) basisToggleParams.set('status', selectedStatus)
   if (search) basisToggleParams.set('search', search)
   if (page > 1) basisToggleParams.set('page', String(page))
   if (sort) basisToggleParams.set('sort', sort)
@@ -140,7 +150,7 @@ export async function PurchasingOrdersView({
   basisToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '0' : '1')
   const basisToggleHref = `${basePath}?${basisToggleParams.toString()}`
   const excelExportParams = new URLSearchParams()
-  if (!overdueOnly) excelExportParams.set('status', status)
+  if (selectedStatus) excelExportParams.set('status', selectedStatus)
   if (overdueOnly) excelExportParams.set('overdueOnly', '1')
   if (search) excelExportParams.set('search', search)
   const excelExportHref = `/api/purchasing/purchase-requests/export?${excelExportParams.toString()}`
@@ -155,7 +165,7 @@ export async function PurchasingOrdersView({
           </p>
         </div>
         <form className="flex items-center gap-2" action={basePath}>
-          <input type="hidden" name="status" value={status} />
+          {selectedStatus ? <input type="hidden" name="status" value={selectedStatus} /> : null}
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
           <input type="hidden" name="showRecommendationBasis" value={showRecommendationBasis ? '1' : '0'} />
           {sort ? <input type="hidden" name="sort" value={sort} /> : null}
@@ -221,7 +231,40 @@ export async function PurchasingOrdersView({
         ) : null}
       </section>
 
-      {showStatusTabs ? (
+      {overdueOnly ? (
+        <nav className="flex flex-wrap gap-2" aria-label="지연 상태 필터">
+          {[
+            { status: undefined, label: '전체', count: overdueTotalCount },
+            { status: 'purchased' as const, label: '발주요청 지연', count: overduePurchaseRequestCount },
+            { status: 'purchase_completed' as const, label: '구매완료 입고지연', count: overduePurchaseCompletedCount },
+          ].map((item) => {
+            const active = item.status === selectedStatus
+            const href = purchaseOrdersHref({
+              basePath,
+              status: item.status,
+              search,
+              showCosts,
+              showRecommendationBasis,
+              sort,
+              order,
+            })
+            return (
+              <Link
+                key={item.status ?? 'all'}
+                href={href}
+                className={`inline-flex h-8 items-center gap-2 rounded-md border px-3 text-sm ${
+                  active ? 'border-foreground bg-foreground text-background' : 'border-border bg-background hover:bg-muted'
+                }`}
+              >
+                {item.label}
+                <span className={active ? 'text-background/70' : 'text-muted-foreground'}>
+                  {item.count.toLocaleString('ko-KR')}
+                </span>
+              </Link>
+            )
+          })}
+        </nav>
+      ) : showStatusTabs ? (
       <nav className="flex flex-wrap gap-2">
         {allowedStatuses.map((item) => {
           const active = item === status
@@ -290,39 +333,39 @@ export async function PurchasingOrdersView({
                   </th>
                   <th className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label="상태" column="status" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="min-w-[280px] px-3 py-2 font-medium">
-                    <SortHeader label="상품" column="productName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
+                    <SortHeader label="상품" column="productName" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
                   </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   {showCosts ? (
                     <>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
+                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="right" />
                       </th>
                     </>
                   ) : null}
                   {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" status={status} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
+                    <SortHeader label="담당자" column="buyerName" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>
@@ -456,7 +499,7 @@ export async function PurchasingOrdersView({
               <Link
                 href={purchaseOrdersHref({
                   basePath,
-                  status,
+                  status: selectedStatus,
                   search,
                   showCosts,
                   showRecommendationBasis,
@@ -479,7 +522,7 @@ export async function PurchasingOrdersView({
               <Link
                 href={purchaseOrdersHref({
                   basePath,
-                  status,
+                  status: selectedStatus,
                   search,
                   showCosts,
                   showRecommendationBasis,
@@ -518,7 +561,7 @@ function SortHeader({
 }: {
   label: string
   column: string
-  status: PurchaseRequestStatus
+  status: PurchaseRequestStatus | undefined
   search: string | undefined
   showCosts: boolean
   showRecommendationBasis: boolean
@@ -650,7 +693,7 @@ function purchaseOrdersHref({
   page,
 }: {
   basePath: string
-  status: PurchaseRequestStatus
+  status?: PurchaseRequestStatus
   search?: string
   showCosts?: boolean
   showRecommendationBasis?: boolean
@@ -658,14 +701,16 @@ function purchaseOrdersHref({
   order?: 'asc' | 'desc'
   page?: number
 }) {
-  const params = new URLSearchParams({ status })
+  const params = new URLSearchParams()
+  if (status) params.set('status', status)
   if (search) params.set('search', search)
   if (showCosts) params.set('showCosts', '1')
   if (showRecommendationBasis !== undefined) params.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (sort) params.set('sort', sort)
   if (order) params.set('order', order)
   if (page && page > 1) params.set('page', String(page))
-  return `${basePath}?${params.toString()}`
+  const query = params.toString()
+  return query ? `${basePath}?${query}` : basePath
 }
 
 function formatNumber(value: unknown) {

@@ -204,19 +204,27 @@ async function getPurchaseRequestRowsForExcel(input: {
 }) {
   const conditions: SQL[] = [eq(purchaseRequestItems.userId, input.userId)]
   if (input.overdueOnly) {
-    conditions.push(or(
-      and(
-        eq(purchaseRequestItems.status, 'purchased'),
-        sql`${purchaseRequestItems.requestDate} IS NOT NULL`,
-        sql`${purchaseRequestItems.requestDate} >= ${PURCHASE_DELAY_TRACKING_START_DATE}::date`,
-        sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
-      ),
-      and(
-        eq(purchaseRequestItems.status, 'purchase_completed'),
-        sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
-        sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
-      ),
-    )!)
+    const purchaseRequestOverdue = and(
+      eq(purchaseRequestItems.status, 'purchased'),
+      sql`${purchaseRequestItems.requestDate} IS NOT NULL`,
+      sql`${purchaseRequestItems.requestDate} >= ${PURCHASE_DELAY_TRACKING_START_DATE}::date`,
+      sql`${purchaseRequestItems.requestDate} <= CURRENT_DATE - INTERVAL '7 days'`,
+    )!
+    const purchaseCompletedOverdue = and(
+      eq(purchaseRequestItems.status, 'purchase_completed'),
+      sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
+      sql`${purchaseRequestItems.outboundExpectedDate} <= CURRENT_DATE - INTERVAL '7 days'`,
+    )!
+    if (input.status === 'purchased') {
+      conditions.push(purchaseRequestOverdue)
+    } else if (input.status === 'purchase_completed') {
+      conditions.push(purchaseCompletedOverdue)
+    } else {
+      conditions.push(or(
+        purchaseRequestOverdue,
+        purchaseCompletedOverdue,
+      )!)
+    }
   } else if (input.status) {
     conditions.push(eq(purchaseRequestItems.status, input.status))
   }

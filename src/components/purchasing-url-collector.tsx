@@ -43,7 +43,17 @@ type CollectorMessage = {
   message?: string
   running?: boolean
   index?: number
-  summary?: Partial<Pick<Progress, 'processed' | 'updated' | 'review' | 'notFound' | 'failed'>>
+  summary?: CollectorSummary
+  checkpoint?: {
+    total: number
+    nextIndex: number
+    summary?: CollectorSummary
+    completedAt?: string | null
+  } | null
+}
+
+type CollectorSummary = Partial<Pick<Progress, 'processed' | 'updated' | 'review' | 'notFound' | 'failed'>> & {
+  recentIssues?: string[]
 }
 
 type SaveResponse = {
@@ -211,6 +221,22 @@ export function PurchasingUrlCollector() {
             failed: message.summary?.failed ?? current.failed,
             message: '진행 중인 1688 수집에 다시 연결했습니다.',
           }))
+        } else if (message.checkpoint?.total) {
+          const checkpoint = message.checkpoint
+          const processed = Math.min(checkpoint.nextIndex, checkpoint.total)
+          setRunning(false)
+          setProgress({
+            total: checkpoint.total,
+            processed,
+            updated: checkpoint.summary?.updated ?? 0,
+            review: checkpoint.summary?.review ?? 0,
+            notFound: checkpoint.summary?.notFound ?? 0,
+            failed: checkpoint.summary?.failed ?? 0,
+            message: checkpoint.completedAt
+              ? '최근 1688 구매 URL 수집이 완료되었습니다.'
+              : `최근 수집이 ${processed.toLocaleString('ko-KR')}건 처리 후 중단되었습니다. 다시 시작하면 이어집니다.`,
+            issues: checkpoint.summary?.recentIssues?.slice(0, 6) ?? [],
+          })
         }
         return
       }

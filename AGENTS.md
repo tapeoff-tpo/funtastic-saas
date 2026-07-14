@@ -52,6 +52,8 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - `구매/입고지연` must support filtering by source status so purchasing-request delays and purchase-arrival delays can be reviewed separately.
 - Purchase URL data is item master data. Display it compactly in lists, but keep the full URL editable and clickable.
 - 1688 URL collection is a temporary operational tool. It may be hidden from the UI after the collection project is complete, but keep the code, Git history, extension package, and already-collected item URLs unless the user explicitly asks to remove them.
+- If production deployment is needed while 1688 URL collection is running, pause/stop the collection first, deploy the new version, refresh the item master page, verify the extension connection, and then restart collection from the saved checkpoint.
+- 1688 URL collection checkpoints are resumable. A deployment may interrupt the visible collection session, but it must not clear already-collected URLs or force a full restart.
 
 ### Item Master Excel Policy
 
@@ -91,6 +93,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Production is deployed on Vercel from the GitHub `main` branch.
 - After production fixes, run a production build when practical, commit changes, push to `origin main`, and verify the Vercel production URL responds.
 - When production deployment should be delayed, save work to a feature branch instead of pushing to `main`.
+- If a feature is saved on a non-production branch and the user later approves production release, merge that branch into `main`, push `origin main`, and verify the Vercel production deployment.
 
 ## 자동형 작업 운영
 

@@ -27,10 +27,27 @@ export interface ActualShippingCostImportResult {
   totalRows: number
   imported: number
   matched: number
+  shipmentMatched: number
+  orderMatched: number
   unmatched: number
   relinked: number
   skipped: number
   errors: Array<{ row: number; reason: string }>
+  shipmentMatchedRows: ActualShippingCostResultRow[]
+  orderMatchedRows: ActualShippingCostResultRow[]
+  unmatchedRows: ActualShippingCostResultRow[]
+}
+
+export interface ActualShippingCostResultRow {
+  rowNumber: number
+  trackingNumber: string
+  orderNumber: string | null
+  actualFee: number
+  packageType: string | null
+  acceptedAt: string | null
+  deliveredAt: string | null
+  reason: string
+  rawData: Record<string, unknown>
 }
 
 const HEADER_CANDIDATES: Record<ActualShippingCostCarrier, {
@@ -124,6 +141,14 @@ export async function ensureActualShippingCostsTable(): Promise<void> {
     CREATE INDEX IF NOT EXISTS actual_shipping_costs_order_idx
       ON actual_shipping_costs(order_id)
   `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS actual_shipping_costs_user_tracking_lookup_idx
+      ON actual_shipping_costs(user_id, normalized_tracking_number)
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS actual_shipping_costs_user_order_number_idx
+      ON actual_shipping_costs(user_id, order_number)
+  `)
 }
 
 export function normalizeTrackingNumber(value: unknown): string {
@@ -210,13 +235,31 @@ export async function importActualShippingCosts(data: {
   const uniqueRows = Array.from(new Map(
     parsed.rows.map((row) => [`${row.carrierId}:${row.normalizedTrackingNumber}`, row]),
   ).values())
-  let matched = 0
+  let shipmentMatched = 0
+  let orderMatched = 0
+  const shipmentMatchedRows: ActualShippingCostResultRow[] = []
+  const orderMatchedRows: ActualShippingCostResultRow[] = []
+  const unmatchedRows: ActualShippingCostResultRow[] = []
   const insertRows = uniqueRows.map((row) => {
     const shipment = shipmentByTracking.get(row.normalizedTrackingNumber) ?? null
     const order = shipment?.orderId
       ? { id: shipment.orderId }
       : orderByNumber.get(normalizeOrderNumber(row.orderNumber)) ?? null
-    if (shipment) matched += 1
+    const resultRow = toResultRow(row)
+    if (shipment) {
+      shipmentMatched += 1
+      shipmentMatchedRows.push({ ...resultRow, reason: '운송장번호로 매칭되었습니다.' })
+    } else if (order) {
+      orderMatched += 1
+      orderMatchedRows.push({ ...resultRow, reason: '주문번호로 매칭되었습니다.' })
+    } else {
+      unmatchedRows.push({
+        ...resultRow,
+        reason: row.orderNumber
+          ? '운송장번호와 주문번호 모두 SaaS 데이터에서 찾지 못했습니다.'
+          : '운송장번호를 SaaS 송장 데이터에서 찾지 못했고, 파일에 주문번호도 없습니다.',
+      })
+    }
     return {
       userId: data.userId,
       carrierId: row.carrierId,
@@ -271,15 +314,35 @@ export async function importActualShippingCosts(data: {
 
   const relinked = await relinkActualShippingCosts(data.userId)
   const imported = uniqueRows.length
+  const matched = shipmentMatched + orderMatched
   return {
     carrierId: data.carrierId,
     totalRows: parsed.rows.length + parsed.errors.length,
     imported,
     matched,
-    unmatched: imported - matched,
+    shipmentMatched,
+    orderMatched,
+    unmatched: unmatchedRows.length,
     relinked,
     skipped: parsed.errors.length,
     errors: parsed.errors,
+    shipmentMatchedRows,
+    orderMatchedRows,
+    unmatchedRows,
+  }
+}
+
+function toResultRow(row: ParsedActualShippingCostRow): ActualShippingCostResultRow {
+  return {
+    rowNumber: row.rowNumber,
+    trackingNumber: row.trackingNumber,
+    orderNumber: row.orderNumber,
+    actualFee: row.actualFee,
+    packageType: row.packageType,
+    acceptedAt: row.acceptedAt,
+    deliveredAt: row.deliveredAt,
+    reason: '',
+    rawData: row.rawData,
   }
 }
 

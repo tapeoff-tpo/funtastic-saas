@@ -211,15 +211,14 @@ export function AiAccountBoard({
           </div>
 
           <div className="overflow-x-auto">
-            <div className="min-w-[820px]">
-              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[28px_72px_minmax(120px,1fr)_102px_102px_128px_minmax(100px,1fr)] md:items-center md:gap-2">
+            <div className="min-w-[760px]">
+              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px] md:items-center md:gap-2">
                 <div />
                 <div>계정명</div>
                 <div>계정아이디</div>
                 <div>상태</div>
                 <div>사용자</div>
                 <div>갱신 예정일</div>
-                <div>비고 / 로그인 방법</div>
               </div>
 
               <div className="divide-y">
@@ -234,7 +233,7 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[28px_72px_minmax(120px,1fr)_102px_102px_128px_minmax(100px,1fr)] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px] md:items-center md:gap-2',
                     isSelected && 'bg-muted',
                   )}
                   onClick={() => selectAccount(account.id)}
@@ -254,7 +253,7 @@ export function AiAccountBoard({
                     className="h-4 w-4"
                   />
                   <div className="min-w-0">
-                    <p className="font-semibold">{account.name}</p>
+                    <p className="truncate whitespace-nowrap text-sm font-semibold" title={account.name}>{account.name}</p>
                     <p className="text-xs text-muted-foreground md:hidden">계정명</p>
                   </div>
                   <div className="min-w-0">
@@ -320,7 +319,7 @@ export function AiAccountBoard({
                       {account.currentUserName && !candidateNames.includes(account.currentUserName) ? <option value={account.currentUserName}>{account.currentUserName}</option> : null}
                       {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
                     </select>
-                    <div>
+                    <div className="flex min-w-0 items-center gap-2">
                       <Input
                         name="renewalDueOn"
                         type="date"
@@ -332,20 +331,16 @@ export function AiAccountBoard({
                           form?.requestSubmit()
                         }}
                         aria-label={`${account.name} 갱신 예정일`}
-                        className="h-9 bg-background px-2 text-xs"
+                        className="h-9 w-[132px] shrink-0 bg-background px-2 text-xs"
                       />
-                      {renewal ? <p className={cn(
-                        'mt-1 text-xs font-medium',
+                      {renewal ? <span className={cn(
+                        'shrink-0 whitespace-nowrap text-xs font-medium',
                         renewal.urgency === 'overdue' && 'text-red-700',
                         renewal.urgency === 'urgent' && 'text-amber-800',
                         renewal.urgency === 'normal' && 'text-muted-foreground',
-                      )}>{renewal.label}</p> : null}
+                      )}>{renewal.label}</span> : null}
                     </div>
                   </form>
-                  <div className="min-w-0 text-xs text-muted-foreground">
-                    <p className="line-clamp-2 whitespace-pre-line">{account.notes || '-'}</p>
-                    <p className="mt-1 md:hidden">비고 / 로그인 방법</p>
-                  </div>
                 </div>
               )
             })}

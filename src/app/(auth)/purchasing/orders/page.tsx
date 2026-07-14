@@ -1,6 +1,6 @@
 ﻿import Link from 'next/link'
 import type { Metadata } from 'next'
-import { Eye, EyeOff } from 'lucide-react'
+import { ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
@@ -112,6 +112,7 @@ export async function PurchasingOrdersView({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
+  const showPurchaseUrlColumn = status === 'purchased' || status === 'purchase_completed' || overdueOnly
   const recommendationBasisParam = stringParam(params.showRecommendationBasis)
   const showRecommendationBasis = recommendationBasisParam === undefined
     ? isRequestedStatus
@@ -124,6 +125,7 @@ export async function PurchasingOrdersView({
     8 +
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
+    (showPurchaseUrlColumn ? 1 : 0) +
     (isRequestedStatus ? 0 : 2)
   const listLabel = overdueOnly
     ? selectedStatus === 'purchased'
@@ -340,6 +342,9 @@ export async function PurchasingOrdersView({
                   <th className="min-w-[280px] px-3 py-2 font-medium">
                     <SortHeader label="상품" column="productName" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} />
                   </th>
+                  {showPurchaseUrlColumn ? (
+                    <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">URL</th>
+                  ) : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label={quantityColumn.label} column="requestedQuantity" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} align="center" />
                   </th>
@@ -393,6 +398,9 @@ export async function PurchasingOrdersView({
                     const isArrivalOverdue = item.status === 'purchase_completed' && purchaseDateElapsedDays >= 7
                     const isOverdueRow = isPurchaseRequestOverdue || isArrivalOverdue
                     const stickyCellClassName = isOverdueRow ? 'bg-red-50' : 'bg-background'
+                    const purchaseUrlHref = typeof item.purchaseUrl === 'string' && /^https?:\/\//.test(item.purchaseUrl)
+                      ? item.purchaseUrl
+                      : null
                     const costs = calculatePurchaseCosts({
                       requestedQuantity: item.requestedQuantity,
                       unitCostYuan: item.unitCostYuan,
@@ -437,6 +445,24 @@ export async function PurchasingOrdersView({
                           {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                         </div>
                       </td>
+                      {showPurchaseUrlColumn ? (
+                        <td className="px-2 py-2 text-center align-middle">
+                          {purchaseUrlHref ? (
+                            <a
+                              href={purchaseUrlHref}
+                              target="_blank"
+                              rel="noreferrer"
+                              title={item.purchaseUrl ?? undefined}
+                              className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                            >
+                              URL
+                              <ExternalLink className="size-3" />
+                            </a>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </td>
+                      ) : null}
                       <td className="px-2 py-2 text-center tabular-nums align-middle">
                         <PurchaseQuantityField
                           id={item.id}

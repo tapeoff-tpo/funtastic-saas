@@ -9,6 +9,7 @@ import {
 } from '@/lib/db/schema'
 import { sumPurchaseCosts } from './purchase-costs'
 import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
+import { PURCHASE_URL_HEADER } from './items'
 import type { PurchaseRequestStatus } from './purchase-request-status'
 
 export async function getPurchaseRequests(input: {
@@ -118,6 +119,7 @@ export async function getPurchaseRequests(input: {
         ...getTableColumns(purchaseRequestItems),
         unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
         unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+        purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
         chinaCurrentStock,
       })
       .from(purchaseRequestItems)

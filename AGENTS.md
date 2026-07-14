@@ -79,6 +79,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - If large orders recur regularly for the same SKU, treat them as demand and allow them to affect purchasing recommendations.
 - If an item had little or no prior sales and suddenly begins selling, flag it for purchasing review and allow the recommendation logic to account for the new demand instead of ignoring it as noise.
 - Spike/anomaly handling must be explainable in the recommendation basis so the user can see whether a quantity was reduced, ignored, or included due to demand pattern checks.
+- Purchasing workflow matching must use `purchase_management_code + sku` as the primary key when `purchase_management_code` exists.
+- If `purchase_management_code` is blank or unreliable, fall back to `supplier_order_number + sku` and keep that fallback match key in `raw_data`.
+- When importing or reconciling purchasing Excel files that include both `purchase_management_code` and `supplier_order_number`, cross-check both match keys and report mismatches before assuming the import is clean.
+- Do not blindly collapse rows by `supplier_order_number + sku` when `purchase_management_code` exists. Some supplier order cells contain non-order memo values, and a single supplier order can contain multiple purchase management codes for the same SKU.
+- Treat `supplier_order_number + sku` as an import fallback only when the supplier order number looks like a real order number and the purchase management code is missing.
 
 ### Operations Tools Policy
 

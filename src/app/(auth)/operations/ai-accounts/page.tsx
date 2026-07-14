@@ -54,6 +54,7 @@ export default async function AiAccountsPage() {
           currentUserName: account.currentUserName,
           weeklyResetAt: account.weeklyResetAt?.toISOString() || null,
           notes: account.notes,
+          renewalDueOn: account.renewalDueOn,
         }))}
         messages={messages.map((message) => ({
           id: message.id,

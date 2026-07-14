@@ -32,6 +32,7 @@ export async function createAiAccountAction(
     secondaryEmail: String(formData.get('secondaryEmail') ?? ''),
     password: String(formData.get('password') ?? ''),
     notes: String(formData.get('notes') ?? ''),
+    renewalDueOn: String(formData.get('renewalDueOn') ?? ''),
   })
 
   if ('error' in result) return { error: result.error }
@@ -125,6 +126,7 @@ export async function updateAiAccountAction(formData: FormData) {
     secondaryEmail: String(formData.get('secondaryEmail') ?? ''),
     password: String(formData.get('password') ?? ''),
     notes: String(formData.get('notes') ?? ''),
+    renewalDueOn: String(formData.get('renewalDueOn') ?? ''),
   })
   revalidatePath('/operations/ai-accounts')
 }

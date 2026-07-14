@@ -50,6 +50,7 @@ export function AiAccountForm({ userCandidates }: Props) {
               <label className="block space-y-1"><Label>아이디</Label><Input name="email" placeholder="메일주소 또는 전화번호" autoComplete="username" /></label>
               <label className="block space-y-1"><Label>비밀번호</Label><Input name="password" type="password" placeholder="계정 비밀번호" autoComplete="new-password" /></label>
               <label className="block space-y-1"><Label>추가 메일</Label><Input name="secondaryEmail" placeholder="복구용 또는 추가 메일" /></label>
+              <label className="block space-y-1"><Label>갱신 예정일</Label><Input name="renewalDueOn" type="date" /></label>
               <label className="block space-y-1">
                 <Label>비고 / 로그인 방법</Label>
                 <textarea name="notes" rows={4} placeholder="예: 네이버 간편 로그인, 인증 문자는 담당자에게 요청" className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50" />

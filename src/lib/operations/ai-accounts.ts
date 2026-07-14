@@ -51,6 +51,7 @@ export async function ensureAiAccountTables() {
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit" varchar(100)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit_period" varchar(10)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100)`)
+  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "renewal_due_on" date`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "gpt_accounts_user_name_uniq" ON "gpt_accounts" ("user_id", "name")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_sort_idx" ON "gpt_accounts" ("user_id", "sort_order")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_status_idx" ON "gpt_accounts" ("user_id", "status")`)
@@ -286,6 +287,7 @@ export async function createAiAccount(input: {
   secondaryEmail?: string | null
   password?: string | null
   notes?: string | null
+  renewalDueOn?: string | null
 }) {
   await seedDefaultAiAccounts(input.userId)
   const name = input.name.trim()
@@ -293,6 +295,7 @@ export async function createAiAccount(input: {
   const secondaryEmail = input.secondaryEmail?.trim() || null
   const password = input.password?.trim() || null
   const notes = input.notes?.trim() || null
+  const renewalDueOn = input.renewalDueOn?.trim() || null
   if (!name) return { error: '계정 이름을 입력해주세요.' as const }
 
   const [{ nextSortOrder }] = await db.select({
@@ -306,6 +309,7 @@ export async function createAiAccount(input: {
       email,
       secondaryEmail,
       notes,
+      renewalDueOn,
       sortOrder: nextSortOrder,
       status: 'available',
     })
@@ -341,6 +345,7 @@ export async function updateAiAccount(input: {
   secondaryEmail?: string | null
   password?: string | null
   notes?: string | null
+  renewalDueOn?: string | null
 }) {
   await ensureAiAccountTables()
   const name = input.name.trim()
@@ -348,6 +353,7 @@ export async function updateAiAccount(input: {
   const secondaryEmail = input.secondaryEmail?.trim() || null
   const password = input.password?.trim() || null
   const notes = input.notes?.trim() || null
+  const renewalDueOn = input.renewalDueOn?.trim() || null
   if (!name) return { error: '계정 이름을 입력해주세요.' as const }
 
   const [duplicate] = await db
@@ -363,6 +369,7 @@ export async function updateAiAccount(input: {
       email,
       secondaryEmail,
       notes,
+      renewalDueOn,
       updatedAt: new Date(),
     })
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))

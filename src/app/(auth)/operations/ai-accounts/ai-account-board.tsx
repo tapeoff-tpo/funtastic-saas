@@ -24,6 +24,7 @@ type AiAccountRow = {
   currentUserName: string | null
   weeklyResetAt: string | null
   notes: string | null
+  renewalDueOn: string | null
 }
 
 type AiAccountMessage = {
@@ -63,6 +64,19 @@ function formatDateTime(value: string) {
     minute: '2-digit',
     hour12: false,
   }).format(new Date(value))
+}
+
+function renewalState(value: string | null, now: Date | null) {
+  if (!value) return null
+  if (!now) return { label: value, urgency: 'normal' as const }
+  const today = new Date(now)
+  today.setHours(0, 0, 0, 0)
+  const due = new Date(`${value}T00:00:00`)
+  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000)
+  if (days < 0) return { label: `D+${Math.abs(days)}`, urgency: 'overdue' as const }
+  if (days === 0) return { label: '오늘', urgency: 'urgent' as const }
+  if (days <= 7) return { label: `D-${days}`, urgency: 'urgent' as const }
+  return { label: value, urgency: 'normal' as const }
 }
 
 export function AiAccountBoard({
@@ -170,13 +184,14 @@ export function AiAccountBoard({
         </div>
       </div>
 
-      <div className="grid gap-0 xl:grid-cols-[minmax(720px,760px)_minmax(480px,1fr)]">
+      <div className="grid gap-0 xl:grid-cols-[minmax(720px,760px)_minmax(440px,1fr)]">
         <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
-          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[96px_minmax(210px,1fr)_86px_110px_minmax(180px,1fr)] md:items-center md:gap-2">
+          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[84px_minmax(170px,1fr)_80px_90px_106px_minmax(140px,1fr)] md:items-center md:gap-2">
             <div>계정명</div>
             <div>계정아이디</div>
             <div>상태</div>
             <div>현재사용자</div>
+            <div>갱신 예정일</div>
             <div>비고 / 로그인 방법</div>
           </div>
 
@@ -186,6 +201,7 @@ export function AiAccountBoard({
               const isReleased = isAvailableAfterWeeklyReset(account, now)
               const displayStatus = isReleased ? 'available' : account.status
               const displayLabel = isReleased ? '사용가능' : statusLabels[account.status] || account.status
+              const renewal = renewalState(account.renewalDueOn, now)
               return (
                 <div
                   key={account.id}
@@ -193,7 +209,7 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[96px_minmax(210px,1fr)_86px_110px_minmax(180px,1fr)] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[84px_minmax(170px,1fr)_80px_90px_106px_minmax(140px,1fr)] md:items-center md:gap-2',
                     isReleased && 'bg-emerald-50/60 hover:bg-emerald-50',
                     isSelected && 'bg-muted',
                   )}
@@ -248,6 +264,15 @@ export function AiAccountBoard({
                     <p className="font-medium">{account.currentUserName || '-'}</p>
                     <p className="text-xs text-muted-foreground md:hidden">현재사용자</p>
                   </div>
+                  <div className="text-xs">
+                    {renewal ? <span className={cn(
+                      'inline-flex rounded px-1.5 py-1 font-medium',
+                      renewal.urgency === 'overdue' && 'bg-red-50 text-red-700',
+                      renewal.urgency === 'urgent' && 'bg-amber-50 text-amber-800',
+                      renewal.urgency === 'normal' && 'text-muted-foreground',
+                    )}>{renewal.label}</span> : <span className="text-muted-foreground">-</span>}
+                    <p className="mt-1 text-muted-foreground md:hidden">갱신 예정일</p>
+                  </div>
                   <div className="min-w-0 text-xs text-muted-foreground">
                     <p className="line-clamp-2 whitespace-pre-line">{account.notes || '-'}</p>
                     <p className="mt-1 md:hidden">비고 / 로그인 방법</p>
@@ -284,6 +309,7 @@ export function AiAccountBoard({
                     <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">아이디</span><Input name="email" defaultValue={selectedAccount.email || ''} placeholder="메일주소 또는 전화번호" autoComplete="username" className="h-9" /></label>
                     <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">새 비밀번호</span><Input name="password" type="password" placeholder="변경할 때만 입력" autoComplete="new-password" className="h-9" /></label>
                     <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">추가 메일</span><Input name="secondaryEmail" defaultValue={selectedAccount.secondaryEmail || ''} placeholder="복구용 또는 추가 메일" className="h-9" /></label>
+                    <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">갱신 예정일</span><Input name="renewalDueOn" type="date" defaultValue={selectedAccount.renewalDueOn || ''} className="h-9" /></label>
                   </div>
                   <label className="block space-y-1">
                     <span className="text-xs font-medium text-muted-foreground">저장된 비밀번호</span>

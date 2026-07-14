@@ -52,7 +52,6 @@ export default async function AiAccountsPage() {
           secondaryEmail: account.secondaryEmail,
           status: account.status,
           currentUserName: account.currentUserName,
-          weeklyResetAt: account.weeklyResetAt?.toISOString() || null,
           notes: account.notes,
           renewalDueOn: account.renewalDueOn,
         }))}

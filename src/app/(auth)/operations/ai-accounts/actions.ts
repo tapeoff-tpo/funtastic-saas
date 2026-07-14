@@ -5,6 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   addAiAccountMessage,
   addAiAccountUserCandidate,
+  bulkUpdateAiAccountRenewal,
   createAiAccount,
   deleteAiAccount,
   deleteAiAccountUserCandidate,
@@ -12,6 +13,7 @@ import {
   readAiAccountPassword,
   updateAiAccount,
   updateAiAccountLimits,
+  updateAiAccountOperationalState,
 } from '@/lib/operations/ai-accounts'
 import { createClient } from '@/lib/supabase/server'
 
@@ -54,11 +56,38 @@ export async function addAiAccountMessageAction(formData: FormData) {
   await addAiAccountMessage({
     userId,
     accountId: String(formData.get('accountId') ?? ''),
-    authorNames: formData.getAll('authorNames').map((value) => String(value)),
-    messageType: String(formData.get('messageType') ?? ''),
+    authorNames: [],
+    messageType: '직접입력',
     message: String(formData.get('message') ?? ''),
   })
   revalidatePath('/operations/ai-accounts')
+}
+
+export async function updateAiAccountOperationalStateAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await updateAiAccountOperationalState({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
+    status: String(formData.get('status') ?? ''),
+    currentUserName: String(formData.get('currentUserName') ?? ''),
+    renewalDueOn: String(formData.get('renewalDueOn') ?? ''),
+    changedField: String(formData.get('changedField') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function bulkUpdateAiAccountRenewalAction(input: {
+  accountIds: string[]
+  renewalDueOn: string
+}) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+
+  const result = await bulkUpdateAiAccountRenewal({ userId, ...input })
+  if (!('error' in result)) revalidatePath('/operations/ai-accounts')
+  return result
 }
 
 export async function updateAiAccountLimitsAction(formData: FormData) {

@@ -24,6 +24,8 @@ export const AI_ACCOUNT_STATUS_LABELS: Record<string, string> = {
   needs_check: '확인 필요',
 }
 
+const AI_ACCOUNT_STATUSES = new Set(Object.keys(AI_ACCOUNT_STATUS_LABELS))
+
 const DEFAULT_USER_CANDIDATES = ['한상철', '김기환', '최종석', '김소희', '오지은', '박현빈']
 
 export async function ensureAiAccountTables() {
@@ -424,6 +426,100 @@ export async function deleteAiAccount(input: {
   return { success: true }
 }
 
+export async function updateAiAccountOperationalState(input: {
+  userId: string
+  accountId: string
+  status: string
+  currentUserName?: string | null
+  renewalDueOn?: string | null
+  changedField?: string | null
+}) {
+  await ensureAiAccountTables()
+  const status = input.status.trim()
+  const currentUserName = input.currentUserName?.trim() || null
+  const renewalDueOn = input.renewalDueOn?.trim() || null
+  if (!AI_ACCOUNT_STATUSES.has(status)) return { error: '올바른 계정 상태를 선택해주세요.' as const }
+  if (renewalDueOn && !/^\d{4}-\d{2}-\d{2}$/.test(renewalDueOn)) {
+    return { error: '올바른 갱신 예정일을 입력해주세요.' as const }
+  }
+
+  const [account] = await db
+    .select({
+      id: gptAccounts.id,
+      status: gptAccounts.status,
+      currentUserName: gptAccounts.currentUserName,
+      renewalDueOn: gptAccounts.renewalDueOn,
+    })
+    .from(gptAccounts)
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .limit(1)
+  if (!account) return { error: '계정을 찾을 수 없습니다.' as const }
+
+  const changedField = input.changedField?.trim() || ''
+  let nextStatus = status
+  let nextCurrentUserName = currentUserName
+  if (changedField === 'status' && status === 'available') nextCurrentUserName = null
+  if (changedField === 'currentUserName') {
+    if (currentUserName && status === 'available') nextStatus = 'in_use'
+    if (!currentUserName && status === 'in_use') nextStatus = 'available'
+  }
+  if (
+    account.status === nextStatus
+    && account.currentUserName === nextCurrentUserName
+    && account.renewalDueOn === renewalDueOn
+  ) return { success: true }
+
+  await db.update(gptAccounts)
+    .set({
+      status: nextStatus,
+      currentUserName: nextCurrentUserName,
+      renewalDueOn,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+
+  const changes = [
+    account.status !== nextStatus ? `상태: ${AI_ACCOUNT_STATUS_LABELS[nextStatus]}` : null,
+    account.currentUserName !== nextCurrentUserName ? `사용자: ${nextCurrentUserName || '없음'}` : null,
+    account.renewalDueOn !== renewalDueOn ? `갱신 예정일: ${renewalDueOn || '미지정'}` : null,
+  ].filter(Boolean)
+  await db.insert(gptAccountMessages).values({
+    userId: input.userId,
+    accountId: input.accountId,
+    eventType: 'account_state_updated',
+    message: changes.join(' · '),
+  })
+  return { success: true }
+}
+
+export async function bulkUpdateAiAccountRenewal(input: {
+  userId: string
+  accountIds: string[]
+  renewalDueOn: string
+}) {
+  await ensureAiAccountTables()
+  const accountIds = Array.from(new Set(input.accountIds.map((id) => id.trim()).filter(Boolean)))
+  const renewalDueOn = input.renewalDueOn.trim()
+  if (!accountIds.length) return { error: '갱신일을 적용할 계정을 선택해주세요.' as const }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(renewalDueOn)) {
+    return { error: '올바른 갱신 예정일을 입력해주세요.' as const }
+  }
+
+  const rows = await db.update(gptAccounts)
+    .set({ renewalDueOn, updatedAt: new Date() })
+    .where(and(eq(gptAccounts.userId, input.userId), inArray(gptAccounts.id, accountIds)))
+    .returning({ id: gptAccounts.id })
+  if (!rows.length) return { error: '선택한 계정을 찾을 수 없습니다.' as const }
+
+  await db.insert(gptAccountMessages).values(rows.map((row) => ({
+    userId: input.userId,
+    accountId: row.id,
+    eventType: 'renewal_bulk_updated',
+    message: `갱신 예정일: ${renewalDueOn} (일괄 적용)`,
+  })))
+  return { success: true, count: rows.length }
+}
+
 export async function addAiAccountMessage(input: {
   userId: string
   accountId: string
@@ -436,8 +532,8 @@ export async function addAiAccountMessage(input: {
   const authorName = authorNames.join(', ')
   const message = input.message.trim()
   const messageType = input.messageType.trim() || '직접입력'
-  const fullMessage = message ? `[${messageType}] ${message}` : `[${messageType}]`
-  if (!messageType && !message) return { error: '내용을 입력해주세요.' as const }
+  const fullMessage = messageType === '직접입력' ? message : message ? `[${messageType}] ${message}` : `[${messageType}]`
+  if (!message) return { error: '내용을 입력해주세요.' as const }
 
   const [account] = await db
     .select({

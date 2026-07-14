@@ -1,19 +1,19 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, Copy, Eye, EyeOff, MessageSquare, Save, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import { CalendarDays, Copy, Eye, EyeOff, MessageSquare, Save, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   addAiAccountMessageAction,
+  bulkUpdateAiAccountRenewalAction,
   deleteAiAccountAction,
   readAiAccountPasswordAction,
   updateAiAccountAction,
+  updateAiAccountOperationalStateAction,
 } from './actions'
-
-const CHAT_MESSAGE_TYPES = ['사용시작', '사용종료', '사용종료(주간소진)', '직접입력'] as const
 
 type AiAccountRow = {
   id: string
@@ -22,7 +22,6 @@ type AiAccountRow = {
   secondaryEmail: string | null
   status: string
   currentUserName: string | null
-  weeklyResetAt: string | null
   notes: string | null
   renewalDueOn: string | null
 }
@@ -48,12 +47,6 @@ function statusClassName(status: string) {
   if (status === 'limit_warning') return 'border-amber-200 bg-amber-50 text-amber-700'
   if (status === 'limit_reached' || status === 'five_hour_limit_reached' || status === 'weekly_limit_reached' || status === 'needs_check') return 'border-red-200 bg-red-50 text-red-700'
   return 'border-emerald-200 bg-emerald-50 text-emerald-700'
-}
-
-function isAvailableAfterWeeklyReset(account: AiAccountRow, now: Date | null) {
-  if (account.status === 'five_hour_limit_reached') return true
-  if (!now || account.status !== 'weekly_limit_reached' || !account.weeklyResetAt) return false
-  return now.getTime() >= new Date(account.weeklyResetAt).getTime()
 }
 
 function formatDateTime(value: string) {
@@ -92,7 +85,10 @@ export function AiAccountBoard({
   const [passwordError, setPasswordError] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [now, setNow] = useState<Date | null>(null)
-  const [selectedUsersByAccount, setSelectedUsersByAccount] = useState<Record<string, string[]>>({})
+  const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([])
+  const [bulkRenewalDueOn, setBulkRenewalDueOn] = useState('')
+  const [bulkMessage, setBulkMessage] = useState('')
+  const [bulkPending, startBulkTransition] = useTransition()
   useEffect(() => {
     const initial = window.setTimeout(() => setNow(new Date()), 0)
     const interval = window.setInterval(() => setNow(new Date()), 60_000)
@@ -103,7 +99,6 @@ export function AiAccountBoard({
   }, [])
 
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
-  const selectedUsers = selectedAccount ? selectedUsersByAccount[selectedAccount.id] || [] : []
   const messagesByAccount = useMemo(() => {
     return messages.reduce<Record<string, AiAccountMessage[]>>((acc, message) => {
       acc[message.accountId] = acc[message.accountId] || []
@@ -112,13 +107,11 @@ export function AiAccountBoard({
     }, {})
   }, [messages])
   const selectedMessages = selectedAccount ? messagesByAccount[selectedAccount.id] || [] : []
-  const selectedReleased = selectedAccount ? isAvailableAfterWeeklyReset(selectedAccount, now) : false
-  const selectedDisplayStatus = selectedAccount
-    ? selectedReleased ? 'available' : selectedAccount.status
-    : 'available'
+  const selectedDisplayStatus = selectedAccount?.status || 'available'
   const selectedDisplayLabel = selectedAccount
-    ? selectedReleased ? '사용가능' : statusLabels[selectedAccount.status] || selectedAccount.status
-    : '사용가능'
+    ? statusLabels[selectedAccount.status] || selectedAccount.status
+    : '비어 있음'
+  const allSelected = accounts.length > 0 && selectedBulkIds.length === accounts.length
 
   async function copyAccountId(account: AiAccountRow) {
     if (!account.email) return
@@ -145,7 +138,7 @@ export function AiAccountBoard({
     const result = await readAiAccountPasswordAction(selectedAccount.id)
     setPasswordLoading(false)
     if ('error' in result) {
-      setPasswordError(result.error)
+      setPasswordError(result.error || '비밀번호를 불러오지 못했습니다.')
       return
     }
     setRevealedPassword(result.password)
@@ -159,20 +152,28 @@ export function AiAccountBoard({
     window.setTimeout(() => setCopiedId(null), 1200)
   }
 
-  function toggleSelectedUser(accountId: string, name: string) {
-    setSelectedUsersByAccount((current) => {
-      const selected = current[accountId] || []
-      const next = selected.includes(name)
-        ? selected.filter((item) => item !== name)
-        : [...selected, name]
-      return { ...current, [accountId]: next }
-    })
+  function toggleBulkAccount(accountId: string) {
+    setSelectedBulkIds((current) => current.includes(accountId)
+      ? current.filter((id) => id !== accountId)
+      : [...current, accountId])
+    setBulkMessage('')
   }
 
-  function clearSelectedUsers(accountId: string) {
-    window.setTimeout(() => {
-      setSelectedUsersByAccount((current) => ({ ...current, [accountId]: [] }))
-    }, 0)
+  function applyBulkRenewal() {
+    if (!selectedBulkIds.length || !bulkRenewalDueOn) return
+    setBulkMessage('')
+    startBulkTransition(async () => {
+      const result = await bulkUpdateAiAccountRenewalAction({
+        accountIds: selectedBulkIds,
+        renewalDueOn: bulkRenewalDueOn,
+      })
+      if ('error' in result) {
+        setBulkMessage(result.error || '갱신 예정일을 변경하지 못했습니다.')
+        return
+      }
+      setBulkMessage(`${result.count}개 계정의 갱신 예정일을 변경했습니다.`)
+      setSelectedBulkIds([])
+    })
   }
 
   return (
@@ -184,24 +185,48 @@ export function AiAccountBoard({
         </div>
       </div>
 
-      <div className="grid gap-0 xl:grid-cols-[minmax(720px,760px)_minmax(440px,1fr)]">
+      <div className="grid gap-0 xl:grid-cols-[minmax(780px,900px)_minmax(400px,1fr)]">
         <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
-          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[84px_minmax(170px,1fr)_80px_90px_106px_minmax(140px,1fr)] md:items-center md:gap-2">
-            <div>계정명</div>
-            <div>계정아이디</div>
-            <div>상태</div>
-            <div>현재사용자</div>
-            <div>갱신 예정일</div>
-            <div>비고 / 로그인 방법</div>
+          <div className="border-b bg-muted/20 p-3">
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={() => setSelectedBulkIds(allSelected ? [] : accounts.map((account) => account.id))}
+                  className="h-4 w-4"
+                />
+                전체 선택
+              </label>
+              <label className="space-y-1">
+                <span className="block text-xs font-medium text-muted-foreground">일괄 갱신 예정일</span>
+                <Input type="date" value={bulkRenewalDueOn} onChange={(event) => setBulkRenewalDueOn(event.target.value)} className="h-9 w-40 bg-background" />
+              </label>
+              <Button type="button" className="h-9" onClick={applyBulkRenewal} disabled={!selectedBulkIds.length || !bulkRenewalDueOn || bulkPending}>
+                <CalendarDays className="h-4 w-4" />
+                {bulkPending ? '적용 중' : `갱신일 적용 (${selectedBulkIds.length})`}
+              </Button>
+            </div>
+            {bulkMessage ? <p className="mt-2 text-xs text-muted-foreground">{bulkMessage}</p> : null}
           </div>
 
-          <div className="divide-y">
+          <div className="overflow-x-auto">
+            <div className="min-w-[820px]">
+              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[28px_72px_minmax(120px,1fr)_102px_102px_128px_minmax(100px,1fr)] md:items-center md:gap-2">
+                <div />
+                <div>계정명</div>
+                <div>계정아이디</div>
+                <div>상태</div>
+                <div>사용자</div>
+                <div>갱신 예정일</div>
+                <div>비고 / 로그인 방법</div>
+              </div>
+
+              <div className="divide-y">
             {accounts.map((account) => {
               const isSelected = selectedAccount?.id === account.id
-              const isReleased = isAvailableAfterWeeklyReset(account, now)
-              const displayStatus = isReleased ? 'available' : account.status
-              const displayLabel = isReleased ? '사용가능' : statusLabels[account.status] || account.status
               const renewal = renewalState(account.renewalDueOn, now)
+              const candidateNames = userCandidates.map((candidate) => candidate.name)
               return (
                 <div
                   key={account.id}
@@ -209,8 +234,7 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[84px_minmax(170px,1fr)_80px_90px_106px_minmax(140px,1fr)] md:items-center md:gap-2',
-                    isReleased && 'bg-emerald-50/60 hover:bg-emerald-50',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[28px_72px_minmax(120px,1fr)_102px_102px_128px_minmax(100px,1fr)] md:items-center md:gap-2',
                     isSelected && 'bg-muted',
                   )}
                   onClick={() => selectAccount(account.id)}
@@ -221,6 +245,14 @@ export function AiAccountBoard({
                     }
                   }}
                 >
+                  <input
+                    type="checkbox"
+                    checked={selectedBulkIds.includes(account.id)}
+                    onChange={() => toggleBulkAccount(account.id)}
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label={`${account.name} 계정 선택`}
+                    className="h-4 w-4"
+                  />
                   <div className="min-w-0">
                     <p className="font-semibold">{account.name}</p>
                     <p className="text-xs text-muted-foreground md:hidden">계정명</p>
@@ -255,24 +287,61 @@ export function AiAccountBoard({
                     </p>
                     {copiedId === account.id ? <p className="mt-1 hidden text-xs text-emerald-700 md:block">복사됨</p> : null}
                   </div>
-                  <div>
-                    <Badge variant="outline" className={cn('rounded-full', statusClassName(displayStatus))}>
-                      {displayLabel}
-                    </Badge>
-                  </div>
-                  <div className="text-sm">
-                    <p className="font-medium">{account.currentUserName || '-'}</p>
-                    <p className="text-xs text-muted-foreground md:hidden">현재사용자</p>
-                  </div>
-                  <div className="text-xs">
-                    {renewal ? <span className={cn(
-                      'inline-flex rounded px-1.5 py-1 font-medium',
-                      renewal.urgency === 'overdue' && 'bg-red-50 text-red-700',
-                      renewal.urgency === 'urgent' && 'bg-amber-50 text-amber-800',
-                      renewal.urgency === 'normal' && 'text-muted-foreground',
-                    )}>{renewal.label}</span> : <span className="text-muted-foreground">-</span>}
-                    <p className="mt-1 text-muted-foreground md:hidden">갱신 예정일</p>
-                  </div>
+                  <form action={updateAiAccountOperationalStateAction} className="contents" onClick={(event) => event.stopPropagation()}>
+                    <input type="hidden" name="accountId" value={account.id} />
+                    <input type="hidden" name="changedField" value="" />
+                    <select
+                      name="status"
+                      defaultValue={account.status}
+                      onChange={(event) => {
+                        const form = event.currentTarget.form
+                        const changedField = form?.elements.namedItem('changedField')
+                        if (changedField instanceof HTMLInputElement) changedField.value = 'status'
+                        form?.requestSubmit()
+                      }}
+                      aria-label={`${account.name} 상태`}
+                      className={cn('h-9 w-full rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring', statusClassName(account.status))}
+                    >
+                      {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                    <select
+                      name="currentUserName"
+                      defaultValue={account.currentUserName || ''}
+                      onChange={(event) => {
+                        const form = event.currentTarget.form
+                        const changedField = form?.elements.namedItem('changedField')
+                        if (changedField instanceof HTMLInputElement) changedField.value = 'currentUserName'
+                        form?.requestSubmit()
+                      }}
+                      aria-label={`${account.name} 사용자`}
+                      className="h-9 w-full rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <option value="">사용자 없음</option>
+                      {account.currentUserName && !candidateNames.includes(account.currentUserName) ? <option value={account.currentUserName}>{account.currentUserName}</option> : null}
+                      {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
+                    </select>
+                    <div>
+                      <Input
+                        name="renewalDueOn"
+                        type="date"
+                        defaultValue={account.renewalDueOn || ''}
+                        onChange={(event) => {
+                          const form = event.currentTarget.form
+                          const changedField = form?.elements.namedItem('changedField')
+                          if (changedField instanceof HTMLInputElement) changedField.value = 'renewalDueOn'
+                          form?.requestSubmit()
+                        }}
+                        aria-label={`${account.name} 갱신 예정일`}
+                        className="h-9 bg-background px-2 text-xs"
+                      />
+                      {renewal ? <p className={cn(
+                        'mt-1 text-xs font-medium',
+                        renewal.urgency === 'overdue' && 'text-red-700',
+                        renewal.urgency === 'urgent' && 'text-amber-800',
+                        renewal.urgency === 'normal' && 'text-muted-foreground',
+                      )}>{renewal.label}</p> : null}
+                    </div>
+                  </form>
                   <div className="min-w-0 text-xs text-muted-foreground">
                     <p className="line-clamp-2 whitespace-pre-line">{account.notes || '-'}</p>
                     <p className="mt-1 md:hidden">비고 / 로그인 방법</p>
@@ -280,6 +349,8 @@ export function AiAccountBoard({
                 </div>
               )
             })}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -336,68 +407,24 @@ export function AiAccountBoard({
                 </form>
               </div>
 
-              <form action={addAiAccountMessageAction} className="rounded-md border bg-background p-3" onSubmit={() => clearSelectedUsers(selectedAccount.id)}>
+              <form action={addAiAccountMessageAction} className="rounded-md border bg-background p-3">
                 <input type="hidden" name="accountId" value={selectedAccount.id} />
                 <h3 className="mb-3 text-sm font-semibold">메모 남기기</h3>
-                <div className="grid gap-2">
-                  <div className="grid gap-2 xl:grid-cols-[minmax(320px,520px)_150px_auto] xl:items-end">
-                    <div className="space-y-1">
-                      <span className="text-xs font-medium text-muted-foreground">사용자</span>
-                      <details className="group relative">
-                        <summary className="flex h-9 cursor-pointer list-none items-center justify-between rounded-md border bg-background px-3 text-sm">
-                          <span className={cn('truncate', !selectedUsers.length && 'text-muted-foreground')}>
-                            {selectedUsers.length ? selectedUsers.join(', ') : '사용자 선택'}
-                          </span>
-                          <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
-                        </summary>
-                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-background p-2 shadow-lg">
-                          {userCandidates.map((candidate) => (
-                            <div key={candidate.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
-                              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  name="authorNames"
-                                  value={candidate.name}
-                                  checked={selectedUsers.includes(candidate.name)}
-                                  onChange={(event) => {
-                                    toggleSelectedUser(selectedAccount.id, candidate.name)
-                                    event.currentTarget.closest('details')?.removeAttribute('open')
-                                  }}
-                                  className="h-4 w-4"
-                                />
-                                <span className="truncate">{candidate.name}</span>
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </details>
-                    </div>
-                    <label className="space-y-1">
-                      <span className="text-xs font-medium text-muted-foreground">상태변경</span>
-                      <select
-                        name="messageType"
-                        defaultValue="사용시작"
-                        className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      >
-                        {CHAT_MESSAGE_TYPES.map((type) => (
-                          <option key={type} value={type}>{type}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <Button type="submit" className="h-9">
-                      <MessageSquare className="h-4 w-4" />
-                      등록
-                    </Button>
-                  </div>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">직접 입력</span>
+                <div className="flex items-end gap-2">
+                  <label className="min-w-0 flex-1 space-y-1">
+                    <span className="text-xs font-medium text-muted-foreground">메모</span>
                     <textarea
                       name="message"
                       rows={3}
                       placeholder="필요한 내용을 수기로 입력"
+                      required
                       className="min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     />
                   </label>
+                  <Button type="submit" className="h-9">
+                    <MessageSquare className="h-4 w-4" />
+                    등록
+                  </Button>
                 </div>
               </form>
 

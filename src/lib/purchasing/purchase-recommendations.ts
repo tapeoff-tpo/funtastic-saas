@@ -44,6 +44,7 @@ export type PurchaseBudgetCandidate = {
   stockCoverageMonths: number | null
   effectiveMonthlyOutgoing: number
   unitCostKrw: number | null
+  moqProductGroupName?: string | null
 }
 
 type AssessedPurchaseRow = ReturnType<typeof buildAssessedPurchaseRow>
@@ -54,18 +55,13 @@ export function calculateStableMonthlyOutgoing(input: {
 }) {
   const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
   const threeMonthAverageOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
-  const previousTwoMonthAverageOutgoing = Math.max(
-    0,
-    (threeMonthAverageOutgoing * 3 - currentMonthOutgoing) / 2,
-  )
-  const salesAnomalyDetected = currentMonthOutgoing >= previousTwoMonthAverageOutgoing * 2
-    && currentMonthOutgoing - previousTwoMonthAverageOutgoing >= 20
+  const baselineMonthlyOutgoing = threeMonthAverageOutgoing
+  const salesAnomalyDetected = currentMonthOutgoing >= baselineMonthlyOutgoing * 2
+    && currentMonthOutgoing - baselineMonthlyOutgoing >= 20
 
   return {
-    effectiveMonthlyOutgoing: roundToOneDecimal(
-      salesAnomalyDetected ? previousTwoMonthAverageOutgoing : threeMonthAverageOutgoing,
-    ),
-    previousTwoMonthAverageOutgoing: roundToOneDecimal(previousTwoMonthAverageOutgoing),
+    effectiveMonthlyOutgoing: roundToOneDecimal(baselineMonthlyOutgoing),
+    baselineMonthlyOutgoing: roundToOneDecimal(baselineMonthlyOutgoing),
     salesAnomalyDetected,
   }
 }
@@ -74,21 +70,43 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
   candidates: T[],
   budgetKrw: number,
 ) {
-  const sorted = [...candidates].sort((left, right) => {
-    const coverageDifference = (left.stockCoverageMonths ?? Number.POSITIVE_INFINITY)
-      - (right.stockCoverageMonths ?? Number.POSITIVE_INFINITY)
-    if (coverageDifference !== 0) return coverageDifference
-    const outgoingDifference = right.effectiveMonthlyOutgoing - left.effectiveMonthlyOutgoing
-    if (outgoingDifference !== 0) return outgoingDifference
-    return left.sku.localeCompare(right.sku)
-  })
+  const allocationUnits = buildBudgetAllocationUnits(candidates)
 
   const items: Array<T & { allocatedQuantity: number }> = []
   let spentBudgetKrw = 0
   let missingCostExcluded = 0
   let budgetLimitedCount = 0
+  let moqBudgetExcludedGroupCount = 0
 
-  for (const candidate of sorted) {
+  for (const unit of allocationUnits) {
+    if (unit.moqProductGroupName) {
+      const missingCostCount = unit.candidates.filter(
+        (candidate) => candidate.unitCostKrw === null || candidate.unitCostKrw <= 0,
+      ).length
+      if (missingCostCount > 0) {
+        missingCostExcluded += missingCostCount
+        moqBudgetExcludedGroupCount += 1
+        continue
+      }
+
+      const groupCostKrw = unit.candidates.reduce(
+        (total, candidate) => total + candidate.recommendedQuantity * candidate.unitCostKrw!,
+        0,
+      )
+      if (spentBudgetKrw + groupCostKrw > budgetKrw) {
+        budgetLimitedCount += unit.candidates.length
+        moqBudgetExcludedGroupCount += 1
+        continue
+      }
+
+      for (const candidate of unit.candidates) {
+        items.push({ ...candidate, allocatedQuantity: candidate.recommendedQuantity })
+      }
+      spentBudgetKrw += groupCostKrw
+      continue
+    }
+
+    const [candidate] = unit.candidates
     if (candidate.unitCostKrw === null || candidate.unitCostKrw <= 0) {
       missingCostExcluded += 1
       continue
@@ -111,7 +129,51 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
     remainingBudgetKrw: Math.max(0, budgetKrw - spentBudgetKrw),
     missingCostExcluded,
     budgetLimitedCount,
+    moqBudgetExcludedGroupCount,
   }
+}
+
+function buildBudgetAllocationUnits<T extends PurchaseBudgetCandidate>(candidates: T[]) {
+  const standaloneUnits: Array<{ moqProductGroupName: null; candidates: T[] }> = []
+  const moqGroups = new Map<string, T[]>()
+
+  for (const candidate of candidates) {
+    const groupName = candidate.moqProductGroupName?.trim()
+    if (!groupName) {
+      standaloneUnits.push({ moqProductGroupName: null, candidates: [candidate] })
+      continue
+    }
+    const group = moqGroups.get(groupName) ?? []
+    group.push(candidate)
+    moqGroups.set(groupName, group)
+  }
+
+  return [
+    ...standaloneUnits,
+    ...Array.from(moqGroups, ([moqProductGroupName, groupedCandidates]) => ({
+      moqProductGroupName,
+      candidates: groupedCandidates,
+    })),
+  ].sort((left, right) => comparePurchaseBudgetCandidates(
+    mostUrgentBudgetCandidate(left.candidates),
+    mostUrgentBudgetCandidate(right.candidates),
+  ))
+}
+
+function mostUrgentBudgetCandidate<T extends PurchaseBudgetCandidate>(candidates: T[]) {
+  return [...candidates].sort(comparePurchaseBudgetCandidates)[0]
+}
+
+function comparePurchaseBudgetCandidates(
+  left: PurchaseBudgetCandidate,
+  right: PurchaseBudgetCandidate,
+) {
+  const coverageDifference = (left.stockCoverageMonths ?? Number.POSITIVE_INFINITY)
+    - (right.stockCoverageMonths ?? Number.POSITIVE_INFINITY)
+  if (coverageDifference !== 0) return coverageDifference
+  const outgoingDifference = right.effectiveMonthlyOutgoing - left.effectiveMonthlyOutgoing
+  if (outgoingDifference !== 0) return outgoingDifference
+  return left.sku.localeCompare(right.sku)
 }
 
 export function calculatePurchaseRecommendation(input: PurchaseRecommendationInput): PurchaseRecommendationCalculation {
@@ -316,6 +378,7 @@ export async function generatePurchaseRecommendations(input: {
           remainingBudgetKrw: null,
           missingCostExcluded: 0,
           budgetLimitedCount: 0,
+          moqBudgetExcludedGroupCount: 0,
         }
       : allocatePurchaseBudget(recommendationCandidates, budgetKrw)
 
@@ -349,6 +412,7 @@ export async function generatePurchaseRecommendations(input: {
       remainingBudgetKrw: allocation.remainingBudgetKrw,
       missingCostExcluded: allocation.missingCostExcluded,
       budgetLimitedCount: allocation.budgetLimitedCount,
+      moqBudgetExcludedGroupCount: allocation.moqBudgetExcludedGroupCount,
       salesAnomalyCount,
     }
     if (allocation.items.length === 0) return { ...resultBase, created: 0 }
@@ -357,7 +421,7 @@ export async function generatePurchaseRecommendations(input: {
       .insert(purchaseRequestBatches)
       .values({
         userId: input.userId,
-        sourceFileName: `auto_purchase_recommendation ${formatDate(now)}`,
+        sourceFileName: `auto_purchase_recommendation ${formatSeoulDate(now)}`,
         sourceSheetName: 'auto_recommendation',
         totalRows: inventoryRows.length,
         importedRows: allocation.items.length,
@@ -372,7 +436,7 @@ export async function generatePurchaseRecommendations(input: {
         userId: input.userId,
         batchId: batch.id,
         rowNumber: rowNumber + index,
-        requestDate: formatDate(now),
+        requestDate: formatSeoulDate(now),
         sku: item.row.sku,
         productName: item.row.productName,
         optionName: item.row.optionName,
@@ -385,7 +449,7 @@ export async function generatePurchaseRecommendations(input: {
           budgetKrw,
           averageMonthlyOutgoing: item.averageMonthlyOutgoing,
           effectiveMonthlyOutgoing: item.effectiveMonthlyOutgoing,
-          previousTwoMonthAverageOutgoing: item.previousTwoMonthAverageOutgoing,
+          baselineMonthlyOutgoing: item.baselineMonthlyOutgoing,
           previousThreeMonthOutgoing: item.previousThreeMonthOutgoing,
           currentMonthOutgoing: item.currentMonthOutgoing,
           salesAnomalyDetected: item.salesAnomalyDetected,
@@ -395,6 +459,7 @@ export async function generatePurchaseRecommendations(input: {
           targetStockQuantity: item.calculation.targetStockQuantity,
           originalRecommendedQuantity: item.calculation.originalRecommendedQuantity,
           baseRecommendedQuantity: item.baseRecommendedQuantity,
+          moqAdjustedQuantity: item.recommendedQuantity,
           moqProductGroupName: item.moqProductGroupName,
           moqMinimumOrderQuantity: item.moqMinimumOrderQuantity,
           moqRoundingUnit: item.moqRoundingUnit,
@@ -576,8 +641,9 @@ function roundToOneDecimal(value: number) {
   return Math.round(value * 10) / 10
 }
 
-function formatDate(value: Date) {
-  return value.toISOString().slice(0, 10)
+export function formatSeoulDate(value: Date) {
+  const seoulDate = new Date(value.getTime() + 9 * 60 * 60 * 1000)
+  return seoulDate.toISOString().slice(0, 10)
 }
 
 function chunks<T>(values: T[], size: number): T[][] {

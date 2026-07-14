@@ -398,18 +398,23 @@ export async function getSkuOutgoingMetrics(
   const uniqueSkus = Array.from(new Set(skus.filter(Boolean)))
   if (uniqueSkus.length === 0) return new Map()
 
-  const { currentMonthStart, previousThreeMonthStart, nextMonthStart } = getOutgoingMetricWindows(now)
+  const {
+    currentMonthStart,
+    previousThreeMonthStart,
+    nextMonthStart,
+    currentMonthDate,
+    nextMonthDate,
+  } = getOutgoingMetricWindows(now)
   const skuSql = sql.join(uniqueSkus.map((sku) => sql`${sku}`), sql`, `)
   const reviewDateExpression = sql`
     CASE
-      WHEN parsed_data->>'orderedAt' ~ '^\\d{8}$' THEN to_date(parsed_data->>'orderedAt', 'YYYYMMDD')
       WHEN raw_data->>'출고완료일자' ~ '^\\d{8}$' THEN to_date(raw_data->>'출고완료일자', 'YYYYMMDD')
+      WHEN raw_data->>'출고완료일자' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(raw_data->>'출고완료일자', 10)::date
+      WHEN parsed_data->>'orderedAt' ~ '^\\d{8}$' THEN to_date(parsed_data->>'orderedAt', 'YYYYMMDD')
+      WHEN parsed_data->>'orderedAt' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(parsed_data->>'orderedAt', 10)::date
       WHEN raw_data->>'수집일자' ~ '^\\d{8}$' THEN to_date(raw_data->>'수집일자', 'YYYYMMDD')
-      ELSE COALESCE(
-        NULLIF(parsed_data->>'orderedAt', '')::timestamptz::date,
-        NULLIF(raw_data->>'출고완료일자', '')::timestamptz::date,
-        NULLIF(raw_data->>'수집일자', '')::timestamptz::date
-      )
+      WHEN raw_data->>'수집일자' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(raw_data->>'수집일자', 10)::date
+      ELSE NULL
     END
   `
   const [storedRows, result, currentMonthReviewResult] = await Promise.all([
@@ -454,8 +459,8 @@ export async function getSkuOutgoingMetrics(
         FROM sabangnet_review_lines
         WHERE user_id = ${userId}
           AND sku IN (${skuSql})
-          AND ${reviewDateExpression} >= ${currentMonthStart.toISOString()}::date
-          AND ${reviewDateExpression} < ${nextMonthStart.toISOString()}::date
+          AND ${reviewDateExpression} >= ${currentMonthDate}::date
+          AND ${reviewDateExpression} < ${nextMonthDate}::date
         ORDER BY created_at DESC
         LIMIT 1
       )
@@ -466,8 +471,8 @@ export async function getSkuOutgoingMetrics(
       WHERE user_id = ${userId}
         AND sku IN (${skuSql})
         AND batch_id = (SELECT batch_id FROM latest_current_month_batch)
-        AND ${reviewDateExpression} >= ${currentMonthStart.toISOString()}::date
-        AND ${reviewDateExpression} < ${nextMonthStart.toISOString()}::date
+        AND ${reviewDateExpression} >= ${currentMonthDate}::date
+        AND ${reviewDateExpression} < ${nextMonthDate}::date
       GROUP BY sku
     `),
   ])
@@ -722,11 +727,24 @@ function emptyOutgoingMetrics(): PurchasingItemOutgoingMetrics {
   return { currentMonthOutgoing: 0, threeMonthAverageOutgoing: 0 }
 }
 
-function getOutgoingMetricWindows(now: Date) {
-  const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
-  const previousThreeMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 3, 1))
-  const nextMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
-  return { currentMonthStart, previousThreeMonthStart, nextMonthStart }
+export function getOutgoingMetricWindows(now: Date) {
+  const seoulNow = new Date(now.getTime() + 9 * 60 * 60 * 1000)
+  const year = seoulNow.getUTCFullYear()
+  const month = seoulNow.getUTCMonth()
+  const seoulMonthStart = (monthOffset: number) => (
+    new Date(Date.UTC(year, month + monthOffset, 1) - 9 * 60 * 60 * 1000)
+  )
+  const monthDate = (monthOffset: number) => (
+    new Date(Date.UTC(year, month + monthOffset, 1)).toISOString().slice(0, 10)
+  )
+
+  return {
+    currentMonthStart: seoulMonthStart(0),
+    previousThreeMonthStart: seoulMonthStart(-3),
+    nextMonthStart: seoulMonthStart(1),
+    currentMonthDate: monthDate(0),
+    nextMonthDate: monthDate(1),
+  }
 }
 
 function resultRows<T>(result: unknown): T[] {

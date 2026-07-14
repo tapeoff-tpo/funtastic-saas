@@ -658,8 +658,17 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
   const anomalyNote = rawData.salesAnomalyDetected === true
     ? `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
     : null
-  const budgetNote = Number(rawData.originalRecommendedQuantity) > Number(rawData.allocatedQuantity)
-    ? `예산 조정 ${formatNumber(rawData.originalRecommendedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
+  const moqAdjustedQuantity = Number(rawData.moqAdjustedQuantity ?? rawData.baseRecommendedQuantity)
+  const budgetNote = moqAdjustedQuantity > Number(rawData.allocatedQuantity)
+    ? `예산 조정 ${formatNumber(moqAdjustedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
+    : null
+  const pipelineQuantity = Number(rawData.pipelineQuantity)
+  const pipelineNote = Number.isFinite(pipelineQuantity) && pipelineQuantity > 0
+    ? `진행 중 발주 ${formatNumber(pipelineQuantity)}`
+    : null
+  const moqNote = typeof rawData.moqProductGroupName === 'string'
+    ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
+      `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
     : null
 
   return (
@@ -668,8 +677,10 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {anomalyNote || budgetNote ? (
+      {pipelineNote || moqNote || anomalyNote || budgetNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
+          {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
+          {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
           {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}
           {budgetNote ? <span className="text-blue-700">{budgetNote}</span> : null}
         </div>

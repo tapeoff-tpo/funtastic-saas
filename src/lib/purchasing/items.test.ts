@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import ExcelJS from 'exceljs'
 import {
   ESA009M_HEADERS,
+  getOutgoingMetricWindows,
   PURCHASE_URL_HEADER,
   parseEsa009mWorkbook,
   resolveOutgoingMetrics,
@@ -18,7 +19,7 @@ describe('parseEsa009mWorkbook', () => {
       if (header === nameHeader) return 'Test item'
       return `${header} value`
     }))
-    sheet.addRow(['20260615 exported'])
+    sheet.addRow(['', '20260615 exported'])
     const buffer = await workbook.xlsx.writeBuffer()
 
     const result = await parseEsa009mWorkbook(buffer as ArrayBuffer)
@@ -74,7 +75,7 @@ describe('parseEsa009mWorkbook', () => {
 })
 
 describe('resolveOutgoingMetrics', () => {
-  it('prefers stored monthly sales metrics over calculated metrics', () => {
+  it('uses calculated current-month outgoing with the stored three-month baseline', () => {
     const result = resolveOutgoingMetrics(
       {
         purchasingOutgoingMetrics: {
@@ -91,7 +92,7 @@ describe('resolveOutgoingMetrics', () => {
     )
 
     expect(result).toEqual({
-      currentMonthOutgoing: 20,
+      currentMonthOutgoing: 4,
       threeMonthAverageOutgoing: 12.3,
     })
   })
@@ -104,9 +105,20 @@ describe('resolveOutgoingMetrics', () => {
 
     expect(resolveOutgoingMetrics({
       purchasingOutgoingMetrics: {
-        currentMonthOutgoing: -1,
-        threeMonthAverageOutgoing: 12.3,
+        currentMonthOutgoing: 20,
+        threeMonthAverageOutgoing: -1,
       },
     }, calculated)).toEqual(calculated)
+  })
+})
+
+describe('getOutgoingMetricWindows', () => {
+  it('uses Seoul month boundaries before 09:00 KST', () => {
+    const result = getOutgoingMetricWindows(new Date('2026-07-31T15:30:00.000Z'))
+
+    expect(result.currentMonthDate).toBe('2026-08-01')
+    expect(result.nextMonthDate).toBe('2026-09-01')
+    expect(result.currentMonthStart.toISOString()).toBe('2026-07-31T15:00:00.000Z')
+    expect(result.nextMonthStart.toISOString()).toBe('2026-08-31T15:00:00.000Z')
   })
 })

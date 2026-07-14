@@ -3,6 +3,7 @@ import {
   allocatePurchaseBudget,
   calculatePurchaseRecommendationWithSpikeGuard,
   calculateStableMonthlyOutgoing,
+  formatSeoulDate,
 } from './purchase-recommendations'
 
 describe('stable monthly outgoing', () => {
@@ -11,8 +12,8 @@ describe('stable monthly outgoing', () => {
       currentMonthOutgoing: 100,
       threeMonthAverageOutgoing: 50,
     })).toEqual({
-      effectiveMonthlyOutgoing: 25,
-      previousTwoMonthAverageOutgoing: 25,
+      effectiveMonthlyOutgoing: 50,
+      baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: true,
     })
   })
@@ -23,7 +24,7 @@ describe('stable monthly outgoing', () => {
       threeMonthAverageOutgoing: 50,
     })).toEqual({
       effectiveMonthlyOutgoing: 50,
-      previousTwoMonthAverageOutgoing: 40,
+      baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: false,
     })
   })
@@ -86,5 +87,45 @@ describe('purchase budget allocation', () => {
 
     expect(result.items.some((item) => item.sku === 'missing-cost')).toBe(false)
     expect(result.missingCostExcluded).toBe(1)
+  })
+
+  it('allocates an MOQ product group only when the full group fits the budget', () => {
+    const moqCandidates = [
+      {
+        sku: 'option-a',
+        recommendedQuantity: 120,
+        stockCoverageMonths: 0,
+        effectiveMonthlyOutgoing: 100,
+        unitCostKrw: 1000,
+        moqProductGroupName: 'MOQ item',
+      },
+      {
+        sku: 'option-b',
+        recommendedQuantity: 80,
+        stockCoverageMonths: 1,
+        effectiveMonthlyOutgoing: 50,
+        unitCostKrw: 1000,
+        moqProductGroupName: 'MOQ item',
+      },
+    ]
+
+    const insufficient = allocatePurchaseBudget(moqCandidates, 199000)
+    expect(insufficient.items).toHaveLength(0)
+    expect(insufficient.spentBudgetKrw).toBe(0)
+    expect(insufficient.moqBudgetExcludedGroupCount).toBe(1)
+
+    const sufficient = allocatePurchaseBudget(moqCandidates, 200000)
+    expect(sufficient.items.map((item) => [item.sku, item.allocatedQuantity])).toEqual([
+      ['option-a', 120],
+      ['option-b', 80],
+    ])
+    expect(sufficient.spentBudgetKrw).toBe(200000)
+    expect(sufficient.moqBudgetExcludedGroupCount).toBe(0)
+  })
+})
+
+describe('Seoul date formatting', () => {
+  it('uses the Korean calendar date around the UTC day boundary', () => {
+    expect(formatSeoulDate(new Date('2026-07-31T15:30:00.000Z'))).toBe('2026-08-01')
   })
 })

@@ -71,7 +71,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ### Sabangnet Review And Purchasing Metrics Policy
 
 - Current-month outgoing quantity for purchasing review must be calculated from files imported through `사방넷 검수`, not from the manually entered item master values.
+- Use the Sabangnet review file's `출고완료일자` as the primary date for assigning outgoing quantity to a month. Order date and collection date are fallbacks only when the shipment completion date is unavailable.
 - The manually entered three-month average outgoing quantity is authoritative for now and must not be overwritten automatically.
+- The manual three-month average is a completed-period baseline through the previous month. Never subtract current-month outgoing quantity from that baseline to reconstruct prior-month demand.
 - When a new monthly Sabangnet review file is imported, update the current-month outgoing quantity for matching SKUs from that month's reviewed data.
 - For July 2026, the current-month outgoing quantity should come from July Sabangnet review data, while the three-month average remains the user's manually entered average through June 2026.
 - From August 2026 onward, the purchasing metric logic may combine the user's manually entered baseline with July Sabangnet review data to calculate rolling averages, but do not switch to automatic overwrite without preserving the user's manual baseline and the agreed calculation rule.
@@ -80,6 +82,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - If an item had little or no prior sales and suddenly begins selling, flag it for purchasing review and allow the recommendation logic to account for the new demand instead of ignoring it as noise.
 - Existing active purchasing rows must not block additional recommendations by SKU. Count requested, purchased, purchase-completed, China-arrived, and outbound-requested quantities as pipeline stock, then recommend only the remaining shortage when current stock plus pipeline quantity is still below target.
 - Product MOQ rules apply across all child options for the same product group. For `테피 USB 캔들라이터`, `루멘 철제 사이드 테이블`, and `린블 아기옷 원형 건조대`, the automatic purchasing recommendation must meet at least 200 total units across options when any option is recommended, and recommended option quantities should be rounded to 10-unit increments.
+- A won budget must never break a product MOQ rule. Treat each MOQ product group as one atomic budget unit: include every recommended option at its full MOQ-adjusted quantity only when the whole group fits the remaining budget; otherwise exclude the whole group instead of partially allocating it.
 - Spike/anomaly handling must be explainable in the recommendation basis so the user can see whether a quantity was reduced, ignored, or included due to demand pattern checks.
 - Purchasing workflow matching must use `purchase_management_code + sku` as the primary key when `purchase_management_code` exists.
 - If `purchase_management_code` is blank or unreliable, fall back to `supplier_order_number + sku` and keep that fallback match key in `raw_data`.

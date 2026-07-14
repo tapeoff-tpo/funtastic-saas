@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useEffect,
   useContext,
   useRef,
   useState,
@@ -456,11 +457,80 @@ function useBulkSelection() {
 }
 
 export function PurchaseRecommendationGenerator() {
+  const router = useRouter()
   const [targetStockMonths, setTargetStockMonths] = useState('1.2')
   const [budgetKrw, setBudgetKrw] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  useEffect(() => {
+    const storedJobId = sessionStorage.getItem('purchase-recommendation-job-id')
+    if (storedJobId) setActiveJobId(storedJobId)
+  }, [])
+
+  useEffect(() => {
+    if (!activeJobId) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    async function poll() {
+      try {
+        const response = await fetch(
+          `/api/purchasing/purchase-requests/recommendations/status?id=${encodeURIComponent(activeJobId!)}`,
+          { cache: 'no-store' },
+        )
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          const statusError = body.error ?? '추천 작업 상태를 확인하지 못했습니다.'
+          if (response.status === 400 || response.status === 404) {
+            sessionStorage.removeItem('purchase-recommendation-job-id')
+            setActiveJobId(null)
+            setError(statusError)
+            return
+          }
+          throw new Error(statusError)
+        }
+        if (cancelled) return
+
+        const job = body.job as {
+          status: string
+          progressMessage: string | null
+          errorMessage: string | null
+        }
+        if (job.status === 'completed') {
+          setMessage(job.progressMessage ?? '추천 계산이 완료되었습니다.')
+          setError(null)
+          sessionStorage.removeItem('purchase-recommendation-job-id')
+          setActiveJobId(null)
+          router.refresh()
+          return
+        }
+        if (job.status === 'failed' || job.status === 'cancelled') {
+          setMessage(null)
+          setError(job.errorMessage ?? '추천 계산에 실패했습니다.')
+          sessionStorage.removeItem('purchase-recommendation-job-id')
+          setActiveJobId(null)
+          return
+        }
+
+        setMessage(job.progressMessage ?? '추천 계산 중입니다.')
+        setError(null)
+        timer = setTimeout(poll, 1500)
+      } catch (pollError) {
+        if (cancelled) return
+        setError(pollError instanceof Error ? pollError.message : '추천 작업 상태를 확인하지 못했습니다.')
+        timer = setTimeout(poll, 3000)
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [activeJobId, router])
 
   function generate() {
     const months = Number(targetStockMonths)
@@ -477,33 +547,28 @@ export function PurchaseRecommendationGenerator() {
     setMessage(null)
     setError(null)
     startTransition(async () => {
-      const response = await fetch('/api/purchasing/purchase-requests/recommendations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetStockMonths: months, budgetKrw: budget }),
-      })
-      const body = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setError(body.error ?? '자동 발주 추천 생성에 실패했습니다.')
-        return
-      }
+      try {
+        const response = await fetch('/api/purchasing/purchase-requests/recommendations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetStockMonths: months, budgetKrw: budget }),
+        })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok) {
+          setError(body.error ?? '자동 발주 추천 생성에 실패했습니다.')
+          return
+        }
+        if (!body.accepted || typeof body.jobId !== 'string') {
+          setError('추천 작업 ID를 받지 못했습니다.')
+          return
+        }
 
-      if (body.accepted) {
-        setMessage('추천 계산을 시작했습니다. 계산 중에도 다른 탭으로 이동할 수 있습니다. 잠시 뒤 발주검토를 새로고침하면 결과가 반영됩니다.')
-        return
+        sessionStorage.setItem('purchase-recommendation-job-id', body.jobId)
+        setActiveJobId(body.jobId)
+        setMessage('추천 계산 대기 중')
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : '자동 발주 추천 생성에 실패했습니다.')
       }
-
-      setMessage(
-        `재고 ${body.evaluated.toLocaleString('ko-KR')}개 검색 · ` +
-        `발주추천 ${body.created.toLocaleString('ko-KR')}건 생성 · ` +
-        `기존 자동추천 ${(body.replaced ?? 0).toLocaleString('ko-KR')}건 교체 · ` +
-        `급증 ${(body.salesAnomalyCount ?? 0).toLocaleString('ko-KR')}건 보정` +
-        (budget !== null
-          ? ` · 예산 ${(body.spentBudgetKrw ?? 0).toLocaleString('ko-KR')}원 사용 · ` +
-            `원가 누락 ${(body.missingCostExcluded ?? 0).toLocaleString('ko-KR')}건 제외 · ` +
-            `예산조정 ${(body.budgetLimitedCount ?? 0).toLocaleString('ko-KR')}건`
-          : ''),
-      )
     })
   }
 
@@ -546,9 +611,9 @@ export function PurchaseRecommendationGenerator() {
             className="h-9 w-36 pl-8"
           />
         </div>
-        <Button type="button" onClick={generate} disabled={isPending}>
-          {isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}
-          추천 계산
+        <Button type="button" onClick={generate} disabled={isPending || activeJobId !== null}>
+          {isPending || activeJobId !== null ? <Loader2 className="animate-spin" /> : <Sparkles />}
+          {activeJobId ? '계산 중' : '추천 계산'}
         </Button>
       </div>
     </div>

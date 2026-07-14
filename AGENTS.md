@@ -39,10 +39,61 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Orders, marketplace connections, products, inventory, mapping codes, mapping components, carrier templates, company settings, shipping data, and order-management settings must not become account-specific unless the user explicitly requests isolated workspaces.
 - When adding queries or mutations for operational data, resolve the workspace owner with `getWorkspaceUserId(user.id)` before reading or writing user-scoped tables.
 
+### Purchasing Operations Policy
+
+- The purchasing workflow is an operational workflow, not a marketing or analytics-only feature. Keep purchasing data shared under the canonical workspace owner.
+- The active purchasing statuses are: `발주검토`, `발주요청`, `구매완료`, `중국창고도착`, `중국출고요청`, and `중국출고완료`.
+- `발주검토` is managed as its own review page. The main `발주` page manages `발주요청` through `중국출고완료` in one place.
+- The old purchase/shipping/arrival tab split must not be reintroduced unless the user explicitly asks for it.
+- Moving an item from `발주검토` to `발주요청` must set the `발주요청 날짜` automatically to the move date, while still allowing the user to manually edit the date afterward.
+- `발주요청` items that remain unpurchased for 7 days from `발주요청 날짜` are delayed and must be visible in the separate `구매/입고지연` page.
+- `구매완료` items that remain unarrived for 7 days from purchase date are delayed and must be visible in the separate `구매/입고지연` page.
+- Delayed items may be visually highlighted in their source status list, but do not force them to the top of the normal status list. The dedicated `구매/입고지연` page is the primary delay work queue.
+- `구매/입고지연` must support filtering by source status so purchasing-request delays and purchase-arrival delays can be reviewed separately.
+- Purchase URL data is item master data. Display it compactly in lists, but keep the full URL editable and clickable.
+- 1688 URL collection is a temporary operational tool. It may be hidden from the UI after the collection project is complete, but keep the code, Git history, extension package, and already-collected item URLs unless the user explicitly asks to remove them.
+- If production deployment is needed while 1688 URL collection is running, pause/stop the collection first, deploy the new version, refresh the item master page, verify the extension connection, and then restart collection from the saved checkpoint.
+- 1688 URL collection checkpoints are resumable. A deployment may interrupt the visible collection session, but it must not clear already-collected URLs or force a full restart.
+
+### Item Master Excel Policy
+
+- Item master Excel upload must never be a destructive full replacement.
+- `품목코드` is the stable matching key for item Excel upload and download. It must always be included in upload templates and selected downloads.
+- Blank cells in uploaded Excel files mean "keep the existing value" unless the user explicitly chooses a destructive clear operation.
+- Excel upload must update only the selected/allowed columns. Do not overwrite unrelated existing item data from an uploaded file.
+- Excel upload must never delete existing items.
+- Default item upload behavior should be: add new items when possible, and update only cost-related fields plus `구매 URL`.
+- New item creation from Excel requires at least `품목코드` and `품목명`.
+- For existing items, partial Excel files are allowed. A file may contain only `품목코드` plus the fields to update, such as `works 신규 원가` or `구매 URL`.
+- Item Excel upload must show a preview before applying changes. The preview should separate new items, changed items, unchanged items, skipped rows, and invalid rows.
+- Item Excel download should allow the user to choose which columns to export. It should also provide an upload-template download using the selected columns.
+
+### Sabangnet Review And Purchasing Metrics Policy
+
+- Current-month outgoing quantity for purchasing review must be calculated from files imported through `사방넷 검수`, not from the manually entered item master values.
+- The manually entered three-month average outgoing quantity is authoritative for now and must not be overwritten automatically.
+- When a new monthly Sabangnet review file is imported, update the current-month outgoing quantity for matching SKUs from that month's reviewed data.
+- For July 2026, the current-month outgoing quantity should come from July Sabangnet review data, while the three-month average remains the user's manually entered average through June 2026.
+- From August 2026 onward, the purchasing metric logic may combine the user's manually entered baseline with July Sabangnet review data to calculate rolling averages, but do not switch to automatic overwrite without preserving the user's manual baseline and the agreed calculation rule.
+- Purchasing recommendation logic must distinguish abnormal one-off bulk orders from repeatable demand. A single large one-off order should not inflate recommended purchase quantity by itself.
+- If large orders recur regularly for the same SKU, treat them as demand and allow them to affect purchasing recommendations.
+- If an item had little or no prior sales and suddenly begins selling, flag it for purchasing review and allow the recommendation logic to account for the new demand instead of ignoring it as noise.
+- Spike/anomaly handling must be explainable in the recommendation basis so the user can see whether a quantity was reduced, ignored, or included due to demand pattern checks.
+
+### Operations Tools Policy
+
+- `견적서` belongs under the `운영` category.
+- `AI 계정공유` belongs under the `운영` category.
+- AI account sharing tracks accounts by account name, account ID, current user(s), status, and limits. Status changes such as `사용시작`, `사용종료`, `사용종료(5시간초과)`, and `사용종료(주간초과)` must be logged as memos.
+- Multiple current users may use one AI account at the same time, and user start/end events must be independent rather than merged into one shared selection state.
+- If all current users end usage, the account status becomes `비어 있음`. If any usage ends due to a 5-hour or weekly limit, the visible status should indicate `한도 초과`.
+
 ### Deployment
 
 - Production is deployed on Vercel from the GitHub `main` branch.
 - After production fixes, run a production build when practical, commit changes, push to `origin main`, and verify the Vercel production URL responds.
+- When production deployment should be delayed, save work to a feature branch instead of pushing to `main`.
+- If a feature is saved on a non-production branch and the user later approves production release, merge that branch into `main`, push `origin main`, and verify the Vercel production deployment.
 
 ## 자동형 작업 운영
 

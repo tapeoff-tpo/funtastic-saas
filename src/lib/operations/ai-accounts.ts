@@ -1,6 +1,9 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { gptAccountMessages, gptAccounts, gptAccountUsers } from '@/lib/db/schema'
+import { deleteCredential, readCredential, storeCredential } from '@/lib/supabase/admin'
+
+const aiAccountCredentialScope = (accountId: string) => `ai-account-${accountId}`
 
 export const DEFAULT_AI_ACCOUNTS = [
   { name: '한상철', email: 'tapeoff@naver.com' },
@@ -281,11 +284,15 @@ export async function createAiAccount(input: {
   name: string
   email?: string | null
   secondaryEmail?: string | null
+  password?: string | null
+  notes?: string | null
 }) {
   await seedDefaultAiAccounts(input.userId)
   const name = input.name.trim()
   const email = input.email?.trim() || null
   const secondaryEmail = input.secondaryEmail?.trim() || null
+  const password = input.password?.trim() || null
+  const notes = input.notes?.trim() || null
   if (!name) return { error: '계정 이름을 입력해주세요.' as const }
 
   const [{ nextSortOrder }] = await db.select({
@@ -298,6 +305,7 @@ export async function createAiAccount(input: {
       name,
       email,
       secondaryEmail,
+      notes,
       sortOrder: nextSortOrder,
       status: 'available',
     })
@@ -307,6 +315,15 @@ export async function createAiAccount(input: {
     .returning({ id: gptAccounts.id })
 
   if (!row) return { error: '이미 같은 이름의 AI 계정이 있습니다.' as const }
+  if (password) {
+    try {
+      await storeCredential(aiAccountCredentialScope(row.id), input.userId, 'password', password)
+    } catch {
+      await db.delete(gptAccounts)
+        .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, row.id)))
+      return { error: '비밀번호를 안전하게 저장하지 못했습니다. 다시 시도해주세요.' as const }
+    }
+  }
   await db.insert(gptAccountMessages).values({
     userId: input.userId,
     accountId: row.id,
@@ -322,11 +339,15 @@ export async function updateAiAccount(input: {
   name: string
   email?: string | null
   secondaryEmail?: string | null
+  password?: string | null
+  notes?: string | null
 }) {
   await ensureAiAccountTables()
   const name = input.name.trim()
   const email = input.email?.trim() || null
   const secondaryEmail = input.secondaryEmail?.trim() || null
+  const password = input.password?.trim() || null
+  const notes = input.notes?.trim() || null
   if (!name) return { error: '계정 이름을 입력해주세요.' as const }
 
   const [duplicate] = await db
@@ -341,13 +362,41 @@ export async function updateAiAccount(input: {
       name,
       email,
       secondaryEmail,
+      notes,
       updatedAt: new Date(),
     })
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
     .returning({ id: gptAccounts.id })
 
   if (!row) return { error: '계정을 찾을 수 없습니다.' as const }
+  if (password) {
+    try {
+      await storeCredential(aiAccountCredentialScope(input.accountId), input.userId, 'password', password)
+    } catch {
+      return { error: '비밀번호를 안전하게 저장하지 못했습니다. 다시 시도해주세요.' as const }
+    }
+  }
   return { success: true }
+}
+
+export async function readAiAccountPassword(input: {
+  userId: string
+  accountId: string
+}) {
+  await ensureAiAccountTables()
+  const [account] = await db.select({ id: gptAccounts.id })
+    .from(gptAccounts)
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .limit(1)
+  if (!account) return { error: '계정을 찾을 수 없습니다.' as const }
+
+  try {
+    const password = await readCredential(aiAccountCredentialScope(input.accountId), input.userId, 'password')
+    if (!password) return { error: '저장된 비밀번호가 없습니다.' as const }
+    return { password }
+  } catch {
+    return { error: '비밀번호를 불러오지 못했습니다.' as const }
+  }
 }
 
 export async function deleteAiAccount(input: {
@@ -360,6 +409,11 @@ export async function deleteAiAccount(input: {
     .returning({ id: gptAccounts.id })
 
   if (!row) return { error: '계정을 찾을 수 없습니다.' as const }
+  try {
+    await deleteCredential(aiAccountCredentialScope(input.accountId), input.userId, 'password')
+  } catch {
+    // Accounts created before password storage do not have a Vault secret.
+  }
   return { success: true }
 }
 

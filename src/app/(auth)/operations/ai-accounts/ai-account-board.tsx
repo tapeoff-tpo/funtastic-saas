@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, Copy, MessageSquare, Save, Trash2 } from 'lucide-react'
+import { ChevronDown, Copy, Eye, EyeOff, MessageSquare, Save, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,8 +9,8 @@ import { cn } from '@/lib/utils'
 import {
   addAiAccountMessageAction,
   deleteAiAccountAction,
+  readAiAccountPasswordAction,
   updateAiAccountAction,
-  updateAiAccountLimitsAction,
 } from './actions'
 
 const CHAT_MESSAGE_TYPES = ['사용시작', '사용종료', '사용종료(주간소진)', '직접입력'] as const
@@ -22,8 +22,8 @@ type AiAccountRow = {
   secondaryEmail: string | null
   status: string
   currentUserName: string | null
-  weeklyLimit: string | null
   weeklyResetAt: string | null
+  notes: string | null
 }
 
 type AiAccountMessage = {
@@ -55,15 +55,6 @@ function isAvailableAfterWeeklyReset(account: AiAccountRow, now: Date | null) {
   return now.getTime() >= new Date(account.weeklyResetAt).getTime()
 }
 
-function weeklyResetNotice(account: AiAccountRow, now: Date | null) {
-  if (!account.weeklyResetAt) return null
-  const resetAt = new Date(account.weeklyResetAt)
-  if (account.status === 'weekly_limit_reached' && now && now.getTime() >= resetAt.getTime()) {
-    return '주간 한도 초기화, 사용 가능'
-  }
-  return `${formatDateTime(account.weeklyResetAt)} 초기화`
-}
-
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat('ko-KR', {
     month: '2-digit',
@@ -74,25 +65,6 @@ function formatDateTime(value: string) {
   }).format(new Date(value))
 }
 
-function parseWeeklyLimit(value: string | null) {
-  const percent = value?.match(/(\d{1,3})\s*%/)?.[1] || ''
-  return { percent }
-}
-
-function toDateTimeLocal(value: string | null) {
-  if (!value) return ''
-  const parts = new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date(value))
-  return parts.replace(' ', 'T')
-}
-
 export function AiAccountBoard({
   accounts,
   messages,
@@ -101,6 +73,10 @@ export function AiAccountBoard({
 }: Props) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(accounts[0]?.id ?? null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [revealedPassword, setRevealedPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordLoading, setPasswordLoading] = useState(false)
   const [now, setNow] = useState<Date | null>(null)
   const [selectedUsersByAccount, setSelectedUsersByAccount] = useState<Record<string, string[]>>({})
   useEffect(() => {
@@ -114,7 +90,6 @@ export function AiAccountBoard({
 
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
   const selectedUsers = selectedAccount ? selectedUsersByAccount[selectedAccount.id] || [] : []
-  const selectedWeeklyLimit = parseWeeklyLimit(selectedAccount?.weeklyLimit || null)
   const messagesByAccount = useMemo(() => {
     return messages.reduce<Record<string, AiAccountMessage[]>>((acc, message) => {
       acc[message.accountId] = acc[message.accountId] || []
@@ -136,6 +111,38 @@ export function AiAccountBoard({
     await navigator.clipboard.writeText(account.email)
     setCopiedId(account.id)
     window.setTimeout(() => setCopiedId((current) => current === account.id ? null : current), 1200)
+  }
+
+  function selectAccount(accountId: string) {
+    setSelectedAccountId(accountId)
+    setRevealedPassword('')
+    setShowPassword(false)
+    setPasswordError('')
+  }
+
+  async function loadPassword() {
+    if (!selectedAccount) return
+    if (revealedPassword) {
+      setShowPassword((current) => !current)
+      return
+    }
+    setPasswordLoading(true)
+    setPasswordError('')
+    const result = await readAiAccountPasswordAction(selectedAccount.id)
+    setPasswordLoading(false)
+    if ('error' in result) {
+      setPasswordError(result.error)
+      return
+    }
+    setRevealedPassword(result.password)
+    setShowPassword(true)
+  }
+
+  async function copyPassword() {
+    if (!revealedPassword) return
+    await navigator.clipboard.writeText(revealedPassword)
+    setCopiedId(`password-${selectedAccount?.id}`)
+    window.setTimeout(() => setCopiedId(null), 1200)
   }
 
   function toggleSelectedUser(accountId: string, name: string) {
@@ -165,12 +172,12 @@ export function AiAccountBoard({
 
       <div className="grid gap-0 xl:grid-cols-[minmax(720px,760px)_minmax(480px,1fr)]">
         <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
-          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[96px_minmax(230px,1fr)_86px_110px_128px] md:items-center md:gap-2">
+          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[96px_minmax(210px,1fr)_86px_110px_minmax(180px,1fr)] md:items-center md:gap-2">
             <div>계정명</div>
             <div>계정아이디</div>
             <div>상태</div>
             <div>현재사용자</div>
-            <div>주간 한도</div>
+            <div>비고 / 로그인 방법</div>
           </div>
 
           <div className="divide-y">
@@ -179,8 +186,6 @@ export function AiAccountBoard({
               const isReleased = isAvailableAfterWeeklyReset(account, now)
               const displayStatus = isReleased ? 'available' : account.status
               const displayLabel = isReleased ? '사용가능' : statusLabels[account.status] || account.status
-              const resetNotice = weeklyResetNotice(account, now)
-
               return (
                 <div
                   key={account.id}
@@ -188,15 +193,15 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[96px_minmax(230px,1fr)_86px_110px_128px] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[96px_minmax(210px,1fr)_86px_110px_minmax(180px,1fr)] md:items-center md:gap-2',
                     isReleased && 'bg-emerald-50/60 hover:bg-emerald-50',
                     isSelected && 'bg-muted',
                   )}
-                  onClick={() => setSelectedAccountId(account.id)}
+                  onClick={() => selectAccount(account.id)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' || event.key === ' ') {
                       event.preventDefault()
-                      setSelectedAccountId(account.id)
+                      selectAccount(account.id)
                     }
                   }}
                 >
@@ -243,17 +248,9 @@ export function AiAccountBoard({
                     <p className="font-medium">{account.currentUserName || '-'}</p>
                     <p className="text-xs text-muted-foreground md:hidden">현재사용자</p>
                   </div>
-                  <div className="text-xs text-muted-foreground">
-                    <p>{account.weeklyLimit || '잔여율 미설정'}</p>
-                    {resetNotice ? (
-                      <p className={cn(
-                        account.status === 'weekly_limit_reached'
-                          ? isReleased ? 'font-medium text-emerald-700' : 'font-medium text-red-700'
-                          : 'text-muted-foreground',
-                      )}>
-                        {resetNotice}
-                      </p>
-                    ) : <p>초기화 일시 미설정</p>}
+                  <div className="min-w-0 text-xs text-muted-foreground">
+                    <p className="line-clamp-2 whitespace-pre-line">{account.notes || '-'}</p>
+                    <p className="mt-1 md:hidden">비고 / 로그인 방법</p>
                   </div>
                 </div>
               )
@@ -268,11 +265,10 @@ export function AiAccountBoard({
                 <form id={`delete-ai-account-${selectedAccount.id}`} action={deleteAiAccountAction}>
                   <input type="hidden" name="accountId" value={selectedAccount.id} />
                 </form>
-                <form key={`account-${selectedAccount.id}`} action={updateAiAccountAction} className="space-y-2">
+                <form key={`account-${selectedAccount.id}`} action={updateAiAccountAction} className="space-y-3">
                   <input type="hidden" name="accountId" value={selectedAccount.id} />
-                  <div className="grid gap-2 xl:grid-cols-[150px_minmax(220px,1fr)_auto_auto_auto] xl:items-center">
-                    <Input name="name" defaultValue={selectedAccount.name} className="h-9 font-semibold" required />
-                    <Input name="email" defaultValue={selectedAccount.email || ''} placeholder="계정 아이디" className="h-9" />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-sm font-semibold">로그인 정보</h3>
                     <Badge
                       variant="outline"
                       className={cn(
@@ -282,59 +278,37 @@ export function AiAccountBoard({
                     >
                       {selectedDisplayLabel}
                     </Badge>
-                    <Button type="submit" className="h-9">
-                      <Save className="h-4 w-4" />
-                      저장
-                    </Button>
-                    <Button
-                      type="submit"
-                      form={`delete-ai-account-${selectedAccount.id}`}
-                      variant="destructive"
-                      className="h-9"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      계정 삭제
-                    </Button>
                   </div>
-                  <Input
-                    name="secondaryEmail"
-                    defaultValue={selectedAccount.secondaryEmail || ''}
-                    placeholder="추가 메일"
-                    className="h-9"
-                  />
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">계정 이름</span><Input name="name" defaultValue={selectedAccount.name} className="h-9 font-semibold" required /></label>
+                    <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">아이디</span><Input name="email" defaultValue={selectedAccount.email || ''} placeholder="메일주소 또는 전화번호" autoComplete="username" className="h-9" /></label>
+                    <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">새 비밀번호</span><Input name="password" type="password" placeholder="변경할 때만 입력" autoComplete="new-password" className="h-9" /></label>
+                    <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">추가 메일</span><Input name="secondaryEmail" defaultValue={selectedAccount.secondaryEmail || ''} placeholder="복구용 또는 추가 메일" className="h-9" /></label>
+                  </div>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-muted-foreground">저장된 비밀번호</span>
+                    <div className="flex gap-2">
+                      <Input readOnly type={showPassword ? 'text' : 'password'} value={revealedPassword} placeholder={passwordError || '확인 버튼을 눌러 조회'} className="h-9" />
+                      <Button type="button" variant="outline" className="h-9" onClick={loadPassword} disabled={passwordLoading}>
+                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        {passwordLoading ? '확인 중' : '확인'}
+                      </Button>
+                      <Button type="button" variant="outline" size="icon" className="h-9 w-9" onClick={copyPassword} disabled={!revealedPassword} title="비밀번호 복사">
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    {copiedId === `password-${selectedAccount.id}` ? <p className="text-xs text-emerald-700">비밀번호가 복사되었습니다.</p> : null}
+                  </label>
+                  <label className="block space-y-1">
+                    <span className="text-xs font-medium text-muted-foreground">비고 / 로그인 방법</span>
+                    <textarea name="notes" rows={4} defaultValue={selectedAccount.notes || ''} placeholder="예: 네이버 간편 로그인, 인증 문자는 담당자에게 요청" className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50" />
+                  </label>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <Button type="submit" form={`delete-ai-account-${selectedAccount.id}`} variant="destructive" className="h-9"><Trash2 className="h-4 w-4" />계정 삭제</Button>
+                    <Button type="submit" className="h-9"><Save className="h-4 w-4" />저장</Button>
+                  </div>
                 </form>
               </div>
-
-              <form key={`limits-${selectedAccount.id}`} action={updateAiAccountLimitsAction} className="rounded-md border bg-background p-3">
-                <input type="hidden" name="accountId" value={selectedAccount.id} />
-                <h3 className="mb-1 text-sm font-semibold">주간 사용량</h3>
-                <p className="mb-3 text-xs text-muted-foreground">Codex 사용량 화면의 주간 잔여율과 초기화 일시를 기록합니다.</p>
-                <div className="grid gap-2 md:grid-cols-[120px_minmax(220px,320px)_auto] md:items-end">
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">주간 잔여율</span>
-                    <div className="relative">
-                      <Input
-                        name="weeklyRemainingPercent"
-                        defaultValue={selectedWeeklyLimit.percent}
-                        type="number"
-                        min="0"
-                        max="100"
-                        placeholder="잔여"
-                        className="h-9 pr-7"
-                      />
-                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
-                    </div>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">주간 초기화 일시</span>
-                    <Input name="weeklyResetAt" type="datetime-local" defaultValue={toDateTimeLocal(selectedAccount.weeklyResetAt)} className="h-9" />
-                  </label>
-                  <Button type="submit" className="h-9 justify-self-start">
-                    <Save className="h-4 w-4" />
-                    주간 한도 저장
-                  </Button>
-                </div>
-              </form>
 
               <form action={addAiAccountMessageAction} className="rounded-md border bg-background p-3" onSubmit={() => clearSelectedUsers(selectedAccount.id)}>
                 <input type="hidden" name="accountId" value={selectedAccount.id} />

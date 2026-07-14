@@ -9,6 +9,7 @@ import {
   deleteAiAccount,
   deleteAiAccountUserCandidate,
   deleteAiAccountUserCandidates,
+  readAiAccountPassword,
   updateAiAccount,
   updateAiAccountLimits,
 } from '@/lib/operations/ai-accounts'
@@ -29,6 +30,8 @@ export async function createAiAccountAction(
     name,
     email,
     secondaryEmail: String(formData.get('secondaryEmail') ?? ''),
+    password: String(formData.get('password') ?? ''),
+    notes: String(formData.get('notes') ?? ''),
   })
 
   if ('error' in result) return { error: result.error }
@@ -120,8 +123,16 @@ export async function updateAiAccountAction(formData: FormData) {
     name: String(formData.get('name') ?? ''),
     email: String(formData.get('email') ?? ''),
     secondaryEmail: String(formData.get('secondaryEmail') ?? ''),
+    password: String(formData.get('password') ?? ''),
+    notes: String(formData.get('notes') ?? ''),
   })
   revalidatePath('/operations/ai-accounts')
+}
+
+export async function readAiAccountPasswordAction(accountId: string) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+  return readAiAccountPassword({ userId, accountId })
 }
 
 export async function deleteAiAccountAction(formData: FormData) {

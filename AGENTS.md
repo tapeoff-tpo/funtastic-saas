@@ -79,6 +79,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - If large orders recur regularly for the same SKU, treat them as demand and allow them to affect purchasing recommendations.
 - If an item had little or no prior sales and suddenly begins selling, flag it for purchasing review and allow the recommendation logic to account for the new demand instead of ignoring it as noise.
 - Existing active purchasing rows must not block additional recommendations by SKU. Count requested, purchased, purchase-completed, China-arrived, and outbound-requested quantities as pipeline stock, then recommend only the remaining shortage when current stock plus pipeline quantity is still below target.
+- Product MOQ rules apply across all child options for the same product group. For `테피 USB 캔들라이터`, `루멘 철제 사이드 테이블`, and `린블 아기옷 원형 건조대`, the automatic purchasing recommendation must meet at least 200 total units across options when any option is recommended, and recommended option quantities should be rounded to 10-unit increments.
 - Spike/anomaly handling must be explainable in the recommendation basis so the user can see whether a quantity was reduced, ignored, or included due to demand pattern checks.
 - Purchasing workflow matching must use `purchase_management_code + sku` as the primary key when `purchase_management_code` exists.
 - If `purchase_management_code` is blank or unreliable, fall back to `supplier_order_number + sku` and keep that fallback match key in `raw_data`.

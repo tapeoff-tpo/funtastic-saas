@@ -10,6 +10,12 @@ import {
 import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics } from './items'
 
+const PRODUCT_GROUP_MOQ_RULES = [
+  { productName: '테피 USB 캔들라이터', minimumOrderQuantity: 200, roundingUnit: 10 },
+  { productName: '루멘 철제 사이드 테이블', minimumOrderQuantity: 200, roundingUnit: 10 },
+  { productName: '린블 아기옷 원형 건조대', minimumOrderQuantity: 200, roundingUnit: 10 },
+] as const
+
 export type PurchaseRecommendationInput = {
   averageMonthlyOutgoing: number
   currentMonthOutgoing: number
@@ -39,6 +45,8 @@ export type PurchaseBudgetCandidate = {
   effectiveMonthlyOutgoing: number
   unitCostKrw: number | null
 }
+
+type AssessedPurchaseRow = ReturnType<typeof buildAssessedPurchaseRow>
 
 export function calculateStableMonthlyOutgoing(input: {
   currentMonthOutgoing: number
@@ -220,23 +228,17 @@ export async function generatePurchaseRecommendations(input: {
       unitCostKrw: productCosts?.unitCostKrw,
     })
 
-    return {
+    return buildAssessedPurchaseRow({
       row,
       previousThreeMonthOutgoing,
       averageMonthlyOutgoing,
       currentMonthOutgoing,
-      ...stableOutgoing,
+      stableOutgoing,
       calculation,
       unitCostYuan: costs.unitCostYuan,
       unitCostKrw: costs.unitCostKrw,
-      sku: row.sku,
-      recommendedQuantity: calculation.recommendedQuantity,
-      stockCoverageMonths: calculation.stockCoverageMonths,
-    }
+    })
   })
-  const recommendationCandidates = assessedRows.filter(
-    (item) => item.calculation.recommendedQuantity > 0,
-  )
   const salesAnomalyCount = assessedRows.filter((item) => item.salesAnomalyDetected).length
 
   return db.transaction(async (tx) => {
@@ -272,7 +274,7 @@ export async function generatePurchaseRecommendations(input: {
         (pipelineQuantityBySku.get(row.sku) ?? 0) + purchasePipelineQuantity(row),
       )
     }
-    const adjustedCandidates = recommendationCandidates.map((item) => {
+    const adjustedRows = assessedRows.map((item) => {
       const pipelineQuantity = pipelineQuantityBySku.get(item.row.sku) ?? 0
       if (pipelineQuantity <= 0) {
         return {
@@ -297,24 +299,25 @@ export async function generatePurchaseRecommendations(input: {
         recommendedQuantity: calculation.recommendedQuantity,
         stockCoverageMonths: calculation.stockCoverageMonths,
       }
-    }).filter(
-      (item) => item.calculation.recommendedQuantity > 0,
+    })
+    const recommendationCandidates = applyProductGroupMoq(adjustedRows).filter(
+      (item) => item.recommendedQuantity > 0,
     )
     const allocation = budgetKrw === null
       ? {
-          items: adjustedCandidates.map((item) => ({
+          items: recommendationCandidates.map((item) => ({
             ...item,
-            allocatedQuantity: item.calculation.recommendedQuantity,
+            allocatedQuantity: item.recommendedQuantity,
           })),
-          spentBudgetKrw: adjustedCandidates.reduce(
-            (total, item) => total + (item.unitCostKrw ?? 0) * item.calculation.recommendedQuantity,
+          spentBudgetKrw: recommendationCandidates.reduce(
+            (total, item) => total + (item.unitCostKrw ?? 0) * item.recommendedQuantity,
             0,
           ),
           remainingBudgetKrw: null,
           missingCostExcluded: 0,
           budgetLimitedCount: 0,
         }
-      : allocatePurchaseBudget(adjustedCandidates, budgetKrw)
+      : allocatePurchaseBudget(recommendationCandidates, budgetKrw)
 
     if (replaceableRows.length > 0) {
       await tx.delete(purchaseRequestItems).where(inArray(
@@ -391,6 +394,11 @@ export async function generatePurchaseRecommendations(input: {
           availableStockWithPipeline: item.availableStockWithPipeline,
           targetStockQuantity: item.calculation.targetStockQuantity,
           originalRecommendedQuantity: item.calculation.originalRecommendedQuantity,
+          baseRecommendedQuantity: item.baseRecommendedQuantity,
+          moqProductGroupName: item.moqProductGroupName,
+          moqMinimumOrderQuantity: item.moqMinimumOrderQuantity,
+          moqRoundingUnit: item.moqRoundingUnit,
+          moqAddedQuantity: item.moqAddedQuantity,
           spikeGuardAdjustedToMinimum: item.calculation.spikeGuardAdjustedToMinimum,
           allocatedQuantity: item.allocatedQuantity,
           unitCostYuan: item.unitCostYuan,
@@ -407,6 +415,107 @@ export async function generatePurchaseRecommendations(input: {
       created: allocation.items.length,
     }
   })
+}
+
+function buildAssessedPurchaseRow(input: {
+  row: {
+    sku: string
+    productName: string
+    optionName: string | null
+    availableStock: number
+  }
+  previousThreeMonthOutgoing: number
+  averageMonthlyOutgoing: number
+  currentMonthOutgoing: number
+  stableOutgoing: ReturnType<typeof calculateStableMonthlyOutgoing>
+  calculation: SpikeGuardPurchaseRecommendationCalculation
+  unitCostYuan: number | null
+  unitCostKrw: number | null
+}) {
+  return {
+    row: input.row,
+    previousThreeMonthOutgoing: input.previousThreeMonthOutgoing,
+    averageMonthlyOutgoing: input.averageMonthlyOutgoing,
+    currentMonthOutgoing: input.currentMonthOutgoing,
+    ...input.stableOutgoing,
+    calculation: input.calculation,
+    unitCostYuan: input.unitCostYuan,
+    unitCostKrw: input.unitCostKrw,
+    sku: input.row.sku,
+    recommendedQuantity: input.calculation.recommendedQuantity,
+    stockCoverageMonths: input.calculation.stockCoverageMonths,
+  }
+}
+
+function applyProductGroupMoq<T extends AssessedPurchaseRow & {
+  pipelineQuantity: number
+  availableStockWithPipeline: number
+}>(items: T[]) {
+  const enriched = items.map((item) => ({
+    ...item,
+    baseRecommendedQuantity: item.calculation.recommendedQuantity,
+    moqProductGroupName: null as string | null,
+    moqMinimumOrderQuantity: null as number | null,
+    moqRoundingUnit: null as number | null,
+    moqAddedQuantity: 0,
+  }))
+
+  for (const rule of PRODUCT_GROUP_MOQ_RULES) {
+    const groupItems = enriched.filter((item) => item.row.productName === rule.productName)
+    if (groupItems.length === 0) continue
+
+    const hasRecommendation = groupItems.some((item) => item.baseRecommendedQuantity > 0)
+    if (!hasRecommendation) continue
+
+    for (const item of groupItems) {
+      item.moqProductGroupName = rule.productName
+      item.moqMinimumOrderQuantity = rule.minimumOrderQuantity
+      item.moqRoundingUnit = rule.roundingUnit
+      item.recommendedQuantity = roundUpToUnit(item.baseRecommendedQuantity, rule.roundingUnit)
+      item.moqAddedQuantity = item.recommendedQuantity - item.baseRecommendedQuantity
+    }
+
+    let totalQuantity = groupItems.reduce((total, item) => total + item.recommendedQuantity, 0)
+    if (totalQuantity >= rule.minimumOrderQuantity) continue
+
+    const allocationTargets = groupItems
+      .filter((item) => purchaseMoqDemandScore(item) > 0)
+      .sort((left, right) => {
+        const scoreDifference = purchaseMoqDemandScore(right) - purchaseMoqDemandScore(left)
+        if (scoreDifference !== 0) return scoreDifference
+        return left.row.sku.localeCompare(right.row.sku)
+      })
+    const targets = allocationTargets.length > 0
+      ? allocationTargets
+      : [...groupItems].sort((left, right) => left.row.sku.localeCompare(right.row.sku))
+
+    let targetIndex = 0
+    while (totalQuantity < rule.minimumOrderQuantity && targets.length > 0) {
+      const target = targets[targetIndex % targets.length]
+      target.recommendedQuantity += rule.roundingUnit
+      target.moqAddedQuantity += rule.roundingUnit
+      totalQuantity += rule.roundingUnit
+      targetIndex += 1
+    }
+  }
+
+  return enriched
+}
+
+function purchaseMoqDemandScore(item: AssessedPurchaseRow) {
+  return Math.max(
+    0,
+    finiteNumber(item.effectiveMonthlyOutgoing),
+    finiteNumber(item.averageMonthlyOutgoing),
+    finiteNumber(item.currentMonthOutgoing),
+  )
+}
+
+function roundUpToUnit(value: number, unit: number) {
+  const safeUnit = Math.max(1, Math.trunc(finiteNumber(unit)))
+  const safeValue = Math.max(0, Math.trunc(finiteNumber(value)))
+  if (safeValue === 0) return 0
+  return Math.ceil(safeValue / safeUnit) * safeUnit
 }
 
 function clampTargetMonths(value: number) {

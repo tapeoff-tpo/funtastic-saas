@@ -249,6 +249,9 @@ export async function generatePurchaseRecommendations(input: {
         sku: purchaseRequestItems.sku,
         status: purchaseRequestItems.status,
         batchId: purchaseRequestItems.batchId,
+        requestedQuantity: purchaseRequestItems.requestedQuantity,
+        actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+        chinaReceivedQuantity: purchaseRequestItems.chinaReceivedQuantity,
         rawData: purchaseRequestItems.rawData,
       })
       .from(purchaseRequestItems)
@@ -258,22 +261,52 @@ export async function generatePurchaseRecommendations(input: {
       ))
 
     const replaceableRows = activeRequestRows.filter(
-      (row) => row.status === 'requested' && row.rawData.source === 'auto_purchase_recommendation',
+      (row) => row.status === 'requested' && isAutoPurchaseRecommendation(row.rawData),
     )
     const replaceableIds = new Set(replaceableRows.map((row) => row.id))
-    const blockedSkus = new Set(
-      activeRequestRows.filter((row) => !replaceableIds.has(row.id)).map((row) => row.sku),
-    )
-    const unblockedCandidates = recommendationCandidates.filter(
-      (item) => !blockedSkus.has(item.row.sku),
+    const pipelineQuantityBySku = new Map<string, number>()
+    for (const row of activeRequestRows) {
+      if (replaceableIds.has(row.id)) continue
+      pipelineQuantityBySku.set(
+        row.sku,
+        (pipelineQuantityBySku.get(row.sku) ?? 0) + purchasePipelineQuantity(row),
+      )
+    }
+    const adjustedCandidates = recommendationCandidates.map((item) => {
+      const pipelineQuantity = pipelineQuantityBySku.get(item.row.sku) ?? 0
+      if (pipelineQuantity <= 0) {
+        return {
+          ...item,
+          pipelineQuantity: 0,
+          availableStockWithPipeline: item.row.availableStock,
+        }
+      }
+      const availableStockWithPipeline = item.row.availableStock + pipelineQuantity
+      const calculation = calculatePurchaseRecommendationWithSpikeGuard({
+        averageMonthlyOutgoing: item.averageMonthlyOutgoing,
+        effectiveMonthlyOutgoing: item.effectiveMonthlyOutgoing,
+        currentMonthOutgoing: item.currentMonthOutgoing,
+        availableStock: availableStockWithPipeline,
+        targetStockMonths,
+      })
+      return {
+        ...item,
+        pipelineQuantity,
+        availableStockWithPipeline,
+        calculation,
+        recommendedQuantity: calculation.recommendedQuantity,
+        stockCoverageMonths: calculation.stockCoverageMonths,
+      }
+    }).filter(
+      (item) => item.calculation.recommendedQuantity > 0,
     )
     const allocation = budgetKrw === null
       ? {
-          items: unblockedCandidates.map((item) => ({
+          items: adjustedCandidates.map((item) => ({
             ...item,
             allocatedQuantity: item.calculation.recommendedQuantity,
           })),
-          spentBudgetKrw: unblockedCandidates.reduce(
+          spentBudgetKrw: adjustedCandidates.reduce(
             (total, item) => total + (item.unitCostKrw ?? 0) * item.calculation.recommendedQuantity,
             0,
           ),
@@ -281,7 +314,7 @@ export async function generatePurchaseRecommendations(input: {
           missingCostExcluded: 0,
           budgetLimitedCount: 0,
         }
-      : allocatePurchaseBudget(unblockedCandidates, budgetKrw)
+      : allocatePurchaseBudget(adjustedCandidates, budgetKrw)
 
     if (replaceableRows.length > 0) {
       await tx.delete(purchaseRequestItems).where(inArray(
@@ -354,6 +387,8 @@ export async function generatePurchaseRecommendations(input: {
           currentMonthOutgoing: item.currentMonthOutgoing,
           salesAnomalyDetected: item.salesAnomalyDetected,
           availableStock: item.row.availableStock,
+          pipelineQuantity: item.pipelineQuantity,
+          availableStockWithPipeline: item.availableStockWithPipeline,
           targetStockQuantity: item.calculation.targetStockQuantity,
           originalRecommendedQuantity: item.calculation.originalRecommendedQuantity,
           spikeGuardAdjustedToMinimum: item.calculation.spikeGuardAdjustedToMinimum,
@@ -377,6 +412,50 @@ export async function generatePurchaseRecommendations(input: {
 function clampTargetMonths(value: number) {
   if (!Number.isFinite(value)) return 1.2
   return Math.min(12, Math.max(0.1, value))
+}
+
+function isAutoPurchaseRecommendation(rawData: unknown) {
+  return typeof rawData === 'object'
+    && rawData !== null
+    && 'source' in rawData
+    && rawData.source === 'auto_purchase_recommendation'
+}
+
+function purchasePipelineQuantity(input: {
+  status: string
+  requestedQuantity: number
+  actualPurchaseQuantity: number | null
+  chinaReceivedQuantity: number | null
+  rawData: unknown
+}) {
+  const outboundRequestedQuantity = readPositiveInteger(input.rawData, 'outboundRequestedQuantity')
+  const quantity = input.status === 'outbound_requested'
+    ? outboundRequestedQuantity
+      ?? input.chinaReceivedQuantity
+      ?? input.actualPurchaseQuantity
+      ?? input.requestedQuantity
+    : input.status === 'china_arrived'
+      ? input.chinaReceivedQuantity
+        ?? input.actualPurchaseQuantity
+        ?? input.requestedQuantity
+      : input.status === 'purchase_completed' || input.status === 'purchased'
+        ? input.actualPurchaseQuantity
+          ?? input.requestedQuantity
+        : input.requestedQuantity
+
+  return Math.max(0, Math.trunc(finiteNumber(quantity)))
+}
+
+function readPositiveInteger(rawData: unknown, key: string) {
+  if (typeof rawData !== 'object' || rawData === null || !(key in rawData)) return null
+  const value = rawData[key as keyof typeof rawData]
+  const numberValue = typeof value === 'number'
+    ? value
+    : typeof value === 'string'
+      ? Number(value)
+      : Number.NaN
+  if (!Number.isFinite(numberValue) || numberValue < 0) return null
+  return Math.trunc(numberValue)
 }
 
 function finiteNumber(value: number) {

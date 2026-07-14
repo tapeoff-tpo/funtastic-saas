@@ -43,10 +43,12 @@ type Props = {
 }
 
 function statusClassName(status: string) {
-  if (status === 'in_use') return 'border-blue-200 bg-blue-50 text-blue-700'
-  if (status === 'limit_warning') return 'border-amber-200 bg-amber-50 text-amber-700'
-  if (status === 'limit_reached' || status === 'five_hour_limit_reached' || status === 'weekly_limit_reached' || status === 'needs_check') return 'border-red-200 bg-red-50 text-red-700'
+  if (status === 'weekly_limit_reached') return 'border-red-200 bg-red-50 text-red-700'
   return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+}
+
+function normalizeStatus(status: string) {
+  return status === 'weekly_limit_reached' ? 'weekly_limit_reached' : 'in_use'
 }
 
 function formatDateTime(value: string) {
@@ -107,10 +109,10 @@ export function AiAccountBoard({
     }, {})
   }, [messages])
   const selectedMessages = selectedAccount ? messagesByAccount[selectedAccount.id] || [] : []
-  const selectedDisplayStatus = selectedAccount?.status || 'available'
+  const selectedDisplayStatus = normalizeStatus(selectedAccount?.status || 'in_use')
   const selectedDisplayLabel = selectedAccount
-    ? statusLabels[selectedAccount.status] || selectedAccount.status
-    : '비어 있음'
+    ? statusLabels[selectedDisplayStatus]
+    : '사용 중'
   const allSelected = accounts.length > 0 && selectedBulkIds.length === accounts.length
 
   async function copyAccountId(account: AiAccountRow) {
@@ -224,6 +226,7 @@ export function AiAccountBoard({
               <div className="divide-y">
             {accounts.map((account) => {
               const isSelected = selectedAccount?.id === account.id
+              const displayStatus = normalizeStatus(account.status)
               const renewal = renewalState(account.renewalDueOn, now)
               const candidateNames = userCandidates.map((candidate) => candidate.name)
               return (
@@ -291,7 +294,7 @@ export function AiAccountBoard({
                     <input type="hidden" name="changedField" value="" />
                     <select
                       name="status"
-                      defaultValue={account.status}
+                      defaultValue={displayStatus}
                       onChange={(event) => {
                         const form = event.currentTarget.form
                         const changedField = form?.elements.namedItem('changedField')
@@ -299,7 +302,7 @@ export function AiAccountBoard({
                         form?.requestSubmit()
                       }}
                       aria-label={`${account.name} 상태`}
-                      className={cn('h-9 w-full rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring', statusClassName(account.status))}
+                      className={cn('h-9 w-full rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring', statusClassName(displayStatus))}
                     >
                       {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>

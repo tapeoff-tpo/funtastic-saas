@@ -15,13 +15,8 @@ export const DEFAULT_AI_ACCOUNTS = [
 ] as const
 
 export const AI_ACCOUNT_STATUS_LABELS: Record<string, string> = {
-  available: '비어 있음',
   in_use: '사용 중',
-  limit_warning: '한도 임박',
-  limit_reached: '한도 초과',
-  five_hour_limit_reached: '사용 가능',
   weekly_limit_reached: '주간 소진',
-  needs_check: '확인 필요',
 }
 
 const AI_ACCOUNT_STATUSES = new Set(Object.keys(AI_ACCOUNT_STATUS_LABELS))
@@ -36,7 +31,7 @@ export async function ensureAiAccountTables() {
       "name" varchar(100) NOT NULL,
       "email" varchar(255),
       "secondary_email" varchar(255),
-      "status" varchar(30) NOT NULL DEFAULT 'available',
+      "status" varchar(30) NOT NULL DEFAULT 'in_use',
       "current_user_name" varchar(100),
       "daily_reset_time" varchar(10),
       "weekly_reset_at" timestamp with time zone,
@@ -54,6 +49,7 @@ export async function ensureAiAccountTables() {
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit_period" varchar(10)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "renewal_due_on" date`)
+  await db.execute(sql`ALTER TABLE "gpt_accounts" ALTER COLUMN "status" SET DEFAULT 'in_use'`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "gpt_accounts_user_name_uniq" ON "gpt_accounts" ("user_id", "name")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_sort_idx" ON "gpt_accounts" ("user_id", "sort_order")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_status_idx" ON "gpt_accounts" ("user_id", "status")`)
@@ -147,7 +143,7 @@ export async function seedDefaultAiAccounts(userId: string) {
       name: account.name,
       email: account.email,
       sortOrder: index + 1,
-      status: 'available',
+      status: 'in_use',
     }))
 
     await db.insert(gptAccounts)
@@ -269,11 +265,10 @@ export async function deleteAiAccountUserCandidates(input: {
       .map((name) => name.trim())
       .filter(Boolean)
       .filter((name) => !deletedNames.includes(name))
-    const nextStatus = account.status === 'in_use' && !activeUsers.length ? 'available' : account.status
     await db.update(gptAccounts)
       .set({
         currentUserName: activeUsers.join(', ') || null,
-        status: nextStatus,
+        status: account.status,
         updatedAt: new Date(),
       })
       .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, account.id)))
@@ -313,7 +308,7 @@ export async function createAiAccount(input: {
       notes,
       renewalDueOn,
       sortOrder: nextSortOrder,
-      status: 'available',
+      status: 'in_use',
     })
     .onConflictDoNothing({
       target: [gptAccounts.userId, gptAccounts.name],
@@ -457,12 +452,8 @@ export async function updateAiAccountOperationalState(input: {
 
   const changedField = input.changedField?.trim() || ''
   let nextStatus = status
-  let nextCurrentUserName = currentUserName
-  if (changedField === 'status' && status === 'available') nextCurrentUserName = null
-  if (changedField === 'currentUserName') {
-    if (currentUserName && status === 'available') nextStatus = 'in_use'
-    if (!currentUserName && status === 'in_use') nextStatus = 'available'
-  }
+  const nextCurrentUserName = currentUserName
+  if (changedField === 'currentUserName' && status !== 'weekly_limit_reached') nextStatus = 'in_use'
   if (
     account.status === nextStatus
     && account.currentUserName === nextCurrentUserName
@@ -581,7 +572,7 @@ export async function addAiAccountMessage(input: {
   } else if (isWeeklyLimitEnd) {
     nextStatus = 'weekly_limit_reached'
   } else if (shouldEndUsage) {
-    nextStatus = nextActiveUsers.length ? 'in_use' : 'available'
+    nextStatus = 'in_use'
   }
 
   await db.update(gptAccounts)

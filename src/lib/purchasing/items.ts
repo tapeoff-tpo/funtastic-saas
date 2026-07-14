@@ -38,6 +38,10 @@ export type PurchasingItemOutgoingMetrics = {
 export type PurchasingItemOutgoingMetricRow = PurchasingItemOutgoingMetrics & {
   internalSku: string
 }
+type PurchasingItemCurrentMonthReviewRow = {
+  internalSku: string
+  currentMonthOutgoing: number
+}
 
 const NUMERIC_HEADERS = new Set<Esa009mHeader>([
   '특가(元)',
@@ -396,7 +400,19 @@ export async function getSkuOutgoingMetrics(
 
   const { currentMonthStart, previousThreeMonthStart, nextMonthStart } = getOutgoingMetricWindows(now)
   const skuSql = sql.join(uniqueSkus.map((sku) => sql`${sku}`), sql`, `)
-  const [storedRows, result] = await Promise.all([
+  const reviewDateExpression = sql`
+    CASE
+      WHEN parsed_data->>'orderedAt' ~ '^\\d{8}$' THEN to_date(parsed_data->>'orderedAt', 'YYYYMMDD')
+      WHEN raw_data->>'출고완료일자' ~ '^\\d{8}$' THEN to_date(raw_data->>'출고완료일자', 'YYYYMMDD')
+      WHEN raw_data->>'수집일자' ~ '^\\d{8}$' THEN to_date(raw_data->>'수집일자', 'YYYYMMDD')
+      ELSE COALESCE(
+        NULLIF(parsed_data->>'orderedAt', '')::timestamptz::date,
+        NULLIF(raw_data->>'출고완료일자', '')::timestamptz::date,
+        NULLIF(raw_data->>'수집일자', '')::timestamptz::date
+      )
+    END
+  `
+  const [storedRows, result, currentMonthReviewResult] = await Promise.all([
     db.select({
       internalSku: products.internalSku,
       metadata: products.metadata,
@@ -432,6 +448,28 @@ export async function getSkuOutgoingMetrics(
         AND COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IN (${skuSql})
       GROUP BY COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
     `),
+    db.execute<PurchasingItemCurrentMonthReviewRow>(sql`
+      WITH latest_current_month_batch AS (
+        SELECT batch_id
+        FROM sabangnet_review_lines
+        WHERE user_id = ${userId}
+          AND sku IN (${skuSql})
+          AND ${reviewDateExpression} >= ${currentMonthStart.toISOString()}::date
+          AND ${reviewDateExpression} < ${nextMonthStart.toISOString()}::date
+        ORDER BY created_at DESC
+        LIMIT 1
+      )
+      SELECT
+        sku AS "internalSku",
+        COALESCE(SUM(quantity), 0)::numeric AS "currentMonthOutgoing"
+      FROM sabangnet_review_lines
+      WHERE user_id = ${userId}
+        AND sku IN (${skuSql})
+        AND batch_id = (SELECT batch_id FROM latest_current_month_batch)
+        AND ${reviewDateExpression} >= ${currentMonthStart.toISOString()}::date
+        AND ${reviewDateExpression} < ${nextMonthStart.toISOString()}::date
+      GROUP BY sku
+    `),
   ])
 
   const metricsBySku = new Map(resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
@@ -441,6 +479,13 @@ export async function getSkuOutgoingMetrics(
       threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
     },
   ]))
+  for (const row of resultRows<PurchasingItemCurrentMonthReviewRow>(currentMonthReviewResult)) {
+    const current = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
+    metricsBySku.set(row.internalSku, {
+      ...current,
+      currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
+    })
+  }
   for (const row of storedRows) {
     const calculated = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
     metricsBySku.set(row.internalSku, resolveOutgoingMetrics(row.metadata, calculated))
@@ -457,18 +502,15 @@ export function resolveOutgoingMetrics(
   if (!stored || typeof stored !== 'object') return calculated
 
   const values = stored as Record<string, unknown>
-  const currentMonthOutgoing = Number(values.currentMonthOutgoing)
   const threeMonthAverageOutgoing = Number(values.threeMonthAverageOutgoing)
   if (
-    !Number.isFinite(currentMonthOutgoing)
-    || !Number.isFinite(threeMonthAverageOutgoing)
-    || currentMonthOutgoing < 0
+    !Number.isFinite(threeMonthAverageOutgoing)
     || threeMonthAverageOutgoing < 0
   ) {
     return calculated
   }
   return {
-    currentMonthOutgoing: cleanOutgoingNumber(currentMonthOutgoing),
+    currentMonthOutgoing: calculated.currentMonthOutgoing,
     threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
   }
 }

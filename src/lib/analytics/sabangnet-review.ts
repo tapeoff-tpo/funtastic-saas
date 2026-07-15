@@ -212,7 +212,7 @@ export async function importSabangnetReviewBatch(input: {
     ...productSkuRows.map((row) => row.sku).filter(Boolean),
     ...variantSkuRows.map((row) => row.sku).filter(Boolean),
   ])
-  const existingSet = new Set(existingRows.map((row) => `${row.marketplaceId}:${row.marketplaceOrderId}`))
+  const existingSet = new Set(existingRows.map((row) => createExistingOrderKey(row.marketplaceId, row.marketplaceOrderId)))
 
   const mappedLines = parseResult.rows.map((row, index) => {
     const raw = rawRows[index] ?? {}
@@ -421,7 +421,7 @@ export async function updateSabangnetReviewLine(
     ...productSkuRows.map((row) => row.sku).filter(Boolean),
     ...variantSkuRows.map((row) => row.sku).filter(Boolean),
   ])
-  const existingSet = new Set(existingRows.map((row) => `${row.marketplaceId}:${row.marketplaceOrderId}`))
+  const existingSet = new Set(existingRows.map((row) => createExistingOrderKey(row.marketplaceId, row.marketplaceOrderId)))
   const duplicateLineKey = getDuplicateLineKey(parsed, current.rawData)
   const duplicateInFile = duplicateRows.some((row) => getDuplicateLineKey(row.parsedData, row.rawData) === duplicateLineKey)
   const connection = matchMarketplaceConnection(connections, marketplaceName || fallbackMarketplaceId || '', fallbackMarketplaceId)
@@ -536,10 +536,53 @@ export async function confirmSabangnetReviewBatch(
       ? Array.from(groupedLines.values()).slice(0, Math.max(0, options.maxOrderGroups))
       : Array.from(groupedLines.values())
 
+    const existingOrdersByKey = new Map<string, string>()
+    const existingOrderCandidates = groupsToConfirm
+      .map((group) => {
+        const firstLine = group[0]
+        const orderNumber = getSabangnetOrderNumber(firstLine.rawData) || firstLine.orderNumber
+        return {
+          marketplaceId: firstLine.marketplaceId,
+          orderNumber,
+          key: createExistingOrderKey(firstLine.marketplaceId, orderNumber),
+        }
+      })
+      .filter((candidate) => candidate.marketplaceId && candidate.orderNumber)
+
+    if (existingOrderCandidates.length > 0) {
+      const existingRows = resultRows(await tx.execute<{ id: string; marketplaceId: string; marketplaceOrderId: string }>(sql`
+        WITH candidates(marketplace_id, marketplace_order_id) AS (
+          VALUES ${sql.join(existingOrderCandidates.map((candidate) => sql`(${candidate.marketplaceId}, ${candidate.orderNumber})`), sql`, `)}
+        )
+        SELECT
+          o.id,
+          o.marketplace_id AS "marketplaceId",
+          o.marketplace_order_id AS "marketplaceOrderId"
+        FROM orders o
+        JOIN candidates c
+          ON c.marketplace_id = o.marketplace_id
+         AND c.marketplace_order_id = o.marketplace_order_id
+        WHERE o.user_id = ${userId}
+          AND o.is_copy = false
+      `))
+      for (const row of existingRows) {
+        existingOrdersByKey.set(createExistingOrderKey(row.marketplaceId, row.marketplaceOrderId), row.id)
+      }
+    }
+
     for (const group of groupsToConfirm) {
       const firstLine = group[0]
       const parsed = firstLine.parsedData
       const effectiveOrderNumber = getSabangnetOrderNumber(firstLine.rawData) || firstLine.orderNumber
+      const existingOrderId = existingOrdersByKey.get(createExistingOrderKey(firstLine.marketplaceId, effectiveOrderNumber))
+      if (existingOrderId) {
+        for (const line of group) {
+          lineUpdates.push({ lineId: line.id, orderId: existingOrderId })
+          confirmed += 1
+        }
+        continue
+      }
+
       const orderedAt = parseImportedOrderedAt(parsed.orderedAt)
       const buyerPhones = splitPhonePair(parsed.buyerPhone)
       const recipientPhones = splitPhonePair(parsed.recipientPhone)
@@ -802,7 +845,8 @@ function buildReviewLine(input: {
   const issueMessages: string[] = []
   const sku = input.normalized.sku?.trim() || null
   const marketplaceId = input.connection?.marketplaceId ?? null
-  const existingOrder = marketplaceId ? input.existingSet.has(`${marketplaceId}:${input.row.orderNumber}`) : false
+  const effectiveOrderNumber = getSabangnetOrderNumber(input.raw) || input.row.orderNumber
+  const existingOrder = marketplaceId ? input.existingSet.has(createExistingOrderKey(marketplaceId, effectiveOrderNumber)) : false
   const orderStatusText = pickByHeaders(input.raw, ORDER_STATUS_HEADERS)
   const claimType = claimTypeFromText(orderStatusText)
 
@@ -898,6 +942,10 @@ function claimTypeFromText(value: string): string | null {
   if (text.includes('반품')) return 'return'
   if (text.includes('교환')) return 'exchange'
   return null
+}
+
+function createExistingOrderKey(marketplaceId: string | null | undefined, orderNumber: string | null | undefined): string {
+  return `${marketplaceId ?? ''}:${String(orderNumber ?? '').trim()}`
 }
 
 function claimLabel(value: string | null) {

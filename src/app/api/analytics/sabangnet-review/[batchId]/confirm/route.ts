@@ -5,7 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { confirmSabangnetReviewBatch } from '@/lib/analytics/sabangnet-review'
 
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ batchId: string }> },
 ) {
   const supabase = await createClient()
@@ -22,7 +22,7 @@ export async function POST(
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   try {
-    const limitParam = Number(_request.nextUrl.searchParams.get('limit') ?? 500)
+    const limitParam = Number(request.nextUrl.searchParams.get('limit') ?? 500)
     const maxOrderGroups = Number.isFinite(limitParam)
       ? Math.min(Math.max(Math.trunc(limitParam), 1), 1000)
       : 500

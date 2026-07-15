@@ -65,6 +65,15 @@ type CoupangCapturePayload = {
   memo?: string | null
 }
 
+type SourcingSearchCandidatePayload = {
+  title?: string | null
+  candidateUrl: string
+  imageUrl?: string | null
+  priceText?: string | null
+  supplierName?: string | null
+  matchScore?: number | null
+}
+
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-coupang-sourcing-extension'
 
@@ -114,6 +123,7 @@ export function SourcingBoard({ items, statusLabels }: Props) {
   const [statusFilter, setStatusFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [extensionConnected, setExtensionConnected] = useState(false)
+  const [searching1688Id, setSearching1688Id] = useState<string | null>(null)
   const processedCaptureIds = useRef<Set<string>>(new Set())
 
   useEffect(() => {
@@ -154,6 +164,39 @@ export function SourcingBoard({ items, statusLabels }: Props) {
       }
     }
 
+    async function save1688Candidates(message: {
+      searchId?: string
+      itemId?: string
+      candidates?: SourcingSearchCandidatePayload[]
+    }) {
+      if (!message.itemId || !Array.isArray(message.candidates) || message.candidates.length === 0) return
+      try {
+        const response = await fetch('/api/operations/sourcing/candidates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            itemId: message.itemId,
+            candidates: message.candidates,
+          }),
+        })
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(result.error || '1688 후보를 저장하지 못했습니다.')
+
+        window.postMessage({
+          source: PAGE_SOURCE,
+          type: 'FUNTASTIC_1688_SOURCING_CANDIDATES_SAVED',
+          searchId: message.searchId,
+          itemId: message.itemId,
+          saved: result.saved || 0,
+        }, window.location.origin)
+        setSearching1688Id((current) => current === message.itemId ? null : current)
+        toast.success(`1688 후보 ${result.saved || 0}개를 저장했습니다.`)
+        router.refresh()
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '1688 후보 저장에 실패했습니다.')
+      }
+    }
+
     function handleMessage(event: MessageEvent) {
       if (event.source !== window || event.origin !== window.location.origin) return
       const message = event.data
@@ -181,6 +224,24 @@ export function SourcingBoard({ items, statusLabels }: Props) {
 
       if (message.type === 'FUNTASTIC_COUPANG_ERROR') {
         toast.error(message.message || '쿠팡 소싱 확장프로그램 오류가 발생했습니다.')
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_1688_SOURCING_ACK') {
+        setExtensionConnected(true)
+        toast.success('1688 이미지검색을 열었습니다.')
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_1688_SOURCING_CANDIDATES') {
+        setExtensionConnected(true)
+        void save1688Candidates(message)
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_1688_SOURCING_ERROR') {
+        setSearching1688Id(null)
+        toast.error(message.message || '1688 이미지검색을 시작하지 못했습니다.')
       }
     }
 
@@ -223,6 +284,32 @@ export function SourcingBoard({ items, statusLabels }: Props) {
 
   async function addCandidate(formData: FormData) {
     await addSourcingCandidateAction(formData)
+  }
+
+  function start1688ImageSearch(item: SourcingItemRow) {
+    if (!item.imageUrl) {
+      toast.error('이미지 URL이 있어야 1688 이미지검색을 시작할 수 있습니다.')
+      return
+    }
+    if (!extensionConnected) {
+      toast.error('쿠팡 소싱 확장프로그램을 새로고침한 뒤 다시 시도해 주세요.')
+      return
+    }
+
+    const searchId = `1688:${item.id}:${Date.now()}`
+    setSearching1688Id(item.id)
+    window.postMessage({
+      source: PAGE_SOURCE,
+      type: 'FUNTASTIC_1688_SOURCING_START',
+      searchId,
+      item: {
+        id: item.id,
+        sourceTitle: item.sourceTitle,
+        sourceUrl: item.sourceUrl,
+        imageUrl: item.imageUrl,
+        keyword: item.keyword,
+      },
+    }, window.location.origin)
   }
 
   return (
@@ -353,6 +440,16 @@ export function SourcingBoard({ items, statusLabels }: Props) {
                       <LinkRow label="쿠팡" href={selected.sourceUrl} />
                       <LinkRow label="1688" href={selected.selected1688Url} />
                       {selected.memo ? <p className="line-clamp-2 text-xs text-muted-foreground">{selected.memo}</p> : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 w-full justify-center"
+                        onClick={() => start1688ImageSearch(selected)}
+                        disabled={!selected.imageUrl || searching1688Id === selected.id}
+                      >
+                        <Search className="h-4 w-4" />
+                        {searching1688Id === selected.id ? '1688 검색중' : '1688 이미지검색'}
+                      </Button>
                     </div>
                   </div>
                 </div>

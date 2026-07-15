@@ -41,13 +41,22 @@ window.addEventListener('message', (event) => {
     return
   }
 
-  if (message.type === 'FUNTASTIC_COUPANG_CAPTURE_SAVED') {
+  if (
+    message.type === 'FUNTASTIC_COUPANG_CAPTURE_SAVED'
+    || message.type === 'FUNTASTIC_1688_SOURCING_START'
+    || message.type === 'FUNTASTIC_1688_SOURCING_CANDIDATES_SAVED'
+  ) {
     try {
       if (!chrome.runtime?.id) return
-      chrome.runtime.sendMessage({
-        type: 'FUNTASTIC_COUPANG_CAPTURE_SAVED',
-        captureId: message.captureId,
-        itemId: message.itemId,
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError || response?.ok !== false) return
+        window.postMessage({
+          source: EXTENSION_SOURCE,
+          type: message.type === 'FUNTASTIC_1688_SOURCING_START'
+            ? 'FUNTASTIC_1688_SOURCING_ERROR'
+            : 'FUNTASTIC_COUPANG_ERROR',
+          message: response.error || '확장프로그램 작업을 처리하지 못했습니다.',
+        }, window.location.origin)
       })
     } catch {
       // Ignore stale extension contexts.

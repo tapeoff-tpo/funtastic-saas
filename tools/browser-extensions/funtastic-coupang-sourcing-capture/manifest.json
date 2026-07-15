@@ -10,6 +10,7 @@
   "host_permissions": [
     "https://www.coupang.com/*",
     "https://*.coupang.com/*",
+    "https://*.1688.com/*",
     "https://funtastic-saas-vercel.vercel.app/*",
     "http://localhost:3000/*"
   ],
@@ -28,6 +29,16 @@
       ],
       "js": ["coupang-capture.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.1688.com/*"
+      ],
+      "js": ["1688-sourcing-search.js"],
+      "run_at": "document_idle",
+      "all_frames": true,
+      "match_about_blank": true,
+      "match_origin_as_fallback": true
     },
     {
       "matches": [

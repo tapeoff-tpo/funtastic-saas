@@ -1411,3 +1411,57 @@ export const dealEvents = pgTable(
     uniqueIndex('deal_events_user_source_key_uniq').on(table.userId, table.sourceKey),
   ],
 )
+
+export const sourcingItems = pgTable(
+  'sourcing_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    sourcePlatform: varchar('source_platform', { length: 30 }).notNull().default('coupang'),
+    sourceTitle: text('source_title').notNull(),
+    sourceUrl: text('source_url'),
+    imageUrl: text('image_url'),
+    category: varchar('category', { length: 120 }),
+    sourceRank: integer('source_rank'),
+    sourcePrice: integer('source_price'),
+    keyword: varchar('keyword', { length: 200 }),
+    status: varchar('status', { length: 30 }).notNull().default('captured'),
+    selected1688Url: text('selected_1688_url'),
+    selectedAt: timestamp('selected_at', { withTimezone: true }),
+    memo: text('memo'),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('sourcing_items_user_status_idx').on(table.userId, table.status),
+    index('sourcing_items_user_updated_idx').on(table.userId, table.updatedAt),
+  ],
+)
+
+export const sourcingCandidates = pgTable(
+  'sourcing_candidates',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    itemId: uuid('item_id')
+      .notNull()
+      .references(() => sourcingItems.id, { onDelete: 'cascade' }),
+    platform: varchar('platform', { length: 30 }).notNull().default('1688'),
+    title: text('title'),
+    candidateUrl: text('candidate_url').notNull(),
+    imageUrl: text('image_url'),
+    priceText: varchar('price_text', { length: 100 }),
+    supplierName: varchar('supplier_name', { length: 200 }),
+    matchScore: integer('match_score'),
+    isSelected: boolean('is_selected').notNull().default(false),
+    memo: text('memo'),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('sourcing_candidates_item_created_idx').on(table.itemId, table.createdAt),
+    index('sourcing_candidates_user_created_idx').on(table.userId, table.createdAt),
+  ],
+)

@@ -56,6 +56,8 @@ const ROUTE_LABELS: Record<string, string> = {
   '/analytics/rocket-outbound': '로켓배송 출고',
   '/analytics/short-meeting': '숏미팅',
   '/operations/deal-calendar': '딜 캘린더',
+  '/operations/sourcing': '소싱',
+  '/operations/ai-accounts': 'AI 계정공유',
   '/settings': '설정',
   '/settings/account': '계정 설정',
   '/settings/company': '회사 설정',

@@ -94,6 +94,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - `견적서` belongs under the `운영` category.
 - `AI 계정공유` belongs under the `운영` category.
+- `소싱` belongs under the `운영` category.
+- Coupang sourcing data is for internal product research only. Prefer user-triggered capture of the currently viewed product or official APIs over large automated Coupang crawling.
+- Coupang product images may be stored only as internal sourcing references. Do not expose copied Coupang images as public product assets.
+- The sourcing workflow should record Coupang source products first, then attach one or more 1688 candidate URLs/images, and require a human-selected candidate before treating a 1688 URL as confirmed.
 - AI account sharing tracks accounts by account name, account ID, current user(s), status, and limits. Status changes such as `사용시작`, `사용종료`, `사용종료(5시간초과)`, and `사용종료(주간초과)` must be logged as memos.
 - Multiple current users may use one AI account at the same time, and user start/end events must be independent rather than merged into one shared selection state.
 - If all current users end usage, the account status becomes `비어 있음`. If any usage ends due to a 5-hour or weekly limit, the visible status should indicate `한도 초과`.

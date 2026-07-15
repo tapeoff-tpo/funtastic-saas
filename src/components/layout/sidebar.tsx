@@ -22,6 +22,7 @@ import {
   ChevronsLeft,
   Download,
   Star,
+  Search,
   Headphones,
   MessageSquareText,
   Boxes,
@@ -142,6 +143,7 @@ export const navSections: NavSection[] = [
     title: '운영',
     items: [
       { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
+      { href: '/operations/sourcing', label: '소싱', icon: Search },
       { href: '/operations/ai-accounts', label: 'AI 계정공유', icon: Bot },
       { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
     ],

@@ -4,6 +4,10 @@ const EXTENSION_SOURCE = 'funtastic-coupang-sourcing-extension'
 const LOCAL_SOURCING_URL = 'http://localhost:3000/operations/sourcing'
 const PROD_SOURCING_URL = 'https://funtastic-saas-vercel.vercel.app/operations/sourcing'
 const MAX_PENDING = 50
+const FEATURES = {
+  coupangCapture: true,
+  image1688Search: true,
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void handleMessage(message, sender)
@@ -44,7 +48,7 @@ async function handleMessage(message, sender) {
 
   if (message.type === 'FUNTASTIC_COUPANG_GET_PENDING') {
     const captures = await getPendingCaptures()
-    return { ok: true, captures, pendingCount: captures.length }
+    return { ok: true, captures, pendingCount: captures.length, features: FEATURES }
   }
 
   if (message.type === 'FUNTASTIC_COUPANG_CAPTURE_SAVED') {
@@ -54,7 +58,7 @@ async function handleMessage(message, sender) {
 
   if (message.type === 'FUNTASTIC_COUPANG_GET_STATUS') {
     const captures = await getPendingCaptures()
-    return { ok: true, pendingCount: captures.length }
+    return { ok: true, pendingCount: captures.length, features: FEATURES }
   }
 
   if (message.type === 'FUNTASTIC_1688_SOURCING_START') {

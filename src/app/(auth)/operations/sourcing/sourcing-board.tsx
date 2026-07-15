@@ -123,10 +123,18 @@ export function SourcingBoard({ items, statusLabels }: Props) {
   const [statusFilter, setStatusFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [extensionConnected, setExtensionConnected] = useState(false)
+  const [supports1688Search, setSupports1688Search] = useState(false)
   const [searching1688Id, setSearching1688Id] = useState<string | null>(null)
   const processedCaptureIds = useRef<Set<string>>(new Set())
+  const searchTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
 
   useEffect(() => {
+    function clearSearchTimeout() {
+      if (!searchTimeoutRef.current) return
+      window.clearTimeout(searchTimeoutRef.current)
+      searchTimeoutRef.current = null
+    }
+
     async function saveCapture(capture: CoupangCapturePayload) {
       const captureId = capture.captureId || `${capture.sourceUrl || ''}|${capture.sourceTitle}`
       if (!capture.sourceTitle || processedCaptureIds.current.has(captureId)) return
@@ -204,6 +212,7 @@ export function SourcingBoard({ items, statusLabels }: Props) {
 
       if (message.type === 'FUNTASTIC_COUPANG_PONG') {
         setExtensionConnected(true)
+        setSupports1688Search(Boolean(message.features?.image1688Search))
         if (Number(message.pendingCount) > 0) {
           window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_GET_PENDING' }, window.location.origin)
         }
@@ -228,6 +237,7 @@ export function SourcingBoard({ items, statusLabels }: Props) {
       }
 
       if (message.type === 'FUNTASTIC_1688_SOURCING_ACK') {
+        clearSearchTimeout()
         setExtensionConnected(true)
         toast.success('1688 이미지검색을 열었습니다.')
         return
@@ -240,6 +250,7 @@ export function SourcingBoard({ items, statusLabels }: Props) {
       }
 
       if (message.type === 'FUNTASTIC_1688_SOURCING_ERROR') {
+        clearSearchTimeout()
         setSearching1688Id(null)
         toast.error(message.message || '1688 이미지검색을 시작하지 못했습니다.')
       }
@@ -251,7 +262,10 @@ export function SourcingBoard({ items, statusLabels }: Props) {
       window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_GET_PENDING' }, window.location.origin)
     }, 500)
 
-    return () => window.removeEventListener('message', handleMessage)
+    return () => {
+      clearSearchTimeout()
+      window.removeEventListener('message', handleMessage)
+    }
   }, [router])
 
   const filteredItems = useMemo(() => {
@@ -295,9 +309,18 @@ export function SourcingBoard({ items, statusLabels }: Props) {
       toast.error('쿠팡 소싱 확장프로그램을 새로고침한 뒤 다시 시도해 주세요.')
       return
     }
+    if (!supports1688Search) {
+      toast.error('확장프로그램을 최신 버전으로 새로고침해야 1688 이미지검색을 쓸 수 있습니다.')
+      return
+    }
 
     const searchId = `1688:${item.id}:${Date.now()}`
     setSearching1688Id(item.id)
+    if (searchTimeoutRef.current) window.clearTimeout(searchTimeoutRef.current)
+    searchTimeoutRef.current = window.setTimeout(() => {
+      setSearching1688Id((current) => current === item.id ? null : current)
+      toast.error('1688 이미지검색이 시작되지 않았습니다. 확장프로그램을 새로고침해 주세요.')
+    }, 8_000)
     window.postMessage({
       source: PAGE_SOURCE,
       type: 'FUNTASTIC_1688_SOURCING_START',

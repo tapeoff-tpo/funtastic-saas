@@ -16,6 +16,7 @@ window.addEventListener('message', (event) => {
           type: 'FUNTASTIC_COUPANG_PONG',
           version: chrome.runtime.getManifest().version,
           pendingCount: response?.pendingCount || 0,
+          features: response?.features || {},
         }, window.location.origin)
       })
     } catch {

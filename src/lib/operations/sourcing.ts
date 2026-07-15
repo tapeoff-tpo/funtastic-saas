@@ -133,22 +133,43 @@ export async function createSourcingItem(input: {
   await ensureSourcingTables()
   const sourceTitle = input.sourceTitle.trim()
   if (!sourceTitle) return { error: '상품명을 입력해 주세요.' as const }
+  const sourceUrl = cleanText(input.sourceUrl)
+  const values = {
+    sourcePlatform: 'coupang',
+    sourceTitle,
+    sourceUrl,
+    imageUrl: cleanText(input.imageUrl),
+    category: cleanText(input.category),
+    sourceRank: cleanNumber(input.sourceRank),
+    sourcePrice: cleanNumber(input.sourcePrice),
+    keyword: cleanText(input.keyword),
+    memo: cleanText(input.memo),
+    rawData: {},
+    updatedAt: new Date(),
+  }
+
+  if (sourceUrl) {
+    const [existing] = await db
+      .select({ id: sourcingItems.id })
+      .from(sourcingItems)
+      .where(and(eq(sourcingItems.userId, input.userId), eq(sourcingItems.sourceUrl, sourceUrl)))
+      .limit(1)
+
+    if (existing) {
+      await db
+        .update(sourcingItems)
+        .set(values)
+        .where(and(eq(sourcingItems.userId, input.userId), eq(sourcingItems.id, existing.id)))
+      return { id: existing.id, updated: true }
+    }
+  }
 
   const [row] = await db
     .insert(sourcingItems)
     .values({
       userId: input.userId,
-      sourcePlatform: 'coupang',
-      sourceTitle,
-      sourceUrl: cleanText(input.sourceUrl),
-      imageUrl: cleanText(input.imageUrl),
-      category: cleanText(input.category),
-      sourceRank: cleanNumber(input.sourceRank),
-      sourcePrice: cleanNumber(input.sourcePrice),
-      keyword: cleanText(input.keyword),
       status: 'captured',
-      memo: cleanText(input.memo),
-      rawData: {},
+      ...values,
     })
     .returning({ id: sourcingItems.id })
 

@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Funtastic Coupang Sourcing Capture",
+  "description": "쿠팡에서 본 상품을 Funtastic SaaS 소싱탭에 저장합니다.",
+  "version": "0.1.0",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.coupang.com/*",
+    "https://*.coupang.com/*",
+    "https://funtastic-saas-vercel.vercel.app/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "쿠팡 소싱 저장"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.coupang.com/*",
+        "https://*.coupang.com/*"
+      ],
+      "js": ["coupang-capture.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://funtastic-saas-vercel.vercel.app/*",
+        "http://localhost:3000/*"
+      ],
+      "js": ["saas-bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

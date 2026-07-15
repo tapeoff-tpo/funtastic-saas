@@ -1,7 +1,9 @@
 'use client'
 
-import { type CSSProperties, useMemo, useState } from 'react'
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Check, ExternalLink, Image as ImageIcon, Link2, Plus, Search, Star } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -51,6 +53,21 @@ type Props = {
   statusLabels: Record<string, string>
 }
 
+type CoupangCapturePayload = {
+  captureId?: string
+  sourceTitle: string
+  sourceUrl?: string | null
+  imageUrl?: string | null
+  category?: string | null
+  sourceRank?: number | null
+  sourcePrice?: number | null
+  keyword?: string | null
+  memo?: string | null
+}
+
+const PAGE_SOURCE = 'funtastic-saas'
+const EXTENSION_SOURCE = 'funtastic-coupang-sourcing-extension'
+
 const STATUS_TONE: Record<string, string> = {
   captured: 'bg-slate-50 text-slate-700 ring-slate-200',
   searching: 'bg-blue-50 text-blue-700 ring-blue-200',
@@ -92,9 +109,89 @@ function StatusBadge({ status, labels }: { status: string; labels: Record<string
 }
 
 export function SourcingBoard({ items, statusLabels }: Props) {
+  const router = useRouter()
   const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [query, setQuery] = useState('')
+  const [extensionConnected, setExtensionConnected] = useState(false)
+  const processedCaptureIds = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    async function saveCapture(capture: CoupangCapturePayload) {
+      const captureId = capture.captureId || `${capture.sourceUrl || ''}|${capture.sourceTitle}`
+      if (!capture.sourceTitle || processedCaptureIds.current.has(captureId)) return
+      processedCaptureIds.current.add(captureId)
+
+      try {
+        const response = await fetch('/api/operations/sourcing/capture', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceTitle: capture.sourceTitle,
+            sourceUrl: capture.sourceUrl || null,
+            imageUrl: capture.imageUrl || null,
+            category: capture.category || null,
+            sourceRank: capture.sourceRank ?? null,
+            sourcePrice: capture.sourcePrice ?? null,
+            keyword: capture.keyword || null,
+            memo: capture.memo || null,
+          }),
+        })
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok) throw new Error(result.error || '쿠팡 상품을 저장하지 못했습니다.')
+
+        window.postMessage({
+          source: PAGE_SOURCE,
+          type: 'FUNTASTIC_COUPANG_CAPTURE_SAVED',
+          captureId,
+          itemId: result.id,
+        }, window.location.origin)
+        toast.success(result.updated ? '쿠팡 소싱 상품을 갱신했습니다.' : '쿠팡 소싱 상품을 저장했습니다.')
+        router.refresh()
+      } catch (error) {
+        processedCaptureIds.current.delete(captureId)
+        toast.error(error instanceof Error ? error.message : '쿠팡 상품 저장에 실패했습니다.')
+      }
+    }
+
+    function handleMessage(event: MessageEvent) {
+      if (event.source !== window || event.origin !== window.location.origin) return
+      const message = event.data
+      if (!message || message.source !== EXTENSION_SOURCE || typeof message.type !== 'string') return
+
+      if (message.type === 'FUNTASTIC_COUPANG_PONG') {
+        setExtensionConnected(true)
+        if (Number(message.pendingCount) > 0) {
+          window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_GET_PENDING' }, window.location.origin)
+        }
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_COUPANG_CAPTURED' && message.capture) {
+        setExtensionConnected(true)
+        void saveCapture(message.capture)
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_COUPANG_PENDING' && Array.isArray(message.captures)) {
+        setExtensionConnected(true)
+        for (const capture of message.captures) void saveCapture(capture)
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_COUPANG_ERROR') {
+        toast.error(message.message || '쿠팡 소싱 확장프로그램 오류가 발생했습니다.')
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_PING' }, window.location.origin)
+    window.setTimeout(() => {
+      window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_GET_PENDING' }, window.location.origin)
+    }, 500)
+
+    return () => window.removeEventListener('message', handleMessage)
+  }, [router])
 
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
@@ -159,6 +256,14 @@ export function SourcingBoard({ items, statusLabels }: Props) {
                 <option key={value} value={value}>{label}</option>
               ))}
             </select>
+            <span className={cn(
+              'inline-flex h-8 items-center rounded-full px-3 text-xs font-medium ring-1',
+              extensionConnected
+                ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+                : 'bg-muted text-muted-foreground ring-border',
+            )}>
+              쿠팡 확장 {extensionConnected ? '연결됨' : '대기'}
+            </span>
           </div>
         </div>
 

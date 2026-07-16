@@ -16,6 +16,14 @@ const PRODUCT_GROUP_MOQ_RULES = [
   { productName: '린블 아기옷 원형 건조대', minimumOrderQuantity: 200, roundingUnit: 10 },
 ] as const
 
+const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
+  '\uC138\uC81C',
+  '\uC138\uD0C1\uBE44\uB204',
+  '\uC138\uCC99\uC81C',
+  '\uC720\uC5F0\uC81C',
+  '\uD45C\uBC31\uC81C',
+] as const
+
 export type PurchaseRecommendationInput = {
   averageMonthlyOutgoing: number
   currentMonthOutgoing: number
@@ -48,6 +56,11 @@ export type PurchaseBudgetCandidate = {
 }
 
 type AssessedPurchaseRow = ReturnType<typeof buildAssessedPurchaseRow>
+
+export function isDomesticPurchaseProduct(productName: string | null | undefined) {
+  const normalizedName = productName?.trim() ?? ''
+  return DOMESTIC_PURCHASE_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
+}
 
 export function calculateStableMonthlyOutgoing(input: {
   currentMonthOutgoing: number
@@ -255,19 +268,23 @@ export async function generatePurchaseRecommendations(input: {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }
   }
 
+  const recommendationInventoryRows = inventoryRows.filter(
+    (row) => !isDomesticPurchaseProduct(row.productName),
+  )
+
   const [outgoingMetricsBySku, productCostRows] = await Promise.all([
-    getSkuOutgoingMetrics(input.userId, inventoryRows.map((row) => row.sku), now),
+    getSkuOutgoingMetrics(input.userId, recommendationInventoryRows.map((row) => row.sku), now),
     db.select({
       sku: products.internalSku,
       unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
       unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
     }).from(products).where(and(
       eq(products.userId, input.userId),
-      inArray(products.internalSku, inventoryRows.map((row) => row.sku)),
+      inArray(products.internalSku, recommendationInventoryRows.map((row) => row.sku)),
     )),
   ])
   const productCostsBySku = new Map(productCostRows.map((row) => [row.sku, row]))
-  const assessedRows = inventoryRows.map((row) => {
+  const assessedRows = recommendationInventoryRows.map((row) => {
     const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
     const currentMonthOutgoing = outgoingMetrics?.currentMonthOutgoing ?? 0
     const averageMonthlyOutgoing = outgoingMetrics?.threeMonthAverageOutgoing ?? 0
@@ -406,6 +423,7 @@ export async function generatePurchaseRecommendations(input: {
       replaced: replaceableRows.length,
       skipped: inventoryRows.length - allocation.items.length,
       evaluated: inventoryRows.length,
+      domesticPurchaseExcluded: inventoryRows.length - recommendationInventoryRows.length,
       targetStockMonths,
       budgetKrw,
       spentBudgetKrw: allocation.spentBudgetKrw,

@@ -4,7 +4,21 @@ import {
   calculatePurchaseRecommendationWithSpikeGuard,
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
+  isDomesticPurchaseProduct,
 } from './purchase-recommendations'
+
+describe('domestic purchase product exclusions', () => {
+  it('excludes detergent and laundry soap products from China purchase recommendations', () => {
+    expect(isDomesticPurchaseProduct('UD \uBB34\uD5A5 1\uC885 \uC8FC\uBC29\uC138\uC81C')).toBe(true)
+    expect(isDomesticPurchaseProduct('\uC2A4\uD2F1\uD615 \uC138\uD0C1\uBE44\uB204')).toBe(true)
+    expect(isDomesticPurchaseProduct('TD \uC6B4\uB3D9\uBCF5\uC138\uC81C')).toBe(true)
+  })
+
+  it('keeps related non-detergent products eligible', () => {
+    expect(isDomesticPurchaseProduct('\uC8FC\uBC29\uC6A9 \uC218\uC138\uBBF8')).toBe(false)
+    expect(isDomesticPurchaseProduct('\uD38C\uD504 \uBD80\uC790\uC7AC')).toBe(false)
+  })
+})
 
 describe('stable monthly outgoing', () => {
   it('removes a sudden current-month spike from recommendation demand', () => {

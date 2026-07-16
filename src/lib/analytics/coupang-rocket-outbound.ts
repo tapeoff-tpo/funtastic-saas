@@ -30,7 +30,7 @@ type MetricRow = CoupangRocketOutgoingMetrics & {
   internalSku: string
 }
 
-type ProductMatcher = {
+export type CoupangRocketOutboundSkuMatcher = {
   skuByCode: Map<string, string | null>
   skuByName: Map<string, string | null>
 }
@@ -142,7 +142,7 @@ export async function importCoupangRocketOutboundBatch(input: {
   }
 
   const prepared = mergeDuplicateSourceRows(parsed.validRows.map((row) => prepareImportedLine(row, matcher)))
-  const matchedRows = parsed.validRows.filter((row) => matchSku(row, matcher) !== null).length
+  const matchedRows = parsed.validRows.filter((row) => matchCoupangRocketOutboundSku(row, matcher) !== null).length
   const unmatchedRows = parsed.validRows.length - matchedRows
   const duplicateRows = parsed.validRows.length - prepared.length
   const dates = prepared.map((line) => line.shipmentDate).sort()
@@ -277,7 +277,7 @@ export async function getCoupangRocketOutgoingMetrics(input: {
   ]))
 }
 
-async function getProductMatcher(userId: string): Promise<ProductMatcher> {
+async function getProductMatcher(userId: string): Promise<CoupangRocketOutboundSkuMatcher> {
   const [productRows, variantRows] = await Promise.all([
     db.select({
       id: products.id,
@@ -290,7 +290,6 @@ async function getProductMatcher(userId: string): Promise<ProductMatcher> {
     )),
     db.select({
       variantSku: productVariants.sku,
-      internalSku: products.internalSku,
     }).from(productVariants)
       .innerJoin(products, eq(productVariants.productId, products.id))
       .where(and(
@@ -309,12 +308,12 @@ async function getProductMatcher(userId: string): Promise<ProductMatcher> {
     addUniqueMatch(skuByName, normalizeName(readEsaValue(row.metadata, '품목명')), row.internalSku)
   }
   for (const row of variantRows) {
-    addUniqueMatch(skuByCode, normalizeCode(row.variantSku), row.internalSku)
+    addUniqueMatch(skuByCode, normalizeCode(row.variantSku), row.variantSku)
   }
   return { skuByCode, skuByName }
 }
 
-function prepareImportedLine(row: ParsedCoupangRocketOutboundRow, matcher: ProductMatcher): ImportedRocketOutboundLine {
+function prepareImportedLine(row: ParsedCoupangRocketOutboundRow, matcher: CoupangRocketOutboundSkuMatcher): ImportedRocketOutboundLine {
   const sourceOrderId = row.sourceOrderId ?? `row:${row.rowNumber}`
   const identity = row.sourceSku ?? row.productName ?? `row:${row.rowNumber}`
   return {
@@ -324,7 +323,7 @@ function prepareImportedLine(row: ParsedCoupangRocketOutboundRow, matcher: Produ
     sourceOrderId,
     sourceSku: row.sourceSku,
     productName: row.productName,
-    sku: matchSku(row, matcher),
+    sku: matchCoupangRocketOutboundSku(row, matcher),
     quantity: row.quantity!,
     sourceKey: createSourceKey(row.shipmentDate!, sourceOrderId, identity),
     rawData: row.rawData,
@@ -349,9 +348,12 @@ function mergeDuplicateSourceRows(lines: ImportedRocketOutboundLine[]) {
   return [...merged.values()]
 }
 
-function matchSku(row: ParsedCoupangRocketOutboundRow, matcher: ProductMatcher) {
-  const codeMatch = matcher.skuByCode.get(normalizeCode(row.sourceSku))
-  if (codeMatch) return codeMatch
+export function matchCoupangRocketOutboundSku(
+  row: Pick<ParsedCoupangRocketOutboundRow, 'sourceSku' | 'productName'>,
+  matcher: CoupangRocketOutboundSkuMatcher,
+) {
+  const sourceSku = normalizeCode(row.sourceSku)
+  if (sourceSku) return matcher.skuByCode.get(sourceSku) ?? null
   return matcher.skuByName.get(normalizeName(row.productName)) ?? null
 }
 

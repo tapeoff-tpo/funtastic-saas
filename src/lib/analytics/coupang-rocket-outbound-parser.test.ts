@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
+import { matchCoupangRocketOutboundSku } from './coupang-rocket-outbound'
 import { parseCoupangRocketOutboundWorkbook } from './coupang-rocket-outbound-parser'
 
 describe('parseCoupangRocketOutboundWorkbook', () => {
@@ -73,5 +74,38 @@ describe('parseCoupangRocketOutboundWorkbook', () => {
       productName: '내부 품목명',
       quantity: 3,
     }))
+  })
+})
+
+describe('matchCoupangRocketOutboundSku', () => {
+  const matcher = {
+    skuByCode: new Map<string, string | null>([
+      ['102436', '102436'],
+      ['102436-0001', '102436-0001'],
+    ]),
+    skuByName: new Map<string, string | null>([
+      ['sample product', '102436'],
+    ]),
+  }
+
+  it('keeps an exact option SKU instead of collapsing it to its parent product code', () => {
+    expect(matchCoupangRocketOutboundSku({
+      sourceSku: '102436-0001',
+      productName: 'Sample Product',
+    }, matcher)).toBe('102436-0001')
+  })
+
+  it('does not apply a name-based parent match when a supplied option SKU is unknown', () => {
+    expect(matchCoupangRocketOutboundSku({
+      sourceSku: 'UNKNOWN-0001',
+      productName: 'Sample Product',
+    }, matcher)).toBeNull()
+  })
+
+  it('uses a product-name match only when the source file has no SKU column value', () => {
+    expect(matchCoupangRocketOutboundSku({
+      sourceSku: null,
+      productName: 'Sample Product',
+    }, matcher)).toBe('102436')
   })
 })

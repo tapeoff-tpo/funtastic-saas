@@ -24,6 +24,9 @@ const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
   '\uD45C\uBC31\uC81C',
 ] as const
 
+const DEFAULT_PURCHASE_MINIMUM_QUANTITY = 10
+const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
+
 export type PurchaseRecommendationInput = {
   averageMonthlyOutgoing: number
   currentMonthOutgoing: number
@@ -53,6 +56,8 @@ export type PurchaseBudgetCandidate = {
   effectiveMonthlyOutgoing: number
   unitCostKrw: number | null
   moqProductGroupName?: string | null
+  purchaseMinimumQuantity?: number | null
+  purchaseRoundingUnit?: number | null
 }
 
 type AssessedPurchaseRow = ReturnType<typeof buildAssessedPurchaseRow>
@@ -60,6 +65,16 @@ type AssessedPurchaseRow = ReturnType<typeof buildAssessedPurchaseRow>
 export function isDomesticPurchaseProduct(productName: string | null | undefined) {
   const normalizedName = productName?.trim() ?? ''
   return DOMESTIC_PURCHASE_PRODUCT_KEYWORDS.some((keyword) => normalizedName.includes(keyword))
+}
+
+export function applyPurchaseMinimumQuantity(recommendedQuantity: number) {
+  const normalizedQuantity = Math.max(0, Math.trunc(finiteNumber(recommendedQuantity)))
+  if (normalizedQuantity === 0) return 0
+
+  return Math.max(
+    DEFAULT_PURCHASE_MINIMUM_QUANTITY,
+    roundUpToUnit(normalizedQuantity, DEFAULT_PURCHASE_ROUNDING_UNIT),
+  )
 }
 
 export function calculateStableMonthlyOutgoing(input: {
@@ -128,9 +143,12 @@ export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
       0,
       Math.floor((budgetKrw - spentBudgetKrw) / candidate.unitCostKrw),
     )
-    const allocatedQuantity = Math.min(candidate.recommendedQuantity, affordableQuantity)
+    const roundingUnit = Math.max(1, Math.trunc(finiteNumber(candidate.purchaseRoundingUnit ?? 1)))
+    const minimumQuantity = Math.max(1, Math.trunc(finiteNumber(candidate.purchaseMinimumQuantity ?? 1)))
+    const roundedAffordableQuantity = Math.floor(affordableQuantity / roundingUnit) * roundingUnit
+    const allocatedQuantity = Math.min(candidate.recommendedQuantity, roundedAffordableQuantity)
     if (allocatedQuantity < candidate.recommendedQuantity) budgetLimitedCount += 1
-    if (allocatedQuantity <= 0) continue
+    if (allocatedQuantity < minimumQuantity) continue
 
     items.push({ ...candidate, allocatedQuantity })
     spentBudgetKrw += allocatedQuantity * candidate.unitCostKrw
@@ -379,7 +397,9 @@ export async function generatePurchaseRecommendations(input: {
         stockCoverageMonths: calculation.stockCoverageMonths,
       }
     })
-    const recommendationCandidates = applyProductGroupMoq(adjustedRows).filter(
+    const recommendationCandidates = applyPurchaseMinimumQuantities(
+      applyProductGroupMoq(adjustedRows),
+    ).filter(
       (item) => item.recommendedQuantity > 0,
     )
     const allocation = budgetKrw === null
@@ -477,11 +497,14 @@ export async function generatePurchaseRecommendations(input: {
           targetStockQuantity: item.calculation.targetStockQuantity,
           originalRecommendedQuantity: item.calculation.originalRecommendedQuantity,
           baseRecommendedQuantity: item.baseRecommendedQuantity,
-          moqAdjustedQuantity: item.recommendedQuantity,
+          moqAdjustedQuantity: item.moqAdjustedQuantity,
           moqProductGroupName: item.moqProductGroupName,
           moqMinimumOrderQuantity: item.moqMinimumOrderQuantity,
           moqRoundingUnit: item.moqRoundingUnit,
           moqAddedQuantity: item.moqAddedQuantity,
+          purchaseMinimumQuantity: item.purchaseMinimumQuantity,
+          purchaseRoundingUnit: item.purchaseRoundingUnit,
+          purchaseMinimumAdjustedQuantity: item.purchaseMinimumAdjustedQuantity,
           spikeGuardAdjustedToMinimum: item.calculation.spikeGuardAdjustedToMinimum,
           allocatedQuantity: item.allocatedQuantity,
           unitCostYuan: item.unitCostYuan,
@@ -582,7 +605,25 @@ function applyProductGroupMoq<T extends AssessedPurchaseRow & {
     }
   }
 
-  return enriched
+  return enriched.map((item) => ({
+    ...item,
+    moqAdjustedQuantity: item.recommendedQuantity,
+  }))
+}
+
+function applyPurchaseMinimumQuantities<T extends {
+  recommendedQuantity: number
+}>(items: T[]) {
+  return items.map((item) => {
+    const purchaseMinimumAdjustedQuantity = applyPurchaseMinimumQuantity(item.recommendedQuantity)
+    return {
+      ...item,
+      purchaseMinimumQuantity: DEFAULT_PURCHASE_MINIMUM_QUANTITY,
+      purchaseRoundingUnit: DEFAULT_PURCHASE_ROUNDING_UNIT,
+      purchaseMinimumAdjustedQuantity,
+      recommendedQuantity: purchaseMinimumAdjustedQuantity,
+    }
+  })
 }
 
 function purchaseMoqDemandScore(item: AssessedPurchaseRow) {

@@ -1,11 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
+  applyPurchaseMinimumQuantity,
   allocatePurchaseBudget,
   calculatePurchaseRecommendationWithSpikeGuard,
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
   isDomesticPurchaseProduct,
 } from './purchase-recommendations'
+
+describe('purchase minimum quantities', () => {
+  it('applies a minimum of 10 and rounds up to 10-unit purchase quantities', () => {
+    expect(applyPurchaseMinimumQuantity(0)).toBe(0)
+    expect(applyPurchaseMinimumQuantity(1)).toBe(10)
+    expect(applyPurchaseMinimumQuantity(9)).toBe(10)
+    expect(applyPurchaseMinimumQuantity(10)).toBe(10)
+    expect(applyPurchaseMinimumQuantity(11)).toBe(20)
+    expect(applyPurchaseMinimumQuantity(27)).toBe(30)
+  })
+})
 
 describe('domestic purchase product exclusions', () => {
   it('excludes detergent and laundry soap products from China purchase recommendations', () => {
@@ -101,6 +113,21 @@ describe('purchase budget allocation', () => {
 
     expect(result.items.some((item) => item.sku === 'missing-cost')).toBe(false)
     expect(result.missingCostExcluded).toBe(1)
+  })
+
+  it('does not allocate below a purchase minimum or outside its rounding unit', () => {
+    const candidate = [{
+      sku: 'minimum-10',
+      recommendedQuantity: 20,
+      stockCoverageMonths: 0,
+      effectiveMonthlyOutgoing: 10,
+      unitCostKrw: 1000,
+      purchaseMinimumQuantity: 10,
+      purchaseRoundingUnit: 10,
+    }]
+
+    expect(allocatePurchaseBudget(candidate, 9000).items).toHaveLength(0)
+    expect(allocatePurchaseBudget(candidate, 15000).items[0]?.allocatedQuantity).toBe(10)
   })
 
   it('allocates an MOQ product group only when the full group fits the budget', () => {

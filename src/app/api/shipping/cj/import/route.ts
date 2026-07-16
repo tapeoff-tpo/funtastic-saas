@@ -129,6 +129,8 @@ export async function POST(req: NextRequest) {
 
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidatePath('/analytics')
+  revalidateTag('analytics', { expire: 0 })
 
   return NextResponse.json({ matched, unmatched, skipped, unmatchedRows })
 }

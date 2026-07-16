@@ -31,6 +31,7 @@ export async function POST(
     revalidatePath('/analytics/sabangnet-review')
     revalidatePath('/orders')
     revalidateTag('orders', 'max')
+    revalidateTag('analytics', { expire: 0 })
     return NextResponse.json(result)
   } catch (error) {
     console.error('[SabangnetReviewConfirm] Error:', error)

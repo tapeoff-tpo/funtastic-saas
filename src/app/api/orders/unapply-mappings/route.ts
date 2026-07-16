@@ -185,6 +185,8 @@ export async function POST(req: NextRequest) {
   revalidateTag('product-mappings', 'max')
   revalidateTag('orders', 'max')
   revalidatePath('/orders')
+  revalidatePath('/analytics')
+  revalidateTag('analytics', { expire: 0 })
 
   return NextResponse.json(result)
 }

@@ -140,6 +140,7 @@ export default async function AnalyticsPage({
           <TabLink href={analyticsHref('settings', month)} active={tab === 'settings'}>설정</TabLink>
           <TopNavLink href="/analytics/price-table">판매가 테이블</TopNavLink>
           <TopNavLink href="/analytics/sabangnet-review">사방넷 검수</TopNavLink>
+          <TopNavLink href="/analytics/rocket-outbound">로켓배송 출고</TopNavLink>
           <TopNavLink href="/analytics/short-meeting">숏미팅</TopNavLink>
         </div>
       </div>

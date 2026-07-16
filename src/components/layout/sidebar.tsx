@@ -153,6 +153,7 @@ export const navSections: NavSection[] = [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
       { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
       { href: '/analytics/sabangnet-review', label: '사방넷 검수', icon: FileSpreadsheet },
+      { href: '/analytics/rocket-outbound', label: '로켓배송 출고', icon: FileSpreadsheet },
       { href: '/analytics/short-meeting', label: '숏미팅', icon: ClipboardList },
     ],
   },

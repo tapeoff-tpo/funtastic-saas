@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs'
 import { and, asc, count, desc, eq, ilike, inArray, or, sql } from 'drizzle-orm'
+import { getCoupangRocketOutgoingMetrics } from '@/lib/analytics/coupang-rocket-outbound'
 import { db } from '@/lib/db'
 import { products } from '@/lib/db/schema'
 
@@ -402,6 +403,7 @@ export async function getSkuOutgoingMetrics(
     currentMonthStart,
     previousThreeMonthStart,
     nextMonthStart,
+    previousThreeMonthDate,
     currentMonthDate,
     nextMonthDate,
   } = getOutgoingMetricWindows(now)
@@ -417,7 +419,7 @@ export async function getSkuOutgoingMetrics(
       ELSE NULL
     END
   `
-  const [storedRows, result, currentMonthReviewResult] = await Promise.all([
+  const [storedRows, result, currentMonthReviewResult, rocketOutgoingMetrics] = await Promise.all([
     db.select({
       internalSku: products.internalSku,
       metadata: products.metadata,
@@ -475,6 +477,13 @@ export async function getSkuOutgoingMetrics(
         AND ${reviewDateExpression} < ${nextMonthDate}::date
       GROUP BY sku
     `),
+    getCoupangRocketOutgoingMetrics({
+      userId,
+      skus: uniqueSkus,
+      previousThreeMonthDate,
+      currentMonthDate,
+      nextMonthDate,
+    }),
   ])
 
   const metricsBySku = new Map(resultRows<PurchasingItemOutgoingMetricRow>(result).map((row) => [
@@ -494,6 +503,16 @@ export async function getSkuOutgoingMetrics(
   for (const row of storedRows) {
     const calculated = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
     metricsBySku.set(row.internalSku, resolveOutgoingMetrics(row.metadata, calculated))
+  }
+  // The stored average remains the established baseline; Rocket delivery is an additional source.
+  for (const [sku, rocketMetrics] of rocketOutgoingMetrics) {
+    const current = metricsBySku.get(sku) ?? emptyOutgoingMetrics()
+    metricsBySku.set(sku, {
+      currentMonthOutgoing: cleanOutgoingNumber(current.currentMonthOutgoing + rocketMetrics.currentMonthOutgoing),
+      threeMonthAverageOutgoing: cleanOutgoingNumber(
+        current.threeMonthAverageOutgoing + rocketMetrics.threeMonthAverageOutgoing,
+      ),
+    })
   }
   return metricsBySku
 }
@@ -742,6 +761,7 @@ export function getOutgoingMetricWindows(now: Date) {
     currentMonthStart: seoulMonthStart(0),
     previousThreeMonthStart: seoulMonthStart(-3),
     nextMonthStart: seoulMonthStart(1),
+    previousThreeMonthDate: monthDate(-3),
     currentMonthDate: monthDate(0),
     nextMonthDate: monthDate(1),
   }

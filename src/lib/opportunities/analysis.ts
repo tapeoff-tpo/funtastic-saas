@@ -316,8 +316,9 @@ function weightedScore(scores: OpportunityScores, config: OpportunityScoringConf
   let total = 0
   let weight = 0
   for (const key of Object.keys(config.weights) as Array<keyof OpportunityScores>) {
-    const score = scores[key].score
-    if (score == null) continue
+    // Missing evidence must not improve rank by removing a criterion's weight.
+    // Keep the visible score unverified while applying the conservative floor.
+    const score = scores[key].score ?? 1
     total += score * config.weights[key]
     weight += config.weights[key]
   }

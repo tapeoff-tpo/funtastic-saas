@@ -76,6 +76,21 @@ describe('analyzeOpportunities', () => {
     expect(result.products[0].scores.printability.evidenceLevel).toBe('unverified')
   })
 
+  it('does not let missing structural evidence inflate a candidate rank', () => {
+    const result = analyzeOpportunities({
+      products: [
+        product({ sku: 'UNKNOWN', productName: '생활용품' }),
+        product({ sku: 'SCREENED', productName: '데스크 정리 홀더' }),
+      ],
+      config: scoringConfig as OpportunityScoringConfig,
+      userId: 'test-user',
+      asOfDate: new Date('2026-01-01T00:00:00Z'),
+    })
+
+    expect(result.products[0].sku).toBe('SCREENED')
+    expect(result.products.find((item) => item.sku === 'UNKNOWN')?.scores.printability.score).toBeNull()
+  })
+
   it('does not confirm profitability when sold products have no cost basis', () => {
     const noCost = monthly(10, 9000).map((row) => ({ ...row, productCost: 0 }))
     const result = analyzeOpportunities({

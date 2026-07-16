@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { importActualShippingCosts } from '@/lib/shipping/actual-costs'
@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
     })
 
     revalidatePath('/analytics')
+    revalidateTag('analytics', { expire: 0 })
     return NextResponse.json(result)
   } catch (error) {
     console.error('actual shipping cost import error:', error)

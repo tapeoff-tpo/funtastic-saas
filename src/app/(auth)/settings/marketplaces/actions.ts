@@ -22,7 +22,7 @@ import { SsgmallAdapter } from '@/lib/marketplace/adapters/ssgmall/adapter'
 import { PlayautoEmpAdapter } from '@/lib/marketplace/adapters/playauto-emp/adapter'
 import { HyundaiHmallAdapter } from '@/lib/marketplace/adapters/hyundai-hmall/adapter'
 import { eq, and } from 'drizzle-orm'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getIntegrationMethod, getSupportedIntegrationMethods } from '@/lib/marketplace/integration-methods'
 import { saveMarketplaceBusinessSetting } from '@/lib/marketplace/business-settings'
@@ -385,6 +385,7 @@ export async function saveSalesExportSettings(
       })
       revalidatePath('/settings/market-settings')
       revalidatePath('/analytics')
+      updateTag('analytics')
       return { success: true, message: '마켓 공통 설정이 저장되었습니다.' }
     }
 
@@ -441,6 +442,7 @@ export async function saveSalesExportSettings(
   revalidatePath('/settings/marketplaces')
   revalidatePath('/settings/market-settings')
   revalidatePath('/analytics')
+  updateTag('analytics')
   return { success: true, message: '마켓 설정이 저장되었습니다.' }
 }
 

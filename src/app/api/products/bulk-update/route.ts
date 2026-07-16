@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { products, productVariants, excelImportTemplates } from '@/lib/db/schema'
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
     : '품목코드'
 
   let headerRow = 0
-  let colMap: Record<string, number> = {}
+  const colMap: Record<string, number> = {}
 
   sheet.eachRow((row, rowNum) => {
     if (headerRow) return
@@ -257,6 +258,11 @@ export async function POST(req: NextRequest) {
       newValue: r.costPrice,
     }))
   await logProductChanges(changeEntries)
+
+  if (updated > 0 || inserted > 0) {
+    revalidatePath('/analytics')
+    revalidateTag('analytics', { expire: 0 })
+  }
 
   return NextResponse.json({
     total: rows.length,

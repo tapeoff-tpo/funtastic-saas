@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { parseBoxCostRateInput, updateBoxCostRate } from '@/lib/analytics/box-costs'
 import { createClient } from '@/lib/supabase/server'
@@ -18,6 +18,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     )
     if (!updated) return NextResponse.json({ error: '박스비 설정을 찾지 못했습니다.' }, { status: 404 })
     revalidatePath('/analytics')
+    revalidateTag('analytics', { expire: 0 })
     return NextResponse.json({ rate: updated })
   } catch (error) {
     return NextResponse.json(

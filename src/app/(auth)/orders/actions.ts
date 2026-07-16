@@ -1,6 +1,6 @@
 'use server'
 
-import { revalidatePath, revalidateTag } from 'next/cache'
+import { revalidatePath, revalidateTag, updateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { claims, orders } from '@/lib/db/schema'
@@ -19,6 +19,11 @@ import type { OrderStatus } from '@/lib/orders/types'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { and, eq, inArray } from 'drizzle-orm'
 
+function revalidateOrderAnalytics() {
+  revalidatePath('/analytics')
+  updateTag('analytics')
+}
+
 /**
  * Server action: change a single order's status.
  * Wraps updateOrderStatus with cache revalidation.
@@ -30,6 +35,7 @@ export async function changeStatusAction(
   const result = await updateOrderStatus(orderId, newStatus)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -48,6 +54,7 @@ export async function holdOrderAction(
   const result = await holdOrder(orderId, trimmed)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -60,6 +67,7 @@ export async function releaseOrderAction(
   const result = await releaseOrder(orderId)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -74,6 +82,7 @@ export async function bulkChangeStatusAction(
   const result = await bulkUpdateStatus(orderIds, newStatus)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -92,6 +101,7 @@ export async function forceBulkChangeStatusAction(
   const result = await forceBulkUpdateStatus(await getWorkspaceUserId(user.id), orderIds, newStatus)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -164,6 +174,7 @@ export async function forceBulkClaimStatusAction(
 
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return { updated: inserted.length, errors }
 }
 
@@ -212,6 +223,7 @@ export async function forceBulkHoldOrdersAction(
 
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return { updated: updatedOrders.length, errors }
 }
 
@@ -230,6 +242,7 @@ export async function uploadInvoiceAction(
   const result = await registerInvoice(orderId, trackingNumber, carrierId, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -250,6 +263,7 @@ export async function bulkUploadInvoiceAction(
   const result = await bulkRegisterInvoice(orders, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -276,6 +290,7 @@ export async function copyOrderAction(
   const result = await copyOrder(orderId, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -297,6 +312,7 @@ export async function bulkDeleteOrdersAction(
   const result = await deleteOrdersForUser(orderIds, await getWorkspaceUserId(user.id))
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }
 
@@ -318,5 +334,6 @@ export async function unlockOrderSnapshotsAction(
   const result = await unlockOrderItemsForOrders(await getWorkspaceUserId(user.id), user.id, orderIds)
   revalidatePath('/orders')
   revalidateTag('orders', 'max')
+  revalidateOrderAnalytics()
   return result
 }

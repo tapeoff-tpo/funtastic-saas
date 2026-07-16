@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, revalidateTag } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createBoxCostRate, listBoxCostRates, parseBoxCostRateInput } from '@/lib/analytics/box-costs'
 import { createClient } from '@/lib/supabase/server'
@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
     const input = parseBoxCostRateInput(await req.json())
     const created = await createBoxCostRate(userId, input)
     revalidatePath('/analytics')
+    revalidateTag('analytics', { expire: 0 })
     return NextResponse.json({ rate: created })
   } catch (error) {
     return NextResponse.json(

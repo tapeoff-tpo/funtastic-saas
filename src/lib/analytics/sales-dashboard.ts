@@ -201,8 +201,8 @@ type ProfitMissingSummaryQueryRow = {
   missingPackagingOrders: string | number | null
 }
 
-type CountQueryRow = {
-  count: string | number | null
+type OrderProfitAnalysisQueryRow = OrderProfitQueryRow & ProfitMissingSummaryQueryRow & {
+  filteredTotal: string | number | null
 }
 
 type ProductProfitQueryRow = {
@@ -390,7 +390,7 @@ export async function getOrderProfitAnalysisData(
         ORDER BY (a.shipment_id = s.id) DESC, a.updated_at DESC
         LIMIT 1
       ) matched_cost ON true
-      LEFT JOIN item_summary items ON items.order_id = s.order_id
+      JOIN item_summary items ON items.order_id = s.order_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) AS package_name
       ) resolved ON true
@@ -539,86 +539,104 @@ export async function getOrderProfitAnalysisData(
     )
   `
 
-  const countResultPromise = search
-    ? db.execute<CountQueryRow>(sql`
-      ${baseQuery}
-      SELECT COUNT(*)::text AS count
-      FROM profit_rows
-      WHERE true
-      ${missingFilter}
-      ${searchFilter}
-    `)
-    : Promise.resolve<CountQueryRow[]>([])
-
-  const [summaryResult, countResult, rowsResult] = await Promise.all([
-    db.execute<ProfitMissingSummaryQueryRow>(sql`
-      ${baseQuery}
+  const analysisResult = await db.execute<OrderProfitAnalysisQueryRow>(sql`
+    ${baseQuery},
+    annotated_rows AS (
       SELECT
-        COUNT(*)::text AS "totalOrders",
+        profit_rows.*,
+        COUNT(*) OVER ()::text AS "totalOrders",
         COUNT(*) FILTER (
           WHERE NOT missing_fee
             AND NOT missing_product_cost
             AND NOT missing_actual_shipping
             AND NOT missing_packaging
-        )::text AS "completeOrders",
+        ) OVER ()::text AS "completeOrders",
         COUNT(*) FILTER (
           WHERE missing_fee OR missing_product_cost OR missing_actual_shipping OR missing_packaging
-        )::text AS "incompleteOrders",
-        COUNT(*) FILTER (WHERE missing_fee)::text AS "missingFeeOrders",
-        COUNT(*) FILTER (WHERE missing_product_cost)::text AS "missingProductCostOrders",
-        COUNT(*) FILTER (WHERE missing_actual_shipping)::text AS "missingActualShippingOrders",
-        COUNT(*) FILTER (WHERE missing_packaging)::text AS "missingPackagingOrders"
+        ) OVER ()::text AS "incompleteOrders",
+        COUNT(*) FILTER (WHERE missing_fee) OVER ()::text AS "missingFeeOrders",
+        COUNT(*) FILTER (WHERE missing_product_cost) OVER ()::text AS "missingProductCostOrders",
+        COUNT(*) FILTER (WHERE missing_actual_shipping) OVER ()::text AS "missingActualShippingOrders",
+        COUNT(*) FILTER (WHERE missing_packaging) OVER ()::text AS "missingPackagingOrders"
       FROM profit_rows
-    `),
-    countResultPromise,
-    db.execute<OrderProfitQueryRow>(sql`
-      ${baseQuery}
-      SELECT
-        order_id AS "orderId",
-        internal_no AS "internalNo",
-        marketplace_order_id AS "marketplaceOrderId",
-        marketplace_name AS "marketplaceName",
-        ordered_at AS "orderedAt",
-        product_summary AS "productSummary",
-        sku_summary AS "skuSummary",
-        package_summary AS "packageSummary",
-        tracking_summary AS "trackingSummary",
-        sales::text AS sales,
-        marketplace_fee::text AS "marketplaceFee",
-        product_cost::text AS "productCost",
-        paid_shipping_fee::text AS "paidShippingFee",
-        actual_shipping_fee::text AS "actualShippingFee",
-        box_cost::text AS "boxCost",
-        missing_fee AS "missingFee",
-        missing_product_cost AS "missingProductCost",
-        missing_actual_shipping AS "missingActualShipping",
-        missing_packaging AS "missingPackaging"
-      FROM profit_rows
-      WHERE true
-      ${missingFilter}
-      ${searchFilter}
-      ORDER BY ${sortExpression} ${sortDirection}, ordered_at DESC, internal_no DESC
-      LIMIT ${ORDER_PROFIT_PAGE_SIZE}
-      OFFSET ${offset}
-    `),
-  ])
+    )
+    SELECT
+      order_id AS "orderId",
+      internal_no AS "internalNo",
+      marketplace_order_id AS "marketplaceOrderId",
+      marketplace_name AS "marketplaceName",
+      ordered_at AS "orderedAt",
+      product_summary AS "productSummary",
+      sku_summary AS "skuSummary",
+      package_summary AS "packageSummary",
+      tracking_summary AS "trackingSummary",
+      sales::text AS sales,
+      marketplace_fee::text AS "marketplaceFee",
+      product_cost::text AS "productCost",
+      paid_shipping_fee::text AS "paidShippingFee",
+      actual_shipping_fee::text AS "actualShippingFee",
+      box_cost::text AS "boxCost",
+      missing_fee AS "missingFee",
+      missing_product_cost AS "missingProductCost",
+      missing_actual_shipping AS "missingActualShipping",
+      missing_packaging AS "missingPackaging",
+      "totalOrders",
+      "completeOrders",
+      "incompleteOrders",
+      "missingFeeOrders",
+      "missingProductCostOrders",
+      "missingActualShippingOrders",
+      "missingPackagingOrders",
+      COUNT(*) OVER ()::text AS "filteredTotal"
+    FROM annotated_rows
+    WHERE true
+    ${missingFilter}
+    ${searchFilter}
+    ORDER BY ${sortExpression} ${sortDirection}, ordered_at DESC, internal_no DESC
+    LIMIT ${ORDER_PROFIT_PAGE_SIZE}
+    OFFSET ${offset}
+  `)
 
-  const summaryRow = resultRows(summaryResult)[0]
-  const summary = toProfitMissingSummary(summaryRow)
-  const filteredTotal = search
-    ? toNumber(resultRows(countResult)[0]?.count)
-    : selectedIssue === 'fee'
-      ? summary.missingFeeOrders
-      : selectedIssue === 'product-cost'
-        ? summary.missingProductCostOrders
-        : selectedIssue === 'actual-shipping'
-          ? summary.missingActualShippingOrders
-          : selectedIssue === 'packaging'
-            ? summary.missingPackagingOrders
-            : missingOnly ? summary.incompleteOrders : summary.totalOrders
+  const analysisRows = resultRows(analysisResult)
+  let summary = toProfitMissingSummary(analysisRows[0])
+  let filteredTotal = toNumber(analysisRows[0]?.filteredTotal)
+
+  if (analysisRows.length === 0) {
+    const [summaryResult, countResult] = await Promise.all([
+      db.execute<ProfitMissingSummaryQueryRow>(sql`
+        ${baseQuery}
+        SELECT
+          COUNT(*)::text AS "totalOrders",
+          COUNT(*) FILTER (
+            WHERE NOT missing_fee
+              AND NOT missing_product_cost
+              AND NOT missing_actual_shipping
+              AND NOT missing_packaging
+          )::text AS "completeOrders",
+          COUNT(*) FILTER (
+            WHERE missing_fee OR missing_product_cost OR missing_actual_shipping OR missing_packaging
+          )::text AS "incompleteOrders",
+          COUNT(*) FILTER (WHERE missing_fee)::text AS "missingFeeOrders",
+          COUNT(*) FILTER (WHERE missing_product_cost)::text AS "missingProductCostOrders",
+          COUNT(*) FILTER (WHERE missing_actual_shipping)::text AS "missingActualShippingOrders",
+          COUNT(*) FILTER (WHERE missing_packaging)::text AS "missingPackagingOrders"
+        FROM profit_rows
+      `),
+      db.execute<{ count: string | number | null }>(sql`
+        ${baseQuery}
+        SELECT COUNT(*)::text AS count
+        FROM profit_rows
+        WHERE true
+        ${missingFilter}
+        ${searchFilter}
+      `),
+    ])
+    summary = toProfitMissingSummary(resultRows(summaryResult)[0])
+    filteredTotal = toNumber(resultRows(countResult)[0]?.count)
+  }
 
   return {
-    rows: resultRows(rowsResult).map(toOrderProfitRow),
+    rows: analysisRows.map(toOrderProfitRow),
     summary,
     page,
     pageSize: ORDER_PROFIT_PAGE_SIZE,
@@ -649,7 +667,7 @@ export const getCachedOrderProfitAnalysisData = unstable_cache(
     direction,
   }),
   ['order-profit-analysis'],
-  { revalidate: 30 },
+  { revalidate: 30, tags: ['analytics'] },
 )
 
 export function emptyOrderProfitAnalysisData(
@@ -1018,7 +1036,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
 export const getCachedSalesDashboardData = unstable_cache(
   async (userId: string, monthKey: string) => getSalesDashboardData(userId, parseAnalyticsMonth(monthKey)),
   ['sales-dashboard'],
-  { revalidate: 30 },
+  { revalidate: 30, tags: ['analytics'] },
 )
 
 export async function getProductProfitAnalysisData(
@@ -1252,7 +1270,7 @@ export const getCachedProductProfitAnalysisData = unstable_cache(
     direction,
   }),
   ['product-profit-analysis'],
-  { revalidate: 30 },
+  { revalidate: 30, tags: ['analytics'] },
 )
 
 export function emptyProductProfitAnalysisData(now = new Date()): ProductProfitAnalysisData {

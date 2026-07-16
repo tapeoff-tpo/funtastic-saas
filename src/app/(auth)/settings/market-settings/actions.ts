@@ -1,7 +1,7 @@
 'use server'
 
 import { nanoid } from 'nanoid'
-import { revalidatePath } from 'next/cache'
+import { revalidatePath, updateTag } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
@@ -52,6 +52,7 @@ export async function createCustomMarketplace(
   revalidatePath('/settings/market-settings')
   revalidatePath('/orders')
   revalidatePath('/analytics')
+  updateTag('analytics')
   return { success: true, message: `${marketplaceName} 마켓을 추가했습니다.` }
 }
 

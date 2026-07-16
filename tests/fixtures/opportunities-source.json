@@ -1,0 +1,63 @@
+{
+  "userId": "fixture-user",
+  "asOfDate": "2026-06-30T23:59:59.999+09:00",
+  "products": [
+    {
+      "sku": "101518-0001",
+      "productName": "홀딩 후크",
+      "optionNames": ["화이트 2개입"],
+      "categoryId": "curtain-accessory",
+      "basePrice": 3900,
+      "costPrice": 900,
+      "currentStock": 420,
+      "images": [],
+      "metadata": {
+        "material": "plastic",
+        "usage": "curtain tieback"
+      },
+      "stockoutEventCount": 0,
+      "repeatBuyerRate": 0.12,
+      "monthly": [
+        { "month": "2025-07", "quantity": 820, "orderCount": 430, "sales": 3198000, "productCost": 738000, "marketplaceFee": 319800, "paidShippingFee": 0, "actualShippingFee": 420000, "boxCost": 86000, "finalProfit": 1634200, "returnOrderCount": 5 },
+        { "month": "2025-08", "quantity": 880, "orderCount": 462, "sales": 3432000, "productCost": 792000, "marketplaceFee": 343200, "paidShippingFee": 0, "actualShippingFee": 450000, "boxCost": 92400, "finalProfit": 1754400, "returnOrderCount": 4 },
+        { "month": "2025-09", "quantity": 940, "orderCount": 495, "sales": 3666000, "productCost": 846000, "marketplaceFee": 366600, "paidShippingFee": 0, "actualShippingFee": 480000, "boxCost": 99000, "finalProfit": 1874400, "returnOrderCount": 5 },
+        { "month": "2025-10", "quantity": 1020, "orderCount": 536, "sales": 3978000, "productCost": 918000, "marketplaceFee": 397800, "paidShippingFee": 0, "actualShippingFee": 520000, "boxCost": 107200, "finalProfit": 2035000, "returnOrderCount": 6 },
+        { "month": "2025-11", "quantity": 1110, "orderCount": 584, "sales": 4329000, "productCost": 999000, "marketplaceFee": 432900, "paidShippingFee": 0, "actualShippingFee": 560000, "boxCost": 116800, "finalProfit": 2220300, "returnOrderCount": 7 },
+        { "month": "2025-12", "quantity": 1190, "orderCount": 626, "sales": 4641000, "productCost": 1071000, "marketplaceFee": 464100, "paidShippingFee": 0, "actualShippingFee": 600000, "boxCost": 125200, "finalProfit": 2380700, "returnOrderCount": 6 },
+        { "month": "2026-01", "quantity": 1220, "orderCount": 642, "sales": 4758000, "productCost": 1098000, "marketplaceFee": 475800, "paidShippingFee": 0, "actualShippingFee": 620000, "boxCost": 128400, "finalProfit": 2435800, "returnOrderCount": 7 },
+        { "month": "2026-02", "quantity": 1280, "orderCount": 674, "sales": 4992000, "productCost": 1152000, "marketplaceFee": 499200, "paidShippingFee": 0, "actualShippingFee": 650000, "boxCost": 134800, "finalProfit": 2556000, "returnOrderCount": 8 },
+        { "month": "2026-03", "quantity": 1320, "orderCount": 695, "sales": 5148000, "productCost": 1188000, "marketplaceFee": 514800, "paidShippingFee": 0, "actualShippingFee": 670000, "boxCost": 139000, "finalProfit": 2636200, "returnOrderCount": 8 },
+        { "month": "2026-04", "quantity": 1340, "orderCount": 705, "sales": 5226000, "productCost": 1206000, "marketplaceFee": 522600, "paidShippingFee": 0, "actualShippingFee": 680000, "boxCost": 141000, "finalProfit": 2676400, "returnOrderCount": 9 },
+        { "month": "2026-05", "quantity": 1350, "orderCount": 711, "sales": 5265000, "productCost": 1215000, "marketplaceFee": 526500, "paidShippingFee": 0, "actualShippingFee": 685000, "boxCost": 142200, "finalProfit": 2696300, "returnOrderCount": 8 },
+        { "month": "2026-06", "quantity": 1350, "orderCount": 710, "sales": 5265000, "productCost": 1215000, "marketplaceFee": 526500, "paidShippingFee": 0, "actualShippingFee": 685000, "boxCost": 142000, "finalProfit": 2696500, "returnOrderCount": 9 }
+      ]
+    },
+    {
+      "sku": "TEST-LOW",
+      "productName": "일회용 비닐 리필",
+      "optionNames": [],
+      "categoryId": null,
+      "basePrice": 1000,
+      "costPrice": null,
+      "currentStock": 100,
+      "images": [],
+      "metadata": {},
+      "stockoutEventCount": null,
+      "repeatBuyerRate": null,
+      "monthly": [
+        { "month": "2025-07", "quantity": 30, "orderCount": 25, "sales": 30000, "productCost": 0, "marketplaceFee": 3000, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 27000, "returnOrderCount": 0 },
+        { "month": "2025-08", "quantity": 25, "orderCount": 20, "sales": 25000, "productCost": 0, "marketplaceFee": 2500, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 22500, "returnOrderCount": 0 },
+        { "month": "2025-09", "quantity": 20, "orderCount": 18, "sales": 20000, "productCost": 0, "marketplaceFee": 2000, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 18000, "returnOrderCount": 0 },
+        { "month": "2025-10", "quantity": 18, "orderCount": 16, "sales": 18000, "productCost": 0, "marketplaceFee": 1800, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 16200, "returnOrderCount": 0 },
+        { "month": "2025-11", "quantity": 15, "orderCount": 14, "sales": 15000, "productCost": 0, "marketplaceFee": 1500, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 13500, "returnOrderCount": 0 },
+        { "month": "2025-12", "quantity": 12, "orderCount": 11, "sales": 12000, "productCost": 0, "marketplaceFee": 1200, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 10800, "returnOrderCount": 0 },
+        { "month": "2026-01", "quantity": 10, "orderCount": 9, "sales": 10000, "productCost": 0, "marketplaceFee": 1000, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 9000, "returnOrderCount": 0 },
+        { "month": "2026-02", "quantity": 8, "orderCount": 7, "sales": 8000, "productCost": 0, "marketplaceFee": 800, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 7200, "returnOrderCount": 0 },
+        { "month": "2026-03", "quantity": 7, "orderCount": 6, "sales": 7000, "productCost": 0, "marketplaceFee": 700, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 6300, "returnOrderCount": 0 },
+        { "month": "2026-04", "quantity": 6, "orderCount": 5, "sales": 6000, "productCost": 0, "marketplaceFee": 600, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 5400, "returnOrderCount": 0 },
+        { "month": "2026-05", "quantity": 5, "orderCount": 4, "sales": 5000, "productCost": 0, "marketplaceFee": 500, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 4500, "returnOrderCount": 0 },
+        { "month": "2026-06", "quantity": 4, "orderCount": 4, "sales": 4000, "productCost": 0, "marketplaceFee": 400, "paidShippingFee": 0, "actualShippingFee": 0, "boxCost": 0, "finalProfit": 3600, "returnOrderCount": 0 }
+      ]
+    }
+  ]
+}

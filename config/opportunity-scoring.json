@@ -1,0 +1,98 @@
+{
+  "version": "1.0.0",
+  "weights": {
+    "demand": 20,
+    "profitability": 18,
+    "growth": 10,
+    "stability": 8,
+    "printability": 14,
+    "upgradePotential": 12,
+    "premiumPotential": 8,
+    "safetyAndLegal": 7,
+    "dataQuality": 3
+  },
+  "exclusion": {
+    "minimumPrintability": 2,
+    "minimumSafetyAndLegal": 2
+  },
+  "keywords": {
+    "printableObjects": [
+      "후크",
+      "고리",
+      "홀더",
+      "거치대",
+      "정리함",
+      "트레이",
+      "스탠드",
+      "클립",
+      "케이스",
+      "받침",
+      "걸이"
+    ],
+    "hardToPrintOrSubstitute": [
+      "전기",
+      "전자",
+      "유리",
+      "섬유",
+      "패브릭",
+      "실리콘",
+      "스테인리스",
+      "알루미늄",
+      "액체",
+      "세제",
+      "화장품"
+    ],
+    "upgradeFriendly": [
+      "후크",
+      "고리",
+      "홀더",
+      "거치대",
+      "정리",
+      "트레이",
+      "스탠드",
+      "클립",
+      "케이스",
+      "받침",
+      "걸이",
+      "수납"
+    ],
+    "lowUpgradePotential": [
+      "리필",
+      "일회용",
+      "소모품",
+      "세제",
+      "티슈",
+      "비닐",
+      "테이프"
+    ],
+    "premiumFriendly": [
+      "인테리어",
+      "데스크",
+      "주방",
+      "욕실",
+      "커튼",
+      "화분",
+      "조명",
+      "정리",
+      "수납",
+      "스탠드"
+    ],
+    "regulatedOrSafetyCritical": [
+      "의료",
+      "치료",
+      "유아",
+      "아기",
+      "어린이",
+      "식품",
+      "조리",
+      "전기",
+      "전자",
+      "화재",
+      "안전",
+      "보호",
+      "등반",
+      "자동차",
+      "하중"
+    ]
+  }
+}

@@ -1203,8 +1203,9 @@ function formatPlainPercent(value: number): string {
   return `${(Math.round(value * 10) / 10).toLocaleString('ko-KR')}%`
 }
 
-function formatDate(value: Date): string {
-  if (Number.isNaN(value.getTime())) return '-'
+function formatDate(value: Date | string): string {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
 
   return new Intl.DateTimeFormat('ko-KR', {
     month: '2-digit',
@@ -1212,5 +1213,5 @@ function formatDate(value: Date): string {
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
-  }).format(value)
+  }).format(date)
 }

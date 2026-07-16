@@ -54,6 +54,7 @@ export default async function AnalyticsPage({
     orderSearch?: string
     orderSort?: string
     orderDirection?: string
+    view?: string
   }>
 }) {
   const user = await getCurrentUser()
@@ -70,6 +71,8 @@ export default async function AnalyticsPage({
   const orderSearch = params?.orderSearch?.trim() ?? ''
   const orderSort = parseOrderProfitSort(params?.orderSort)
   const orderDirection: SortDirection = params?.orderDirection === 'asc' ? 'asc' : 'desc'
+  const shouldLoadOrderProfit = tab === 'orders' && params?.view === '1'
+  const shouldLoadProductProfit = tab === 'products' && params?.view === '1'
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const dashboard = tab === 'dashboard'
     ? await getCachedSalesDashboardData(workspaceUserId, month).catch((error) => {
@@ -77,7 +80,7 @@ export default async function AnalyticsPage({
       return emptySalesDashboardData(new Date(`${month}-01T00:00:00`))
     })
     : emptySalesDashboardData()
-  const profitData = tab === 'orders' || tab === 'missing'
+  const profitData = shouldLoadOrderProfit || tab === 'missing'
     ? await getCachedOrderProfitAnalysisData(
       workspaceUserId,
       page,
@@ -97,7 +100,7 @@ export default async function AnalyticsPage({
       })
     })
     : null
-  const productData = tab === 'products'
+  const productData = shouldLoadProductProfit
     ? await getCachedProductProfitAnalysisData(
       workspaceUserId,
       month,
@@ -160,14 +163,18 @@ export default async function AnalyticsPage({
         <UploadPanel recent={recent} />
       ) : tab === 'settings' ? (
         <BoxCostSettings rates={boxCostRates} />
-      ) : tab === 'products' ? (
+      ) : tab === 'products' && productData ? (
         <ProductProfitPanel
-          data={productData!}
+          data={productData}
           month={month}
           search={productSearch}
           sort={productSort}
           direction={productDirection}
         />
+      ) : tab === 'orders' && !profitData ? (
+        <ProfitQueryPrompt tab="orders" month={month} title="주문별 손익" />
+      ) : tab === 'products' ? (
+        <ProfitQueryPrompt tab="products" month={month} title="상품별 손익" />
       ) : tab === 'orders' || tab === 'missing' ? (
         <OrderProfitPanel
           data={profitData!}
@@ -254,9 +261,11 @@ function MonthSelector({
   orderDirection: SortDirection
 }) {
   const targetTab = tab === 'uploads' || tab === 'settings' ? 'dashboard' : tab
+  const requiresExplicitQuery = targetTab === 'orders' || targetTab === 'products'
   return (
     <form className="flex flex-wrap items-end gap-2 rounded-lg border bg-card px-4 py-3">
       <input type="hidden" name="tab" value={targetTab} />
+      {requiresExplicitQuery ? <input type="hidden" name="view" value="1" /> : null}
       {tab === 'products' ? (
         <>
           <input type="hidden" name="productSearch" value={productSearch} />
@@ -287,6 +296,24 @@ function MonthSelector({
         <span className="pb-2 text-xs text-muted-foreground">월을 선택하면 대시보드로 이동합니다.</span>
       ) : null}
     </form>
+  )
+}
+
+function ProfitQueryPrompt({ tab, month, title }: { tab: 'orders' | 'products'; month: string; title: string }) {
+  return (
+    <div className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-lg border bg-card p-6 text-center">
+      <div>
+        <h2 className="text-base font-semibold">{title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">조회 전</p>
+      </div>
+      <Link
+        href={analyticsHref(tab, month, undefined, true)}
+        className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+      >
+        <Search className="size-4" />
+        조회
+      </Link>
+    </div>
   )
 }
 
@@ -427,6 +454,7 @@ function ProductProfitPanel({
     <div className="space-y-3">
       <form className="flex flex-wrap items-end gap-2 rounded-lg border bg-card px-4 py-3">
         <input type="hidden" name="tab" value="products" />
+        <input type="hidden" name="view" value="1" />
         <input type="hidden" name="month" value={month} />
         <input type="hidden" name="productSort" value={sort} />
         <input type="hidden" name="productDirection" value={direction} />
@@ -446,7 +474,7 @@ function ProductProfitPanel({
           조회
         </button>
         {search ? (
-          <Link href={analyticsHref('products', month)} className="h-9 rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted">
+          <Link href={analyticsHref('products', month, undefined, true)} className="h-9 rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted">
             초기화
           </Link>
         ) : null}
@@ -515,6 +543,7 @@ function ProductSortHeader({
   const params = new URLSearchParams({
     tab: 'products',
     month,
+    view: '1',
     productSort: column,
     productDirection: nextDirection,
   })
@@ -593,6 +622,7 @@ function OrderProfitPanel({
     <div className="space-y-4">
       <form className="flex flex-wrap items-end gap-2 rounded-lg border bg-card px-4 py-3">
         <input type="hidden" name="tab" value={tab} />
+        <input type="hidden" name="view" value="1" />
         <input type="hidden" name="month" value={month} />
         <input type="hidden" name="orderSort" value={sort} />
         <input type="hidden" name="orderDirection" value={direction} />
@@ -613,7 +643,7 @@ function OrderProfitPanel({
           조회
         </button>
         {search ? (
-          <Link href={analyticsHref(tab, month, data.selectedIssue)} className="h-9 rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted">
+          <Link href={analyticsHref(tab, month, data.selectedIssue, true)} className="h-9 rounded-md border bg-background px-4 py-2 text-sm font-medium hover:bg-muted">
             초기화
           </Link>
         ) : null}
@@ -759,6 +789,7 @@ function OrderSortHeader({
   const params = new URLSearchParams({
     tab,
     month,
+    view: '1',
     orderSort: column,
     orderDirection: nextDirection,
   })
@@ -1020,6 +1051,7 @@ function paginationHref(
   const params = new URLSearchParams({
     tab,
     month,
+    view: '1',
     page: String(page),
     orderSort: sort,
     orderDirection: direction,
@@ -1130,9 +1162,10 @@ function TopNavLink({ href, children }: { href: string; children: React.ReactNod
   )
 }
 
-function analyticsHref(tab: AnalyticsTab, month: string, issue?: ProfitMissingIssue): string {
+function analyticsHref(tab: AnalyticsTab, month: string, issue?: ProfitMissingIssue, view = false): string {
   const params = new URLSearchParams({ tab, month })
   if (issue && issue !== 'all') params.set('issue', issue)
+  if (view) params.set('view', '1')
   return `/analytics?${params.toString()}`
 }
 

@@ -1204,6 +1204,8 @@ function formatPlainPercent(value: number): string {
 }
 
 function formatDate(value: Date): string {
+  if (Number.isNaN(value.getTime())) return '-'
+
   return new Intl.DateTimeFormat('ko-KR', {
     month: '2-digit',
     day: '2-digit',

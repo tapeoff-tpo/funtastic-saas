@@ -42,6 +42,7 @@ function buildFiles(run: OpportunityRun, source: ProductOpportunitySource[], top
 }
 
 function topReport(run: OpportunityRun, products: ProductOpportunity[]) {
+  const periodLabel = run.metadata.observedMonths >= 12 ? '12M' : `${run.metadata.observedMonths}M observed`
   const rows = products.map((product) => [
     product.rank,
     product.sku,
@@ -61,19 +62,20 @@ function topReport(run: OpportunityRun, products: ProductOpportunity[]) {
 
 - Generated: ${run.metadata.generatedAt}
 - Sales data through: ${run.metadata.asOfDate}
+- Observed sales months: ${run.metadata.observedMonths}
 - Source: ${run.metadata.source}
 - Scoring version: ${run.metadata.scoringVersion}
 - Important: structural scores marked as rule-based are screening hypotheses, not verified engineering facts.
 
 ## Top Candidates
 
-| Rank | SKU | Product | 3M Qty | 12M Qty | 12M Sales | 12M Profit | Print | Upgrade | Premium | Safety | Total | Confidence |
+| Rank | SKU | Product | 3M Qty | ${periodLabel} Qty | ${periodLabel} Sales | ${periodLabel} Profit | Print | Upgrade | Premium | Safety | Total | Confidence |
 |---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 ${rows.map((row) => `| ${row.join(' | ')} |`).join('\n')}
 
 ## Candidate Notes
 
-${products.map(candidateDetail).join('\n\n')}
+${products.map((product) => candidateDetail(product, periodLabel)).join('\n\n')}
 
 ## Interpretation Rules
 
@@ -84,11 +86,11 @@ ${products.map(candidateDetail).join('\n\n')}
 `
 }
 
-function candidateDetail(product: ProductOpportunity) {
+function candidateDetail(product: ProductOpportunity, periodLabel: string) {
   return `### ${product.rank}. ${product.productName} (${product.sku})
 
 - 3/6/12-month quantity: ${round(product.periods['3'].quantity)} / ${round(product.periods['6'].quantity)} / ${round(product.periods['12'].quantity)}
-- 12-month sales / calculated final profit: ${won(product.periods['12'].sales)} / ${won(product.periods['12'].finalProfit)}
+- ${periodLabel} sales / calculated final profit: ${won(product.periods['12'].sales)} / ${won(product.periods['12'].finalProfit)}
 - Latest 3M vs previous 3M: ${percent(product.latestThreeVsPreviousThreeGrowth)}
 - Printability: ${score(product.scores.printability.score)} — ${product.scores.printability.reason}
 - Upgrade potential: ${score(product.scores.upgradePotential.score)} — ${product.scores.upgradePotential.reason}

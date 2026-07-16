@@ -19,6 +19,7 @@ export function analyzeOpportunities(input: {
   source?: string
   dataVersion?: string
 }): OpportunityRun {
+  const observedMonths = Math.max(0, ...input.products.map((product) => product.monthly.length))
   const candidates = input.products.map((product) => buildCandidate(product, input.config))
   assignBusinessScores(candidates)
 
@@ -44,6 +45,7 @@ export function analyzeOpportunities(input: {
     metadata: {
       generatedAt: new Date().toISOString(),
       asOfDate: input.asOfDate.toISOString(),
+      observedMonths,
       periods: [...PERIODS],
       source: input.source ?? 'funtastic-saas PostgreSQL',
       dataVersion: input.dataVersion ?? input.asOfDate.toISOString(),
@@ -59,7 +61,7 @@ export function analyzeOpportunities(input: {
     dataAudit: {
       available: [
         'SKU and product name',
-        '3/6/12-month quantity, order count, sales, and calculated final profit',
+        `3/6/12-month quantity, order count, sales, and calculated final profit over up to ${observedMonths} observed months`,
         'Marketplace fee, product cost, shipping cost, and box cost when configured',
         'Product options, category, images, current stock, and product metadata when registered',
         'Return-order count derived from non-rejected return claims',
@@ -74,7 +76,7 @@ export function analyzeOpportunities(input: {
         'Verified final use case',
         'Customer reviews, image reviews, and VOC linked to every SKU',
         'B2B/B2C classification without an explicit marketplace mapping',
-        'Verified seasonality beyond the available 12-month observation window',
+        `Verified seasonality beyond the available ${observedMonths}-month observation window`,
         'Legal clearance, patent clearance, and regulatory certification',
       ],
     },

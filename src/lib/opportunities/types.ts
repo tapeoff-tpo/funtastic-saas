@@ -90,6 +90,7 @@ export type OpportunityRun = {
   metadata: {
     generatedAt: string
     asOfDate: string
+    observedMonths: number
     periods: number[]
     source: string
     dataVersion: string

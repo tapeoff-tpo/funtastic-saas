@@ -1,0 +1,267 @@
+{
+  "schemaVersion": "1.0.0",
+  "sku": "101518-0001",
+  "productName": "홀딩 후크",
+  "recordedAt": "2026-07-17",
+  "inspectionMode": "official-photo-and-record review; no physical sample measurement",
+  "evidenceLevels": [
+    "official-label",
+    "official-photo-observation",
+    "engineering-inference",
+    "unknown"
+  ],
+  "sources": [
+    {
+      "type": "official-product-page",
+      "url": "https://www.funtasticb2b.com/products/2d8f84e2-dafb-4bc0-881c-1"
+    },
+    {
+      "type": "official-reference-photo",
+      "path": "photos/official-reference-installed.jpg"
+    },
+    {
+      "type": "official-reference-photo",
+      "path": "photos/official-reference-product.jpg"
+    },
+    {
+      "type": "official-detail-crop",
+      "path": "photos/official-reference-adhesive.jpg"
+    },
+    {
+      "type": "official-detail-crop",
+      "path": "photos/official-reference-specification.jpg"
+    }
+  ],
+  "structure": {
+    "overallForm": {
+      "value": "elongated capsule base, central projecting neck, elongated parallel double-ended retaining arm",
+      "evidenceLevel": "official-photo-observation"
+    },
+    "userDisassemblable": {
+      "value": false,
+      "evidenceLevel": "official-photo-observation",
+      "qualification": "No fastener or user separation feature is visible; physical teardown not performed."
+    },
+    "functionalPartsPerHook": [
+      {
+        "part": "molded body",
+        "observedCount": 1,
+        "evidenceLevel": "official-photo-observation"
+      },
+      {
+        "part": "rear adhesive sections",
+        "observedCount": 2,
+        "evidenceLevel": "official-photo-observation",
+        "qualification": "Unknown whether these are two pads or one pad with split release liners."
+      }
+    ],
+    "assembly": {
+      "value": "pressure-sensitive adhesive material laminated to rear of molded body",
+      "evidenceLevel": "official-photo-observation"
+    }
+  },
+  "material": {
+    "body": {
+      "value": "ABS",
+      "evidenceLevel": "official-label",
+      "source": "Official detail image INFO table"
+    },
+    "adhesive": {
+      "value": null,
+      "evidenceLevel": "unknown"
+    },
+    "releaseLiner": {
+      "value": null,
+      "evidenceLevel": "unknown"
+    }
+  },
+  "manufacturing": {
+    "bodyProcess": {
+      "value": "injection molding",
+      "evidenceLevel": "engineering-inference",
+      "confidence": "medium",
+      "basis": [
+        "official ABS material",
+        "continuous radii and uniform surface",
+        "one-piece mass-market geometry"
+      ]
+    },
+    "secondaryProcess": {
+      "value": "die-cut adhesive pad application",
+      "evidenceLevel": "engineering-inference",
+      "confidence": "medium"
+    },
+    "ultrasonicWelding": {
+      "value": null,
+      "evidenceLevel": "unknown",
+      "observation": "No weld seam is visible in available photos."
+    },
+    "moldDrawHypothesis": {
+      "value": "side-to-side draw across product width",
+      "evidenceLevel": "engineering-inference",
+      "confidence": "low",
+      "reason": "A rear-normal draw would trap the arm; the open-ended profile may permit lateral molding."
+    },
+    "undercut": {
+      "value": "present for rear-normal draw; potentially absent for lateral draw",
+      "evidenceLevel": "engineering-inference"
+    },
+    "partingLine": {
+      "value": null,
+      "evidenceLevel": "unknown"
+    },
+    "gateLocation": {
+      "value": null,
+      "evidenceLevel": "unknown"
+    },
+    "ejectorMarks": {
+      "value": null,
+      "evidenceLevel": "unknown"
+    }
+  },
+  "function": {
+    "loadPath": [
+      "hung item or tieback cord",
+      "inside surface of retaining arm",
+      "central neck and root",
+      "elongated base",
+      "adhesive layer",
+      "installation surface"
+    ],
+    "primaryBendingRegion": "retaining arm and central neck root",
+    "adhesiveLoads": [
+      "vertical shear",
+      "peel moment caused by projection from wall"
+    ],
+    "frictionRole": "secondary slip resistance between cord and ABS surface",
+    "retentionMethod": "geometric capture between base and parallel arm",
+    "sellerClaimedMaximumLoadKg": 1,
+    "loadClaimQualification": "Test surface, duration and safety factor were not published."
+  },
+  "adhesiveSystem": {
+    "type": "rear pressure-sensitive adhesive pad",
+    "evidenceLevel": "official-photo-observation",
+    "observedSections": 2,
+    "thicknessMm": null,
+    "dimensionsMm": null,
+    "replaceable": null,
+    "removalTabVisible": false,
+    "thirdPartyCompatibility": null
+  },
+  "printability": {
+    "quantitativeSlicePerformed": false,
+    "reason": "Complete three-axis and functional dimensions are unavailable.",
+    "materials": [
+      {
+        "material": "PLA",
+        "standaloneOutput": "prototype-only",
+        "issues": [
+          "creep risk near warm windows",
+          "brittle central neck under bending"
+        ],
+        "requiredValidation": [
+          "adhesive-face flatness",
+          "temperature and sustained-load test"
+        ]
+      },
+      {
+        "material": "PETG",
+        "standaloneOutput": "prototype-and-functional-test",
+        "issues": [
+          "stringing and dimensional rounding",
+          "adhesive bond to printed surface unknown"
+        ],
+        "requiredValidation": [
+          "surface cleaning and light sanding",
+          "bending and adhesive test"
+        ]
+      },
+      {
+        "material": "ABS",
+        "standaloneOutput": "closest material comparison",
+        "issues": [
+          "warping and shrinkage",
+          "printed layer strength differs from injection-molded ABS"
+        ],
+        "requiredValidation": [
+          "dimensional calibration",
+          "adhesive-face flatness",
+          "interlayer bending test"
+        ]
+      },
+      {
+        "material": "TPU",
+        "standaloneOutput": "likely unsuitable",
+        "issues": [
+          "retaining arm may deform",
+          "flexible base may peel adhesive"
+        ],
+        "requiredValidation": [
+          "hardness-specific deformation test"
+        ]
+      }
+    ]
+  },
+  "dfam": {
+    "favorable": [
+      "one-piece body",
+      "open ends",
+      "large external radii",
+      "small published two-axis envelope"
+    ],
+    "unfavorable": [
+      "parallel elevated arm creates support demand when rear face is on bed",
+      "side orientation has narrow bed contact",
+      "central neck concentrates bending across layer boundaries",
+      "printed adhesive face may not remain sufficiently flat"
+    ],
+    "injectionEasyFdmDifficult": [
+      "uniform rounded finish",
+      "repeatable thin arm",
+      "flat adhesive surface"
+    ],
+    "fdmEasyInjectionDifficult": [
+      "low-volume geometry variation without tooling changes",
+      "individual text or size variation"
+    ]
+  },
+  "improvementEvidenceAreas": [
+    {
+      "area": "adhesion",
+      "basis": "External analogue reviews report both detachment and paint removal; internal adhesive specification is unknown."
+    },
+    {
+      "area": "installation",
+      "basis": "Current product is one-step pressure mounting and no alignment aid is visible."
+    },
+    {
+      "area": "appearance",
+      "basis": "Current official option is white ABS while market alternatives use metal, wood and decorative finishes."
+    },
+    {
+      "area": "adhesive replaceability",
+      "basis": "Adhesive is a separately applied component but replacement specification is absent."
+    },
+    {
+      "area": "color",
+      "basis": "Current official option is white; external alternatives document multiple finishes and printed colors."
+    },
+    {
+      "area": "customization",
+      "basis": "A direct FDM competitor explicitly offers size, color, direction and text variants."
+    }
+  ],
+  "unknowns": [
+    "complete three-axis dimensions",
+    "functional feature dimensions",
+    "single-hook mass",
+    "ABS grade",
+    "wall thickness and internal geometry",
+    "parting line, gate and ejector locations",
+    "adhesive chemistry, carrier and thickness",
+    "whether rear sections are separate pads or split liners",
+    "removal residue and surface damage",
+    "measured load and creep performance",
+    "third-party adhesive compatibility"
+  ]
+}

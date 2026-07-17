@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "1.0.0",
+  "sku": "101518-0001",
+  "units": {
+    "length": "mm",
+    "mass": "g",
+    "load": "kg"
+  },
+  "measurementStatus": "official-two-axis-reference-only",
+  "officialReference": {
+    "overallLength": {
+      "value": 70,
+      "method": "official detail graphic",
+      "uncertainty": "Seller notes manual measurement may differ by 10-30 mm."
+    },
+    "overallWidth": {
+      "value": 20,
+      "method": "official detail graphic",
+      "uncertainty": "Seller notes manual measurement may differ by 10-30 mm."
+    },
+    "publishedMass": {
+      "value": 20,
+      "method": "official INFO table",
+      "uncertainty": "Unknown whether value is per hook or per two-piece set."
+    },
+    "sellerClaimedMaximumLoad": {
+      "value": 1,
+      "method": "official marketing image",
+      "uncertainty": "Surface, dwell time, duration and safety factor unknown."
+    }
+  },
+  "physicalMeasurements": {
+    "overallLength": null,
+    "overallWidth": null,
+    "overallProjection": null,
+    "baseLength": null,
+    "baseWidth": null,
+    "baseThickness": null,
+    "retainingArmLength": null,
+    "retainingArmWidth": null,
+    "retainingArmThickness": null,
+    "openingAtEachEnd": null,
+    "internalGap": null,
+    "neckWidth": null,
+    "neckThickness": null,
+    "rootFilletRadius": null,
+    "adhesiveSectionCount": null,
+    "adhesiveSectionLength": null,
+    "adhesiveSectionWidth": null,
+    "adhesiveThickness": null,
+    "singleHookMass": null
+  },
+  "measurementProtocol": [
+    "Use calipers with at least 0.1 mm resolution for rigid dimensions.",
+    "Measure three samples and retain each raw value rather than only an average.",
+    "Measure adhesive thickness before and after removal without compressing foam.",
+    "Weigh one bare body, adhesive material and complete hook separately where possible.",
+    "Photograph each measurement with the instrument display and measured feature visible."
+  ]
+}

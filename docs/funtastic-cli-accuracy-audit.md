@@ -1,5 +1,8 @@
 # FUN-TASTIC CLI Accuracy Audit
 
+> Historical note: this audit describes Discover before Evidence Builder 2.0.
+> See `docs/funtastic-discover-evidence.md` for the current Discover contract.
+
 Audited commit: `69a5191`
 
 Audit date: 2026-07-17

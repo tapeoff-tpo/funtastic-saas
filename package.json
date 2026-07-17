@@ -2,6 +2,9 @@
   "name": "funtastic-saas",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "funtastic": "scripts/funtastic.mjs"
+  },
   "engines": {
     "node": ">=22.0.0"
   },
@@ -10,6 +13,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "funtastic": "node scripts/funtastic.mjs",
     "worker": "node --import tsx src/worker.ts",
     "worker:start": "node --env-file=.env.local --import tsx src/worker.ts",
     "worker:dev": "node --env-file=.env.local --import tsx --watch src/worker.ts",

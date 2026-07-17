@@ -23,6 +23,10 @@ type ConceptInput = {
 
 async function main() {
   const [sku, ...args] = process.argv.slice(2)
+  if (sku === '-h' || sku === '--help') {
+    console.log('Usage:\n  funtastic council SKU [--products PATH]\n')
+    return
+  }
   if (!sku || sku.startsWith('-')) throw new Error('Usage: funtastic council SKU [--products PATH]')
   const root = path.resolve(option(args, '--products') ?? 'products', sku)
   const councilDir = path.join(root, 'council')

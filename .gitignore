@@ -46,3 +46,8 @@ next-env.d.ts
 .local-tools/
 dev-server*.log
 dev-server.pid
+
+# FUN-TASTIC internal analysis and generated product evidence
+/opportunities/
+/products/[0-9]*/
+/docs/product-research/

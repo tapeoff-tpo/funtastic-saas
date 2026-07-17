@@ -289,6 +289,10 @@ async function exists(target: string) {
 }
 
 function parseOptions(args: string[]): Options {
+  if (args[0] === '-h' || args[0] === '--help') {
+    usage()
+    process.exit(0)
+  }
   const sku = args[0]
   if (!sku || sku.startsWith('-')) {
     usage()

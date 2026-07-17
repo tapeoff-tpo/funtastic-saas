@@ -10,6 +10,7 @@ const projectRoot = resolve(scriptDirectory, '..')
 const commands = {
   opportunities: 'funtastic-opportunities.ts',
   discover: 'funtastic-discover.ts',
+  research: 'funtastic-research.ts',
   concepts: 'funtastic-concepts.ts',
   council: 'funtastic-council.ts',
 }
@@ -49,6 +50,7 @@ function usage() {
   console.log(`Usage:
   funtastic opportunities [OPTIONS]
   funtastic discover SKU [OPTIONS]
+  funtastic research SKU [OPTIONS]
   funtastic concepts SKU [OPTIONS]
   funtastic council SKU [OPTIONS]
 

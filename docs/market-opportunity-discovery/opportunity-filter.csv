@@ -1,0 +1,101 @@
+rank,scan_id,product,market_demand_10,repeated_voc_10,structural_simplicity_10,fdm_fit_10,differentiation_10,customization_10,total_60,verdict,evidence_depth
+1,61,SKADIS curved hooks 8 pack,9,8,10,10,9,10,56,GO,deep-researched
+2,68,Glass shower door razor holder,9,8,10,10,9,10,56,GO,deep-researched
+3,3,KitchenAid curved/straight cord organizer,10,8,10,10,8,9,55,GO,deep-researched
+4,66,Minimalist razor holder,10,7,10,10,8,9,54,GO,deep-researched
+5,36,Wall mounted gravity broom holder PETG,9,8,8,9,9,10,53,GO,deep-researched
+6,57,Individual cabinet pot lid holders,10,8,9,9,9,8,53,GO WITH LIMITATIONS,deep-researched
+7,46,3D printed remote control holder,9,7,10,10,8,9,53,GO WITH LIMITATIONS,deep-researched
+8,1,Kitchen appliance cord wrap,10,7,10,10,7,9,53,GO WITH LIMITATIONS,deep-researched
+9,64,Pegboard tech accessory set,7,8,8,9,10,10,52,GO WITH LIMITATIONS,deep-researched
+10,19,CalDigit TS4 under-desk mount,10,7,9,9,8,8,51,GO WITH LIMITATIONS,deep-researched
+11,48,Wall mount Mitsubishi AC remote holder,6,7,10,10,9,9,51,GO WITH LIMITATIONS,deep-researched
+12,62,SKADIS headphone holder,9,6,9,9,8,9,50,GO WITH LIMITATIONS,deep-researched
+13,26,Scrub Daddy sponge holder pad 3D printed,8,7,9,9,8,9,50,GO WITH LIMITATIONS,deep-researched
+14,18,Under-desk power brick holder PETG,6,7,9,9,10,9,50,GO WITH LIMITATIONS,deep-researched
+15,17,The Cable Claw under-desk hub,8,6,9,10,8,8,49,HOLD,deep-researched
+16,86,Personalized dog butt leash holder,8,5,9,9,8,10,49,HOLD,deep-researched
+17,56,Caraway magnetic 3D printed lid organizer,7,8,8,8,9,7,47,GO WITH LIMITATIONS,deep-researched
+18,76,Car headrest hook 4 pack,8,6,9,8,8,8,47,HOLD,deep-researched
+19,27,Sponge Butler rapid-dry holder,10,6,8,8,8,7,47,HOLD,deep-researched
+20,100,Self adhesive push-grip towel holder,4,7,8,9,9,9,46,HOLD,deep-researched
+21,5,Kitchen mixer cord organizer,9,5,10,9,5,7,45,HOLD,stage1-only
+22,6,Universal cord organizer,7,5,10,9,6,8,45,HOLD,stage1-only
+23,20,Desk mount kit for Anker Prime 250W,9,5,10,9,5,7,45,HOLD,stage1-only
+24,21,Dell WD25 dock under-desk mount,8,5,10,9,5,8,45,HOLD,stage1-only
+25,37,Wall mounted trio gravity broom holder,9,5,10,9,5,7,45,HOLD,stage1-only
+26,38,Gravity broom holder custom engraved,7,5,10,9,6,8,45,HOLD,stage1-only
+27,67,3D printed razor holder,7,5,10,9,6,8,45,HOLD,stage1-only
+28,73,Manscaped Lawn Mower wall mount,9,5,10,9,5,7,45,HOLD,stage1-only
+29,96,SKADIS photo clips set of 4,8,5,10,9,5,8,45,HOLD,stage1-only
+30,11,Wire-Tidy cable management system,9,5,10,9,6,5,44,HOLD,stage1-only
+31,13,Minimalist rotating cable winder,2,7,10,9,8,8,44,HOLD,stage1-only
+32,22,Under-desk laptop holder 7 sizes,9,5,10,6,6,8,44,HOLD,stage1-only
+33,54,Remote Daddy oversized remote shell,6,5,10,9,6,8,44,HOLD,stage1-only
+34,58,Pot lid holders 10 pack,6,5,10,9,6,8,44,HOLD,stage1-only
+35,65,SKADIS straight hook,6,5,10,9,6,8,44,HOLD,stage1-only
+36,70,Wall mounted safety razor holder with blade storage,6,5,10,9,6,8,44,HOLD,stage1-only
+37,72,Shower glass hook 19 colours,6,5,10,9,6,8,44,HOLD,stage1-only
+38,47,Remote Control Holder finned organizer,5,5,10,9,6,8,43,HOLD,stage1-only
+39,49,Fanimation remote wall mount 3D printed,5,5,10,9,6,8,43,HOLD,stage1-only
+40,50,Wallmote Samsung Solar Remote holder,5,5,10,9,6,8,43,HOLD,stage1-only
+41,69,Universal razor holder with 3M tape,5,5,10,9,6,8,43,HOLD,stage1-only
+42,97,SKADIS crate organizer bin,5,5,10,9,6,8,43,HOLD,stage1-only
+43,44,Vivitar six-pack cable organizer clip,5,7,8,9,8,5,42,HOLD,stage1-only
+44,23,Under-desk phone hard-drive rack,9,2,10,9,3,8,41,HOLD,stage1-only
+45,71,Self-draining razor and soap tray,6,5,10,9,6,5,41,HOLD,stage1-only
+46,81,Mercedes headrest hook,3,5,10,9,6,8,41,HOLD,stage1-only
+47,29,Tap-mount sink caddy,2,5,10,9,6,8,40,HOLD,stage1-only
+48,41,Wall Control gravity broom holder,5,5,10,9,6,5,40,HOLD,stage1-only
+49,75,Triple shower screen razor holder,5,5,10,9,6,5,40,HOLD,stage1-only
+50,98,SKADIS display case mount,5,5,10,9,6,5,40,HOLD,stage1-only
+51,59,Cabinet door lid organizer,4,5,10,9,6,5,39,HOLD,stage1-only
+52,63,SKADIS scissor organizer,8,3,10,9,4,5,39,HOLD,stage1-only
+53,4,KitchenAid 3D printed cable clip,7,3,10,9,4,5,38,HOLD,stage1-only
+54,12,Self adhesive cable organizer,2,5,10,9,6,5,37,REJECT,stage1-only
+55,24,Under-desk single deck laptop mount,8,3,10,6,4,5,36,REJECT,stage1-only
+56,35,Suction sponge holder,8,5,6,6,6,5,36,REJECT,stage1-only
+57,39,Gravity broom holder basic,7,2,10,9,3,5,36,REJECT,stage1-only
+58,74,Razor and toothbrush shower caddy 3D printed,4,2,10,9,3,8,36,REJECT,stage1-only
+59,7,KitchenAid peel-and-stick cord organizer,6,2,10,9,3,5,35,REJECT,stage1-only
+60,55,3-slot wall mount remote holder,4,3,10,9,4,5,35,REJECT,stage1-only
+61,60,Pot lid stand mini drying rack,4,3,10,9,4,5,35,REJECT,stage1-only
+62,80,Headrest bag hook truck,4,3,10,9,4,5,35,REJECT,stage1-only
+63,85,Headrest hanger heavy duty,7,3,10,6,4,5,35,REJECT,stage1-only
+64,88,Custom dog paw leash hook,8,3,6,6,4,8,35,REJECT,stage1-only
+65,28,Cartoon sponge holder,3,3,10,9,4,5,34,REJECT,stage1-only
+66,93,No-drill wall mop and broom clip,7,2,8,9,3,5,34,REJECT,stage1-only
+67,14,Electronics cable winder pack of 5,4,2,10,9,3,5,33,REJECT,stage1-only
+68,34,Sponge holder for sink,4,2,10,9,3,5,33,REJECT,stage1-only
+69,51,3D printed rope style remote holder,4,2,10,9,3,5,33,REJECT,stage1-only
+70,52,5-slot felt-lined 3D remote holder,4,3,8,9,4,5,33,REJECT,stage1-only
+71,53,Mini remote control holder wall mount,4,2,10,9,3,5,33,REJECT,stage1-only
+72,87,Custom shiplap dog leash holder,9,3,3,6,4,8,33,REJECT,stage1-only
+73,89,Personalized dog name leash holder,9,3,3,6,4,8,33,REJECT,stage1-only
+74,92,Personalized shiplap dog key rack,9,3,3,6,4,8,33,REJECT,stage1-only
+75,99,Adjustable phone stand six angles,1,2,10,9,3,8,33,REJECT,stage1-only
+76,2,Appliance Cord Organizer 3M Stick On,7,2,6,9,3,5,32,REJECT,stage1-only
+77,16,Desk cable chain,3,2,10,9,3,5,32,REJECT,stage1-only
+78,84,3D PLA safety razor display stand,1,3,10,9,4,5,32,REJECT,stage1-only
+79,10,Stand mixer cord organizer 3D printed,2,2,10,9,3,5,31,REJECT,stage1-only
+80,40,3D printed mop mount,2,2,10,9,3,5,31,REJECT,stage1-only
+81,8,Magnetic stand mixer cord manager,3,2,8,9,3,5,30,REJECT,stage1-only
+82,9,Appliance cord organizer 10 pack,3,3,6,9,4,5,30,REJECT,stage1-only
+83,90,Dog tail wall hook 19 colors,10,3,3,2,4,8,30,REJECT,stage1-only
+84,25,SnapBridge magnetic cable arches,2,2,8,9,3,5,29,REJECT,stage1-only
+85,15,Personalized wooden plug holder,3,2,6,6,3,8,28,REJECT,stage1-only
+86,32,Stone sponge holder,8,3,6,2,4,5,28,REJECT,stage1-only
+87,45,Monoprice under-desk cable tray,3,7,3,2,8,5,28,REJECT,stage1-only
+88,91,Personalized metal leash rack,8,3,3,2,4,8,28,REJECT,stage1-only
+89,42,Utility hook rack broom hanger,10,3,3,2,4,5,27,REJECT,stage1-only
+90,33,Ceramic belly sponge holder,9,3,3,2,4,5,26,REJECT,stage1-only
+91,77,Leather stainless headrest hook,9,3,3,2,4,5,26,REJECT,stage1-only
+92,78,2-in-1 phone holder and bag hanger,2,2,8,6,3,5,26,REJECT,stage1-only
+93,95,12mm cable cover and protection clip,2,3,6,6,4,5,26,REJECT,stage1-only
+94,94,Redbean lever-type vent mount cable clip hook,1,2,8,6,3,5,25,REJECT,stage1-only
+95,31,Magnetic dishcloth holder,7,3,3,2,4,5,24,REJECT,stage1-only
+96,30,Self-draining soap and sponge tray,3,3,6,2,4,5,23,REJECT,stage1-only
+97,43,Stainless 4-rack 5-hook broom holder,4,3,3,2,4,5,21,REJECT,stage1-only
+98,82,Headrest hat holder magnetic clip,2,2,6,2,3,5,20,REJECT,stage1-only
+99,83,SEAMETAL 20kg dual headrest hook,3,3,3,2,4,5,20,REJECT,stage1-only
+100,79,Suede double headrest hook,2,3,3,2,4,5,19,REJECT,stage1-only

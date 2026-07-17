@@ -68,6 +68,7 @@ async function main() {
   const result = await writeOpportunityReport({
     run,
     source: products,
+    config,
     outputRoot: path.resolve(options.output),
     top: options.top,
   })

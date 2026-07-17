@@ -1,10 +1,16 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { OpportunityRun, ProductOpportunity, ProductOpportunitySource } from './types'
+import type {
+  OpportunityRun,
+  OpportunityScoringConfig,
+  ProductOpportunity,
+  ProductOpportunitySource,
+} from './types'
 
 export async function writeOpportunityReport(input: {
   run: OpportunityRun
   source: ProductOpportunitySource[]
+  config: OpportunityScoringConfig
   outputRoot: string
   top: number
 }) {
@@ -16,7 +22,7 @@ export async function writeOpportunityReport(input: {
   await rm(currentDir, { recursive: true, force: true })
   await mkdir(currentDir, { recursive: true })
 
-  const files = buildFiles(input.run, input.source, input.top)
+  const files = buildFiles(input.run, input.source, input.config, input.top)
   await Promise.all([...files.entries()].flatMap(([name, content]) => [
     writeFile(path.join(runDir, name), content),
     writeFile(path.join(currentDir, name), content),
@@ -24,9 +30,19 @@ export async function writeOpportunityReport(input: {
   return { runDir, currentDir }
 }
 
-function buildFiles(run: OpportunityRun, source: ProductOpportunitySource[], top: number) {
+function buildFiles(
+  run: OpportunityRun,
+  source: ProductOpportunitySource[],
+  config: OpportunityScoringConfig,
+  top: number,
+) {
   const ranked = run.products.filter((product) => !product.excluded)
   const excluded = run.products.filter((product) => product.excluded)
+  const byQuantity = rankBy(ranked, (product) => product.periods['12'].quantity)
+  const byRevenue = rankBy(ranked, (product) => product.periods['12'].sales)
+  const byProfit = rankBy(ranked, (product) => product.periods['12'].finalProfit)
+  const byPrintability = rankBy(ranked, (product) => product.scores.printability.score ?? 0)
+  const byPremium = rankBy(ranked, (product) => product.scores.premiumPotential.score ?? 0)
   return new Map<string, string>([
     ['run.json', pretty(run)],
     ['source_snapshot.json', pretty({
@@ -36,9 +52,24 @@ function buildFiles(run: OpportunityRun, source: ProductOpportunitySource[], top
     ['rankings.csv', opportunityCsv(ranked)],
     ['excluded.csv', opportunityCsv(excluded)],
     ['top10.md', topReport(run, ranked.slice(0, top))],
+    ['sales-ranking.csv', opportunityCsv(byQuantity)],
+    ['revenue-ranking.csv', opportunityCsv(byRevenue)],
+    ['gross-profit-ranking.csv', opportunityCsv(byProfit)],
+    ['printability-ranking.csv', opportunityCsv(byPrintability)],
+    ['premium-potential-ranking.csv', opportunityCsv(byPremium)],
+    ['opportunity-ranking.csv', opportunityCsv(ranked)],
+    ['excluded-products.csv', opportunityCsv(excluded)],
+    ['candidate-summary.md', topReport(run, ranked.slice(0, top))],
+    ['scoring-config.json', pretty(config)],
     ['missing_data.md', missingReport(run)],
     ['evidence.csv', evidenceCsv(run.products)],
   ])
+}
+
+function rankBy(products: ProductOpportunity[], value: (product: ProductOpportunity) => number) {
+  return [...products].sort((a, b) => value(b) - value(a)
+    || b.weightedScore - a.weightedScore
+    || a.sku.localeCompare(b.sku))
 }
 
 function topReport(run: OpportunityRun, products: ProductOpportunity[]) {

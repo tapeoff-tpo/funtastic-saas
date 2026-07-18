@@ -1,0 +1,76 @@
+{
+  "status": "pass",
+  "parts": {
+    "A_base": {
+      "watertight": true,
+      "is_volume": true,
+      "step_solid_count": 1,
+      "extents_mm": [
+        44.0,
+        44.0,
+        9.4
+      ],
+      "common_xy_envelope": true
+    },
+    "A_module": {
+      "watertight": true,
+      "is_volume": true,
+      "step_solid_count": 1,
+      "extents_mm": [
+        38.0,
+        38.0,
+        16.0
+      ],
+      "common_xy_envelope": true
+    },
+    "B_base": {
+      "watertight": true,
+      "is_volume": true,
+      "step_solid_count": 1,
+      "extents_mm": [
+        44.0,
+        44.0,
+        9.4
+      ],
+      "common_xy_envelope": true
+    },
+    "B_module": {
+      "watertight": true,
+      "is_volume": true,
+      "step_solid_count": 1,
+      "extents_mm": [
+        38.0,
+        38.0,
+        16.0
+      ],
+      "common_xy_envelope": true
+    },
+    "C_base": {
+      "watertight": true,
+      "is_volume": true,
+      "step_solid_count": 1,
+      "extents_mm": [
+        44.0,
+        44.0,
+        9.4
+      ],
+      "common_xy_envelope": true
+    },
+    "C_module": {
+      "watertight": true,
+      "is_volume": true,
+      "step_solid_count": 1,
+      "extents_mm": [
+        38.0,
+        38.0,
+        16.0
+      ],
+      "common_xy_envelope": true
+    }
+  },
+  "assembled_interference_mm3": {
+    "A": 0,
+    "B": 0,
+    "C": 0
+  }
+}

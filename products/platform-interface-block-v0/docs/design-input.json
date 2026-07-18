@@ -1,0 +1,21 @@
+{
+  "status": "V0-experimental-unvalidated",
+  "purpose": "Compare block-form assembly UX for three PLA-only universal interfaces.",
+  "not_a_finished_product": true,
+  "comparison_controls": [
+    "Base envelope",
+    "Module envelope and grip depth",
+    "load position",
+    "rounding",
+    "material",
+    "print orientation",
+    "slicer profile"
+  ],
+  "prohibited": [
+    "LEGO studs or brick proportions",
+    "living hinges",
+    "deep cantilever snaps",
+    "metal or magnetic components",
+    "printing without user approval"
+  ]
+}

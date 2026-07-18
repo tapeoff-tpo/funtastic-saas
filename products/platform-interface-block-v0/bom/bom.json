@@ -1,0 +1,26 @@
+{
+  "product": "Platform Interface Block V0",
+  "material": "Generic PLA",
+  "mesh_volume_cm3": 107.287,
+  "weight_g": 47.56,
+  "print_time": "1h 16m 15s",
+  "filament_length_mm": 15947.25,
+  "material_cost_krw": 1189,
+  "adhesive_pad": {
+    "description": "None - block interface bench specimen",
+    "quantity": 0,
+    "unit_cost_krw": 0
+  },
+  "additional_parts": [],
+  "estimated_direct_cost_krw": 1189,
+  "part_count": 1,
+  "target_sale_price_krw": null,
+  "cost_exclusions": [
+    "machine time",
+    "labor",
+    "failed prints",
+    "packaging",
+    "shipping",
+    "tax"
+  ]
+}

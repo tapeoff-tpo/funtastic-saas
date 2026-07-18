@@ -1,0 +1,56 @@
+{
+  "A": {
+    "expected_advantages": [
+      "Continuous angled rails carry load while the shallow detent only confirms the endpoint.",
+      "The long guided motion should be easiest to align with one hand.",
+      "Angled channel walls replace the flat captured roof used by Phase 9."
+    ],
+    "expected_risks": [
+      "Long contact length can amplify PLA surface roughness and tolerance drift.",
+      "Users may perceive the travel as slower than B or C.",
+      "The rigid terminal bump may provide weak feedback or mark the mating face."
+    ],
+    "validate": [
+      "Insertion force",
+      "endpoint feedback",
+      "rattle",
+      "wear after 100 cycles"
+    ]
+  },
+  "B": {
+    "expected_advantages": [
+      "Two short hook points create a quick lower-and-slide gesture.",
+      "Short travel reduces friction compared with A.",
+      "Gravity supports the final position on a vertical Base."
+    ],
+    "expected_risks": [
+      "A user can stop in a partially engaged state.",
+      "The Module may lift toward the entry during removal of an accessory.",
+      "Loads are concentrated at two local hooks."
+    ],
+    "validate": [
+      "lift-out",
+      "partial engagement",
+      "local wear",
+      "one-hand removal"
+    ]
+  },
+  "C": {
+    "expected_advantages": [
+      "A short rotation creates the clearest assembly ritual of the three variants.",
+      "Three lugs distribute moment around the Module center.",
+      "The assembled interface is visually hidden inside the block boundary."
+    ],
+    "expected_risks": [
+      "Arc tracks are the most tolerance-sensitive geometry.",
+      "Rotation direction may not be obvious without a cue.",
+      "Terminal throat friction may change quickly with PLA wear."
+    ],
+    "validate": [
+      "rotation comprehension",
+      "binding",
+      "terminal feedback",
+      "wear"
+    ]
+  }
+}

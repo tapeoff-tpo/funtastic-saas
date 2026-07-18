@@ -1,0 +1,107 @@
+{
+  "status": "V0-experimental-unvalidated",
+  "units": "mm",
+  "print_plate_nominal_envelope": [
+    148.0,
+    100.0,
+    16.0
+  ],
+  "assembled_nominal_envelope": [
+    44.0,
+    44.0,
+    23.0
+  ],
+  "declared_minimum_wall": 1.6,
+  "common_parameters": {
+    "base_width": 44.0,
+    "base_height": 44.0,
+    "base_thickness": 7.0,
+    "base_corner_radius": 5.0,
+    "module_width": 38.0,
+    "module_height": 38.0,
+    "module_depth": 16.0,
+    "module_corner_radius": 4.5,
+    "interface_width": 27.0,
+    "interface_length": 27.0,
+    "interface_depth": 2.8,
+    "insertion_clearance": 0.35,
+    "side_clearance": 0.3,
+    "end_clearance": 0.4,
+    "detent_height": 0.3,
+    "detent_diameter": 3.8,
+    "detent_pocket_depth": 0.55,
+    "shell_wall": 1.6,
+    "fillet": 1.2,
+    "module_projection": 16.0,
+    "grid_pitch": 47.0,
+    "label_depth": 0.3,
+    "wear_mark_depth": 0.25
+  },
+  "interface_parameters": {
+    "A": {
+      "rail_spacing": 12.0,
+      "rail_length": 19.0,
+      "rail_neck_width": 3.8,
+      "rail_cap_width": 6.0,
+      "rail_neck_height": 0.8,
+      "rail_cap_height": 1.6,
+      "channel_entry_y": -19.2,
+      "channel_terminal_y": 10.0,
+      "detent_y": 7.0
+    },
+    "B": {
+      "hook_spacing": 14.0,
+      "slide_distance": 8.0,
+      "hook_neck_width": 4.6,
+      "hook_neck_length": 4.6,
+      "hook_cap_width": 7.6,
+      "hook_cap_length": 7.6,
+      "hook_neck_height": 0.8,
+      "hook_cap_height": 1.6,
+      "entry_y": -8.0,
+      "terminal_y": 0.0,
+      "detent_y": 5.5
+    },
+    "C": {
+      "lug_count": 3,
+      "lug_radius": 9.5,
+      "lug_neck_diameter": 4.2,
+      "lug_cap_diameter": 7.0,
+      "lug_neck_height": 0.8,
+      "lug_cap_height": 1.6,
+      "rotation_angle_deg": 22.0,
+      "track_samples": 11,
+      "terminal_throat_reduction": 0.18
+    }
+  },
+  "part_volumes_mm3": {
+    "A": {
+      "base": 13817.738,
+      "module": 21916.15
+    },
+    "B": {
+      "base": 13559.355,
+      "module": 22139.999
+    },
+    "C": {
+      "base": 13554.927,
+      "module": 22299.569
+    }
+  },
+  "pair_volumes_mm3": {
+    "A": 35733.888,
+    "B": 35699.354,
+    "C": 35854.496
+  },
+  "pair_volume_deviation_from_mean_percent": {
+    "A": -0.08,
+    "B": -0.177,
+    "C": 0.257
+  },
+  "maximum_pair_volume_spread_percent": 0.434,
+  "notes": [
+    "All values are unvalidated V0 experimental dimensions.",
+    "The common visible Base and Module envelopes are identical across A/B/C.",
+    "Clearance parameters are independent; no global scale factor controls fit."
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "file": "/private/tmp/funtastic-opportunities-deploy/products/platform-interface-block-v0/step/main.step",
+  "solid_count": 6,
+  "valid": true,
+  "bounds_mm": [
+    {
+      "x": 44.0,
+      "y": 44.0,
+      "z": 9.4
+    },
+    {
+      "x": 38.0,
+      "y": 38.0,
+      "z": 16.0
+    },
+    {
+      "x": 44.0,
+      "y": 44.0,
+      "z": 9.4
+    },
+    {
+      "x": 38.0,
+      "y": 38.0,
+      "z": 16.0
+    },
+    {
+      "x": 44.0,
+      "y": 44.0,
+      "z": 9.4
+    },
+    {
+      "x": 38.0,
+      "y": 38.0,
+      "z": 16.0
+    }
+  ]
+}

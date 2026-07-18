@@ -1,0 +1,12 @@
+{
+  "gcode": "/private/tmp/funtastic-opportunities-deploy/products/platform-interface-block-v0/build/slice/plate_1.gcode",
+  "model_printing_time": "1h 15m 55s",
+  "total_estimated_time": "1h 16m 15s",
+  "filament_length_mm": 15947.25,
+  "filament_volume_mm3": 38357.63,
+  "filament_weight_g": 47.56,
+  "layer_height_mm": 0.2,
+  "wall_loops": 2,
+  "sparse_infill_density": 15.0,
+  "support_enabled": false
+}

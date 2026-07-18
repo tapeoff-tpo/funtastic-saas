@@ -1,6 +1,6 @@
 # Direction Comparison
 
-No direction is selected in this phase. The comparison identifies the decision the user must make before CAD.
+This comparison records the visual study and the user's subsequent architecture decision. Direction B is the approved visual reference for Phase 9.3, with the architecture clarified below.
 
 | Dimension | A: Soft Cell | B: Facet Totem | C: Frame & Core |
 | --- | --- | --- | --- |
@@ -27,13 +27,22 @@ All three directions intentionally show:
 - Pastel and vivid block combinations
 - No stud field, brick-copy proportion, slide, hook-and-slide, or twist-lock action
 
-## User decision required
+## User-approved decision
 
-Choose the product-family attitude before engineering:
+The approved direction is **B: Facet Totem Blocks**, revised into a Base-led module platform:
 
-- **A** for the calmest, broadest desk-interior fit.
-- **B** for the strongest collectible block identity.
-- **C** for the clearest long-lived frame and replaceable-module architecture.
+- A large common Base plate provides the repeated positions and common standard.
+- Each module presses straight into and pulls straight out of a Base position.
+- Modules do not connect directly to one another or stack as structural blocks.
+- The shared footprint and faceted visual language create the family relationship.
+- Module heights vary by function; Tray, Cup, Cable, and Phone Rest are not forced into one vertical envelope.
+- Color composition and the seated tactile event provide collection value.
+- Slide, hook-and-slide, rotation, LEGO studs, brick proportions, and compatibility geometry remain excluded.
 
-The selection is a direction approval, not approval of the depicted internal connection.
+Direction A's capsule-like form and Direction C's replaceable frame/core architecture are not selected. The approval is limited to product architecture and visual language; it does not approve the internal connection geometry shown in any concept render.
 
+## Phase 9.3 handoff
+
+The next CAD phase must translate B's visual language into a common Base, a shared module footprint, and multiple function-dependent module heights. It must test straight Push-In/Pull-Out retention, tactile completion, finger access between neighboring modules, partial seating, wobble, and PLA wear before any interface is treated as final.
+
+Current status: `approved-for-phase-9-3-cad`

@@ -15,6 +15,7 @@ export const DEFAULT_AI_ACCOUNTS = [
 ] as const
 
 export const AI_ACCOUNT_STATUS_LABELS: Record<string, string> = {
+  unselected: '선택 안 함',
   in_use: '사용 중',
   weekly_limit_reached: '주간 소진',
 }

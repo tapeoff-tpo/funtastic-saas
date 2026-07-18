@@ -44,11 +44,13 @@ type Props = {
 
 function statusClassName(status: string) {
   if (status === 'weekly_limit_reached') return 'border-red-200 bg-red-50 text-red-700'
-  return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (status === 'in_use') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  return 'border-slate-200 bg-slate-50 text-slate-600'
 }
 
 function normalizeStatus(status: string) {
-  return status === 'weekly_limit_reached' ? 'weekly_limit_reached' : 'in_use'
+  if (status === 'weekly_limit_reached' || status === 'in_use' || status === 'unselected') return status
+  return 'unselected'
 }
 
 function formatDateTime(value: string) {
@@ -109,10 +111,10 @@ export function AiAccountBoard({
     }, {})
   }, [messages])
   const selectedMessages = selectedAccount ? messagesByAccount[selectedAccount.id] || [] : []
-  const selectedDisplayStatus = normalizeStatus(selectedAccount?.status || 'in_use')
+  const selectedDisplayStatus = normalizeStatus(selectedAccount?.status || 'unselected')
   const selectedDisplayLabel = selectedAccount
     ? statusLabels[selectedDisplayStatus]
-    : '사용 중'
+    : '선택 안 함'
   const allSelected = accounts.length > 0 && selectedBulkIds.length === accounts.length
 
   async function copyAccountId(account: AiAccountRow) {

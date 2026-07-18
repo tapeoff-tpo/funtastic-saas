@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "status": "V0-experimental-unvalidated",
+  "source": "../../parameters/parameters.json",
+  "coupon": {
+    "socket_outer_width": 50.0,
+    "socket_outer_length": 50.0,
+    "socket_outer_radius": 5.0,
+    "socket_thickness": 10.0,
+    "plug_visible_grip_height": 8.0,
+    "plug_grip_style": "open-top shell using parent 2.0mm shell and 2.4mm bottom",
+    "plate_column_pitch": 60.0,
+    "plate_row_pitch": 64.0
+  },
+  "inherited_unchanged": {
+    "facet_footprint": "46x46mm asymmetric five-sided Facet",
+    "socket_opening_mm": [41.0, 41.0],
+    "socket_depth_mm": 5.2,
+    "guide_insertion_depth_mm": 4.8,
+    "terminal_clearance_mm": 0.4,
+    "retention_bead_height_mm": 0.5,
+    "retention_bead_length_mm": 8.0,
+    "retention_bead_vertical_mm": 1.2,
+    "pocket_length_mm": 8.8,
+    "pocket_vertical_mm": 1.6,
+    "corner_radius_mm": 3.2,
+    "guide_chamfer_mm": 0.6,
+    "minimum_wall_mm": 1.6
+  },
+  "fit_values": {
+    "light": {"guide_side_clearance_mm": 0.5, "pocket_depth_mm": 0.34, "retention_relief_mm": 0.12},
+    "standard": {"guide_side_clearance_mm": 0.4, "pocket_depth_mm": 0.26, "retention_relief_mm": 0.04},
+    "firm": {"guide_side_clearance_mm": 0.3, "pocket_depth_mm": 0.18, "retention_relief_mm": -0.04}
+  },
+  "printing": {
+    "printer": "Bambu Lab P2S",
+    "material": "Generic PLA",
+    "nozzle_mm": 0.4,
+    "layer_height_mm": 0.2,
+    "wall_loops": 2,
+    "sparse_infill_percent": 15,
+    "supports": false,
+    "brim": false
+  }
+}

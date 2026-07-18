@@ -1,0 +1,12 @@
+{
+  "gcode": "slice/facet-totem-fit-coupon.gcode",
+  "model_printing_time": "1h 30m 24s",
+  "total_estimated_time": "1h 30m 44s",
+  "filament_length_mm": 18702.29,
+  "filament_volume_mm3": 44984.28,
+  "filament_weight_g": 55.78,
+  "layer_height_mm": 0.2,
+  "wall_loops": 2,
+  "sparse_infill_density": 15.0,
+  "support_enabled": false
+}

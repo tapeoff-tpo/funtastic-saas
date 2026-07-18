@@ -1,0 +1,62 @@
+{
+  "status": "V0-experimental-unvalidated",
+  "source_parent_parameters": "../../parameters/parameters.json",
+  "coupon_parameters": {
+    "socket_outer_width": 50.0,
+    "socket_outer_length": 50.0,
+    "socket_outer_radius": 5.0,
+    "socket_thickness": 10.0,
+    "plug_visible_grip_height": 8.0,
+    "plug_grip_style": "open-top shell using parent 2.0mm shell and 2.4mm bottom",
+    "plate_column_pitch": 60.0,
+    "plate_row_pitch": 64.0
+  },
+  "fit_values": {
+    "light": {
+      "guide_side_clearance_mm": 0.5,
+      "pocket_depth_mm": 0.34,
+      "retention_relief_mm": 0.12
+    },
+    "standard": {
+      "guide_side_clearance_mm": 0.4,
+      "pocket_depth_mm": 0.26,
+      "retention_relief_mm": 0.04
+    },
+    "firm": {
+      "guide_side_clearance_mm": 0.3,
+      "pocket_depth_mm": 0.18,
+      "retention_relief_mm": -0.04
+    }
+  },
+  "part_volumes_mm3": {
+    "light_socket": 15818.553,
+    "light_plug": 14350.797,
+    "standard_socket": 15818.553,
+    "standard_plug": 14429.017,
+    "firm_socket": 15818.553,
+    "firm_plug": 14507.573
+  },
+  "plate_volume_mm3": 90743.045,
+  "unchanged_interface": {
+    "facet_footprint": "46x46mm asymmetric five-sided Facet",
+    "socket_opening_mm": [
+      41.0,
+      41.0
+    ],
+    "socket_depth_mm": 5.2,
+    "guide_insertion_depth_mm": 4.8,
+    "terminal_clearance_mm": 0.4,
+    "retention_bead_height_mm": 0.5,
+    "retention_bead_length_mm": 8.0,
+    "retention_bead_vertical_mm": 1.2,
+    "pocket_length_mm": 8.8,
+    "pocket_vertical_mm": 1.6,
+    "corner_radius_mm": 3.2,
+    "guide_chamfer_mm": 0.6,
+    "minimum_wall_mm": 1.6
+  },
+  "notes": [
+    "Only visible plug height and nonfunctional socket flange area were reduced.",
+    "Functional socket, guide, stop, bead, pocket, print direction, and fit values are inherited unchanged."
+  ]
+}

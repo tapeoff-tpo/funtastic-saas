@@ -1,0 +1,110 @@
+{
+  "status": "pass",
+  "parts": {
+    "light_socket": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        50.0,
+        50.0,
+        10.0
+      ],
+      "volume_mm3": 15818.377,
+      "first_layer_z_mm": 0.0
+    },
+    "light_plug": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        12.8
+      ],
+      "volume_mm3": 14350.8,
+      "first_layer_z_mm": -0.0
+    },
+    "standard_socket": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        50.0,
+        50.0,
+        10.0
+      ],
+      "volume_mm3": 15818.377,
+      "first_layer_z_mm": 0.0
+    },
+    "standard_plug": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        12.8
+      ],
+      "volume_mm3": 14429.02,
+      "first_layer_z_mm": -0.0
+    },
+    "firm_socket": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        50.0,
+        50.0,
+        10.0
+      ],
+      "volume_mm3": 15818.377,
+      "first_layer_z_mm": 0.0
+    },
+    "firm_plug": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        12.8
+      ],
+      "volume_mm3": 14507.576,
+      "first_layer_z_mm": -0.0
+    }
+  },
+  "functional_identity": {
+    "coupon_declared_values_equal_parent": true,
+    "socket_external_envelopes_identical": true,
+    "plug_external_xy_identical": true,
+    "socket_volumes_identical_mm3": true,
+    "assembly_path": "single straight Z translation",
+    "stop_surface_z_mm": 10.0
+  },
+  "assembled": {
+    "light": {
+      "seated_z_mm": 5.2,
+      "interference_mm3": 0
+    },
+    "standard": {
+      "seated_z_mm": 5.2,
+      "interference_mm3": 0.216578
+    },
+    "firm": {
+      "seated_z_mm": 5.2,
+      "interference_mm3": 1.103008
+    }
+  },
+  "plate": {
+    "extents_mm": [
+      170.0,
+      112.0,
+      12.8
+    ],
+    "source_part_count": 6,
+    "pairwise_xy_separation_pass": true,
+    "p2s_build_volume_pass": true,
+    "all_components_on_bed": true
+  }
+}

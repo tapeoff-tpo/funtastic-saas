@@ -1,0 +1,651 @@
+zone,rank,small_object
+Study,1,Pen
+Study,2,Pencil
+Study,3,Mechanical pencil
+Study,4,Highlighter
+Study,5,Marker
+Study,6,Eraser
+Study,7,Pencil sharpener
+Study,8,Ruler
+Study,9,Scissors
+Study,10,Glue stick
+Study,11,Tape roll
+Study,12,Correction tape
+Study,13,Sticky notes
+Study,14,Index cards
+Study,15,Flashcards
+Study,16,Bookmark
+Study,17,Paper clips
+Study,18,Binder clips
+Study,19,Push pins
+Study,20,Rubber bands
+Study,21,Stapler
+Study,22,Staple refills
+Study,23,Hole punch
+Study,24,Calculator
+Study,25,Study timer
+Study,26,Phone
+Study,27,Earbuds
+Study,28,Charging cable
+Study,29,USB drive
+Study,30,SD card
+Study,31,External SSD
+Study,32,Notebook
+Study,33,Planner
+Study,34,Textbook
+Study,35,Loose paper
+Study,36,Envelope
+Study,37,Document tabs
+Study,38,Label tape
+Study,39,Stamp
+Study,40,Ink pad
+Study,41,Drawing compass
+Study,42,Protractor
+Study,43,Craft knife
+Study,44,Spare blades
+Study,45,Paintbrush
+Study,46,Colored pencils
+Study,47,Washi tape
+Study,48,Memo cards
+Study,49,Reading glasses
+Study,50,Desk cleaning brush
+Work,1,Phone
+Work,2,Laptop charger
+Work,3,Charging cable
+Work,4,USB hub
+Work,5,USB drive
+Work,6,External SSD
+Work,7,Mouse
+Work,8,Trackpad
+Work,9,Keyboard cleaning brush
+Work,10,Headset
+Work,11,Earbuds
+Work,12,Webcam
+Work,13,Webcam privacy cover
+Work,14,Security key
+Work,15,ID card
+Work,16,Business cards
+Work,17,Pen
+Work,18,Highlighter
+Work,19,Marker
+Work,20,Mechanical pencil
+Work,21,Sticky notes
+Work,22,Notebook
+Work,23,Planner
+Work,24,Paper clips
+Work,25,Binder clips
+Work,26,Rubber bands
+Work,27,Stapler
+Work,28,Staple refills
+Work,29,Scissors
+Work,30,Tape dispenser
+Work,31,Glue stick
+Work,32,Calculator
+Work,33,Presentation remote
+Work,34,Meeting timer
+Work,35,Nameplate
+Work,36,Access badge
+Work,37,Keys
+Work,38,Wallet
+Work,39,Watch
+Work,40,Glasses
+Work,41,Lens cloth
+Work,42,Hand cream
+Work,43,Lip balm
+Work,44,Sanitizer bottle
+Work,45,Tissue pack
+Work,46,Snack bar
+Work,47,Tea bags
+Work,48,Coffee capsules
+Work,49,Document tabs
+Work,50,Cable labels
+Bathroom,1,Toothbrush
+Bathroom,2,Electric toothbrush head
+Bathroom,3,Toothpaste
+Bathroom,4,Dental floss
+Bathroom,5,Interdental brush
+Bathroom,6,Tongue cleaner
+Bathroom,7,Mouthwash cup
+Bathroom,8,Razor
+Bathroom,9,Spare razor cartridge
+Bathroom,10,Shaving brush
+Bathroom,11,Shaving cream tube
+Bathroom,12,Face cleanser
+Bathroom,13,Cleansing brush
+Bathroom,14,Soap bar
+Bathroom,15,Soap pouch
+Bathroom,16,Shampoo bottle
+Bathroom,17,Conditioner bottle
+Bathroom,18,Body wash bottle
+Bathroom,19,Travel bottle
+Bathroom,20,Shower cap
+Bathroom,21,Washcloth
+Bathroom,22,Shower sponge
+Bathroom,23,Loofah
+Bathroom,24,Hair tie
+Bathroom,25,Hair clip
+Bathroom,26,Comb
+Bathroom,27,Hairbrush
+Bathroom,28,Cotton swabs
+Bathroom,29,Cotton pads
+Bathroom,30,Tweezers
+Bathroom,31,Nail clippers
+Bathroom,32,Nail file
+Bathroom,33,Small scissors
+Bathroom,34,Contact lens case
+Bathroom,35,Contact lens solution
+Bathroom,36,Glasses
+Bathroom,37,Skincare tube
+Bathroom,38,Skincare jar
+Bathroom,39,Hand cream
+Bathroom,40,Deodorant
+Bathroom,41,Sanitary pads
+Bathroom,42,Tampons
+Bathroom,43,Toilet paper roll
+Bathroom,44,Air freshener
+Bathroom,45,Drain hair catcher
+Bathroom,46,Squeegee
+Bathroom,47,Cleaning brush
+Bathroom,48,Rubber gloves
+Bathroom,49,Small towel
+Bathroom,50,Waterproof speaker
+Kitchen,1,Cooking spoon
+Kitchen,2,Spatula
+Kitchen,3,Ladle
+Kitchen,4,Tongs
+Kitchen,5,Whisk
+Kitchen,6,Peeler
+Kitchen,7,Can opener
+Kitchen,8,Bottle opener
+Kitchen,9,Kitchen scissors
+Kitchen,10,Measuring spoon
+Kitchen,11,Measuring cup
+Kitchen,12,Kitchen timer
+Kitchen,13,Thermometer
+Kitchen,14,Pot holder
+Kitchen,15,Oven mitt
+Kitchen,16,Dish towel
+Kitchen,17,Sponge
+Kitchen,18,Scrub brush
+Kitchen,19,Dish soap bottle
+Kitchen,20,Rubber gloves
+Kitchen,21,Sink stopper
+Kitchen,22,Drain strainer
+Kitchen,23,Food bag clips
+Kitchen,24,Rubber bands
+Kitchen,25,Aluminum foil roll
+Kitchen,26,Plastic wrap roll
+Kitchen,27,Parchment roll
+Kitchen,28,Reusable food bags
+Kitchen,29,Spice jar
+Kitchen,30,Seasoning packet
+Kitchen,31,Tea bag
+Kitchen,32,Coffee filter
+Kitchen,33,Chopsticks
+Kitchen,34,Straw
+Kitchen,35,Reusable cutlery
+Kitchen,36,Napkin
+Kitchen,37,Coaster
+Kitchen,38,Trivet
+Kitchen,39,Recipe card
+Kitchen,40,Phone
+Kitchen,41,Tablet
+Kitchen,42,Kitchen scale
+Kitchen,43,Vegetable brush
+Kitchen,44,Garlic press
+Kitchen,45,Citrus squeezer
+Kitchen,46,Tea infuser
+Kitchen,47,Bag sealer
+Kitchen,48,Label marker
+Kitchen,49,Jar labels
+Kitchen,50,Small cleaning cloth
+Coffee,1,Coffee beans bag
+Coffee,2,Coffee capsule
+Coffee,3,Paper filter
+Coffee,4,Metal filter
+Coffee,5,Portafilter
+Coffee,6,Dosing cup
+Coffee,7,Dosing ring
+Coffee,8,Coffee tamper
+Coffee,9,Distribution tool
+Coffee,10,WDT tool
+Coffee,11,Espresso puck screen
+Coffee,12,Milk pitcher
+Coffee,13,Shot glass
+Coffee,14,Espresso cup
+Coffee,15,Mug
+Coffee,16,Dripper
+Coffee,17,Coffee server
+Coffee,18,Hand grinder
+Coffee,19,Scale
+Coffee,20,Timer
+Coffee,21,Scoop
+Coffee,22,Measuring spoon
+Coffee,23,Stirring spoon
+Coffee,24,Cleaning brush
+Coffee,25,Group-head brush
+Coffee,26,Bar towel
+Coffee,27,Knock-box bar
+Coffee,28,Backflush disk
+Coffee,29,Cleaning tablet
+Coffee,30,Descaling packet
+Coffee,31,Water-test strip
+Coffee,32,Tea infuser
+Coffee,33,Tea bag
+Coffee,34,Sugar packet
+Coffee,35,Syrup pump cap
+Coffee,36,Straw
+Coffee,37,Coaster
+Coffee,38,Reusable cup lid
+Coffee,39,Cup sleeve
+Coffee,40,Recipe card
+Coffee,41,Bean label
+Coffee,42,Marker
+Coffee,43,Filter paper brush
+Coffee,44,Spare grinder burr tool
+Coffee,45,Steam-tip pin
+Coffee,46,Thermometer
+Coffee,47,Water spray bottle
+Coffee,48,Charging cable
+Coffee,49,Milk-jug clip
+Coffee,50,Small waste bag
+Bedroom,1,Phone
+Bedroom,2,Charging cable
+Bedroom,3,Wireless earbuds
+Bedroom,4,Watch
+Bedroom,5,Glasses
+Bedroom,6,Reading glasses
+Bedroom,7,Eye mask
+Bedroom,8,Earplugs
+Bedroom,9,Hair tie
+Bedroom,10,Hair clip
+Bedroom,11,Comb
+Bedroom,12,Jewelry ring
+Bedroom,13,Earrings
+Bedroom,14,Necklace
+Bedroom,15,Bracelet
+Bedroom,16,Wallet
+Bedroom,17,Keys
+Bedroom,18,Lip balm
+Bedroom,19,Hand cream
+Bedroom,20,Tissue pack
+Bedroom,21,Medication bottle
+Bedroom,22,Pill organizer
+Bedroom,23,Water bottle
+Bedroom,24,Book
+Bedroom,25,E-reader
+Bedroom,26,Bookmark
+Bedroom,27,Pen
+Bedroom,28,Notebook
+Bedroom,29,Remote control
+Bedroom,30,Smart-home remote
+Bedroom,31,Sleep headphones
+Bedroom,32,USB charger
+Bedroom,33,Power bank
+Bedroom,34,Lens cloth
+Bedroom,35,Perfume bottle
+Bedroom,36,Deodorant
+Bedroom,37,Nail file
+Bedroom,38,Nail clippers
+Bedroom,39,Small mirror
+Bedroom,40,Incense holder
+Bedroom,41,Matchbox
+Bedroom,42,Candle snuffer
+Bedroom,43,Clothing lint brush
+Bedroom,44,Collar stay
+Bedroom,45,Cufflinks
+Bedroom,46,Tie clip
+Bedroom,47,Spare buttons
+Bedroom,48,Laundry tag
+Bedroom,49,Alarm clock
+Bedroom,50,Bedside flashlight
+Kids,1,Crayon
+Kids,2,Colored pencil
+Kids,3,Washable marker
+Kids,4,Pencil
+Kids,5,Eraser
+Kids,6,Sharpener
+Kids,7,Child scissors
+Kids,8,Glue stick
+Kids,9,Sticker sheet
+Kids,10,Stamp
+Kids,11,Ink pad
+Kids,12,Paintbrush
+Kids,13,Watercolor pan
+Kids,14,Modeling clay tool
+Kids,15,Craft pom-poms
+Kids,16,Beads
+Kids,17,Thread spool
+Kids,18,Tape roll
+Kids,19,Ruler
+Kids,20,Flashcards
+Kids,21,Letter cards
+Kids,22,Number cards
+Kids,23,Small puzzle pieces
+Kids,24,Toy car
+Kids,25,Building block pieces
+Kids,26,Mini figure
+Kids,27,Trading cards
+Kids,28,Game tokens
+Kids,29,Dice
+Kids,30,Marbles
+Kids,31,Hair tie
+Kids,32,Hair clip
+Kids,33,Child toothbrush
+Kids,34,Tissue pack
+Kids,35,Face mask
+Kids,36,Name tag
+Kids,37,School ID card
+Kids,38,Backpack tag
+Kids,39,Keychain
+Kids,40,Charging cable
+Kids,41,Headphones
+Kids,42,Tablet stylus
+Kids,43,Bookmark
+Kids,44,Notebook
+Kids,45,Reward tokens
+Kids,46,Chore cards
+Kids,47,Snack clips
+Kids,48,Small socks
+Kids,49,Mitten pair
+Kids,50,Night-light remote
+Pet,1,Leash
+Pet,2,Collar
+Pet,3,Harness
+Pet,4,ID tag
+Pet,5,Waste bag roll
+Pet,6,Waste bag dispenser
+Pet,7,Training clicker
+Pet,8,Treat pouch
+Pet,9,Treat packet
+Pet,10,Small toy
+Pet,11,Ball
+Pet,12,Chew stick
+Pet,13,Rope toy
+Pet,14,Cat teaser wand
+Pet,15,Feather refill
+Pet,16,Brush
+Pet,17,Comb
+Pet,18,Nail clipper
+Pet,19,Tick remover
+Pet,20,Toothbrush
+Pet,21,Toothpaste tube
+Pet,22,Ear-cleaning bottle
+Pet,23,Eye-wipe packet
+Pet,24,Paw-wipe packet
+Pet,25,Paw balm
+Pet,26,Medication bottle
+Pet,27,Pill cutter
+Pet,28,Food scoop
+Pet,29,Can lid
+Pet,30,Feeding mat clip
+Pet,31,Water-bottle nozzle
+Pet,32,Travel bowl
+Pet,33,Carrier accessory
+Pet,34,Seat-belt tether
+Pet,35,Poop scoop bags
+Pet,36,Litter scoop
+Pet,37,Litter-bag roll
+Pet,38,Deodorizer packet
+Pet,39,Aquarium net
+Pet,40,Fish-food container
+Pet,41,Cage-cleaning brush
+Pet,42,Bird treat clip
+Pet,43,Bird toy
+Pet,44,Pet towel
+Pet,45,Pet clothing hanger
+Pet,46,Grooming scissors
+Pet,47,Training whistle
+Pet,48,Doorbell button
+Pet,49,Pet camera cable
+Pet,50,Vaccination record card
+Living Room,1,TV remote
+Living Room,2,Streaming remote
+Living Room,3,Game controller
+Living Room,4,VR controller
+Living Room,5,Phone
+Living Room,6,Tablet
+Living Room,7,E-reader
+Living Room,8,Charging cable
+Living Room,9,USB charger
+Living Room,10,Power bank
+Living Room,11,Earbuds
+Living Room,12,Headphones
+Living Room,13,Glasses
+Living Room,14,Lens cloth
+Living Room,15,Coaster
+Living Room,16,Bottle opener
+Living Room,17,Snack clip
+Living Room,18,Tissue pack
+Living Room,19,Hand cream
+Living Room,20,Candle lighter
+Living Room,21,Matchbox
+Living Room,22,Candle snuffer
+Living Room,23,Incense holder
+Living Room,24,Plant mister
+Living Room,25,Plant label
+Living Room,26,Small pruning scissors
+Living Room,27,Books
+Living Room,28,Bookmark
+Living Room,29,Magazine
+Living Room,30,Pen
+Living Room,31,Notepad
+Living Room,32,Playing cards
+Living Room,33,Dice
+Living Room,34,Board-game tokens
+Living Room,35,Puzzle pieces
+Living Room,36,Photo prints
+Living Room,37,Postcards
+Living Room,38,Mini figure
+Living Room,39,Small collectible
+Living Room,40,Smart-light remote
+Living Room,41,Air-conditioner remote
+Living Room,42,Fan remote
+Living Room,43,Router accessory
+Living Room,44,Cable adapter
+Living Room,45,USB drive
+Living Room,46,Media card
+Living Room,47,Pet toy
+Living Room,48,Lint roller
+Living Room,49,Small cleaning brush
+Living Room,50,Room-fragrance bottle
+Entryway,1,House keys
+Entryway,2,Car keys
+Entryway,3,Key fob
+Entryway,4,Wallet
+Entryway,5,Coin pouch
+Entryway,6,Transit card
+Entryway,7,Access card
+Entryway,8,Employee badge
+Entryway,9,Sunglasses
+Entryway,10,Glasses case
+Entryway,11,Face mask
+Entryway,12,Mask strap
+Entryway,13,Earbuds
+Entryway,14,Phone
+Entryway,15,Charging cable
+Entryway,16,Power bank
+Entryway,17,Watch
+Entryway,18,Bracelet
+Entryway,19,Mail
+Entryway,20,Postcard
+Entryway,21,Parcel slip
+Entryway,22,Pen
+Entryway,23,Notepad
+Entryway,24,Reusable shopping bag
+Entryway,25,Umbrella strap
+Entryway,26,Shoe horn
+Entryway,27,Shoe brush
+Entryway,28,Shoe cloth
+Entryway,29,Shoe deodorizer
+Entryway,30,Lint roller
+Entryway,31,Clothing brush
+Entryway,32,Hand sanitizer
+Entryway,33,Hand cream
+Entryway,34,Tissue pack
+Entryway,35,Dog leash
+Entryway,36,Waste bag roll
+Entryway,37,Pet treat pouch
+Entryway,38,Bicycle-light charger
+Entryway,39,Bike-lock key
+Entryway,40,Helmet strap
+Entryway,41,Delivery box key
+Entryway,42,Name tag
+Entryway,43,Door remote
+Entryway,44,Security token
+Entryway,45,Spare key
+Entryway,46,Flashlight
+Entryway,47,Small tape measure
+Entryway,48,Package cutter
+Entryway,49,Return label
+Entryway,50,Reusable cup sleeve
+Laundry,1,Clothespin
+Laundry,2,Laundry bag clip
+Laundry,3,Mesh wash bag
+Laundry,4,Delicates bag
+Laundry,5,Stain remover stick
+Laundry,6,Stain-remover brush
+Laundry,7,Detergent scoop
+Laundry,8,Detergent pod
+Laundry,9,Fabric-softener cap
+Laundry,10,Bleach cap
+Laundry,11,Dryer sheet
+Laundry,12,Dryer ball
+Laundry,13,Lint roller
+Laundry,14,Lint brush
+Laundry,15,Lint-trap brush
+Laundry,16,Sewing needle case
+Laundry,17,Thread spool
+Laundry,18,Spare buttons
+Laundry,19,Safety pins
+Laundry,20,Fabric clips
+Laundry,21,Measuring tape
+Laundry,22,Fabric marker
+Laundry,23,Clothing labels
+Laundry,24,Ironing cloth
+Laundry,25,Garment steamer brush
+Laundry,26,Iron water cup
+Laundry,27,Hanger clips
+Laundry,28,Sock clips
+Laundry,29,Collar stays
+Laundry,30,Shoe-laundry bag
+Laundry,31,Rubber gloves
+Laundry,32,Cleaning sponge
+Laundry,33,Cleaning brush
+Laundry,34,Spray bottle
+Laundry,35,Microfiber cloth
+Laundry,36,Drain filter
+Laundry,37,Washing-machine filter
+Laundry,38,Machine-cleaning tablet
+Laundry,39,Coin pouch
+Laundry,40,Laundry timer
+Laundry,41,Instruction card
+Laundry,42,Color-catcher sheet
+Laundry,43,Fragrance sachet
+Laundry,44,Closet deodorizer
+Laundry,45,Garment repair patch
+Laundry,46,Zipper repair kit
+Laundry,47,Small scissors
+Laundry,48,Seam ripper
+Laundry,49,Ironing-board clip
+Laundry,50,Missing-sock marker
+Beauty,1,Makeup brush
+Beauty,2,Beauty sponge
+Beauty,3,Foundation bottle
+Beauty,4,Concealer tube
+Beauty,5,Face powder compact
+Beauty,6,Blush compact
+Beauty,7,Highlighter compact
+Beauty,8,Eyeshadow palette
+Beauty,9,Mascara
+Beauty,10,Eyeliner
+Beauty,11,Eyebrow pencil
+Beauty,12,Lipstick
+Beauty,13,Lip tint
+Beauty,14,Lip balm
+Beauty,15,Lip liner
+Beauty,16,Eyelash curler
+Beauty,17,False eyelashes
+Beauty,18,Eyelash glue
+Beauty,19,Tweezers
+Beauty,20,Small scissors
+Beauty,21,Cotton swabs
+Beauty,22,Cotton pads
+Beauty,23,Makeup-remover pad
+Beauty,24,Perfume bottle
+Beauty,25,Skincare dropper bottle
+Beauty,26,Skincare tube
+Beauty,27,Skincare jar
+Beauty,28,Sheet mask packet
+Beauty,29,Hairbrush
+Beauty,30,Comb
+Beauty,31,Hair tie
+Beauty,32,Hair clip
+Beauty,33,Hairpin
+Beauty,34,Headband
+Beauty,35,Nail polish bottle
+Beauty,36,Nail file
+Beauty,37,Nail buffer
+Beauty,38,Nail clippers
+Beauty,39,Manicure tool
+Beauty,40,Jewelry ring
+Beauty,41,Earrings
+Beauty,42,Necklace
+Beauty,43,Bracelet
+Beauty,44,Watch
+Beauty,45,Contact lens case
+Beauty,46,Glasses
+Beauty,47,Lens cloth
+Beauty,48,Small mirror
+Beauty,49,Makeup sharpener
+Beauty,50,Brush-cleaning tool
+Travel,1,Passport
+Travel,2,Boarding pass
+Travel,3,Travel wallet
+Travel,4,Credit card
+Travel,5,Transit card
+Travel,6,Foreign currency
+Travel,7,Coin pouch
+Travel,8,Luggage key
+Travel,9,Luggage tag
+Travel,10,Pen
+Travel,11,Phone
+Travel,12,Charging cable
+Travel,13,USB charger
+Travel,14,Travel adapter
+Travel,15,Power bank
+Travel,16,Earbuds
+Travel,17,Headphones
+Travel,18,USB drive
+Travel,19,Camera battery
+Travel,20,Memory card
+Travel,21,Lens cap
+Travel,22,Sunglasses
+Travel,23,Glasses
+Travel,24,Lens cloth
+Travel,25,Eye mask
+Travel,26,Earplugs
+Travel,27,Neck pillow strap
+Travel,28,Face mask
+Travel,29,Hand sanitizer
+Travel,30,Tissue pack
+Travel,31,Wet wipes
+Travel,32,Medication bottle
+Travel,33,Pill organizer
+Travel,34,Toothbrush
+Travel,35,Toothpaste tube
+Travel,36,Travel bottle
+Travel,37,Razor
+Travel,38,Comb
+Travel,39,Hair tie
+Travel,40,Hair clip
+Travel,41,Lip balm
+Travel,42,Hand cream
+Travel,43,Sunscreen tube
+Travel,44,Jewelry pouch
+Travel,45,Laundry bag
+Travel,46,Shoe bag
+Travel,47,Bag clip
+Travel,48,Safety pin
+Travel,49,Mini sewing kit
+Travel,50,Reusable bottle cap

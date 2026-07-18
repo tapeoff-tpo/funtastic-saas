@@ -1,0 +1,36 @@
+module_family,primary_job,compatible_zones,pla_mvp,environment_limit,platform_role
+Catch-all tray,Temporarily hold mixed small objects,"Study|Work|Bedroom|Kids|Living Room|Entryway|Beauty|Coffee|Pet",yes,"Dry indoor use",universal-core
+Divided tray,Separate small loose objects,"Study|Work|Bedroom|Kids|Living Room|Beauty|Travel",yes,"Dry indoor use",universal-core
+Cup,Hold upright tools and tubes,"Study|Work|Kids|Beauty|Coffee|Bathroom|Kitchen|Laundry",conditional,"Wet zones require material and drainage validation",universal-core
+Hook,Hang looped or handled objects,"Study|Work|Bedroom|Kids|Pet|Living Room|Entryway|Laundry|Bathroom|Kitchen",conditional,"Load and wet-zone limits vary",universal-core
+Retaining clip,Grip thin flexible objects,"Study|Work|Kids|Entryway|Laundry|Kitchen|Travel",conditional,"Repeated PLA flex requires replaceable or low-strain retention",universal-core
+Cable guide,Route flexible cables,"Study|Work|Bedroom|Kids|Living Room|Coffee|Travel",yes,"Keep away from heat and mains connections",universal-core
+Label plate,Identify owner contents or location,"Study|Work|Bathroom|Kitchen|Coffee|Bedroom|Kids|Pet|Living Room|Entryway|Laundry|Beauty|Travel",yes,"No safety-identification claims",universal-core
+Small bin,Contain loose parts,"Study|Work|Kids|Pet|Living Room|Laundry|Beauty|Travel",yes,"Not for food contact or wet waste",universal-core
+Card and memo holder,Display flat cards notes or instructions,"Study|Work|Kitchen|Coffee|Bedroom|Kids|Pet|Living Room|Entryway|Laundry|Travel",yes,"Dry paper only",universal-core
+Phone rest,Present a phone at a viewing angle,"Study|Work|Kitchen|Coffee|Bedroom|Living Room|Beauty|Travel",yes,"Away from heat and direct water",universal-core
+Device cradle,Fit a defined lightweight device,"Study|Work|Bedroom|Kids|Living Room|Beauty|Travel",yes,"Fit must be validated per device",object-specific
+Ring and loop holder,Retain cylindrical or looped objects,"Study|Work|Bathroom|Kitchen|Coffee|Bedroom|Beauty|Travel",conditional,"Wet and heat exposure require later material",universal-core
+Riser,Raise or stage small objects,"Study|Work|Coffee|Bedroom|Kids|Living Room|Beauty",yes,"Low load only",universal-core
+Display ledge,Display cards photos or collectibles,"Study|Work|Bedroom|Kids|Living Room|Beauty",yes,"Low load and dry zones",universal-core
+Pocket,Hold thin mixed objects vertically,"Study|Work|Bedroom|Kids|Living Room|Entryway|Laundry|Travel",yes,"Dry low-load contents",universal-core
+Divider,Subdivide an existing tray cup or bin,"Study|Work|Kitchen|Coffee|Bedroom|Kids|Pet|Living Room|Laundry|Beauty|Travel",conditional,"Food and wet-zone contact excluded in PLA MVP",universal-core
+Spool and roll holder,Control tape bag or cord rolls,"Study|Work|Kitchen|Kids|Pet|Entryway|Laundry|Travel",conditional,"Low torque and dry use in PLA MVP",object-specific
+Brush rack,Separate and air tools,"Study|Bathroom|Kitchen|Coffee|Pet|Laundry|Beauty",conditional,"Wet cleaning and hygiene claims need validation",object-specific
+Bottle collar,Stabilize small bottles and tubes,"Bathroom|Kitchen|Coffee|Pet|Laundry|Beauty|Travel",conditional,"No heat food-contact or chemical-resistance claim",object-specific
+Remote stand,Group handheld controllers,"Work|Bedroom|Kids|Living Room",yes,"Device fit and tip stability required",object-specific
+Headphone hanger,Hang lightweight headphones,"Study|Work|Kids|Living Room|Travel",yes,"Load and cable-snag limits required",object-specific
+Jewelry tree,Separate rings earrings and chains,"Bedroom|Beauty|Travel",yes,"Dry use only",zone-specific
+Key dock,Collect keys fobs and access cards,"Work|Bedroom|Entryway|Travel",yes,"Mount and load limits required",zone-specific
+Mail slot,Hold incoming flat documents,"Work|Living Room|Entryway",yes,"Dry paper only",zone-specific
+Waste-bag dispenser,Present a small bag roll,"Pet|Entryway|Kitchen|Travel",conditional,"Not for wet or hot placement",zone-specific
+Filter holder,Keep dry paper filters organized,"Kitchen|Coffee",yes,"Dry storage only; no food-contact performance claim",zone-specific
+Cosmetic divider,Index cosmetic tubes and compacts,"Bedroom|Beauty|Travel",yes,"Dry cosmetic storage only",zone-specific
+Laundry clip cup,Collect clothespins and repair notions,"Laundry|Travel",conditional,"Humidity and repeated impact require validation",zone-specific
+Toiletry drain cup,Hold wet grooming items,"Bathroom|Travel",no,"Requires PETG or equivalent plus hygiene and drainage validation",future-zone
+Utensil drain cup,Hold wet kitchen tools,"Kitchen|Coffee",no,"Requires heat water and cleaning validation",future-zone
+Portable carrier,Move a selected module set,"Study|Work|Kids|Beauty|Travel",conditional,"Drop and handle-load validation required",cross-zone
+Base expansion link,Join compatible base capacity,"Study|Work|Bedroom|Kids|Living Room|Beauty",conditional,"Interface accumulation and load paths require validation",platform-service
+Interface adapter,Connect legacy or external standards,"Study|Work|Kitchen|Bedroom|Living Room|Entryway|Laundry",conditional,"Compatibility and IP must be verified",platform-service
+Blank cover,Hide unused interface positions,"Study|Work|Bathroom|Kitchen|Coffee|Bedroom|Kids|Pet|Living Room|Entryway|Laundry|Beauty|Travel",yes,"Environment follows the Base",platform-service
+Replacement detent,Restore tactile retention without replacing a module,"Study|Work|Bedroom|Kids|Pet|Living Room|Entryway|Beauty|Travel",conditional,"Cycle life must be measured",platform-service

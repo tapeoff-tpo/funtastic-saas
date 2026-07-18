@@ -10,7 +10,13 @@ export type PriceTableDisplayColumn = {
   }>
   format?: 'money' | 'text'
   defaultVisible?: boolean
+  productIdKeys?: string[]
+  showProductId?: boolean
 }
+
+const PRODUCT_ID_FIELD_PATTERN = /(?:등록\s*)?(?:상품|제품)\s*(?:번호|코드|id)|판매자\s*상품\s*코드/i
+const CORE_PRODUCT_ID_KEYS = new Set(['상품코드', '사방넷상품코드', '제품코드'])
+const TOKEN_NOISE_PATTERN = /(?:판매가격?|공급가격?|정산희망\s*가격|매입가|배송비|추가금|신사이트|현재|기준|등록|가격으로|상품|제품|번호|코드|id|사이트|판매중단)/gi
 
 const productRegistrationColumns: PriceTableDisplayColumn[] = [
   priceColumn('b2b', 'B2B', 'B2B 판매가', 'b2b 배송비', true, [
@@ -143,6 +149,39 @@ export function getPriceTableDisplayColumns(sheetName: string) {
   return productRegistrationColumns
 }
 
+export function findMarketplaceProductIds(
+  rawData: Record<string, string>,
+  column: PriceTableDisplayColumn,
+) {
+  const exactKeys = column.productIdKeys ?? []
+  const exactMatches = exactKeys
+    .map((key) => ({ key, value: rawData[key] }))
+    .filter((entry): entry is { key: string; value: string } => Boolean(entry.value))
+  if (exactMatches.length) return exactMatches
+
+  const tokens = marketplaceTokens(column)
+  if (!tokens.length) return []
+
+  const candidates = Object.entries(rawData)
+    .filter(([key, value]) => value && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
+    .map(([key, value]) => ({ key, value, score: identifierKeyScore(key, tokens) }))
+  const namedMatches = candidates
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.key.localeCompare(right.key, 'ko'))
+    .filter((entry, index, entries) => index === 0 || entry.score === entries[0]?.score)
+    .map(({ key, value }) => ({ key, value }))
+  if (namedMatches.length) return namedMatches
+
+  const keys = Object.keys(rawData)
+  const priceIndex = keys.indexOf(column.valueKey)
+  if (priceIndex < 0) return []
+  const nearbyMatch = candidates
+    .map((entry) => ({ ...entry, distance: Math.abs(keys.indexOf(entry.key) - priceIndex) }))
+    .filter((entry) => entry.distance <= 4)
+    .sort((left, right) => left.distance - right.distance)[0]
+  return nearbyMatch ? [{ key: nearbyMatch.key, value: nearbyMatch.value }] : []
+}
+
 function priceColumn(
   id: string,
   label: string,
@@ -157,9 +196,40 @@ function priceColumn(
     valueKey,
     format: 'money',
     defaultVisible,
+    showProductId: true,
     details: [
       ...extraDetails,
       { key: shippingKey, label: '배송', format: 'money' },
     ],
   }
+}
+
+function marketplaceTokens(column: PriceTableDisplayColumn) {
+  const sources = [
+    column.label,
+    column.valueKey,
+    ...(column.details ?? []).map((detail) => detail.key),
+  ]
+  const tokens = sources.flatMap((source) => {
+    const cleaned = source
+      .replace(TOKEN_NOISE_PATTERN, ' ')
+      .replace(/[★()@._/,-]/g, ' ')
+      .replace(/\b\d+\b/g, ' ')
+      .toLowerCase()
+    return cleaned.split(/\s+/).filter((token) => token.length >= 2)
+  })
+  return [...new Set(tokens)]
+}
+
+function identifierKeyScore(key: string, tokens: string[]) {
+  const normalizedKey = key.toLowerCase().replace(/\s+/g, '')
+  return tokens.reduce((score, token) => {
+    const normalizedToken = token.replace(/\s+/g, '')
+    if (!normalizedToken || !normalizedKey.includes(normalizedToken)) return score
+    return score + Math.max(1, normalizedToken.length)
+  }, 0)
+}
+
+function compactKey(value: string) {
+  return value.replace(/\s+/g, '')
 }

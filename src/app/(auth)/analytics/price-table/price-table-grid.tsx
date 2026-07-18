@@ -10,7 +10,11 @@ import {
   Columns3,
   RotateCcw,
 } from 'lucide-react'
-import { getPriceTableDisplayColumns, type PriceTableDisplayColumn } from './price-table-columns'
+import {
+  findMarketplaceProductIds,
+  getPriceTableDisplayColumns,
+  type PriceTableDisplayColumn,
+} from './price-table-columns'
 
 export type PriceTableGridRow = {
   id: string
@@ -264,6 +268,7 @@ function CoreCell({ column, row }: { column: CoreColumn; row: PriceTableGridRow 
 
 function PriceCell({ column, row }: { column: PriceTableDisplayColumn; row: PriceTableGridRow }) {
   const value = row.rawData[column.valueKey]
+  const productIds = findMarketplaceProductIds(row.rawData, column)
   const details = (column.details ?? [])
     .map((detail) => ({ ...detail, value: row.rawData[detail.key] }))
     .filter((detail) => detail.value !== undefined && detail.value !== '')
@@ -280,6 +285,18 @@ function PriceCell({ column, row }: { column: PriceTableDisplayColumn; row: Pric
             </div>
           ))}
         </div>
+      ) : null}
+      {column.showProductId && productIds.length > 0 ? (
+        <div className="mt-1 space-y-0.5 border-t border-dashed pt-1 text-[11px] text-muted-foreground">
+          {productIds.map((productId) => (
+            <div key={productId.key} className="flex justify-end gap-1" title={productId.key}>
+              <span>상품번호</span>
+              <span className="max-w-[105px] truncate font-mono text-foreground">{productId.value}</span>
+            </div>
+          ))}
+        </div>
+      ) : column.showProductId ? (
+        <div className="mt-1 border-t border-dashed pt-1 text-[11px] text-muted-foreground/70">상품번호 미등록</div>
       ) : null}
     </td>
   )

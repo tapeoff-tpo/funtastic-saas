@@ -1,0 +1,113 @@
+{
+  "status": "pass",
+  "parts": {
+    "base_2x2": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        118.0,
+        118.0,
+        10.0
+      ],
+      "volume_mm3": 102822.355
+    },
+    "block_low": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        26.8
+      ],
+      "volume_mm3": 53276.491
+    },
+    "block_medium": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        42.8
+      ],
+      "volume_mm3": 86507.828
+    },
+    "block_tall": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        62.8
+      ],
+      "volume_mm3": 128046.997
+    },
+    "block_light_fit": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        42.8
+      ],
+      "volume_mm3": 86429.607
+    },
+    "block_standard_fit": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        42.8
+      ],
+      "volume_mm3": 86507.828
+    },
+    "block_firm_fit": {
+      "step_solid_count": 1,
+      "watertight": true,
+      "is_volume": true,
+      "extents_mm": [
+        46.0,
+        46.0,
+        42.8
+      ],
+      "volume_mm3": 86586.384
+    }
+  },
+  "assembled": {
+    "block_low": {
+      "interference_mm3": 0.216578
+    },
+    "block_medium": {
+      "interference_mm3": 0.216578
+    },
+    "block_tall": {
+      "interference_mm3": 0.216578
+    },
+    "block_light_fit": {
+      "interference_mm3": 0
+    },
+    "block_standard_fit": {
+      "interference_mm3": 0.216578
+    },
+    "block_firm_fit": {
+      "interference_mm3": 1.103008
+    }
+  },
+  "checks": {
+    "common_footprint": true,
+    "visible_finger_gap_mm": 8.0,
+    "finger_gap_meets_declared": true,
+    "base_fits_p2s": true,
+    "declared_minimum_wall_mm": 1.6,
+    "minimum_wall_at_least_four_nozzle_lines": true,
+    "common_insertion_depth_mm": 4.8,
+    "terminal_clearance_mm": 0.4,
+    "straight_assembly_path": "single translation along +Z/-Z; no rotation or lateral motion"
+  }
+}

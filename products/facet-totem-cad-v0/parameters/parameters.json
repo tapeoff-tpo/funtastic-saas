@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "status": "V0-experimental-unvalidated",
+  "units": "mm",
+  "base": {
+    "width": 118.0,
+    "length": 118.0,
+    "thickness": 10.0,
+    "corner_radius": 8.0,
+    "rows": 2,
+    "columns": 2,
+    "socket_pitch": 54.0,
+    "socket_depth": 5.2,
+    "socket_width": 41.0,
+    "socket_length": 41.0,
+    "socket_facet": 7.0,
+    "socket_edge_radius": 1.4,
+    "top_reveal_depth": 0.6,
+    "top_reveal_width": 48.0
+  },
+  "module": {
+    "footprint_width": 46.0,
+    "footprint_length": 46.0,
+    "low_height": 22.0,
+    "medium_height": 38.0,
+    "tall_height": 58.0,
+    "facet_size": 8.0,
+    "facet_angle_deg": 45.0,
+    "corner_radius": 3.2,
+    "guide_length": 4.8,
+    "stop_surface_height": 0.4,
+    "shell_thickness": 2.0,
+    "bottom_thickness": 2.4,
+    "minimum_wall": 1.6,
+    "fillet": 1.2,
+    "chamfer": 0.6,
+    "grip_relief_width": 12.0,
+    "grip_relief_depth": 1.0,
+    "mark_depth": 0.3
+  },
+  "interface": {
+    "guide_width": 40.2,
+    "guide_length_xy": 40.2,
+    "insertion_depth": 4.8,
+    "lateral_clearance_standard": 0.4,
+    "terminal_clearance": 0.4,
+    "retention_bead_height": 0.5,
+    "retention_bead_length": 8.0,
+    "retention_bead_vertical": 1.2,
+    "retention_z_from_base": 2.0,
+    "pocket_length": 8.8,
+    "pocket_vertical": 1.6,
+    "pocket_z_from_guide_bottom": 1.8,
+    "finger_gap": 8.0
+  },
+  "fits": {
+    "light": {
+      "guide_side_clearance": 0.5,
+      "pocket_depth": 0.34,
+      "retention_relief": 0.12
+    },
+    "standard": {
+      "guide_side_clearance": 0.4,
+      "pocket_depth": 0.26,
+      "retention_relief": 0.04
+    },
+    "firm": {
+      "guide_side_clearance": 0.3,
+      "pocket_depth": 0.18,
+      "retention_relief": -0.04
+    }
+  },
+  "printing": {
+    "printer": "Bambu Lab P2S",
+    "material": "Generic PLA",
+    "nozzle_mm": 0.4,
+    "layer_height_mm": 0.2,
+    "wall_loops": 2,
+    "sparse_infill_percent": 15,
+    "supports": false,
+    "brim": false,
+    "profile": "0.20mm Standard @BBL P2S"
+  },
+  "notes": [
+    "All dimensions are V0 experimental and unvalidated.",
+    "Fit is controlled by independent guide clearance and retention-pocket relief, never global scaling.",
+    "IP review required before commercialization."
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "status": "V0-experimental-unvalidated",
+  "units": "mm",
+  "base_envelope_mm": [
+    118.0,
+    118.0,
+    10.0
+  ],
+  "module_footprint_mm": [
+    46.0,
+    46.0
+  ],
+  "module_heights_mm": {
+    "low": 22.0,
+    "medium": 38.0,
+    "tall": 58.0
+  },
+  "visible_module_gap_mm": 8.0,
+  "fit_parameters": {
+    "light": {
+      "guide_side_clearance": 0.5,
+      "pocket_depth": 0.34,
+      "retention_relief": 0.12
+    },
+    "standard": {
+      "guide_side_clearance": 0.4,
+      "pocket_depth": 0.26,
+      "retention_relief": 0.04
+    },
+    "firm": {
+      "guide_side_clearance": 0.3,
+      "pocket_depth": 0.18,
+      "retention_relief": -0.04
+    }
+  },
+  "part_volumes_mm3": {
+    "base_2x2": 102822.84,
+    "block_low": 53276.613,
+    "block_medium": 86508.082,
+    "block_tall": 128047.419,
+    "block_light_fit": 86429.862,
+    "block_standard_fit": 86508.082,
+    "block_firm_fit": 86586.639
+  },
+  "plate_volume_mm3": 630179.538,
+  "notes": [
+    "All dimensions are V0 experimental and unvalidated.",
+    "Fit is controlled by independent guide clearance and retention-pocket relief, never global scaling.",
+    "IP review required before commercialization."
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "A": {
+    "expected_advantages": [
+      "Continuous rails carry shear and moment while the detent provides only end confirmation.",
+      "Long guidance should reduce wrong-angle insertion and rattle.",
+      "The module body can grow without changing the rail grammar."
+    ],
+    "expected_risks": [
+      "Long sliding contact may magnify surface roughness and spool-to-spool tolerance variation.",
+      "The 1 mm-scale channel lips require slicer inspection for short bridges.",
+      "A rigid shallow detent may feel weak or require excessive local deflection."
+    ],
+    "validate": [
+      "Insertion force consistency",
+      "Terminal click and visual confirmation",
+      "Rattle and wear debris after 100 cycles",
+      "Base movement during removal"
+    ]
+  },
+  "B": {
+    "expected_advantages": [
+      "Two separated hooks create a familiar lower-and-slide motion.",
+      "Short travel limits friction compared with the continuous rail.",
+      "Gravity can support the retained position in vertical use."
+    ],
+    "expected_risks": [
+      "The module may lift toward the entry during object removal.",
+      "Users may lower the module without completing the terminal catch.",
+      "Concentrated hook loads may create more local wear than Interface A."
+    ],
+    "validate": [
+      "Unintentional lift-out",
+      "Partial engagement visibility",
+      "Hook wear and cap damage",
+      "One-hand release without moving the Base"
+    ]
+  },
+  "C": {
+    "expected_advantages": [
+      "Insert-and-turn creates the clearest ritual and orientation change of the three variants.",
+      "Three lugs distribute moment around the module center.",
+      "The terminal throat can provide confirmation without a separate part."
+    ],
+    "expected_risks": [
+      "Arc tracks are more tolerance-sensitive and can bind from surface roughness.",
+      "Users may not infer rotation direction without a visible cue.",
+      "The shallow roofs over the sub-surface tracks require close slicer inspection."
+    ],
+    "validate": [
+      "First-use rotation comprehension",
+      "Terminal throat click and wear",
+      "Partial rotation retention",
+      "Fit consistency across PLA colors and spools"
+    ]
+  }
+}

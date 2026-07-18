@@ -1,0 +1,24 @@
+{
+  "advantages": [
+    "A/B/C share one controlled test envelope and load point.",
+    "All parts are designed for flat PLA printing without supports.",
+    "Pair volume is equalized in a nonfunctional lower test zone."
+  ],
+  "disadvantages": [
+    "V0 dimensions are unvalidated and may bind or feel loose.",
+    "Shallow captured channels include short bridge roofs that require slicer and print inspection.",
+    "The bench specimen does not prove final product loads, mounting, or ergonomics."
+  ],
+  "structural_features": [
+    "Common Base and Module envelope",
+    "Common integrated hand/load hole",
+    "Separate load guidance and terminal confirmation intent",
+    "Neutral mass-equalization cutout"
+  ],
+  "improvement_points": [
+    "Record fit and force at 0, 10, 25, 50, and 100 cycles.",
+    "Revise only independent functional parameters after physical evidence.",
+    "Do not freeze the interface from CAD or slicer results alone."
+  ],
+  "installed_mockup_context": "Neutral interface bench test; not an installed product"
+}

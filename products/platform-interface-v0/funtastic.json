@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "product": {
+    "name": "Platform Interface V0",
+    "slug": "platform-interface-v0",
+    "status": "ready-for-user-print-approval"
+  },
+  "cad": {
+    "entrypoint": "cad/model.py",
+    "primary_model": "main"
+  },
+  "printing": {
+    "printer": "Bambu Lab P2S",
+    "material": "Generic PLA",
+    "material_density_g_cm3": 1.24,
+    "filament_cost_krw_per_kg": 25000,
+    "layer_height_mm": 0.2,
+    "nozzle_mm": 0.4
+  },
+  "bom": {
+    "adhesive_pad": {
+      "description": "None - interface bench specimen",
+      "quantity": 0,
+      "unit_cost_krw": 0
+    },
+    "additional_parts": [],
+    "target_sale_price_krw": null
+  },
+  "created_at": "2026-07-18T00:00:00+09:00",
+  "updated_at": "2026-07-18T14:04:10+09:00",
+  "last_build": {
+    "at": "2026-07-18T14:04:10+09:00",
+    "status": "pass",
+    "stl": "stl/main.stl",
+    "report": "build/build-report.json"
+  }
+}

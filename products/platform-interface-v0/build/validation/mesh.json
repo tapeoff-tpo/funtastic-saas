@@ -1,0 +1,27 @@
+{
+  "file": "/private/tmp/funtastic-opportunities-deploy/products/platform-interface-v0/stl/main.stl",
+  "watertight": true,
+  "winding_consistent": true,
+  "is_volume": true,
+  "extents_mm": [
+    212.0,
+    156.0,
+    8.8
+  ],
+  "bounds_min_mm": [
+    -106.0,
+    -78.0,
+    0.0
+  ],
+  "bounds_max_mm": [
+    106.0,
+    78.0,
+    8.8
+  ],
+  "volume_cm3": 145.849,
+  "surface_area_cm2": 683.355,
+  "bed_contact_faces": 1464,
+  "fits_p2s_256_cube": true,
+  "downward_overhang_area_cm2_heuristic": 10.245,
+  "pass": true
+}

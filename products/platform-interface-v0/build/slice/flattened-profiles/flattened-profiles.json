@@ -1,0 +1,16 @@
+{
+  "machinePath": "/private/tmp/funtastic-opportunities-deploy/products/platform-interface-v0/build/slice/flattened-profiles/flat-machine-Bambu_Lab_P2S_0.4_nozzle-83d46649.json",
+  "processPath": "/private/tmp/funtastic-opportunities-deploy/products/platform-interface-v0/build/slice/flattened-profiles/flat-process-0.20mm_Standard_BBL_P2S-c007d7be.json",
+  "filamentPaths": [
+    "/private/tmp/funtastic-opportunities-deploy/products/platform-interface-v0/build/slice/flattened-profiles/flat-filament-0-Generic_PLA_BBL_P2S-0e224e32.json"
+  ],
+  "meta": {
+    "profilesRoot": "/Applications/BambuStudio.app/Contents/Resources/profiles",
+    "machineLeafName": "Bambu Lab P2S 0.4 nozzle",
+    "processLeafName": "0.20mm Standard @BBL P2S",
+    "filamentLeafNames": [
+      "Generic PLA @BBL P2S"
+    ],
+    "cliOverlayApplied": false
+  }
+}

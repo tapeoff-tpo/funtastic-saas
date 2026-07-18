@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-07-18T05:10:48.523Z",
+  "transport": "LAN MQTT read-only",
+  "connected": false,
+  "connection_error": "connack timeout",
+  "printer": {
+    "model": "p2s",
+    "serial_suffix": "1338",
+    "firmware": "unknown",
+    "state": "unknown",
+    "nozzle_actual_c": null,
+    "nozzle_target_c": null,
+    "bed_actual_c": null,
+    "bed_target_c": null,
+    "layer_current": null,
+    "layer_total": null
+  },
+  "ams": {
+    "detected": false,
+    "loaded_slots": []
+  },
+  "camera": {
+    "checked": false,
+    "reason": "Fallback probe is deliberately limited to MQTT status reads."
+  }
+}

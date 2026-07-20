@@ -1,11 +1,13 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, List, Plus, X } from 'lucide-react'
+import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, List, Plus, TriangleAlert, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { createDealEventAction, updateDealStatusAction } from './actions'
+import { createDealEventAction, updateDealChecklistAction, updateDealStatusAction } from './actions'
+
+type DealChecklistItem = { key: string; label: string; completed: boolean }
 
 export type DealCalendarItem = {
   id: string
@@ -30,11 +32,13 @@ export type DealCalendarItem = {
   status: string
   contact: string | null
   notes: string | null
+  checklist: DealChecklistItem[]
 }
 
 type CalendarMarker = { event: DealCalendarItem; phase: 'application' | 'event' }
 type ViewMode = 'calendar' | 'list'
 type PhaseFilter = 'all' | 'application' | 'event'
+type DeadlineFilter = 'all' | 'today' | '3days' | '7days' | 'overdue'
 
 const PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', other: '기타' }
 const TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션' }
@@ -59,10 +63,42 @@ function won(value: number | null) {
   return value == null || value === 0 ? '-' : `${value.toLocaleString('ko-KR')}원`
 }
 
+function addDays(value: Date, days: number) {
+  const date = new Date(value)
+  date.setDate(date.getDate() + days)
+  return dateKey(date)
+}
+
+function eventWarnings(events: DealCalendarItem[]) {
+  const warnings: Record<string, string[]> = {}
+  const add = (id: string, message: string) => {
+    warnings[id] = warnings[id] || []
+    if (!warnings[id].includes(message)) warnings[id].push(message)
+  }
+
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index]
+    if (event.productCode && event.platform !== '10x10') {
+      const days = Math.max(1, Math.round((new Date(`${event.endsOn}T00:00:00`).getTime() - new Date(`${event.startsOn}T00:00:00`).getTime()) / 86_400_000) + 1)
+      if (event.stock < event.dailyCapacity * days) add(event.id, `행사 최대 출고량 ${event.dailyCapacity * days}개 대비 재고가 ${event.stock}개입니다.`)
+    }
+    for (let otherIndex = index + 1; otherIndex < events.length; otherIndex += 1) {
+      const other = events[otherIndex]
+      if (!event.productCode || event.productCode !== other.productCode) continue
+      if (event.startsOn <= other.endsOn && other.startsOn <= event.endsOn) {
+        add(event.id, `같은 상품코드가 '${other.title}' 행사와 겹칩니다.`)
+        add(other.id, `같은 상품코드가 '${event.title}' 행사와 겹칩니다.`)
+      }
+    }
+  }
+  return warnings
+}
+
 export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   const [monthKey, setMonthKey] = useState(() => initialMonth(events))
   const [platform, setPlatform] = useState('all')
   const [phase, setPhase] = useState<PhaseFilter>('all')
+  const [deadline, setDeadline] = useState<DeadlineFilter>('all')
   const [view, setView] = useState<ViewMode>('calendar')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -72,8 +108,11 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   const sevenDaysLater = new Date()
   sevenDaysLater.setDate(sevenDaysLater.getDate() + 7)
   const deadlineLimit = dateKey(sevenDaysLater)
+  const threeDayLimit = addDays(new Date(), 3)
   const todos = events.filter((event) => ['submitted', 'selected'].includes(event.status))
   const closingSoon = events.filter((event) => event.applicationEndsOn && event.applicationEndsOn >= today && event.applicationEndsOn <= deadlineLimit)
+  const warnings = useMemo(() => eventWarnings(events), [events])
+  const warningEvents = events.filter((event) => warnings[event.id]?.length)
 
   const days = useMemo(() => {
     const first = new Date(year, month - 1, 1)
@@ -87,9 +126,18 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   }, [month, year])
 
   const platformEvents = platform === 'all' ? events : events.filter((event) => event.platform === platform)
-  const filteredEvents = phase === 'application'
+  const phaseEvents = phase === 'application'
     ? platformEvents.filter((event) => event.applicationStartsOn && event.applicationEndsOn)
     : platformEvents
+  const filteredEvents = phaseEvents.filter((event) => {
+    const end = event.applicationEndsOn
+    if (deadline === 'all') return true
+    if (!end) return false
+    if (deadline === 'overdue') return end < today
+    if (deadline === 'today') return end === today
+    if (deadline === '3days') return end >= today && end <= threeDayLimit
+    return end >= today && end <= deadlineLimit
+  })
   const periodLabel = phase === 'application' ? '신청 기간' : '행사 기간'
 
   function changeMonth(delta: number) {
@@ -114,6 +162,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
             <b>전체 {events.length}건</b>
             <span className="text-muted-foreground">7일 내 신청 마감 <b className="text-foreground">{closingSoon.length}건</b></span>
             <span className="text-muted-foreground">후속 작업 <b className={cn(todos.length && 'text-amber-700', !todos.length && 'text-foreground')}>{todos.length}건</b></span>
+            <span className="text-muted-foreground">주의 필요 <b className={cn(warningEvents.length && 'text-red-700', !warningEvents.length && 'text-foreground')}>{warningEvents.length}건</b></span>
           </div>
           <Button type="button" size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" />일정 추가</Button>
         </div>
@@ -130,6 +179,13 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                 <div className="flex rounded border p-0.5 text-xs">
                   {[['all', '전체'], ['10x10', '텐바이텐'], ['kakao', '카카오']].map(([value, label]) => <button key={value} type="button" onClick={() => setPlatform(value)} className={cn('h-7 px-2.5', platform === value ? 'bg-foreground text-background' : 'hover:bg-muted')}>{label}</button>)}
                 </div>
+                <select value={deadline} onChange={(event) => setDeadline(event.target.value as DeadlineFilter)} aria-label="신청 마감 필터" className="h-8 rounded border bg-background px-2 text-xs">
+                  <option value="all">마감 전체</option>
+                  <option value="today">오늘 마감</option>
+                  <option value="3days">3일 이내</option>
+                  <option value="7days">7일 이내</option>
+                  <option value="overdue">마감 지남</option>
+                </select>
                 <div className="flex rounded border p-0.5 text-xs">
                   {([['all', '전체 기간'], ['application', '신청기간'], ['event', '행사기간']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setPhase(value)} className={cn(
                     'h-7 px-2.5',
@@ -159,7 +215,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                         <div key={day} className={cn('min-h-24 border-b border-r p-1.5', inMonth ? 'bg-background' : 'bg-muted/20')}>
                           <span className={cn('text-xs', inMonth ? 'text-foreground' : 'text-muted-foreground/50', day === today && 'inline-grid size-5 place-items-center rounded-full bg-foreground text-background')}>{date.getDate()}</span>
                           <div className="mt-1 space-y-1">
-                            {markers.slice(0, 2).map((marker) => <button key={`${marker.event.id}-${marker.phase}`} type="button" onClick={() => setSelectedId(marker.event.id)} className={cn('block w-full truncate rounded-sm border-l-2 bg-muted/50 px-1.5 py-1 text-left text-[10px] font-medium hover:bg-muted', marker.phase === 'application' ? 'border-l-blue-500 text-blue-800' : 'border-l-emerald-500 text-emerald-800')} title={`${marker.phase === 'application' ? '신청 기간' : '행사 기간'} · ${marker.event.title}`}>{marker.event.title}</button>)}
+                            {markers.slice(0, 2).map((marker) => <button key={`${marker.event.id}-${marker.phase}`} type="button" onClick={() => setSelectedId(marker.event.id)} className={cn('block w-full truncate rounded-sm border-l-2 bg-muted/50 px-1.5 py-1 text-left text-[10px] font-medium hover:bg-muted', marker.phase === 'application' ? 'border-l-blue-500 text-blue-800' : 'border-l-emerald-500 text-emerald-800')} title={`${marker.phase === 'application' ? '신청 기간' : '행사 기간'} · ${marker.event.title}${warnings[marker.event.id]?.length ? ' · 주의 필요' : ''}`}>{warnings[marker.event.id]?.length ? '! ' : ''}{marker.event.title}</button>)}
                             {markers.length > 2 && <p className="px-1 text-[10px] text-muted-foreground">+{markers.length - 2}</p>}
                           </div>
                         </div>
@@ -176,7 +232,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                     const period = phase === 'application' && event.applicationStartsOn && event.applicationEndsOn
                       ? `${event.applicationStartsOn} ~ ${event.applicationEndsOn}`
                       : `${event.startsOn} ~ ${event.endsOn}`
-                    return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><span>{PLATFORM_LABELS[event.platform] ?? event.platform}</span><b className="truncate">{event.title}</b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className="text-xs">{STATUS_LABELS[event.status] ?? event.status}</span></button>
+                    return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><span>{PLATFORM_LABELS[event.platform] ?? event.platform}</span><b className="flex min-w-0 items-center gap-1.5">{warnings[event.id]?.length ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-red-600" /> : null}<span className="truncate">{event.title}</span></b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className="text-xs">{STATUS_LABELS[event.status] ?? event.status}</span></button>
                   })}
                 </div>
               </div>
@@ -190,18 +246,20 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
               {!todos.length && <p className="flex items-center gap-2 py-5 text-sm text-muted-foreground"><CheckCircle2 className="h-4 w-4" />남은 작업이 없습니다.</p>}
             </div>
             {todos.length > 5 && <button type="button" onClick={() => setView('list')} className="mt-3 text-xs font-medium text-muted-foreground hover:text-foreground">전체 {todos.length}건 보기</button>}
+            {warningEvents.length ? <div className="mt-5"><h3 className="flex items-center gap-2 text-sm font-semibold text-red-700"><TriangleAlert className="h-4 w-4" />주의 필요</h3><div className="mt-2 divide-y border-y">{warningEvents.slice(0, 3).map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full py-2.5 text-left"><b className="block truncate text-xs">{event.title}</b><p className="mt-1 truncate text-xs text-red-700">{warnings[event.id][0]}</p></button>)}</div></div> : null}
             <div className="mt-5 flex items-center gap-4 text-xs text-muted-foreground"><span className="flex items-center gap-1"><i className="size-2 rounded-full bg-blue-500" />신청 기간</span><span className="flex items-center gap-1"><i className="size-2 rounded-full bg-emerald-500" />행사 기간</span></div>
           </aside>
         </div>
       </section>
 
-      {selected ? <EventDetail event={selected} onClose={() => setSelectedId(null)} /> : null}
+      {selected ? <EventDetail event={selected} warnings={warnings[selected.id] || []} onClose={() => setSelectedId(null)} /> : null}
       {addOpen ? <AddEventModal onClose={() => setAddOpen(false)} /> : null}
     </>
   )
 }
 
-function EventDetail({ event, onClose }: { event: DealCalendarItem; onClose: () => void }) {
+function EventDetail({ event, warnings, onClose }: { event: DealCalendarItem; warnings: string[]; onClose: () => void }) {
+  const completedTasks = event.checklist.filter((item) => item.completed).length
   return (
     <div className="fixed inset-0 z-50 bg-black/30" onMouseDown={onClose}>
       <aside className="ml-auto flex h-full w-full max-w-md flex-col bg-background shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
@@ -210,6 +268,7 @@ function EventDetail({ event, onClose }: { event: DealCalendarItem; onClose: () 
           <Button type="button" variant="ghost" size="icon" onClick={onClose} title="닫기"><X className="h-4 w-4" /></Button>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
+          {warnings.length ? <section className="rounded-md border border-red-200 bg-red-50 p-3"><h3 className="flex items-center gap-2 text-sm font-semibold text-red-800"><TriangleAlert className="h-4 w-4" />주의가 필요합니다</h3><ul className="mt-2 space-y-1 text-xs text-red-700">{warnings.map((warning) => <li key={warning}>· {warning}</li>)}</ul></section> : null}
           <section className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
             <Detail label="행사 기간" value={`${event.startsOn} ~ ${event.endsOn}`} wide />
             {event.applicationStartsOn && event.applicationEndsOn ? <Detail label="신청 기간" value={`${event.applicationStartsOn} ~ ${event.applicationEndsOn}`} wide /> : null}
@@ -219,6 +278,18 @@ function EventDetail({ event, onClose }: { event: DealCalendarItem; onClose: () 
           </section>
           {event.options ? <Detail label="옵션" value={event.options} /> : null}
           {event.notes ? <Detail label="메모" value={event.notes} /> : null}
+          <section>
+            <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">준비 체크리스트</h3><span className="text-xs text-muted-foreground">{completedTasks}/{event.checklist.length} 완료</span></div>
+            <div className="mt-2 divide-y rounded-md border">
+              {event.checklist.map((task) => <form key={task.key} action={updateDealChecklistAction} className="flex items-center gap-2 px-3 py-2.5">
+                <input type="hidden" name="id" value={event.id} />
+                <input type="hidden" name="taskKey" value={task.key} />
+                <input type="hidden" name="completed" value={String(!task.completed)} />
+                <input type="checkbox" checked={task.completed} onChange={(changeEvent) => changeEvent.currentTarget.form?.requestSubmit()} className="h-4 w-4" />
+                <span className={cn('text-sm', task.completed && 'text-muted-foreground line-through')}>{task.label}</span>
+              </form>)}
+            </div>
+          </section>
         </div>
         <form action={updateDealStatusAction} className="flex items-end gap-2 border-t p-5">
           <input type="hidden" name="id" value={event.id} />

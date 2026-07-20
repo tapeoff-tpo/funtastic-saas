@@ -1402,6 +1402,7 @@ export const dealEvents = pgTable(
     status: varchar('status', { length: 30 }).notNull().default('draft'),
     contact: varchar('contact', { length: 50 }),
     notes: text('notes'),
+    checklist: jsonb('checklist').$type<Array<{ key: string; label: string; completed: boolean }>>().notNull().default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },

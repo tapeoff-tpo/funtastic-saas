@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { CalendarDays } from 'lucide-react'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { listDealEvents } from '@/lib/operations/deal-calendar'
+import { listDealEvents, normalizeDealChecklist } from '@/lib/operations/deal-calendar'
 import { DealCalendarGrid, type DealCalendarItem } from './deal-calendar-grid'
 
 export const dynamic = 'force-dynamic'
@@ -35,6 +35,7 @@ export default async function DealCalendarPage() {
     status: event.status,
     contact: event.contact,
     notes: event.notes,
+    checklist: normalizeDealChecklist(event.checklist),
   }))
 
   return (

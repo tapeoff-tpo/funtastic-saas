@@ -6,6 +6,25 @@ export const DEAL_TYPE_LABELS: Record<string, string> = { today: '오늘의딜',
 export const DEAL_STATUS_LABELS: Record<string, string> = { draft: '작성 중', submitted: '제안 완료', applied: '신청 완료', selected: '선정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
 export const DEAL_PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', other: '기타' }
 
+export type DealChecklistItem = { key: string; label: string; completed: boolean }
+
+export const DEFAULT_DEAL_CHECKLIST: DealChecklistItem[] = [
+  { key: 'product', label: '상품 선정', completed: false },
+  { key: 'discount', label: '할인율·판매가 설정', completed: false },
+  { key: 'stock', label: '재고·출고량 확인', completed: false },
+  { key: 'creative', label: '상세페이지·배너 준비', completed: false },
+  { key: 'application', label: '판매자센터 신청', completed: false },
+  { key: 'restore', label: '행사 종료 후 가격 복구', completed: false },
+]
+
+export function normalizeDealChecklist(value: unknown): DealChecklistItem[] {
+  const saved = Array.isArray(value) ? value : []
+  return DEFAULT_DEAL_CHECKLIST.map((item) => {
+    const match = saved.find((candidate) => candidate && typeof candidate === 'object' && 'key' in candidate && candidate.key === item.key)
+    return { ...item, completed: Boolean(match && 'completed' in match && match.completed) }
+  })
+}
+
 export async function ensureDealCalendarTable() {
   await db.execute(sql`CREATE TABLE IF NOT EXISTS "deal_events" ("id" uuid PRIMARY KEY DEFAULT gen_random_uuid(), "user_id" uuid NOT NULL, "platform" varchar(30) NOT NULL DEFAULT 'kakao', "deal_type" varchar(30) NOT NULL, "title" text NOT NULL, "product_id" varchar(100), "product_code" varchar(100), "options" text, "regular_price" integer, "deal_price" integer NOT NULL, "unit_cost" integer, "shipping_cost" integer NOT NULL DEFAULT 0, "stock" integer NOT NULL DEFAULT 500, "daily_capacity" integer NOT NULL DEFAULT 500, "starts_on" date NOT NULL, "ends_on" date NOT NULL, "application_starts_on" date, "application_ends_on" date, "minimum_discount_rate" integer, "applied_product_count" integer, "discount_code" varchar(50), "external_promotion_id" varchar(50), "source_key" varchar(100), "status" varchar(30) NOT NULL DEFAULT 'draft', "contact" varchar(50), "notes" text, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now())`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "platform" varchar(30) NOT NULL DEFAULT 'kakao'`)
@@ -16,6 +35,7 @@ export async function ensureDealCalendarTable() {
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "discount_code" varchar(50)`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "external_promotion_id" varchar(50)`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "source_key" varchar(100)`)
+  await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "checklist" jsonb NOT NULL DEFAULT '[]'::jsonb`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "deal_events_user_date_idx" ON "deal_events" ("user_id", "starts_on")`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "deal_events_user_source_key_uniq" ON "deal_events" ("user_id", "source_key") WHERE "source_key" IS NOT NULL`)
 }
@@ -42,3 +62,12 @@ export async function seedDealCalendar(userId: string) {
 export async function listDealEvents(userId: string) { await seedDealCalendar(userId); return db.select().from(dealEvents).where(eq(dealEvents.userId, userId)).orderBy(asc(dealEvents.startsOn), asc(dealEvents.createdAt)) }
 export async function updateDealStatus(userId: string, id: string, status: string) { await ensureDealCalendarTable(); return db.update(dealEvents).set({ status, updatedAt: new Date() }).where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id))) }
 export async function createDealEvent(input: typeof dealEvents.$inferInsert) { await ensureDealCalendarTable(); return db.insert(dealEvents).values(input) }
+
+export async function updateDealChecklist(userId: string, id: string, taskKey: string, completed: boolean) {
+  await ensureDealCalendarTable()
+  if (!DEFAULT_DEAL_CHECKLIST.some((item) => item.key === taskKey)) return
+  const [event] = await db.select({ checklist: dealEvents.checklist }).from(dealEvents).where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id))).limit(1)
+  if (!event) return
+  const checklist = normalizeDealChecklist(event.checklist).map((item) => item.key === taskKey ? { ...item, completed } : item)
+  return db.update(dealEvents).set({ checklist, updatedAt: new Date() }).where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id)))
+}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useMemo, useState, useTransition } from 'react'
 import { CalendarDays, Copy, Eye, EyeOff, MessageSquare, Save, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -66,19 +66,6 @@ function formatDateTime(value: string) {
   }).format(new Date(value))
 }
 
-function renewalState(value: string | null, now: Date | null) {
-  if (!value) return null
-  if (!now) return { label: value, urgency: 'normal' as const }
-  const today = new Date(now)
-  today.setHours(0, 0, 0, 0)
-  const due = new Date(`${value}T00:00:00`)
-  const days = Math.round((due.getTime() - today.getTime()) / 86_400_000)
-  if (days < 0) return { label: `D+${Math.abs(days)}`, urgency: 'overdue' as const }
-  if (days === 0) return { label: '오늘', urgency: 'urgent' as const }
-  if (days <= 7) return { label: `D-${days}`, urgency: 'urgent' as const }
-  return { label: value, urgency: 'normal' as const }
-}
-
 export function AiAccountBoard({
   accounts,
   messages,
@@ -91,20 +78,10 @@ export function AiAccountBoard({
   const [showPassword, setShowPassword] = useState(false)
   const [passwordError, setPasswordError] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
-  const [now, setNow] = useState<Date | null>(null)
   const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([])
   const [bulkRenewalDueOn, setBulkRenewalDueOn] = useState('')
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkPending, startBulkTransition] = useTransition()
-  useEffect(() => {
-    const initial = window.setTimeout(() => setNow(new Date()), 0)
-    const interval = window.setInterval(() => setNow(new Date()), 60_000)
-    return () => {
-      window.clearTimeout(initial)
-      window.clearInterval(interval)
-    }
-  }, [])
-
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
   const messagesByAccount = useMemo(() => {
     return messages.reduce<Record<string, AiAccountMessage[]>>((acc, message) => {
@@ -226,8 +203,8 @@ export function AiAccountBoard({
           </div>
 
           <div className="overflow-x-auto">
-            <div className="min-w-[940px]">
-              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px_86px_90px] md:items-center md:gap-2">
+            <div className="min-w-[740px]">
+              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[24px_72px_minmax(100px,1fr)_94px_90px_132px_62px_74px] md:items-center md:gap-2">
                 <div />
                 <div>계정명</div>
                 <div>계정아이디</div>
@@ -242,7 +219,6 @@ export function AiAccountBoard({
             {sortedAccounts.map((account) => {
               const isSelected = selectedAccount?.id === account.id
               const displayStatus = normalizeStatus(account.status)
-              const renewal = renewalState(account.renewalDueOn, now)
               const candidateNames = userCandidates.map((candidate) => candidate.name)
               return (
                 <div
@@ -251,7 +227,7 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px_86px_90px] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[24px_72px_minmax(100px,1fr)_94px_90px_132px_62px_74px] md:items-center md:gap-2',
                     account.sharedUse && 'bg-emerald-50/50',
                     isSelected && 'bg-muted',
                   )}
@@ -338,7 +314,7 @@ export function AiAccountBoard({
                       {account.currentUserName && !candidateNames.includes(account.currentUserName) ? <option value={account.currentUserName}>{account.currentUserName}</option> : null}
                       {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
                     </select>
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="min-w-0">
                       <Input
                         name="renewalDueOn"
                         type="date"
@@ -350,14 +326,8 @@ export function AiAccountBoard({
                           form?.requestSubmit()
                         }}
                         aria-label={`${account.name} 갱신 예정일`}
-                        className="h-9 w-[132px] shrink-0 bg-background px-2 text-xs"
+                        className="h-9 w-full bg-background px-2 text-xs"
                       />
-                      {renewal ? <span className={cn(
-                        'shrink-0 whitespace-nowrap text-xs font-medium',
-                        renewal.urgency === 'overdue' && 'text-red-700',
-                        renewal.urgency === 'urgent' && 'text-amber-800',
-                        renewal.urgency === 'normal' && 'text-muted-foreground',
-                      )}>{renewal.label}</span> : null}
                     </div>
                   </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents" onClick={(event) => event.stopPropagation()}>

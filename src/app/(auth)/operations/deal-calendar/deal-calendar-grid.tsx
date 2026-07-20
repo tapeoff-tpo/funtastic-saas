@@ -1,11 +1,11 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, List, Plus, TriangleAlert, X } from 'lucide-react'
+import { BarChart3, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, List, Plus, TriangleAlert, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { createDealEventAction, updateDealChecklistAction, updateDealStatusAction } from './actions'
+import { createDealEventAction, updateDealChecklistAction, updateDealPerformanceAction, updateDealStatusAction } from './actions'
 
 type DealChecklistItem = { key: string; label: string; completed: boolean }
 
@@ -33,10 +33,12 @@ export type DealCalendarItem = {
   contact: string | null
   notes: string | null
   checklist: DealChecklistItem[]
+  soldQuantity: number
+  salesAmount: number
 }
 
 type CalendarMarker = { event: DealCalendarItem; phase: 'application' | 'event' }
-type ViewMode = 'calendar' | 'list'
+type ViewMode = 'calendar' | 'list' | 'performance'
 type PhaseFilter = 'all' | 'application' | 'event'
 type DeadlineFilter = 'all' | 'today' | '3days' | '7days' | 'overdue'
 
@@ -61,6 +63,10 @@ function initialMonth(events: DealCalendarItem[]) {
 
 function won(value: number | null) {
   return value == null || value === 0 ? '-' : `${value.toLocaleString('ko-KR')}원`
+}
+
+function eventSales(event: DealCalendarItem) {
+  return event.salesAmount || event.dealPrice * event.soldQuantity
 }
 
 function addDays(value: Date, days: number) {
@@ -126,6 +132,40 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   }, [month, year])
 
   const platformEvents = platform === 'all' ? events : events.filter((event) => event.platform === platform)
+  const productRows = useMemo(() => {
+    const grouped = new Map<string, {
+      key: string
+      title: string
+      productCode: string | null
+      dealCount: number
+      soldQuantity: number
+      salesAmount: number
+      latestEndsOn: string
+    }>()
+    for (const event of platformEvents) {
+      const key = event.productCode || `title:${event.title}`
+      const current = grouped.get(key) || {
+        key,
+        title: event.title,
+        productCode: event.productCode,
+        dealCount: 0,
+        soldQuantity: 0,
+        salesAmount: 0,
+        latestEndsOn: event.endsOn,
+      }
+      current.dealCount += 1
+      current.soldQuantity += event.soldQuantity
+      current.salesAmount += eventSales(event)
+      if (event.endsOn > current.latestEndsOn) {
+        current.latestEndsOn = event.endsOn
+        current.title = event.title
+      }
+      grouped.set(key, current)
+    }
+    return Array.from(grouped.values()).sort((left, right) => right.latestEndsOn.localeCompare(left.latestEndsOn))
+  }, [platformEvents])
+  const totalSoldQuantity = events.reduce((total, event) => total + event.soldQuantity, 0)
+  const totalSalesAmount = events.reduce((total, event) => total + eventSales(event), 0)
   const phaseEvents = phase === 'application'
     ? platformEvents.filter((event) => event.applicationStartsOn && event.applicationEndsOn)
     : platformEvents
@@ -163,6 +203,8 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
             <span className="text-muted-foreground">7일 내 신청 마감 <b className="text-foreground">{closingSoon.length}건</b></span>
             <span className="text-muted-foreground">후속 작업 <b className={cn(todos.length && 'text-amber-700', !todos.length && 'text-foreground')}>{todos.length}건</b></span>
             <span className="text-muted-foreground">주의 필요 <b className={cn(warningEvents.length && 'text-red-700', !warningEvents.length && 'text-foreground')}>{warningEvents.length}건</b></span>
+            <span className="text-muted-foreground">딜 판매 <b className="text-foreground">{totalSoldQuantity.toLocaleString('ko-KR')}개</b></span>
+            <span className="text-muted-foreground">딜 매출 <b className="text-foreground">{won(totalSalesAmount)}</b></span>
           </div>
           <Button type="button" size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" />일정 추가</Button>
         </div>
@@ -198,6 +240,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                 <div className="flex rounded border p-0.5">
                   <button type="button" title="캘린더 보기" onClick={() => setView('calendar')} className={cn('grid size-7 place-items-center', view === 'calendar' ? 'bg-foreground text-background' : 'hover:bg-muted')}><CalendarDays className="h-4 w-4" /></button>
                   <button type="button" title="목록 보기" onClick={() => setView('list')} className={cn('grid size-7 place-items-center', view === 'list' ? 'bg-foreground text-background' : 'hover:bg-muted')}><List className="h-4 w-4" /></button>
+                  <button type="button" title="상품·성과 보기" onClick={() => setView('performance')} className={cn('flex h-7 items-center gap-1 px-2 text-xs font-medium', view === 'performance' ? 'bg-foreground text-background' : 'hover:bg-muted')}><BarChart3 className="h-4 w-4" />상품·성과</button>
                 </div>
               </div>
             </div>
@@ -224,7 +267,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : view === 'list' ? (
               <div className="overflow-x-auto">
                 <div className="min-w-[720px]">
                   <div className="grid grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground"><span>플랫폼</span><span>일정</span><span>구분</span><span>{periodLabel}</span><span>상태</span></div>
@@ -234,6 +277,24 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                       : `${event.startsOn} ~ ${event.endsOn}`
                     return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><span>{PLATFORM_LABELS[event.platform] ?? event.platform}</span><b className="flex min-w-0 items-center gap-1.5">{warnings[event.id]?.length ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-red-600" /> : null}<span className="truncate">{event.title}</span></b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className="text-xs">{STATUS_LABELS[event.status] ?? event.status}</span></button>
                   })}
+                </div>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <div className="min-w-[680px]">
+                  <div className="grid grid-cols-[minmax(240px,1fr)_140px_90px_110px_140px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
+                    <span>딜 상품</span><span>상품코드</span><span>딜 횟수</span><span>판매수량</span><span>매출</span>
+                  </div>
+                  {productRows.map((product) => (
+                    <div key={product.key} className="grid grid-cols-[minmax(240px,1fr)_140px_90px_110px_140px] items-center gap-3 border-b px-4 py-3 text-sm">
+                      <div className="min-w-0"><b className="block truncate">{product.title}</b><span className="mt-1 block text-xs text-muted-foreground">최근 행사 종료 {product.latestEndsOn}</span></div>
+                      <span className="truncate text-xs text-muted-foreground">{product.productCode || '-'}</span>
+                      <span>{product.dealCount}회</span>
+                      <b>{product.soldQuantity.toLocaleString('ko-KR')}개</b>
+                      <b>{won(product.salesAmount)}</b>
+                    </div>
+                  ))}
+                  {!productRows.length ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">등록된 딜 상품이 없습니다.</p> : null}
                 </div>
               </div>
             )}
@@ -278,6 +339,15 @@ function EventDetail({ event, warnings, onClose }: { event: DealCalendarItem; wa
           </section>
           {event.options ? <Detail label="옵션" value={event.options} /> : null}
           {event.notes ? <Detail label="메모" value={event.notes} /> : null}
+          <form action={updateDealPerformanceAction} className="rounded-md border p-3">
+            <input type="hidden" name="id" value={event.id} />
+            <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">판매 성과</h3><span className="text-xs text-muted-foreground">예상 매출 {won(eventSales(event))}</span></div>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">판매수량</span><Input name="soldQuantity" type="number" min="0" defaultValue={event.soldQuantity} className="h-9" /></label>
+              <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">실제 매출액</span><Input name="salesAmount" type="number" min="0" defaultValue={event.salesAmount || ''} placeholder="미입력 시 판매가×수량" className="h-9" /></label>
+            </div>
+            <div className="mt-3 flex justify-end"><Button type="submit" size="sm">성과 저장</Button></div>
+          </form>
           <section>
             <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">준비 체크리스트</h3><span className="text-xs text-muted-foreground">{completedTasks}/{event.checklist.length} 완료</span></div>
             <div className="mt-2 divide-y rounded-md border">
@@ -315,6 +385,7 @@ function AddEventModal({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">플랫폼</span><select name="platform" className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">구분</span><select name="dealType" className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">일정 또는 상품명</span><Input required name="title" /></label>
           <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">상품코드</span><Input name="productCode" /></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">딜 판매가</span><Input name="dealPrice" type="number" /></label></div>
+          <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">상품 옵션</span><Input name="options" placeholder="옵션이 여러 개면 쉼표로 구분" /></label>
           <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">시작일</span><Input required name="startsOn" type="date" /></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">종료일</span><Input required name="endsOn" type="date" /></label></div>
           <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="outline" onClick={onClose}>취소</Button><Button type="submit">추가</Button></div>
         </form>

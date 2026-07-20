@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { createDealEvent, updateDealChecklist, updateDealStatus } from '@/lib/operations/deal-calendar'
+import { createDealEvent, updateDealChecklist, updateDealPerformance, updateDealStatus } from '@/lib/operations/deal-calendar'
 import { createClient } from '@/lib/supabase/server'
 
 async function workspaceId() {
@@ -30,6 +30,18 @@ export async function updateDealChecklistAction(formData: FormData) {
   revalidatePath('/operations/deal-calendar')
 }
 
+export async function updateDealPerformanceAction(formData: FormData) {
+  const userId = await workspaceId()
+  if (!userId) return
+  await updateDealPerformance(
+    userId,
+    String(formData.get('id')),
+    Number(formData.get('soldQuantity')),
+    Number(formData.get('salesAmount')),
+  )
+  revalidatePath('/operations/deal-calendar')
+}
+
 export async function createDealEventAction(formData: FormData) {
   const userId = await workspaceId()
   if (!userId) return
@@ -39,6 +51,7 @@ export async function createDealEventAction(formData: FormData) {
     dealType: String(formData.get('dealType')),
     title: String(formData.get('title')),
     productCode: String(formData.get('productCode')) || null,
+    options: String(formData.get('options')) || null,
     dealPrice: Number(formData.get('dealPrice')) || 0,
     startsOn: String(formData.get('startsOn')),
     endsOn: String(formData.get('endsOn')),

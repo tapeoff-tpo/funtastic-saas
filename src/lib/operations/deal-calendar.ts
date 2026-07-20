@@ -36,6 +36,8 @@ export async function ensureDealCalendarTable() {
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "external_promotion_id" varchar(50)`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "source_key" varchar(100)`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "checklist" jsonb NOT NULL DEFAULT '[]'::jsonb`)
+  await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "sold_quantity" integer NOT NULL DEFAULT 0`)
+  await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "sales_amount" integer NOT NULL DEFAULT 0`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "deal_events_user_date_idx" ON "deal_events" ("user_id", "starts_on")`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "deal_events_user_source_key_uniq" ON "deal_events" ("user_id", "source_key") WHERE "source_key" IS NOT NULL`)
 }
@@ -62,6 +64,15 @@ export async function seedDealCalendar(userId: string) {
 export async function listDealEvents(userId: string) { await seedDealCalendar(userId); return db.select().from(dealEvents).where(eq(dealEvents.userId, userId)).orderBy(asc(dealEvents.startsOn), asc(dealEvents.createdAt)) }
 export async function updateDealStatus(userId: string, id: string, status: string) { await ensureDealCalendarTable(); return db.update(dealEvents).set({ status, updatedAt: new Date() }).where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id))) }
 export async function createDealEvent(input: typeof dealEvents.$inferInsert) { await ensureDealCalendarTable(); return db.insert(dealEvents).values(input) }
+
+export async function updateDealPerformance(userId: string, id: string, soldQuantity: number, salesAmount: number) {
+  await ensureDealCalendarTable()
+  const safeQuantity = Number.isFinite(soldQuantity) ? Math.max(0, Math.round(soldQuantity)) : 0
+  const safeSalesAmount = Number.isFinite(salesAmount) ? Math.max(0, Math.round(salesAmount)) : 0
+  return db.update(dealEvents)
+    .set({ soldQuantity: safeQuantity, salesAmount: safeSalesAmount, updatedAt: new Date() })
+    .where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id)))
+}
 
 export async function updateDealChecklist(userId: string, id: string, taskKey: string, completed: boolean) {
   await ensureDealCalendarTable()

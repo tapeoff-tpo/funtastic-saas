@@ -36,6 +36,8 @@ export default async function DealCalendarPage() {
     contact: event.contact,
     notes: event.notes,
     checklist: normalizeDealChecklist(event.checklist),
+    soldQuantity: event.soldQuantity,
+    salesAmount: event.salesAmount,
   }))
 
   return (

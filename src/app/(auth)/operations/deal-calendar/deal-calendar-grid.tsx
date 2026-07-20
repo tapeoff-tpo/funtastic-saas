@@ -29,6 +29,10 @@ export type DealCalendarItem = {
   appliedProductCount: number | null
   discountCode: string | null
   externalPromotionId: string | null
+  campaignName: string | null
+  dailyBudget: number | null
+  searchBid: number | null
+  recommendationBid: number | null
   status: string
   contact: string | null
   notes: string | null
@@ -42,9 +46,9 @@ type ViewMode = 'calendar' | 'list' | 'performance'
 type PhaseFilter = 'all' | 'application' | 'event'
 type DeadlineFilter = 'all' | 'today' | '3days' | '7days' | 'overdue'
 
-const PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', other: '기타' }
-const TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션' }
-const STATUS_LABELS: Record<string, string> = { draft: '작성 중', submitted: '제안 완료', applied: '신청 완료', selected: '선정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
+const PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', '11st': '11번가', other: '기타' }
+const TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션', ad_campaign: '광고 캠페인', promotion_application: '프로모션 신청' }
+const STATUS_LABELS: Record<string, string> = { draft: '작성 중', application_pending: '신청 대기', submitted: '제안 완료', applied: '신청 완료', selected: '선정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일']
 
 function dateKey(date: Date) {
@@ -84,7 +88,7 @@ function eventWarnings(events: DealCalendarItem[]) {
 
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index]
-    if (event.productCode && event.platform !== '10x10') {
+    if (event.productCode && event.platform !== '10x10' && event.dealType !== 'ad_campaign') {
       const days = Math.max(1, Math.round((new Date(`${event.endsOn}T00:00:00`).getTime() - new Date(`${event.startsOn}T00:00:00`).getTime()) / 86_400_000) + 1)
       if (event.stock < event.dailyCapacity * days) add(event.id, `행사 최대 출고량 ${event.dailyCapacity * days}개 대비 재고가 ${event.stock}개입니다.`)
     }
@@ -219,7 +223,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex rounded border p-0.5 text-xs">
-                  {[['all', '전체'], ['10x10', '텐바이텐'], ['kakao', '카카오']].map(([value, label]) => <button key={value} type="button" onClick={() => setPlatform(value)} className={cn('h-7 px-2.5', platform === value ? 'bg-foreground text-background' : 'hover:bg-muted')}>{label}</button>)}
+                  {[['all', '전체'], ['11st', '11번가'], ['10x10', '텐바이텐'], ['kakao', '카카오']].map(([value, label]) => <button key={value} type="button" onClick={() => setPlatform(value)} className={cn('h-7 px-2.5', platform === value ? 'bg-foreground text-background' : 'hover:bg-muted')}>{label}</button>)}
                 </div>
                 <select value={deadline} onChange={(event) => setDeadline(event.target.value as DeadlineFilter)} aria-label="신청 마감 필터" className="h-8 rounded border bg-background px-2 text-xs">
                   <option value="all">마감 전체</option>
@@ -335,7 +339,7 @@ function EventDetail({ event, warnings, onClose }: { event: DealCalendarItem; wa
             {event.applicationStartsOn && event.applicationEndsOn ? <Detail label="신청 기간" value={`${event.applicationStartsOn} ~ ${event.applicationEndsOn}`} wide /> : null}
             <Detail label="상품코드" value={event.productCode || '-'} />
             <Detail label="딜 판매가" value={won(event.dealPrice)} />
-            {event.platform === '10x10' ? <><Detail label="최소 할인" value={event.minimumDiscountRate == null ? '-' : `${event.minimumDiscountRate}%`} /><Detail label="신청 상품" value={event.appliedProductCount == null ? '-' : `${event.appliedProductCount}개`} /><Detail label="할인코드" value={event.discountCode || '-'} /><Detail label="프로모션 ID" value={event.externalPromotionId || '-'} /></> : <><Detail label="원가" value={won(event.unitCost)} /><Detail label="배송비" value={won(event.shippingCost)} /><Detail label="재고" value={`${event.stock}개`} /><Detail label="일 출고" value={`${event.dailyCapacity}개`} /></>}
+            {event.dealType === 'ad_campaign' ? <><Detail label="캠페인" value={event.campaignName || '-'} /><Detail label="일 예산" value={won(event.dailyBudget)} /><Detail label="검색 입찰가" value={won(event.searchBid)} /><Detail label="추천 입찰가" value={won(event.recommendationBid)} /></> : event.platform === '10x10' ? <><Detail label="최소 할인" value={event.minimumDiscountRate == null ? '-' : `${event.minimumDiscountRate}%`} /><Detail label="신청 상품" value={event.appliedProductCount == null ? '-' : `${event.appliedProductCount}개`} /><Detail label="할인코드" value={event.discountCode || '-'} /><Detail label="프로모션 ID" value={event.externalPromotionId || '-'} /></> : <><Detail label="원가" value={won(event.unitCost)} /><Detail label="배송비" value={won(event.shippingCost)} /><Detail label="재고" value={`${event.stock}개`} /><Detail label="일 출고" value={`${event.dailyCapacity}개`} /></>}
           </section>
           {event.options ? <Detail label="옵션" value={event.options} /> : null}
           {event.notes ? <Detail label="메모" value={event.notes} /> : null}
@@ -372,6 +376,8 @@ function EventDetail({ event, warnings, onClose }: { event: DealCalendarItem; wa
 }
 
 function AddEventModal({ onClose }: { onClose: () => void }) {
+  const [dealType, setDealType] = useState('today')
+
   async function createEvent(formData: FormData) {
     await createDealEventAction(formData)
     onClose()
@@ -382,10 +388,11 @@ function AddEventModal({ onClose }: { onClose: () => void }) {
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-md bg-background shadow-xl" onMouseDown={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b px-5 py-4"><h2 className="font-semibold">새 일정 추가</h2><Button type="button" variant="ghost" size="icon" onClick={onClose} title="닫기"><X className="h-4 w-4" /></Button></div>
         <form action={createEvent} className="space-y-3 p-5">
-          <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">플랫폼</span><select name="platform" className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">구분</span><select name="dealType" className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+          <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">플랫폼</span><select name="platform" className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">구분</span><select name="dealType" value={dealType} onChange={(event) => setDealType(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">일정 또는 상품명</span><Input required name="title" /></label>
           <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">상품코드</span><Input name="productCode" /></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">딜 판매가</span><Input name="dealPrice" type="number" /></label></div>
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">상품 옵션</span><Input name="options" placeholder="옵션이 여러 개면 쉼표로 구분" /></label>
+          {dealType === 'ad_campaign' ? <div className="space-y-3 rounded-md border p-3"><label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">캠페인명</span><Input name="campaignName" /></label><div className="grid grid-cols-3 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">일 예산</span><Input name="dailyBudget" type="number" min="0" /></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">검색 입찰가</span><Input name="searchBid" type="number" min="0" /></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">추천 입찰가</span><Input name="recommendationBid" type="number" min="0" /></label></div></div> : null}
           <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">시작일</span><Input required name="startsOn" type="date" /></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">종료일</span><Input required name="endsOn" type="date" /></label></div>
           <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="outline" onClick={onClose}>취소</Button><Button type="submit">추가</Button></div>
         </form>

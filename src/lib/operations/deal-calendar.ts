@@ -2,9 +2,9 @@ import { and, asc, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { dealEvents } from '@/lib/db/schema'
 
-export const DEAL_TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션' }
-export const DEAL_STATUS_LABELS: Record<string, string> = { draft: '작성 중', submitted: '제안 완료', applied: '신청 완료', selected: '선정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
-export const DEAL_PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', other: '기타' }
+export const DEAL_TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션', ad_campaign: '광고 캠페인', promotion_application: '프로모션 신청' }
+export const DEAL_STATUS_LABELS: Record<string, string> = { draft: '작성 중', application_pending: '신청 대기', submitted: '제안 완료', applied: '신청 완료', selected: '선정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
+export const DEAL_PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', '11st': '11번가', other: '기타' }
 
 export type DealChecklistItem = { key: string; label: string; completed: boolean }
 
@@ -17,9 +17,31 @@ export const DEFAULT_DEAL_CHECKLIST: DealChecklistItem[] = [
   { key: 'restore', label: '행사 종료 후 가격 복구', completed: false },
 ]
 
-export function normalizeDealChecklist(value: unknown): DealChecklistItem[] {
+export const AD_CAMPAIGN_CHECKLIST: DealChecklistItem[] = [
+  { key: 'product', label: '광고 상품 선정', completed: false },
+  { key: 'creative', label: '상품명·대표이미지 점검', completed: false },
+  { key: 'bid', label: '입찰가·일 예산 설정', completed: false },
+  { key: 'launch', label: '캠페인 ON 확인', completed: false },
+  { key: 'performance', label: '노출·클릭·전환 성과 확인', completed: false },
+  { key: 'close', label: '종료·연장 여부 결정', completed: false },
+]
+
+export const PROMOTION_APPLICATION_CHECKLIST: DealChecklistItem[] = [
+  { key: 'product', label: '신청 상품 선정', completed: false },
+  { key: 'price', label: '가격·배송 조건 확인', completed: false },
+  { key: 'application', label: '판매자센터 신청 제출', completed: false },
+  { key: 'result', label: '신청 결과 확인', completed: false },
+]
+
+function checklistTemplate(dealType?: string) {
+  if (dealType === 'ad_campaign') return AD_CAMPAIGN_CHECKLIST
+  if (dealType === 'promotion_application') return PROMOTION_APPLICATION_CHECKLIST
+  return DEFAULT_DEAL_CHECKLIST
+}
+
+export function normalizeDealChecklist(value: unknown, dealType?: string): DealChecklistItem[] {
   const saved = Array.isArray(value) ? value : []
-  return DEFAULT_DEAL_CHECKLIST.map((item) => {
+  return checklistTemplate(dealType).map((item) => {
     const match = saved.find((candidate) => candidate && typeof candidate === 'object' && 'key' in candidate && candidate.key === item.key)
     return { ...item, completed: Boolean(match && 'completed' in match && match.completed) }
   })
@@ -34,6 +56,10 @@ export async function ensureDealCalendarTable() {
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "applied_product_count" integer`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "discount_code" varchar(50)`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "external_promotion_id" varchar(50)`)
+  await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "campaign_name" varchar(100)`)
+  await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "daily_budget" integer`)
+  await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "search_bid" integer`)
+  await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "recommendation_bid" integer`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "source_key" varchar(100)`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "checklist" jsonb NOT NULL DEFAULT '[]'::jsonb`)
   await db.execute(sql`ALTER TABLE "deal_events" ADD COLUMN IF NOT EXISTS "sold_quantity" integer NOT NULL DEFAULT 0`)
@@ -77,8 +103,8 @@ export async function updateDealPerformance(userId: string, id: string, soldQuan
 export async function updateDealChecklist(userId: string, id: string, taskKey: string, completed: boolean) {
   await ensureDealCalendarTable()
   if (!DEFAULT_DEAL_CHECKLIST.some((item) => item.key === taskKey)) return
-  const [event] = await db.select({ checklist: dealEvents.checklist }).from(dealEvents).where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id))).limit(1)
+  const [event] = await db.select({ checklist: dealEvents.checklist, dealType: dealEvents.dealType }).from(dealEvents).where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id))).limit(1)
   if (!event) return
-  const checklist = normalizeDealChecklist(event.checklist).map((item) => item.key === taskKey ? { ...item, completed } : item)
+  const checklist = normalizeDealChecklist(event.checklist, event.dealType).map((item) => item.key === taskKey ? { ...item, completed } : item)
   return db.update(dealEvents).set({ checklist, updatedAt: new Date() }).where(and(eq(dealEvents.userId, userId), eq(dealEvents.id, id)))
 }

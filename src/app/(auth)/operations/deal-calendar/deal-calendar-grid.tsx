@@ -34,6 +34,7 @@ export type DealCalendarItem = {
 
 type CalendarMarker = { event: DealCalendarItem; phase: 'application' | 'event' }
 type ViewMode = 'calendar' | 'list'
+type PhaseFilter = 'all' | 'application' | 'event'
 
 const PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', other: '기타' }
 const TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션' }
@@ -61,6 +62,7 @@ function won(value: number | null) {
 export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   const [monthKey, setMonthKey] = useState(() => initialMonth(events))
   const [platform, setPlatform] = useState('all')
+  const [phase, setPhase] = useState<PhaseFilter>('all')
   const [view, setView] = useState<ViewMode>('calendar')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -84,7 +86,11 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
     })
   }, [month, year])
 
-  const filteredEvents = platform === 'all' ? events : events.filter((event) => event.platform === platform)
+  const platformEvents = platform === 'all' ? events : events.filter((event) => event.platform === platform)
+  const filteredEvents = phase === 'application'
+    ? platformEvents.filter((event) => event.applicationStartsOn && event.applicationEndsOn)
+    : platformEvents
+  const periodLabel = phase === 'application' ? '신청 기간' : '행사 기간'
 
   function changeMonth(delta: number) {
     const next = new Date(year, month - 1 + delta, 1)
@@ -94,8 +100,8 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   function markersFor(day: string) {
     const markers: CalendarMarker[] = []
     for (const event of filteredEvents) {
-      if (event.applicationStartsOn && event.applicationEndsOn && day >= event.applicationStartsOn && day <= event.applicationEndsOn) markers.push({ event, phase: 'application' })
-      if (day >= event.startsOn && day <= event.endsOn) markers.push({ event, phase: 'event' })
+      if (phase !== 'event' && event.applicationStartsOn && event.applicationEndsOn && day >= event.applicationStartsOn && day <= event.applicationEndsOn) markers.push({ event, phase: 'application' })
+      if (phase !== 'application' && day >= event.startsOn && day <= event.endsOn) markers.push({ event, phase: 'event' })
     }
     return markers
   }
@@ -123,6 +129,15 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
               <div className="flex flex-wrap items-center gap-2">
                 <div className="flex rounded border p-0.5 text-xs">
                   {[['all', '전체'], ['10x10', '텐바이텐'], ['kakao', '카카오']].map(([value, label]) => <button key={value} type="button" onClick={() => setPlatform(value)} className={cn('h-7 px-2.5', platform === value ? 'bg-foreground text-background' : 'hover:bg-muted')}>{label}</button>)}
+                </div>
+                <div className="flex rounded border p-0.5 text-xs">
+                  {([['all', '전체 기간'], ['application', '신청기간'], ['event', '행사기간']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setPhase(value)} className={cn(
+                    'h-7 px-2.5',
+                    phase === value && value === 'all' && 'bg-foreground text-background',
+                    phase === value && value === 'application' && 'bg-blue-600 text-white',
+                    phase === value && value === 'event' && 'bg-emerald-600 text-white',
+                    phase !== value && 'hover:bg-muted',
+                  )}>{label}</button>)}
                 </div>
                 <div className="flex rounded border p-0.5">
                   <button type="button" title="캘린더 보기" onClick={() => setView('calendar')} className={cn('grid size-7 place-items-center', view === 'calendar' ? 'bg-foreground text-background' : 'hover:bg-muted')}><CalendarDays className="h-4 w-4" /></button>
@@ -156,8 +171,13 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
             ) : (
               <div className="overflow-x-auto">
                 <div className="min-w-[720px]">
-                  <div className="grid grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground"><span>플랫폼</span><span>일정</span><span>구분</span><span>행사 기간</span><span>상태</span></div>
-                  {filteredEvents.map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><span>{PLATFORM_LABELS[event.platform] ?? event.platform}</span><b className="truncate">{event.title}</b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{event.startsOn} ~ {event.endsOn}</span><span className="text-xs">{STATUS_LABELS[event.status] ?? event.status}</span></button>)}
+                  <div className="grid grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground"><span>플랫폼</span><span>일정</span><span>구분</span><span>{periodLabel}</span><span>상태</span></div>
+                  {filteredEvents.map((event) => {
+                    const period = phase === 'application' && event.applicationStartsOn && event.applicationEndsOn
+                      ? `${event.applicationStartsOn} ~ ${event.applicationEndsOn}`
+                      : `${event.startsOn} ~ ${event.endsOn}`
+                    return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><span>{PLATFORM_LABELS[event.platform] ?? event.platform}</span><b className="truncate">{event.title}</b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className="text-xs">{STATUS_LABELS[event.status] ?? event.status}</span></button>
+                  })}
                 </div>
               </div>
             )}

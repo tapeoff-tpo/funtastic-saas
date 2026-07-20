@@ -51,6 +51,18 @@ export function AiAccountForm({ userCandidates }: Props) {
               <label className="block space-y-1"><Label>비밀번호</Label><Input name="password" type="password" placeholder="계정 비밀번호" autoComplete="new-password" /></label>
               <label className="block space-y-1"><Label>추가 메일</Label><Input name="secondaryEmail" placeholder="복구용 또는 추가 메일" /></label>
               <label className="block space-y-1"><Label>갱신 예정일</Label><Input name="renewalDueOn" type="date" /></label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1">
+                  <Label>초기화 가능</Label>
+                  <select name="resetAvailableCount" defaultValue="0" className="h-9 w-full rounded-md border bg-background px-3 text-sm">
+                    {[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}개</option>)}
+                  </select>
+                </label>
+                <label className="flex h-9 items-center gap-2 self-end rounded-md border px-3 text-sm">
+                  <input type="checkbox" name="sharedUse" className="h-4 w-4" />
+                  공유 사용 중
+                </label>
+              </div>
               <label className="block space-y-1">
                 <Label>비고 / 로그인 방법</Label>
                 <textarea name="notes" rows={4} placeholder="예: 네이버 간편 로그인, 인증 문자는 담당자에게 요청" className="w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50" />

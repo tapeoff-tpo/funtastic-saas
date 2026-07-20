@@ -54,6 +54,8 @@ export default async function AiAccountsPage() {
           currentUserName: account.currentUserName,
           notes: account.notes,
           renewalDueOn: account.renewalDueOn,
+          resetAvailableCount: account.resetAvailableCount,
+          sharedUse: account.sharedUse,
         }))}
         messages={messages.map((message) => ({
           id: message.id,

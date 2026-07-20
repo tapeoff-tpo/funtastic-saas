@@ -24,6 +24,11 @@ const AI_ACCOUNT_STATUSES = new Set(Object.keys(AI_ACCOUNT_STATUS_LABELS))
 
 const DEFAULT_USER_CANDIDATES = ['한상철', '김기환', '최종석', '김소희', '오지은', '박현빈']
 
+function normalizeResetAvailableCount(value: number | undefined) {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(3, Math.max(0, Math.round(value || 0)))
+}
+
 export async function ensureAiAccountTables() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "gpt_accounts" (
@@ -50,6 +55,8 @@ export async function ensureAiAccountTables() {
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit_period" varchar(10)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100)`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "renewal_due_on" date`)
+  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "reset_available_count" integer NOT NULL DEFAULT 0`)
+  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "shared_use" boolean NOT NULL DEFAULT false`)
   await db.execute(sql`ALTER TABLE "gpt_accounts" ALTER COLUMN "status" SET DEFAULT 'in_use'`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "gpt_accounts_user_name_uniq" ON "gpt_accounts" ("user_id", "name")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_sort_idx" ON "gpt_accounts" ("user_id", "sort_order")`)
@@ -286,6 +293,8 @@ export async function createAiAccount(input: {
   password?: string | null
   notes?: string | null
   renewalDueOn?: string | null
+  resetAvailableCount?: number
+  sharedUse?: boolean
 }) {
   await seedDefaultAiAccounts(input.userId)
   const name = input.name.trim()
@@ -294,6 +303,7 @@ export async function createAiAccount(input: {
   const password = input.password?.trim() || null
   const notes = input.notes?.trim() || null
   const renewalDueOn = input.renewalDueOn?.trim() || null
+  const resetAvailableCount = normalizeResetAvailableCount(input.resetAvailableCount)
   if (!name) return { error: '계정 이름을 입력해주세요.' as const }
 
   const [{ nextSortOrder }] = await db.select({
@@ -308,6 +318,8 @@ export async function createAiAccount(input: {
       secondaryEmail,
       notes,
       renewalDueOn,
+      resetAvailableCount,
+      sharedUse: Boolean(input.sharedUse),
       sortOrder: nextSortOrder,
       status: 'in_use',
     })
@@ -344,6 +356,8 @@ export async function updateAiAccount(input: {
   password?: string | null
   notes?: string | null
   renewalDueOn?: string | null
+  resetAvailableCount?: number
+  sharedUse?: boolean
 }) {
   await ensureAiAccountTables()
   const name = input.name.trim()
@@ -352,6 +366,7 @@ export async function updateAiAccount(input: {
   const password = input.password?.trim() || null
   const notes = input.notes?.trim() || null
   const renewalDueOn = input.renewalDueOn?.trim() || null
+  const resetAvailableCount = normalizeResetAvailableCount(input.resetAvailableCount)
   if (!name) return { error: '계정 이름을 입력해주세요.' as const }
 
   const [duplicate] = await db
@@ -368,6 +383,8 @@ export async function updateAiAccount(input: {
       secondaryEmail,
       notes,
       renewalDueOn,
+      resetAvailableCount,
+      sharedUse: Boolean(input.sharedUse),
       updatedAt: new Date(),
     })
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
@@ -402,6 +419,54 @@ export async function readAiAccountPassword(input: {
   } catch {
     return { error: '비밀번호를 불러오지 못했습니다.' as const }
   }
+}
+
+export async function updateAiAccountAvailability(input: {
+  userId: string
+  accountId: string
+  resetAvailableCount: number
+  sharedUse: boolean
+  changedField: 'resetAvailableCount' | 'sharedUse'
+}) {
+  await ensureAiAccountTables()
+  const resetAvailableCount = Math.round(input.resetAvailableCount)
+  if (!Number.isInteger(resetAvailableCount) || resetAvailableCount < 0 || resetAvailableCount > 3) {
+    return { error: '초기화 가능 수는 0부터 3까지 선택해주세요.' as const }
+  }
+
+  const [account] = await db.select({
+    resetAvailableCount: gptAccounts.resetAvailableCount,
+    sharedUse: gptAccounts.sharedUse,
+  }).from(gptAccounts)
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .limit(1)
+  if (!account) return { error: '계정을 찾을 수 없습니다.' as const }
+
+  const nextResetCount = input.changedField === 'resetAvailableCount'
+    ? resetAvailableCount
+    : account.resetAvailableCount
+  const nextSharedUse = input.changedField === 'sharedUse'
+    ? input.sharedUse
+    : account.sharedUse
+  if (nextResetCount === account.resetAvailableCount && nextSharedUse === account.sharedUse) {
+    return { success: true }
+  }
+
+  await db.update(gptAccounts).set({
+    resetAvailableCount: nextResetCount,
+    sharedUse: nextSharedUse,
+    updatedAt: new Date(),
+  }).where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+
+  await db.insert(gptAccountMessages).values({
+    userId: input.userId,
+    accountId: input.accountId,
+    eventType: 'availability_updated',
+    message: input.changedField === 'sharedUse'
+      ? `공유 사용: ${nextSharedUse ? '사용 중' : '사용 안 함'}`
+      : `초기화 가능: ${nextResetCount}개`,
+  })
+  return { success: true }
 }
 
 export async function deleteAiAccount(input: {

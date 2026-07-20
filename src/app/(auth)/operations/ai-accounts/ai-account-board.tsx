@@ -12,6 +12,7 @@ import {
   deleteAiAccountAction,
   readAiAccountPasswordAction,
   updateAiAccountAction,
+  updateAiAccountAvailabilityAction,
   updateAiAccountOperationalStateAction,
 } from './actions'
 
@@ -24,6 +25,8 @@ type AiAccountRow = {
   currentUserName: string | null
   notes: string | null
   renewalDueOn: string | null
+  resetAvailableCount: number
+  sharedUse: boolean
 }
 
 type AiAccountMessage = {
@@ -111,6 +114,14 @@ export function AiAccountBoard({
     }, {})
   }, [messages])
   const selectedMessages = selectedAccount ? messagesByAccount[selectedAccount.id] || [] : []
+  const sortedAccounts = useMemo(() => accounts
+    .map((account, index) => ({ account, index }))
+    .sort((left, right) => Number(right.account.sharedUse) - Number(left.account.sharedUse)
+      || right.account.resetAvailableCount - left.account.resetAvailableCount
+      || left.index - right.index)
+    .map(({ account }) => account), [accounts])
+  const sharedAccountCount = accounts.filter((account) => account.sharedUse).length
+  const resetAvailableTotal = accounts.reduce((total, account) => total + account.resetAvailableCount, 0)
   const selectedDisplayStatus = normalizeStatus(selectedAccount?.status || 'unselected')
   const selectedDisplayLabel = selectedAccount
     ? statusLabels[selectedDisplayStatus]
@@ -185,7 +196,7 @@ export function AiAccountBoard({
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div>
           <h2 className="text-base font-semibold">계정 목록</h2>
-          <p className="text-xs text-muted-foreground">총 {accounts.length}개</p>
+          <p className="text-xs text-muted-foreground">총 {accounts.length}개 · 공유 사용 {sharedAccountCount}개 · 초기화 가능 {resetAvailableTotal}개</p>
         </div>
       </div>
 
@@ -215,18 +226,20 @@ export function AiAccountBoard({
           </div>
 
           <div className="overflow-x-auto">
-            <div className="min-w-[760px]">
-              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px] md:items-center md:gap-2">
+            <div className="min-w-[940px]">
+              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px_86px_90px] md:items-center md:gap-2">
                 <div />
                 <div>계정명</div>
                 <div>계정아이디</div>
                 <div>상태</div>
                 <div>사용자</div>
                 <div>갱신 예정일</div>
+                <div>초기화</div>
+                <div>공유 사용</div>
               </div>
 
               <div className="divide-y">
-            {accounts.map((account) => {
+            {sortedAccounts.map((account) => {
               const isSelected = selectedAccount?.id === account.id
               const displayStatus = normalizeStatus(account.status)
               const renewal = renewalState(account.renewalDueOn, now)
@@ -238,7 +251,8 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[28px_88px_minmax(120px,1fr)_112px_112px_190px_86px_90px] md:items-center md:gap-2',
+                    account.sharedUse && 'bg-emerald-50/50',
                     isSelected && 'bg-muted',
                   )}
                   onClick={() => selectAccount(account.id)}
@@ -346,6 +360,40 @@ export function AiAccountBoard({
                       )}>{renewal.label}</span> : null}
                     </div>
                   </form>
+                  <form action={updateAiAccountAvailabilityAction} className="contents" onClick={(event) => event.stopPropagation()}>
+                    <input type="hidden" name="accountId" value={account.id} />
+                    <input type="hidden" name="changedField" value="" />
+                    <select
+                      name="resetAvailableCount"
+                      defaultValue={String(account.resetAvailableCount)}
+                      onChange={(event) => {
+                        const form = event.currentTarget.form
+                        const changedField = form?.elements.namedItem('changedField')
+                        if (changedField instanceof HTMLInputElement) changedField.value = 'resetAvailableCount'
+                        form?.requestSubmit()
+                      }}
+                      aria-label={`${account.name} 초기화 가능 수`}
+                      className="h-9 w-full rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}개</option>)}
+                    </select>
+                    <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-2 text-xs font-medium">
+                      <input
+                        type="checkbox"
+                        name="sharedUse"
+                        value="true"
+                        defaultChecked={account.sharedUse}
+                        onChange={(event) => {
+                          const form = event.currentTarget.form
+                          const changedField = form?.elements.namedItem('changedField')
+                          if (changedField instanceof HTMLInputElement) changedField.value = 'sharedUse'
+                          form?.requestSubmit()
+                        }}
+                        className="h-4 w-4"
+                      />
+                      사용 중
+                    </label>
+                  </form>
                 </div>
               )
             })}
@@ -381,6 +429,16 @@ export function AiAccountBoard({
                     <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">새 비밀번호</span><Input name="password" type="password" placeholder="변경할 때만 입력" autoComplete="new-password" className="h-9" /></label>
                     <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">추가 메일</span><Input name="secondaryEmail" defaultValue={selectedAccount.secondaryEmail || ''} placeholder="복구용 또는 추가 메일" className="h-9" /></label>
                     <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">갱신 예정일</span><Input name="renewalDueOn" type="date" defaultValue={selectedAccount.renewalDueOn || ''} className="h-9" /></label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-medium text-muted-foreground">초기화 가능</span>
+                      <select name="resetAvailableCount" defaultValue={String(selectedAccount.resetAvailableCount)} className="h-9 w-full rounded-md border bg-background px-3 text-sm">
+                        {[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}개</option>)}
+                      </select>
+                    </label>
+                    <label className="flex h-9 items-center gap-2 self-end rounded-md border px-3 text-sm">
+                      <input type="checkbox" name="sharedUse" defaultChecked={selectedAccount.sharedUse} className="h-4 w-4" />
+                      공유 사용 중
+                    </label>
                   </div>
                   <label className="block space-y-1">
                     <span className="text-xs font-medium text-muted-foreground">저장된 비밀번호</span>

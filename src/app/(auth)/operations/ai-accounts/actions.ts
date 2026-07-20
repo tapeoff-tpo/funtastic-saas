@@ -12,6 +12,7 @@ import {
   deleteAiAccountUserCandidates,
   readAiAccountPassword,
   updateAiAccount,
+  updateAiAccountAvailability,
   updateAiAccountLimits,
   updateAiAccountOperationalState,
 } from '@/lib/operations/ai-accounts'
@@ -35,6 +36,8 @@ export async function createAiAccountAction(
     password: String(formData.get('password') ?? ''),
     notes: String(formData.get('notes') ?? ''),
     renewalDueOn: String(formData.get('renewalDueOn') ?? ''),
+    resetAvailableCount: Number(formData.get('resetAvailableCount') ?? 0),
+    sharedUse: formData.get('sharedUse') === 'on',
   })
 
   if ('error' in result) return { error: result.error }
@@ -74,6 +77,20 @@ export async function updateAiAccountOperationalStateAction(formData: FormData) 
     currentUserName: String(formData.get('currentUserName') ?? ''),
     renewalDueOn: String(formData.get('renewalDueOn') ?? ''),
     changedField: String(formData.get('changedField') ?? ''),
+  })
+  revalidatePath('/operations/ai-accounts')
+}
+
+export async function updateAiAccountAvailabilityAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return
+
+  await updateAiAccountAvailability({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
+    resetAvailableCount: Number(formData.get('resetAvailableCount') ?? 0),
+    sharedUse: String(formData.get('sharedUse') ?? '') === 'true',
+    changedField: String(formData.get('changedField') ?? '') as 'resetAvailableCount' | 'sharedUse',
   })
   revalidatePath('/operations/ai-accounts')
 }
@@ -156,6 +173,8 @@ export async function updateAiAccountAction(formData: FormData) {
     password: String(formData.get('password') ?? ''),
     notes: String(formData.get('notes') ?? ''),
     renewalDueOn: String(formData.get('renewalDueOn') ?? ''),
+    resetAvailableCount: Number(formData.get('resetAvailableCount') ?? 0),
+    sharedUse: formData.get('sharedUse') === 'on',
   })
   revalidatePath('/operations/ai-accounts')
 }

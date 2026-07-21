@@ -12,6 +12,7 @@ import {
 
 const EXTRA_HEADERS = ['구매 URL 상태', '당월 출고수량', '3개월 평균 출고수량', '최근 반영일'] as const
 type ExtraHeader = (typeof EXTRA_HEADERS)[number]
+type ExportItem = Awaited<ReturnType<typeof getAllPurchasingItems>>[number]
 
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
@@ -34,13 +35,7 @@ export async function GET(request: NextRequest) {
   sheet.views = [{ state: 'frozen', ySplit: 1 }]
   sheet.autoFilter = { from: 'A1', to: { row: 1, column: sheet.columns.length } }
 
-  const headerRow = sheet.getRow(1)
-  headerRow.height = 24
-  headerRow.eachCell((cell) => {
-    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } }
-    cell.alignment = { vertical: 'middle', horizontal: 'center' }
-  })
+  styleHeaderRow(sheet.getRow(1))
 
   if (isTemplate) {
     addTemplateRows(sheet, selectedHeaders)
@@ -55,6 +50,7 @@ export async function GET(request: NextRequest) {
         updatedAt: item.updatedAt.toLocaleString('ko-KR'),
       })
     }
+    addPurchaseUrlIssueSheet(workbook, items)
   }
 
   const buffer = await workbook.xlsx.writeBuffer()
@@ -91,4 +87,49 @@ function addTemplateRows(sheet: ExcelJS.Worksheet, headers: Esa009mHeader[]) {
   if ('works 신규 원가' in example) example['works 신규 원가'] = '1000'
   if ('구매 URL' in example) example['구매 URL'] = 'https://detail.1688.com/offer/example.html'
   sheet.addRow(example)
+}
+
+function addPurchaseUrlIssueSheet(workbook: ExcelJS.Workbook, items: ExportItem[]) {
+  const sheet = workbook.addWorksheet('구매 URL 오류 목록')
+  sheet.columns = [
+    { header: '품목코드', key: 'sku', width: 18 },
+    { header: '품목명', key: 'productName', width: 32 },
+    { header: '규격정보', key: 'optionName', width: 20 },
+    { header: '검증 오류사유', key: 'reason', width: 44 },
+    { header: '검증일시', key: 'checkedAt', width: 22 },
+  ]
+  sheet.views = [{ state: 'frozen', ySplit: 1 }]
+  sheet.autoFilter = { from: 'A1', to: { row: 1, column: sheet.columns.length } }
+  styleHeaderRow(sheet.getRow(1))
+
+  const issueItems = items.filter((item) => item.purchaseUrlVerification !== null)
+  if (issueItems.length === 0) {
+    sheet.addRow({ productName: '저장된 구매 URL 검증 오류가 없습니다.' })
+    return
+  }
+
+  for (const item of issueItems) {
+    sheet.addRow({
+      sku: item.data['품목코드'],
+      productName: item.data['품목명'],
+      optionName: item.data['규격정보'],
+      reason: item.purchaseUrlVerification?.reason ?? '확인 필요',
+      checkedAt: formatCheckedAt(item.purchaseUrlVerification?.checkedAt),
+    })
+  }
+}
+
+function styleHeaderRow(row: ExcelJS.Row) {
+  row.height = 24
+  row.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF334155' } }
+    cell.alignment = { vertical: 'middle', horizontal: 'center' }
+  })
+}
+
+function formatCheckedAt(value: string | null | undefined) {
+  if (!value) return ''
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString('ko-KR')
 }

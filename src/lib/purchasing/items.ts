@@ -37,6 +37,11 @@ export type PurchasingItemOutgoingMetrics = {
   threeMonthAverageOutgoing: number
 }
 export type PurchaseUrlVerificationStatus = 'confirm_required' | null
+export type PurchaseUrlVerification = {
+  status: 'confirm_required'
+  reason: string | null
+  checkedAt: string | null
+} | null
 export type PurchasingItemOutgoingMetricRow = PurchasingItemOutgoingMetrics & {
   internalSku: string
 }
@@ -132,6 +137,7 @@ export async function getPurchasingItems(input: {
       id: row.id,
       data: normalizeEsaData(row.metadata?.esa009m),
       purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
+      purchaseUrlVerification: purchaseUrlVerification(row.metadata),
       outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
       updatedAt: row.updatedAt,
     })),
@@ -155,6 +161,7 @@ export async function getAllPurchasingItems(userId: string) {
     id: row.id,
     data: normalizeEsaData(row.metadata?.esa009m),
     purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
+    purchaseUrlVerification: purchaseUrlVerification(row.metadata),
     outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
     updatedAt: row.updatedAt,
   }))
@@ -515,14 +522,22 @@ export async function getSkuOutgoingMetrics(
 }
 
 export function purchaseUrlVerificationStatus(metadata: unknown): PurchaseUrlVerificationStatus {
+  return purchaseUrlVerification(metadata)?.status ?? null
+}
+
+export function purchaseUrlVerification(metadata: unknown): PurchaseUrlVerification {
   const root = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? metadata as Record<string, unknown>
     : {}
   const verification = root.purchaseUrlVerification
   if (!verification || typeof verification !== 'object' || Array.isArray(verification)) return null
-  return (verification as Record<string, unknown>).status === 'confirm_required'
-    ? 'confirm_required'
-    : null
+  const details = verification as Record<string, unknown>
+  if (details.status !== 'confirm_required') return null
+  return {
+    status: 'confirm_required',
+    reason: typeof details.reason === 'string' && details.reason.trim() ? details.reason.trim() : null,
+    checkedAt: typeof details.checkedAt === 'string' && details.checkedAt.trim() ? details.checkedAt.trim() : null,
+  }
 }
 
 export function purchaseUrlExportStatus(

@@ -6,6 +6,7 @@ import {
   PURCHASE_URL_HEADER,
   parseEsa009mWorkbook,
   purchaseUrlExportStatus,
+  purchaseUrlVerification,
   resolveOutgoingMetrics,
 } from './items'
 
@@ -80,6 +81,22 @@ describe('purchaseUrlExportStatus', () => {
     expect(purchaseUrlExportStatus({ [PURCHASE_URL_HEADER]: null }, 'confirm_required')).toBe('확인 필요')
     expect(purchaseUrlExportStatus({ [PURCHASE_URL_HEADER]: null }, null)).toBe('URL 없음')
     expect(purchaseUrlExportStatus({ [PURCHASE_URL_HEADER]: 'https://detail.1688.com/offer/123456.html' }, null)).toBe('등록됨')
+  })
+})
+
+describe('purchaseUrlVerification', () => {
+  it('returns the saved reason for the dedicated error export', () => {
+    expect(purchaseUrlVerification({
+      purchaseUrlVerification: {
+        status: 'confirm_required',
+        reason: '1688 페이지 응답 시간 초과',
+        checkedAt: '2026-07-21T10:30:00.000Z',
+      },
+    })).toEqual({
+      status: 'confirm_required',
+      reason: '1688 페이지 응답 시간 초과',
+      checkedAt: '2026-07-21T10:30:00.000Z',
+    })
   })
 })
 

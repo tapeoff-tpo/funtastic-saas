@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, getTableColumns, gt, ilike, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
@@ -95,23 +95,12 @@ export async function getPurchaseRequests(input: {
   const overduePurchaseRequestWhere = and(...overduePurchaseRequestConditions)
   const overduePurchaseCompletedWhere = and(...overduePurchaseCompletedConditions)
   const chinaCurrentStock = sql<number>`(
-    SELECT COALESCE(SUM(
-      CASE
-        WHEN (active.raw_data->>'outboundRequestedQuantity') ~ '^[0-9]+$'
-          THEN (active.raw_data->>'outboundRequestedQuantity')::int
-        ELSE COALESCE(
-          active.china_received_quantity,
-          active.actual_purchase_quantity,
-          active.requested_quantity,
-          0
-        )
-      END
-    ), 0)::int
-    FROM ${purchaseRequestItems} active
-    WHERE active.user_id = ${purchaseRequestItems.userId}
-      AND active.sku = ${purchaseRequestItems.sku}
-      AND COALESCE(active.option_name, '') = COALESCE(${purchaseRequestItems.optionName}, '')
-      AND active.status IN ('china_arrived', 'outbound_requested')
+    SELECT COALESCE(${chinaWarehouseInventory.availableQuantity}, 0)::int
+    FROM ${chinaWarehouseInventory}
+    WHERE ${chinaWarehouseInventory.userId} = ${purchaseRequestItems.userId}
+      AND ${chinaWarehouseInventory.sku} = ${purchaseRequestItems.sku}
+      AND ${chinaWarehouseInventory.optionKey} = COALESCE(${purchaseRequestItems.optionName}, '')
+    LIMIT 1
   )`
   const [items, [{ total }], statusCounts, costRows, overduePurchaseRequestRows, overduePurchaseCompletedRows] = await Promise.all([
     db
@@ -192,6 +181,7 @@ export async function updatePurchaseRequestStatus(input: {
       if (current.status === 'china_arrived') {
         await addChinaWarehouseStock(tx, current)
       }
+      await subtractChinaWarehouseStock(tx, current)
     }
     if (input.status === 'completed') {
       if (current.status === 'china_arrived') {
@@ -300,7 +290,7 @@ export async function updatePurchaseRequestPlanFields(input: {
     if (chinaReceivedQuantity !== undefined) {
       await adjustChinaWarehouseArrivalQuantity(tx, current, chinaReceivedQuantity)
     }
-    if (outboundRequestedQuantity !== undefined && current.status === 'completed') {
+    if (outboundRequestedQuantity !== undefined && current.status === 'outbound_requested') {
       await adjustChinaWarehouseOutboundQuantity(tx, current, outboundRequestedQuantity)
     }
 
@@ -446,59 +436,32 @@ export async function getChinaWarehouseInventory(input: {
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
   const conditions: SQL[] = [
-    eq(purchaseRequestItems.userId, input.userId),
-    sql`${purchaseRequestItems.status} IN ('china_arrived', 'outbound_requested')`,
+    eq(chinaWarehouseInventory.userId, input.userId),
+    gt(chinaWarehouseInventory.availableQuantity, 0),
   ]
   if (input.search) {
     const pattern = `%${input.search}%`
     conditions.push(or(
-      ilike(purchaseRequestItems.sku, pattern),
-      ilike(purchaseRequestItems.productName, pattern),
-      ilike(purchaseRequestItems.optionName, pattern),
+      ilike(chinaWarehouseInventory.sku, pattern),
+      ilike(chinaWarehouseInventory.productName, pattern),
+      ilike(chinaWarehouseInventory.optionName, pattern),
     )!)
   }
 
   const where = and(...conditions)
-  const optionKey = sql<string>`COALESCE(${purchaseRequestItems.optionName}, '')`
-  const warehouseQuantity = sql<number>`COALESCE(SUM(
-    CASE
-      WHEN (${purchaseRequestItems.rawData}->>'outboundRequestedQuantity') ~ '^[0-9]+$'
-        THEN (${purchaseRequestItems.rawData}->>'outboundRequestedQuantity')::int
-      ELSE COALESCE(
-        ${purchaseRequestItems.chinaReceivedQuantity},
-        ${purchaseRequestItems.actualPurchaseQuantity},
-        ${purchaseRequestItems.requestedQuantity},
-        0
-      )
-    END
-  ), 0)::int`
   const [items, [{ total }]] = await Promise.all([
     db
-      .select({
-        id: sql<string>`MIN(${purchaseRequestItems.id}::text)`,
-        userId: purchaseRequestItems.userId,
-        sku: purchaseRequestItems.sku,
-        productName: sql<string>`MAX(${purchaseRequestItems.productName})`,
-        optionKey,
-        optionName: purchaseRequestItems.optionName,
-        totalQuantity: warehouseQuantity,
-        availableQuantity: warehouseQuantity,
-        lastArrivedAt: sql<Date | null>`MAX(${purchaseRequestItems.chinaReceivedAt})`,
-        lastOutboundRequestedAt: sql<Date | null>`MAX(CASE WHEN ${purchaseRequestItems.status} = 'outbound_requested' THEN ${purchaseRequestItems.updatedAt} ELSE NULL END)`,
-        createdAt: sql<Date>`MIN(${purchaseRequestItems.createdAt})`,
-        updatedAt: sql<Date>`MAX(${purchaseRequestItems.updatedAt})`,
-      })
-      .from(purchaseRequestItems)
+      .select()
+      .from(chinaWarehouseInventory)
       .where(where)
-      .groupBy(purchaseRequestItems.userId, purchaseRequestItems.sku, purchaseRequestItems.optionName)
-      .orderBy(asc(purchaseRequestItems.sku), asc(optionKey))
+      .orderBy(asc(chinaWarehouseInventory.sku), asc(chinaWarehouseInventory.optionKey))
       .limit(pageSize)
       .offset((page - 1) * pageSize),
     db
       .select({
-        total: sql<number>`COUNT(DISTINCT (${purchaseRequestItems.sku}, COALESCE(${purchaseRequestItems.optionName}, '')))::int`,
+        total: count(),
       })
-      .from(purchaseRequestItems)
+      .from(chinaWarehouseInventory)
       .where(where),
   ])
 

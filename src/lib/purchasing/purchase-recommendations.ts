@@ -2,6 +2,7 @@
 import { db } from '@/lib/db'
 import { notExists } from 'drizzle-orm'
 import {
+  chinaWarehouseInventory,
   inventory,
   products,
   purchaseRequestBatches,
@@ -271,16 +272,60 @@ export async function generatePurchaseRecommendations(input: {
     : Math.max(0, Math.trunc(finiteNumber(input.budgetKrw)))
   const now = input.now ?? new Date()
 
-  const inventoryRows = await db
-    .select({
-      sku: inventory.sku,
-      productName: sql<string>`MAX(${inventory.productName})`,
-      optionName: sql<string | null>`MAX(${inventory.optionName})`,
-      availableStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+  const [domesticInventoryRows, chinaInventoryRows] = await Promise.all([
+    db
+      .select({
+        sku: inventory.sku,
+        productName: sql<string>`MAX(${inventory.productName})`,
+        optionName: sql<string | null>`MAX(${inventory.optionName})`,
+        availableStock: sql<number>`COALESCE(SUM(CASE WHEN ${inventory.warehouseZone} IN ('1창고', '쿠팡창고', '쿠팡', '2창고') THEN ${inventory.availableStock} ELSE 0 END), 0)::int`,
+      })
+      .from(inventory)
+      .where(eq(inventory.userId, input.userId))
+      .groupBy(inventory.sku),
+    db
+      .select({
+        sku: chinaWarehouseInventory.sku,
+        productName: sql<string>`MAX(${chinaWarehouseInventory.productName})`,
+        optionName: sql<string | null>`MAX(${chinaWarehouseInventory.optionName})`,
+        availableStock: sql<number>`COALESCE(SUM(${chinaWarehouseInventory.availableQuantity}), 0)::int`,
+      })
+      .from(chinaWarehouseInventory)
+      .where(and(
+        eq(chinaWarehouseInventory.userId, input.userId),
+        sql`${chinaWarehouseInventory.availableQuantity} > 0`,
+      ))
+      .groupBy(chinaWarehouseInventory.sku),
+  ])
+  const inventoryBySku = new Map<string, {
+    sku: string
+    productName: string
+    optionName: string | null
+    availableStock: number
+    domesticAvailableStock: number
+    chinaAvailableStock: number
+  }>()
+  for (const row of domesticInventoryRows) {
+    inventoryBySku.set(row.sku, {
+      ...row,
+      domesticAvailableStock: row.availableStock,
+      chinaAvailableStock: 0,
     })
-    .from(inventory)
-    .where(eq(inventory.userId, input.userId))
-    .groupBy(inventory.sku)
+  }
+  for (const row of chinaInventoryRows) {
+    const existing = inventoryBySku.get(row.sku)
+    if (existing) {
+      existing.availableStock += row.availableStock
+      existing.chinaAvailableStock += row.availableStock
+      continue
+    }
+    inventoryBySku.set(row.sku, {
+      ...row,
+      domesticAvailableStock: 0,
+      chinaAvailableStock: row.availableStock,
+    })
+  }
+  const inventoryRows = [...inventoryBySku.values()]
 
   if (inventoryRows.length === 0) {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }
@@ -356,7 +401,7 @@ export async function generatePurchaseRecommendations(input: {
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'china_arrived', 'outbound_requested']),
+        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'outbound_requested']),
       ))
 
     const replaceableRows = activeRequestRows.filter(
@@ -491,6 +536,8 @@ export async function generatePurchaseRecommendations(input: {
           previousThreeMonthOutgoing: item.previousThreeMonthOutgoing,
           currentMonthOutgoing: item.currentMonthOutgoing,
           salesAnomalyDetected: item.salesAnomalyDetected,
+          domesticAvailableStock: item.row.domesticAvailableStock,
+          chinaAvailableStock: item.row.chinaAvailableStock,
           availableStock: item.row.availableStock,
           pipelineQuantity: item.pipelineQuantity,
           availableStockWithPipeline: item.availableStockWithPipeline,
@@ -529,6 +576,8 @@ function buildAssessedPurchaseRow(input: {
     productName: string
     optionName: string | null
     availableStock: number
+    domesticAvailableStock: number
+    chinaAvailableStock: number
   }
   previousThreeMonthOutgoing: number
   averageMonthlyOutgoing: number

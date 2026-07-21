@@ -14,6 +14,7 @@ import {
 } from '@/lib/purchasing/purchase-request-status'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { PurchaseEcountRawSyncDialog } from './ecount-raw-sync-dialog'
 import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
@@ -307,6 +308,7 @@ export async function PurchasingOrdersView({
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               {isRequestedStatus ? <PurchaseRequestCreateDialog /> : null}
+              {!overdueOnly && status === 'purchased' ? <PurchaseEcountRawSyncDialog /> : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
               <Link
@@ -666,6 +668,10 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
   const pipelineNote = Number.isFinite(pipelineQuantity) && pipelineQuantity > 0
     ? `진행 중 발주 ${formatNumber(pipelineQuantity)}`
     : null
+  const chinaAvailableStock = Number(rawData.chinaAvailableStock)
+  const stockNote = Number.isFinite(chinaAvailableStock)
+    ? `국내 ${formatNumber(rawData.domesticAvailableStock)} · 중국 ${formatNumber(chinaAvailableStock)}`
+    : null
   const moqNote = typeof rawData.moqProductGroupName === 'string'
     ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
       `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
@@ -673,12 +679,13 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
 
   return (
     <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
-      <Metric label="현재고" value={formatNumber(rawData.availableStock)} />
+      <Metric label="총 현재고" value={formatNumber(rawData.availableStock)} />
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {pipelineNote || moqNote || anomalyNote || budgetNote ? (
+      {stockNote || pipelineNote || moqNote || anomalyNote || budgetNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
+          {stockNote ? <span className="text-emerald-700">{stockNote}</span> : null}
           {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
           {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}

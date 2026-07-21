@@ -37,7 +37,7 @@ export default async function ChinaInventoryPage({
         <div>
           <h1 className="text-2xl font-semibold">중국재고</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            중국창고도착 또는 중국출고요청 단계의 발주 항목을 조회합니다. 중국출고완료로 이동하면 목록에서 제외됩니다.
+            Ecount 중국재고 원본을 기준으로 실제 중국창고에 남아 있는 수량을 조회합니다. 중국출고 후 국내 입고 전 수량은 발주 탭의 중국출고요청으로 관리합니다.
           </p>
         </div>
         <form className="flex items-center gap-2" action="/purchasing/china-inventory">

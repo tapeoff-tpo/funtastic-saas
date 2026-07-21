@@ -1227,6 +1227,11 @@ function uniqueVerificationLinks(value) {
     if (links.size >= MAX_VERIFY_LINKS) break
   }
   return Array.from(links.values())
+    .map((link) => ({
+      ...link,
+      items: link.items.sort((left, right) => left.sku.localeCompare(right.sku)),
+    }))
+    .sort((left, right) => left.url.localeCompare(right.url))
 }
 
 function verificationQueueFingerprint(links) {

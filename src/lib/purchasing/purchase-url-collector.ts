@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { productChangeLogs, products, purchaseRequestItems } from '@/lib/db/schema'
 import { PURCHASE_URL_HEADER } from './items'
@@ -184,6 +184,7 @@ export async function getPurchaseUrlVerificationQueue(input: {
       eq(products.userId, input.userId),
       sql`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '') IS NOT NULL`,
     ))
+    .orderBy(asc(products.internalSku))
 
   const linksByUrl = new Map<string, PurchaseUrlVerificationLink>()
   let skippedInvalid = 0
@@ -202,6 +203,11 @@ export async function getPurchaseUrlVerificationQueue(input: {
   }
 
   const allLinks = Array.from(linksByUrl.values())
+    .map((link) => ({
+      ...link,
+      items: link.items.sort((left, right) => left.sku.localeCompare(right.sku)),
+    }))
+    .sort((left, right) => left.url.localeCompare(right.url))
   const links = allLinks.slice(0, limit)
   return {
     links,

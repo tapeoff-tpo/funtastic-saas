@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
-const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.0.zip'
+const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.1.zip'
 
 type QueueResponse = {
   orders: Array<{

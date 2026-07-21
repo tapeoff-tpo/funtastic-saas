@@ -1167,16 +1167,28 @@ function updateVerificationSummary(run, result, acknowledgement) {
   const summary = normalizeVerificationSummary(run.summary)
   summary.processed = run.index + 1
   if (result.status === 'open') summary.open += 1
-  if (result.status === 'unavailable') summary.unavailable += 1
+  if (result.status === 'unavailable') {
+    summary.unavailable += 1
+    summary.recentIssues = [
+      `[상품 없음] ${verificationItemLabel(result.items)}: ${result.message || '1688에서 상품 없음 또는 판매중지로 표시됩니다.'}`,
+      ...summary.recentIssues,
+    ].slice(0, 12)
+  }
   if (result.status === 'unknown') {
     summary.unknown += 1
-    const skus = result.items.map((item) => item.sku).slice(0, 4).join(', ')
     summary.recentIssues = [
-      `${skus || '품목'}: ${result.message || '정상 열림 여부 확인 필요'}`,
+      `[확인 필요] ${verificationItemLabel(result.items)}: ${result.message || '정상 열림 여부 확인 필요'}`,
       ...summary.recentIssues,
     ].slice(0, 12)
   }
   run.summary = summary
+}
+
+function verificationItemLabel(items) {
+  const labels = items
+    .slice(0, 4)
+    .map((item) => `${item.productName || '품목'} (${item.sku})`)
+  return labels.length > 0 ? labels.join(', ') : '품목'
 }
 
 function updateVerificationCheckpoint(run) {

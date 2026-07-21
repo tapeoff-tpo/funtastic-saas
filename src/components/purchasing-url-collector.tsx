@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
-const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.1.zip'
+const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.2.zip'
 
 type QueueResponse = {
   orders: Array<{
@@ -263,7 +263,10 @@ export function PurchasingUrlCollector() {
 
     setVerificationProgress((current) => {
       const items = message.items ?? []
-      const skuLabel = items.map((item) => item.sku).slice(0, 4).join(', ')
+      const itemLabel = items
+        .slice(0, 4)
+        .map((item) => `${item.productName || '품목'} (${item.sku})`)
+        .join(', ')
       const issues = [...current.issues]
       let open = current.open
       let unavailable = current.unavailable
@@ -272,11 +275,11 @@ export function PurchasingUrlCollector() {
       if (message.status === 'open') open += 1
       if (message.status === 'unavailable') {
         unavailable += 1
-        issues.unshift(`${skuLabel || message.url}: 1688 상품 없음 또는 판매중지`)
+        issues.unshift(`[상품 없음] ${itemLabel || message.url}: 1688 상품 없음 또는 판매중지`)
       }
       if (message.status === 'unknown') {
         unknown += 1
-        issues.unshift(`${skuLabel || message.url}: ${message.message || '정상 열림 여부 확인 필요'}`)
+        issues.unshift(`[확인 필요] ${itemLabel || message.url}: ${message.message || '정상 열림 여부 확인 필요'}`)
       }
 
       return {
@@ -285,7 +288,7 @@ export function PurchasingUrlCollector() {
         open,
         unavailable,
         unknown,
-        message: skuLabel ? `${skuLabel} 검증 완료` : '구매 URL 검증 완료',
+        message: itemLabel ? `${itemLabel} 검증 완료` : '구매 URL 검증 완료',
         issues: issues.slice(0, 12),
       }
     })
@@ -678,8 +681,15 @@ export function PurchasingUrlCollector() {
             />
           </div>
           {verificationProgress.issues.length > 0 ? (
-            <div className="mt-2 space-y-1 text-red-700">
-              {verificationProgress.issues.map((issue) => <p key={issue}>{issue}</p>)}
+            <div className="mt-2 space-y-1">
+              {verificationProgress.issues.map((issue) => (
+                <p
+                  key={issue}
+                  className={issue.startsWith('[상품 없음]') ? 'text-red-700' : 'text-amber-700'}
+                >
+                  {issue}
+                </p>
+              ))}
             </div>
           ) : null}
         </div>

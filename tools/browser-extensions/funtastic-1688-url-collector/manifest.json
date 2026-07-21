@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Funtastic 1688 URL Collector",
   "description": "발주 엑셀 주문번호로 1688 구매 URL을 수집하고 중단 지점부터 이어갑니다.",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "permissions": [
     "alarms",
     "storage",

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>몰 상품 확인</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header><strong>몰 상품 확인</strong><span id="market">대기</span></header>
+      <section id="empty"><p>SaaS 판매가 테이블의 몰 기준 화면에서 확인할 상품을 선택하세요.</p><button id="open-saas">판매가 테이블 열기</button></section>
+      <section id="active" hidden>
+        <div class="product"><b id="code"></b><span id="name"></span></div>
+        <p id="detail">판매자센터에서 상품을 검색한 뒤 결과를 저장하세요.</p>
+        <button id="analyze" class="primary">현재 화면 자동 판독</button>
+        <div class="grid">
+          <button data-status="registered">등록</button>
+          <button data-status="missing">미등록</button>
+          <button data-status="stopped">판매중지</button>
+          <button data-status="needs_review">확인 필요</button>
+        </div>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

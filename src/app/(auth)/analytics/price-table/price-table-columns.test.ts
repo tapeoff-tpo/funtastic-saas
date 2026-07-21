@@ -68,4 +68,24 @@ describe('findMarketplaceProductIds', () => {
       { key: '쿠팡 상품관리번호', value: 'CP-10' },
     ])
   })
+
+  it('0과 미등록 표시는 실제 상품번호로 취급하지 않는다', () => {
+    expect(findMarketplaceProductIds({
+      '쿠팡 상품번호': '0',
+      'belload89 상품번호': '미등록',
+      'belload89 판매가': '12900',
+    }, column())).toEqual([])
+  })
+
+  it('계정별 명시 열이 0이면 다른 계정 상품번호를 섞지 않는다', () => {
+    expect(findMarketplaceProductIds({
+      '스마트스토어 상품코드': '5158554636',
+      '스마트스토어 상품코드 4': '0',
+    }, column({
+      id: 'smartstore-1530',
+      label: '스마트스토어 일오삼공',
+      valueKey: '일오삼공 판매가',
+      productIdKeys: ['스마트스토어 상품코드 4'],
+    }))).toEqual([])
+  })
 })

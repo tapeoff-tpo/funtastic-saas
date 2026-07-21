@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Funtastic 몰 상품 확인",
+  "description": "판매자센터의 실제 상품 등록 상태를 Funtastic 판매가 테이블에 기록합니다.",
+  "version": "0.1.0",
+  "permissions": ["storage", "tabs", "activeTab"],
+  "host_permissions": [
+    "https://*/*",
+    "http://localhost:3000/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "몰 상품 확인"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "exclude_matches": [
+        "https://funtastic-saas.vercel.app/*",
+        "https://funtastic-saas-vercel.vercel.app/*"
+      ],
+      "js": ["marketplace-page.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://funtastic-saas.vercel.app/*",
+        "https://funtastic-saas-vercel.vercel.app/*",
+        "http://localhost:3000/*"
+      ],
+      "js": ["saas-bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

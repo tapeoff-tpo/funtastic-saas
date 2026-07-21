@@ -457,6 +457,37 @@ export const analyticsPriceTableRows = pgTable(
   ],
 )
 
+export const analyticsMarketplaceProductChecks = pgTable(
+  'analytics_marketplace_product_checks',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    productCode: varchar('product_code', { length: 100 }).notNull(),
+    marketplaceKey: varchar('marketplace_key', { length: 100 }).notNull(),
+    marketplaceName: varchar('marketplace_name', { length: 150 }).notNull(),
+    accountKey: varchar('account_key', { length: 150 }).notNull().default('default'),
+    status: varchar('status', { length: 30 }).notNull(),
+    marketplaceProductId: varchar('marketplace_product_id', { length: 300 }),
+    marketplaceProductName: text('marketplace_product_name'),
+    sellerUrl: text('seller_url'),
+    source: varchar('source', { length: 30 }).notNull().default('browser_extension'),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull().default({}),
+    checkedAt: timestamp('checked_at', { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('analytics_marketplace_checks_unique').on(
+      table.userId,
+      table.productCode,
+      table.marketplaceKey,
+      table.accountKey,
+    ),
+    index('analytics_marketplace_checks_user_market_idx').on(table.userId, table.marketplaceKey),
+    index('analytics_marketplace_checks_user_product_idx').on(table.userId, table.productCode),
+  ],
+)
+
 export const shipmentGroups = pgTable('shipment_groups', {
   id: uuid('id').defaultRandom().primaryKey(),
   userId: uuid('user_id').notNull(),

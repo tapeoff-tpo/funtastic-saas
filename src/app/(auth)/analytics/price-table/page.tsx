@@ -3,8 +3,10 @@ import Link from 'next/link'
 import { ChevronDown, FileSpreadsheet, Search, X } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { listPriceTableRows } from '@/lib/analytics/price-table'
+import { listMarketplaceProductChecks } from '@/lib/analytics/marketplace-product-checks'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { PriceTableGrid, type PriceTableGridRow } from './price-table-grid'
+import { type PriceTableGridRow } from './price-table-grid'
+import { PriceTableWorkspace } from './price-table-workspace'
 import { PriceTableUpload } from './price-table-upload'
 
 export const metadata: Metadata = {
@@ -22,6 +24,7 @@ export default async function PriceTablePage({
     sheet?: string
     sort?: string
     order?: string
+    view?: string
   }>
 }) {
   const user = await getCurrentUser()
@@ -33,6 +36,7 @@ export default async function PriceTablePage({
   const activeSheet = params?.sheet?.trim() || '상품등록'
   const sortKey = params?.sort?.trim() || 'productCode'
   const sortOrder = params?.order === 'desc' ? 'desc' : 'asc'
+  const activeView = params?.view === 'malls' || params?.view === 'compare' ? params.view : 'products'
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const data = await listPriceTableRows({
@@ -70,6 +74,13 @@ export default async function PriceTablePage({
     registeredProductName: row.registeredProductName,
     rawData: row.rawData as Record<string, string>,
   }))
+  const checks = await listMarketplaceProductChecks(
+    workspaceUserId,
+    gridRows.map((row) => row.productCode ?? ''),
+  ).catch((error) => {
+    console.error('marketplace product checks list error:', error)
+    return []
+  })
 
   return (
     <div className="space-y-4">
@@ -114,7 +125,7 @@ export default async function PriceTablePage({
           {sheetCounts.map((sheet) => (
             <Link
               key={sheet.name}
-              href={sheetHref(sheet.name, search)}
+              href={sheetHref(sheet.name, search, activeView)}
               className={`inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2.5 text-sm font-medium ${
                 activeSheet === sheet.name
                   ? 'border-primary text-foreground'
@@ -131,6 +142,7 @@ export default async function PriceTablePage({
 
         <form className="flex flex-col gap-2 p-3 sm:flex-row">
           <input type="hidden" name="sheet" value={activeSheet} />
+          {activeView !== 'products' ? <input type="hidden" name="view" value={activeView} /> : null}
           <div className="relative min-w-0 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -145,7 +157,7 @@ export default async function PriceTablePage({
           </button>
           {search ? (
             <Link
-              href={`/analytics/price-table?sheet=${encodeURIComponent(activeSheet)}`}
+              href={`/analytics/price-table?sheet=${encodeURIComponent(activeSheet)}${activeView !== 'products' ? `&view=${activeView}` : ''}`}
               className="inline-flex h-9 items-center justify-center gap-1 rounded-md border px-3 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <X className="size-4" />
@@ -155,12 +167,24 @@ export default async function PriceTablePage({
         </form>
       </section>
 
-      <PriceTableGrid
-        key={activeSheet}
+      <PriceTableWorkspace
+        key={`${activeSheet}:${params?.view ?? 'products'}`}
         rows={gridRows}
         sheetName={activeSheet}
         sortKey={sortKey}
         sortOrder={sortOrder}
+        initialView={activeView}
+        checks={checks.map((check) => ({
+          productCode: check.productCode,
+          marketplaceKey: check.marketplaceKey,
+          marketplaceName: check.marketplaceName,
+          accountKey: check.accountKey,
+          status: check.status,
+          marketplaceProductId: check.marketplaceProductId,
+          marketplaceProductName: check.marketplaceProductName,
+          sellerUrl: check.sellerUrl,
+          checkedAt: check.checkedAt.toISOString(),
+        }))}
       />
 
       <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -175,6 +199,7 @@ export default async function PriceTablePage({
             sheetName={activeSheet}
             sortKey={sortKey}
             sortOrder={sortOrder}
+            view={activeView}
           >
             이전
           </PageLink>
@@ -186,6 +211,7 @@ export default async function PriceTablePage({
             sheetName={activeSheet}
             sortKey={sortKey}
             sortOrder={sortOrder}
+            view={activeView}
           >
             다음
           </PageLink>
@@ -211,6 +237,7 @@ function PageLink({
   sheetName,
   sortKey,
   sortOrder,
+  view,
   children,
 }: {
   page: number
@@ -219,6 +246,7 @@ function PageLink({
   sheetName: string
   sortKey: string
   sortOrder: 'asc' | 'desc'
+  view: 'products' | 'malls' | 'compare'
   children: React.ReactNode
 }) {
   if (disabled) {
@@ -230,6 +258,7 @@ function PageLink({
   params.set('sheet', sheetName)
   if (sortKey !== 'productCode') params.set('sort', sortKey)
   if (sortOrder !== 'asc') params.set('order', sortOrder)
+  if (view !== 'products') params.set('view', view)
   return (
     <Link href={`/analytics/price-table?${params}`} className="rounded-md border bg-background px-3 py-1.5 hover:bg-muted">
       {children}
@@ -237,9 +266,10 @@ function PageLink({
   )
 }
 
-function sheetHref(sheetName: string, search: string) {
+function sheetHref(sheetName: string, search: string, view: 'products' | 'malls' | 'compare') {
   const params = new URLSearchParams({ sheet: sheetName })
   if (search) params.set('q', search)
+  if (view !== 'products') params.set('view', view)
   return `/analytics/price-table?${params}`
 }
 

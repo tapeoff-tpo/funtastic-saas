@@ -40,10 +40,10 @@ const productRegistrationColumns: PriceTableDisplayColumn[] = [
   priceColumn('banana', '바나나B2B', '★ 판매가 3', '★ 배송비 10'),
   priceColumn('tenbyten', '텐바이텐', 'tapeofff 판매가', '★ 배송비 11'),
   priceColumn('coupang', '쿠팡', 'belload89 판매가', '★ 배송비 12', true),
-  priceColumn('smartstore-home', '스마트스토어 집정리', '집정리(구살림딜) 판매가', 'hu4umart 배송비', true),
-  priceColumn('smartstore-life', '스마트스토어 생활살림', '생활살림 판매가', 'ncp_1nl4wa_01 배송비'),
-  priceColumn('smartstore-nat', '스마트스토어 낫카페', '낫카페 판매가', 'belload89 배송비'),
-  priceColumn('smartstore-18', '스마트스토어 18제곱미터', '스마트스토어 18.제곱미터 판매가', '스마트스토어 18.제곱미터 배송비'),
+  priceColumn('smartstore-home', '스마트스토어 집정리', '집정리(구살림딜) 판매가', 'hu4umart 배송비', true, [], ['스마트스토어 상품코드']),
+  priceColumn('smartstore-life', '스마트스토어 생활살림', '생활살림 판매가', 'ncp_1nl4wa_01 배송비', false, [], ['스마트스토어 상품코드 2']),
+  priceColumn('smartstore-nat', '스마트스토어 낫카페', '낫카페 판매가', 'belload89 배송비', false, [], ['스마트스토어 상품코드 3']),
+  priceColumn('smartstore-18', '스마트스토어 18제곱미터', '스마트스토어 18.제곱미터 판매가', '스마트스토어 18.제곱미터 배송비', false, [], ['스마트스토어 18.제곱미터 상품코드']),
   priceColumn('cafe24', '카페24', '집정리 판매가', '집정리 배송비', true),
   priceColumn('kakao-funta', '카카오 펀타스틱', 'tapeoff (166967) 판매가', '★ 배송비 13'),
   priceColumn('kakao-life', '카카오 생활살림', 'tapeoff1 (166968) 판매가', '★ 배송비 14'),
@@ -76,7 +76,7 @@ const productRegistrationColumns: PriceTableDisplayColumn[] = [
   priceColumn('zigzag', '지그재그', 'tapeoff1@daum.net 판매가', '낫카페(240076) / 1530(5002745) 배송비'),
   priceColumn('mongttang', '몽땅뚝딱', 'tapeoff 판매가 9', '(사방넷)인테리어T 배송비'),
   priceColumn('10000recipe', '만개의레시피', 'A924 판매가', 'A924 배송비'),
-  priceColumn('smartstore-1530', '스마트스토어 일오삼공', '일오삼공 판매가', '일오삼공 배송비'),
+  priceColumn('smartstore-1530', '스마트스토어 일오삼공', '일오삼공 판매가', '일오삼공 배송비', false, [], ['스마트스토어 상품코드 4']),
   priceColumn('hiver', '하이버', 'tapeoff1 판매가 3', 'tapeoff1 배송비 3'),
   priceColumn('vanessdeco', '바네스데코', 'songarak007 판매가', 'songarak007 배송비'),
   priceColumn('funhome', '집정리 funhome', 'funhome 판매가', 'funhome 배송비'),
@@ -149,6 +149,10 @@ export function getPriceTableDisplayColumns(sheetName: string) {
   return productRegistrationColumns
 }
 
+export function getRegistrationMarketplaceColumns() {
+  return productRegistrationColumns
+}
+
 export function findMarketplaceProductIds(
   rawData: Record<string, string>,
   column: PriceTableDisplayColumn,
@@ -156,14 +160,14 @@ export function findMarketplaceProductIds(
   const exactKeys = column.productIdKeys ?? []
   const exactMatches = exactKeys
     .map((key) => ({ key, value: rawData[key] }))
-    .filter((entry): entry is { key: string; value: string } => Boolean(entry.value))
-  if (exactMatches.length) return exactMatches
+    .filter((entry): entry is { key: string; value: string } => isProductIdentifier(entry.value))
+  if (exactKeys.length) return exactMatches
 
   const tokens = marketplaceTokens(column)
   if (!tokens.length) return []
 
   const candidates = Object.entries(rawData)
-    .filter(([key, value]) => value && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
+    .filter(([key, value]) => isProductIdentifier(value) && PRODUCT_ID_FIELD_PATTERN.test(key) && !CORE_PRODUCT_ID_KEYS.has(compactKey(key)))
     .map(([key, value]) => ({ key, value, score: identifierKeyScore(key, tokens) }))
   const namedMatches = candidates
     .filter((entry) => entry.score > 0)
@@ -189,6 +193,7 @@ function priceColumn(
   shippingKey: string,
   defaultVisible = false,
   extraDetails: PriceTableDisplayColumn['details'] = [],
+  productIdKeys?: string[],
 ): PriceTableDisplayColumn {
   return {
     id,
@@ -197,6 +202,7 @@ function priceColumn(
     format: 'money',
     defaultVisible,
     showProductId: true,
+    productIdKeys,
     details: [
       ...extraDetails,
       { key: shippingKey, label: '배송', format: 'money' },
@@ -232,4 +238,10 @@ function identifierKeyScore(key: string, tokens: string[]) {
 
 function compactKey(value: string) {
   return value.replace(/\s+/g, '')
+}
+
+function isProductIdentifier(value: string | undefined): value is string {
+  if (!value) return false
+  const normalized = value.replace(/\s+/g, '').toLowerCase()
+  return !['0', '-', '미등록', '없음', 'null', 'undefined'].includes(normalized)
 }

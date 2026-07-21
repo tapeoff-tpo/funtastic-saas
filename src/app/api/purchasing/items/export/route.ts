@@ -3,9 +3,14 @@ import { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
-import { ESA009M_HEADERS, type Esa009mHeader, getAllPurchasingItems } from '@/lib/purchasing/items'
+import {
+  ESA009M_HEADERS,
+  type Esa009mHeader,
+  getAllPurchasingItems,
+  purchaseUrlExportStatus,
+} from '@/lib/purchasing/items'
 
-const EXTRA_HEADERS = ['당월 출고수량', '3개월 평균 출고수량', '최근 반영일'] as const
+const EXTRA_HEADERS = ['구매 URL 상태', '당월 출고수량', '3개월 평균 출고수량', '최근 반영일'] as const
 type ExtraHeader = (typeof EXTRA_HEADERS)[number]
 
 export async function GET(request: NextRequest) {
@@ -21,6 +26,7 @@ export async function GET(request: NextRequest) {
 
   sheet.columns = [
     ...selectedHeaders.map((header) => ({ header, key: header, width: Math.max(14, Math.min(32, header.length + 6)) })),
+    ...(!isTemplate && selectedExtraHeaders.includes('구매 URL 상태') ? [{ header: '구매 URL 상태', key: 'purchaseUrlStatus', width: 14 }] : []),
     ...(!isTemplate && selectedExtraHeaders.includes('당월 출고수량') ? [{ header: '당월 출고수량', key: 'currentMonthOutgoing', width: 16 }] : []),
     ...(!isTemplate && selectedExtraHeaders.includes('3개월 평균 출고수량') ? [{ header: '3개월 평균 출고수량', key: 'threeMonthAverageOutgoing', width: 20 }] : []),
     ...(!isTemplate && selectedExtraHeaders.includes('최근 반영일') ? [{ header: '최근 반영일', key: 'updatedAt', width: 22 }] : []),
@@ -43,6 +49,7 @@ export async function GET(request: NextRequest) {
     for (const item of items) {
       sheet.addRow({
         ...Object.fromEntries(selectedHeaders.map((header) => [header, item.data[header] ?? null])),
+        purchaseUrlStatus: purchaseUrlExportStatus(item.data, item.purchaseUrlVerificationStatus),
         currentMonthOutgoing: item.outgoingMetrics.currentMonthOutgoing,
         threeMonthAverageOutgoing: item.outgoingMetrics.threeMonthAverageOutgoing,
         updatedAt: item.updatedAt.toLocaleString('ko-KR'),

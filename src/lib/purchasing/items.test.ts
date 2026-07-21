@@ -5,6 +5,7 @@ import {
   getOutgoingMetricWindows,
   PURCHASE_URL_HEADER,
   parseEsa009mWorkbook,
+  purchaseUrlExportStatus,
   resolveOutgoingMetrics,
 } from './items'
 
@@ -71,6 +72,14 @@ describe('parseEsa009mWorkbook', () => {
     const result = await parseEsa009mWorkbook(buffer as ArrayBuffer)
 
     expect(result.rows[0][PURCHASE_URL_HEADER]).toBeNull()
+  })
+})
+
+describe('purchaseUrlExportStatus', () => {
+  it('keeps URL verification status visible in Excel exports', () => {
+    expect(purchaseUrlExportStatus({ [PURCHASE_URL_HEADER]: null }, 'confirm_required')).toBe('확인 필요')
+    expect(purchaseUrlExportStatus({ [PURCHASE_URL_HEADER]: null }, null)).toBe('URL 없음')
+    expect(purchaseUrlExportStatus({ [PURCHASE_URL_HEADER]: 'https://detail.1688.com/offer/123456.html' }, null)).toBe('등록됨')
   })
 })
 

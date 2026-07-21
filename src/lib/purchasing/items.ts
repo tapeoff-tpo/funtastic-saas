@@ -525,6 +525,14 @@ export function purchaseUrlVerificationStatus(metadata: unknown): PurchaseUrlVer
     : null
 }
 
+export function purchaseUrlExportStatus(
+  data: Pick<Esa009mData, typeof PURCHASE_URL_HEADER>,
+  verificationStatus: PurchaseUrlVerificationStatus,
+) {
+  if (verificationStatus === 'confirm_required') return '확인 필요'
+  return data[PURCHASE_URL_HEADER]?.trim() ? '등록됨' : 'URL 없음'
+}
+
 function metadataWithPurchasingItemData(metadata: unknown, esa009m: Esa009mData) {
   const root = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? metadata as Record<string, unknown>

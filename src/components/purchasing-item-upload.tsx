@@ -69,7 +69,7 @@ const DEFAULT_DOWNLOAD_HEADERS = [
   ...DEFAULT_SELECTED_HEADERS,
 ]
 
-const EXTRA_DOWNLOAD_HEADERS = ['당월 출고수량', '3개월 평균 출고수량', '최근 반영일'] as const
+const EXTRA_DOWNLOAD_HEADERS = ['구매 URL 상태', '당월 출고수량', '3개월 평균 출고수량', '최근 반영일'] as const
 
 export function PurchasingItemUpload() {
   const inputRef = useRef<HTMLInputElement>(null)

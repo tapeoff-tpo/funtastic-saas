@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
-const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.2.zip'
+const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.3.zip'
 
 type QueueResponse = {
   orders: Array<{
@@ -130,6 +130,8 @@ const EMPTY_VERIFICATION_PROGRESS: VerificationProgress = {
   message: '',
   issues: [],
 }
+
+const VERIFICATION_ISSUE_LIMIT = 100
 
 export function PurchasingUrlCollector() {
   const router = useRouter()
@@ -289,7 +291,7 @@ export function PurchasingUrlCollector() {
         unavailable,
         unknown,
         message: itemLabel ? `${itemLabel} 검증 완료` : '구매 URL 검증 완료',
-        issues: issues.slice(0, 12),
+        issues: issues.slice(0, VERIFICATION_ISSUE_LIMIT),
       }
     })
 
@@ -322,7 +324,7 @@ export function PurchasingUrlCollector() {
               unavailable: message.summary?.unavailable ?? current.unavailable,
               unknown: message.summary?.unknown ?? current.unknown,
               message: '진행 중인 1688 URL 검증에 다시 연결했습니다.',
-              issues: message.summary?.recentIssues?.slice(0, 12) ?? current.issues,
+              issues: message.summary?.recentIssues?.slice(0, VERIFICATION_ISSUE_LIMIT) ?? current.issues,
             }))
           }
           return
@@ -370,7 +372,7 @@ export function PurchasingUrlCollector() {
             message: checkpoint.completedAt
               ? '최근 1688 구매 URL 검증이 완료되었습니다.'
               : `최근 검증이 ${processed.toLocaleString('ko-KR')}건 처리 후 중단되었습니다. 다시 시작하면 이어집니다.`,
-            issues: checkpoint.summary?.recentIssues?.slice(0, 12) ?? [],
+            issues: checkpoint.summary?.recentIssues?.slice(0, VERIFICATION_ISSUE_LIMIT) ?? [],
           })
         }
         return
@@ -681,7 +683,7 @@ export function PurchasingUrlCollector() {
             />
           </div>
           {verificationProgress.issues.length > 0 ? (
-            <div className="mt-2 space-y-1">
+            <div className="mt-2 max-h-64 space-y-1 overflow-y-auto pr-2">
               {verificationProgress.issues.map((issue) => (
                 <p
                   key={issue}

@@ -10,6 +10,7 @@ const VERIFY_CHECKPOINT_KEY = 'funtastic1688VerificationCheckpoint'
 const VERIFY_NEXT_ALARM = 'funtastic-1688-verify-next'
 const VERIFY_TIMEOUT_ALARM = 'funtastic-1688-verify-timeout'
 const VERIFY_SAVE_TIMEOUT_ALARM = 'funtastic-1688-verify-save-timeout'
+const VERIFICATION_ISSUE_LIMIT = 100
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const ORDER_LIST_URL = 'https://air.1688.com/app/ctf-page/trade-order-list/buyer-order-list.html'
 const LOCAL_QUEUE_FILE = 'order-queue.json'
@@ -1172,14 +1173,14 @@ function updateVerificationSummary(run, result, acknowledgement) {
     summary.recentIssues = [
       `[상품 없음] ${verificationItemLabel(result.items)}: ${result.message || '1688에서 상품 없음 또는 판매중지로 표시됩니다.'}`,
       ...summary.recentIssues,
-    ].slice(0, 12)
+    ].slice(0, VERIFICATION_ISSUE_LIMIT)
   }
   if (result.status === 'unknown') {
     summary.unknown += 1
     summary.recentIssues = [
       `[확인 필요] ${verificationItemLabel(result.items)}: ${result.message || '정상 열림 여부 확인 필요'}`,
       ...summary.recentIssues,
-    ].slice(0, 12)
+    ].slice(0, VERIFICATION_ISSUE_LIMIT)
   }
   run.summary = summary
 }
@@ -1215,7 +1216,7 @@ function normalizeVerificationSummary(value) {
     unavailable: Math.max(0, Number(summary.unavailable) || 0),
     unknown: Math.max(0, Number(summary.unknown) || 0),
     recentIssues: Array.isArray(summary.recentIssues)
-      ? summary.recentIssues.filter((item) => typeof item === 'string').slice(0, 12)
+      ? summary.recentIssues.filter((item) => typeof item === 'string').slice(0, VERIFICATION_ISSUE_LIMIT)
       : [],
   }
 }

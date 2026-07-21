@@ -14,7 +14,6 @@ import {
 } from '@/lib/purchasing/purchase-request-status'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { PurchaseEcountRawSyncDialog } from './ecount-raw-sync-dialog'
 import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
@@ -308,7 +307,6 @@ export async function PurchasingOrdersView({
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               {isRequestedStatus ? <PurchaseRequestCreateDialog /> : null}
-              {!overdueOnly && status === 'purchased' ? <PurchaseEcountRawSyncDialog /> : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}
               <Link

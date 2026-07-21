@@ -62,6 +62,7 @@ export default async function CostsPage({
         rows={items.map((item) => ({
           id: item.id,
           data: item.data,
+          purchaseUrlVerificationStatus: item.purchaseUrlVerificationStatus,
           updatedAt: item.updatedAt.toISOString(),
         }))}
       />

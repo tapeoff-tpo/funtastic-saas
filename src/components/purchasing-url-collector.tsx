@@ -145,6 +145,7 @@ export function PurchasingUrlCollector() {
   const pendingSavesRef = useRef(0)
   const extensionFinishedRef = useRef(false)
   const finalizedRef = useRef(false)
+  const verificationUrlChangedRef = useRef(false)
 
   const finalizeVerification = useCallback(() => {
     setVerificationRunning(false)
@@ -152,8 +153,12 @@ export function PurchasingUrlCollector() {
       ...current,
       message: '1688 구매 URL 검증이 완료되었습니다.',
     }))
+    if (verificationUrlChangedRef.current) {
+      verificationUrlChangedRef.current = false
+      router.refresh()
+    }
     toast.success('1688 구매 URL 검증을 완료했습니다.')
-  }, [])
+  }, [router])
 
   const finalizeRun = useCallback(() => {
     if (
@@ -260,11 +265,28 @@ export function PurchasingUrlCollector() {
     }
   }, [finalizeRun])
 
-  const acknowledgeVerificationResult = useCallback((message: CollectorMessage) => {
+  const acknowledgeVerificationResult = useCallback(async (message: CollectorMessage) => {
     if (!message.url || !message.status) return
 
+    const items = message.items ?? []
+    if (message.status === 'unknown' && items.length > 0) {
+      const response = await fetch('/api/purchasing/purchase-url-verification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: message.url,
+          skus: items.map((item) => item.sku),
+          reason: message.message ?? null,
+        }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        throw new Error(body.error ?? '확인 필요 URL을 반영하지 못했습니다.')
+      }
+      if (body.updated > 0) verificationUrlChangedRef.current = true
+    }
+
     setVerificationProgress((current) => {
-      const items = message.items ?? []
       const itemLabel = items
         .slice(0, 4)
         .map((item) => `${item.productName || '품목'} (${item.sku})`)
@@ -387,7 +409,11 @@ export function PurchasingUrlCollector() {
           return
         }
         if (message.type === 'FUNTASTIC_1688_VERIFY_RESULT') {
-          acknowledgeVerificationResult(message)
+          void acknowledgeVerificationResult(message).catch((error) => {
+            const detail = error instanceof Error ? error.message : '확인 필요 URL을 반영하지 못했습니다.'
+            setVerificationProgress((current) => ({ ...current, message: detail }))
+            toast.error(detail)
+          })
           return
         }
         if (message.type === 'FUNTASTIC_1688_VERIFY_COMPLETE') {
@@ -525,6 +551,7 @@ export function PurchasingUrlCollector() {
     }
 
     setVerificationRunning(true)
+    verificationUrlChangedRef.current = false
     setVerificationProgress({ ...EMPTY_VERIFICATION_PROGRESS, message: '검증할 구매 URL을 확인하고 있습니다.' })
     try {
       const response = await fetch('/api/purchasing/purchase-url-verification?limit=2000', {

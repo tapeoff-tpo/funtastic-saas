@@ -339,6 +339,60 @@ export async function applyPurchaseUrlCollectionResult(input: {
   })
 }
 
+export async function markPurchaseUrlsForVerification(input: {
+  userId: string
+  url: string
+  skus: string[]
+  reason?: string | null
+}) {
+  const url = canonicalize1688OfferUrl(input.url)
+  const skus = Array.from(new Set(input.skus.map((sku) => sku.trim()).filter(Boolean)))
+  if (!url || skus.length === 0) return { updated: [] }
+
+  const reason = input.reason?.trim().slice(0, 1_000) || null
+  return db.transaction(async (tx) => {
+    const candidates = await tx
+      .select({
+        id: products.id,
+        internalSku: products.internalSku,
+        name: products.name,
+        metadata: products.metadata,
+      })
+      .from(products)
+      .where(and(
+        eq(products.userId, input.userId),
+        inArray(products.internalSku, skus),
+      ))
+      .for('update')
+
+    const updated: Array<{ id: string; sku: string; productName: string }> = []
+    for (const product of candidates) {
+      const currentUrl = purchaseUrlFromMetadata(product.metadata)
+      if (canonicalize1688OfferUrl(currentUrl) !== url) continue
+
+      await tx
+        .update(products)
+        .set({
+          metadata: metadataWithPurchaseUrlConfirmationRequired(product.metadata, reason),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(products.userId, input.userId), eq(products.id, product.id)))
+
+      await tx.insert(productChangeLogs).values({
+        productId: product.id,
+        userId: input.userId,
+        fieldName: `metadata.esa009m.${PURCHASE_URL_HEADER}`,
+        oldValue: currentUrl,
+        newValue: '확인 필요',
+      })
+
+      updated.push({ id: product.id, sku: product.internalSku, productName: product.name })
+    }
+
+    return { updated }
+  })
+}
+
 function uniqueCanonicalUrls(values: Array<string | PurchaseUrlCandidate>) {
   return Array.from(new Set(values.flatMap((value) => {
     const url = canonicalize1688OfferUrl(typeof value === 'string' ? value : value.url)
@@ -356,11 +410,30 @@ function purchaseUrlFromMetadata(metadata: unknown) {
 function metadataWithPurchaseUrl(metadata: unknown, url: string) {
   const root = recordValue(metadata)
   const esa009m = recordValue(root.esa009m)
+  const rest = { ...root }
+  delete rest.purchaseUrlVerification
+  return {
+    ...rest,
+    esa009m: {
+      ...esa009m,
+      [PURCHASE_URL_HEADER]: url,
+    },
+  }
+}
+
+function metadataWithPurchaseUrlConfirmationRequired(metadata: unknown, reason: string | null) {
+  const root = recordValue(metadata)
+  const esa009m = recordValue(root.esa009m)
   return {
     ...root,
     esa009m: {
       ...esa009m,
-      [PURCHASE_URL_HEADER]: url,
+      [PURCHASE_URL_HEADER]: null,
+    },
+    purchaseUrlVerification: {
+      status: 'confirm_required',
+      checkedAt: new Date().toISOString(),
+      reason,
     },
   }
 }

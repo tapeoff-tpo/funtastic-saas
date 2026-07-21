@@ -36,6 +36,7 @@ export type PurchasingItemOutgoingMetrics = {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
 }
+export type PurchaseUrlVerificationStatus = 'confirm_required' | null
 export type PurchasingItemOutgoingMetricRow = PurchasingItemOutgoingMetrics & {
   internalSku: string
 }
@@ -130,6 +131,7 @@ export async function getPurchasingItems(input: {
     items: rows.map((row) => ({
       id: row.id,
       data: normalizeEsaData(row.metadata?.esa009m),
+      purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
       outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
       updatedAt: row.updatedAt,
     })),
@@ -152,6 +154,7 @@ export async function getAllPurchasingItems(userId: string) {
   return rows.map((row) => ({
     id: row.id,
     data: normalizeEsaData(row.metadata?.esa009m),
+    purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
     outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
     updatedAt: row.updatedAt,
   }))
@@ -212,10 +215,7 @@ export async function importPurchasingItems(input: {
     const changedHeaders = headers.filter((header) => currentData[header] !== nextData[header])
     if (changedHeaders.length === 0) continue
 
-    const metadata = {
-      ...(current.metadata ?? {}),
-      esa009m: nextData,
-    }
+    const metadata = metadataWithPurchasingItemData(current.metadata, nextData)
     const set: Partial<typeof products.$inferInsert> = {
       metadata,
       updatedAt: new Date(),
@@ -315,10 +315,7 @@ export async function updatePurchasingItem(input: {
   const nextName = nextData[ESA009M_HEADERS[1]] || current.name
   const warehouseLocation = nextData[ESA009M_HEADERS[3]]
   const costPrice = numericText(nextData[ESA009M_HEADERS[14]] || nextData[ESA009M_HEADERS[13]])
-  const metadata = {
-    ...(current.metadata ?? {}),
-    esa009m: nextData,
-  }
+  const metadata = metadataWithPurchasingItemData(current.metadata, nextData)
 
   const [row] = await db
     .update(products)
@@ -515,6 +512,30 @@ export async function getSkuOutgoingMetrics(
     })
   }
   return metricsBySku
+}
+
+export function purchaseUrlVerificationStatus(metadata: unknown): PurchaseUrlVerificationStatus {
+  const root = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : {}
+  const verification = root.purchaseUrlVerification
+  if (!verification || typeof verification !== 'object' || Array.isArray(verification)) return null
+  return (verification as Record<string, unknown>).status === 'confirm_required'
+    ? 'confirm_required'
+    : null
+}
+
+function metadataWithPurchasingItemData(metadata: unknown, esa009m: Esa009mData) {
+  const root = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : {}
+  const hasReplacementUrl = Boolean(esa009m[PURCHASE_URL_HEADER]?.trim())
+  const withoutVerification = { ...root }
+  delete withoutVerification.purchaseUrlVerification
+  return {
+    ...(hasReplacementUrl ? withoutVerification : root),
+    esa009m,
+  }
 }
 
 export function resolveOutgoingMetrics(

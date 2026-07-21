@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 export type CostEditableRow = {
   id: string
   data: Record<string, string | null>
+  purchaseUrlVerificationStatus?: 'confirm_required' | null
   updatedAt: string
 }
 
@@ -153,6 +154,10 @@ export function CostsEditableTable({
   function renderCell(row: CostEditableRow, header: string) {
     const value = row.data[header]
     if (header !== PURCHASE_URL_HEADER) return value || '-'
+
+    if (row.purchaseUrlVerificationStatus === 'confirm_required') {
+      return <span className="inline-flex rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">확인 필요</span>
+    }
 
     const href = purchaseHref(value)
     if (!href) return '-'

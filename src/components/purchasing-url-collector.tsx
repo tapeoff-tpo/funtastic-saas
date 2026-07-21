@@ -15,6 +15,7 @@ import { toast } from 'sonner'
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.3.zip'
+const SHOW_COLLECTION_CONTROLS = false
 
 type QueueResponse = {
   orders: Array<{
@@ -146,13 +147,12 @@ export function PurchasingUrlCollector() {
   const extensionFinishedRef = useRef(false)
   const finalizedRef = useRef(false)
   const verificationUrlChangedRef = useRef(false)
+  const cancelledVerificationRunIdRef = useRef<string | null>(null)
 
   const finalizeVerification = useCallback(() => {
+    verificationRunIdRef.current = null
     setVerificationRunning(false)
-    setVerificationProgress((current) => ({
-      ...current,
-      message: '1688 구매 URL 검증이 완료되었습니다.',
-    }))
+    setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
     if (verificationUrlChangedRef.current) {
       verificationUrlChangedRef.current = false
       router.refresh()
@@ -335,7 +335,11 @@ export function PurchasingUrlCollector() {
       if (message.type === 'FUNTASTIC_1688_PONG') {
         setExtensionReady(true)
         if (message.mode === 'verification') {
-          if (message.running && message.runId) {
+          if (
+            message.running
+            && message.runId
+            && message.runId !== cancelledVerificationRunIdRef.current
+          ) {
             verificationRunIdRef.current = message.runId
             setVerificationRunning(true)
             setVerificationProgress((current) => ({
@@ -381,22 +385,6 @@ export function PurchasingUrlCollector() {
             issues: checkpoint.summary?.recentIssues?.slice(0, 6) ?? [],
           })
         }
-        if (message.verificationCheckpoint?.total) {
-          const checkpoint = message.verificationCheckpoint
-          const processed = Math.min(checkpoint.nextIndex, checkpoint.total)
-          setVerificationRunning(false)
-          setVerificationProgress({
-            total: checkpoint.total,
-            processed,
-            open: checkpoint.summary?.open ?? 0,
-            unavailable: checkpoint.summary?.unavailable ?? 0,
-            unknown: checkpoint.summary?.unknown ?? 0,
-            message: checkpoint.completedAt
-              ? '최근 1688 구매 URL 검증이 완료되었습니다.'
-              : `최근 검증이 ${processed.toLocaleString('ko-KR')}건 처리 후 중단되었습니다. 다시 시작하면 이어집니다.`,
-            issues: checkpoint.summary?.recentIssues?.slice(0, VERIFICATION_ISSUE_LIMIT) ?? [],
-          })
-        }
         return
       }
       if (message.runId && message.runId === verificationRunIdRef.current) {
@@ -422,16 +410,14 @@ export function PurchasingUrlCollector() {
         }
         if (message.type === 'FUNTASTIC_1688_VERIFY_CANCELLED') {
           setVerificationRunning(false)
-          setVerificationProgress((current) => ({ ...current, message: 'URL 검증을 중단했습니다.' }))
+          setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
           toast.info('1688 구매 URL 검증을 중단했습니다.')
           return
         }
         if (message.type === 'FUNTASTIC_1688_VERIFY_ERROR') {
+          verificationRunIdRef.current = null
           setVerificationRunning(false)
-          setVerificationProgress((current) => ({
-            ...current,
-            message: message.message ?? '1688 URL 검증 중 오류가 발생했습니다.',
-          }))
+          setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
           toast.error(message.message ?? '1688 URL 검증 중 오류가 발생했습니다.')
           return
         }
@@ -563,6 +549,7 @@ export function PurchasingUrlCollector() {
 
       const runId = crypto.randomUUID()
       verificationRunIdRef.current = runId
+      cancelledVerificationRunIdRef.current = null
       setVerificationProgress({
         ...EMPTY_VERIFICATION_PROGRESS,
         total: body.links.length,
@@ -587,12 +574,18 @@ export function PurchasingUrlCollector() {
   }
 
   const cancelVerification = () => {
-    if (!verificationRunIdRef.current) return
+    const runId = verificationRunIdRef.current
+    if (!runId) return
+    cancelledVerificationRunIdRef.current = runId
+    verificationRunIdRef.current = null
+    setVerificationRunning(false)
+    setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
     window.postMessage({
       source: PAGE_SOURCE,
       type: 'FUNTASTIC_1688_VERIFY_CANCEL',
-      runId: verificationRunIdRef.current,
+      runId,
     }, window.location.origin)
+    toast.info('1688 구매 URL 검증을 중단했습니다.')
   }
 
   const percentage = progress.total > 0
@@ -613,27 +606,31 @@ export function PurchasingUrlCollector() {
           <Download className="size-4" aria-hidden="true" />
           확장프로그램
         </a>
-        <button
-          type="button"
-          onClick={() => void startCollection()}
-          disabled={running || verificationRunning}
-          className="inline-flex h-9 items-center gap-2 rounded-md bg-foreground px-3 text-sm font-semibold text-background hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-55"
-        >
-          {running
-            ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
-            : <Link2 className="size-4" aria-hidden="true" />}
-          {running ? `${progress.processed}/${progress.total} 수집 중` : '1688 URL 자동수집'}
-        </button>
-        {running ? (
-          <button
-            type="button"
-            onClick={cancelCollection}
-            className="inline-flex size-9 items-center justify-center rounded-md border bg-background hover:bg-muted"
-            aria-label="구매 URL 수집 중단"
-            title="수집 중단"
-          >
-            <Square className="size-4" aria-hidden="true" />
-          </button>
+        {SHOW_COLLECTION_CONTROLS ? (
+          <>
+            <button
+              type="button"
+              onClick={() => void startCollection()}
+              disabled={running || verificationRunning}
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-foreground px-3 text-sm font-semibold text-background hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              {running
+                ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+                : <Link2 className="size-4" aria-hidden="true" />}
+              {running ? `${progress.processed}/${progress.total} 수집 중` : '1688 URL 자동수집'}
+            </button>
+            {running ? (
+              <button
+                type="button"
+                onClick={cancelCollection}
+                className="inline-flex size-9 items-center justify-center rounded-md border bg-background hover:bg-muted"
+                aria-label="구매 URL 수집 중단"
+                title="수집 중단"
+              >
+                <Square className="size-4" aria-hidden="true" />
+              </button>
+            ) : null}
+          </>
         ) : null}
         <button
           type="button"
@@ -673,7 +670,7 @@ export function PurchasingUrlCollector() {
         </span>
       </div>
 
-      {progress.total > 0 ? (
+      {SHOW_COLLECTION_CONTROLS && progress.total > 0 ? (
         <div className="w-full min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-medium">{progress.message}</span>
@@ -695,7 +692,7 @@ export function PurchasingUrlCollector() {
         </div>
       ) : null}
 
-      {verificationProgress.total > 0 ? (
+      {verificationRunning && verificationProgress.total > 0 ? (
         <div className="w-full min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-medium">{verificationProgress.message}</span>

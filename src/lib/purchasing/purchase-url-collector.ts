@@ -23,6 +23,14 @@ export type PurchaseUrlCandidate = {
   title?: string | null
 }
 
+export type PurchaseUrlVerificationLink = {
+  url: string
+  items: Array<{
+    sku: string
+    productName: string
+  }>
+}
+
 export type PurchaseUrlAssignmentProduct = {
   productId: string
   sku: string
@@ -157,6 +165,49 @@ export async function getPurchaseUrlCollectionQueue(input: {
     totalItems: orders.reduce((sum, order) => sum + order.items.length, 0),
     skippedInvalid,
     hasMore: allOrders.length > limit || rows.length === MAX_QUEUE_ROWS,
+  }
+}
+
+export async function getPurchaseUrlVerificationQueue(input: {
+  userId: string
+  limit?: number
+}) {
+  const limit = Math.min(Math.max(input.limit ?? 1_000, 1), MAX_QUEUE_ROWS)
+  const rows = await db
+    .select({
+      sku: products.internalSku,
+      productName: products.name,
+      metadata: products.metadata,
+    })
+    .from(products)
+    .where(and(
+      eq(products.userId, input.userId),
+      sql`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '') IS NOT NULL`,
+    ))
+
+  const linksByUrl = new Map<string, PurchaseUrlVerificationLink>()
+  let skippedInvalid = 0
+  for (const product of rows) {
+    const url = canonicalize1688OfferUrl(purchaseUrlFromMetadata(product.metadata))
+    if (!url) {
+      skippedInvalid += 1
+      continue
+    }
+
+    const link = linksByUrl.get(url) ?? { url, items: [] }
+    if (!link.items.some((item) => item.sku === product.sku)) {
+      link.items.push({ sku: product.sku, productName: product.productName })
+    }
+    linksByUrl.set(url, link)
+  }
+
+  const allLinks = Array.from(linksByUrl.values())
+  const links = allLinks.slice(0, limit)
+  return {
+    links,
+    totalItems: links.reduce((sum, link) => sum + link.items.length, 0),
+    skippedInvalid,
+    hasMore: allLinks.length > limit,
   }
 }
 

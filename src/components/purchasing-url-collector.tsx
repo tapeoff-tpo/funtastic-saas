@@ -14,12 +14,23 @@ import { toast } from 'sonner'
 
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
-const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector.zip'
+const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.0.zip'
 
 type QueueResponse = {
   orders: Array<{
     orderNumber: string
     items?: Array<{ sku: string }>
+  }>
+  totalItems: number
+  skippedInvalid: number
+  hasMore: boolean
+  error?: string
+}
+
+type VerificationQueueResponse = {
+  links: Array<{
+    url: string
+    items: Array<{ sku: string; productName: string }>
   }>
   totalItems: number
   skippedInvalid: number
@@ -38,16 +49,25 @@ type CollectorMessage = {
   runId?: string
   total?: number
   orderNumber?: string
-  items?: Array<{ sku: string }>
+  url?: string
+  status?: VerificationStatus
+  mode?: 'collection' | 'verification'
+  items?: Array<{ sku: string; productName?: string }>
   candidates?: Candidate[]
   message?: string
   running?: boolean
   index?: number
-  summary?: CollectorSummary
+  summary?: CollectorSummary & VerificationSummary
   checkpoint?: {
     total: number
     nextIndex: number
     summary?: CollectorSummary
+    completedAt?: string | null
+  } | null
+  verificationCheckpoint?: {
+    total: number
+    nextIndex: number
+    summary?: VerificationSummary
     completedAt?: string | null
   } | null
 }
@@ -74,6 +94,22 @@ type Progress = {
   issues: string[]
 }
 
+type VerificationStatus = 'open' | 'unavailable' | 'unknown'
+
+type VerificationProgress = {
+  total: number
+  processed: number
+  open: number
+  unavailable: number
+  unknown: number
+  message: string
+  issues: string[]
+}
+
+type VerificationSummary = Partial<Pick<VerificationProgress, 'processed' | 'open' | 'unavailable' | 'unknown'>> & {
+  recentIssues?: string[]
+}
+
 const EMPTY_PROGRESS: Progress = {
   total: 0,
   processed: 0,
@@ -85,15 +121,37 @@ const EMPTY_PROGRESS: Progress = {
   issues: [],
 }
 
+const EMPTY_VERIFICATION_PROGRESS: VerificationProgress = {
+  total: 0,
+  processed: 0,
+  open: 0,
+  unavailable: 0,
+  unknown: 0,
+  message: '',
+  issues: [],
+}
+
 export function PurchasingUrlCollector() {
   const router = useRouter()
   const [extensionReady, setExtensionReady] = useState(false)
   const [running, setRunning] = useState(false)
   const [progress, setProgress] = useState<Progress>(EMPTY_PROGRESS)
+  const [verificationRunning, setVerificationRunning] = useState(false)
+  const [verificationProgress, setVerificationProgress] = useState<VerificationProgress>(EMPTY_VERIFICATION_PROGRESS)
   const runIdRef = useRef<string | null>(null)
+  const verificationRunIdRef = useRef<string | null>(null)
   const pendingSavesRef = useRef(0)
   const extensionFinishedRef = useRef(false)
   const finalizedRef = useRef(false)
+
+  const finalizeVerification = useCallback(() => {
+    setVerificationRunning(false)
+    setVerificationProgress((current) => ({
+      ...current,
+      message: '1688 구매 URL 검증이 완료되었습니다.',
+    }))
+    toast.success('1688 구매 URL 검증을 완료했습니다.')
+  }, [])
 
   const finalizeRun = useCallback(() => {
     if (
@@ -200,6 +258,47 @@ export function PurchasingUrlCollector() {
     }
   }, [finalizeRun])
 
+  const acknowledgeVerificationResult = useCallback((message: CollectorMessage) => {
+    if (!message.url || !message.status) return
+
+    setVerificationProgress((current) => {
+      const items = message.items ?? []
+      const skuLabel = items.map((item) => item.sku).slice(0, 4).join(', ')
+      const issues = [...current.issues]
+      let open = current.open
+      let unavailable = current.unavailable
+      let unknown = current.unknown
+
+      if (message.status === 'open') open += 1
+      if (message.status === 'unavailable') {
+        unavailable += 1
+        issues.unshift(`${skuLabel || message.url}: 1688 상품 없음 또는 판매중지`)
+      }
+      if (message.status === 'unknown') {
+        unknown += 1
+        issues.unshift(`${skuLabel || message.url}: ${message.message || '정상 열림 여부 확인 필요'}`)
+      }
+
+      return {
+        ...current,
+        processed: Math.min(current.total, current.processed + 1),
+        open,
+        unavailable,
+        unknown,
+        message: skuLabel ? `${skuLabel} 검증 완료` : '구매 URL 검증 완료',
+        issues: issues.slice(0, 12),
+      }
+    })
+
+    window.postMessage({
+      source: PAGE_SOURCE,
+      type: 'FUNTASTIC_1688_VERIFY_RESULT_SAVED',
+      runId: message.runId,
+      url: message.url,
+      ok: true,
+    }, window.location.origin)
+  }, [])
+
   useEffect(() => {
     const onMessage = (event: MessageEvent<unknown>) => {
       if (event.source !== window || event.origin !== window.location.origin) return
@@ -208,6 +307,23 @@ export function PurchasingUrlCollector() {
 
       if (message.type === 'FUNTASTIC_1688_PONG') {
         setExtensionReady(true)
+        if (message.mode === 'verification') {
+          if (message.running && message.runId) {
+            verificationRunIdRef.current = message.runId
+            setVerificationRunning(true)
+            setVerificationProgress((current) => ({
+              ...current,
+              total: message.total ?? current.total,
+              processed: message.summary?.processed ?? message.index ?? current.processed,
+              open: message.summary?.open ?? current.open,
+              unavailable: message.summary?.unavailable ?? current.unavailable,
+              unknown: message.summary?.unknown ?? current.unknown,
+              message: '진행 중인 1688 URL 검증에 다시 연결했습니다.',
+              issues: message.summary?.recentIssues?.slice(0, 12) ?? current.issues,
+            }))
+          }
+          return
+        }
         if (message.running && message.runId) {
           runIdRef.current = message.runId
           setRunning(true)
@@ -238,7 +354,56 @@ export function PurchasingUrlCollector() {
             issues: checkpoint.summary?.recentIssues?.slice(0, 6) ?? [],
           })
         }
+        if (message.verificationCheckpoint?.total) {
+          const checkpoint = message.verificationCheckpoint
+          const processed = Math.min(checkpoint.nextIndex, checkpoint.total)
+          setVerificationRunning(false)
+          setVerificationProgress({
+            total: checkpoint.total,
+            processed,
+            open: checkpoint.summary?.open ?? 0,
+            unavailable: checkpoint.summary?.unavailable ?? 0,
+            unknown: checkpoint.summary?.unknown ?? 0,
+            message: checkpoint.completedAt
+              ? '최근 1688 구매 URL 검증이 완료되었습니다.'
+              : `최근 검증이 ${processed.toLocaleString('ko-KR')}건 처리 후 중단되었습니다. 다시 시작하면 이어집니다.`,
+            issues: checkpoint.summary?.recentIssues?.slice(0, 12) ?? [],
+          })
+        }
         return
+      }
+      if (message.runId && message.runId === verificationRunIdRef.current) {
+        if (message.type === 'FUNTASTIC_1688_VERIFY_ACK') {
+          setVerificationProgress((current) => ({
+            ...current,
+            total: message.total ?? current.total,
+            message: '1688 구매 URL 검증을 시작했습니다.',
+          }))
+          return
+        }
+        if (message.type === 'FUNTASTIC_1688_VERIFY_RESULT') {
+          acknowledgeVerificationResult(message)
+          return
+        }
+        if (message.type === 'FUNTASTIC_1688_VERIFY_COMPLETE') {
+          finalizeVerification()
+          return
+        }
+        if (message.type === 'FUNTASTIC_1688_VERIFY_CANCELLED') {
+          setVerificationRunning(false)
+          setVerificationProgress((current) => ({ ...current, message: 'URL 검증을 중단했습니다.' }))
+          toast.info('1688 구매 URL 검증을 중단했습니다.')
+          return
+        }
+        if (message.type === 'FUNTASTIC_1688_VERIFY_ERROR') {
+          setVerificationRunning(false)
+          setVerificationProgress((current) => ({
+            ...current,
+            message: message.message ?? '1688 URL 검증 중 오류가 발생했습니다.',
+          }))
+          toast.error(message.message ?? '1688 URL 검증 중 오류가 발생했습니다.')
+          return
+        }
       }
       if (message.runId && message.runId !== runIdRef.current) return
 
@@ -291,7 +456,7 @@ export function PurchasingUrlCollector() {
       window.removeEventListener('message', onMessage)
       window.clearInterval(timer)
     }
-  }, [finalizeRun, saveResult])
+  }, [acknowledgeVerificationResult, finalizeRun, finalizeVerification, saveResult])
 
   const startCollection = async () => {
     if (!extensionReady) {
@@ -348,8 +513,61 @@ export function PurchasingUrlCollector() {
     }, window.location.origin)
   }
 
+  const startVerification = async () => {
+    if (!extensionReady) {
+      toast.error('1688 수집 확장프로그램을 먼저 설치해주세요.')
+      return
+    }
+
+    setVerificationRunning(true)
+    setVerificationProgress({ ...EMPTY_VERIFICATION_PROGRESS, message: '검증할 구매 URL을 확인하고 있습니다.' })
+    try {
+      const response = await fetch('/api/purchasing/purchase-url-verification?limit=2000', {
+        cache: 'no-store',
+      })
+      const body = await response.json() as VerificationQueueResponse
+      if (!response.ok) throw new Error(body.error ?? '구매 URL 검증 목록을 불러오지 못했습니다.')
+      if (body.links.length === 0) throw new Error('검증할 1688 구매 URL이 없습니다.')
+
+      const runId = crypto.randomUUID()
+      verificationRunIdRef.current = runId
+      setVerificationProgress({
+        ...EMPTY_VERIFICATION_PROGRESS,
+        total: body.links.length,
+        message: body.hasMore
+          ? `먼저 ${body.links.length.toLocaleString('ko-KR')}개 링크를 검증합니다.`
+          : `${body.links.length.toLocaleString('ko-KR')}개 링크를 검증합니다.`,
+        issues: body.skippedInvalid > 0
+          ? [`1688 상품 주소 형식이 맞지 않는 URL ${body.skippedInvalid.toLocaleString('ko-KR')}개는 제외했습니다.`]
+          : [],
+      })
+      window.postMessage({
+        source: PAGE_SOURCE,
+        type: 'FUNTASTIC_1688_VERIFY_START',
+        runId,
+        links: body.links,
+      }, window.location.origin)
+    } catch (error) {
+      setVerificationRunning(false)
+      setVerificationProgress(EMPTY_VERIFICATION_PROGRESS)
+      toast.error(error instanceof Error ? error.message : '구매 URL 검증을 시작하지 못했습니다.')
+    }
+  }
+
+  const cancelVerification = () => {
+    if (!verificationRunIdRef.current) return
+    window.postMessage({
+      source: PAGE_SOURCE,
+      type: 'FUNTASTIC_1688_VERIFY_CANCEL',
+      runId: verificationRunIdRef.current,
+    }, window.location.origin)
+  }
+
   const percentage = progress.total > 0
     ? Math.round((progress.processed / progress.total) * 100)
+    : 0
+  const verificationPercentage = verificationProgress.total > 0
+    ? Math.round((verificationProgress.processed / verificationProgress.total) * 100)
     : 0
 
   return (
@@ -366,7 +584,7 @@ export function PurchasingUrlCollector() {
         <button
           type="button"
           onClick={() => void startCollection()}
-          disabled={running}
+          disabled={running || verificationRunning}
           className="inline-flex h-9 items-center gap-2 rounded-md bg-foreground px-3 text-sm font-semibold text-background hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-55"
         >
           {running
@@ -381,6 +599,30 @@ export function PurchasingUrlCollector() {
             className="inline-flex size-9 items-center justify-center rounded-md border bg-background hover:bg-muted"
             aria-label="구매 URL 수집 중단"
             title="수집 중단"
+          >
+            <Square className="size-4" aria-hidden="true" />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => void startVerification()}
+          disabled={running || verificationRunning}
+          className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-semibold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-55"
+        >
+          {verificationRunning
+            ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            : <CheckCircle2 className="size-4" aria-hidden="true" />}
+          {verificationRunning
+            ? `${verificationProgress.processed}/${verificationProgress.total} 검증 중`
+            : 'URL 검증'}
+        </button>
+        {verificationRunning ? (
+          <button
+            type="button"
+            onClick={cancelVerification}
+            className="inline-flex size-9 items-center justify-center rounded-md border bg-background hover:bg-muted"
+            aria-label="구매 URL 검증 중단"
+            title="검증 중단"
           >
             <Square className="size-4" aria-hidden="true" />
           </button>
@@ -416,6 +658,28 @@ export function PurchasingUrlCollector() {
           {progress.issues.length > 0 ? (
             <div className="mt-2 space-y-1 text-red-700">
               {progress.issues.map((issue) => <p key={issue}>{issue}</p>)}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {verificationProgress.total > 0 ? (
+        <div className="w-full min-w-0 rounded-md border bg-background px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium">{verificationProgress.message}</span>
+            <span className="tabular-nums text-muted-foreground">
+              정상 {verificationProgress.open} · 상품 없음 {verificationProgress.unavailable} · 확인 필요 {verificationProgress.unknown}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-foreground transition-[width]"
+              style={{ width: `${verificationPercentage}%` }}
+            />
+          </div>
+          {verificationProgress.issues.length > 0 ? (
+            <div className="mt-2 space-y-1 text-red-700">
+              {verificationProgress.issues.map((issue) => <p key={issue}>{issue}</p>)}
             </div>
           ) : null}
         </div>

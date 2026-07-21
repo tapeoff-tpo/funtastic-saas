@@ -4,6 +4,12 @@ const CHECKPOINT_KEY = 'funtastic1688QueueCheckpoint'
 const NEXT_ALARM = 'funtastic-1688-next'
 const TIMEOUT_ALARM = 'funtastic-1688-timeout'
 const SAVE_TIMEOUT_ALARM = 'funtastic-1688-save-timeout'
+const VERIFY_STATE_KEY = 'funtastic1688VerificationRun'
+const VERIFY_QUEUE_KEY = 'funtastic1688VerificationQueue'
+const VERIFY_CHECKPOINT_KEY = 'funtastic1688VerificationCheckpoint'
+const VERIFY_NEXT_ALARM = 'funtastic-1688-verify-next'
+const VERIFY_TIMEOUT_ALARM = 'funtastic-1688-verify-timeout'
+const VERIFY_SAVE_TIMEOUT_ALARM = 'funtastic-1688-verify-save-timeout'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const ORDER_LIST_URL = 'https://air.1688.com/app/ctf-page/trade-order-list/buyer-order-list.html'
 const LOCAL_QUEUE_FILE = 'order-queue.json'
@@ -12,9 +18,15 @@ const PAGE_TIMEOUT_MS = 40_000
 const SAVE_TIMEOUT_MS = 30_000
 const MAX_ORDERS = 10_000
 const CHECKPOINT_INTERVAL = 10
+const VERIFY_DELAY_MS = 2_500
+const VERIFY_PAGE_TIMEOUT_MS = 30_000
+const VERIFY_SAVE_TIMEOUT_MS = 30_000
+const MAX_VERIFY_LINKS = 2_000
 
 let resultInFlight = false
 let checkpointCache = null
+let verificationResultInFlight = false
+let verificationCheckpointCache = null
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   void handleMessage(message, sender)
@@ -27,6 +39,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === NEXT_ALARM) void navigateToCurrentOrder()
   if (alarm.name === TIMEOUT_ALARM) void handlePageTimeout()
   if (alarm.name === SAVE_TIMEOUT_ALARM) void handleSaveTimeout()
+  if (alarm.name === VERIFY_NEXT_ALARM) void navigateToCurrentVerification()
+  if (alarm.name === VERIFY_TIMEOUT_ALARM) void handleVerificationPageTimeout()
+  if (alarm.name === VERIFY_SAVE_TIMEOUT_ALARM) void handleVerificationSaveTimeout()
 })
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -39,9 +54,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void getRun().then((run) => {
+  void Promise.all([getRun(), getVerificationRun()]).then(([run, verificationRun]) => {
     if (run?.collectorTabId === tabId && run.status === 'running') {
       return failRun(run, '1688 주문조회 탭이 닫혀 수집을 중단했습니다.', false)
+    }
+    if (verificationRun?.collectorTabId === tabId && verificationRun.status === 'running') {
+      return failVerificationRun(verificationRun, '1688 URL 검증 탭이 닫혀 검증을 중단했습니다.', false)
     }
   })
 })
@@ -53,7 +71,20 @@ async function handleMessage(message, sender) {
     if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
       return { ok: false, error: 'SaaS 품목 화면에서 시작해주세요.' }
     }
+    if (await getVerificationRun()) {
+      return { ok: false, error: 'URL 검증이 진행 중입니다. 먼저 검증을 중단해주세요.' }
+    }
     return startRun(message, sender.tab.id)
+  }
+
+  if (message.type === 'FUNTASTIC_1688_VERIFY_START') {
+    if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
+      return { ok: false, error: 'SaaS 품목 화면에서 시작해주세요.' }
+    }
+    if (await getRun()) {
+      return { ok: false, error: '구매 URL 수집이 진행 중입니다. 먼저 수집을 중단해주세요.' }
+    }
+    return startVerificationRun(message, sender.tab.id)
   }
 
   if (message.type === 'FUNTASTIC_1688_CANCEL') {
@@ -63,14 +94,47 @@ async function handleMessage(message, sender) {
     return { ok: true }
   }
 
+  if (message.type === 'FUNTASTIC_1688_VERIFY_CANCEL') {
+    const run = await getVerificationRun()
+    if (!run || (message.runId && message.runId !== run.runId)) return { ok: true }
+    await cancelVerificationRun(run)
+    return { ok: true }
+  }
+
   if (message.type === 'FUNTASTIC_1688_GET_STATUS') {
+    const verificationRun = await getVerificationRun()
+    if (verificationRun) {
+      if (sender.tab?.id && isSaasUrl(sender.tab.url)) {
+        verificationRun.sourceTabId = sender.tab.id
+        await setVerificationRun(verificationRun)
+        if (verificationRun.pendingResult) {
+          setTimeout(() => void resendPendingVerificationResult(), 500)
+        }
+      }
+      return {
+        ok: true,
+        running: true,
+        mode: 'verification',
+        runId: verificationRun.runId,
+        index: verificationRun.index,
+        total: verificationRun.links.length,
+        summary: verificationRun.summary,
+      }
+    }
+
     const run = await getRun()
     if (!run) {
-      const checkpoint = await getCheckpoint()
+      const [checkpoint, verificationCheckpoint] = await Promise.all([
+        getCheckpoint(),
+        getVerificationCheckpoint(),
+      ])
       return {
         ok: true,
         running: false,
         checkpoint: checkpoint ? checkpointStatus(checkpoint) : null,
+        verificationCheckpoint: verificationCheckpoint
+          ? verificationCheckpointStatus(verificationCheckpoint)
+          : null,
       }
     }
 
@@ -84,6 +148,7 @@ async function handleMessage(message, sender) {
     return {
       ok: true,
       running: true,
+      mode: 'collection',
       runId: run.runId,
       index: run.index,
       total: run.orders.length,
@@ -120,6 +185,78 @@ async function handleMessage(message, sender) {
     ) return { ok: false }
 
     await completeCurrentOrder(run, message)
+    return { ok: true }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_VERIFY_READY') {
+    const run = await getVerificationRun()
+    const current = run?.links[run.index]
+    if (
+      !run
+      || sender.tab?.id !== run.collectorTabId
+      || !current
+      || canonicalOfferUrl(message.url) !== current.url
+    ) return { active: false }
+
+    return {
+      active: true,
+      runId: run.runId,
+      url: current.url,
+      items: current.items,
+    }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_VERIFY_RESULT') {
+    const run = await getVerificationRun()
+    const current = run?.links[run.index]
+    if (
+      !run
+      || sender.tab?.id !== run.collectorTabId
+      || verificationResultInFlight
+      || run.pendingResult
+      || !current
+      || canonicalOfferUrl(message.url) !== current.url
+    ) return { ok: false }
+
+    if (message.fatal) {
+      await failVerificationRun(
+        run,
+        typeof message.message === 'string'
+          ? message.message
+          : '1688 로그인 또는 보안 확인이 필요합니다.',
+        true,
+      )
+      return { ok: true }
+    }
+
+    const status = ['open', 'unavailable', 'unknown'].includes(message.status)
+      ? message.status
+      : 'unknown'
+    verificationResultInFlight = true
+    try {
+      await queueVerificationResult(run, {
+        url: current.url,
+        items: current.items,
+        status,
+        message: typeof message.message === 'string' ? message.message.slice(0, 500) : null,
+      })
+    } finally {
+      verificationResultInFlight = false
+    }
+    return { ok: true }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_VERIFY_RESULT_SAVED') {
+    const run = await getVerificationRun()
+    if (
+      !run
+      || sender.tab?.id !== run.sourceTabId
+      || !run.pendingResult
+      || message.runId !== run.runId
+      || canonicalOfferUrl(message.url) !== run.pendingResult.url
+    ) return { ok: false }
+
+    await completeCurrentVerification(run, message)
     return { ok: true }
   }
 
@@ -748,4 +885,358 @@ function safeDecodeURIComponent(value) {
   } catch {
     return value
   }
+}
+
+async function startVerificationRun(message, sourceTabId) {
+  const links = uniqueVerificationLinks(message.links)
+  if (!message.runId || links.length === 0) {
+    return { ok: false, error: '검증할 구매 URL이 없습니다.' }
+  }
+
+  const previous = await getVerificationRun()
+  if (previous) await clearVerificationRun(previous, true)
+
+  const queueId = verificationQueueFingerprint(links)
+  const previousCheckpoint = await getVerificationCheckpoint()
+  const canResume = previousCheckpoint?.queueId === queueId
+    && previousCheckpoint.total === links.length
+    && previousCheckpoint.nextIndex > 0
+    && previousCheckpoint.nextIndex < links.length
+  const checkpoint = canResume
+    ? normalizeVerificationCheckpoint(previousCheckpoint, queueId, links.length)
+    : createVerificationCheckpoint(queueId, links.length)
+  verificationCheckpointCache = checkpoint
+  await saveVerificationCheckpoint(true)
+
+  const index = canResume ? checkpoint.nextIndex : 0
+  const collectorTab = await chrome.tabs.create({ url: links[index].url, active: true })
+  if (!collectorTab.id) throw new Error('1688 URL 검증 탭을 열지 못했습니다.')
+
+  const run = {
+    runId: String(message.runId),
+    queueId,
+    sourceTabId,
+    collectorTabId: collectorTab.id,
+    links,
+    index,
+    status: 'running',
+    startedAt: checkpoint.startedAt,
+    summary: normalizeVerificationSummary(checkpoint.summary),
+    pendingResult: null,
+  }
+  await setVerificationQueue(links)
+  await setVerificationRun(run)
+  await scheduleVerificationTimeout()
+  await sendToSaas(run, {
+    type: 'FUNTASTIC_1688_VERIFY_ACK',
+    total: links.length,
+    resumedFrom: index,
+    summary: run.summary,
+  })
+  return { ok: true, total: links.length, resumedFrom: index }
+}
+
+async function queueVerificationResult(run, result) {
+  await chrome.alarms.clear(VERIFY_TIMEOUT_ALARM)
+  const current = run.links[run.index]
+  if (!current || current.url !== result.url) return
+
+  run.pendingResult = {
+    ...result,
+    saveAttempts: 1,
+  }
+  await setVerificationRun(run)
+  await scheduleVerificationSaveTimeout()
+  try {
+    await sendPendingVerificationResult(run)
+  } catch {
+    await failVerificationRun(run, 'SaaS 화면에 URL 검증 결과를 전달하지 못했습니다. 다시 시작하면 이어서 진행합니다.', false)
+  }
+}
+
+async function completeCurrentVerification(run, acknowledgement) {
+  await chrome.alarms.clear(VERIFY_SAVE_TIMEOUT_ALARM)
+  const pendingResult = run.pendingResult
+  if (!pendingResult) return
+
+  updateVerificationSummary(run, pendingResult, acknowledgement)
+  updateVerificationCheckpoint(run)
+  run.index += 1
+  run.pendingResult = null
+
+  if (run.index >= run.links.length) {
+    if (verificationCheckpointCache) verificationCheckpointCache.completedAt = new Date().toISOString()
+    await saveVerificationCheckpoint(true)
+    await sendToSaas(run, {
+      type: 'FUNTASTIC_1688_VERIFY_COMPLETE',
+      total: run.links.length,
+      summary: run.summary,
+    }).catch(() => {})
+    await clearVerificationRun(run, true)
+    await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+    return
+  }
+
+  await setVerificationRun(run)
+  await saveVerificationCheckpoint(true)
+  await chrome.alarms.create(VERIFY_NEXT_ALARM, { when: Date.now() + VERIFY_DELAY_MS })
+}
+
+async function navigateToCurrentVerification() {
+  const run = await getVerificationRun()
+  if (!run || run.status !== 'running' || run.pendingResult) return
+  const current = run.links[run.index]
+  if (!current) return
+
+  try {
+    await chrome.tabs.update(run.collectorTabId, { url: current.url })
+    await scheduleVerificationTimeout()
+  } catch {
+    await failVerificationRun(run, '1688 URL 검증 탭을 다시 열지 못했습니다.', false)
+  }
+}
+
+async function handleVerificationPageTimeout() {
+  const run = await getVerificationRun()
+  if (!run || run.status !== 'running' || verificationResultInFlight || run.pendingResult) return
+  const current = run.links[run.index]
+  if (!current) return
+
+  verificationResultInFlight = true
+  try {
+    await queueVerificationResult(run, {
+      url: current.url,
+      items: current.items,
+      status: 'unknown',
+      message: '1688 페이지 응답 시간 초과',
+    })
+  } finally {
+    verificationResultInFlight = false
+  }
+}
+
+async function handleVerificationSaveTimeout() {
+  const run = await getVerificationRun()
+  if (!run?.pendingResult) return
+  if (run.pendingResult.saveAttempts >= 3) {
+    await failVerificationRun(run, 'SaaS 저장 응답이 없어 URL 검증을 멈췄습니다. 다시 시작하면 이어서 진행합니다.', false)
+    return
+  }
+
+  run.pendingResult.saveAttempts += 1
+  await setVerificationRun(run)
+  await scheduleVerificationSaveTimeout()
+  try {
+    await sendPendingVerificationResult(run)
+  } catch {
+    await failVerificationRun(run, 'SaaS 화면과 연결이 끊겼습니다. 다시 시작하면 이어서 진행합니다.', false)
+  }
+}
+
+async function sendPendingVerificationResult(run) {
+  if (!run.pendingResult) return
+  await sendToSaas(run, {
+    type: 'FUNTASTIC_1688_VERIFY_RESULT',
+    url: run.pendingResult.url,
+    items: run.pendingResult.items,
+    status: run.pendingResult.status,
+    message: run.pendingResult.message,
+  })
+}
+
+async function resendPendingVerificationResult() {
+  const run = await getVerificationRun()
+  if (!run?.pendingResult) return
+  await sendPendingVerificationResult(run).catch(() => {})
+}
+
+async function cancelVerificationRun(run) {
+  await syncVerificationCheckpointFromRun(run)
+  await saveVerificationCheckpoint(true)
+  await sendToSaas(run, { type: 'FUNTASTIC_1688_VERIFY_CANCELLED' }).catch(() => {})
+  await clearVerificationRun(run, true)
+  await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+}
+
+async function failVerificationRun(run, message, keepCollectorTab) {
+  await syncVerificationCheckpointFromRun(run)
+  await saveVerificationCheckpoint(true)
+  await sendToSaas(run, { type: 'FUNTASTIC_1688_VERIFY_ERROR', message }).catch(() => {})
+  await clearVerificationRun(run, !keepCollectorTab)
+  if (!keepCollectorTab) {
+    await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+  }
+}
+
+async function clearVerificationRun(run, closeCollectorTab) {
+  await Promise.all([
+    chrome.alarms.clear(VERIFY_NEXT_ALARM),
+    chrome.alarms.clear(VERIFY_TIMEOUT_ALARM),
+    chrome.alarms.clear(VERIFY_SAVE_TIMEOUT_ALARM),
+    chrome.storage.session.remove([VERIFY_STATE_KEY, VERIFY_QUEUE_KEY]),
+  ])
+  if (closeCollectorTab && run.collectorTabId) {
+    await chrome.tabs.remove(run.collectorTabId).catch(() => {})
+  }
+}
+
+async function scheduleVerificationTimeout() {
+  await chrome.alarms.clear(VERIFY_TIMEOUT_ALARM)
+  await chrome.alarms.create(VERIFY_TIMEOUT_ALARM, { when: Date.now() + VERIFY_PAGE_TIMEOUT_MS })
+}
+
+async function scheduleVerificationSaveTimeout() {
+  await chrome.alarms.clear(VERIFY_SAVE_TIMEOUT_ALARM)
+  await chrome.alarms.create(VERIFY_SAVE_TIMEOUT_ALARM, { when: Date.now() + VERIFY_SAVE_TIMEOUT_MS })
+}
+
+async function getVerificationRun() {
+  const stored = await chrome.storage.session.get([VERIFY_STATE_KEY, VERIFY_QUEUE_KEY])
+  const state = stored[VERIFY_STATE_KEY]
+  const links = stored[VERIFY_QUEUE_KEY]
+  return state && Array.isArray(links) ? { ...state, links } : null
+}
+
+async function setVerificationRun(run) {
+  const { links: _links, ...state } = run
+  await chrome.storage.session.set({ [VERIFY_STATE_KEY]: state })
+}
+
+async function setVerificationQueue(links) {
+  await chrome.storage.session.set({ [VERIFY_QUEUE_KEY]: links })
+}
+
+async function getVerificationCheckpoint() {
+  if (verificationCheckpointCache) return verificationCheckpointCache
+  const stored = await chrome.storage.local.get(VERIFY_CHECKPOINT_KEY)
+  verificationCheckpointCache = stored[VERIFY_CHECKPOINT_KEY] || null
+  return verificationCheckpointCache
+}
+
+async function saveVerificationCheckpoint(force) {
+  if (!verificationCheckpointCache || !force) return
+  verificationCheckpointCache.updatedAt = new Date().toISOString()
+  await chrome.storage.local.set({ [VERIFY_CHECKPOINT_KEY]: verificationCheckpointCache })
+}
+
+async function syncVerificationCheckpointFromRun(run) {
+  const checkpoint = await getVerificationCheckpoint()
+  if (!checkpoint || checkpoint.queueId !== run.queueId) return
+  checkpoint.nextIndex = run.index
+  checkpoint.summary = normalizeVerificationSummary(run.summary)
+}
+
+function createVerificationCheckpoint(queueId, total) {
+  const now = new Date().toISOString()
+  return {
+    version: 1,
+    queueId,
+    total,
+    nextIndex: 0,
+    summary: emptyVerificationSummary(),
+    startedAt: now,
+    updatedAt: now,
+    completedAt: null,
+  }
+}
+
+function normalizeVerificationCheckpoint(value, queueId, total) {
+  return {
+    version: 1,
+    queueId,
+    total,
+    nextIndex: Math.min(Math.max(Number(value.nextIndex) || 0, 0), total),
+    summary: normalizeVerificationSummary(value.summary),
+    startedAt: typeof value.startedAt === 'string' ? value.startedAt : new Date().toISOString(),
+    updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date().toISOString(),
+    completedAt: typeof value.completedAt === 'string' ? value.completedAt : null,
+  }
+}
+
+function verificationCheckpointStatus(checkpoint) {
+  return {
+    queueId: checkpoint.queueId,
+    total: checkpoint.total,
+    nextIndex: checkpoint.nextIndex,
+    summary: normalizeVerificationSummary(checkpoint.summary),
+    completedAt: checkpoint.completedAt,
+  }
+}
+
+function updateVerificationSummary(run, result, acknowledgement) {
+  const summary = normalizeVerificationSummary(run.summary)
+  summary.processed = run.index + 1
+  if (result.status === 'open') summary.open += 1
+  if (result.status === 'unavailable') summary.unavailable += 1
+  if (result.status === 'unknown') {
+    summary.unknown += 1
+    const skus = result.items.map((item) => item.sku).slice(0, 4).join(', ')
+    summary.recentIssues = [
+      `${skus || '품목'}: ${result.message || '정상 열림 여부 확인 필요'}`,
+      ...summary.recentIssues,
+    ].slice(0, 12)
+  }
+  run.summary = summary
+}
+
+function updateVerificationCheckpoint(run) {
+  if (!verificationCheckpointCache || verificationCheckpointCache.queueId !== run.queueId) return
+  verificationCheckpointCache.nextIndex = run.index + 1
+  verificationCheckpointCache.summary = normalizeVerificationSummary(run.summary)
+}
+
+function emptyVerificationSummary() {
+  return {
+    processed: 0,
+    open: 0,
+    unavailable: 0,
+    unknown: 0,
+    recentIssues: [],
+  }
+}
+
+function normalizeVerificationSummary(value) {
+  const summary = value && typeof value === 'object' ? value : {}
+  return {
+    processed: Math.max(0, Number(summary.processed) || 0),
+    open: Math.max(0, Number(summary.open) || 0),
+    unavailable: Math.max(0, Number(summary.unavailable) || 0),
+    unknown: Math.max(0, Number(summary.unknown) || 0),
+    recentIssues: Array.isArray(summary.recentIssues)
+      ? summary.recentIssues.filter((item) => typeof item === 'string').slice(0, 12)
+      : [],
+  }
+}
+
+function uniqueVerificationLinks(value) {
+  if (!Array.isArray(value)) return []
+  const links = new Map()
+  for (const item of value) {
+    const url = canonicalOfferUrl(item?.url)
+    if (!url) continue
+    const existing = links.get(url) || { url, items: [] }
+    const itemSkus = new Set(existing.items.map((entry) => entry.sku))
+    for (const sourceItem of Array.isArray(item?.items) ? item.items : []) {
+      const sku = String(sourceItem?.sku || '').trim()
+      const productName = String(sourceItem?.productName || '').trim()
+      if (!sku || sku.length > 100 || itemSkus.has(sku) || existing.items.length >= 200) continue
+      itemSkus.add(sku)
+      existing.items.push({ sku, productName: productName.slice(0, 500) })
+    }
+    links.set(url, existing)
+    if (links.size >= MAX_VERIFY_LINKS) break
+  }
+  return Array.from(links.values())
+}
+
+function verificationQueueFingerprint(links) {
+  let hash = 2166136261
+  for (const link of links) {
+    const value = `${link.url}:${link.items.map((item) => item.sku).join(',')}|`
+    for (let index = 0; index < value.length; index += 1) {
+      hash ^= value.charCodeAt(index)
+      hash = Math.imul(hash, 16777619)
+    }
+  }
+  return `verify-${links.length}-${(hash >>> 0).toString(16)}`
 }

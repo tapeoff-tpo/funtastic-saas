@@ -13,9 +13,11 @@ describe('parseEcountPurchasingSnapshot', () => {
         ['20260715-002', '100002-0001', '중국창고', '완료 상품', '레드', 'N', 30, '2026-07-30', 'P-002', '발주요청', '완료', '담당자'],
       ]),
       makeUpload('발주 계획 현황.xlsx', [
-        '입고창고명', '품목코드', '실 구매 수량(C)', '구입관리코드', '현재상태',
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
       ], [
-        ['중국창고', '100001-0001', 10, 'P-001', '발주계획'],
+        ['20260715-001', '중국창고', '100001-0001', '테스트 상품', '블루', 10, '123456789', '개인', 'P-001', '발주계획'],
+        ['20260715-002', '중국창고', '100002-0001', '완료 상품', '레드', 30, 'WECHAT', '개인', 'P-002', '발주계획'],
       ]),
       makeUpload('구매 현황.xlsx', [
         '일자-No.', '품목코드', '창고명', '품목명', '규격', '발주계획일자', '구매수량(EA)', '중국창고 도착요청일',
@@ -54,9 +56,26 @@ describe('parseEcountPurchasingSnapshot', () => {
     })
     expect(snapshot.chinaInventory).toHaveLength(2)
     expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 30])
-    expect(snapshot.purchaseCompleted).toMatchObject([
-      { sku: '100001-0001', quantity: 10, purchaseManagementCode: 'P-001', chinaArrivalRequestDate: '2026-07-30' },
-    ])
+    expect(snapshot.purchaseCompleted).toHaveLength(2)
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
+      {
+        source: 'ecount_purchasing_snapshot_purchase_completed',
+        sku: '100001-0001',
+        quantity: 10,
+        purchaseManagementCode: 'P-001',
+        chinaArrivalRequestDate: '2026-07-30',
+      },
+    ))
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
+      {
+        source: 'ecount_purchasing_snapshot_plan_purchase_completed',
+        sku: '100002-0001',
+        quantity: 30,
+        purchaseManagementCode: 'P-002',
+        chinaArrivalRequestDate: '2026-07-30',
+        supplierOrderNumber: 'WECHAT',
+      },
+    ))
     expect(snapshot.outboundCompleted).toMatchObject([
       { sku: '100001-0001', quantity: 10, effectiveDate: '2026-07-13' },
     ])

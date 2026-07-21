@@ -9,6 +9,7 @@ import {
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
 export const ECOUNT_PURCHASE_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_purchase_completed'
+export const ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_plan_purchase_completed'
 export const ECOUNT_CHINA_ARRIVED_SOURCE = 'ecount_purchasing_snapshot_china_arrived'
 export const ECOUNT_OUTBOUND_SOURCE = 'ecount_purchasing_snapshot_outbound'
 export const ECOUNT_OUTBOUND_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_outbound_completed'
@@ -17,6 +18,7 @@ const REPLACEABLE_ECOUNT_SOURCES = [
   ECOUNT_PURCHASING_LEGACY_SOURCE,
   ECOUNT_PENDING_REQUEST_SOURCE,
   ECOUNT_PURCHASE_COMPLETED_SOURCE,
+  ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
   ECOUNT_CHINA_ARRIVED_SOURCE,
   ECOUNT_OUTBOUND_SOURCE,
   ECOUNT_OUTBOUND_COMPLETED_SOURCE,
@@ -31,6 +33,9 @@ const REPORT_KINDS = [
 ] as const
 
 type EcountReportKind = (typeof REPORT_KINDS)[number]
+type EcountPurchaseCompletedSource =
+  | typeof ECOUNT_PURCHASE_COMPLETED_SOURCE
+  | typeof ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE
 
 type ParsedReport = {
   kind: EcountReportKind
@@ -60,9 +65,12 @@ export type EcountPendingRequest = {
 }
 
 export type EcountPurchaseCompletedItem = {
+  source: EcountPurchaseCompletedSource
   sourceFileName: string
   sourceRowNumber: number
   sourceDateNo: string
+  sourceRequestFileName: string | null
+  sourceRequestRowNumber: number | null
   purchaseDate: string | null
   sku: string
   productName: string
@@ -105,6 +113,7 @@ export type EcountOutboundPendingItem = {
 export type EcountPurchasingSnapshot = {
   asOfDate: string
   domesticInventoryReflectedThrough: string
+  purchasePlanConfirmedSince: string
   files: Record<EcountReportKind, string>
   activeRequests: EcountPendingRequest[]
   purchaseCompleted: EcountPurchaseCompletedItem[]
@@ -152,6 +161,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   files: EcountPurchasingUpload[]
   domesticInventoryReflectedThrough: string
   asOfDate?: string
+  purchasePlanConfirmedSince?: string
 }): Promise<EcountPurchasingSnapshot> {
   const reflectedThrough = normalizeDateOnly(input.domesticInventoryReflectedThrough)
   if (!reflectedThrough) {
@@ -159,6 +169,12 @@ export async function parseEcountPurchasingSnapshot(input: {
   }
   const asOfDate = normalizeDateOnly(input.asOfDate ?? formatDate(new Date()))
   if (!asOfDate) throw new Error('Ecount 기준일을 YYYY-MM-DD 형식으로 입력해주세요.')
+  const purchasePlanConfirmedSince = normalizeDateOnly(
+    input.purchasePlanConfirmedSince ?? `${asOfDate.slice(0, 7)}-01`,
+  )
+  if (!purchasePlanConfirmedSince) {
+    throw new Error('완료 발주계획 반영 시작일을 YYYY-MM-DD 형식으로 입력해주세요.')
+  }
 
   const reports = await Promise.all(input.files.map(loadEcountReport))
   const reportByKind = new Map<EcountReportKind, ParsedReport>()
@@ -180,13 +196,20 @@ export async function parseEcountPurchasingSnapshot(input: {
   const chinaInventory = reportByKind.get('chinaInventory')!
   const chinaOutbound = reportByKind.get('chinaOutbound')!
 
-  const planKeys = new Set(readRows(purchasePlan)
+  const purchasePlanRows = readRows(purchasePlan)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchasePlan, '품목코드')))
-    .map((row) => purchaseKey(
+  const planRowsByPurchaseKey = new Map<string, Array<{ number: number; row: ExcelJS.Row }>>()
+  for (const row of purchasePlanRows) {
+    const key = purchaseKey(
       valueAt(row, purchasePlan, '구입관리코드'),
       valueAt(row, purchasePlan, '품목코드'),
-    ))
-    .filter((key) => key !== null))
+    )
+    if (!key) continue
+    const matches = planRowsByPurchaseKey.get(key) ?? []
+    matches.push(row)
+    planRowsByPurchaseKey.set(key, matches)
+  }
+  const planKeys = new Set(planRowsByPurchaseKey.keys())
   const purchaseKeys = new Set(readRows(purchaseHistory)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchaseHistory, '품목코드')))
     .map((row) => purchaseKey(
@@ -227,7 +250,7 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountPendingRequest => row !== null)
 
-  const purchaseCompleted = readRows(purchaseHistory)
+  const purchaseCompletedFromHistory = readRows(purchaseHistory)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchaseHistory, '품목코드')))
     .filter((row) => valueAt(row, purchaseHistory, '진행상태') === '확인')
     .map((row) => {
@@ -240,9 +263,12 @@ export async function parseEcountPurchasingSnapshot(input: {
       }
 
       return {
+        source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
         sourceFileName: purchaseHistory.fileName,
         sourceRowNumber: row.number,
         sourceDateNo: valueAt(row, purchaseHistory, '일자-No.'),
+        sourceRequestFileName: null,
+        sourceRequestRowNumber: null,
         purchaseDate: parseDate(valueAt(row, purchaseHistory, '일자-No.')),
         sku,
         productName: valueAt(row, purchaseHistory, '품목명'),
@@ -318,6 +344,63 @@ export async function parseEcountPurchasingSnapshot(input: {
   const outboundCompleted = chinaOutboundItems.filter((row) => row.effectiveDate <= reflectedThrough)
   const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > reflectedThrough)
 
+  const chinaInventorySkus = new Set(chinaInventoryItems.map((item) => item.sku))
+  const outboundSupplierKeys = new Set(chinaOutboundItems
+    .map((item) => supplierKey(item.supplierOrderNumber, item.sku))
+    .filter((key): key is string => key !== null))
+  const purchaseCompletedFromPlan: EcountPurchaseCompletedItem[] = []
+  const handledPlanPurchaseKeys = new Set<string>()
+  for (const request of readRows(purchaseRequest)) {
+    const sku = valueAt(request, purchaseRequest, '품목코드')
+    if (!isPurchaseItemSku(sku) || valueAt(request, purchaseRequest, '진행상태') !== '완료') continue
+
+    const purchaseManagementCode = valueAt(request, purchaseRequest, '구입관리코드')
+    const matchKey = purchaseKey(purchaseManagementCode, sku)
+    const requestDate = parseDate(valueAt(request, purchaseRequest, '일자-No.'))
+    const chinaArrivalRequestDate = parseDate(valueAt(request, purchaseRequest, '중국창고 도착요청일'))
+    if (
+      !matchKey
+      || handledPlanPurchaseKeys.has(matchKey)
+      || !requestDate
+      || requestDate < purchasePlanConfirmedSince
+      || !chinaArrivalRequestDate
+      || purchaseKeys.has(matchKey)
+      || chinaInventorySkus.has(sku)
+    ) continue
+
+    const matchingPlanRows = planRowsByPurchaseKey.get(matchKey) ?? []
+    if (matchingPlanRows.length !== 1) continue
+    const plan = matchingPlanRows[0]
+    const quantity = positiveInteger(valueAt(plan, purchasePlan, '실 구매 수량(C)'))
+    const supplierOrderNumber = emptyToNull(valueAt(plan, purchasePlan, '주문서번호 (C)'))
+    const supplierMatchKey = supplierKey(supplierOrderNumber, sku)
+    if (quantity === 0 || !supplierOrderNumber || (supplierMatchKey && outboundSupplierKeys.has(supplierMatchKey))) continue
+
+    handledPlanPurchaseKeys.add(matchKey)
+    purchaseCompletedFromPlan.push({
+      source: ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
+      sourceFileName: purchasePlan.fileName,
+      sourceRowNumber: plan.number,
+      sourceDateNo: valueAt(plan, purchasePlan, '일자-No.'),
+      sourceRequestFileName: purchaseRequest.fileName,
+      sourceRequestRowNumber: request.number,
+      purchaseDate: requestDate,
+      sku,
+      productName: valueAt(plan, purchasePlan, '품목명') || valueAt(request, purchaseRequest, '품목명'),
+      optionName: emptyToNull(valueAt(plan, purchasePlan, '규격'))
+        ?? emptyToNull(valueAt(request, purchaseRequest, '규격')),
+      quantity,
+      chinaArrivalRequestDate,
+      purchaseManagementCode,
+      purchaseOrderNumber: null,
+      supplierOrderNumber,
+      purchaseMethod: emptyToNull(valueAt(plan, purchasePlan, '구매진행여부 (C)')),
+      unitPriceCny: null,
+      shippingFeeCny: null,
+    })
+  }
+  const purchaseCompleted = [...purchaseCompletedFromHistory, ...purchaseCompletedFromPlan]
+
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
   )).length
@@ -343,6 +426,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   return {
     asOfDate,
     domesticInventoryReflectedThrough: reflectedThrough,
+    purchasePlanConfirmedSince,
     files: {
       purchaseRequest: purchaseRequest.fileName,
       purchasePlan: purchasePlan.fileName,
@@ -371,6 +455,7 @@ export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnap
   return {
     asOfDate: snapshot.asOfDate,
     domesticInventoryReflectedThrough: snapshot.domesticInventoryReflectedThrough,
+    purchasePlanConfirmedSince: snapshot.purchasePlanConfirmedSince,
     files: snapshot.files,
     activeRequests: {
       rows: snapshot.activeRequests.length,
@@ -384,6 +469,9 @@ export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnap
     purchaseCompleted: {
       rows: snapshot.purchaseCompleted.length,
       quantity: sumQuantities(snapshot.purchaseCompleted),
+      confirmedPlanRows: snapshot.purchaseCompleted.filter(
+        (item) => item.source === ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
+      ).length,
       samples: snapshot.purchaseCompleted.slice(0, 5).map((item) => ({
         sku: item.sku,
         productName: item.productName,
@@ -548,10 +636,15 @@ export async function syncEcountPurchasingSnapshot(input: {
       unitPriceCny: item.unitPriceCny,
       shippingFeeCny: item.shippingFeeCny,
       rawData: {
-        source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
+        source: item.source,
         sourceFileName: item.sourceFileName,
         sourceRowNumber: item.sourceRowNumber,
         sourceDateNo: item.sourceDateNo,
+        sourceRequestFileName: item.sourceRequestFileName,
+        sourceRequestRowNumber: item.sourceRequestRowNumber,
+        purchasePlanConfirmedSince: item.source === ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE
+          ? input.snapshot.purchasePlanConfirmedSince
+          : null,
         purchaseOrderNumber: item.purchaseOrderNumber,
         syncedByUserId: input.requestedByUserId,
         syncedAt: now.toISOString(),

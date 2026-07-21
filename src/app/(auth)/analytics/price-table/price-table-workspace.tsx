@@ -152,7 +152,9 @@ function ExtensionStatus() {
 
 function MarketplaceView({ rows, checks }: { rows: PriceTableGridRow[]; checks: MarketplaceCheckView[] }) {
   const columns = useMemo(() => getRegistrationMarketplaceColumns(), [])
-  const [marketplaceId, setMarketplaceId] = useState(columns[0]?.id ?? '')
+  const [marketplaceId, setMarketplaceId] = useState(
+    columns.some((column) => column.id === 'smartstore-1530') ? 'smartstore-1530' : (columns[0]?.id ?? ''),
+  )
   const [filter, setFilter] = useState<'all' | 'registered' | 'missing' | 'unchecked'>('all')
   const column = columns.find((item) => item.id === marketplaceId) ?? columns[0]
   const evaluatedRows = useMemo(() => rows.map((row) => {

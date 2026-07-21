@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { parseEcountPurchasingSnapshot, type EcountPurchasingUpload } from './ecount-purchasing-sync'
 
 describe('parseEcountPurchasingSnapshot', () => {
-  it('reads Ecount headers from row 2 and only keeps China outbound after the domestic inventory cutoff', async () => {
+  it('maps Ecount raw rows to the current purchasing stages from row 2 headers', async () => {
     const files = await Promise.all([
       makeUpload('발주 요청 현황.xlsx', [
         '일자-No.', '품목코드', '창고명', '품목명', '규격', '사전포장여부코드',
@@ -18,10 +18,11 @@ describe('parseEcountPurchasingSnapshot', () => {
         ['중국창고', '100001-0001', 10, 'P-001', '발주계획'],
       ]),
       makeUpload('구매 현황.xlsx', [
-        '발주서-no', '발주계획일자', '품목코드', '구입관리코드', '진행상태', '주문서번호 (C)',
+        '일자-No.', '품목코드', '창고명', '품목명', '규격', '발주계획일자', '구매수량(EA)', '중국창고 도착요청일',
+        '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
       ], [
-        ['PO-001', '2026-07-15', '100001-0001', 'P-001', '구매완료', '123456789'],
-        ['PO-002', '2026-07-15', '109037-9998-package', 'P-003', '구매완료', '123456789'],
+        ['20260715-001', '100001-0001', '중국창고', '테스트 상품', '블루', '2026-07-15', 10, '2026-07-30', 'PO-001', 'P-001', '확인', '123456789'],
+        ['20260715-002', '109037-9998-package', '중국창고', '패키지 상품', '패키지', '2026-07-15', 20, '2026-07-12', 'PO-002', 'P-003', '확인', '123456789'],
       ]),
       makeUpload('중국재고.xlsx', [
         '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
@@ -42,6 +43,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     const snapshot = await parseEcountPurchasingSnapshot({
       files,
       domesticInventoryReflectedThrough: '2026-07-13',
+      asOfDate: '2026-07-21',
     })
 
     expect(snapshot.activeRequests).toHaveLength(1)
@@ -52,6 +54,12 @@ describe('parseEcountPurchasingSnapshot', () => {
     })
     expect(snapshot.chinaInventory).toHaveLength(2)
     expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 30])
+    expect(snapshot.purchaseCompleted).toMatchObject([
+      { sku: '100001-0001', quantity: 10, purchaseManagementCode: 'P-001', chinaArrivalRequestDate: '2026-07-30' },
+    ])
+    expect(snapshot.outboundCompleted).toMatchObject([
+      { sku: '100001-0001', quantity: 10, effectiveDate: '2026-07-13' },
+    ])
     expect(snapshot.outboundPending).toMatchObject([
       { sku: '109037-9998-package', quantity: 20, effectiveDate: '2026-07-15' },
       { sku: '100002-0001', quantity: 5, effectiveDate: '2026-07-20' },

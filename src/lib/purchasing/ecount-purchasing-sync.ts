@@ -8,12 +8,18 @@ import {
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
+export const ECOUNT_PURCHASE_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_purchase_completed'
+export const ECOUNT_CHINA_ARRIVED_SOURCE = 'ecount_purchasing_snapshot_china_arrived'
 export const ECOUNT_OUTBOUND_SOURCE = 'ecount_purchasing_snapshot_outbound'
+export const ECOUNT_OUTBOUND_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_outbound_completed'
 
 const REPLACEABLE_ECOUNT_SOURCES = [
   ECOUNT_PURCHASING_LEGACY_SOURCE,
   ECOUNT_PENDING_REQUEST_SOURCE,
+  ECOUNT_PURCHASE_COMPLETED_SOURCE,
+  ECOUNT_CHINA_ARRIVED_SOURCE,
   ECOUNT_OUTBOUND_SOURCE,
+  ECOUNT_OUTBOUND_COMPLETED_SOURCE,
 ] as const
 
 const REPORT_KINDS = [
@@ -53,6 +59,24 @@ export type EcountPendingRequest = {
   buyerName: string | null
 }
 
+export type EcountPurchaseCompletedItem = {
+  sourceFileName: string
+  sourceRowNumber: number
+  sourceDateNo: string
+  purchaseDate: string | null
+  sku: string
+  productName: string
+  optionName: string | null
+  quantity: number
+  chinaArrivalRequestDate: string
+  purchaseManagementCode: string
+  purchaseOrderNumber: string | null
+  supplierOrderNumber: string | null
+  purchaseMethod: string | null
+  unitPriceCny: number | null
+  shippingFeeCny: number | null
+}
+
 export type EcountChinaInventoryItem = {
   sourceFileName: string
   sourceRowNumber: number
@@ -79,10 +103,13 @@ export type EcountOutboundPendingItem = {
 }
 
 export type EcountPurchasingSnapshot = {
+  asOfDate: string
   domesticInventoryReflectedThrough: string
   files: Record<EcountReportKind, string>
   activeRequests: EcountPendingRequest[]
+  purchaseCompleted: EcountPurchaseCompletedItem[]
   chinaInventory: EcountChinaInventoryItem[]
+  outboundCompleted: EcountOutboundPendingItem[]
   outboundPending: EcountOutboundPendingItem[]
   validation: {
     activeRequestRows: number
@@ -124,11 +151,14 @@ const REPORT_DEFINITIONS: Array<{
 export async function parseEcountPurchasingSnapshot(input: {
   files: EcountPurchasingUpload[]
   domesticInventoryReflectedThrough: string
+  asOfDate?: string
 }): Promise<EcountPurchasingSnapshot> {
   const reflectedThrough = normalizeDateOnly(input.domesticInventoryReflectedThrough)
   if (!reflectedThrough) {
     throw new Error('국내재고 반영 기준일을 YYYY-MM-DD 형식으로 입력해주세요.')
   }
+  const asOfDate = normalizeDateOnly(input.asOfDate ?? formatDate(new Date()))
+  if (!asOfDate) throw new Error('Ecount 기준일을 YYYY-MM-DD 형식으로 입력해주세요.')
 
   const reports = await Promise.all(input.files.map(loadEcountReport))
   const reportByKind = new Map<EcountReportKind, ParsedReport>()
@@ -197,6 +227,38 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountPendingRequest => row !== null)
 
+  const purchaseCompleted = readRows(purchaseHistory)
+    .filter((row) => isPurchaseItemSku(valueAt(row, purchaseHistory, '품목코드')))
+    .filter((row) => valueAt(row, purchaseHistory, '진행상태') === '확인')
+    .map((row) => {
+      const sku = valueAt(row, purchaseHistory, '품목코드')
+      const quantity = positiveInteger(valueAt(row, purchaseHistory, '구매수량(EA)'))
+      const purchaseManagementCode = valueAt(row, purchaseHistory, '구입관리코드')
+      const chinaArrivalRequestDate = parseDate(valueAt(row, purchaseHistory, '중국창고 도착요청일'))
+      if (!purchaseManagementCode || !chinaArrivalRequestDate || chinaArrivalRequestDate <= asOfDate || quantity === 0) {
+        return null
+      }
+
+      return {
+        sourceFileName: purchaseHistory.fileName,
+        sourceRowNumber: row.number,
+        sourceDateNo: valueAt(row, purchaseHistory, '일자-No.'),
+        purchaseDate: parseDate(valueAt(row, purchaseHistory, '일자-No.')),
+        sku,
+        productName: valueAt(row, purchaseHistory, '품목명'),
+        optionName: emptyToNull(valueAt(row, purchaseHistory, '규격')),
+        quantity,
+        chinaArrivalRequestDate,
+        purchaseManagementCode,
+        purchaseOrderNumber: emptyToNull(valueAt(row, purchaseHistory, '발주서-no')),
+        supplierOrderNumber: emptyToNull(valueAt(row, purchaseHistory, '주문서번호 (C)')),
+        purchaseMethod: emptyToNull(valueAt(row, purchaseHistory, '창고명')),
+        unitPriceCny: null,
+        shippingFeeCny: null,
+      } satisfies EcountPurchaseCompletedItem
+    })
+    .filter((row): row is EcountPurchaseCompletedItem => row !== null)
+
   const chinaInventoryItems = readRows(chinaInventory)
     .filter((row) => isChinaInventorySku(valueAt(row, chinaInventory, '품목코드')))
     .map((row) => {
@@ -217,12 +279,12 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountChinaInventoryItem => row !== null)
 
-  const outboundPending = readRows(chinaOutbound)
+  const chinaOutboundItems = readRows(chinaOutbound)
     .filter((row) => isPurchaseItemSku(valueAt(row, chinaOutbound, '품목코드')))
     .map((row) => {
       const effectiveDate = parseDate(valueAt(row, chinaOutbound, '유효기간'))
       const quantity = positiveInteger(valueAt(row, chinaOutbound, '출고수량(EA)'))
-      if (!effectiveDate || effectiveDate <= reflectedThrough || quantity === 0) return null
+      if (!effectiveDate || quantity === 0) return null
 
       const sku = valueAt(row, chinaOutbound, '품목코드')
       const sourceDateNo = valueAt(row, chinaOutbound, '일자-No.')
@@ -253,6 +315,9 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountOutboundPendingItem => row !== null)
 
+  const outboundCompleted = chinaOutboundItems.filter((row) => row.effectiveDate <= reflectedThrough)
+  const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > reflectedThrough)
+
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
   )).length
@@ -276,6 +341,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   }
 
   return {
+    asOfDate,
     domesticInventoryReflectedThrough: reflectedThrough,
     files: {
       purchaseRequest: purchaseRequest.fileName,
@@ -285,7 +351,9 @@ export async function parseEcountPurchasingSnapshot(input: {
       chinaOutbound: chinaOutbound.fileName,
     },
     activeRequests,
+    purchaseCompleted,
     chinaInventory: chinaInventoryItems,
+    outboundCompleted,
     outboundPending,
     validation: {
       activeRequestRows: activeRequests.length,
@@ -301,6 +369,7 @@ export async function parseEcountPurchasingSnapshot(input: {
 
 export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnapshot) {
   return {
+    asOfDate: snapshot.asOfDate,
     domesticInventoryReflectedThrough: snapshot.domesticInventoryReflectedThrough,
     files: snapshot.files,
     activeRequests: {
@@ -312,6 +381,16 @@ export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnap
         quantity: item.requestedQuantity,
       })),
     },
+    purchaseCompleted: {
+      rows: snapshot.purchaseCompleted.length,
+      quantity: sumQuantities(snapshot.purchaseCompleted),
+      samples: snapshot.purchaseCompleted.slice(0, 5).map((item) => ({
+        sku: item.sku,
+        productName: item.productName,
+        quantity: item.quantity,
+        chinaArrivalRequestDate: item.chinaArrivalRequestDate,
+      })),
+    },
     chinaInventory: {
       rows: snapshot.chinaInventory.length,
       quantity: sumQuantities(snapshot.chinaInventory),
@@ -319,6 +398,16 @@ export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnap
         sku: item.sku,
         productName: item.productName,
         quantity: item.quantity,
+      })),
+    },
+    outboundCompleted: {
+      rows: snapshot.outboundCompleted.length,
+      quantity: sumQuantities(snapshot.outboundCompleted),
+      samples: snapshot.outboundCompleted.slice(0, 5).map((item) => ({
+        sku: item.sku,
+        productName: item.productName,
+        quantity: item.quantity,
+        effectiveDate: item.effectiveDate,
       })),
     },
     outboundPending: {
@@ -367,7 +456,11 @@ export async function syncEcountPurchasingSnapshot(input: {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
 
-    const activeCodes = [...new Set(input.snapshot.activeRequests.map((item) => item.purchaseManagementCode))]
+    const snapshotManagedItems = [
+      ...input.snapshot.activeRequests,
+      ...input.snapshot.purchaseCompleted,
+    ]
+    const activeCodes = [...new Set(snapshotManagedItems.map((item) => item.purchaseManagementCode))]
     if (activeCodes.length > 0) {
       const existingRows = await tx
         .select({
@@ -383,7 +476,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       const conflicts = existingRows.filter((row) => {
         const source = readRawDataSource(row.rawData)
         return !REPLACEABLE_ECOUNT_SOURCES.includes(source as (typeof REPLACEABLE_ECOUNT_SOURCES)[number])
-          && input.snapshot.activeRequests.some((item) => (
+          && snapshotManagedItems.some((item) => (
             item.purchaseManagementCode === row.purchaseManagementCode && item.sku === row.sku
           ))
       })
@@ -412,6 +505,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       .where(eq(purchaseRequestItems.userId, input.userId))
     let nextRowNumber = maxRowNumber
     const now = new Date()
+    const snapshotDate = new Date(`${input.snapshot.asOfDate}T00:00:00.000Z`)
 
     const requestRows = input.snapshot.activeRequests.map((item) => ({
       userId: input.userId,
@@ -435,6 +529,57 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
+    const purchaseCompletedRows = input.snapshot.purchaseCompleted.map((item) => ({
+      userId: input.userId,
+      rowNumber: ++nextRowNumber,
+      status: 'purchase_completed' as const,
+      requestDate: item.purchaseDate,
+      sku: item.sku,
+      productName: item.productName,
+      optionName: item.optionName,
+      requestedQuantity: item.quantity,
+      actualPurchaseQuantity: item.quantity,
+      chinaArrivalRequestDate: item.chinaArrivalRequestDate,
+      expectedArrivalDate: item.chinaArrivalRequestDate,
+      purchaseManagementCode: item.purchaseManagementCode,
+      supplierOrderNumber: item.supplierOrderNumber,
+      purchaseMethod: item.purchaseMethod,
+      purchaseConfirmed: true,
+      unitPriceCny: item.unitPriceCny,
+      shippingFeeCny: item.shippingFeeCny,
+      rawData: {
+        source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
+        sourceFileName: item.sourceFileName,
+        sourceRowNumber: item.sourceRowNumber,
+        sourceDateNo: item.sourceDateNo,
+        purchaseOrderNumber: item.purchaseOrderNumber,
+        syncedByUserId: input.requestedByUserId,
+        syncedAt: now.toISOString(),
+      },
+    }))
+    const chinaArrivedRows = input.snapshot.chinaInventory.map((item) => ({
+      userId: input.userId,
+      rowNumber: ++nextRowNumber,
+      status: 'china_arrived' as const,
+      requestDate: input.snapshot.asOfDate,
+      sku: item.sku,
+      productName: item.productName,
+      optionName: item.optionName,
+      requestedQuantity: item.quantity,
+      actualPurchaseQuantity: item.quantity,
+      chinaReceivedQuantity: item.quantity,
+      chinaReceivedAt: snapshotDate,
+      sourceCurrentState: 'Ecount China inventory',
+      rawData: {
+        source: ECOUNT_CHINA_ARRIVED_SOURCE,
+        sourceFileName: item.sourceFileName,
+        sourceRowNumber: item.sourceRowNumber,
+        snapshotAsOfDate: input.snapshot.asOfDate,
+        productType: item.productType,
+        syncedByUserId: input.requestedByUserId,
+        syncedAt: now.toISOString(),
+      },
+    }))
     const outboundRows = input.snapshot.outboundPending.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
@@ -447,6 +592,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       actualPurchaseQuantity: item.quantity,
       chinaReceivedQuantity: item.quantity,
       supplierOrderNumber: item.supplierOrderNumber,
+      outboundExpectedDate: item.effectiveDate,
       rawData: {
         source: ECOUNT_OUTBOUND_SOURCE,
         sourceFileName: item.sourceFileName,
@@ -460,8 +606,41 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
+    const outboundCompletedRows = input.snapshot.outboundCompleted.map((item) => ({
+      userId: input.userId,
+      rowNumber: ++nextRowNumber,
+      status: 'completed' as const,
+      requestDate: parseDate(item.sourceDateNo),
+      sku: item.sku,
+      productName: item.productName,
+      optionName: item.optionName,
+      requestedQuantity: item.quantity,
+      actualPurchaseQuantity: item.quantity,
+      chinaReceivedQuantity: item.quantity,
+      supplierOrderNumber: item.supplierOrderNumber,
+      outboundExpectedDate: item.effectiveDate,
+      purchaseConfirmed: true,
+      rawData: {
+        source: ECOUNT_OUTBOUND_COMPLETED_SOURCE,
+        sourceFileName: item.sourceFileName,
+        sourceRowNumber: item.sourceRowNumber,
+        sourceDateNo: item.sourceDateNo,
+        effectiveDate: item.effectiveDate,
+        outboundManagementCode: item.outboundManagementCode,
+        fallbackMatchKey: item.fallbackMatchKey,
+        outboundCompletedQuantity: item.quantity,
+        syncedByUserId: input.requestedByUserId,
+        syncedAt: now.toISOString(),
+      },
+    }))
 
-    for (const rows of chunks([...requestRows, ...outboundRows], 500)) {
+    for (const rows of chunks([
+      ...requestRows,
+      ...purchaseCompletedRows,
+      ...chinaArrivedRows,
+      ...outboundRows,
+      ...outboundCompletedRows,
+    ], 500)) {
       await tx.insert(purchaseRequestItems).values(rows)
     }
 
@@ -510,7 +689,10 @@ export async function syncEcountPurchasingSnapshot(input: {
     return {
       replacedPurchaseRows: replaceableRows.length,
       createdPendingRequestRows: requestRows.length,
+      createdPurchaseCompletedRows: purchaseCompletedRows.length,
+      createdChinaArrivedRows: chinaArrivedRows.length,
       createdOutboundRows: outboundRows.length,
+      createdOutboundCompletedRows: outboundCompletedRows.length,
       syncedChinaInventoryRows: input.snapshot.chinaInventory.length,
       chinaInventoryQuantity: sumQuantities(input.snapshot.chinaInventory),
     }
@@ -657,10 +839,12 @@ function readRawDataSource(rawData: unknown) {
 }
 
 function isReplaceableEcountSource() {
+  const sourceList = sql.join(
+    REPLACEABLE_ECOUNT_SOURCES.map((source) => sql`${source}`),
+    sql`, `,
+  )
   return sql`COALESCE(${purchaseRequestItems.rawData}->>'source', '') IN (
-    ${ECOUNT_PURCHASING_LEGACY_SOURCE},
-    ${ECOUNT_PENDING_REQUEST_SOURCE},
-    ${ECOUNT_OUTBOUND_SOURCE}
+    ${sourceList}
   )`
 }
 

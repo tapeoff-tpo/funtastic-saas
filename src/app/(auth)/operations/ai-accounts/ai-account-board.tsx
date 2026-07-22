@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
-import { CalendarDays, Copy, Eye, EyeOff, MessageSquare, Save, Trash2 } from 'lucide-react'
+import { Copy, Eye, EyeOff, MessageSquare, Save, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -78,7 +78,6 @@ export function AiAccountBoard({
   const [showPassword, setShowPassword] = useState(false)
   const [passwordError, setPasswordError] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
-  const [selectedBulkIds, setSelectedBulkIds] = useState<string[]>([])
   const [bulkRenewalDueOn, setBulkRenewalDueOn] = useState('')
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkPending, startBulkTransition] = useTransition()
@@ -103,7 +102,6 @@ export function AiAccountBoard({
   const selectedDisplayLabel = selectedAccount
     ? statusLabels[selectedDisplayStatus]
     : '선택 안 함'
-  const allSelected = accounts.length > 0 && selectedBulkIds.length === accounts.length
 
   async function copyAccountId(account: AiAccountRow) {
     if (!account.email) return
@@ -144,27 +142,20 @@ export function AiAccountBoard({
     window.setTimeout(() => setCopiedId(null), 1200)
   }
 
-  function toggleBulkAccount(accountId: string) {
-    setSelectedBulkIds((current) => current.includes(accountId)
-      ? current.filter((id) => id !== accountId)
-      : [...current, accountId])
-    setBulkMessage('')
-  }
-
-  function applyBulkRenewal() {
-    if (!selectedBulkIds.length || !bulkRenewalDueOn) return
+  function applyBulkRenewal(renewalDueOn: string) {
+    setBulkRenewalDueOn(renewalDueOn)
+    if (!accounts.length || !renewalDueOn) return
     setBulkMessage('')
     startBulkTransition(async () => {
       const result = await bulkUpdateAiAccountRenewalAction({
-        accountIds: selectedBulkIds,
-        renewalDueOn: bulkRenewalDueOn,
+        accountIds: accounts.map((account) => account.id),
+        renewalDueOn,
       })
       if ('error' in result) {
         setBulkMessage(result.error || '갱신 예정일을 변경하지 못했습니다.')
         return
       }
       setBulkMessage(`${result.count}개 계정의 갱신 예정일을 변경했습니다.`)
-      setSelectedBulkIds([])
     })
   }
 
@@ -181,31 +172,24 @@ export function AiAccountBoard({
         <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
           <div className="border-b bg-muted/20 p-3">
             <div className="flex flex-wrap items-end gap-2">
-              <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={() => setSelectedBulkIds(allSelected ? [] : accounts.map((account) => account.id))}
-                  className="h-4 w-4"
-                />
-                전체 선택
-              </label>
               <label className="space-y-1">
-                <span className="block text-xs font-medium text-muted-foreground">일괄 갱신 예정일</span>
-                <Input type="date" value={bulkRenewalDueOn} onChange={(event) => setBulkRenewalDueOn(event.target.value)} className="h-9 w-40 bg-background" />
+                <span className="block text-xs font-medium text-muted-foreground">전체 계정 갱신 예정일</span>
+                <Input
+                  type="date"
+                  value={bulkRenewalDueOn}
+                  onChange={(event) => applyBulkRenewal(event.target.value)}
+                  disabled={bulkPending || accounts.length === 0}
+                  className="h-9 w-40 bg-background"
+                />
               </label>
-              <Button type="button" className="h-9" onClick={applyBulkRenewal} disabled={!selectedBulkIds.length || !bulkRenewalDueOn || bulkPending}>
-                <CalendarDays className="h-4 w-4" />
-                {bulkPending ? '적용 중' : `갱신일 적용 (${selectedBulkIds.length})`}
-              </Button>
+              <p className="pb-2 text-xs text-muted-foreground">날짜를 선택하면 {accounts.length}개 계정에 바로 적용됩니다.</p>
             </div>
             {bulkMessage ? <p className="mt-2 text-xs text-muted-foreground">{bulkMessage}</p> : null}
           </div>
 
           <div className="overflow-x-auto">
             <div className="min-w-[740px]">
-              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[24px_72px_minmax(100px,1fr)_94px_90px_132px_62px_74px] md:items-center md:gap-2">
-                <div />
+              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[72px_minmax(100px,1fr)_94px_90px_132px_62px_74px] md:items-center md:gap-2">
                 <div>계정명</div>
                 <div>계정아이디</div>
                 <div>상태</div>
@@ -227,7 +211,7 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[24px_72px_minmax(100px,1fr)_94px_90px_132px_62px_74px] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[72px_minmax(100px,1fr)_94px_90px_132px_62px_74px] md:items-center md:gap-2',
                     account.sharedUse && 'bg-emerald-50/50',
                     isSelected && 'bg-muted',
                   )}
@@ -239,14 +223,6 @@ export function AiAccountBoard({
                     }
                   }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedBulkIds.includes(account.id)}
-                    onChange={() => toggleBulkAccount(account.id)}
-                    onClick={(event) => event.stopPropagation()}
-                    aria-label={`${account.name} 계정 선택`}
-                    className="h-4 w-4"
-                  />
                   <div className="min-w-0">
                     <p className="truncate whitespace-nowrap text-sm font-semibold" title={account.name}>{account.name}</p>
                     <p className="text-xs text-muted-foreground md:hidden">계정명</p>
@@ -353,6 +329,7 @@ export function AiAccountBoard({
                         name="sharedUse"
                         value="true"
                         defaultChecked={account.sharedUse}
+                        disabled={account.sharedUse}
                         onChange={(event) => {
                           const form = event.currentTarget.form
                           const changedField = form?.elements.namedItem('changedField')
@@ -361,7 +338,7 @@ export function AiAccountBoard({
                         }}
                         className="h-4 w-4"
                       />
-                      사용 중
+                      {account.sharedUse ? '고정됨' : '사용 중'}
                     </label>
                   </form>
                 </div>
@@ -406,8 +383,8 @@ export function AiAccountBoard({
                       </select>
                     </label>
                     <label className="flex h-9 items-center gap-2 self-end rounded-md border px-3 text-sm">
-                      <input type="checkbox" name="sharedUse" defaultChecked={selectedAccount.sharedUse} className="h-4 w-4" />
-                      공유 사용 중
+                      <input type="checkbox" name="sharedUse" defaultChecked={selectedAccount.sharedUse} disabled={selectedAccount.sharedUse} className="h-4 w-4" />
+                      {selectedAccount.sharedUse ? '공유 사용 고정' : '공유 사용 중'}
                     </label>
                   </div>
                   <label className="block space-y-1">

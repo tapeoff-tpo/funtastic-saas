@@ -384,7 +384,7 @@ export async function updateAiAccount(input: {
       notes,
       renewalDueOn,
       resetAvailableCount,
-      sharedUse: Boolean(input.sharedUse),
+      sharedUse: sql`${gptAccounts.sharedUse} OR ${Boolean(input.sharedUse)}`,
       updatedAt: new Date(),
     })
     .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
@@ -446,7 +446,7 @@ export async function updateAiAccountAvailability(input: {
     ? resetAvailableCount
     : account.resetAvailableCount
   const nextSharedUse = input.changedField === 'sharedUse'
-    ? input.sharedUse
+    ? account.sharedUse || input.sharedUse
     : account.sharedUse
   if (nextResetCount === account.resetAvailableCount && nextSharedUse === account.sharedUse) {
     return { success: true }
@@ -518,8 +518,11 @@ export async function updateAiAccountOperationalState(input: {
 
   const changedField = input.changedField?.trim() || ''
   let nextStatus = status
-  const nextCurrentUserName = currentUserName
-  if (changedField === 'currentUserName' && status !== 'weekly_limit_reached') nextStatus = 'in_use'
+  let nextCurrentUserName = currentUserName
+  if (changedField === 'currentUserName' && status !== 'weekly_limit_reached') {
+    nextStatus = currentUserName ? 'in_use' : 'unselected'
+  }
+  if (changedField === 'status' && status === 'unselected') nextCurrentUserName = null
   if (
     account.status === nextStatus
     && account.currentUserName === nextCurrentUserName

@@ -5,6 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   addAiAccountMessage,
   addAiAccountUserCandidate,
+  bulkUpdateAiAccountOperationalState,
   bulkUpdateAiAccountRenewal,
   createAiAccount,
   deleteAiAccount,
@@ -103,6 +104,19 @@ export async function bulkUpdateAiAccountRenewalAction(input: {
   if (!userId) return { error: '로그인이 필요합니다.' }
 
   const result = await bulkUpdateAiAccountRenewal({ userId, ...input })
+  if (!('error' in result)) revalidatePath('/operations/ai-accounts')
+  return result
+}
+
+export async function bulkUpdateAiAccountOperationalStateAction(input: {
+  status: string
+  currentUserName?: string | null
+  changedField: 'status' | 'currentUserName'
+}) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+
+  const result = await bulkUpdateAiAccountOperationalState({ userId, ...input })
   if (!('error' in result)) revalidatePath('/operations/ai-accounts')
   return result
 }

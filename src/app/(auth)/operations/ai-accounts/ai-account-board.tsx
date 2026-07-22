@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   addAiAccountMessageAction,
+  bulkUpdateAiAccountOperationalStateAction,
   bulkUpdateAiAccountRenewalAction,
   deleteAiAccountAction,
   readAiAccountPasswordAction,
@@ -79,6 +80,8 @@ export function AiAccountBoard({
   const [passwordError, setPasswordError] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [bulkRenewalDueOn, setBulkRenewalDueOn] = useState('')
+  const [bulkStatus, setBulkStatus] = useState('')
+  const [bulkUserName, setBulkUserName] = useState('')
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkPending, startBulkTransition] = useTransition()
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
@@ -159,6 +162,44 @@ export function AiAccountBoard({
     })
   }
 
+  function applyBulkStatus(status: string) {
+    setBulkStatus(status)
+    if (!accounts.length || !status) return
+    setBulkMessage('')
+    startBulkTransition(async () => {
+      const result = await bulkUpdateAiAccountOperationalStateAction({
+        status,
+        changedField: 'status',
+      })
+      if ('error' in result) {
+        setBulkMessage(result.error || '상태를 변경하지 못했습니다.')
+        return
+      }
+      setBulkMessage(`${result.count}개 계정의 상태를 변경했습니다.`)
+      setBulkStatus('')
+    })
+  }
+
+  function applyBulkUser(value: string) {
+    const currentUserName = value === '__none__' ? '' : value
+    setBulkUserName(value)
+    if (!accounts.length) return
+    setBulkMessage('')
+    startBulkTransition(async () => {
+      const result = await bulkUpdateAiAccountOperationalStateAction({
+        status: currentUserName ? 'in_use' : 'unselected',
+        currentUserName,
+        changedField: 'currentUserName',
+      })
+      if ('error' in result) {
+        setBulkMessage(result.error || '사용자를 변경하지 못했습니다.')
+        return
+      }
+      setBulkMessage(`${result.count}개 계정의 사용자와 상태를 변경했습니다.`)
+      setBulkUserName('')
+    })
+  }
+
   return (
     <section className="rounded-md border bg-background">
       <div className="flex items-center justify-between border-b px-4 py-3">
@@ -182,7 +223,32 @@ export function AiAccountBoard({
                   className="h-9 w-40 bg-background"
                 />
               </label>
-              <p className="pb-2 text-xs text-muted-foreground">날짜를 선택하면 {accounts.length}개 계정에 바로 적용됩니다.</p>
+              <label className="space-y-1">
+                <span className="block text-xs font-medium text-muted-foreground">전체 사용자</span>
+                <select
+                  value={bulkUserName}
+                  onChange={(event) => applyBulkUser(event.target.value)}
+                  disabled={bulkPending || accounts.length === 0}
+                  className="h-9 w-36 rounded-md border bg-background px-2 text-sm"
+                >
+                  <option value="" disabled>사용자 선택</option>
+                  <option value="__none__">사용자 없음</option>
+                  {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="block text-xs font-medium text-muted-foreground">전체 상태</span>
+                <select
+                  value={bulkStatus}
+                  onChange={(event) => applyBulkStatus(event.target.value)}
+                  disabled={bulkPending || accounts.length === 0}
+                  className="h-9 w-36 rounded-md border bg-background px-2 text-sm"
+                >
+                  <option value="" disabled>상태 선택</option>
+                  {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                </select>
+              </label>
+              <p className="pb-2 text-xs text-muted-foreground">값을 선택하면 {accounts.length}개 계정에 바로 적용됩니다.</p>
             </div>
             {bulkMessage ? <p className="mt-2 text-xs text-muted-foreground">{bulkMessage}</p> : null}
           </div>

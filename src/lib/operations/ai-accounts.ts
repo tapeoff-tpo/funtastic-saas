@@ -580,6 +580,51 @@ export async function bulkUpdateAiAccountRenewal(input: {
   return { success: true, count: rows.length }
 }
 
+export async function bulkUpdateAiAccountOperationalState(input: {
+  userId: string
+  status: string
+  currentUserName?: string | null
+  changedField: 'status' | 'currentUserName'
+}) {
+  await ensureAiAccountTables()
+  const status = input.status.trim()
+  const currentUserName = input.currentUserName?.trim() || null
+  if (!AI_ACCOUNT_STATUSES.has(status)) return { error: '올바른 계정 상태를 선택해주세요.' as const }
+
+  const accounts = await db.select({
+    id: gptAccounts.id,
+    status: gptAccounts.status,
+    currentUserName: gptAccounts.currentUserName,
+  }).from(gptAccounts).where(eq(gptAccounts.userId, input.userId))
+  if (!accounts.length) return { error: '변경할 계정이 없습니다.' as const }
+
+  const nextStatus = input.changedField === 'currentUserName'
+    ? currentUserName ? 'in_use' : 'unselected'
+    : status
+  const clearsUser = input.changedField === 'currentUserName' || nextStatus === 'unselected'
+
+  await db.update(gptAccounts).set({
+    status: nextStatus,
+    ...(clearsUser ? { currentUserName } : {}),
+    updatedAt: new Date(),
+  }).where(eq(gptAccounts.userId, input.userId))
+
+  await db.insert(gptAccountMessages).values(accounts.map((account) => {
+    const nextUser = clearsUser ? currentUserName : account.currentUserName
+    const changes = [
+      account.status !== nextStatus ? `상태: ${AI_ACCOUNT_STATUS_LABELS[nextStatus]}` : null,
+      account.currentUserName !== nextUser ? `사용자: ${nextUser || '없음'}` : null,
+    ].filter(Boolean)
+    return {
+      userId: input.userId,
+      accountId: account.id,
+      eventType: 'account_state_bulk_updated',
+      message: `${changes.join(' · ') || '변경 없음'} (일괄 적용)`,
+    }
+  }))
+  return { success: true, count: accounts.length }
+}
+
 export async function addAiAccountMessage(input: {
   userId: string
   accountId: string

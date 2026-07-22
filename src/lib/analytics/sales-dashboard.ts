@@ -220,6 +220,18 @@ type ProductProfitQueryRow = {
 
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
 const ORDER_PROFIT_PAGE_SIZE = 50
+const ANALYTICS_ORDER_AMOUNT = sql`
+  CASE
+    WHEN o.raw_data->>'sabangnetSeparated' = 'true' THEN COALESCE(
+      NULLIF(
+        regexp_replace(COALESCE(o.raw_data->'sabangnetAmounts'->>'lineTotal', ''), '[^0-9.-]', '', 'g'),
+        ''
+      )::numeric,
+      o.total_amount::numeric
+    )
+    ELSE o.total_amount::numeric
+  END
+`
 const PURCHASING_ITEM_COST = sql`
   NULLIF(
     regexp_replace(
@@ -497,10 +509,10 @@ export async function getOrderProfitAnalysisData(
         COALESCE(items.sku_summary, '미매핑') AS sku_summary,
         COALESCE(shipments.package_summary, order_costs.package_summary, '박스명 없음') AS package_summary,
         COALESCE(shipments.tracking_summary, order_costs.tracking_summary, '송장 없음') AS tracking_summary,
-        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS sales,
         (
           CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END
-          * o.total_amount::numeric
+          * ${ANALYTICS_ORDER_AMOUNT}
           * COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0)
           / 100
         ) AS marketplace_fee,
@@ -730,7 +742,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     current_orders AS (
       SELECT
         o.id,
-        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS total_amount,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS shipping_fee,
         COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0) AS fee_percent
       FROM orders o
@@ -758,7 +770,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         AND o.status::text IN ${STATUS_FILTER}
     ),
     shipped_orders AS (
-      SELECT DISTINCT o.id, (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS total_amount
+      SELECT DISTINCT o.id, (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS total_amount
       FROM orders o
       JOIN shipments s ON s.order_id = o.id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
@@ -770,7 +782,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     previous_months AS (
       SELECT
         to_char(o.ordered_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') AS month_key,
-        SUM(CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales
+        SUM(CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS sales
       FROM orders o
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
@@ -788,7 +800,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       )::text AS "currentProfitExcludingShipping",
       COALESCE((SELECT SUM(total_amount) FROM current_orders), 0)::text AS "currentPeriodSales",
       COALESCE((
-        SELECT SUM(CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric)
+        SELECT SUM(CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT})
         FROM orders o
         LEFT JOIN claim_effects ce ON ce.order_id = o.id
         WHERE o.user_id = ${userId}
@@ -851,7 +863,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
           ) || ')'
           ELSE ''
         END AS marketplace_name,
-        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS total_amount,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
         CASE
           WHEN o.raw_data->>'analyticsClaimType' = 'exchange'
@@ -1086,7 +1098,7 @@ export async function getProductProfitAnalysisData(
     order_base AS (
       SELECT
         o.id,
-        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * o.total_amount::numeric) AS sales,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS sales,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
         CASE
           WHEN o.raw_data->>'analyticsClaimType' = 'exchange'
@@ -1096,7 +1108,7 @@ export async function getProductProfitAnalysisData(
         END AS exchange_actual_shipping_fee,
         (
           CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END
-          * o.total_amount::numeric
+          * ${ANALYTICS_ORDER_AMOUNT}
           * COALESCE(NULLIF(mc.metadata->>'salesFeePercent', '')::numeric, mfs.fallback_fee_percent, 0)
           / 100
         ) AS marketplace_fee
@@ -1326,8 +1338,8 @@ async function getSalesComparisonData(
     )
     SELECT
       cm.month_key AS "monthKey",
-      COALESCE(SUM(o.total_amount::numeric), 0)::text AS "totalSales",
-      COALESCE(SUM(o.total_amount::numeric) FILTER (WHERE o.ordered_at < cm.same_period_end), 0)::text AS "samePeriodSales"
+      COALESCE(SUM(${ANALYTICS_ORDER_AMOUNT}), 0)::text AS "totalSales",
+      COALESCE(SUM(${ANALYTICS_ORDER_AMOUNT}) FILTER (WHERE o.ordered_at < cm.same_period_end), 0)::text AS "samePeriodSales"
     FROM comparison_months cm
     LEFT JOIN orders o
       ON o.user_id = ${userId}

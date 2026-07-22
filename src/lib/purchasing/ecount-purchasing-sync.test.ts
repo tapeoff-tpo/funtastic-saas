@@ -11,13 +11,15 @@ describe('parseEcountPurchasingSnapshot', () => {
       ], [
         ['20260715-001', '100001-0001', '중국창고', '테스트 상품', '블루', 'N', 10, '2026-07-30', 'P-001', '발주요청', '진행중', '담당자'],
         ['20260715-002', '100002-0001', '중국창고', '완료 상품', '레드', 'N', 30, '2026-07-30', 'P-002', '발주요청', '완료', '담당자'],
+        ['20260610-001', '100003-0001', '중국창고', '6월 완료 상품', '그린', 'N', 15, '2026-07-30', 'P-003', '발주요청', '완료', '담당자'],
       ]),
       makeUpload('발주 계획 현황.xlsx', [
         '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
         '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
       ], [
         ['20260715-001', '중국창고', '100001-0001', '테스트 상품', '블루', 10, '123456789', '개인', 'P-001', '발주계획'],
-        ['20260715-002', '중국창고', '100002-0001', '완료 상품', '레드', 30, 'WECHAT', '개인', 'P-002', '발주계획'],
+        ['20260715-002', '중국창고', '100002-0001', '완료 상품', '레드', 30, '987654321', '개인', 'P-002', '발주계획'],
+        ['20260610-001', '중국창고', '100003-0001', '6월 완료 상품', '그린', 15, '', '개인', 'P-003', '발주계획'],
       ]),
       makeUpload('구매 현황.xlsx', [
         '일자-No.', '품목코드', '창고명', '품목명', '규격', '발주계획일자', '구매수량(EA)', '중국창고 도착요청일',
@@ -25,6 +27,8 @@ describe('parseEcountPurchasingSnapshot', () => {
       ], [
         ['20260715-001', '100001-0001', '중국창고', '테스트 상품', '블루', '2026-07-15', 10, '2026-07-30', 'PO-001', 'P-001', '확인', '123456789'],
         ['20260715-002', '109037-9998-package', '중국창고', '패키지 상품', '패키지', '2026-07-15', 20, '2026-07-12', 'PO-002', 'P-003', '확인', '123456789'],
+        ['20260610-003', '100003-0001', '중국창고', '6월 완료 상품', '그린', '2026-06-10', 15, '2026-06-20', 'PO-003', 'P-003', '확인', ''],
+        ['20260610-002', '100004-0001', '중국창고', '도착예정 상품', '옐로우', '2026-06-10', 25, '2026-07-30', 'PO-OLD', 'P-OLD', '확인', '998877665544'],
       ]),
       makeUpload('중국재고.xlsx', [
         '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
@@ -37,7 +41,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       ], [
         ['100001-0001', '20260713-001', '이미 입고된 상품', '블루', 10, '2026-07-13', '123456789', 'OUT-001'],
         ['109037-9998-package', '20260715-001', '입고예정 상품', '패키지', 20, '2026-07-15', '123456789', 'OUT-002'],
-        ['100002-0001', '20260720-001', '주문번호 없는 상품', '레드', 5, '2026-07-20', '', 'OUT-003'],
+        ['100002-0001', '20260720-001', '주문번호 있는 상품', '레드', 5, '2026-07-20', '987654321', 'OUT-003'],
         ['00002', '20260720-002', '부자재 출고', '', 4, '2026-07-20', '', 'OUT-004'],
       ]),
     ])
@@ -46,6 +50,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       files,
       domesticInventoryReflectedThrough: '2026-07-13',
       asOfDate: '2026-07-21',
+      purchasePlanConfirmedSince: '2026-07-01',
     })
 
     expect(snapshot.activeRequests).toHaveLength(1)
@@ -56,24 +61,32 @@ describe('parseEcountPurchasingSnapshot', () => {
     })
     expect(snapshot.chinaInventory).toHaveLength(2)
     expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 30])
-    expect(snapshot.purchaseCompleted).toHaveLength(2)
+    expect(snapshot.purchaseCompleted).toHaveLength(3)
     expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
       {
-        source: 'ecount_purchasing_snapshot_purchase_completed',
-        sku: '100001-0001',
-        quantity: 10,
-        purchaseManagementCode: 'P-001',
+        source: 'ecount_purchasing_snapshot_plan_purchase_completed',
+        sku: '100002-0001',
+        quantity: 25,
+        purchaseManagementCode: 'P-002',
         chinaArrivalRequestDate: '2026-07-30',
+        supplierOrderNumber: '987654321',
       },
     ))
     expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
       {
         source: 'ecount_purchasing_snapshot_plan_purchase_completed',
-        sku: '100002-0001',
-        quantity: 30,
-        purchaseManagementCode: 'P-002',
+        sku: '100003-0001',
+        quantity: 15,
+        purchaseManagementCode: 'P-003',
+      },
+    ))
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
+      {
+        source: 'ecount_purchasing_snapshot_purchase_completed',
+        sku: '100004-0001',
+        quantity: 25,
+        purchaseManagementCode: 'P-OLD',
         chinaArrivalRequestDate: '2026-07-30',
-        supplierOrderNumber: 'WECHAT',
       },
     ))
     expect(snapshot.outboundCompleted).toMatchObject([
@@ -86,9 +99,9 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.validation).toMatchObject({
       activeRequestsMatchedToPlan: 1,
       activeRequestsMatchedToPurchase: 1,
-      outboundRowsWithSupplierOrder: 1,
+      outboundRowsWithSupplierOrder: 2,
       outboundRowsMatchedToPurchase: 1,
-      outboundRowsWithoutReliableSupplierOrder: 1,
+      outboundRowsWithoutReliableSupplierOrder: 0,
     })
   })
 })

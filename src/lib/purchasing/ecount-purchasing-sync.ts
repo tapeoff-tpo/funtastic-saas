@@ -76,8 +76,8 @@ export type EcountPurchaseCompletedItem = {
   productName: string
   optionName: string | null
   quantity: number
-  chinaArrivalRequestDate: string
-  purchaseManagementCode: string
+  chinaArrivalRequestDate: string | null
+  purchaseManagementCode: string | null
   purchaseOrderNumber: string | null
   supplierOrderNumber: string | null
   purchaseMethod: string | null
@@ -250,41 +250,6 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountPendingRequest => row !== null)
 
-  const purchaseCompletedFromHistory = readRows(purchaseHistory)
-    .filter((row) => isPurchaseItemSku(valueAt(row, purchaseHistory, '품목코드')))
-    .filter((row) => valueAt(row, purchaseHistory, '진행상태') === '확인')
-    .map((row) => {
-      const sku = valueAt(row, purchaseHistory, '품목코드')
-      const quantity = positiveInteger(valueAt(row, purchaseHistory, '구매수량(EA)'))
-      const purchaseManagementCode = valueAt(row, purchaseHistory, '구입관리코드')
-      const chinaArrivalRequestDate = parseDate(valueAt(row, purchaseHistory, '중국창고 도착요청일'))
-      if (!purchaseManagementCode || !chinaArrivalRequestDate || chinaArrivalRequestDate <= asOfDate || quantity === 0) {
-        return null
-      }
-
-      return {
-        source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
-        sourceFileName: purchaseHistory.fileName,
-        sourceRowNumber: row.number,
-        sourceDateNo: valueAt(row, purchaseHistory, '일자-No.'),
-        sourceRequestFileName: null,
-        sourceRequestRowNumber: null,
-        purchaseDate: parseDate(valueAt(row, purchaseHistory, '일자-No.')),
-        sku,
-        productName: valueAt(row, purchaseHistory, '품목명'),
-        optionName: emptyToNull(valueAt(row, purchaseHistory, '규격')),
-        quantity,
-        chinaArrivalRequestDate,
-        purchaseManagementCode,
-        purchaseOrderNumber: emptyToNull(valueAt(row, purchaseHistory, '발주서-no')),
-        supplierOrderNumber: emptyToNull(valueAt(row, purchaseHistory, '주문서번호 (C)')),
-        purchaseMethod: emptyToNull(valueAt(row, purchaseHistory, '창고명')),
-        unitPriceCny: null,
-        shippingFeeCny: null,
-      } satisfies EcountPurchaseCompletedItem
-    })
-    .filter((row): row is EcountPurchaseCompletedItem => row !== null)
-
   const chinaInventoryItems = readRows(chinaInventory)
     .filter((row) => isChinaInventorySku(valueAt(row, chinaInventory, '품목코드')))
     .map((row) => {
@@ -344,10 +309,26 @@ export async function parseEcountPurchasingSnapshot(input: {
   const outboundCompleted = chinaOutboundItems.filter((row) => row.effectiveDate <= reflectedThrough)
   const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > reflectedThrough)
 
-  const chinaInventorySkus = new Set(chinaInventoryItems.map((item) => item.sku))
-  const outboundSupplierKeys = new Set(chinaOutboundItems
-    .map((item) => supplierKey(item.supplierOrderNumber, item.sku))
-    .filter((key): key is string => key !== null))
+  const remainingOutboundQuantityBySupplierKey = new Map<string, number>()
+  for (const item of chinaOutboundItems) {
+    const key = supplierKey(item.supplierOrderNumber, item.sku)
+    if (!key) continue
+    remainingOutboundQuantityBySupplierKey.set(
+      key,
+      (remainingOutboundQuantityBySupplierKey.get(key) ?? 0) + item.quantity,
+    )
+  }
+  const remainingPurchaseQuantityAfterOutbound = (quantity: number, key: string | null) => {
+    if (!key) return quantity
+    const outboundQuantity = remainingOutboundQuantityBySupplierKey.get(key) ?? 0
+    const matchedQuantity = Math.min(quantity, outboundQuantity)
+    if (matchedQuantity > 0) {
+      remainingOutboundQuantityBySupplierKey.set(key, outboundQuantity - matchedQuantity)
+    }
+    return quantity - matchedQuantity
+  }
+
+  // The plan is the current stage record. Purchase history is only a fallback when no live plan remains.
   const purchaseCompletedFromPlan: EcountPurchaseCompletedItem[] = []
   const handledPlanPurchaseKeys = new Set<string>()
   for (const request of readRows(purchaseRequest)) {
@@ -362,21 +343,19 @@ export async function parseEcountPurchasingSnapshot(input: {
       !matchKey
       || handledPlanPurchaseKeys.has(matchKey)
       || !requestDate
-      || requestDate < purchasePlanConfirmedSince
       || !chinaArrivalRequestDate
-      || purchaseKeys.has(matchKey)
-      || chinaInventorySkus.has(sku)
     ) continue
 
     const matchingPlanRows = planRowsByPurchaseKey.get(matchKey) ?? []
     if (matchingPlanRows.length !== 1) continue
     const plan = matchingPlanRows[0]
-    const quantity = positiveInteger(valueAt(plan, purchasePlan, '실 구매 수량(C)'))
+    const sourceQuantity = positiveInteger(valueAt(plan, purchasePlan, '실 구매 수량(C)'))
     const supplierOrderNumber = emptyToNull(valueAt(plan, purchasePlan, '주문서번호 (C)'))
     const supplierMatchKey = supplierKey(supplierOrderNumber, sku)
-    if (quantity === 0 || !supplierOrderNumber || (supplierMatchKey && outboundSupplierKeys.has(supplierMatchKey))) continue
-
     handledPlanPurchaseKeys.add(matchKey)
+    const quantity = remainingPurchaseQuantityAfterOutbound(sourceQuantity, supplierMatchKey)
+    if (quantity === 0) continue
+
     purchaseCompletedFromPlan.push({
       source: ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
       sourceFileName: purchasePlan.fileName,
@@ -399,6 +378,51 @@ export async function parseEcountPurchasingSnapshot(input: {
       shippingFeeCny: null,
     })
   }
+  const purchaseCompletedFromHistory = readRows(purchaseHistory)
+    .filter((row) => isPurchaseItemSku(valueAt(row, purchaseHistory, '품목코드')))
+    .filter((row) => valueAt(row, purchaseHistory, '진행상태') === '확인')
+    .map((row) => {
+      const sku = valueAt(row, purchaseHistory, '품목코드')
+      const sourceQuantity = positiveInteger(valueAt(row, purchaseHistory, '구매수량(EA)'))
+      const purchaseManagementCode = emptyToNull(valueAt(row, purchaseHistory, '구입관리코드'))
+      const planMatchKey = purchaseKey(purchaseManagementCode ?? '', sku)
+      const chinaArrivalRequestDate = parseDate(valueAt(row, purchaseHistory, '중국창고 도착요청일'))
+      if (
+        sourceQuantity === 0
+        || !chinaArrivalRequestDate
+        || chinaArrivalRequestDate <= asOfDate
+        || (planMatchKey && handledPlanPurchaseKeys.has(planMatchKey))
+      ) return null
+
+      const supplierOrderNumber = emptyToNull(valueAt(row, purchaseHistory, '주문서번호 (C)'))
+      const quantity = remainingPurchaseQuantityAfterOutbound(
+        sourceQuantity,
+        supplierKey(supplierOrderNumber, sku),
+      )
+      if (quantity === 0) return null
+
+      return {
+        source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
+        sourceFileName: purchaseHistory.fileName,
+        sourceRowNumber: row.number,
+        sourceDateNo: valueAt(row, purchaseHistory, '일자-No.'),
+        sourceRequestFileName: null,
+        sourceRequestRowNumber: null,
+        purchaseDate: parseDate(valueAt(row, purchaseHistory, '일자-No.')),
+        sku,
+        productName: valueAt(row, purchaseHistory, '품목명'),
+        optionName: emptyToNull(valueAt(row, purchaseHistory, '규격')),
+        quantity,
+        chinaArrivalRequestDate,
+        purchaseManagementCode,
+        purchaseOrderNumber: emptyToNull(valueAt(row, purchaseHistory, '발주서-no')),
+        supplierOrderNumber,
+        purchaseMethod: emptyToNull(valueAt(row, purchaseHistory, '창고명')),
+        unitPriceCny: null,
+        shippingFeeCny: null,
+      } satisfies EcountPurchaseCompletedItem
+    })
+    .filter((row): row is EcountPurchaseCompletedItem => row !== null)
   const purchaseCompleted = [...purchaseCompletedFromHistory, ...purchaseCompletedFromPlan]
 
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
@@ -548,7 +572,9 @@ export async function syncEcountPurchasingSnapshot(input: {
       ...input.snapshot.activeRequests,
       ...input.snapshot.purchaseCompleted,
     ]
-    const activeCodes = [...new Set(snapshotManagedItems.map((item) => item.purchaseManagementCode))]
+    const activeCodes = [...new Set(snapshotManagedItems
+      .map((item) => item.purchaseManagementCode)
+      .filter((code): code is string => Boolean(code)))]
     if (activeCodes.length > 0) {
       const existingRows = await tx
         .select({

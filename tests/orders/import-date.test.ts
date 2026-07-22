@@ -14,6 +14,12 @@ describe('order import dates', () => {
     )
   })
 
+  it('parses compact YYYYMMDD dates before treating numbers as Excel serial dates', () => {
+    expect(parseImportedOrderedAt('20260720').toISOString()).toBe(
+      '2026-07-19T15:00:00.000Z',
+    )
+  })
+
   it('formats ExcelJS date cells without turning them into UTC instants', () => {
     const excelJsDate = new Date('2026-05-29T10:30:00.000Z')
 

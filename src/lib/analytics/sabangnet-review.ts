@@ -652,27 +652,39 @@ export async function confirmSabangnetReviewBatch(
       }
     }
 
-    for (const chunk of chunks(orderRows, 500)) {
-      await tx.insert(orders).values(chunk)
+    for (const [index, chunk] of chunks(orderRows, 500).entries()) {
+      try {
+        await tx.insert(orders).values(chunk)
+      } catch (error) {
+        throw new Error(`사방넷 주문 생성 실패 (${index * 500 + 1}-${index * 500 + chunk.length}번째 주문): ${summarizeDatabaseError(error)}`)
+      }
     }
 
-    for (const chunk of chunks(itemRows, 500)) {
-      await tx.insert(orderItems).values(chunk)
+    for (const [index, chunk] of chunks(itemRows, 500).entries()) {
+      try {
+        await tx.insert(orderItems).values(chunk)
+      } catch (error) {
+        throw new Error(`사방넷 주문상품 생성 실패 (${index * 500 + 1}-${index * 500 + chunk.length}번째 상품): ${summarizeDatabaseError(error)}`)
+      }
     }
 
-    for (const chunk of chunks(lineUpdates, 500)) {
-      await tx.execute(sql`
-        UPDATE sabangnet_review_lines AS line
-        SET confirmed_order_id = updates.order_id,
-            confirmed_at = NOW(),
-            review_status = 'confirmed',
-            updated_at = NOW()
-        FROM (
-          VALUES ${sql.join(chunk.map((row) => sql`(${row.lineId}::uuid, ${row.orderId}::uuid)`), sql`, `)}
-        ) AS updates(line_id, order_id)
-        WHERE line.id = updates.line_id
-          AND line.user_id = ${userId}
-      `)
+    for (const [index, chunk] of chunks(lineUpdates, 500).entries()) {
+      try {
+        await tx.execute(sql`
+          UPDATE sabangnet_review_lines AS line
+          SET confirmed_order_id = updates.order_id,
+              confirmed_at = NOW(),
+              review_status = 'confirmed',
+              updated_at = NOW()
+          FROM (
+            VALUES ${sql.join(chunk.map((row) => sql`(${row.lineId}::uuid, ${row.orderId}::uuid)`), sql`, `)}
+          ) AS updates(line_id, order_id)
+          WHERE line.id = updates.line_id
+            AND line.user_id = ${userId}
+        `)
+      } catch (error) {
+        throw new Error(`사방넷 검수상태 업데이트 실패 (${index * 500 + 1}-${index * 500 + chunk.length}번째 행): ${summarizeDatabaseError(error)}`)
+      }
     }
 
     await tx.execute(sql`
@@ -994,6 +1006,34 @@ function chunks<T>(values: T[], size: number): T[][] {
   const result: T[][] = []
   for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size))
   return result
+}
+
+function summarizeDatabaseError(error: unknown): string {
+  const source = error as {
+    message?: unknown
+    cause?: {
+      message?: unknown
+      code?: unknown
+      detail?: unknown
+      constraint?: unknown
+      column?: unknown
+    }
+    code?: unknown
+    detail?: unknown
+    constraint?: unknown
+    column?: unknown
+  }
+  const cause = source.cause ?? source
+  const parts = [
+    typeof cause.message === 'string' ? cause.message : typeof source.message === 'string' ? source.message : null,
+    cause.code ? `code=${String(cause.code)}` : null,
+    cause.constraint ? `constraint=${String(cause.constraint)}` : null,
+    cause.column ? `column=${String(cause.column)}` : null,
+    cause.detail ? `detail=${String(cause.detail)}` : null,
+  ].filter(Boolean)
+
+  const summary = parts.join(' / ')
+  return summary.length > 600 ? `${summary.slice(0, 600)}...` : summary || '알 수 없는 DB 오류'
 }
 
 function resultRows<T>(result: T[] | { rows?: T[] }): T[] {

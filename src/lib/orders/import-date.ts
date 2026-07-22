@@ -41,9 +41,14 @@ export function parseImportedOrderedAt(value: string): Date {
   const trimmed = value.trim()
   if (!trimmed) return new Date()
 
-  const serial = Number(trimmed)
-  const serialDate = parseExcelSerialDate(serial)
-  if (serialDate) return serialDate
+  const compactDateMatch = trimmed.match(/^(\d{4})(\d{2})(\d{2})$/)
+  if (compactDateMatch) {
+    return dateFromKstParts(
+      Number(compactDateMatch[1]),
+      Number(compactDateMatch[2]),
+      Number(compactDateMatch[3]),
+    )
+  }
 
   const kstTextMatch = trimmed.match(
     /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/,
@@ -58,6 +63,10 @@ export function parseImportedOrderedAt(value: string): Date {
       Number(kstTextMatch[6] ?? 0),
     )
   }
+
+  const serial = Number(trimmed)
+  const serialDate = parseExcelSerialDate(serial)
+  if (serialDate) return serialDate
 
   const parsed = new Date(trimmed)
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed

@@ -6,6 +6,6 @@ import { applyMarketplaceRegistration } from '@/lib/operations/marketplace-regis
 
 export async function applyRegistrationAction(formData: FormData) {
   const user = await getCurrentUser(); if (!user) return
-  await applyMarketplaceRegistration({ userId: await getWorkspaceUserId(user.id), productCode: String(formData.get('productCode') ?? ''), productName: '', stock: 0, commonCategory: String(formData.get('commonCategory') ?? '').trim() || null, brand: String(formData.get('brand') ?? '').trim() || null, manufacturer: String(formData.get('manufacturer') ?? '').trim() || null, countryOfOrigin: String(formData.get('countryOfOrigin') ?? '').trim() || null })
+  await applyMarketplaceRegistration({ userId: await getWorkspaceUserId(user.id), productCode: String(formData.get('productCode') ?? ''), productName: '', stock: 0, commonCategory: String(formData.get('commonCategory') ?? '').trim() || null, brand: String(formData.get('brand') ?? '').trim() || null, manufacturer: String(formData.get('manufacturer') ?? '').trim() || null, countryOfOrigin: String(formData.get('countryOfOrigin') ?? '').trim() || null, sourceProductUrl: String(formData.get('sourceProductUrl') ?? '').trim() || null, primaryImageUrl: String(formData.get('primaryImageUrl') ?? '').trim() || null, imageUrls: String(formData.get('detailImageUrls') ?? '').split(/\r?\n/).map((url) => url.trim()).filter(Boolean) })
   revalidatePath('/operations/marketplace-registration')
 }

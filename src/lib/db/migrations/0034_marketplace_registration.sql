@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS marketplace_registration_profiles (
   certification text,
   detail_notice jsonb NOT NULL DEFAULT '{}'::jsonb,
   image_urls jsonb NOT NULL DEFAULT '[]'::jsonb,
+  source_product_url text,
+  primary_image_url text,
   updated_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(user_id, product_code)

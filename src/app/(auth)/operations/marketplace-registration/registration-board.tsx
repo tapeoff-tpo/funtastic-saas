@@ -61,6 +61,27 @@ function ProductImage({ row, className }: { row: RegistrationRow; className?: st
   return <img src={src} alt="" className={cn('object-cover', className)} />
 }
 
+function registrationImages(row: RegistrationRow) {
+  const primary = row.primaryImageUrl || row.sourceImageUrl
+  const additional = (row.imageUrls.length > 0 ? row.imageUrls : row.thumbnailUrls)
+    .filter((url) => url && url !== primary)
+    .slice(0, 9)
+
+  return { primary, additional }
+}
+
+function registrationChecks(row: RegistrationRow) {
+  const { primary, additional } = registrationImages(row)
+  return [
+    { label: '카테고리', complete: Boolean(row.commonCategory) },
+    { label: '대표·추가 이미지', complete: Boolean(primary) && additional.length > 0 },
+    { label: '상품 상세', complete: Boolean(row.sourceDescription) },
+    { label: '제조사·원산지', complete: Boolean(row.manufacturer && row.countryOfOrigin) },
+    { label: '옵션·재고', complete: row.options.length > 0 },
+    { label: '상품고시', complete: row.productNotice.length > 0 },
+  ]
+}
+
 export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
   const router = useRouter()
   const [query, setQuery] = useState('')
@@ -69,6 +90,8 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
   const [syncMessage, setSyncMessage] = useState('')
   const [syncPending, startSyncTransition] = useTransition()
   const selected = rows.find((row) => row.productCode === selectedCode) ?? null
+  const selectedImages = selected ? registrationImages(selected) : null
+  const selectedChecks = selected ? registrationChecks(selected) : []
 
   const counts = useMemo(() => ({
     all: rows.length,
@@ -268,6 +291,20 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                   </div>
 
                   <div>
+                    <h3 className="mb-2 text-sm font-semibold">등록 점검</h3>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {selectedChecks.map((check) => (
+                        <div key={check.label} className="flex items-center gap-1.5 rounded border bg-background px-2 py-1.5 text-xs">
+                          {check.complete
+                            ? <CheckCircle2 className="size-3.5 text-emerald-600" />
+                            : <AlertCircle className="size-3.5 text-amber-600" />}
+                          <span>{check.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
                     <h3 className="mb-2 text-sm font-semibold">판매 정보</h3>
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                       <div><dt className="text-xs text-muted-foreground">B2B 판매가</dt><dd className="font-medium">{formatPrice(selected.price)}</dd></div>
@@ -305,20 +342,31 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                   </div>
 
                   <div>
-                    <h3 className="mb-2 text-sm font-semibold">이미지 재정의</h3>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold">등록용 이미지</h3>
+                      <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">Cloudflare R2 원본</Badge>
+                    </div>
                     <label className="space-y-1">
                       <span className="text-xs text-muted-foreground">대표 이미지 URL</span>
                       <Input name="primaryImageUrl" defaultValue={selected.primaryImageUrl ?? ''} placeholder="비워두면 B2B 대표 이미지를 사용합니다" />
                     </label>
+                    <div className="mt-2 rounded border bg-background p-2">
+                      <p className="mb-2 text-xs text-muted-foreground">등록에 반영될 추가 이미지 {selectedImages?.additional.length ?? 0}장</p>
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {selectedImages?.additional.map((url) => <img key={url} src={url} alt="" className="aspect-square w-full rounded border object-cover" />)}
+                        {selectedImages?.additional.length === 0 ? <p className="col-span-5 py-2 text-center text-xs text-muted-foreground">B2B 추가 이미지가 없습니다.</p> : null}
+                      </div>
+                    </div>
                     <label className="mt-2 block space-y-1">
-                      <span className="text-xs text-muted-foreground">상세 이미지 URL</span>
+                      <span className="text-xs text-muted-foreground">추가 이미지 URL</span>
                       <textarea
                         name="detailImageUrls"
                         defaultValue={selected.imageUrls.join('\n')}
-                        placeholder="비워두면 B2B 상세 이미지를 사용합니다"
+                        placeholder="비워두면 B2B Cloudflare R2 추가 이미지를 사용합니다. 직접 지정할 때는 한 줄에 하나씩 입력하세요."
                         className="min-h-20 w-full rounded-md border bg-background px-2.5 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                       />
                     </label>
+                    <p className="mt-1 text-xs text-muted-foreground">상세페이지 원본 이미지 {selected.detailImageUrls.length}장 · B2B 원본 이미지는 자동으로 유지됩니다.</p>
                   </div>
                 </div>
                 <div className="sticky bottom-0 flex items-center justify-between border-t bg-background p-3">

@@ -12,6 +12,15 @@ import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
 import { PURCHASE_URL_HEADER } from './items'
 import type { PurchaseRequestStatus } from './purchase-request-status'
 
+const CHINA_INVENTORY_WAREHOUSE_ORDER = [
+  '부품관리',
+  '브랜드',
+  '스마일배송(개인个人1688)',
+  '원재료 창고',
+  '중국발생비용 (中国产生费用)',
+  '중국창고',
+] as const
+
 export async function getPurchaseRequests(input: {
   userId: string
   status?: PurchaseRequestStatus
@@ -449,7 +458,7 @@ export async function getChinaWarehouseInventory(input: {
   }
 
   const where = and(...conditions)
-  const [items, [{ total }]] = await Promise.all([
+  const [items, [{ total }], warehouseRows] = await Promise.all([
     db
       .select()
       .from(chinaWarehouseInventory)
@@ -463,9 +472,30 @@ export async function getChinaWarehouseInventory(input: {
       })
       .from(chinaWarehouseInventory)
       .where(where),
+    db
+      .select({ warehouseQuantities: chinaWarehouseInventory.warehouseQuantities })
+      .from(chinaWarehouseInventory)
+      .where(eq(chinaWarehouseInventory.userId, input.userId)),
   ])
 
-  return { items, total }
+  return {
+    items,
+    total,
+    warehouseNames: sortChinaInventoryWarehouseNames(
+      warehouseRows.flatMap((row) => Object.keys(row.warehouseQuantities)),
+    ),
+  }
+}
+
+function sortChinaInventoryWarehouseNames(warehouseNames: Iterable<string>) {
+  const rankByName = new Map<string, number>(
+    CHINA_INVENTORY_WAREHOUSE_ORDER.map((name, index): [string, number] => [name, index]),
+  )
+  return [...new Set(warehouseNames)].sort((left, right) => {
+    const leftRank = rankByName.get(left) ?? Number.MAX_SAFE_INTEGER
+    const rightRank = rankByName.get(right) ?? Number.MAX_SAFE_INTEGER
+    return leftRank - rightRank || left.localeCompare(right, 'ko-KR')
+  })
 }
 
 type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]

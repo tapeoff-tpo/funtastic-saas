@@ -23,7 +23,7 @@ export default async function ChinaInventoryPage({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const { items, total } = await getChinaWarehouseInventory({
+  const { items, total, warehouseNames } = await getChinaWarehouseInventory({
     userId: workspaceUserId,
     search: search ?? undefined,
     page,
@@ -37,7 +37,7 @@ export default async function ChinaInventoryPage({
         <div>
           <h1 className="text-2xl font-semibold">중국재고</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Ecount 중국재고 원본을 기준으로 실제 중국창고에 남아 있는 수량을 조회합니다. 중국출고 후 국내 입고 전 수량은 발주 탭의 중국출고요청으로 관리합니다.
+            Ecount 중국재고 원본의 합계와 창고별 수량을 나누어 조회합니다. 중국출고 후 국내 입고 전 수량은 발주 탭의 중국출고요청으로 관리합니다.
           </p>
         </div>
         <form className="flex items-center gap-2" action="/purchasing/china-inventory">
@@ -53,17 +53,22 @@ export default async function ChinaInventoryPage({
 
       <section className="overflow-hidden rounded-md border bg-background">
         <div className="flex flex-col gap-1 border-b px-3 py-2">
-          <h2 className="text-sm font-semibold">중국창고 재고 목록</h2>
+          <h2 className="text-sm font-semibold">중국재고 위치별 목록</h2>
           <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[1500px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
                 <th className="w-32 px-3 py-2 font-medium">품목코드</th>
                 <th className="px-3 py-2 font-medium">상품</th>
                 <th className="w-28 px-3 py-2 text-right font-medium">총 재고</th>
+                {warehouseNames.map((warehouseName) => (
+                  <th key={warehouseName} className="w-28 whitespace-nowrap px-3 py-2 text-right font-medium">
+                    {warehouseName}
+                  </th>
+                ))}
                 <th className="w-28 px-3 py-2 text-right font-medium">가용 재고</th>
                 <th className="w-40 px-3 py-2 font-medium">최근 입고</th>
                 <th className="w-40 px-3 py-2 font-medium">최근 중국출고요청</th>
@@ -72,7 +77,7 @@ export default async function ChinaInventoryPage({
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                    <td colSpan={6 + warehouseNames.length} className="px-3 py-12 text-center text-sm text-muted-foreground">
                     조건에 맞는 중국창고 재고가 없습니다.
                   </td>
                 </tr>
@@ -87,6 +92,11 @@ export default async function ChinaInventoryPage({
                     <td className="px-3 py-2 text-right tabular-nums">
                       {item.totalQuantity.toLocaleString('ko-KR')}
                     </td>
+                    {warehouseNames.map((warehouseName) => (
+                      <td key={warehouseName} className="px-3 py-2 text-right tabular-nums">
+                        {(item.warehouseQuantities[warehouseName] ?? 0).toLocaleString('ko-KR')}
+                      </td>
+                    ))}
                     <td className="px-3 py-2 text-right tabular-nums">
                       {item.availableQuantity.toLocaleString('ko-KR')}
                     </td>

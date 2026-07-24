@@ -412,6 +412,91 @@ export function PurchaseRequestExcelActions({
   )
 }
 
+export function PurchasePaginationControls({
+  basePath,
+  status,
+  search,
+  showCosts,
+  showRecommendationBasis,
+  sort,
+  order,
+  page,
+  pageSize,
+  totalPages,
+}: {
+  basePath: string
+  status: PurchaseRequestStatus | undefined
+  search: string | undefined
+  showCosts: boolean
+  showRecommendationBasis: boolean
+  sort: string | undefined
+  order: 'asc' | 'desc'
+  page: number
+  pageSize: number
+  totalPages: number
+}) {
+  const router = useRouter()
+  const [pageInput, setPageInput] = useState(String(page))
+
+  function href(nextPage: number, nextPageSize: number) {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (search) params.set('search', search)
+    if (showCosts) params.set('showCosts', '1')
+    params.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
+    if (sort) params.set('sort', sort)
+    if (order) params.set('order', order)
+    if (nextPage > 1) params.set('page', String(nextPage))
+    if (nextPageSize !== 50) params.set('pageSize', String(nextPageSize))
+    const query = params.toString()
+    return query ? `${basePath}?${query}` : basePath
+  }
+
+  function moveToPage(nextPage: number) {
+    const clampedPage = Math.min(totalPages, Math.max(1, nextPage))
+    router.push(href(clampedPage, pageSize))
+  }
+
+  function submitPage(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const requestedPage = Number.parseInt(pageInput, 10)
+    moveToPage(Number.isFinite(requestedPage) ? requestedPage : page)
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span>목록 보기</span>
+        <select
+          value={pageSize}
+          onChange={(event) => router.push(href(1, Number(event.target.value)))}
+          className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+          aria-label="목록 보기 개수"
+        >
+          {[10, 50, 100, 200].map((size) => (
+            <option key={size} value={size}>{size}개</option>
+          ))}
+        </select>
+      </label>
+      <form onSubmit={submitPage} className="flex items-center gap-1.5">
+        <label htmlFor="purchase-page-jump" className="sr-only">이동할 페이지</label>
+        <input
+          id="purchase-page-jump"
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={totalPages}
+          value={pageInput}
+          onChange={(event) => setPageInput(event.target.value)}
+          className="h-8 w-16 rounded-md border border-input bg-background px-2 text-center text-sm tabular-nums"
+        />
+        <span className="whitespace-nowrap text-xs text-muted-foreground">/ {totalPages.toLocaleString('ko-KR')}</span>
+        <Button type="submit" variant="outline" size="sm">이동</Button>
+      </form>
+    </div>
+  )
+}
+
 
 export function PurchaseBulkDeleteButton() {
   const router = useRouter()

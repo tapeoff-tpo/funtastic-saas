@@ -56,6 +56,7 @@ chrome.tabs.onCreated.addListener((tab) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   const url = changeInfo.url || tab.url
   if (url) void captureDetailNavigation(tabId, url, tab.openerTabId)
+  if (changeInfo.status === 'complete') void collectDetailImagesFromTab(tabId)
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -681,11 +682,37 @@ async function startDetailImagesRun(message, sourceTabId) {
     collectorTabId: collectorTab.id,
     url,
     status: 'running',
+    collecting: false,
   }
   await setDetailImagesRun(run)
   await scheduleDetailImagesTimeout()
   await sendDetailImagesToSaas(run, { type: 'FUNTASTIC_1688_DETAIL_IMAGES_ACK', jobId })
+  const latestTab = await chrome.tabs.get(collectorTab.id).catch(() => null)
+  if (latestTab?.status === 'complete') void collectDetailImagesFromTab(collectorTab.id)
   return { ok: true }
+}
+
+async function collectDetailImagesFromTab(tabId) {
+  const run = await getDetailImagesRun()
+  if (!run || run.status !== 'running' || run.collecting || run.collectorTabId !== tabId) return
+
+  run.collecting = true
+  await setDetailImagesRun(run)
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: collect1688DetailImagesInPage,
+    })
+    const value = result?.result
+    const images = uniqueDetailImageUrls(value?.images)
+    if (images.length === 0) {
+      await failDetailImagesRun(run, typeof value?.error === 'string' ? value.error : '1688 상품 이미지를 찾지 못했습니다.')
+      return
+    }
+    await completeDetailImagesRun(run, images)
+  } catch (error) {
+    await failDetailImagesRun(run, `1688 이미지 수집을 실행하지 못했습니다: ${errorMessage(error)}`)
+  }
 }
 
 async function completeDetailImagesRun(run, images) {
@@ -740,6 +767,57 @@ async function setDetailImagesRun(run) {
 async function scheduleDetailImagesTimeout() {
   await chrome.alarms.clear(DETAIL_IMAGES_TIMEOUT_ALARM)
   await chrome.alarms.create(DETAIL_IMAGES_TIMEOUT_ALARM, { when: Date.now() + DETAIL_IMAGES_PAGE_TIMEOUT_MS })
+}
+
+async function collect1688DetailImagesInPage() {
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const pageText = () => (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+/g, ' ').slice(0, 100_000)
+  const text = pageText()
+  if (/请登录|登录后|账号登录|扫码登录/i.test(text)) {
+    return { images: [], error: '1688 로그인이 필요합니다. 로그인 후 다시 실행해주세요.' }
+  }
+  if (/访问过于频繁|安全验证|请完成验证|滑动验证|请输入验证码|系统繁忙，请稍后再试/i.test(text)) {
+    return { images: [], error: '1688 보안 확인이 필요합니다. 화면에서 확인을 마친 뒤 다시 실행해주세요.' }
+  }
+  if (/商品不存在|商品已下架|您查看的商品不存在|找不到.{0,12}(商品|宝贝)|很抱歉.{0,30}(商品|宝贝).{0,20}(不存在|下架)/i.test(text)) {
+    return { images: [], error: '1688에서 상품 없음 또는 판매중지로 표시됩니다.' }
+  }
+
+  const collect = () => {
+    const images = new Set()
+    for (const image of document.images) {
+      const width = Math.max(image.naturalWidth || 0, image.width || 0)
+      const height = Math.max(image.naturalHeight || 0, image.height || 0)
+      if (width < 80 || height < 80) continue
+      for (const value of [image.currentSrc, image.src, image.getAttribute('data-src'), image.getAttribute('data-lazy-src'), image.getAttribute('data-original')]) {
+        if (!value || value.startsWith('data:') || images.size >= 30) continue
+        try {
+          const url = new URL(value.startsWith('//') ? `https:${value}` : value, window.location.href)
+          if (!['http:', 'https:'].includes(url.protocol)) continue
+          if (!/alicdn|1688|taobaocdn/i.test(url.hostname)) continue
+          images.add(url.toString())
+        } catch {
+          // Ignore malformed image values rendered by the product page.
+        }
+      }
+    }
+    return Array.from(images)
+  }
+
+  let previous = ''
+  let latestImages = []
+  for (let step = 0; step < 7; step += 1) {
+    latestImages = collect()
+    const fingerprint = latestImages.join('|')
+    if (latestImages.length >= 2 && fingerprint === previous) return { images: latestImages }
+    previous = fingerprint
+    const height = Math.max(document.documentElement.scrollHeight, document.body?.scrollHeight || 0)
+    window.scrollTo({ top: Math.round((height * Math.min(step + 1, 4)) / 4), behavior: 'auto' })
+    await delay(900)
+  }
+  return latestImages.length > 0
+    ? { images: latestImages }
+    : { images: [], error: '1688 상품 이미지를 찾지 못했습니다.' }
 }
 
 async function sendDetailImagesToSaas(run, payload) {

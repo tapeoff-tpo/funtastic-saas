@@ -6,7 +6,8 @@
   "permissions": [
     "alarms",
     "storage",
-    "tabs"
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.1688.com/*"
@@ -48,11 +49,6 @@
     {
       "matches": ["https://detail.1688.com/offer/*"],
       "js": ["1688-url-verifier.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["https://detail.1688.com/offer/*"],
-      "js": ["1688-detail-image-capture.js"],
       "run_at": "document_idle"
     }
   ]

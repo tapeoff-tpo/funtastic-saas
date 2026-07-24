@@ -98,18 +98,20 @@ describe('parseEcountPurchasingSnapshot', () => {
       },
     ))
     expect(snapshot.outboundCompleted).toMatchObject([
-      { sku: '100001-0001', quantity: 10, effectiveDate: '2026-07-13' },
-    ])
-    expect(snapshot.outboundPending).toMatchObject([
       { sku: '109037-9998-package', quantity: 20, effectiveDate: '2026-07-15' },
       { sku: '100002-0001', quantity: 5, effectiveDate: '2026-07-20' },
     ])
+    expect(snapshot.outboundCompleted).not.toContainEqual(expect.objectContaining({
+      sku: '100001-0001',
+      effectiveDate: '2026-07-13',
+    }))
+    expect(snapshot.outboundPending).toEqual([])
     expect(snapshot.validation).toMatchObject({
       activeRequestsMatchedToPlan: 1,
       activeRequestsMatchedToPurchase: 1,
-      outboundRowsWithSupplierOrder: 1,
-      outboundRowsMatchedToPurchase: 1,
-      outboundRowsWithoutReliableSupplierOrder: 1,
+      outboundRowsWithSupplierOrder: 0,
+      outboundRowsMatchedToPurchase: 0,
+      outboundRowsWithoutReliableSupplierOrder: 0,
     })
   })
 

@@ -521,7 +521,7 @@ export async function PurchasingOrdersView({
                             dateField={item.status === 'purchased' ? 'requestDate' : 'outboundExpectedDate'}
                             dateLabel={item.status === 'purchased'
                               ? '발주요청 날짜'
-                              : item.status === 'outbound_requested'
+                              : item.status === 'outbound_requested' || item.status === 'completed'
                                 ? '출고날짜'
                                 : '구매날짜'}
                             purchaseMethod={item.purchaseMethod}

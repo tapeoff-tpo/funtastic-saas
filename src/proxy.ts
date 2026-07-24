@@ -11,12 +11,16 @@ export async function proxy(request: NextRequest) {
     pathname === '/api/sms-bridge/pair'
     || pathname === '/api/sms-bridge/messages'
     || pathname === '/api/sms-bridge/heartbeat'
+  // Figma plugins cannot send the browser's Supabase cookie. These routes
+  // authenticate with a one-time pairing code or an opaque bridge token.
+  const isFigmaBridgeEndpoint = pathname.startsWith('/api/operations/detail-pages/bridge/')
 
   if (
     pathname === '/api/health'
     || pathname.startsWith('/api/debug/')
     || pathname.startsWith('/auth/callback')
     || isSmsBridgeDeviceEndpoint
+    || isFigmaBridgeEndpoint
   ) {
     return supabaseResponse
   }

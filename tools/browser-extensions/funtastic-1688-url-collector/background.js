@@ -10,6 +10,8 @@ const VERIFY_CHECKPOINT_KEY = 'funtastic1688VerificationCheckpoint'
 const VERIFY_NEXT_ALARM = 'funtastic-1688-verify-next'
 const VERIFY_TIMEOUT_ALARM = 'funtastic-1688-verify-timeout'
 const VERIFY_SAVE_TIMEOUT_ALARM = 'funtastic-1688-verify-save-timeout'
+const DETAIL_IMAGES_STATE_KEY = 'funtastic1688DetailImagesRun'
+const DETAIL_IMAGES_TIMEOUT_ALARM = 'funtastic-1688-detail-images-timeout'
 const VERIFICATION_ISSUE_LIMIT = 100
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 const ORDER_LIST_URL = 'https://air.1688.com/app/ctf-page/trade-order-list/buyer-order-list.html'
@@ -23,6 +25,7 @@ const VERIFY_DELAY_MS = 2_500
 const VERIFY_PAGE_TIMEOUT_MS = 30_000
 const VERIFY_SAVE_TIMEOUT_MS = 30_000
 const MAX_VERIFY_LINKS = 2_000
+const DETAIL_IMAGES_PAGE_TIMEOUT_MS = 60_000
 
 let resultInFlight = false
 let checkpointCache = null
@@ -43,6 +46,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === VERIFY_NEXT_ALARM) void navigateToCurrentVerification()
   if (alarm.name === VERIFY_TIMEOUT_ALARM) void handleVerificationPageTimeout()
   if (alarm.name === VERIFY_SAVE_TIMEOUT_ALARM) void handleVerificationSaveTimeout()
+  if (alarm.name === DETAIL_IMAGES_TIMEOUT_ALARM) void handleDetailImagesTimeout()
 })
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -55,12 +59,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 })
 
 chrome.tabs.onRemoved.addListener((tabId) => {
-  void Promise.all([getRun(), getVerificationRun()]).then(([run, verificationRun]) => {
+  void Promise.all([getRun(), getVerificationRun(), getDetailImagesRun()]).then(([run, verificationRun, detailImagesRun]) => {
     if (run?.collectorTabId === tabId && run.status === 'running') {
       return failRun(run, '1688 주문조회 탭이 닫혀 수집을 중단했습니다.', false)
     }
     if (verificationRun?.collectorTabId === tabId && verificationRun.status === 'running') {
       return failVerificationRun(verificationRun, '1688 URL 검증 탭이 닫혀 검증을 중단했습니다.', false)
+    }
+    if (detailImagesRun?.collectorTabId === tabId && detailImagesRun.status === 'running') {
+      return failDetailImagesRun(detailImagesRun, '1688 이미지 수집 탭이 닫혀 수집을 중단했습니다.')
     }
   })
 })
@@ -86,6 +93,17 @@ async function handleMessage(message, sender) {
       return { ok: false, error: '구매 URL 수집이 진행 중입니다. 먼저 수집을 중단해주세요.' }
     }
     return startVerificationRun(message, sender.tab.id)
+  }
+
+  if (message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_START') {
+    if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
+      return { ok: false, error: 'SaaS 상세페이지 제작 화면에서 시작해주세요.' }
+    }
+    const [run, verificationRun] = await Promise.all([getRun(), getVerificationRun()])
+    if (run || verificationRun) {
+      return { ok: false, error: '진행 중인 1688 URL 작업이 있습니다. 해당 작업을 먼저 마친 뒤 이미지 수집을 시작해주세요.' }
+    }
+    return startDetailImagesRun(message, sender.tab.id)
   }
 
   if (message.type === 'FUNTASTIC_1688_CANCEL') {
@@ -173,6 +191,44 @@ async function handleMessage(message, sender) {
           candidates: run.capturedCandidates || [],
         }
       : { active: false }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_READY') {
+    const run = await getDetailImagesRun()
+    if (
+      !run
+      || run.status !== 'running'
+      || sender.tab?.id !== run.collectorTabId
+      || canonicalOfferUrl(message.url) !== run.url
+    ) return { active: false }
+
+    return {
+      active: true,
+      runId: run.runId,
+      jobId: run.jobId,
+      url: run.url,
+    }
+  }
+
+  if (message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_RESULT') {
+    const run = await getDetailImagesRun()
+    if (
+      !run
+      || run.status !== 'running'
+      || sender.tab?.id !== run.collectorTabId
+      || message.runId !== run.runId
+      || message.jobId !== run.jobId
+      || canonicalOfferUrl(message.url) !== run.url
+    ) return { ok: false }
+
+    const images = uniqueDetailImageUrls(message.images)
+    if (images.length === 0) {
+      await failDetailImagesRun(run, typeof message.message === 'string' ? message.message : '1688 상품 이미지를 찾지 못했습니다.')
+      return { ok: true }
+    }
+
+    await completeDetailImagesRun(run, images)
+    return { ok: true }
   }
 
   if (message.type === 'FUNTASTIC_1688_RESULT_SAVED') {
@@ -604,6 +660,96 @@ async function sendToSaas(run, payload) {
   })
 }
 
+async function startDetailImagesRun(message, sourceTabId) {
+  const url = canonicalOfferUrl(message.url)
+  const runId = typeof message.runId === 'string' ? message.runId : ''
+  const jobId = typeof message.jobId === 'string' ? message.jobId : ''
+  if (!url || !runId || !jobId) {
+    return { ok: false, error: '상세페이지 이미지 수집 요청이 올바르지 않습니다.' }
+  }
+
+  const previous = await getDetailImagesRun()
+  if (previous) await clearDetailImagesRun(previous, true)
+
+  const collectorTab = await chrome.tabs.create({ url, active: true })
+  if (!collectorTab.id) throw new Error('1688 상품 페이지를 열지 못했습니다.')
+
+  const run = {
+    runId,
+    jobId,
+    sourceTabId,
+    collectorTabId: collectorTab.id,
+    url,
+    status: 'running',
+  }
+  await setDetailImagesRun(run)
+  await scheduleDetailImagesTimeout()
+  await sendDetailImagesToSaas(run, { type: 'FUNTASTIC_1688_DETAIL_IMAGES_ACK', jobId })
+  return { ok: true }
+}
+
+async function completeDetailImagesRun(run, images) {
+  await chrome.alarms.clear(DETAIL_IMAGES_TIMEOUT_ALARM)
+  await sendDetailImagesToSaas(run, {
+    type: 'FUNTASTIC_1688_DETAIL_IMAGES_RESULT',
+    jobId: run.jobId,
+    images,
+  }).catch(async (error) => {
+    await failDetailImagesRun(run, `SaaS 화면에 이미지 수집 결과를 전달하지 못했습니다: ${errorMessage(error)}`)
+  })
+  await clearDetailImagesRun(run, true)
+  await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+}
+
+async function failDetailImagesRun(run, message) {
+  await chrome.alarms.clear(DETAIL_IMAGES_TIMEOUT_ALARM)
+  await sendDetailImagesToSaas(run, {
+    type: 'FUNTASTIC_1688_DETAIL_IMAGES_ERROR',
+    jobId: run.jobId,
+    message,
+  }).catch(() => {})
+  await clearDetailImagesRun(run, true)
+  await chrome.tabs.update(run.sourceTabId, { active: true }).catch(() => {})
+}
+
+async function handleDetailImagesTimeout() {
+  const run = await getDetailImagesRun()
+  if (!run || run.status !== 'running') return
+  await failDetailImagesRun(run, '1688 상품 페이지 응답 시간이 초과되었습니다. 로그인 또는 보안 확인 상태를 확인해주세요.')
+}
+
+async function clearDetailImagesRun(run, closeCollectorTab) {
+  await Promise.all([
+    chrome.alarms.clear(DETAIL_IMAGES_TIMEOUT_ALARM),
+    chrome.storage.session.remove(DETAIL_IMAGES_STATE_KEY),
+  ])
+  if (closeCollectorTab && run.collectorTabId) {
+    await chrome.tabs.remove(run.collectorTabId).catch(() => {})
+  }
+}
+
+async function getDetailImagesRun() {
+  const stored = await chrome.storage.session.get(DETAIL_IMAGES_STATE_KEY)
+  return stored[DETAIL_IMAGES_STATE_KEY] || null
+}
+
+async function setDetailImagesRun(run) {
+  await chrome.storage.session.set({ [DETAIL_IMAGES_STATE_KEY]: run })
+}
+
+async function scheduleDetailImagesTimeout() {
+  await chrome.alarms.clear(DETAIL_IMAGES_TIMEOUT_ALARM)
+  await chrome.alarms.create(DETAIL_IMAGES_TIMEOUT_ALARM, { when: Date.now() + DETAIL_IMAGES_PAGE_TIMEOUT_MS })
+}
+
+async function sendDetailImagesToSaas(run, payload) {
+  await chrome.tabs.sendMessage(run.sourceTabId, {
+    source: EXTENSION_SOURCE,
+    runId: run.runId,
+    ...payload,
+  })
+}
+
 async function scheduleTimeout() {
   await chrome.alarms.clear(TIMEOUT_ALARM)
   await chrome.alarms.create(TIMEOUT_ALARM, { when: Date.now() + PAGE_TIMEOUT_MS })
@@ -833,6 +979,23 @@ function uniqueCandidateUrls(values) {
   return Array.from(candidates.values())
 }
 
+function uniqueDetailImageUrls(values) {
+  if (!Array.isArray(values)) return []
+  const images = new Set()
+  for (const value of values) {
+    if (typeof value !== 'string' || images.size >= 30) continue
+    try {
+      const url = new URL(value.startsWith('//') ? `https:${value}` : value)
+      if (!['http:', 'https:'].includes(url.protocol)) continue
+      if (!/alicdn|1688|taobaocdn/i.test(url.hostname)) continue
+      images.add(url.toString())
+    } catch {
+      // Ignore malformed image URLs returned by the product page.
+    }
+  }
+  return Array.from(images)
+}
+
 function uniqueOrders(value) {
   if (!Array.isArray(value)) return []
   const orders = new Map()
@@ -871,6 +1034,7 @@ function isSaasUrl(value) {
     const url = new URL(value)
     return url.origin === 'https://funtastic-saas-vercel.vercel.app'
       || url.origin === 'http://localhost:3000'
+      || url.origin === 'http://localhost:3001'
   } catch {
     return false
   }

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Funtastic 1688 URL Collector",
-  "description": "발주 엑셀 주문번호로 1688 구매 URL을 수집하고 중단 지점부터 이어갑니다.",
-  "version": "1.2.3",
+  "description": "발주 엑셀 주문번호로 1688 구매 URL과 상세페이지용 상품 이미지를 수집합니다.",
+  "version": "1.3.0",
   "permissions": [
     "alarms",
     "storage",
@@ -22,7 +22,8 @@
     {
       "matches": [
         "https://funtastic-saas-vercel.vercel.app/*",
-        "http://localhost:3000/*"
+        "http://localhost:3000/*",
+        "http://localhost:3001/*"
       ],
       "js": ["saas-bridge.js"],
       "run_at": "document_start"
@@ -47,6 +48,11 @@
     {
       "matches": ["https://detail.1688.com/offer/*"],
       "js": ["1688-url-verifier.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://detail.1688.com/offer/*"],
+      "js": ["1688-detail-image-capture.js"],
       "run_at": "document_idle"
     }
   ]

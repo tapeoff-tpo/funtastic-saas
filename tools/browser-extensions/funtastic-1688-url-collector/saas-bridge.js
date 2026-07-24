@@ -33,6 +33,7 @@ window.addEventListener('message', (event) => {
     && message.type !== 'FUNTASTIC_1688_VERIFY_START'
     && message.type !== 'FUNTASTIC_1688_VERIFY_CANCEL'
     && message.type !== 'FUNTASTIC_1688_VERIFY_RESULT_SAVED'
+    && message.type !== 'FUNTASTIC_1688_DETAIL_IMAGES_START'
   ) return
   try {
     if (!chrome.runtime?.id) return

@@ -86,6 +86,15 @@ function rows<T>(result: unknown) { return (result as { rows?: T[] }).rows ?? re
 
 export async function listMarketplaceRegistrationProducts(userId: string) {
   await ensureMarketplaceRegistrationTables()
+  // 최초 등록 기준은 B2B 원본 카테고리로 채운다. 사용자가 이미 보정한 값은 절대 덮어쓰지 않는다.
+  await db.execute(sql`
+    UPDATE marketplace_registration_profiles
+    SET common_category = source_category_name, updated_at = now()
+    WHERE user_id = ${userId}
+      AND source_type = 'funtastic-b2b'
+      AND NULLIF(BTRIM(COALESCE(common_category, '')), '') IS NULL
+      AND NULLIF(BTRIM(COALESCE(source_category_name, '')), '') IS NOT NULL
+  `)
   const result = await db.execute<RegistrationRow>(sql`
     SELECT r.id, r.product_code AS "productCode", COALESCE(r.product_name, '') AS "productName",
       r.source_stock_qty::int AS stock, COALESCE(r.source_price, 0)::float8 AS price,
@@ -373,6 +382,11 @@ export async function syncFuntasticB2bRegistrationProducts(userId: string) {
         source_detail_image_urls = EXCLUDED.source_detail_image_urls,
         source_options = EXCLUDED.source_options,
         source_product_notice = EXCLUDED.source_product_notice,
+        common_category = CASE
+          WHEN NULLIF(BTRIM(COALESCE(marketplace_registration_profiles.common_category, '')), '') IS NULL
+            THEN NULLIF(BTRIM(EXCLUDED.source_category_name), '')
+          ELSE marketplace_registration_profiles.common_category
+        END,
         source_product_url = EXCLUDED.source_product_url,
         source_updated_at = EXCLUDED.source_updated_at,
         last_synced_at = EXCLUDED.last_synced_at,

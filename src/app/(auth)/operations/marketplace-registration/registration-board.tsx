@@ -282,7 +282,8 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                     <div className="grid grid-cols-2 gap-2">
                       <label className="col-span-2 space-y-1">
                         <span className="text-xs text-muted-foreground">기본 카테고리</span>
-                        <Input name="commonCategory" defaultValue={selected.commonCategory ?? ''} placeholder="네이버 기준 카테고리" />
+                        <Input name="commonCategory" defaultValue={selected.commonCategory ?? ''} placeholder="B2B 카테고리를 기본으로 사용합니다" />
+                        <span className="block text-[11px] text-muted-foreground">B2B 원본 카테고리가 자동 입력되며, 네이버·쿠팡·토스 등록 전 필요한 기준으로 수정할 수 있습니다.</span>
                       </label>
                       <label className="space-y-1">
                         <span className="text-xs text-muted-foreground">브랜드</span>

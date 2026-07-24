@@ -344,6 +344,7 @@ export async function parseEcountPurchasingSnapshot(input: {
       || handledPlanPurchaseKeys.has(matchKey)
       || !requestDate
       || !chinaArrivalRequestDate
+      || chinaArrivalRequestDate <= asOfDate
     ) continue
 
     const matchingPlanRows = planRowsByPurchaseKey.get(matchKey) ?? []
@@ -648,6 +649,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       rowNumber: ++nextRowNumber,
       status: 'purchase_completed' as const,
       requestDate: item.purchaseDate,
+      outboundExpectedDate: item.purchaseDate,
       sku: item.sku,
       productName: item.productName,
       optionName: item.optionName,

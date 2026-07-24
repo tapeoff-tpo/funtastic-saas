@@ -104,6 +104,55 @@ describe('parseEcountPurchasingSnapshot', () => {
       outboundRowsWithoutReliableSupplierOrder: 0,
     })
   })
+
+  it('excludes plan rows already due at the snapshot date and preserves the source purchase date', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-request.xlsx', [
+        '\uC77C\uC790-No.', '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9',
+        '\uC0AC\uC804\uD3EC\uC7A5\uC5EC\uBD80\uCF54\uB4DC', '\uAD6C\uB9E4\uC218\uB7C9(EA)',
+        '\uC911\uAD6D\uCC3D\uACE0 \uB3C4\uCC29\uC694\uCCAD\uC77C', '\uAD6C\uC785\uAD00\uB9AC\uCF54\uB4DC',
+        '\uD604\uC7AC\uC0C1\uD0DC', '\uC9C4\uD589\uC0C1\uD0DC', '\uC0AC\uC6D0(\uB2F4\uB2F9)\uBA85',
+      ], [
+        ['20260610-001', '100001-0001', 'Past item', 'basic', 'N', 10, '2026-07-20', 'P-PAST', '', '\uC644\uB8CC', ''],
+        ['20260715-001', '100002-0001', 'Future item', 'basic', 'N', 20, '2026-07-30', 'P-FUTURE', '', '\uC644\uB8CC', ''],
+      ]),
+      makeUpload('purchase-plan.xlsx', [
+        '\uC77C\uC790-No.', '\uC785\uACE0\uCC3D\uACE0\uBA85', '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9',
+        '\uC2E4 \uAD6C\uB9E4 \uC218\uB7C9(C)', '\uC8FC\uBB38\uC11C\uBC88\uD638 (C)', '\uAD6C\uB9E4\uC9C4\uD589\uC5EC\uBD80 (C)',
+        '\uAD6C\uC785\uAD00\uB9AC\uCF54\uB4DC', '\uD604\uC7AC\uC0C1\uD0DC',
+      ], [
+        ['20260610-001', '\uC911\uAD6D\uCC3D\uACE0', '100001-0001', 'Past item', 'basic', 10, '', '\uAC1C\uC778', 'P-PAST', '\uBC1C\uC8FC\uACC4\uD68D'],
+        ['20260715-001', '\uC911\uAD6D\uCC3D\uACE0', '100002-0001', 'Future item', 'basic', 20, '', '\uAC1C\uC778', 'P-FUTURE', '\uBC1C\uC8FC\uACC4\uD68D'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '\uC77C\uC790-No.', '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9', '\uBC1C\uC8FC\uACC4\uD68D\uC77C\uC790',
+        '\uAD6C\uB9E4\uC218\uB7C9(EA)', '\uC911\uAD6D\uCC3D\uACE0 \uB3C4\uCC29\uC694\uCCAD\uC77C',
+        '\uBC1C\uC8FC\uC11C-no', '\uAD6C\uC785\uAD00\uB9AC\uCF54\uB4DC', '\uC9C4\uD589\uC0C1\uD0DC', '\uC8FC\uBB38\uC11C\uBC88\uD638 (C)',
+      ], []),
+      makeUpload('china-inventory.xlsx', [
+        '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9', '\uD488\uBAA9\uAD6C\uBD84', '\uD569\uACC4', '\uC911\uAD6D\uCC3D\uACE0',
+      ], []),
+      makeUpload('china-outbound.xlsx', [
+        '\uD488\uBAA9\uCF54\uB4DC', '\uC77C\uC790-No.', '\uD488\uBAA9\uBA85', '\uADDC\uACA9', '\uCD9C\uACE0\uC218\uB7C9(EA)',
+        '\uC720\uD6A8\uAE30\uAC04', '\uC8FC\uBB38\uC11C\uBC88\uD638', '\uCD9C\uACE0\uAD00\uB9AC\uCF54\uB4DC',
+      ], []),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-07-13',
+      asOfDate: '2026-07-21',
+    })
+
+    expect(snapshot.purchaseCompleted).toEqual([
+      expect.objectContaining({
+        sku: '100002-0001',
+        purchaseManagementCode: 'P-FUTURE',
+        purchaseDate: '2026-07-15',
+        chinaArrivalRequestDate: '2026-07-30',
+      }),
+    ])
+  })
 })
 
 async function makeUpload(

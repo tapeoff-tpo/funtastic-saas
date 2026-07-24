@@ -208,9 +208,20 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     }
 
     window.addEventListener('message', onMessage)
-    window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_PING' }, window.location.origin)
     return () => window.removeEventListener('message', onMessage)
   }, [])
+
+  useEffect(() => {
+    if (extensionReady) return
+    const pingExtension = () => {
+      window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_PING' }, window.location.origin)
+    }
+    // Content scripts can load after the React view on a hard refresh.
+    // Keep probing briefly so a valid extension is not treated as unavailable.
+    pingExtension()
+    const timer = window.setInterval(pingExtension, 1_000)
+    return () => window.clearInterval(timer)
+  }, [extensionReady])
 
   function createJobs() {
     if (selectedDraftProducts.length === 0) return
@@ -543,7 +554,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         <WorkflowStep icon={FilePenLine} label="Figma 검수" active={activeJob.status === 'completed'} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
-                        {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />이미지 수집 시작</Button> : null}
+                        {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />{extensionReady ? '이미지 수집 시작' : '확장프로그램 연결 중'}</Button> : null}
                         {activeJob.status === 'draft_pending' || activeJob.status === 'failed' ? <Button type="button" variant="outline" onClick={requestFigmaDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? 'Figma 초안 요청 중' : activeJob.status === 'failed' ? 'Figma 초안 재요청' : 'Figma 초안 제작 요청'}</Button> : null}
                         {activeJob.status === 'figma_queued' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />Figma 플러그인 대기</Badge> : null}
                         {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma에서 초안 제작 중</Badge> : null}

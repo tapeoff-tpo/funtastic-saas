@@ -36,6 +36,7 @@ type EcountReportKind = (typeof REPORT_KINDS)[number]
 type EcountPurchaseCompletedSource =
   | typeof ECOUNT_PURCHASE_COMPLETED_SOURCE
   | typeof ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE
+type PurchaseRequestItemInsert = typeof purchaseRequestItems.$inferInsert
 
 type ParsedReport = {
   kind: EcountReportKind
@@ -306,8 +307,12 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountOutboundPendingItem => row !== null)
 
-  const outboundCompleted = chinaOutboundItems.filter((row) => row.effectiveDate <= reflectedThrough)
-  const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > reflectedThrough)
+  // Rows through the reflected-through date are already in domestic inventory.
+  // Later rows become completed once their China outbound date has passed.
+  const outboundCompleted = chinaOutboundItems.filter((row) => (
+    row.effectiveDate > reflectedThrough && row.effectiveDate <= asOfDate
+  ))
+  const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > asOfDate)
 
   // The plan is the current stage record. Purchase history is only a fallback when no live plan remains.
   const purchaseCompletedFromPlan: EcountPurchaseCompletedItem[] = []
@@ -360,7 +365,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   const purchaseCompletedFromHistory = readRows(purchaseHistory)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchaseHistory, '품목코드')))
     .filter((row) => valueAt(row, purchaseHistory, '진행상태') === '확인')
-    .map((row) => {
+    .map<EcountPurchaseCompletedItem | null>((row) => {
       const sku = valueAt(row, purchaseHistory, '품목코드')
       const sourceQuantity = positiveInteger(valueAt(row, purchaseHistory, '구매수량(EA)'))
       const purchaseManagementCode = emptyToNull(valueAt(row, purchaseHistory, '구입관리코드'))
@@ -393,7 +398,7 @@ export async function parseEcountPurchasingSnapshot(input: {
         purchaseMethod: emptyToNull(valueAt(row, purchaseHistory, '창고명')),
         unitPriceCny: null,
         shippingFeeCny: null,
-      } satisfies EcountPurchaseCompletedItem
+      }
     })
     .filter((row): row is EcountPurchaseCompletedItem => row !== null)
   const purchaseCompleted = reconcilePurchaseCompletedWithOutbound(
@@ -710,8 +715,8 @@ export async function syncEcountPurchasingSnapshot(input: {
       supplierOrderNumber: item.supplierOrderNumber,
       purchaseMethod: item.purchaseMethod,
       purchaseConfirmed: true,
-      unitPriceCny: item.unitPriceCny,
-      shippingFeeCny: item.shippingFeeCny,
+      unitPriceCny: item.unitPriceCny === null ? null : String(item.unitPriceCny),
+      shippingFeeCny: item.shippingFeeCny === null ? null : String(item.shippingFeeCny),
       rawData: {
         source: item.source,
         sourceFileName: item.sourceFileName,
@@ -776,25 +781,47 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    for (const rows of chunks([
+    const outboundCompletedRows = input.snapshot.outboundCompleted.map((item) => ({
+      userId: input.userId,
+      rowNumber: ++nextRowNumber,
+      status: 'completed' as const,
+      requestDate: parseDate(item.sourceDateNo),
+      sku: item.sku,
+      productName: item.productName,
+      optionName: item.optionName,
+      requestedQuantity: item.quantity,
+      actualPurchaseQuantity: item.quantity,
+      chinaReceivedQuantity: item.quantity,
+      supplierOrderNumber: item.supplierOrderNumber,
+      outboundExpectedDate: item.effectiveDate,
+      purchaseConfirmed: true,
+      rawData: {
+        source: ECOUNT_OUTBOUND_COMPLETED_SOURCE,
+        sourceFileName: item.sourceFileName,
+        sourceRowNumber: item.sourceRowNumber,
+        sourceDateNo: item.sourceDateNo,
+        effectiveDate: item.effectiveDate,
+        outboundManagementCode: item.outboundManagementCode,
+        fallbackMatchKey: item.fallbackMatchKey,
+        outboundCompletedQuantity: item.quantity,
+        syncedByUserId: input.requestedByUserId,
+        syncedAt: now.toISOString(),
+      },
+    }))
+    const rowsToInsert: PurchaseRequestItemInsert[] = [
       ...requestRows,
       ...purchaseCompletedRows,
       ...chinaArrivedRows,
       ...outboundRows,
-    ], 500)) {
+      ...outboundCompletedRows,
+    ]
+    for (const rows of chunks(rowsToInsert, 500)) {
       await tx.insert(purchaseRequestItems).values(rows)
     }
 
-    await tx
-      .update(chinaWarehouseInventory)
-      .set({
-        totalQuantity: 0,
-        availableQuantity: 0,
-        lastArrivedAt: null,
-        lastOutboundRequestedAt: null,
-        updatedAt: now,
-      })
-      .where(eq(chinaWarehouseInventory.userId, input.userId))
+    await tx.delete(chinaWarehouseInventory).where(
+      eq(chinaWarehouseInventory.userId, input.userId),
+    )
 
     for (const rows of chunks(input.snapshot.chinaInventory, 500)) {
       await tx
@@ -809,22 +836,6 @@ export async function syncEcountPurchasingSnapshot(input: {
           availableQuantity: item.quantity,
           updatedAt: now,
         })))
-        .onConflictDoUpdate({
-          target: [
-            chinaWarehouseInventory.userId,
-            chinaWarehouseInventory.sku,
-            chinaWarehouseInventory.optionKey,
-          ],
-          set: {
-            productName: sql`excluded.product_name`,
-            optionName: sql`excluded.option_name`,
-            totalQuantity: sql`excluded.total_quantity`,
-            availableQuantity: sql`excluded.available_quantity`,
-            lastArrivedAt: null,
-            lastOutboundRequestedAt: null,
-            updatedAt: now,
-          },
-        })
     }
 
     return {
@@ -833,7 +844,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       createdPurchaseCompletedRows: purchaseCompletedRows.length,
       createdChinaArrivedRows: chinaArrivedRows.length,
       createdOutboundRows: outboundRows.length,
-      createdOutboundCompletedRows: 0,
+      createdOutboundCompletedRows: outboundCompletedRows.length,
       syncedChinaInventoryRows: input.snapshot.chinaInventory.length,
       chinaInventoryQuantity: sumQuantities(input.snapshot.chinaInventory),
     }

@@ -776,40 +776,11 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundCompletedRows = input.snapshot.outboundCompleted.map((item) => ({
-      userId: input.userId,
-      rowNumber: ++nextRowNumber,
-      status: 'completed' as const,
-      requestDate: parseDate(item.sourceDateNo),
-      sku: item.sku,
-      productName: item.productName,
-      optionName: item.optionName,
-      requestedQuantity: item.quantity,
-      actualPurchaseQuantity: item.quantity,
-      chinaReceivedQuantity: item.quantity,
-      supplierOrderNumber: item.supplierOrderNumber,
-      outboundExpectedDate: item.effectiveDate,
-      purchaseConfirmed: true,
-      rawData: {
-        source: ECOUNT_OUTBOUND_COMPLETED_SOURCE,
-        sourceFileName: item.sourceFileName,
-        sourceRowNumber: item.sourceRowNumber,
-        sourceDateNo: item.sourceDateNo,
-        effectiveDate: item.effectiveDate,
-        outboundManagementCode: item.outboundManagementCode,
-        fallbackMatchKey: item.fallbackMatchKey,
-        outboundCompletedQuantity: item.quantity,
-        syncedByUserId: input.requestedByUserId,
-        syncedAt: now.toISOString(),
-      },
-    }))
-
     for (const rows of chunks([
       ...requestRows,
       ...purchaseCompletedRows,
       ...chinaArrivedRows,
       ...outboundRows,
-      ...outboundCompletedRows,
     ], 500)) {
       await tx.insert(purchaseRequestItems).values(rows)
     }
@@ -862,7 +833,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       createdPurchaseCompletedRows: purchaseCompletedRows.length,
       createdChinaArrivedRows: chinaArrivedRows.length,
       createdOutboundRows: outboundRows.length,
-      createdOutboundCompletedRows: outboundCompletedRows.length,
+      createdOutboundCompletedRows: 0,
       syncedChinaInventoryRows: input.snapshot.chinaInventory.length,
       chinaInventoryQuantity: sumQuantities(input.snapshot.chinaInventory),
     }

@@ -498,7 +498,11 @@ export async function PurchasingOrdersView({
                             supplierOrderNumber={item.supplierOrderNumber}
                             dateValue={item.status === 'purchased' ? item.requestDate : item.outboundExpectedDate}
                             dateField={item.status === 'purchased' ? 'requestDate' : 'outboundExpectedDate'}
-                            dateLabel={item.status === 'purchased' ? '발주요청 날짜' : '구매날짜'}
+                            dateLabel={item.status === 'purchased'
+                              ? '발주요청 날짜'
+                              : item.status === 'outbound_requested'
+                                ? '출고날짜'
+                                : '구매날짜'}
                             purchaseMethod={item.purchaseMethod}
                           />
                         </td>

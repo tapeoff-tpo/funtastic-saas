@@ -309,25 +309,6 @@ export async function parseEcountPurchasingSnapshot(input: {
   const outboundCompleted = chinaOutboundItems.filter((row) => row.effectiveDate <= reflectedThrough)
   const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > reflectedThrough)
 
-  const remainingOutboundQuantityBySupplierKey = new Map<string, number>()
-  for (const item of chinaOutboundItems) {
-    const key = supplierKey(item.supplierOrderNumber, item.sku)
-    if (!key) continue
-    remainingOutboundQuantityBySupplierKey.set(
-      key,
-      (remainingOutboundQuantityBySupplierKey.get(key) ?? 0) + item.quantity,
-    )
-  }
-  const remainingPurchaseQuantityAfterOutbound = (quantity: number, key: string | null) => {
-    if (!key) return quantity
-    const outboundQuantity = remainingOutboundQuantityBySupplierKey.get(key) ?? 0
-    const matchedQuantity = Math.min(quantity, outboundQuantity)
-    if (matchedQuantity > 0) {
-      remainingOutboundQuantityBySupplierKey.set(key, outboundQuantity - matchedQuantity)
-    }
-    return quantity - matchedQuantity
-  }
-
   // The plan is the current stage record. Purchase history is only a fallback when no live plan remains.
   const purchaseCompletedFromPlan: EcountPurchaseCompletedItem[] = []
   const handledPlanPurchaseKeys = new Set<string>()
@@ -351,10 +332,8 @@ export async function parseEcountPurchasingSnapshot(input: {
     const plan = matchingPlanRows[0]
     const sourceQuantity = positiveInteger(valueAt(plan, purchasePlan, '실 구매 수량(C)'))
     const supplierOrderNumber = emptyToNull(valueAt(plan, purchasePlan, '주문서번호 (C)'))
-    const supplierMatchKey = supplierKey(supplierOrderNumber, sku)
     handledPlanPurchaseKeys.add(matchKey)
-    const quantity = remainingPurchaseQuantityAfterOutbound(sourceQuantity, supplierMatchKey)
-    if (quantity === 0) continue
+    if (sourceQuantity === 0) continue
 
     purchaseCompletedFromPlan.push({
       source: ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
@@ -368,7 +347,7 @@ export async function parseEcountPurchasingSnapshot(input: {
       productName: valueAt(plan, purchasePlan, '품목명') || valueAt(request, purchaseRequest, '품목명'),
       optionName: emptyToNull(valueAt(plan, purchasePlan, '규격'))
         ?? emptyToNull(valueAt(request, purchaseRequest, '규격')),
-      quantity,
+      quantity: sourceQuantity,
       chinaArrivalRequestDate,
       purchaseManagementCode,
       purchaseOrderNumber: null,
@@ -395,12 +374,6 @@ export async function parseEcountPurchasingSnapshot(input: {
       ) return null
 
       const supplierOrderNumber = emptyToNull(valueAt(row, purchaseHistory, '주문서번호 (C)'))
-      const quantity = remainingPurchaseQuantityAfterOutbound(
-        sourceQuantity,
-        supplierKey(supplierOrderNumber, sku),
-      )
-      if (quantity === 0) return null
-
       return {
         source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
         sourceFileName: purchaseHistory.fileName,
@@ -412,7 +385,7 @@ export async function parseEcountPurchasingSnapshot(input: {
         sku,
         productName: valueAt(row, purchaseHistory, '품목명'),
         optionName: emptyToNull(valueAt(row, purchaseHistory, '규격')),
-        quantity,
+        quantity: sourceQuantity,
         chinaArrivalRequestDate,
         purchaseManagementCode,
         purchaseOrderNumber: emptyToNull(valueAt(row, purchaseHistory, '발주서-no')),
@@ -423,7 +396,10 @@ export async function parseEcountPurchasingSnapshot(input: {
       } satisfies EcountPurchaseCompletedItem
     })
     .filter((row): row is EcountPurchaseCompletedItem => row !== null)
-  const purchaseCompleted = [...purchaseCompletedFromHistory, ...purchaseCompletedFromPlan]
+  const purchaseCompleted = reconcilePurchaseCompletedWithOutbound(
+    [...purchaseCompletedFromHistory, ...purchaseCompletedFromPlan],
+    chinaOutboundItems,
+  )
 
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
@@ -473,6 +449,80 @@ export async function parseEcountPurchasingSnapshot(input: {
     },
     warnings,
   }
+}
+
+function reconcilePurchaseCompletedWithOutbound(
+  purchaseItems: EcountPurchaseCompletedItem[],
+  outboundItems: EcountOutboundPendingItem[],
+) {
+  const remainingOutboundQuantity = new Map<number, number>(
+    outboundItems.map((item, index) => [index, item.quantity]),
+  )
+  const orderedOutbound = outboundItems
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => (
+      left.item.effectiveDate.localeCompare(right.item.effectiveDate)
+      || left.item.sourceRowNumber - right.item.sourceRowNumber
+      || left.index - right.index
+    ))
+  const orderedPurchases = purchaseItems
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => (
+      (left.item.purchaseDate ?? '9999-12-31').localeCompare(right.item.purchaseDate ?? '9999-12-31')
+      || left.item.sourceRowNumber - right.item.sourceRowNumber
+      || left.index - right.index
+    ))
+  const remainingPurchaseQuantity = new Map<number, number>()
+
+  const consumeOutbound = (
+    quantity: number,
+    matches: (outbound: EcountOutboundPendingItem) => boolean,
+  ) => {
+    let remaining = quantity
+    for (const { item: outbound, index } of orderedOutbound) {
+      if (remaining === 0 || !matches(outbound)) continue
+      const outboundRemaining = remainingOutboundQuantity.get(index) ?? 0
+      const allocated = Math.min(remaining, outboundRemaining)
+      if (allocated === 0) continue
+      remainingOutboundQuantity.set(index, outboundRemaining - allocated)
+      remaining -= allocated
+    }
+    return remaining
+  }
+
+  for (const { item: purchase, index } of orderedPurchases) {
+    let remaining = purchase.quantity
+    const exactSupplierKey = supplierKey(purchase.supplierOrderNumber, purchase.sku)
+    if (exactSupplierKey) {
+      remaining = consumeOutbound(
+        remaining,
+        (outbound) => (
+          outbound.effectiveDate >= (purchase.purchaseDate ?? '')
+          && supplierKey(outbound.supplierOrderNumber, outbound.sku) === exactSupplierKey
+        ),
+      )
+    }
+
+    // China outbound reports often omit the supplier order number. In that case,
+    // the SKU is variant-level, so consume only later outbound rows in FIFO order.
+    if (remaining > 0 && purchase.purchaseDate) {
+      const purchaseDate = purchase.purchaseDate
+      remaining = consumeOutbound(
+        remaining,
+        (outbound) => (
+          outbound.supplierOrderNumber === null
+          && outbound.sku === purchase.sku
+          && outbound.effectiveDate >= purchaseDate
+        ),
+      )
+    }
+    remainingPurchaseQuantity.set(index, remaining)
+  }
+
+  return purchaseItems.flatMap((item, index) => {
+    const quantity = remainingPurchaseQuantity.get(index) ?? item.quantity
+    return quantity > 0 ? [{ ...item, quantity }] : []
+  })
 }
 
 export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnapshot) {
@@ -648,6 +698,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       rowNumber: ++nextRowNumber,
       status: 'purchase_completed' as const,
       requestDate: item.purchaseDate,
+      outboundExpectedDate: item.purchaseDate,
       sku: item.sku,
       productName: item.productName,
       optionName: item.optionName,

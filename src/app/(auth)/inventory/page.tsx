@@ -27,6 +27,7 @@ const searchParamsCache = createSearchParamsCache({
   sort: parseAsString,
   order: parseAsString,
   warehouseZone: parseAsString,
+  focusSku: parseAsString,
   // 검색 트리거 sentinel — 이게 없으면 페이지 진입 직후엔 fetch 하지 않는다.
   searched: parseAsString,
 })
@@ -99,6 +100,7 @@ export default async function InventoryPage({
         page={params.page}
         pageSize={params.pageSize}
         warehouseZones={warehouseZones}
+        focusSku={params.focusSku ?? undefined}
       />
     </div>
   )

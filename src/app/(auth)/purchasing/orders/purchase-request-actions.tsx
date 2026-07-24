@@ -849,7 +849,7 @@ export function PurchasePlanFieldsV2({
         <Input
           name={dateField}
           type="date"
-          defaultValue={formatDateInput(dateValue) || todayDateInput()}
+          defaultValue={formatDateInput(dateValue)}
           className="h-7 text-xs"
         />
       </label>
@@ -956,17 +956,4 @@ function formatDateInput(value: string | Date | null) {
   if (!value) return ''
   if (value instanceof Date) return value.toISOString().slice(0, 10)
   return value.slice(0, 10)
-}
-
-function todayDateInput() {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-  const year = parts.find((part) => part.type === 'year')?.value ?? '0000'
-  const month = parts.find((part) => part.type === 'month')?.value ?? '00'
-  const day = parts.find((part) => part.type === 'day')?.value ?? '00'
-  return `${year}-${month}-${day}`
 }

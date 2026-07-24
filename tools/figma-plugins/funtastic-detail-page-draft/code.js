@@ -224,6 +224,9 @@ async function pair(message) {
     figmaFileKey: message.figmaFileKey || DEFAULT_FILE_KEY,
   })
   figma.ui.postMessage({ type: 'paired' })
+  // A successful one-time pairing should immediately process the item the
+  // operator just queued in SaaS, without requiring a second plugin click.
+  await sync()
 }
 
 async function sync() {

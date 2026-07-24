@@ -35,6 +35,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       ], [
         ['00002', '부자재', '', '부자재', 4, 4],
         ['100001-0001', '테스트 상품', '블루', '상품', 50, 30],
+        ['110115-package', '비정형 부자재', '패키지', '부자재', 7, 0],
       ]),
       makeUpload('중국 출고.xlsx', [
         '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
@@ -59,8 +60,8 @@ describe('parseEcountPurchasingSnapshot', () => {
       requestedQuantity: 10,
       purchaseManagementCode: 'P-001',
     })
-    expect(snapshot.chinaInventory).toHaveLength(2)
-    expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 30])
+    expect(snapshot.chinaInventory).toHaveLength(3)
+    expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 50, 7])
     expect(snapshot.purchaseCompleted).toHaveLength(4)
     expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
       {

@@ -47,6 +47,9 @@ export type RegistrationRow = {
   productNotice: Array<{ label: string; value: string }>
   channels: RegistrationChannel[]
   matchedSalesCodes: number
+  matchedSalesCodeList: string[]
+  inventorySkus: string[]
+  inventoryAvailableStock: number
 }
 
 export async function ensureMarketplaceRegistrationTables() {
@@ -113,11 +116,58 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
         WHERE c.profile_id = r.id
       ), '[]'::jsonb) AS channels,
       COALESCE((
+        SELECT ARRAY_AGG(DISTINCT p.product_code ORDER BY p.product_code)
+        FROM analytics_price_table_rows p
+        WHERE p.user_id = ${userId}
+          AND p.source_sheet_name = '상품등록'
+          AND p.product_code IN (
+            SELECT r.product_code
+            UNION
+            SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
+            UNION
+            SELECT option_value->>'barcode'
+            FROM jsonb_array_elements(r.source_options) option_value
+            WHERE COALESCE(option_value->>'barcode', '') <> ''
+          )
+      ), ARRAY[]::text[]) AS "matchedSalesCodeList",
+      COALESCE((
+        SELECT ARRAY_AGG(DISTINCT i.sku ORDER BY i.sku)
+        FROM inventory i
+        WHERE i.user_id = ${userId}
+          AND i.sku IN (
+            SELECT r.product_code
+            UNION
+            SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
+            UNION
+            SELECT option_value->>'barcode'
+            FROM jsonb_array_elements(r.source_options) option_value
+            WHERE COALESCE(option_value->>'barcode', '') <> ''
+          )
+      ), ARRAY[]::text[]) AS "inventorySkus",
+      COALESCE((
+        SELECT SUM(i.available_stock)::int
+        FROM inventory i
+        WHERE i.user_id = ${userId}
+          AND i.sku IN (
+            SELECT r.product_code
+            UNION
+            SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
+            UNION
+            SELECT option_value->>'barcode'
+            FROM jsonb_array_elements(r.source_options) option_value
+            WHERE COALESCE(option_value->>'barcode', '') <> ''
+          )
+      ), 0)::int AS "inventoryAvailableStock",
+      COALESCE((
         SELECT COUNT(DISTINCT p.product_code)
         FROM analytics_price_table_rows p
         WHERE p.user_id = ${userId}
           AND p.source_sheet_name = '상품등록'
           AND p.product_code IN (
+            SELECT r.product_code
+            UNION
+            SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
+            UNION
             SELECT option_value->>'barcode'
             FROM jsonb_array_elements(r.source_options) option_value
             WHERE COALESCE(option_value->>'barcode', '') <> ''

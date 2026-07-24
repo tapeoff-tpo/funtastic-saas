@@ -92,6 +92,7 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
   const selected = rows.find((row) => row.productCode === selectedCode) ?? null
   const selectedImages = selected ? registrationImages(selected) : null
   const selectedChecks = selected ? registrationChecks(selected) : []
+  const inventorySku = selected?.inventorySkus[0] ?? null
 
   const counts = useMemo(() => ({
     all: rows.length,
@@ -255,7 +256,15 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                     <Badge variant="outline" className={sourceStatusClass(selected.sourceStatus)}>
                       {sourceStatusLabel(selected.sourceStatus)}
                     </Badge>
-                    <Badge variant="outline">재고 {selected.stock.toLocaleString('ko-KR')}</Badge>
+                    <Badge variant="outline">B2B 재고 {selected.stock.toLocaleString('ko-KR')}</Badge>
+                    {inventorySku ? (
+                      <a
+                        href={`/inventory?search=${encodeURIComponent(inventorySku)}&searched=1&focusSku=${encodeURIComponent(inventorySku)}`}
+                        className="inline-flex h-6 items-center rounded-md border border-blue-200 bg-blue-50 px-2 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        SaaS 재고 {selected.inventoryAvailableStock.toLocaleString('ko-KR')}
+                      </a>
+                    ) : null}
                     <Badge variant="outline">배송비 {formatPrice(selected.shippingFee)}</Badge>
                   </div>
                 </div>
@@ -312,6 +321,42 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                       <div><dt className="text-xs text-muted-foreground">최소 주문</dt><dd>{selected.minOrderQty}{selected.unit || 'EA'}</dd></div>
                       <div><dt className="text-xs text-muted-foreground">판매코드 매칭</dt><dd>{selected.matchedSalesCodes}개</dd></div>
                     </dl>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-semibold">운영 연결</h3>
+                      <span className="text-xs text-muted-foreground">코드를 누르면 해당 화면으로 이동합니다</span>
+                    </div>
+                    <div className="space-y-2 rounded border bg-background p-2.5 text-xs">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="shrink-0 text-muted-foreground">SaaS 재고</span>
+                        {inventorySku ? (
+                          <a
+                            href={`/inventory?search=${encodeURIComponent(inventorySku)}&searched=1&focusSku=${encodeURIComponent(inventorySku)}`}
+                            className="min-w-0 text-right font-mono text-blue-700 hover:underline"
+                          >
+                            {selected.inventorySkus.join(', ')} · {selected.inventoryAvailableStock.toLocaleString('ko-KR')}개
+                          </a>
+                        ) : <span className="text-right text-muted-foreground">매칭 SKU 없음</span>}
+                      </div>
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="shrink-0 text-muted-foreground">판매가 테이블</span>
+                        {selected.matchedSalesCodeList.length ? (
+                          <span className="flex min-w-0 flex-wrap justify-end gap-1">
+                            {selected.matchedSalesCodeList.map((code) => (
+                              <a
+                                key={code}
+                                href={`/analytics/price-table?sheet=${encodeURIComponent('상품등록')}&q=${encodeURIComponent(code)}`}
+                                className="rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 font-mono text-violet-700 hover:bg-violet-100"
+                              >
+                                {code}
+                              </a>
+                            ))}
+                          </span>
+                        ) : <span className="text-right text-muted-foreground">연결된 판매코드 없음</span>}
+                      </div>
+                    </div>
                   </div>
 
                   <div>

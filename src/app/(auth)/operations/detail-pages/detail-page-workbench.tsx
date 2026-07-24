@@ -33,6 +33,12 @@ type DetailPageJob = {
   imageError: string | null
 }
 
+type PersistedWorkbenchState = {
+  jobs: DetailPageJob[]
+  activeId: string | null
+  consumedProductIds: string[]
+}
+
 const STATUS = {
   draft: { label: '작업 설정', className: 'border-slate-200 bg-slate-50 text-slate-700' },
   asset_pending: { label: '이미지 수집 대기', className: 'border-amber-200 bg-amber-50 text-amber-800' },
@@ -47,6 +53,7 @@ const EMPTY_PRODUCT: DetailPageProduct = {
 }
 
 const DETAIL_PAGE_SELECTION_KEY = 'funtastic-detail-page-selection'
+const DETAIL_PAGE_WORKBENCH_STATE_KEY = 'funtastic-detail-page-workbench-state-v1'
 const EMPTY_PRODUCTS: DetailPageProduct[] = []
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
@@ -65,6 +72,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [consumedProductIds, setConsumedProductIds] = useState<Set<string>>(() => new Set())
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set())
   const [extensionReady, setExtensionReady] = useState(false)
+  const [workbenchLoaded, setWorkbenchLoaded] = useState(false)
   const incomingProducts = selectedProducts.length > 0 ? selectedProducts : sessionProducts
   const draftProducts = useMemo(
     () => incomingProducts.filter((product) => !consumedProductIds.has(product.id)),
@@ -86,6 +94,32 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       ['제조국', activeProduct.country],
     ].filter(([, value]) => !value.trim()).map(([label]) => label)
   ), [activeProduct])
+
+  useEffect(() => {
+    const saved = readWorkbenchState()
+    const restoreTimer = window.setTimeout(() => {
+      if (saved) {
+        setJobs(saved.jobs)
+        setActiveId(saved.activeId)
+        setConsumedProductIds(new Set(saved.consumedProductIds))
+      }
+      setWorkbenchLoaded(true)
+    }, 0)
+    return () => window.clearTimeout(restoreTimer)
+  }, [])
+
+  useEffect(() => {
+    if (!workbenchLoaded || typeof window === 'undefined') return
+    try {
+      window.localStorage.setItem(DETAIL_PAGE_WORKBENCH_STATE_KEY, JSON.stringify({
+        jobs,
+        activeId,
+        consumedProductIds: Array.from(consumedProductIds),
+      } satisfies PersistedWorkbenchState))
+    } catch {
+      // Keep the current work usable even when browser storage is unavailable.
+    }
+  }, [activeId, consumedProductIds, jobs, workbenchLoaded])
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -472,6 +506,53 @@ function isDetailPageProduct(value: unknown): value is DetailPageProduct {
     && typeof product.weight === 'string'
     && typeof product.country === 'string'
     && typeof product.capacity === 'string'
+}
+
+function readWorkbenchState(): PersistedWorkbenchState | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const saved = window.localStorage.getItem(DETAIL_PAGE_WORKBENCH_STATE_KEY)
+    const parsed = saved ? JSON.parse(saved) : null
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.jobs)) return null
+
+    const jobs = parsed.jobs.filter(isDetailPageJob).map((job) => (
+      job.status === 'collecting'
+        ? {
+            ...job,
+            status: 'asset_pending' as const,
+            imageRunId: null,
+            imageAcknowledged: false,
+            imageError: '페이지를 새로고침해 이미지 수집이 중단되었습니다. 다시 시작해주세요.',
+          }
+        : job
+    ))
+    const consumedProductIds = Array.isArray(parsed.consumedProductIds)
+      ? parsed.consumedProductIds.filter((id: unknown): id is string => typeof id === 'string')
+      : []
+    const activeId = typeof parsed.activeId === 'string' && jobs.some((job) => job.id === parsed.activeId)
+      ? parsed.activeId
+      : jobs[0]?.id ?? null
+
+    return { jobs, activeId, consumedProductIds }
+  } catch {
+    return null
+  }
+}
+
+function isDetailPageJob(value: unknown): value is DetailPageJob {
+  if (!value || typeof value !== 'object') return false
+  const job = value as Partial<DetailPageJob>
+  return typeof job.id === 'string'
+    && isDetailPageProduct(job.product)
+    && ['draft', 'asset_pending', 'collecting', 'draft_pending', 'review', 'completed'].includes(job.status ?? '')
+    && typeof job.template === 'string'
+    && typeof job.note === 'string'
+    && typeof job.createdAt === 'string'
+    && Array.isArray(job.images)
+    && job.images.every((image) => typeof image === 'string')
+    && (typeof job.imageRunId === 'string' || job.imageRunId === null)
+    && typeof job.imageAcknowledged === 'boolean'
+    && (typeof job.imageError === 'string' || job.imageError === null)
 }
 
 function subscribeToSessionProducts() {

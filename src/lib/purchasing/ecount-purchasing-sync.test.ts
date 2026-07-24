@@ -41,7 +41,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       ], [
         ['100001-0001', '20260713-001', '이미 입고된 상품', '블루', 10, '2026-07-13', '123456789', 'OUT-001'],
         ['109037-9998-package', '20260715-001', '입고예정 상품', '패키지', 20, '2026-07-15', '123456789', 'OUT-002'],
-        ['100002-0001', '20260720-001', '주문번호 있는 상품', '레드', 5, '2026-07-20', '987654321', 'OUT-003'],
+        ['100002-0001', '20260720-001', '주문번호 없는 상품', '레드', 5, '2026-07-20', '', 'OUT-003'],
         ['00002', '20260720-002', '부자재 출고', '', 4, '2026-07-20', '', 'OUT-004'],
       ]),
     ])
@@ -61,7 +61,15 @@ describe('parseEcountPurchasingSnapshot', () => {
     })
     expect(snapshot.chinaInventory).toHaveLength(2)
     expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 30])
-    expect(snapshot.purchaseCompleted).toHaveLength(3)
+    expect(snapshot.purchaseCompleted).toHaveLength(4)
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
+      {
+        source: 'ecount_purchasing_snapshot_purchase_completed',
+        sku: '100001-0001',
+        quantity: 10,
+        purchaseManagementCode: 'P-001',
+      },
+    ))
     expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
       {
         source: 'ecount_purchasing_snapshot_plan_purchase_completed',
@@ -99,9 +107,9 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.validation).toMatchObject({
       activeRequestsMatchedToPlan: 1,
       activeRequestsMatchedToPurchase: 1,
-      outboundRowsWithSupplierOrder: 2,
+      outboundRowsWithSupplierOrder: 1,
       outboundRowsMatchedToPurchase: 1,
-      outboundRowsWithoutReliableSupplierOrder: 0,
+      outboundRowsWithoutReliableSupplierOrder: 1,
     })
   })
 

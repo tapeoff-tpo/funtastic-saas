@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,10 @@ type DetailPageJob = {
   template: string
   note: string
   createdAt: string
+  images: string[]
+  imageRunId: string | null
+  imageAcknowledged: boolean
+  imageError: string | null
 }
 
 const STATUS = {
@@ -43,6 +47,8 @@ const EMPTY_PRODUCT: DetailPageProduct = {
 
 const DETAIL_PAGE_SELECTION_KEY = 'funtastic-detail-page-selection'
 const EMPTY_PRODUCTS: DetailPageProduct[] = []
+const PAGE_SOURCE = 'funtastic-saas'
+const EXTENSION_SOURCE = 'funtastic-1688-extension'
 let cachedSessionProducts: DetailPageProduct[] | null = null
 
 export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: DetailPageProduct[] }) {
@@ -57,6 +63,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [note, setNote] = useState('')
   const [consumedProductIds, setConsumedProductIds] = useState<Set<string>>(() => new Set())
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set())
+  const [extensionReady, setExtensionReady] = useState(false)
   const incomingProducts = selectedProducts.length > 0 ? selectedProducts : sessionProducts
   const draftProducts = useMemo(
     () => incomingProducts.filter((product) => !consumedProductIds.has(product.id)),
@@ -79,6 +86,51 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     ].filter(([, value]) => !value.trim()).map(([label]) => label)
   ), [activeProduct])
 
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.source !== window || event.origin !== window.location.origin) return
+      const message = event.data
+      if (!message || message.source !== EXTENSION_SOURCE || typeof message.type !== 'string') return
+
+      if (message.type === 'FUNTASTIC_1688_PONG') {
+        setExtensionReady(true)
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_RESULT') {
+        const images = normalizeImageUrls(message.images)
+        setJobs((current) => current.map((job) => {
+          if (job.id !== message.jobId || job.imageRunId !== message.runId) return job
+          return images.length > 0
+            ? { ...job, status: 'review', images, imageRunId: null, imageError: null }
+            : { ...job, status: 'asset_pending', imageRunId: null, imageError: '1688 상품 이미지가 발견되지 않았습니다.' }
+        }))
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_ACK') {
+        setJobs((current) => current.map((job) => (
+          job.imageRunId === message.runId
+            ? { ...job, imageAcknowledged: true }
+            : job
+        )))
+        return
+      }
+
+      if (message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_ERROR') {
+        setJobs((current) => current.map((job) => (
+          job.imageRunId === message.runId
+            ? { ...job, status: 'asset_pending', imageRunId: null, imageError: message.message || '1688 이미지 수집에 실패했습니다.' }
+            : job
+        )))
+      }
+    }
+
+    window.addEventListener('message', onMessage)
+    window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_1688_PING' }, window.location.origin)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+
   function createJobs() {
     if (selectedDraftProducts.length === 0) return
     const createdAt = new Date().toLocaleString('ko-KR')
@@ -89,6 +141,10 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       template,
       note: note.trim(),
       createdAt,
+      images: [],
+      imageRunId: null,
+      imageAcknowledged: false,
+      imageError: null,
     }))
     setJobs((current) => [...created, ...current])
     setActiveId(created[0]?.id ?? null)
@@ -129,6 +185,40 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   function moveJob(status: DetailPageJob['status']) {
     if (!activeJob) return
     setJobs((current) => current.map((job) => job.id === activeJob.id ? { ...job, status } : job))
+  }
+
+  function startImageCollection() {
+    if (!activeJob) return
+    if (!activeJob.product.purchaseUrl) {
+      setJobs((current) => current.map((job) => (
+        job.id === activeJob.id
+          ? { ...job, imageError: '품목에 구매 URL이 없어 1688 이미지를 수집할 수 없습니다.' }
+          : job
+      )))
+      return
+    }
+
+    const runId = createRunId()
+    setJobs((current) => current.map((job) => (
+      job.id === activeJob.id
+        ? { ...job, status: 'collecting', imageRunId: runId, imageAcknowledged: false, imageError: null }
+        : job
+    )))
+    window.postMessage({
+      source: PAGE_SOURCE,
+      type: 'FUNTASTIC_1688_DETAIL_IMAGES_START',
+      runId,
+      jobId: activeJob.id,
+      url: normalizeUrl(activeJob.product.purchaseUrl),
+    }, window.location.origin)
+
+    window.setTimeout(() => {
+      setJobs((current) => current.map((job) => (
+        job.id === activeJob.id && job.imageRunId === runId && !job.imageAcknowledged
+          ? { ...job, status: 'asset_pending', imageRunId: null, imageError: '확장프로그램이 응답하지 않습니다. 확장프로그램을 다시 로드한 뒤 재시도해주세요.' }
+          : job
+      )))
+    }, 8_000)
   }
 
   return (
@@ -261,11 +351,12 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         <WorkflowStep icon={FilePenLine} label="Figma 검수" active={activeJob.status === 'completed'} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
-                        {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={() => moveJob('collecting')}><ImagePlus />이미지 수집 시작</Button> : null}
+                        {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />이미지 수집 시작</Button> : null}
                         {activeJob.status === 'collecting' ? <Button type="button" variant="outline" onClick={() => moveJob('review')}><WandSparkles />Figma 초안 생성</Button> : null}
                         {activeJob.status === 'review' ? <Button type="button" onClick={() => moveJob('completed')}><FilePenLine />Figma 검수 완료</Button> : null}
                         {activeJob.status === 'completed' ? <Badge variant="outline" className="h-8 border-emerald-200 bg-emerald-50 px-3 text-emerald-800"><Check />Figma 링크 저장 예정</Badge> : null}
                       </div>
+                      {activeJob.imageError ? <p className="mt-3 text-xs text-destructive">{activeJob.imageError}</p> : null}
                     </section>
                   )}
                 </div>
@@ -277,6 +368,18 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                     <p className="mt-2 text-sm font-medium">{activeJob?.status === 'completed' ? '편집 파일 준비됨' : '편집 파일 대기'}</p>
                     <p className="mt-1 text-xs text-muted-foreground">완료 후 이 작업과 품목에 같은 링크가 표시됩니다.</p>
                   </div>
+                  {activeJob?.images.length ? (
+                    <div className="mt-4">
+                      <p className="text-xs font-medium">수집 이미지 {activeJob.images.length}장</p>
+                      <div className="mt-2 grid grid-cols-3 gap-1.5">
+                        {activeJob.images.slice(0, 9).map((imageUrl) => (
+                          <a key={imageUrl} href={imageUrl} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden border bg-background">
+                            <img src={imageUrl} alt={`${activeJob.product.name} 수집 이미지`} className="size-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   {activeJob?.note ? <p className="mt-4 text-xs text-muted-foreground">메모: {activeJob.note}</p> : null}
                   {activeJob ? <p className="mt-2 text-xs text-muted-foreground">생성: {activeJob.createdAt}</p> : null}
                 </aside>
@@ -331,6 +434,27 @@ function WorkflowStep({ icon: Icon, label, active }: { icon: typeof Clock3; labe
 
 function normalizeUrl(value: string) {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`
+}
+
+function normalizeImageUrls(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const images = new Set<string>()
+  for (const entry of value) {
+    if (typeof entry !== 'string' || images.size >= 30) continue
+    try {
+      const url = new URL(entry.startsWith('//') ? `https:${entry}` : entry)
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') continue
+      images.add(url.toString())
+    } catch {
+      // Ignore malformed image addresses from the page.
+    }
+  }
+  return Array.from(images)
+}
+
+function createRunId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return `detail-images-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 function isDetailPageProduct(value: unknown): value is DetailPageProduct {

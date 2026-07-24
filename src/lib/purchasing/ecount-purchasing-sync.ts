@@ -150,7 +150,7 @@ const REPORT_DEFINITIONS: Array<{
   },
   {
     kind: 'chinaInventory',
-    requiredHeaders: ['품목구분', '합계', '중국창고'],
+    requiredHeaders: ['품목코드', '품목명', '품목구분', '합계'],
   },
   {
     kind: 'chinaOutbound',
@@ -252,22 +252,23 @@ export async function parseEcountPurchasingSnapshot(input: {
     .filter((row): row is EcountPendingRequest => row !== null)
 
   const chinaInventoryItems = readRows(chinaInventory)
-    .filter((row) => isChinaInventorySku(valueAt(row, chinaInventory, '품목코드')))
-    .map((row) => {
-      const quantity = positiveInteger(valueAt(row, chinaInventory, '중국창고'))
+    .map<EcountChinaInventoryItem | null>((row) => {
+      const sku = valueAt(row, chinaInventory, '품목코드')
+      const productName = valueAt(row, chinaInventory, '품목명')
+      const quantity = positiveInteger(valueAt(row, chinaInventory, '합계'))
       const optionName = emptyToNull(valueAt(row, chinaInventory, '규격'))
-      if (quantity === 0) return null
+      if (!sku || !productName) return null
 
       return {
         sourceFileName: chinaInventory.fileName,
         sourceRowNumber: row.number,
-        sku: valueAt(row, chinaInventory, '품목코드'),
-        productName: valueAt(row, chinaInventory, '품목명'),
+        sku,
+        productName,
         optionName,
         optionKey: optionName ?? '',
         productType: emptyToNull(valueAt(row, chinaInventory, '품목구분')),
         quantity,
-      } satisfies EcountChinaInventoryItem
+      }
     })
     .filter((row): row is EcountChinaInventoryItem => row !== null)
 
@@ -960,10 +961,6 @@ function emptyToNull(value: string) {
 
 function isPurchaseItemSku(value: string) {
   return /^\d{5,}-\d+(?:[-_].+)?$/i.test(value)
-}
-
-function isChinaInventorySku(value: string) {
-  return isPurchaseItemSku(value) || /^\d{3,5}$/.test(value)
 }
 
 function isReliableSupplierOrderNumber(value: string) {

@@ -1505,3 +1505,77 @@ export const sourcingCandidates = pgTable(
     index('sourcing_candidates_user_created_idx').on(table.userId, table.createdAt),
   ],
 )
+
+// ─── Operations: AI Detail Page Drafts ────────────────────────────────
+
+export const detailPageJobs = pgTable(
+  'detail_page_jobs',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    requestedByUserId: uuid('requested_by_user_id').notNull(),
+    clientJobKey: varchar('client_job_key', { length: 160 }).notNull(),
+    productId: varchar('product_id', { length: 120 }).notNull(),
+    sku: varchar('sku', { length: 100 }).notNull(),
+    productName: text('product_name').notNull(),
+    optionName: text('option_name'),
+    purchaseUrl: text('purchase_url'),
+    productSnapshot: jsonb('product_snapshot').$type<Record<string, string>>().notNull().default({}),
+    imageUrls: jsonb('image_urls').$type<string[]>().notNull().default([]),
+    template: varchar('template', { length: 120 }).notNull().default('기본 상품 상세'),
+    note: text('note'),
+    status: varchar('status', { length: 30 }).notNull().default('queued'),
+    errorMessage: text('error_message'),
+    figmaFileKey: varchar('figma_file_key', { length: 120 }).notNull(),
+    figmaNodeId: varchar('figma_node_id', { length: 120 }),
+    figmaUrl: text('figma_url'),
+    claimedByDeviceId: uuid('claimed_by_device_id'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('detail_page_jobs_user_client_key_uniq').on(table.userId, table.clientJobKey),
+    index('detail_page_jobs_user_status_created_idx').on(table.userId, table.status, table.createdAt),
+    index('detail_page_jobs_file_status_created_idx').on(table.figmaFileKey, table.status, table.createdAt),
+  ],
+)
+
+export const figmaBridgePairings = pgTable(
+  'figma_bridge_pairings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    deviceLabel: varchar('device_label', { length: 100 }),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('figma_bridge_pairings_token_hash_uniq').on(table.tokenHash),
+    index('figma_bridge_pairings_user_expires_idx').on(table.userId, table.expiresAt),
+  ],
+)
+
+export const figmaBridgeDevices = pgTable(
+  'figma_bridge_devices',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    name: varchar('name', { length: 100 }).notNull(),
+    figmaFileKey: varchar('figma_file_key', { length: 120 }).notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull(),
+    pluginVersion: varchar('plugin_version', { length: 30 }),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('figma_bridge_devices_token_hash_uniq').on(table.tokenHash),
+    index('figma_bridge_devices_user_created_idx').on(table.userId, table.createdAt),
+    index('figma_bridge_devices_user_file_idx').on(table.userId, table.figmaFileKey),
+  ],
+)

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 18px; color: #171717; font: 13px Inter, sans-serif; }
+      h1 { margin: 0 0 6px; font-size: 16px; }
+      p { margin: 0 0 16px; color: #6b7280; line-height: 1.5; }
+      label { display: block; margin-top: 12px; font-weight: 600; }
+      input { width: 100%; margin-top: 6px; border: 1px solid #d1d5db; border-radius: 6px; padding: 9px; font: inherit; }
+      button { width: 100%; margin-top: 16px; border: 0; border-radius: 7px; background: #171717; color: #fff; padding: 10px; font: inherit; font-weight: 700; cursor: pointer; }
+      button[disabled] { opacity: .5; cursor: wait; }
+      #message { min-height: 20px; margin-top: 12px; color: #374151; line-height: 1.45; }
+      #pairing { margin-top: 12px; padding-top: 2px; }
+      .hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <h1>Funtastic AI 상세페이지</h1>
+    <p>대기 중인 SaaS 작업을 이 파일의 새 편집 프레임으로 제작합니다.</p>
+    <div id="pairing">
+      <label>연결 코드<input id="pairingToken" autocomplete="off" placeholder="SaaS에서 생성한 10분 코드" /></label>
+      <label>연결 이름<input id="deviceName" value="AI 상세페이지 파일" /></label>
+      <label>Figma 파일 키<input id="figmaFileKey" value="X8yYgVtrAFKycEA0yy0kWI" /></label>
+      <button id="pairButton">Figma 파일 연결</button>
+    </div>
+    <button id="syncButton" class="hidden">대기 작업 전부 제작</button>
+    <div id="message"></div>
+    <script>
+      const pairing = document.getElementById('pairing')
+      const pairButton = document.getElementById('pairButton')
+      const syncButton = document.getElementById('syncButton')
+      const message = document.getElementById('message')
+      const input = (id) => document.getElementById(id).value.trim()
+      const setBusy = (busy) => {
+        pairButton.disabled = busy
+        syncButton.disabled = busy
+      }
+      pairButton.onclick = () => {
+        if (!input('pairingToken')) { message.textContent = 'SaaS에서 만든 연결 코드를 입력해주세요.'; return }
+        setBusy(true)
+        parent.postMessage({ pluginMessage: { type: 'pair', pairingToken: input('pairingToken'), deviceName: input('deviceName'), figmaFileKey: input('figmaFileKey') } }, '*')
+      }
+      syncButton.onclick = () => {
+        setBusy(true)
+        message.textContent = '대기 작업을 확인하고 있습니다.'
+        parent.postMessage({ pluginMessage: { type: 'sync' } }, '*')
+      }
+      onmessage = (event) => {
+        const data = event.data.pluginMessage
+        if (!data) return
+        if (data.type === 'state') {
+          document.getElementById('deviceName').value = data.deviceName || 'AI 상세페이지 파일'
+          document.getElementById('figmaFileKey').value = data.figmaFileKey || 'X8yYgVtrAFKycEA0yy0kWI'
+          if (data.paired) { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = '연결됨. 대기 작업을 제작할 수 있습니다.' }
+        }
+        if (data.type === 'paired') { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = '연결됐습니다. 이제 대기 작업을 제작하세요.'; setBusy(false) }
+        if (data.type === 'progress') message.textContent = `${data.index}번째: ${data.name} 초안을 만들고 있습니다.`
+        if (data.type === 'synced') { message.textContent = data.completed ? `${data.completed}건 초안을 만들었습니다. SaaS에서 검수 상태를 확인하세요.` : '제작할 대기 작업이 없습니다.'; setBusy(false) }
+        if (data.type === 'error') { message.textContent = data.message; setBusy(false) }
+      }
+    </script>
+  </body>
+</html>

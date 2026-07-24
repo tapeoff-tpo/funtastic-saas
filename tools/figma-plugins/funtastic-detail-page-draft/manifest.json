@@ -1,0 +1,15 @@
+{
+  "name": "Funtastic AI Detail Page Draft",
+  "api": "1.0.0",
+  "main": "code.js",
+  "ui": "ui.html",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": [
+      "https://funtastic-saas-vercel.vercel.app",
+      "https://*.1688.com",
+      "https://*.alicdn.com",
+      "https://*.taobaocdn.com"
+    ]
+  }
+}

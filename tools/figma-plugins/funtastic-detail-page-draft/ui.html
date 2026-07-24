@@ -56,6 +56,7 @@
           if (data.paired) { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = '연결됨. 대기 작업을 제작할 수 있습니다.' }
         }
         if (data.type === 'paired') { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = '연결됐습니다. 이제 대기 작업을 제작하세요.'; setBusy(false) }
+        if (data.type === 'automatic-sync') message.textContent = '연결됨. 이 창을 열어두면 SaaS의 초안 제작 요청을 자동으로 처리합니다.'
         if (data.type === 'progress') message.textContent = `${data.index}번째: ${data.name} 초안을 만들고 있습니다.`
         if (data.type === 'synced') { message.textContent = data.completed ? `${data.completed}건 초안을 만들었습니다. SaaS에서 검수 상태를 확인하세요.` : '제작할 대기 작업이 없습니다.'; setBusy(false) }
         if (data.type === 'error') { message.textContent = data.message; setBusy(false) }

@@ -1,6 +1,10 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
 const PLUGIN_VERSION = '1.0.0'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
+const AUTO_SYNC_INTERVAL_MS = 8_000
+
+let activeSync = null
+let automaticSyncStarted = false
 
 figma.showUI(__html__, { width: 390, height: 500, themeColors: true })
 
@@ -205,6 +209,7 @@ async function initialize() {
     deviceName: state?.deviceName || 'AI 상세페이지 파일',
     figmaFileKey: state?.figmaFileKey || DEFAULT_FILE_KEY,
   })
+  if (state?.bridgeToken) startAutomaticSync()
 }
 
 async function pair(message) {
@@ -224,12 +229,45 @@ async function pair(message) {
     figmaFileKey: message.figmaFileKey || DEFAULT_FILE_KEY,
   })
   figma.ui.postMessage({ type: 'paired' })
+  startAutomaticSync()
   // A successful one-time pairing should immediately process the item the
   // operator just queued in SaaS, without requiring a second plugin click.
   await sync()
 }
 
-async function sync() {
+function startAutomaticSync() {
+  if (automaticSyncStarted) return
+  automaticSyncStarted = true
+  figma.ui.postMessage({ type: 'automatic-sync' })
+
+  const poll = async () => {
+    try {
+      await sync(true)
+    } catch (error) {
+      automaticSyncStarted = false
+      figma.ui.postMessage({
+        type: 'error',
+        message: `자동 동기화를 멈췄습니다: ${error instanceof Error ? error.message : String(error)}`,
+      })
+      return
+    }
+    setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
+  }
+
+  setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
+}
+
+async function sync(silent = false) {
+  if (activeSync) return activeSync
+  activeSync = runSync(silent)
+  try {
+    return await activeSync
+  } finally {
+    activeSync = null
+  }
+}
+
+async function runSync(silent) {
   const state = await figma.clientStorage.getAsync('funtastic-detail-page-bridge')
   if (!state?.bridgeToken) throw new Error('먼저 SaaS에서 만든 연결 코드를 입력해주세요.')
   let completed = 0
@@ -262,7 +300,7 @@ async function sync() {
       }).catch(() => {})
     }
   }
-  figma.ui.postMessage({ type: 'synced', completed, empty })
+  if (!silent || completed > 0) figma.ui.postMessage({ type: 'synced', completed, empty })
 }
 
 figma.ui.onmessage = async (message) => {

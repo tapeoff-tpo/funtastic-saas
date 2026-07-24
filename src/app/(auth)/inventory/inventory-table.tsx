@@ -42,6 +42,7 @@ interface InventoryTableProps {
   warehouseZones: string[]
   searched: boolean
   mode?: 'inventory' | 'adjustments'
+  focusSku?: string
 }
 
 const columnHelper = createColumnHelper<InventoryRow>()
@@ -70,6 +71,7 @@ export function InventoryTable({
   warehouseZones,
   searched,
   mode = 'inventory',
+  focusSku,
 }: InventoryTableProps) {
   const [adjustDialog, setAdjustDialog] = useState<{
     open: boolean
@@ -87,6 +89,7 @@ export function InventoryTable({
   const [excelDialogOpen, setExcelDialogOpen] = useState(false)
   const [bulkAdjustmentOpen, setBulkAdjustmentOpen] = useState(false)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const [handledFocusSku, setHandledFocusSku] = useState<string | null>(null)
 
   const [, setPage] = useQueryState('page', parseAsInteger.withDefault(1).withOptions({ shallow: false }))
   const [, setPageSize] = useQueryState('pageSize', parseAsInteger.withDefault(25).withOptions({ shallow: false }))
@@ -114,6 +117,15 @@ export function InventoryTable({
   useEffect(() => {
     setMaxStockInput(filters.maxStock != null ? String(filters.maxStock) : '')
   }, [filters.maxStock])
+
+  // 상품 등록 관리에서 넘어온 SKU는 검색 결과가 준비되는 즉시 이력까지 연다.
+  useEffect(() => {
+    if (!focusSku || handledFocusSku === focusSku) return
+    const row = data.find((item) => item.sku === focusSku)
+    if (!row) return
+    setHandledFocusSku(focusSku)
+    setHistoryDialog({ open: true, inventoryId: row.id, sku: row.sku })
+  }, [data, focusSku, handledFocusSku])
 
   const submitSearch = useCallback(() => {
     const maxStock = maxStockInput.trim() === '' ? null : Number(maxStockInput)

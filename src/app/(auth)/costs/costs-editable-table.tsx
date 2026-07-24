@@ -22,9 +22,9 @@ type TableColumn =
 const PURCHASE_URL_HEADER = '구매 URL'
 const UPDATED_AT_HEADER = '최근 반영일'
 const WAREHOUSE_GROUP = {
-  label: '창고/재질',
+  label: '창고/상품정보',
   start: '한국창고기준 위치',
-  end: '재질',
+  end: '용량',
 }
 const EXTRA_GROUP = {
   label: '구분/반영',

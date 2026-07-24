@@ -11,6 +11,17 @@ import {
 } from './items'
 
 describe('parseEsa009mWorkbook', () => {
+  it('includes product-information fields in the item schema', () => {
+    expect(ESA009M_HEADERS).toEqual(expect.arrayContaining([
+      '재질',
+      '제품크기',
+      '제조사',
+      '무게',
+      '제조국',
+      '용량',
+    ]))
+  })
+
   it('preserves all ESA009M columns and skips rows without a code or name', async () => {
     const [codeHeader, nameHeader] = ESA009M_HEADERS
     const workbook = new ExcelJS.Workbook()

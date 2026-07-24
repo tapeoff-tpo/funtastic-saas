@@ -15,6 +15,11 @@ export const ESA009M_HEADERS = [
   '100KG 인증여부',
   'HS CODE',
   '재질',
+  '제품크기',
+  '제조사',
+  '무게',
+  '제조국',
+  '용량',
   '특가(元)',
   '신규원가(元)',
   '상품원가(元)',
@@ -254,14 +259,14 @@ export async function createPurchasingItem(input: {
     ),
   } as Esa009mData
 
-  const internalSku = nextData[ESA009M_HEADERS[0]]?.trim()
-  const name = nextData[ESA009M_HEADERS[1]]?.trim()
+  const internalSku = nextData['품목코드']?.trim()
+  const name = nextData['품목명']?.trim()
   if (!internalSku || !name) {
     return { error: '품목코드와 품목명은 필수입니다.' as const }
   }
 
-  nextData[ESA009M_HEADERS[0]] = internalSku
-  nextData[ESA009M_HEADERS[1]] = name
+  nextData['품목코드'] = internalSku
+  nextData['품목명'] = name
   const [existing] = await db
     .select({ id: products.id })
     .from(products)
@@ -277,8 +282,8 @@ export async function createPurchasingItem(input: {
       internalSku,
       name,
       basePrice: '0',
-      costPrice: numericText(nextData[ESA009M_HEADERS[14]] || nextData[ESA009M_HEADERS[13]]),
-      warehouseLocation: nextData[ESA009M_HEADERS[3]],
+      costPrice: numericText(nextData['works 신규 원가'] || nextData['works 기존 원가']),
+      warehouseLocation: nextData['한국창고기준 위치'],
       status: 'active' as const,
       metadata: { esa009m: nextData },
     })
@@ -317,10 +322,10 @@ export async function updatePurchasingItem(input: {
     ),
   } as Esa009mData
 
-  nextData[ESA009M_HEADERS[0]] = current.internalSku
-  const nextName = nextData[ESA009M_HEADERS[1]] || current.name
-  const warehouseLocation = nextData[ESA009M_HEADERS[3]]
-  const costPrice = numericText(nextData[ESA009M_HEADERS[14]] || nextData[ESA009M_HEADERS[13]])
+  nextData['품목코드'] = current.internalSku
+  const nextName = nextData['품목명'] || current.name
+  const warehouseLocation = nextData['한국창고기준 위치']
+  const costPrice = numericText(nextData['works 신규 원가'] || nextData['works 기존 원가'])
   const metadata = metadataWithPurchasingItemData(current.metadata, nextData)
 
   const [row] = await db

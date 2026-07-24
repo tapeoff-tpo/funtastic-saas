@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { ChevronLeft, ChevronRight, ExternalLink, Pencil, Plus, Save, X } from 'lucide-react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
+import { ChevronLeft, ChevronRight, ExternalLink, Pencil, Plus, Save, WandSparkles, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -44,9 +44,11 @@ function emptyDraft(headers: readonly string[]) {
 export function CostsEditableTable({
   headers,
   rows,
+  onSelectionChange,
 }: {
   headers: readonly string[]
   rows: CostEditableRow[]
+  onSelectionChange?: (rows: CostEditableRow[]) => void
 }) {
   const router = useRouter()
   const [editingRow, setEditingRow] = useState<CostEditableRow | null>(null)
@@ -54,6 +56,7 @@ export function CostsEditableTable({
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [message, setMessage] = useState<string | null>(null)
   const [openGroups, setOpenGroups] = useState({ warehouse: false, extra: false })
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [isPending, startTransition] = useTransition()
   const codeHeader = headers[0]
   const nameHeader = headers[1]
@@ -88,6 +91,29 @@ export function CostsEditableTable({
     return columns
   }, [headers, openGroups.extra, openGroups.warehouse])
 
+  const selectedRows = useMemo(
+    () => rows.filter((row) => selectedIds.has(row.id)),
+    [rows, selectedIds],
+  )
+  const allRowsSelected = rows.length > 0 && rows.every((row) => selectedIds.has(row.id))
+
+  useEffect(() => {
+    onSelectionChange?.(selectedRows)
+  }, [onSelectionChange, selectedRows])
+
+  function toggleRowSelection(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAllRows() {
+    setSelectedIds(allRowsSelected ? new Set() : new Set(rows.map((row) => row.id)))
+  }
+
   function openEdit(row: CostEditableRow) {
     setIsCreating(false)
     setEditingRow(row)
@@ -100,6 +126,24 @@ export function CostsEditableTable({
     setEditingRow(null)
     setDraft(emptyDraft(headers))
     setMessage(null)
+  }
+
+  function openDetailPageWorkflow() {
+    if (!editingRow) return
+    const params = new URLSearchParams({
+      itemId: editingRow.id,
+      sku: draft[codeHeader] || '',
+      name: draft[nameHeader] || '',
+      option: draft['규격정보'] || '',
+      purchaseUrl: draft[PURCHASE_URL_HEADER] || '',
+      material: draft['재질'] || '',
+      size: draft['제품크기'] || '',
+      manufacturer: draft['제조사'] || '',
+      weight: draft['무게'] || '',
+      country: draft['제조국'] || '',
+      capacity: draft['용량'] || '',
+    })
+    router.push(`/operations/detail-pages?${params.toString()}`)
   }
 
   function close() {
@@ -192,6 +236,15 @@ export function CostsEditableTable({
         <table className="min-w-full table-auto text-sm">
           <thead className="sticky top-0 z-[1] bg-muted">
             <tr className="border-b">
+              <th className="w-10 px-3 py-2.5 text-center">
+                <input
+                  type="checkbox"
+                  checked={allRowsSelected}
+                  onChange={toggleAllRows}
+                  aria-label="현재 페이지 품목 전체 선택"
+                  className="size-4 accent-foreground"
+                />
+              </th>
               {tableColumns.map((column, index) => {
                 if (column.type === 'collapse') {
                   return (
@@ -219,7 +272,7 @@ export function CostsEditableTable({
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={tableColumns.length} className="h-40 text-center text-muted-foreground">
+                <td colSpan={tableColumns.length + 1} className="h-40 text-center text-muted-foreground">
                   표시할 품목이 없습니다. ESA009M 양식을 업로드하거나 품목을 추가해주세요.
                 </td>
               </tr>
@@ -229,12 +282,22 @@ export function CostsEditableTable({
                 className="cursor-pointer border-b hover:bg-muted/40 focus-within:bg-muted/40"
                 onClick={() => openEdit(row)}
               >
+                <td className="w-10 px-3 py-2 text-center align-top">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(row.id)}
+                    onChange={() => toggleRowSelection(row.id)}
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label={`${row.data[nameHeader] || row.data[codeHeader] || '품목'} 선택`}
+                    className="size-4 accent-foreground"
+                  />
+                </td>
                 {tableColumns.map((column, index) => {
                   if (column.type === 'collapse') return <CollapsedCell key={`${row.id}-${column.group}-${index}`} />
                   if (column.type === 'updatedAt') {
                     return (
                       <td key={`${row.id}-updated-at`} className="whitespace-nowrap px-3 py-2 text-muted-foreground">
-                        {new Date(row.updatedAt).toLocaleString('ko-KR')}
+                        {formatUpdatedAt(row.updatedAt)}
                       </td>
                     )
                   }
@@ -305,7 +368,15 @@ export function CostsEditableTable({
             </div>
 
             <div className="flex flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-destructive">{message}</p>
+              <div className="flex min-w-0 items-center gap-2">
+                {!isCreating ? (
+                  <Button type="button" variant="outline" onClick={openDetailPageWorkflow} disabled={isPending}>
+                    <WandSparkles />
+                    상세페이지 제작
+                  </Button>
+                ) : null}
+                <p className="truncate text-xs text-destructive">{message}</p>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={close} disabled={isPending}>취소</Button>
                 <Button type="button" onClick={save} disabled={isPending}>
@@ -381,4 +452,20 @@ function cellClassName(header: string, nameHeader: string) {
   if (header === '품목코드') return 'w-28 whitespace-nowrap font-mono text-xs text-muted-foreground'
   if (header === PURCHASE_URL_HEADER) return 'w-20 whitespace-nowrap'
   return 'whitespace-nowrap'
+}
+
+function formatUpdatedAt(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const valueFor = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
+  return `${valueFor('year')}-${valueFor('month')}-${valueFor('day')} ${valueFor('hour')}:${valueFor('minute')}`
 }

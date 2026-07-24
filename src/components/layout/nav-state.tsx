@@ -58,6 +58,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/operations/deal-calendar': '딜 캘린더',
   '/operations/sourcing': '소싱',
   '/operations/marketplace-registration': '상품 등록 관리',
+  '/operations/detail-pages': '상세페이지 제작',
   '/operations/ai-accounts': 'AI 계정공유',
   '/settings': '설정',
   '/settings/account': '계정 설정',

@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import {
   AlertTriangle,
   CheckCircle2,
-  Download,
   Link2,
   LoaderCircle,
   Square,
@@ -14,7 +13,6 @@ import { toast } from 'sonner'
 
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
-const EXTENSION_DOWNLOAD = '/downloads/funtastic-1688-url-collector-1.2.3.zip'
 const SHOW_COLLECTION_CONTROLS = false
 
 type QueueResponse = {
@@ -598,14 +596,6 @@ export function PurchasingUrlCollector() {
   return (
     <div className="flex max-w-2xl flex-col items-end gap-2">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <a
-          href={EXTENSION_DOWNLOAD}
-          download
-          className="inline-flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium hover:bg-muted"
-        >
-          <Download className="size-4" aria-hidden="true" />
-          확장프로그램
-        </a>
         {SHOW_COLLECTION_CONTROLS ? (
           <>
             <button

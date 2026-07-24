@@ -579,14 +579,21 @@ function purchasingItemConditions(
     sql`${products.metadata}->'esa009m' IS NOT NULL`,
   ]
   if (search) {
-    const pattern = `%${search}%`
-    conditions.push(or(
-      ilike(products.internalSku, pattern),
-      ilike(products.name, pattern),
-      sql`${products.metadata}->'esa009m'->>'영문명' ILIKE ${pattern}`,
-      sql`${products.metadata}->'esa009m'->>'HS CODE' ILIKE ${pattern}`,
-      sql`${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER} ILIKE ${pattern}`,
-    )!)
+    const searchTerms = Array.from(new Set(search
+      .split(/[,，\n]+/)
+      .map((term) => term.trim())
+      .filter(Boolean)))
+    const searchConditions = searchTerms.map((term) => {
+      const pattern = `%${term}%`
+      return or(
+        ilike(products.internalSku, pattern),
+        ilike(products.name, pattern),
+        sql`${products.metadata}->'esa009m'->>'영문명' ILIKE ${pattern}`,
+        sql`${products.metadata}->'esa009m'->>'HS CODE' ILIKE ${pattern}`,
+        sql`${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER} ILIKE ${pattern}`,
+      )!
+    })
+    if (searchConditions.length > 0) conditions.push(or(...searchConditions)!)
   }
   for (const header of ESA009M_HEADERS) {
     const value = filters?.[header]?.trim()

@@ -33,6 +33,7 @@ import {
   ChevronDown,
   ChevronRight,
   CalendarDays,
+  PanelsTopLeft,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useNavState } from './nav-state'
@@ -145,6 +146,7 @@ export const navSections: NavSection[] = [
       { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
       { href: '/operations/sourcing', label: '소싱', icon: Search },
       { href: '/operations/marketplace-registration', label: '상품 등록 관리', icon: Package },
+      { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },
       { href: '/operations/ai-accounts', label: 'AI 계정공유', icon: Bot },
       { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
     ],

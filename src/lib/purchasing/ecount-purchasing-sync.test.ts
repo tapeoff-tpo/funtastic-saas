@@ -105,7 +105,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     })
   })
 
-  it('excludes plan rows already due at the snapshot date and preserves the source purchase date', async () => {
+  it('keeps plan rows regardless of their arrival target date and preserves the source purchase date', async () => {
     const files = await Promise.all([
       makeUpload('purchase-request.xlsx', [
         '\uC77C\uC790-No.', '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9',
@@ -144,14 +144,21 @@ describe('parseEcountPurchasingSnapshot', () => {
       asOfDate: '2026-07-21',
     })
 
-    expect(snapshot.purchaseCompleted).toEqual([
+    expect(snapshot.purchaseCompleted).toHaveLength(2)
+    expect(snapshot.purchaseCompleted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sku: '100001-0001',
+        purchaseManagementCode: 'P-PAST',
+        purchaseDate: '2026-06-10',
+        chinaArrivalRequestDate: '2026-07-20',
+      }),
       expect.objectContaining({
         sku: '100002-0001',
         purchaseManagementCode: 'P-FUTURE',
         purchaseDate: '2026-07-15',
         chinaArrivalRequestDate: '2026-07-30',
       }),
-    ])
+    ]))
   })
 })
 

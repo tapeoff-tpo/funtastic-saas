@@ -344,7 +344,6 @@ export async function parseEcountPurchasingSnapshot(input: {
       || handledPlanPurchaseKeys.has(matchKey)
       || !requestDate
       || !chinaArrivalRequestDate
-      || chinaArrivalRequestDate <= asOfDate
     ) continue
 
     const matchingPlanRows = planRowsByPurchaseKey.get(matchKey) ?? []

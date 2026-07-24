@@ -38,12 +38,14 @@ window.addEventListener('message', (event) => {
   try {
     if (!chrome.runtime?.id) return
     chrome.runtime.sendMessage(message, (response) => {
-      if (chrome.runtime.lastError || response?.ok !== false) return
+      if (!chrome.runtime.lastError && response?.ok !== false) return
       window.postMessage({
         source: EXTENSION_SOURCE,
-        type: 'FUNTASTIC_1688_ERROR',
+        type: message.type === 'FUNTASTIC_1688_DETAIL_IMAGES_START'
+          ? 'FUNTASTIC_1688_DETAIL_IMAGES_ERROR'
+          : 'FUNTASTIC_1688_ERROR',
         runId: message.runId,
-        message: response.error || '확장프로그램 작업을 시작하지 못했습니다.',
+        message: response?.error || chrome.runtime.lastError?.message || '확장프로그램 작업을 시작하지 못했습니다.',
       }, window.location.origin)
     })
   } catch {

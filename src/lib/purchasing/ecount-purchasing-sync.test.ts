@@ -31,11 +31,11 @@ describe('parseEcountPurchasingSnapshot', () => {
         ['20260610-002', '100004-0001', '중국창고', '도착예정 상품', '옐로우', '2026-06-10', 25, '2026-07-30', 'PO-OLD', 'P-OLD', '확인', '998877665544'],
       ]),
       makeUpload('중국재고.xlsx', [
-        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+        '품목코드', '품목명', '규격', '품목구분', '합계', '부품관리', '브랜드', '중국창고',
       ], [
-        ['00002', '부자재', '', '부자재', 4, 4],
-        ['100001-0001', '테스트 상품', '블루', '상품', 50, 30],
-        ['110115-package', '비정형 부자재', '패키지', '부자재', 7, 0],
+        ['00002', '부자재', '', '부자재', 4, 1, 0, 3],
+        ['100001-0001', '테스트 상품', '블루', '상품', 50, 10, 10, 30],
+        ['110115-package', '비정형 부자재', '패키지', '부자재', 7, 0, 7, 0],
       ]),
       makeUpload('중국 출고.xlsx', [
         '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
@@ -62,6 +62,14 @@ describe('parseEcountPurchasingSnapshot', () => {
     })
     expect(snapshot.chinaInventory).toHaveLength(3)
     expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 50, 7])
+    expect(snapshot.chinaInventory).toContainEqual(expect.objectContaining({
+      sku: '100001-0001',
+      warehouseQuantities: {
+        부품관리: 10,
+        브랜드: 10,
+        중국창고: 30,
+      },
+    }))
     expect(snapshot.purchaseCompleted).toHaveLength(4)
     expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
       {

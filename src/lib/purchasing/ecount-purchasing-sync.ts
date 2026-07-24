@@ -24,6 +24,14 @@ const REPLACEABLE_ECOUNT_SOURCES = [
   ECOUNT_OUTBOUND_COMPLETED_SOURCE,
 ] as const
 
+const CHINA_INVENTORY_FIXED_HEADERS = new Set([
+  '품목코드',
+  '품목명',
+  '규격',
+  '품목구분',
+  '합계',
+])
+
 const REPORT_KINDS = [
   'purchaseRequest',
   'purchasePlan',
@@ -95,6 +103,7 @@ export type EcountChinaInventoryItem = {
   optionKey: string
   productType: string | null
   quantity: number
+  warehouseQuantities: Record<string, number>
 }
 
 export type EcountOutboundPendingItem = {
@@ -251,6 +260,10 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountPendingRequest => row !== null)
 
+  const chinaInventoryWarehouseHeaders = [...chinaInventory.columns.entries()]
+    .filter(([header]) => !CHINA_INVENTORY_FIXED_HEADERS.has(header))
+    .sort(([, leftColumn], [, rightColumn]) => leftColumn - rightColumn)
+    .map(([header]) => header)
   const chinaInventoryItems = readRows(chinaInventory)
     .map<EcountChinaInventoryItem | null>((row) => {
       const sku = valueAt(row, chinaInventory, '품목코드')
@@ -258,6 +271,12 @@ export async function parseEcountPurchasingSnapshot(input: {
       const quantity = positiveInteger(valueAt(row, chinaInventory, '합계'))
       const optionName = emptyToNull(valueAt(row, chinaInventory, '규격'))
       if (!sku || !productName) return null
+      const warehouseQuantities = Object.fromEntries(
+        chinaInventoryWarehouseHeaders.map((header) => [
+          header,
+          positiveInteger(valueAt(row, chinaInventory, header)),
+        ]),
+      )
 
       return {
         sourceFileName: chinaInventory.fileName,
@@ -268,6 +287,7 @@ export async function parseEcountPurchasingSnapshot(input: {
         optionKey: optionName ?? '',
         productType: emptyToNull(valueAt(row, chinaInventory, '품목구분')),
         quantity,
+        warehouseQuantities,
       }
     })
     .filter((row): row is EcountChinaInventoryItem => row !== null)
@@ -752,6 +772,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         sourceRowNumber: item.sourceRowNumber,
         snapshotAsOfDate: input.snapshot.asOfDate,
         productType: item.productType,
+        warehouseQuantities: item.warehouseQuantities,
         syncedByUserId: input.requestedByUserId,
         syncedAt: now.toISOString(),
       },
@@ -833,6 +854,7 @@ export async function syncEcountPurchasingSnapshot(input: {
           productName: item.productName,
           optionKey: item.optionKey,
           optionName: item.optionName,
+          warehouseQuantities: item.warehouseQuantities,
           totalQuantity: item.quantity,
           availableQuantity: item.quantity,
           updatedAt: now,

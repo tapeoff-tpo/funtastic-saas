@@ -740,6 +740,7 @@ export const chinaWarehouseInventory = pgTable(
     productName: text('product_name').notNull(),
     optionKey: varchar('option_key', { length: 200 }).notNull().default(''),
     optionName: varchar('option_name', { length: 200 }),
+    warehouseQuantities: jsonb('warehouse_quantities').$type<Record<string, number>>().notNull().default({}),
     totalQuantity: integer('total_quantity').notNull().default(0),
     availableQuantity: integer('available_quantity').notNull().default(0),
     lastArrivedAt: timestamp('last_arrived_at', { withTimezone: true }),

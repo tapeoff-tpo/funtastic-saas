@@ -374,7 +374,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       <div className="mt-2 grid grid-cols-3 gap-1.5">
                         {activeJob.images.slice(0, 9).map((imageUrl) => (
                           <a key={imageUrl} href={imageUrl} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden border bg-background">
-                            <img src={imageUrl} alt={`${activeJob.product.name} 수집 이미지`} className="size-full object-cover" />
+                            <img src={imageUrl} alt={`${activeJob.product.name} 수집 이미지`} className="size-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
                           </a>
                         ))}
                       </div>

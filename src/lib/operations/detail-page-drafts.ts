@@ -246,6 +246,15 @@ export async function completeDetailPageReview(userId: string, id: string) {
   return row ? toDetailPageDraftRecord(row) : null
 }
 
+export async function deleteDetailPageDraft(userId: string, id: string) {
+  await ensureDetailPageDraftTables()
+  const [deleted] = await db
+    .delete(detailPageJobs)
+    .where(and(eq(detailPageJobs.userId, userId), eq(detailPageJobs.id, id)))
+    .returning({ id: detailPageJobs.id })
+  return Boolean(deleted)
+}
+
 export async function createFigmaBridgePairing(userId: string, deviceLabel?: string | null) {
   await ensureDetailPageDraftTables()
   const pairingToken = token(24)

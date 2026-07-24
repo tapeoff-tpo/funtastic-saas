@@ -93,6 +93,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [workbenchLoaded, setWorkbenchLoaded] = useState(false)
   const [draftRequestingId, setDraftRequestingId] = useState<string | null>(null)
   const [reviewCompletingId, setReviewCompletingId] = useState<string | null>(null)
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
   const [pairingToken, setPairingToken] = useState<string | null>(null)
   const [pairingError, setPairingError] = useState<string | null>(null)
   const incomingProducts = selectedProducts.length > 0 ? selectedProducts : sessionProducts
@@ -318,6 +319,38 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     }
   }
 
+  async function deleteActiveJob() {
+    if (!activeJob) return
+    const target = activeJob
+    const confirmed = window.confirm(`'${target.product.name}' 상세페이지 작업을 삭제할까요?\nFigma에 이미 만들어진 프레임은 삭제되지 않습니다.`)
+    if (!confirmed) return
+
+    setDeletingJobId(target.id)
+    try {
+      if (target.remoteJobId) {
+        const response = await fetch(`/api/operations/detail-pages/jobs/${target.remoteJobId}`, { method: 'DELETE' })
+        if (!response.ok && response.status !== 404) {
+          const body = await response.json().catch(() => ({})) as { error?: string }
+          throw new Error(body.error || 'Figma 초안 작업을 삭제하지 못했습니다.')
+        }
+      }
+      setJobs((current) => current.filter((job) => job.id !== target.id))
+      setActiveId((current) => current === target.id ? null : current)
+      setConsumedProductIds((current) => {
+        const next = new Set(current)
+        next.delete(target.product.id)
+        return next
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Figma 초안 작업을 삭제하지 못했습니다.'
+      setJobs((current) => current.map((job) => (
+        job.id === target.id ? { ...job, imageError: message } : job
+      )))
+    } finally {
+      setDeletingJobId(null)
+    }
+  }
+
   async function createFigmaPairing() {
     setPairingError(null)
     try {
@@ -448,11 +481,14 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       {!activeJob && selectedDraftProducts.length > 0 ? ` · ${selectedDraftProducts.length}개 선택` : ''}
                     </p>
                   </div>
-                  {activeProduct.purchaseUrl ? (
-                    <a href={normalizeUrl(activeProduct.purchaseUrl)} target="_blank" rel="noreferrer" className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted">
-                      <Link2 className="size-3.5" />구매 URL<ExternalLink className="size-3" />
-                    </a>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    {activeProduct.purchaseUrl ? (
+                      <a href={normalizeUrl(activeProduct.purchaseUrl)} target="_blank" rel="noreferrer" className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted">
+                        <Link2 className="size-3.5" />구매 URL<ExternalLink className="size-3" />
+                      </a>
+                    ) : null}
+                    {activeJob ? <Button type="button" size="sm" variant="outline" className="text-destructive hover:text-destructive" onClick={deleteActiveJob} disabled={deletingJobId === activeJob.id}><Trash2 />{deletingJobId === activeJob.id ? '작업 삭제 중' : '작업 삭제'}</Button> : null}
+                  </div>
                 </div>
               </div>
 

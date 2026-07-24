@@ -5,6 +5,7 @@ const AUTO_SYNC_INTERVAL_MS = 8_000
 
 let activeSync = null
 let automaticSyncStarted = false
+let bridgeState = null
 
 figma.showUI(__html__, { width: 390, height: 500, themeColors: true })
 
@@ -201,8 +202,29 @@ async function request(path, options = {}) {
   return body
 }
 
+async function readBridgeState() {
+  if (bridgeState?.bridgeToken) return bridgeState
+  try {
+    const stored = await figma.clientStorage.getAsync('funtastic-detail-page-bridge')
+    if (stored?.bridgeToken) bridgeState = stored
+  } catch {
+    // Development manifests without a Figma-issued plugin ID cannot use
+    // clientStorage. The active plugin session can still process jobs safely.
+  }
+  return bridgeState
+}
+
+async function rememberBridgeState(nextState) {
+  bridgeState = nextState
+  try {
+    await figma.clientStorage.setAsync('funtastic-detail-page-bridge', nextState)
+  } catch {
+    // Keep the in-memory bridge connected for this open plugin session.
+  }
+}
+
 async function initialize() {
-  const state = await figma.clientStorage.getAsync('funtastic-detail-page-bridge')
+  const state = await readBridgeState()
   figma.ui.postMessage({
     type: 'state',
     paired: Boolean(state?.bridgeToken),
@@ -223,7 +245,7 @@ async function pair(message) {
       pluginVersion: PLUGIN_VERSION,
     }),
   })
-  await figma.clientStorage.setAsync('funtastic-detail-page-bridge', {
+  await rememberBridgeState({
     bridgeToken: data.bridgeToken,
     deviceName: message.deviceName || 'AI 상세페이지 파일',
     figmaFileKey: message.figmaFileKey || DEFAULT_FILE_KEY,
@@ -268,7 +290,7 @@ async function sync(silent = false) {
 }
 
 async function runSync(silent) {
-  const state = await figma.clientStorage.getAsync('funtastic-detail-page-bridge')
+  const state = await readBridgeState()
   if (!state?.bridgeToken) throw new Error('먼저 SaaS에서 만든 연결 코드를 입력해주세요.')
   let completed = 0
   let empty = false

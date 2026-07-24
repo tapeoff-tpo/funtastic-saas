@@ -23,7 +23,7 @@ export type DetailPageProduct = {
 type DetailPageJob = {
   id: string
   product: DetailPageProduct
-  status: 'draft' | 'asset_pending' | 'collecting' | 'review' | 'completed'
+  status: 'draft' | 'asset_pending' | 'collecting' | 'draft_pending' | 'review' | 'completed'
   template: string
   note: string
   createdAt: string
@@ -37,6 +37,7 @@ const STATUS = {
   draft: { label: '작업 설정', className: 'border-slate-200 bg-slate-50 text-slate-700' },
   asset_pending: { label: '이미지 수집 대기', className: 'border-amber-200 bg-amber-50 text-amber-800' },
   collecting: { label: '이미지 수집 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
+  draft_pending: { label: '초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   review: { label: '검수 필요', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   completed: { label: '제작 완료', className: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
 } as const
@@ -102,7 +103,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
         setJobs((current) => current.map((job) => {
           if (job.id !== message.jobId || job.imageRunId !== message.runId) return job
           return images.length > 0
-            ? { ...job, status: 'review', images, imageRunId: null, imageError: null }
+            ? { ...job, status: 'draft_pending', images, imageRunId: null, imageError: null }
             : { ...job, status: 'asset_pending', imageRunId: null, imageError: '1688 상품 이미지가 발견되지 않았습니다.' }
         }))
         return
@@ -346,13 +347,13 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       <h3 className="text-sm font-semibold">작업 진행</h3>
                       <ol className="mt-4 grid gap-3 sm:grid-cols-4">
                         <WorkflowStep icon={Clock3} label="작업 생성" active />
-                        <WorkflowStep icon={ImagePlus} label="이미지 수집" active={activeJob.status !== 'asset_pending'} />
+                        <WorkflowStep icon={ImagePlus} label="이미지 수집" active={activeJob.status !== 'asset_pending' && activeJob.status !== 'collecting'} />
                         <WorkflowStep icon={WandSparkles} label="초안 제작" active={activeJob.status === 'review' || activeJob.status === 'completed'} />
                         <WorkflowStep icon={FilePenLine} label="Figma 검수" active={activeJob.status === 'completed'} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
                         {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />이미지 수집 시작</Button> : null}
-                        {activeJob.status === 'collecting' ? <Button type="button" variant="outline" onClick={() => moveJob('review')}><WandSparkles />Figma 초안 생성</Button> : null}
+                        {activeJob.status === 'draft_pending' ? <Button type="button" variant="outline" onClick={() => moveJob('review')}><WandSparkles />Figma 초안 제작</Button> : null}
                         {activeJob.status === 'review' ? <Button type="button" onClick={() => moveJob('completed')}><FilePenLine />Figma 검수 완료</Button> : null}
                         {activeJob.status === 'completed' ? <Badge variant="outline" className="h-8 border-emerald-200 bg-emerald-50 px-3 text-emerald-800"><Check />Figma 링크 저장 예정</Badge> : null}
                       </div>

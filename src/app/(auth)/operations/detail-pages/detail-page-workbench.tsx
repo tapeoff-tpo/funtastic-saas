@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, useSyncExternalStore } from 'react'
-import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, WandSparkles } from 'lucide-react'
+import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -56,14 +56,20 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [template, setTemplate] = useState('기본 상품 상세')
   const [note, setNote] = useState('')
   const [consumedProductIds, setConsumedProductIds] = useState<Set<string>>(() => new Set())
+  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set())
   const incomingProducts = selectedProducts.length > 0 ? selectedProducts : sessionProducts
   const draftProducts = useMemo(
     () => incomingProducts.filter((product) => !consumedProductIds.has(product.id)),
     [consumedProductIds, incomingProducts],
   )
+  const selectedDraftProducts = useMemo(
+    () => draftProducts.filter((product) => selectedDraftIds.has(product.id)),
+    [draftProducts, selectedDraftIds],
+  )
   const hasDraftProducts = draftProducts.length > 0
+  const allDraftsSelected = hasDraftProducts && selectedDraftProducts.length === draftProducts.length
   const activeJob = jobs.find((job) => job.id === activeId) ?? null
-  const activeProduct = activeJob?.product ?? draftProducts[0] ?? EMPTY_PRODUCT
+  const activeProduct = activeJob?.product ?? selectedDraftProducts[0] ?? draftProducts[0] ?? EMPTY_PRODUCT
   const missingFields = useMemo(() => (
     [
       ['구매 URL', activeProduct.purchaseUrl],
@@ -74,9 +80,9 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   ), [activeProduct])
 
   function createJobs() {
-    if (!hasDraftProducts) return
+    if (selectedDraftProducts.length === 0) return
     const createdAt = new Date().toLocaleString('ko-KR')
-    const created = draftProducts.map((product, index) => ({
+    const created = selectedDraftProducts.map((product, index) => ({
       id: `${product.id}-${Date.now()}-${index}`,
       product,
       status: 'asset_pending' as const,
@@ -86,9 +92,38 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     }))
     setJobs((current) => [...created, ...current])
     setActiveId(created[0]?.id ?? null)
-    setConsumedProductIds(new Set(draftProducts.map((product) => product.id)))
-    window.sessionStorage.removeItem(DETAIL_PAGE_SELECTION_KEY)
-    cachedSessionProducts = EMPTY_PRODUCTS
+    excludeDraftProducts(selectedDraftProducts)
+  }
+
+  function excludeDraftProducts(products: DetailPageProduct[]) {
+    if (products.length === 0) return
+    const excludedIds = new Set(products.map((product) => product.id))
+    setConsumedProductIds((current) => new Set([...current, ...excludedIds]))
+    setSelectedDraftIds(new Set())
+
+    if (selectedProducts.length > 0 || typeof window === 'undefined') return
+    const remainingProducts = sessionProducts.filter((product) => !excludedIds.has(product.id))
+    cachedSessionProducts = remainingProducts
+    if (remainingProducts.length > 0) {
+      window.sessionStorage.setItem(DETAIL_PAGE_SELECTION_KEY, JSON.stringify(remainingProducts))
+    } else {
+      window.sessionStorage.removeItem(DETAIL_PAGE_SELECTION_KEY)
+    }
+  }
+
+  function toggleDraftSelection(productId: string) {
+    setSelectedDraftIds((current) => {
+      const next = new Set(current)
+      if (next.has(productId)) next.delete(productId)
+      else next.add(productId)
+      return next
+    })
+    setActiveId(null)
+  }
+
+  function toggleAllDrafts() {
+    setSelectedDraftIds(allDraftsSelected ? new Set() : new Set(draftProducts.map((product) => product.id)))
+    setActiveId(null)
   }
 
   function moveJob(status: DetailPageJob['status']) {
@@ -105,13 +140,33 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
               <h2 className="text-sm font-semibold">제작 대기열</h2>
               <p className="mt-0.5 text-xs text-muted-foreground">{jobs.length + draftProducts.length}건</p>
             </div>
-            <Button type="button" size="icon-sm" variant="outline" onClick={() => setActiveId(null)} aria-label="새 작업 설정" title="새 작업 설정">
-              <Plus />
-            </Button>
+            <div className="flex items-center gap-1.5">
+              {hasDraftProducts ? (
+                <label className="inline-flex h-8 items-center gap-1.5 rounded-md border bg-background px-2 text-xs font-medium">
+                  <input type="checkbox" checked={allDraftsSelected} onChange={toggleAllDrafts} className="size-3.5 accent-foreground" aria-label="대기 품목 전체 선택" />
+                  전체
+                </label>
+              ) : null}
+              {selectedDraftProducts.length > 0 ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => excludeDraftProducts(selectedDraftProducts)} className="text-destructive hover:text-destructive" title="선택한 품목을 상세페이지 대기열에서만 제외합니다.">
+                  <Trash2 />선택 삭제 {selectedDraftProducts.length}
+                </Button>
+              ) : null}
+              <Button type="button" size="icon-sm" variant="outline" onClick={() => setActiveId(null)} aria-label="새 작업 설정" title="새 작업 설정">
+                <Plus />
+              </Button>
+            </div>
           </div>
 
           <div className="divide-y">
-            {!activeJob ? draftProducts.map((product) => <QueueDraft key={product.id} product={product} />) : null}
+            {draftProducts.map((product) => (
+              <QueueDraft
+                key={product.id}
+                product={product}
+                selected={selectedDraftIds.has(product.id)}
+                onSelectedChange={() => toggleDraftSelection(product.id)}
+              />
+            ))}
             {jobs.map((job) => (
               <button
                 key={job.id}
@@ -144,7 +199,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                     </div>
                     <p className="mt-1 font-mono text-xs text-muted-foreground">
                       {activeProduct.sku}{activeProduct.option ? ` · ${activeProduct.option}` : ''}
-                      {!activeJob && draftProducts.length > 1 ? ` · ${draftProducts.length}개 일괄 작업` : ''}
+                      {!activeJob && selectedDraftProducts.length > 0 ? ` · ${selectedDraftProducts.length}개 선택` : ''}
                     </p>
                   </div>
                   {activeProduct.purchaseUrl ? (
@@ -175,7 +230,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
 
                   {!activeJob ? (
                     <section className="space-y-4 px-5 py-4">
-                      <h3 className="text-sm font-semibold">제작 설정{draftProducts.length > 1 ? ` · ${draftProducts.length}개 일괄 적용` : ''}</h3>
+                      <h3 className="text-sm font-semibold">제작 설정{selectedDraftProducts.length > 0 ? ` · ${selectedDraftProducts.length}개 일괄 적용` : ''}</h3>
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1">
                           <span className="text-xs font-medium text-muted-foreground">Figma 템플릿</span>
@@ -191,8 +246,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         </label>
                       </div>
                       <div className="flex justify-end">
-                        <Button type="button" onClick={createJobs} disabled={!hasDraftProducts}>
-                          <WandSparkles />작업 생성{draftProducts.length > 1 ? ` ${draftProducts.length}` : ''}
+                        <Button type="button" onClick={createJobs} disabled={selectedDraftProducts.length === 0}>
+                          <WandSparkles />선택 작업 생성{selectedDraftProducts.length > 0 ? ` ${selectedDraftProducts.length}` : ''}
                         </Button>
                       </div>
                     </section>
@@ -240,15 +295,24 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   )
 }
 
-function QueueDraft({ product }: { product: DetailPageProduct }) {
+function QueueDraft({
+  product,
+  selected,
+  onSelectedChange,
+}: {
+  product: DetailPageProduct
+  selected: boolean
+  onSelectedChange: () => void
+}) {
   return (
-    <div className="grid grid-cols-[1fr_auto] gap-3 bg-background px-4 py-3">
+    <label className={`grid cursor-pointer grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3 transition-colors hover:bg-muted/70 ${selected ? 'bg-muted' : 'bg-background'}`}>
+      <input type="checkbox" checked={selected} onChange={onSelectedChange} className="mt-0.5 size-4 accent-foreground" aria-label={`${product.name} 선택`} />
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium">{product.name}</span>
         <span className="mt-1 block truncate font-mono text-xs text-muted-foreground">{product.sku}{product.option ? ` · ${product.option}` : ''}</span>
       </span>
       <Badge variant="outline" className={STATUS.draft.className}>{STATUS.draft.label}</Badge>
-    </div>
+    </label>
   )
 }
 

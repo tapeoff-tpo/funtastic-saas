@@ -135,7 +135,13 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
             SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
             UNION
             SELECT option_value->>'barcode'
-            FROM jsonb_array_elements(r.source_options) option_value
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(COALESCE(r.source_options, '[]'::jsonb)) = 'array'
+                  THEN r.source_options
+                ELSE '[]'::jsonb
+              END
+            ) option_value
             WHERE COALESCE(option_value->>'barcode', '') <> ''
           )
       ), ARRAY[]::text[]) AS "matchedSalesCodeList",
@@ -149,7 +155,13 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
             SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
             UNION
             SELECT option_value->>'barcode'
-            FROM jsonb_array_elements(r.source_options) option_value
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(COALESCE(r.source_options, '[]'::jsonb)) = 'array'
+                  THEN r.source_options
+                ELSE '[]'::jsonb
+              END
+            ) option_value
             WHERE COALESCE(option_value->>'barcode', '') <> ''
           )
       ), ARRAY[]::text[]) AS "inventorySkus",
@@ -163,7 +175,13 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
             SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
             UNION
             SELECT option_value->>'barcode'
-            FROM jsonb_array_elements(r.source_options) option_value
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(COALESCE(r.source_options, '[]'::jsonb)) = 'array'
+                  THEN r.source_options
+                ELSE '[]'::jsonb
+              END
+            ) option_value
             WHERE COALESCE(option_value->>'barcode', '') <> ''
           )
       ), 0)::int AS "inventoryAvailableStock",
@@ -178,7 +196,13 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
             SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
             UNION
             SELECT option_value->>'barcode'
-            FROM jsonb_array_elements(r.source_options) option_value
+            FROM jsonb_array_elements(
+              CASE
+                WHEN jsonb_typeof(COALESCE(r.source_options, '[]'::jsonb)) = 'array'
+                  THEN r.source_options
+                ELSE '[]'::jsonb
+              END
+            ) option_value
             WHERE COALESCE(option_value->>'barcode', '') <> ''
           )
       ), 0)::int AS "matchedSalesCodes"

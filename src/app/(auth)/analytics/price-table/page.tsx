@@ -2,12 +2,14 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { ChevronDown, FileSpreadsheet, Search, X } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { listChannelBundleOverrides } from '@/lib/analytics/channel-product-overrides'
 import { listPriceTableRows } from '@/lib/analytics/price-table'
 import { listMarketplaceProductChecks } from '@/lib/analytics/marketplace-product-checks'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
 import { PriceTableWorkspace } from './price-table-workspace'
 import { PriceTableUpload } from './price-table-upload'
+import { ChannelBundleOverrides } from './channel-bundle-overrides'
 
 export const metadata: Metadata = {
   title: '판매가 테이블',
@@ -74,13 +76,19 @@ export default async function PriceTablePage({
     registeredProductName: row.registeredProductName,
     rawData: row.rawData as Record<string, string>,
   }))
-  const checks = await listMarketplaceProductChecks(
-    workspaceUserId,
-    gridRows.map((row) => row.productCode ?? ''),
-  ).catch((error) => {
-    console.error('marketplace product checks list error:', error)
-    return []
-  })
+  const [checks, channelBundles] = await Promise.all([
+    listMarketplaceProductChecks(
+      workspaceUserId,
+      gridRows.map((row) => row.productCode ?? ''),
+    ).catch((error) => {
+      console.error('marketplace product checks list error:', error)
+      return []
+    }),
+    listChannelBundleOverrides(workspaceUserId, search).catch((error) => {
+      console.error('channel bundle overrides list error:', error)
+      return []
+    }),
+  ])
 
   return (
     <div className="space-y-4">
@@ -186,6 +194,8 @@ export default async function PriceTablePage({
           checkedAt: check.checkedAt.toISOString(),
         }))}
       />
+
+      <ChannelBundleOverrides rows={channelBundles} search={search} />
 
       <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="text-muted-foreground">

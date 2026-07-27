@@ -457,6 +457,40 @@ export const analyticsPriceTableRows = pgTable(
   ],
 )
 
+export const analyticsChannelProductOverrides = pgTable(
+  'analytics_channel_product_overrides',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    channelKey: varchar('channel_key', { length: 100 }).notNull(),
+    channelName: varchar('channel_name', { length: 150 }).notNull(),
+    channelProductId: varchar('channel_product_id', { length: 120 }).notNull(),
+    sourceKey: varchar('source_key', { length: 140 }).notNull(),
+    productName: text('product_name').notNull(),
+    optionName: text('option_name'),
+    components: jsonb('components').$type<Array<{ sku: string; quantity: number }>>().notNull().default([]),
+    salePrice: numeric('sale_price', { precision: 12, scale: 2 }).notNull(),
+    regularPrice: numeric('regular_price', { precision: 12, scale: 2 }),
+    shippingFee: numeric('shipping_fee', { precision: 12, scale: 2 }).notNull().default('0'),
+    commissionRate: numeric('commission_rate', { precision: 7, scale: 4 }).notNull(),
+    registeredStock: integer('registered_stock').notNull().default(0),
+    saleStatus: varchar('sale_status', { length: 50 }).notNull(),
+    lastCheckedAt: date('last_checked_at').notNull(),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('analytics_channel_product_overrides_unique').on(
+      table.userId,
+      table.channelKey,
+      table.channelProductId,
+      table.sourceKey,
+    ),
+    index('analytics_channel_product_overrides_user_channel_idx').on(table.userId, table.channelKey),
+  ],
+)
+
 export const analyticsMarketplaceProductChecks = pgTable(
   'analytics_marketplace_product_checks',
   {

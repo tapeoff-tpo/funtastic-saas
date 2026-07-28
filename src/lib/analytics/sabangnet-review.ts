@@ -183,7 +183,7 @@ export async function importSabangnetReviewBatch(input: {
     lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1)
   }
 
-  const [connections, productSkuRows, variantSkuRows, existingRows] = await Promise.all([
+  const [connections, productSkuRows, variantSkuRows] = await Promise.all([
     db
       .select({
         id: marketplaceConnections.id,
@@ -202,34 +202,42 @@ export async function importSabangnetReviewBatch(input: {
       .from(productVariants)
       .innerJoin(products, sql`${products.id} = ${productVariants.productId}`)
       .where(sql`${products.userId} = ${input.userId} AND ${products.status} <> 'deleted' AND ${productVariants.isActive} = true`),
-    db
-      .select({ marketplaceId: orders.marketplaceId, marketplaceOrderId: orders.marketplaceOrderId })
-      .from(orders)
-      .where(sql`${orders.userId} = ${input.userId}`),
   ])
 
   const skuSet = new Set([
     ...productSkuRows.map((row) => row.sku).filter(Boolean),
     ...variantSkuRows.map((row) => row.sku).filter(Boolean),
   ])
-  const existingSet = new Set(existingRows.map((row) => createExistingOrderKey(row.marketplaceId, row.marketplaceOrderId)))
 
-  const mappedLines = parseResult.rows.map((row, index) => {
+  const pendingLines = parseResult.rows.map((row, index) => {
     const raw = rawRows[index] ?? {}
     const rawMarketplaceName = pickByHeaders(raw, MARKETPLACE_HEADERS)
     const marketplaceName = rawMarketplaceName || input.fallbackMarketplaceName || input.fallbackMarketplaceId || ''
     const connection = matchMarketplaceConnection(connections, marketplaceName, input.fallbackMarketplaceId)
     const normalized = normalizeImportedOrderItem(row, connection?.marketplaceId ?? input.fallbackMarketplaceId ?? 'sabangnet')
+    return { row, normalized, raw, rowNumber: index + 1, marketplaceName, connection }
+  })
+  const existingSet = await getExistingOrderKeySet(
+    input.userId,
+    pendingLines
+      .map((line) => ({
+        marketplaceId: line.connection?.marketplaceId,
+        orderNumber: getSabangnetOrderNumber(line.raw) || line.row.orderNumber,
+      }))
+      .filter((line) => line.marketplaceId && line.orderNumber),
+  )
+
+  const mappedLines = pendingLines.map((line) => {
     return buildReviewLine({
-      row,
-      normalized,
-      raw,
-      rowNumber: index + 1,
-      duplicateInFile: (lineCounts.get(getDuplicateLineKey(row, raw)) ?? 0) > 1,
-      connection,
+      row: line.row,
+      normalized: line.normalized,
+      raw: line.raw,
+      rowNumber: line.rowNumber,
+      duplicateInFile: (lineCounts.get(getDuplicateLineKey(line.row, line.raw)) ?? 0) > 1,
+      connection: line.connection,
       skuSet,
       existingSet,
-      marketplaceName,
+      marketplaceName: line.marketplaceName,
     })
   })
 
@@ -797,6 +805,40 @@ function normalizeNonNegativeNumber(value: unknown, fallback: number): number {
   const num = Number(value)
   if (!Number.isFinite(num) || num < 0) return fallback
   return num
+}
+
+async function getExistingOrderKeySet(
+  userId: string,
+  candidates: Array<{ marketplaceId?: string | null; orderNumber?: string | null }>,
+): Promise<Set<string>> {
+  const uniqueCandidates = Array.from(
+    new Map(
+      candidates
+        .map((candidate) => ({
+          marketplaceId: candidate.marketplaceId?.trim() ?? '',
+          orderNumber: String(candidate.orderNumber ?? '').trim(),
+        }))
+        .filter((candidate) => candidate.marketplaceId && candidate.orderNumber)
+        .map((candidate) => [createExistingOrderKey(candidate.marketplaceId, candidate.orderNumber), candidate]),
+    ).values(),
+  )
+
+  const existingSet = new Set<string>()
+  for (const chunk of chunks(uniqueCandidates, 1000)) {
+    const rows = resultRows(await db.execute<{ marketplaceId: string; marketplaceOrderId: string }>(sql`
+      SELECT marketplace_id AS "marketplaceId", marketplace_order_id AS "marketplaceOrderId"
+      FROM orders
+      WHERE user_id = ${userId}
+        AND (marketplace_id, marketplace_order_id) IN (
+          ${sql.join(chunk.map((candidate) => sql`(${candidate.marketplaceId}, ${candidate.orderNumber})`), sql`, `)}
+        )
+    `))
+    for (const row of rows) {
+      existingSet.add(createExistingOrderKey(row.marketplaceId, row.marketplaceOrderId))
+    }
+  }
+
+  return existingSet
 }
 
 async function parseRawRows(buffer: Buffer): Promise<RawExcelRow[]> {

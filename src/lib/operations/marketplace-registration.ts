@@ -18,6 +18,7 @@ export type RegistrationChannel = {
 export type RegistrationRow = {
   id: string
   productCode: string
+  salesCodes: string[]
   productName: string
   stock: number
   price: number
@@ -56,6 +57,7 @@ export async function ensureMarketplaceRegistrationTables() {
   await db.execute(sql`CREATE TABLE IF NOT EXISTS marketplace_registration_profiles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), user_id uuid NOT NULL, product_code varchar(100) NOT NULL, common_category varchar(200), brand varchar(200), manufacturer varchar(200), country_of_origin varchar(120), certification text, detail_notice jsonb NOT NULL DEFAULT '{}'::jsonb, image_urls jsonb NOT NULL DEFAULT '[]'::jsonb, updated_at timestamptz NOT NULL DEFAULT now(), created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(user_id, product_code))`)
   await db.execute(sql`ALTER TABLE marketplace_registration_profiles ADD COLUMN IF NOT EXISTS source_product_url text`)
   await db.execute(sql`ALTER TABLE marketplace_registration_profiles ADD COLUMN IF NOT EXISTS primary_image_url text`)
+  await db.execute(sql`ALTER TABLE marketplace_registration_profiles ADD COLUMN IF NOT EXISTS sales_codes jsonb NOT NULL DEFAULT '[]'::jsonb`)
   await db.execute(sql`ALTER TABLE marketplace_registration_profiles
     ADD COLUMN IF NOT EXISTS source_type varchar(50) NOT NULL DEFAULT 'manual',
     ADD COLUMN IF NOT EXISTS source_product_id text,
@@ -96,7 +98,7 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
       AND NULLIF(BTRIM(COALESCE(source_category_name, '')), '') IS NOT NULL
   `)
   const result = await db.execute<RegistrationRow>(sql`
-    SELECT r.id, r.product_code AS "productCode", COALESCE(r.product_name, '') AS "productName",
+    SELECT r.id, r.product_code AS "productCode", COALESCE(r.sales_codes, '[]'::jsonb) AS "salesCodes", COALESCE(r.product_name, '') AS "productName",
       r.source_stock_qty::int AS stock, COALESCE(r.source_price, 0)::float8 AS price,
       COALESCE(r.source_retail_price, 0)::float8 AS "retailPrice",
       COALESCE(r.source_cost_price, 0)::float8 AS "costPrice",
@@ -130,6 +132,9 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
         WHERE p.user_id = ${userId}
           AND p.source_sheet_name = '상품등록'
           AND p.product_code IN (
+            SELECT sales_code.value
+            FROM jsonb_array_elements_text(COALESCE(r.sales_codes, '[]'::jsonb)) AS sales_code(value)
+            UNION
             SELECT r.product_code
             UNION
             SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
@@ -150,6 +155,9 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
         FROM inventory i
         WHERE i.user_id = ${userId}
           AND i.sku IN (
+            SELECT sales_code.value
+            FROM jsonb_array_elements_text(COALESCE(r.sales_codes, '[]'::jsonb)) AS sales_code(value)
+            UNION
             SELECT r.product_code
             UNION
             SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
@@ -170,6 +178,9 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
         FROM inventory i
         WHERE i.user_id = ${userId}
           AND i.sku IN (
+            SELECT sales_code.value
+            FROM jsonb_array_elements_text(COALESCE(r.sales_codes, '[]'::jsonb)) AS sales_code(value)
+            UNION
             SELECT r.product_code
             UNION
             SELECT r.source_barcode WHERE COALESCE(r.source_barcode, '') <> ''
@@ -223,20 +234,56 @@ type RegistrationProfileInput = {
   sourceProductUrl: string | null
   primaryImageUrl: string | null
   imageUrls: string[]
+  salesCodes: string[]
 }
 
 export async function applyMarketplaceRegistration(input: RegistrationProfileInput) {
   await ensureMarketplaceRegistrationTables()
   const result = await db.execute<{ id: string }>(sql`
-    INSERT INTO marketplace_registration_profiles (user_id, product_code, common_category, brand, manufacturer, country_of_origin, source_product_url, primary_image_url, image_urls)
-    VALUES (${input.userId}, ${input.productCode}, ${input.commonCategory || null}, ${input.brand || null}, ${input.manufacturer || null}, ${input.countryOfOrigin || null}, ${input.sourceProductUrl || null}, ${input.primaryImageUrl || null}, ${JSON.stringify(input.imageUrls)}::jsonb)
-    ON CONFLICT (user_id, product_code) DO UPDATE SET common_category = EXCLUDED.common_category, brand = EXCLUDED.brand, manufacturer = EXCLUDED.manufacturer, country_of_origin = EXCLUDED.country_of_origin, source_product_url = EXCLUDED.source_product_url, primary_image_url = EXCLUDED.primary_image_url, image_urls = EXCLUDED.image_urls, updated_at = now()
+    INSERT INTO marketplace_registration_profiles (user_id, product_code, common_category, brand, manufacturer, country_of_origin, source_product_url, primary_image_url, image_urls, sales_codes)
+    VALUES (${input.userId}, ${input.productCode}, ${input.commonCategory || null}, ${input.brand || null}, ${input.manufacturer || null}, ${input.countryOfOrigin || null}, ${input.sourceProductUrl || null}, ${input.primaryImageUrl || null}, ${JSON.stringify(input.imageUrls)}::jsonb, ${JSON.stringify(input.salesCodes)}::jsonb)
+    ON CONFLICT (user_id, product_code) DO UPDATE SET common_category = EXCLUDED.common_category, brand = EXCLUDED.brand, manufacturer = EXCLUDED.manufacturer, country_of_origin = EXCLUDED.country_of_origin, source_product_url = EXCLUDED.source_product_url, primary_image_url = EXCLUDED.primary_image_url, image_urls = EXCLUDED.image_urls, sales_codes = EXCLUDED.sales_codes, updated_at = now()
     RETURNING id
   `)
   const profileId = rows<{ id: string }>(result)[0]!.id
   for (const marketplaceId of ['coupang', 'smartstore', 'toss']) {
     await db.execute(sql`INSERT INTO marketplace_registration_channels (profile_id, user_id, marketplace_id, category_name, payload) VALUES (${profileId}, ${input.userId}, ${marketplaceId}, ${input.commonCategory || null}, ${JSON.stringify({ source: 'funtastic-b2b', commonCategory: input.commonCategory || null })}::jsonb) ON CONFLICT (profile_id, marketplace_id) DO UPDATE SET category_name = EXCLUDED.category_name, payload = EXCLUDED.payload, updated_at = now()`)
   }
+}
+
+export async function syncMarketplaceRegistrationSalesCodes(userId: string) {
+  await ensureMarketplaceRegistrationTables()
+  const result = await db.execute<{ profile_count: number; sales_code_count: number }>(sql`
+    WITH matched AS (
+      SELECT registration.id,
+        jsonb_agg(DISTINCT inventory.sku ORDER BY inventory.sku) AS matched_codes
+      FROM marketplace_registration_profiles registration
+      JOIN inventory
+        ON inventory.user_id = registration.user_id
+       AND regexp_replace(lower(replace(COALESCE(inventory.product_name, ''), '_펀타스틱', '')), '[^0-9a-z가-힣]', '', 'g')
+         = regexp_replace(lower(replace(COALESCE(registration.product_name, ''), '_펀타스틱', '')), '[^0-9a-z가-힣]', '', 'g')
+      WHERE registration.user_id = ${userId}
+        AND registration.source_type = 'funtastic-b2b'
+      GROUP BY registration.id
+    ), updated AS (
+      UPDATE marketplace_registration_profiles registration
+      SET sales_codes = (
+        SELECT COALESCE(jsonb_agg(DISTINCT code ORDER BY code), '[]'::jsonb)
+        FROM (
+          SELECT value AS code FROM jsonb_array_elements_text(COALESCE(registration.sales_codes, '[]'::jsonb))
+          UNION
+          SELECT value AS code FROM jsonb_array_elements_text(matched.matched_codes)
+        ) codes
+      ), updated_at = now()
+      FROM matched
+      WHERE registration.id = matched.id
+      RETURNING registration.sales_codes
+    )
+    SELECT COUNT(*)::int AS profile_count,
+      COALESCE(SUM(jsonb_array_length(sales_codes)), 0)::int AS sales_code_count
+    FROM updated
+  `)
+  return rows<{ profile_count: number; sales_code_count: number }>(result)[0] ?? { profile_count: 0, sales_code_count: 0 }
 }
 
 type SourceProduct = {

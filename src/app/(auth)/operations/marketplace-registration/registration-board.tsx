@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { RegistrationRow } from '@/lib/operations/marketplace-registration'
-import { applyRegistrationAction, syncFuntasticB2bAction } from './actions'
+import { applyRegistrationAction, syncFuntasticB2bAction, syncMarketplaceRegistrationSalesCodesAction } from './actions'
 
 type Filter = 'all' | 'needs_info' | 'ready' | 'selling' | 'paused'
 
@@ -89,6 +89,7 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
   const [selectedCode, setSelectedCode] = useState<string | null>(rows[0]?.productCode ?? null)
   const [syncMessage, setSyncMessage] = useState('')
   const [syncPending, startSyncTransition] = useTransition()
+  const [salesCodePending, startSalesCodeTransition] = useTransition()
   const selected = rows.find((row) => row.productCode === selectedCode) ?? null
   const selectedImages = selected ? registrationImages(selected) : null
   const selectedChecks = selected ? registrationChecks(selected) : []
@@ -112,6 +113,7 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
       if (!keyword) return true
       return [
         row.productCode,
+        ...row.salesCodes,
         row.productName,
         row.sourceCategoryName,
         ...row.options.map((option) => option.barcode),
@@ -128,6 +130,19 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
         return
       }
       setSyncMessage(`${result.count.toLocaleString('ko-KR')}개 상품을 동기화했습니다.`)
+      router.refresh()
+    })
+  }
+
+  function syncSalesCodes() {
+    setSyncMessage('')
+    startSalesCodeTransition(async () => {
+      const result = await syncMarketplaceRegistrationSalesCodesAction()
+      if ('error' in result) {
+        setSyncMessage(result.error || '판매코드를 매칭하지 못했습니다.')
+        return
+      }
+      setSyncMessage(`${result.profile_count.toLocaleString('ko-KR')}개 상품에 재고 SKU ${result.sales_code_count.toLocaleString('ko-KR')}개를 판매코드로 연결했습니다.`)
       router.refresh()
     })
   }
@@ -171,6 +186,10 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
             <RefreshCw className={cn(syncPending && 'animate-spin')} />
             {syncPending ? '동기화 중' : 'B2B 동기화'}
           </Button>
+          <Button type="button" variant="outline" onClick={syncSalesCodes} disabled={salesCodePending}>
+            <RefreshCw className={cn(salesCodePending && 'animate-spin')} />
+            {salesCodePending ? 'SKU 매칭 중' : '재고 SKU 매칭'}
+          </Button>
         </div>
         {syncMessage ? <p className="text-xs text-muted-foreground lg:basis-full lg:text-right">{syncMessage}</p> : null}
       </div>
@@ -203,7 +222,9 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium">{row.productName}</span>
                     <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span className="font-mono">{row.productCode}</span>
+                      <span className="font-mono">{row.salesCodes[0] || '판매코드 미매칭'}</span>
+                      {row.salesCodes.length > 1 ? <span>외 {row.salesCodes.length - 1}개</span> : null}
+                      <span>B2B {row.productCode}</span>
                       <span>{row.sourceCategoryName || '카테고리 없음'}</span>
                     </span>
                   </span>
@@ -245,7 +266,7 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                     <div className="min-w-0">
                       <h2 className="truncate text-base font-semibold">{selected.productName}</h2>
                       <p className="mt-0.5 text-xs text-muted-foreground">
-                        B2B {selected.productCode} · {selected.sourceCategoryName || '카테고리 없음'}
+                        판매코드 {selected.salesCodes.join(', ') || '미매칭'} · B2B {selected.productCode}
                       </p>
                     </div>
                     <Button type="button" variant="ghost" size="icon-sm" onClick={() => setSelectedCode(null)} title="닫기">
@@ -323,6 +344,17 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                       <div><dt className="text-xs text-muted-foreground">판매코드 매칭</dt><dd>{selected.matchedSalesCodes}개</dd></div>
                     </dl>
                   </div>
+
+                  <label className="block space-y-1">
+                    <span className="text-xs text-muted-foreground">판매코드 (재고 SKU)</span>
+                    <textarea
+                      name="salesCodes"
+                      defaultValue={selected.salesCodes.join('\n')}
+                      placeholder="재고 상품코드를 한 줄에 하나씩 입력하세요"
+                      className="min-h-20 w-full rounded-md border bg-background px-2.5 py-2 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    />
+                    <span className="block text-[11px] text-muted-foreground">B2B 상품번호는 동기화용 원본키로 유지하며, 몰 등록·판매가·재고 연결은 이 판매코드를 기준으로 합니다.</span>
+                  </label>
 
                   <div>
                     <div className="mb-2 flex items-center justify-between gap-2">

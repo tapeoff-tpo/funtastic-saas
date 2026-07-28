@@ -241,6 +241,7 @@ export function calculateChannelBundle(
   const warnings = [
     ...(row.registeredStock > availableBundleStock ? [`등록 재고 ${row.registeredStock}세트가 실재고 기준 ${availableBundleStock}세트를 초과`] : []),
     ...(componentCost == null ? ['Works 원가 미확인'] : []),
+    ...(b2bReferencePrice == null ? ['B2B 기준 판매가 미확인'] : []),
     ...(actualShippingCost == null ? ['실배송비 미확인'] : []),
     ...(requiredPayout != null && netPayout < requiredPayout ? ['수수료·배송비 반영 후 보전 기준 미달'] : []),
   ]

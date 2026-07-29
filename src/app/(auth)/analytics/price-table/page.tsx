@@ -9,7 +9,6 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
 import { PriceTableWorkspace } from './price-table-workspace'
 import { PriceTableUpload } from './price-table-upload'
-import { ChannelBundleOverrides } from './channel-bundle-overrides'
 
 export const metadata: Metadata = {
   title: '판매가 테이블',
@@ -38,7 +37,7 @@ export default async function PriceTablePage({
   const activeSheet = params?.sheet?.trim() || '상품등록'
   const sortKey = params?.sort?.trim() || 'productCode'
   const sortOrder = params?.order === 'desc' ? 'desc' : 'asc'
-  const activeView = params?.view === 'malls' || params?.view === 'compare' ? params.view : 'products'
+  const activeView = params?.view === 'malls' || params?.view === 'compare' || params?.view === 'ohouse' ? params.view : 'products'
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const data = await listPriceTableRows({
@@ -193,9 +192,8 @@ export default async function PriceTablePage({
           sellerUrl: check.sellerUrl,
           checkedAt: check.checkedAt.toISOString(),
         }))}
+        channelBundles={channelBundles}
       />
-
-      <ChannelBundleOverrides rows={channelBundles} search={search} />
 
       <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="text-muted-foreground">
@@ -256,7 +254,7 @@ function PageLink({
   sheetName: string
   sortKey: string
   sortOrder: 'asc' | 'desc'
-  view: 'products' | 'malls' | 'compare'
+  view: 'products' | 'malls' | 'compare' | 'ohouse'
   children: React.ReactNode
 }) {
   if (disabled) {
@@ -276,7 +274,7 @@ function PageLink({
   )
 }
 
-function sheetHref(sheetName: string, search: string, view: 'products' | 'malls' | 'compare') {
+function sheetHref(sheetName: string, search: string, view: 'products' | 'malls' | 'compare' | 'ohouse') {
   const params = new URLSearchParams({ sheet: sheetName })
   if (search) params.set('q', search)
   if (view !== 'products') params.set('view', view)

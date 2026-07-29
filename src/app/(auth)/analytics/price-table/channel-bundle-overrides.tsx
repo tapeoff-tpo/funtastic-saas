@@ -1,19 +1,49 @@
+'use client'
+
 import Link from 'next/link'
+import { useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, PackageCheck } from 'lucide-react'
 import type { ChannelBundleOverride } from '@/lib/analytics/channel-product-overrides'
 
 export function ChannelBundleOverrides({ rows, search }: { rows: ChannelBundleOverride[]; search: string }) {
+  const [filter, setFilter] = useState<'all' | 'warning' | 'stock' | 'profit'>('all')
+  const counts = useMemo(() => ({
+    warning: rows.filter((row) => row.warnings.length > 0).length,
+    stock: rows.filter((row) => row.hasExcessRegisteredStock).length,
+    profit: rows.filter((row) => row.estimatedProfit != null && row.estimatedProfit < 0).length,
+    selling: rows.filter((row) => /판매중/.test(row.saleStatus)).length,
+  }), [rows])
+  const visibleRows = useMemo(() => rows.filter((row) => {
+    if (filter === 'warning') return row.warnings.length > 0
+    if (filter === 'stock') return row.hasExcessRegisteredStock
+    if (filter === 'profit') return row.estimatedProfit != null && row.estimatedProfit < 0
+    return true
+  }), [filter, rows])
+
   return (
     <section className="overflow-hidden rounded-md border bg-card">
       <div className="flex flex-col gap-1 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <PackageCheck className="size-4 text-emerald-600" />
-          <h2 className="text-sm font-semibold">채널 묶음상품 오버라이드</h2>
+          <h2 className="text-sm font-semibold">오늘의집 등록 현황</h2>
           <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-medium text-emerald-700">오늘의집 {rows.length}개</span>
         </div>
-        <p className="text-xs text-muted-foreground">원본 판매가 엑셀과 별도 저장되어 파일 교체 후에도 유지됩니다.</p>
+        <p className="text-xs text-muted-foreground">판매코드 기준으로 상품등록관리와 연결됩니다.</p>
       </div>
       {rows.length ? (
+        <>
+          <div className="grid gap-px border-b bg-border sm:grid-cols-4">
+            <Summary label="등록 상품" value={`${rows.length}개`} tone="default" />
+            <Summary label="판매중" value={`${counts.selling}개`} tone="success" />
+            <Summary label="확인 필요" value={`${counts.warning}개`} tone={counts.warning ? 'warning' : 'success'} />
+            <Summary label="재고·손익 위험" value={`${counts.stock + counts.profit}개`} tone={counts.stock + counts.profit ? 'danger' : 'success'} />
+          </div>
+          <div className="flex flex-wrap gap-1 border-b bg-muted/20 px-3 py-2">
+            <FilterButton active={filter === 'all'} onClick={() => setFilter('all')}>전체 {rows.length}</FilterButton>
+            <FilterButton active={filter === 'warning'} onClick={() => setFilter('warning')}>확인 필요 {counts.warning}</FilterButton>
+            <FilterButton active={filter === 'stock'} onClick={() => setFilter('stock')}>재고 초과 {counts.stock}</FilterButton>
+            <FilterButton active={filter === 'profit'} onClick={() => setFilter('profit')}>적자 {counts.profit}</FilterButton>
+          </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1320px] text-sm">
             <thead className="bg-muted text-left text-xs text-muted-foreground">
@@ -30,10 +60,12 @@ export function ChannelBundleOverrides({ rows, search }: { rows: ChannelBundleOv
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => <BundleRow key={row.id} row={row} />)}
+              {visibleRows.map((row) => <BundleRow key={row.id} row={row} />)}
             </tbody>
           </table>
         </div>
+        {visibleRows.length === 0 ? <div className="border-t p-8 text-center text-sm text-muted-foreground">이 조건에 해당하는 오늘의집 상품이 없습니다.</div> : null}
+        </>
       ) : (
         <div className="p-8 text-center text-sm text-muted-foreground">
           {search ? `'${search}'와 일치하는 원본 SKU 또는 묶음상품이 없습니다.` : '등록된 채널 묶음상품이 없습니다.'}
@@ -44,6 +76,15 @@ export function ChannelBundleOverrides({ rows, search }: { rows: ChannelBundleOv
       </div>
     </section>
   )
+}
+
+function Summary({ label, value, tone }: { label: string; value: string; tone: 'default' | 'success' | 'warning' | 'danger' }) {
+  const className = tone === 'danger' ? 'text-red-700' : tone === 'warning' ? 'text-amber-700' : tone === 'success' ? 'text-emerald-700' : 'text-foreground'
+  return <div className="bg-card px-3 py-2.5"><p className="text-xs text-muted-foreground">{label}</p><p className={`mt-0.5 text-base font-semibold tabular-nums ${className}`}>{value}</p></div>
+}
+
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <button type="button" onClick={onClick} className={`h-7 rounded px-2.5 text-xs font-medium ${active ? 'bg-primary text-primary-foreground' : 'border bg-background hover:bg-muted'}`}>{children}</button>
 }
 
 function BundleRow({ row }: { row: ChannelBundleOverride }) {

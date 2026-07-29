@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { CheckCircle2, CircleAlert, Download, ExternalLink, PackageSearch, Store, Table2 } from 'lucide-react'
+import { CheckCircle2, CircleAlert, Download, ExternalLink, PackageCheck, PackageSearch, Store, Table2 } from 'lucide-react'
 import { toast } from 'sonner'
+import type { ChannelBundleOverride } from '@/lib/analytics/channel-product-overrides'
+import { ChannelBundleOverrides } from './channel-bundle-overrides'
 import { PriceTableGrid, type PriceTableGridRow } from './price-table-grid'
 import {
   findMarketplaceProductIds,
@@ -11,7 +13,7 @@ import {
   type PriceTableDisplayColumn,
 } from './price-table-columns'
 
-type WorkspaceView = 'products' | 'malls' | 'compare'
+type WorkspaceView = 'products' | 'malls' | 'compare' | 'ohouse'
 
 export type MarketplaceCheckView = {
   productCode: string
@@ -29,6 +31,7 @@ const VIEW_ITEMS: Array<{ id: WorkspaceView; label: string; icon: typeof Table2 
   { id: 'products', label: '상품 기준', icon: Table2 },
   { id: 'malls', label: '몰 기준', icon: Store },
   { id: 'compare', label: '가격 비교', icon: PackageSearch },
+  { id: 'ohouse', label: '오늘의집 현황', icon: PackageCheck },
 ]
 
 const SELLER_CENTERS: Record<string, string> = {
@@ -70,6 +73,7 @@ export function PriceTableWorkspace(props: {
   sortOrder: 'asc' | 'desc'
   initialView: WorkspaceView
   checks: MarketplaceCheckView[]
+  channelBundles: ChannelBundleOverride[]
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -112,6 +116,8 @@ export function PriceTableWorkspace(props: {
         <PriceTableGrid {...props} />
       ) : view === 'malls' ? (
         <MarketplaceView rows={props.rows} checks={props.checks} />
+      ) : view === 'ohouse' ? (
+        <ChannelBundleOverrides rows={props.channelBundles} search="" />
       ) : (
         <PriceCompareView rows={props.rows} />
       )}

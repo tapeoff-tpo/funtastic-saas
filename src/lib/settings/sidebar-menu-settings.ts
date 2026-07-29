@@ -1,12 +1,13 @@
 import { eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { sidebarMenuSettings } from '@/lib/db/schema'
-import type { SidebarMenuOrder } from '@/components/layout/sidebar-menu-order'
+import { SIDEBAR_MENU_ORDER_VERSION, type SidebarMenuOrder } from '@/components/layout/sidebar-menu-order'
 
 function isSidebarMenuOrder(value: unknown): value is SidebarMenuOrder {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<SidebarMenuOrder>
   return (
+    candidate.version === SIDEBAR_MENU_ORDER_VERSION &&
     Array.isArray(candidate.sections) &&
     candidate.sections.every((section) => typeof section === 'string') &&
     Boolean(candidate.items) &&
@@ -22,6 +23,7 @@ export function parseSidebarMenuOrder(value: unknown): SidebarMenuOrder {
     throw new Error('메뉴 순서 형식이 올바르지 않습니다.')
   }
   return {
+    version: value.version,
     sections: value.sections,
     items: value.items,
   }
@@ -50,7 +52,7 @@ export async function getSidebarMenuOrder(userId: string): Promise<SidebarMenuOr
     .from(sidebarMenuSettings)
     .where(eq(sidebarMenuSettings.userId, userId))
     .limit(1)
-  return row?.menuOrder ?? null
+  return isSidebarMenuOrder(row?.menuOrder) ? row.menuOrder : null
 }
 
 export async function saveSidebarMenuOrderForUser(userId: string, order: SidebarMenuOrder) {

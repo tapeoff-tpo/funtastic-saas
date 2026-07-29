@@ -1,7 +1,9 @@
 export const SIDEBAR_MENU_ORDER_KEY = 'funtastic-sidebar-menu-order'
 export const SIDEBAR_MENU_ORDER_EVENT = 'funtastic-sidebar-menu-order-changed'
+export const SIDEBAR_MENU_ORDER_VERSION = 2
 
 export interface SidebarMenuOrder {
+  version: number
   sections: string[]
   items: Record<string, string[]>
 }
@@ -20,8 +22,13 @@ export function readSidebarMenuOrder(): SidebarMenuOrder | null {
     const raw = localStorage.getItem(SIDEBAR_MENU_ORDER_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<SidebarMenuOrder>
-    if (!Array.isArray(parsed.sections) || !parsed.items || typeof parsed.items !== 'object') return null
-    return { sections: parsed.sections, items: parsed.items }
+    if (
+      parsed.version !== SIDEBAR_MENU_ORDER_VERSION ||
+      !Array.isArray(parsed.sections) ||
+      !parsed.items ||
+      typeof parsed.items !== 'object'
+    ) return null
+    return { version: parsed.version, sections: parsed.sections, items: parsed.items }
   } catch {
     return null
   }
@@ -100,6 +107,7 @@ export function applySidebarMenuOrder<TItem extends OrderableNavItem, TSection e
 
 export function createSidebarMenuOrder<TSection extends OrderableNavSection>(sections: TSection[]): SidebarMenuOrder {
   return {
+    version: SIDEBAR_MENU_ORDER_VERSION,
     sections: sections.map((section) => section.id),
     items: Object.fromEntries(sections.map((section) => [section.id, section.items.map((item) => item.href)])),
   }

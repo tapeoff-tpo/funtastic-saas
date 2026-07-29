@@ -1026,6 +1026,7 @@ export const sidebarMenuSettings = pgTable(
     id: uuid('id').defaultRandom().primaryKey(),
     userId: uuid('user_id').notNull(),
     menuOrder: jsonb('menu_order').$type<{
+      version: number
       sections: string[]
       items: Record<string, string[]>
     }>().notNull(),

@@ -2,18 +2,15 @@
 
 import { useState, useEffect, useTransition } from 'react'
 import { useRouter, useParams } from 'next/navigation'
-import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
 import type { ProductDetail, VariantFormData, ProductMarketplaceLink } from '@/lib/products/types'
 import { CategoryEditor } from './category-editor'
-import { ProductOperationsOverview } from './product-operations-overview'
 
 const SYNC_STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   synced: 'default',
   pending: 'outline',
   error: 'destructive',
 }
-
 const SYNC_STATUS_LABELS: Record<string, string> = {
   synced: '동기화됨',
   pending: '대기중',
@@ -219,11 +216,11 @@ export default function EditProductPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">품목 운영</h1>
+        <h1 className="text-2xl font-bold">상품 수정</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          원가, 재고, 판매가, 등록 몰을 확인하고 품목 정보를 관리합니다.
+          상품 정보를 수정하고 마켓플레이스 동기화 상태를 확인합니다.
         </p>
       </div>
 
@@ -232,8 +229,6 @@ export default function EditProductPage() {
           {error}
         </div>
       )}
-
-      <ProductOperationsOverview productId={productId} />
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Basic product info */}
@@ -575,12 +570,12 @@ export default function EditProductPage() {
 
         {/* Actions */}
         <div className="flex justify-end gap-2">
-          <Link
+          <a
             href="/products"
             className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
           >
             취소
-          </Link>
+          </a>
           <button
             type="submit"
             disabled={isPending}

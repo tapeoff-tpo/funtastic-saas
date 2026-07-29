@@ -1,7 +1,6 @@
 'use client'
 
 import { useTransition } from 'react'
-import Link from 'next/link'
 import type { ColumnDef } from '@tanstack/react-table'
 import { Badge } from '@/components/ui/badge'
 import { PRODUCT_STATUS_LABELS, type ProductStatus } from '@/lib/products/types'
@@ -105,12 +104,12 @@ export const columns: ColumnDef<ProductRow>[] = [
     accessorKey: 'internalSku',
     header: '상품코드',
     cell: ({ row }) => (
-      <Link
+      <a
         href={`/products/${row.original.id}`}
         className="font-mono text-sm text-blue-600 hover:underline"
       >
         {row.getValue('internalSku')}
-      </Link>
+      </a>
     ),
     size: 140,
   },
@@ -119,13 +118,13 @@ export const columns: ColumnDef<ProductRow>[] = [
     accessorKey: 'name',
     header: '상품명',
     cell: ({ row }) => (
-      <Link
+      <a
         href={`/products/${row.original.id}`}
         className="block max-w-[300px] truncate text-blue-600 hover:underline"
         title={row.getValue('name')}
       >
         {row.getValue('name')}
-      </Link>
+      </a>
     ),
     size: 300,
   },

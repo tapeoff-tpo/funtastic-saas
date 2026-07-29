@@ -16,7 +16,6 @@ import {
   BarChart3,
   Store,
   Settings,
-  FileText,
   Users,
   LogOut,
   ChevronsLeft,
@@ -140,36 +139,39 @@ export const navSections: NavSection[] = [
     ],
   },
   {
-    id: 'operations',
-    title: '운영',
+    id: 'product-registration',
+    title: '상품등록·광고',
     items: [
-      { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
       { href: '/operations/sourcing', label: '소싱', icon: Search },
+      { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
       { href: '/operations/marketplace-registration', label: '상품 등록 관리', icon: Package },
       { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },
-      { href: '/operations/ai-accounts', label: 'AI 계정공유', icon: Bot },
-      { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
+      { href: '/operations/deal-calendar', label: '딜 캘린더', icon: CalendarDays },
     ],
   },
   {
     id: 'analytics',
-    title: '분석',
+    title: '매출분석',
     items: [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
-      { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
       { href: '/analytics/sabangnet-review', label: '사방넷 검수', icon: FileSpreadsheet },
       { href: '/analytics/rocket-outbound', label: '로켓배송 출고', icon: FileSpreadsheet },
       { href: '/analytics/short-meeting', label: '숏미팅', icon: ClipboardList },
     ],
   },
   {
+    id: 'operations',
+    title: '운영',
+    items: [
+      { href: '/operations/ai-accounts', label: 'AI 계정공유', icon: Bot },
+      { href: '/purchasing/quotes', label: '견적서', icon: FileSpreadsheet },
+    ],
+  },
+  {
     id: 'admin',
     title: '관리자',
     items: [
-      { href: '/admin/dev-log', label: '개발로그', icon: FileText },
       { href: '/admin/accounts', label: '계정관리', icon: Users },
-      { href: '/settings/menu', label: '메뉴', icon: Settings },
-      { href: '/settings', label: '설정', icon: Settings },
     ],
   },
 ]

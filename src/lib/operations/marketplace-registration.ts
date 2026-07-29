@@ -13,6 +13,8 @@ export type RegistrationChannel = {
   marketplaceId: string
   status: string
   categoryName: string | null
+  payload: Record<string, unknown>
+  updatedAt: string | null
 }
 
 export type RegistrationRow = {
@@ -86,8 +88,45 @@ export async function ensureMarketplaceRegistrationTables() {
 
 function rows<T>(result: unknown) { return (result as { rows?: T[] }).rows ?? result as T[] }
 
+function jsonArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[]
+  if (typeof value !== 'string') return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed as T[] : []
+  } catch {
+    return []
+  }
+}
+
+function registrationOptions(value: unknown): RegistrationOption[] {
+  return jsonArray<Record<string, unknown>>(value).map((option, index) => ({
+    id: String(option.id ?? option.sku ?? index),
+    optionName: String(
+      option.optionName
+        ?? (Array.isArray(option.values) ? option.values.join(' / ') : option.name)
+        ?? '기본',
+    ),
+    stockQty: Number(option.stockQty ?? option.stock ?? 0),
+    status: String(option.status ?? 'SELLING'),
+    barcode: String(option.barcode ?? option.sku ?? '').trim() || null,
+  }))
+}
+
 export async function listMarketplaceRegistrationProducts(userId: string) {
   await ensureMarketplaceRegistrationTables()
+  await db.execute(sql`
+    INSERT INTO marketplace_registration_channels (
+      profile_id, user_id, marketplace_id, status, payload
+    )
+    SELECT profile.id, profile.user_id, 'ohouse', 'needs_info',
+      '{"source":"funtastic-b2b"}'::jsonb
+    FROM marketplace_registration_profiles profile
+    WHERE profile.user_id = ${userId}
+      AND profile.source_type = 'funtastic-b2b'
+    ON CONFLICT (profile_id, marketplace_id) DO NOTHING
+  `)
+  await syncLinkedOhouseRegistrationChannels(userId)
   // 최초 등록 기준은 B2B 원본 카테고리로 채운다. 사용자가 이미 보정한 값은 절대 덮어쓰지 않는다.
   await db.execute(sql`
     UPDATE marketplace_registration_profiles
@@ -121,7 +160,9 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
         SELECT jsonb_agg(jsonb_build_object(
           'marketplaceId', c.marketplace_id,
           'status', c.status,
-          'categoryName', c.category_name
+          'categoryName', c.category_name,
+          'payload', c.payload,
+          'updatedAt', c.updated_at::text
         ) ORDER BY c.marketplace_id)
         FROM marketplace_registration_channels c
         WHERE c.profile_id = r.id
@@ -218,10 +259,31 @@ export async function listMarketplaceRegistrationProducts(userId: string) {
           )
       ), 0)::int AS "matchedSalesCodes"
     FROM marketplace_registration_profiles r
-    WHERE r.user_id = ${userId} AND r.source_type = 'funtastic-b2b'
+    WHERE r.user_id = ${userId}
+      AND r.source_type = 'funtastic-b2b'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM marketplace_registration_profiles canonical
+        WHERE canonical.user_id = r.user_id
+          AND canonical.source_type = 'funtastic-b2b'
+          AND canonical.product_code <> r.product_code
+          AND canonical.product_code IN (
+            SELECT linked_code.value
+            FROM jsonb_array_elements_text(COALESCE(r.sales_codes, '[]'::jsonb)) AS linked_code(value)
+          )
+      )
     ORDER BY r.source_updated_at DESC NULLS LAST, r.product_code DESC
   `)
-  return rows<RegistrationRow>(result)
+  return rows<RegistrationRow>(result).map((row) => ({
+    ...row,
+    salesCodes: jsonArray<string>(row.salesCodes),
+    thumbnailUrls: jsonArray<string>(row.thumbnailUrls),
+    detailImageUrls: jsonArray<string>(row.detailImageUrls),
+    imageUrls: jsonArray<string>(row.imageUrls),
+    options: registrationOptions(row.options),
+    productNotice: jsonArray<{ label: string; value: string }>(row.productNotice),
+    channels: jsonArray<RegistrationChannel>(row.channels),
+  }))
 }
 
 type RegistrationProfileInput = {
@@ -246,7 +308,7 @@ export async function applyMarketplaceRegistration(input: RegistrationProfileInp
     RETURNING id
   `)
   const profileId = rows<{ id: string }>(result)[0]!.id
-  for (const marketplaceId of ['coupang', 'smartstore', 'toss']) {
+  for (const marketplaceId of ['coupang', 'smartstore', 'toss', 'ohouse']) {
     await db.execute(sql`INSERT INTO marketplace_registration_channels (profile_id, user_id, marketplace_id, category_name, payload) VALUES (${profileId}, ${input.userId}, ${marketplaceId}, ${input.commonCategory || null}, ${JSON.stringify({ source: 'funtastic-b2b', commonCategory: input.commonCategory || null })}::jsonb) ON CONFLICT (profile_id, marketplace_id) DO UPDATE SET category_name = EXCLUDED.category_name, payload = EXCLUDED.payload, updated_at = now()`)
   }
 }
@@ -475,7 +537,7 @@ export async function syncFuntasticB2bRegistrationProducts(userId: string) {
         '{"source":"funtastic-b2b"}'::jsonb
       FROM marketplace_registration_profiles profile
       CROSS JOIN (
-        VALUES ('coupang'), ('smartstore'), ('toss')
+        VALUES ('coupang'), ('smartstore'), ('toss'), ('ohouse')
       ) AS channel(marketplace_id)
       WHERE profile.user_id = ${userId}
         AND profile.source_type = 'funtastic-b2b'
@@ -484,4 +546,90 @@ export async function syncFuntasticB2bRegistrationProducts(userId: string) {
   }
 
   return { count: products.length, syncedAt: syncedAtIso }
+}
+
+type OhouseRegistrationOverride = {
+  channelProductId: string
+  sourceKey: string
+  productName: string
+  optionName: string | null
+  components: Array<{ sku?: string; quantity?: number }>
+  salePrice: number
+  regularPrice: number | null
+  shippingFee: number
+  commissionRate: number
+  registeredStock: number
+  saleStatus: string
+  lastCheckedAt: string
+  notes: string | null
+}
+
+async function syncLinkedOhouseRegistrationChannels(userId: string) {
+  const tableResult = await db.execute<{ tableName: string | null }>(sql`
+    SELECT to_regclass('public.analytics_channel_product_overrides')::text AS "tableName"
+  `)
+  if (!rows<{ tableName: string | null }>(tableResult)[0]?.tableName) return
+
+  const overrides = rows<OhouseRegistrationOverride>(await db.execute<OhouseRegistrationOverride>(sql`
+    SELECT channel_product_id AS "channelProductId", source_key AS "sourceKey",
+      product_name AS "productName", option_name AS "optionName", components,
+      sale_price::float8 AS "salePrice", regular_price::float8 AS "regularPrice",
+      shipping_fee::float8 AS "shippingFee", commission_rate::float8 AS "commissionRate",
+      registered_stock::int AS "registeredStock", sale_status AS "saleStatus",
+      last_checked_at::text AS "lastCheckedAt", notes
+    FROM analytics_channel_product_overrides
+    WHERE user_id = ${userId} AND channel_key = 'ohouse'
+  `))
+  if (overrides.length === 0) return
+
+  const bySku = new Map<string, OhouseRegistrationOverride[]>()
+  for (const registration of overrides) {
+    for (const component of registration.components ?? []) {
+      const sku = component.sku?.trim()
+      if (!sku) continue
+      bySku.set(sku, [...(bySku.get(sku) ?? []), registration])
+    }
+  }
+
+  for (const [sku, registrations] of bySku) {
+    const uniqueRegistrations = [...new Map(
+      registrations.map((registration) => [
+        `${registration.channelProductId}:${registration.sourceKey}`,
+        registration,
+      ]),
+    ).values()]
+    await db.execute(sql`
+      INSERT INTO marketplace_registration_channels (
+        profile_id, user_id, marketplace_id, status, category_name, payload
+      )
+      SELECT profile.id, profile.user_id, 'ohouse', 'submitted', profile.common_category,
+        ${JSON.stringify({
+          source: 'analytics-channel-product-overrides',
+          registrations: uniqueRegistrations,
+        })}::jsonb
+      FROM marketplace_registration_profiles profile
+      WHERE profile.user_id = ${userId}
+        AND profile.source_type = 'funtastic-b2b'
+        AND (
+          profile.product_code = ${sku}
+          OR COALESCE(profile.sales_codes, '[]'::jsonb) ? ${sku}
+          OR EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements(
+              CASE WHEN jsonb_typeof(COALESCE(profile.source_options, '[]'::jsonb)) = 'array'
+                THEN profile.source_options ELSE '[]'::jsonb END
+            ) option_value
+            WHERE option_value->>'barcode' = ${sku}
+          )
+        )
+      ON CONFLICT (profile_id, marketplace_id) DO UPDATE SET
+        status = EXCLUDED.status,
+        category_name = COALESCE(EXCLUDED.category_name, marketplace_registration_channels.category_name),
+        payload = EXCLUDED.payload,
+        updated_at = now()
+      WHERE marketplace_registration_channels.status IS DISTINCT FROM EXCLUDED.status
+        OR marketplace_registration_channels.category_name IS DISTINCT FROM COALESCE(EXCLUDED.category_name, marketplace_registration_channels.category_name)
+        OR marketplace_registration_channels.payload IS DISTINCT FROM EXCLUDED.payload
+    `)
+  }
 }

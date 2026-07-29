@@ -23,9 +23,21 @@ import { applyRegistrationAction, syncFuntasticB2bAction, syncMarketplaceRegistr
 type Filter = 'all' | 'needs_info' | 'ready' | 'selling' | 'paused'
 
 const CHANNEL_LABELS: Record<string, string> = {
+  '10x10': '텐바이텐',
   coupang: '쿠팡',
   smartstore: '스마트스토어',
   toss: '토스',
+  ohouse: '오늘의집',
+}
+
+const CHANNEL_STATUS_LABELS: Record<string, string> = {
+  needs_info: '정보 필요',
+  ready: '등록 준비',
+  submitted: '등록 완료',
+  approved: '승인 완료',
+  selling: '판매중',
+  paused: '판매중지',
+  rejected: '반려',
 }
 
 function formatPrice(value: number) {
@@ -88,6 +100,7 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
   const [filter, setFilter] = useState<Filter>('all')
   const [selectedCode, setSelectedCode] = useState<string | null>(rows[0]?.productCode ?? null)
   const [syncMessage, setSyncMessage] = useState('')
+  const [selectedChannel, setSelectedChannel] = useState<RegistrationRow['channels'][number] | null>(null)
   const [syncPending, startSyncTransition] = useTransition()
   const [salesCodePending, startSalesCodeTransition] = useTransition()
   const selected = rows.find((row) => row.productCode === selectedCode) ?? null
@@ -407,16 +420,25 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
 
                   <div>
                     <h3 className="mb-2 text-sm font-semibold">몰별 준비 상태</h3>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {selected.channels.map((channel) => (
-                        <div key={channel.marketplaceId} className="border bg-background px-2 py-2 text-center">
+                        <button
+                          key={channel.marketplaceId}
+                          type="button"
+                          onClick={() => setSelectedChannel(channel)}
+                          className={cn(
+                            'rounded border bg-background px-2 py-2 text-center transition-colors hover:border-blue-300 hover:bg-blue-50',
+                            channel.marketplaceId === 'ohouse' && 'border-blue-200 bg-blue-50/60',
+                          )}
+                        >
                           <p className="text-xs font-medium">{CHANNEL_LABELS[channel.marketplaceId] || channel.marketplaceId}</p>
-                          <p className={cn('mt-1 text-[11px]', selected.commonCategory ? 'text-emerald-700' : 'text-amber-700')}>
-                            {selected.commonCategory ? '등록 준비' : '카테고리 필요'}
+                          <p className={cn('mt-1 text-[11px]', channel.status === 'needs_info' ? 'text-amber-700' : 'text-emerald-700')}>
+                            {CHANNEL_STATUS_LABELS[channel.status] || channel.status}
                           </p>
-                        </div>
+                        </button>
                       ))}
                     </div>
+                    <p className="mt-1.5 text-[11px] text-muted-foreground">채널을 누르면 실제 등록 상품·가격·배송·검수 상태를 확인할 수 있습니다.</p>
                   </div>
 
                   <div>
@@ -470,6 +492,100 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
           )}
         </aside>
       </div>
+      {selectedChannel ? (
+        <ChannelRegistrationModal channel={selectedChannel} onClose={() => setSelectedChannel(null)} />
+      ) : null}
     </section>
   )
+}
+
+function ChannelRegistrationModal({
+  channel,
+  onClose,
+}: {
+  channel: RegistrationRow['channels'][number]
+  onClose: () => void
+}) {
+  const registrations = Array.isArray(channel.payload.registrations)
+    ? channel.payload.registrations.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    : []
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" role="presentation" onMouseDown={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="channel-registration-title"
+        className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-lg border bg-background shadow-xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="sticky top-0 flex items-center justify-between border-b bg-background px-5 py-4">
+          <div>
+            <h2 id="channel-registration-title" className="text-base font-semibold">
+              {CHANNEL_LABELS[channel.marketplaceId] || channel.marketplaceId} 등록 내역
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {CHANNEL_STATUS_LABELS[channel.status] || channel.status}
+              {channel.updatedAt ? ` · ${new Date(channel.updatedAt).toLocaleString('ko-KR')}` : ''}
+            </p>
+          </div>
+          <Button type="button" variant="ghost" size="icon-sm" onClick={onClose} title="닫기"><X /></Button>
+        </div>
+        <div className="space-y-3 p-5">
+          {registrations.length > 0 ? registrations.map((registration, index) => (
+            <div key={`${String(registration.channelProductId ?? index)}:${String(registration.sourceKey ?? '')}`} className="rounded-md border bg-muted/10 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <p className="font-medium">{String(registration.productName ?? '등록 상품')}</p>
+                  <p className="mt-1 font-mono text-xs text-muted-foreground">
+                    상품 ID {String(registration.channelProductId ?? '-')} · 구성코드 {String(registration.sourceKey ?? '-')}
+                  </p>
+                </div>
+                <Badge variant="outline">{String(registration.saleStatus ?? CHANNEL_STATUS_LABELS[channel.status] ?? channel.status)}</Badge>
+              </div>
+              <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+                <RegistrationDetail label="판매가" value={formatOptionalPrice(registration.salePrice)} />
+                <RegistrationDetail label="정상가" value={formatOptionalPrice(registration.regularPrice)} />
+                <RegistrationDetail label="배송비" value={formatOptionalPrice(registration.shippingFee)} />
+                <RegistrationDetail label="수수료" value={registration.commissionRate == null ? '-' : `${registration.commissionRate}%`} />
+                <RegistrationDetail label="등록 재고" value={registration.registeredStock == null ? '-' : `${registration.registeredStock}개`} />
+                <RegistrationDetail label="옵션" value={String(registration.optionName ?? '단일 옵션')} />
+                <RegistrationDetail label="구성" value={formatComponents(registration.components)} />
+                <RegistrationDetail label="최종 확인" value={formatDate(registration.lastCheckedAt)} />
+                <RegistrationDetail label="배송 메모" value={String(registration.notes ?? '-')} />
+              </dl>
+            </div>
+          )) : (
+            <div className="rounded-md border border-dashed px-4 py-10 text-center">
+              <p className="text-sm font-medium">아직 연결된 등록 상품이 없습니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">별도 상품을 새로 만들지 않고, 이 B2B 상품의 판매코드로 등록 내역이 연결됩니다.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function RegistrationDetail({ label, value }: { label: string; value: string }) {
+  return <div><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 font-medium">{value}</dd></div>
+}
+
+function formatOptionalPrice(value: unknown) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? formatPrice(numeric) : '-'
+}
+
+function formatDate(value: unknown) {
+  if (!value) return '-'
+  const date = new Date(String(value))
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleDateString('ko-KR')
+}
+
+function formatComponents(value: unknown) {
+  if (!Array.isArray(value)) return '-'
+  return value
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => `${String(item.sku ?? '-')} × ${String(item.quantity ?? 1)}`)
+    .join(', ') || '-'
 }

@@ -88,29 +88,23 @@ export default async function PriceTablePage({
         </Link>
       </div>
 
-      <div className="grid overflow-hidden rounded-md border bg-card sm:grid-cols-3 sm:divide-x">
-        <SummaryItem label="전체 데이터" value={`${data.overallTotal.toLocaleString('ko-KR')}건`} />
-        <SummaryItem
-          label={search ? '검색 결과' : `${activeSheet} 데이터`}
-          value={`${data.total.toLocaleString('ko-KR')}건`}
-        />
-        <SummaryItem label="최근 업로드" value={formatDateTime(data.latestImport)} />
-      </div>
-
-      <details className="group rounded-md border bg-card">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 [&::-webkit-details-marker]:hidden">
-          <div className="flex min-w-0 items-center gap-2">
-            <FileSpreadsheet className="size-4 shrink-0 text-muted-foreground" />
-            <span className="whitespace-nowrap text-sm font-medium sm:hidden">파일 교체</span>
-            <span className="hidden whitespace-nowrap text-sm font-medium sm:inline">원본 파일 교체</span>
-            {data.sourceFileName ? <span className="hidden truncate text-xs text-muted-foreground sm:inline">{data.sourceFileName}</span> : null}
-          </div>
-          <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
-        </summary>
-        <div className="border-t p-4">
-          <PriceTableUpload />
+      <div className="flex flex-col gap-2 border-y py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3 overflow-x-auto text-xs text-muted-foreground">
+          <SummaryItem label="전체" value={`${data.overallTotal.toLocaleString('ko-KR')}건`} />
+          <SummaryItem label={search ? '검색' : activeSheet} value={`${data.total.toLocaleString('ko-KR')}건`} />
+          <SummaryItem label="최근 업로드" value={formatDateTime(data.latestImport)} />
         </div>
-      </details>
+        <details className="group relative shrink-0">
+          <summary className="flex h-7 cursor-pointer list-none items-center gap-1.5 rounded border bg-background px-2 text-xs font-medium hover:bg-muted [&::-webkit-details-marker]:hidden">
+            <FileSpreadsheet className="size-3.5 text-muted-foreground" />
+            원본 업로드
+            <ChevronDown className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="absolute right-0 z-40 mt-1 w-[min(420px,calc(100vw-2rem))] rounded-md border bg-popover p-3 shadow-lg">
+            <PriceTableUpload compact />
+          </div>
+        </details>
+      </div>
 
       <ChannelBundleOverridesUpload />
 
@@ -203,9 +197,9 @@ export default async function PriceTablePage({
 
 function SummaryItem({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border-b px-4 py-3 last:border-b-0 sm:border-b-0">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 text-base font-semibold tabular-nums">{value}</div>
+    <div className="flex shrink-0 items-center gap-1.5">
+      <span>{label}</span>
+      <span className="font-medium tabular-nums text-foreground">{value}</span>
     </div>
   )
 }

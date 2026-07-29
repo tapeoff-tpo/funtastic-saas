@@ -12,7 +12,7 @@ type ImportResult = {
   sourceFileName: string
 }
 
-export function PriceTableUpload() {
+export function PriceTableUpload({ compact = false }: { compact?: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const [result, setResult] = useState<ImportResult | null>(null)
@@ -47,22 +47,24 @@ export function PriceTableUpload() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-base font-semibold">판매가 테이블 업로드</h2>
-        <p className="text-sm text-muted-foreground">
-          상품등록, 메인, 뉴도매 시트의 상품코드와 플랫폼별 판매가 원본 데이터를 분석 화면에 반영합니다.
-        </p>
-      </div>
+    <div className={compact ? 'space-y-2' : 'space-y-3'}>
+      {!compact ? (
+        <div className="flex flex-col gap-1">
+          <h2 className="text-base font-semibold">판매가 테이블 업로드</h2>
+          <p className="text-sm text-muted-foreground">
+            상품등록, 메인, 뉴도매 시트의 상품코드와 플랫폼별 판매가 원본 데이터를 분석 화면에 반영합니다.
+          </p>
+        </div>
+      ) : <p className="text-xs text-muted-foreground">상품등록, 메인, 뉴도매 원본 파일을 교체합니다.</p>}
 
       <div className="grid gap-2 md:grid-cols-[1fr_auto]">
         <input
           ref={fileRef}
           type="file"
           accept=".xlsb,.xlsx,.xls"
-          className="h-9 rounded-lg border bg-background px-2 py-1 text-sm"
+          className="h-8 rounded-md border bg-background px-2 py-1 text-xs"
         />
-        <Button type="button" onClick={upload} disabled={isPending}>
+        <Button type="button" size="sm" onClick={upload} disabled={isPending}>
           <Upload />
           {isPending ? '업로드 중' : '업로드'}
         </Button>

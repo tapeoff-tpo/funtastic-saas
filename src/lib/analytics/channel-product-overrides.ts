@@ -187,11 +187,24 @@ async function getUnitCosts(userId: string, skus: string[]) {
 async function getB2bReferencePrices(userId: string, skus: string[]) {
   if (!skus.length) return new Map<string, number>()
   const result = rows<{ sku: string; b2bPrice: number | null }>(await db.execute(sql`
-    SELECT product_code AS sku, MAX(source_price)::float8 AS "b2bPrice"
-    FROM marketplace_registration_profiles
-    WHERE user_id = ${userId} AND source_type = 'funtastic-b2b'
-      AND product_code IN (${sql.join(skus.map((sku) => sql`${sku}`), sql`, `)})
-    GROUP BY product_code
+    WITH source_prices AS (
+      SELECT product_code AS sku, MAX(source_price)::float8 AS price
+      FROM marketplace_registration_profiles
+      WHERE user_id = ${userId} AND source_type = 'funtastic-b2b'
+        AND product_code IN (${sql.join(skus.map((sku) => sql`${sku}`), sql`, `)})
+      GROUP BY product_code
+      UNION ALL
+      SELECT product_code AS sku,
+        MAX(NULLIF(regexp_replace(COALESCE(raw_data->>'B2B 판매가', ''), '[^0-9.-]', '', 'g'), '')::numeric)::float8 AS price
+      FROM analytics_price_table_rows
+      WHERE user_id = ${userId}
+        AND product_code IN (${sql.join(skus.map((sku) => sql`${sku}`), sql`, `)})
+      GROUP BY product_code
+    )
+    SELECT sku, MAX(price)::float8 AS "b2bPrice"
+    FROM source_prices
+    WHERE price IS NOT NULL
+    GROUP BY sku
   `))
   return new Map(result.flatMap((row) => row.b2bPrice == null ? [] : [[row.sku, Number(row.b2bPrice)] as const]))
 }

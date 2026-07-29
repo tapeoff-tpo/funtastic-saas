@@ -2,12 +2,11 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { ChevronDown, FileSpreadsheet, Search, X } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { listChannelBundleOverrides } from '@/lib/analytics/channel-product-overrides'
 import { listPriceTableRows } from '@/lib/analytics/price-table'
-import { listMarketplaceProductChecks } from '@/lib/analytics/marketplace-product-checks'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { type PriceTableGridRow } from './price-table-grid'
 import { PriceTableWorkspace } from './price-table-workspace'
+import { ChannelBundleOverridesUpload } from './channel-bundle-overrides-upload'
 import { PriceTableUpload } from './price-table-upload'
 
 export const metadata: Metadata = {
@@ -37,7 +36,7 @@ export default async function PriceTablePage({
   const activeSheet = params?.sheet?.trim() || '상품등록'
   const sortKey = params?.sort?.trim() || 'productCode'
   const sortOrder = params?.order === 'desc' ? 'desc' : 'asc'
-  const activeView = params?.view === 'malls' || params?.view === 'compare' || params?.view === 'ohouse' ? params.view : 'products'
+  const activeView = params?.view === 'products' ? 'products' : 'compare'
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
   const data = await listPriceTableRows({
@@ -75,20 +74,6 @@ export default async function PriceTablePage({
     registeredProductName: row.registeredProductName,
     rawData: row.rawData as Record<string, string>,
   }))
-  const [checks, channelBundles] = await Promise.all([
-    listMarketplaceProductChecks(
-      workspaceUserId,
-      gridRows.map((row) => row.productCode ?? ''),
-    ).catch((error) => {
-      console.error('marketplace product checks list error:', error)
-      return []
-    }),
-    listChannelBundleOverrides(workspaceUserId, search).catch((error) => {
-      console.error('channel bundle overrides list error:', error)
-      return []
-    }),
-  ])
-
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -126,6 +111,8 @@ export default async function PriceTablePage({
           <PriceTableUpload />
         </div>
       </details>
+
+      <ChannelBundleOverridesUpload />
 
       <section className="overflow-hidden rounded-md border bg-card">
         <div className="flex gap-1 overflow-x-auto border-b px-3 pt-1">
@@ -177,22 +164,7 @@ export default async function PriceTablePage({
       <PriceTableWorkspace
         key={`${activeSheet}:${params?.view ?? 'products'}`}
         rows={gridRows}
-        sheetName={activeSheet}
-        sortKey={sortKey}
-        sortOrder={sortOrder}
         initialView={activeView}
-        checks={checks.map((check) => ({
-          productCode: check.productCode,
-          marketplaceKey: check.marketplaceKey,
-          marketplaceName: check.marketplaceName,
-          accountKey: check.accountKey,
-          status: check.status,
-          marketplaceProductId: check.marketplaceProductId,
-          marketplaceProductName: check.marketplaceProductName,
-          sellerUrl: check.sellerUrl,
-          checkedAt: check.checkedAt.toISOString(),
-        }))}
-        channelBundles={channelBundles}
       />
 
       <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
@@ -254,7 +226,7 @@ function PageLink({
   sheetName: string
   sortKey: string
   sortOrder: 'asc' | 'desc'
-  view: 'products' | 'malls' | 'compare' | 'ohouse'
+  view: 'products' | 'compare'
   children: React.ReactNode
 }) {
   if (disabled) {
@@ -274,7 +246,7 @@ function PageLink({
   )
 }
 
-function sheetHref(sheetName: string, search: string, view: 'products' | 'malls' | 'compare' | 'ohouse') {
+function sheetHref(sheetName: string, search: string, view: 'products' | 'compare') {
   const params = new URLSearchParams({ sheet: sheetName })
   if (search) params.set('q', search)
   if (view !== 'products') params.set('view', view)

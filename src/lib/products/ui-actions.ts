@@ -19,6 +19,7 @@ import { getCategoryMappings, getInternalCategories } from './categories'
 import { saveCategoryMapping, deleteCategoryMapping } from './category-actions'
 import type { ProductFilters, ProductFormData, ProductListItem, ProductDetail, CategoryMapping, ProductStatus } from './types'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getProductOperationsSummary } from './operations-summary'
 
 type ActionResult<T = void> = { success: true; data: T } | { success: false; error: string }
 
@@ -47,6 +48,10 @@ export async function getProductByIdAction(
 ): Promise<ProductDetail | null> {
   await requireUser()
   return getProductById(productId)
+}
+
+export async function getProductOperationsSummaryAction(productId: string) {
+  return getProductOperationsSummary(await requireUser(), productId)
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateChannelBundle } from './channel-product-overrides'
+import { calculateChannelBundle, parseChannelBundleOverrideRow } from './channel-product-overrides'
 
 const base = {
   id: 'test',
@@ -35,5 +35,42 @@ describe('calculateChannelBundle', () => {
     expect(result.hasExcessRegisteredStock).toBe(true)
     expect(result.warnings).toContain('실배송비 미확인')
     expect(result.warnings.some((warning) => warning.includes('초과'))).toBe(true)
+  })
+})
+
+describe('parseChannelBundleOverrideRow', () => {
+  it('엑셀 행의 단일 원본 SKU와 구성수량을 묶음 구성으로 변환한다', () => {
+    const result = parseChannelBundleOverrideRow({
+      채널: '오늘의집',
+      채널상품ID: '4170322',
+      묶음SKU: '111723-0001-3SET',
+      상품명: '파일 정리함 3개 세트',
+      원본SKU: '111723-0001',
+      구성수량: '3',
+      판매가: '16,900원',
+      수수료율: '20%',
+      마지막확인일: '2026.07.29',
+    })
+    expect(result.channelKey).toBe('ohouse')
+    expect(result.components).toEqual([{ sku: '111723-0001', quantity: 3 }])
+    expect(result.salePrice).toBe(16900)
+    expect(result.commissionRate).toBe(20)
+    expect(result.lastCheckedAt).toBe('2026-07-29')
+  })
+
+  it('원본 SKU에 수량을 함께 쓰면 여러 구성품을 읽는다', () => {
+    const result = parseChannelBundleOverrideRow({
+      채널: 'ohouse',
+      채널상품ID: '4170368',
+      묶음SKU: 'hook-set',
+      상품명: '후크 세트',
+      원본SKU: '111654-0001*2, 111654-0002*1',
+      판매가: 14900,
+      수수료율: 18,
+    })
+    expect(result.components).toEqual([
+      { sku: '111654-0001', quantity: 2 },
+      { sku: '111654-0002', quantity: 1 },
+    ])
   })
 })

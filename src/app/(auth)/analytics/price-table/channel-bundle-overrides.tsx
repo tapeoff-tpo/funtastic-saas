@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { AlertTriangle, CheckCircle2, PackageCheck } from 'lucide-react'
 import type { ChannelBundleOverride } from '@/lib/analytics/channel-product-overrides'
+import { ChannelBundleOverridesUpload } from './channel-bundle-overrides-upload'
 
 export function ChannelBundleOverrides({ rows, search }: { rows: ChannelBundleOverride[]; search: string }) {
   const [filter, setFilter] = useState<'all' | 'warning' | 'stock' | 'profit'>('all')
@@ -30,6 +31,7 @@ export function ChannelBundleOverrides({ rows, search }: { rows: ChannelBundleOv
         </div>
         <p className="text-xs text-muted-foreground">판매코드 기준으로 상품등록관리와 연결됩니다.</p>
       </div>
+      <ChannelBundleOverridesUpload />
       {rows.length ? (
         <>
           <div className="grid gap-px border-b bg-border sm:grid-cols-4">

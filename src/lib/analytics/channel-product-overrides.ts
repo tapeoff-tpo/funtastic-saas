@@ -1,4 +1,5 @@
 import { sql } from 'drizzle-orm'
+import * as XLSX from 'xlsx'
 import { db } from '@/lib/db'
 
 export type ChannelBundleComponent = {
@@ -36,6 +37,161 @@ export type ChannelBundleOverride = StoredOverride & {
   requiredPayout: number | null
   estimatedProfit: number | null
   warnings: string[]
+}
+
+type ImportableOverride = Omit<StoredOverride, 'id'>
+
+export type ChannelBundleOverrideImportResult = {
+  created: number
+  updated: number
+  skipped: number
+  errors: string[]
+}
+
+const BUNDLE_UPLOAD_HEADERS = [
+  '채널', '채널상품ID', '묶음SKU', '상품명', '옵션명', '원본SKU', '구성수량',
+  '판매가', '정상가', '배송비', '수수료율', '등록재고', '판매상태', '마지막확인일', '비고',
+]
+
+export function createChannelBundleOverrideTemplate(): Buffer {
+  const worksheet = XLSX.utils.aoa_to_sheet([
+    BUNDLE_UPLOAD_HEADERS,
+    ['오늘의집', '4170322', '111723-0001-3SET', '파일 서류 정리함 좁은형 3개 세트', '', '111723-0001', 3, 16900, 29700, 0, 20, 30, '검수 후 판매대기', '2026-07-29', '무료배송'],
+  ])
+  worksheet['!cols'] = BUNDLE_UPLOAD_HEADERS.map((header) => ({ wch: Math.max(header.length + 2, 14) }))
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, worksheet, '채널묶음상품')
+  return Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }))
+}
+
+export async function importChannelBundleOverrides({
+  userId,
+  fileBuffer,
+}: {
+  userId: string
+  fileBuffer: ArrayBuffer
+}): Promise<ChannelBundleOverrideImportResult> {
+  await ensureChannelProductOverrideSchema()
+  const workbook = XLSX.read(fileBuffer, { type: 'array', cellDates: false })
+  const sheet = workbook.Sheets[workbook.SheetNames[0] ?? '']
+  if (!sheet) throw new Error('업로드 파일에서 시트를 찾지 못했습니다.')
+  const sourceRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '', raw: false })
+  if (!sourceRows.length) throw new Error('업로드할 데이터 행이 없습니다.')
+
+  const result: ChannelBundleOverrideImportResult = { created: 0, updated: 0, skipped: 0, errors: [] }
+  for (let index = 0; index < sourceRows.length; index += 1) {
+    const line = index + 2
+    try {
+      const item = parseChannelBundleOverrideRow(sourceRows[index])
+      const existing = rows<{ id: string }>(await db.execute(sql`
+        SELECT id FROM analytics_channel_product_overrides
+        WHERE user_id = ${userId} AND channel_key = ${item.channelKey}
+          AND channel_product_id = ${item.channelProductId} AND source_key = ${item.sourceKey}
+        LIMIT 1
+      `))[0]
+      await db.execute(sql`
+        INSERT INTO analytics_channel_product_overrides (
+          user_id, channel_key, channel_name, channel_product_id, source_key, product_name, option_name,
+          components, sale_price, regular_price, shipping_fee, commission_rate, registered_stock,
+          sale_status, last_checked_at, notes, updated_at
+        ) VALUES (
+          ${userId}, ${item.channelKey}, ${item.channelName}, ${item.channelProductId}, ${item.sourceKey},
+          ${item.productName}, ${item.optionName}, ${JSON.stringify(item.components)}::jsonb,
+          ${item.salePrice}, ${item.regularPrice}, ${item.shippingFee}, ${item.commissionRate}, ${item.registeredStock},
+          ${item.saleStatus}, ${item.lastCheckedAt}::date, ${item.notes}, now()
+        ) ON CONFLICT (user_id, channel_key, channel_product_id, source_key) DO UPDATE SET
+          channel_name = EXCLUDED.channel_name, product_name = EXCLUDED.product_name, option_name = EXCLUDED.option_name,
+          components = EXCLUDED.components, sale_price = EXCLUDED.sale_price, regular_price = EXCLUDED.regular_price,
+          shipping_fee = EXCLUDED.shipping_fee, commission_rate = EXCLUDED.commission_rate,
+          registered_stock = EXCLUDED.registered_stock, sale_status = EXCLUDED.sale_status,
+          last_checked_at = EXCLUDED.last_checked_at, notes = EXCLUDED.notes, updated_at = now()
+      `)
+      if (existing) result.updated += 1
+      else result.created += 1
+    } catch (error) {
+      result.skipped += 1
+      result.errors.push(`${line}행: ${error instanceof Error ? error.message : '형식을 확인해주세요.'}`)
+    }
+  }
+  return result
+}
+
+export function parseChannelBundleOverrideRow(row: Record<string, unknown>): ImportableOverride {
+  const value = (...keys: string[]) => {
+    for (const key of keys) {
+      const found = row[key]
+      if (found != null && String(found).trim()) return String(found).trim()
+    }
+    return ''
+  }
+  const channelInput = value('채널', '채널명', '채널코드')
+  const channel = normalizeChannel(channelInput)
+  const channelProductId = value('채널상품ID', '상품ID', '채널 상품 ID')
+  const productName = value('상품명', '묶음상품명')
+  const componentText = value('원본SKU', '원본 SKU', '구성')
+  const components = parseComponents(componentText, value('구성수량', '구성 수량'))
+  const sourceKey = value('묶음SKU', '묶음 SKU') || components.map((component) => `${component.sku}-${component.quantity}SET`).join('_')
+  const salePrice = numberValue(value('판매가'), '판매가', true)
+  const commissionRate = numberValue(value('수수료율', '수수료'), '수수료율', true)
+  if (!channelProductId) throw new Error('채널상품ID가 필요합니다.')
+  if (!productName) throw new Error('상품명이 필요합니다.')
+  if (!sourceKey) throw new Error('묶음SKU가 필요합니다.')
+  return {
+    channelKey: channel.key,
+    channelName: channel.name,
+    channelProductId,
+    sourceKey,
+    productName,
+    optionName: value('옵션명', '옵션') || null,
+    components,
+    salePrice,
+    regularPrice: optionalNumber(value('정상가', '정가'), '정상가'),
+    shippingFee: optionalNumber(value('배송비'), '배송비') ?? 0,
+    commissionRate,
+    registeredStock: Math.floor(optionalNumber(value('등록재고', '등록 재고'), '등록재고') ?? 0),
+    saleStatus: value('판매상태', '상태') || '판매대기',
+    lastCheckedAt: normalizeDate(value('마지막확인일', '확인일', '마지막 확인일')),
+    notes: value('비고', '메모') || null,
+  }
+}
+
+function normalizeChannel(value: string) {
+  const normalized = value.replaceAll(' ', '').toLowerCase()
+  if (normalized === '오늘의집' || normalized === 'ohouse') return { key: 'ohouse', name: '오늘의집' }
+  if (/^[a-z0-9-]+$/.test(normalized)) return { key: normalized, name: value }
+  throw new Error('채널은 오늘의집 또는 영문 채널코드로 입력해주세요.')
+}
+
+function parseComponents(value: string, fallbackQuantity: string): ChannelBundleComponent[] {
+  if (!value) throw new Error('원본SKU가 필요합니다.')
+  const fallback = Math.floor(optionalNumber(fallbackQuantity, '구성수량') ?? 1)
+  const components = value.split(/[,\n]+/).flatMap((part) => {
+    const [rawSku, rawQuantity] = part.trim().split(/[x*]/i).map((item) => item.trim())
+    const quantity = rawQuantity ? Math.floor(optionalNumber(rawQuantity, '구성수량') ?? 0) : fallback
+    return rawSku && quantity > 0 ? [{ sku: rawSku, quantity }] : []
+  })
+  if (!components.length) throw new Error('원본SKU/구성수량 형식을 확인해주세요.')
+  return components
+}
+
+function numberValue(value: string, label: string, required: boolean) {
+  const parsed = optionalNumber(value, label)
+  if (parsed == null && required) throw new Error(`${label}이 필요합니다.`)
+  return parsed ?? 0
+}
+
+function optionalNumber(value: string, label: string) {
+  if (!value) return null
+  const parsed = Number(value.replaceAll(',', '').replace(/[^0-9.-]/g, ''))
+  if (!Number.isFinite(parsed) || parsed < 0) throw new Error(`${label} 형식을 확인해주세요.`)
+  return parsed
+}
+
+function normalizeDate(value: string) {
+  if (!value) return new Date().toISOString().slice(0, 10)
+  const normalized = value.replaceAll('.', '-').replaceAll('/', '-').slice(0, 10)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) throw new Error('마지막확인일은 YYYY-MM-DD 형식이어야 합니다.')
+  return normalized
 }
 
 const TODAY = '2026-07-27'

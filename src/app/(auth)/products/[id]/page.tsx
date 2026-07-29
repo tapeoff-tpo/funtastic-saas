@@ -221,9 +221,9 @@ export default function EditProductPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">상품 수정</h1>
+        <h1 className="text-2xl font-bold">품목 운영</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          상품 정보를 수정하고 마켓플레이스 동기화 상태를 확인합니다.
+          원가, 재고, 판매가, 등록 몰을 확인하고 품목 정보를 관리합니다.
         </p>
       </div>
 

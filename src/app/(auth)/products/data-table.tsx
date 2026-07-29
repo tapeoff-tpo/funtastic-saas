@@ -11,6 +11,7 @@ import {
 } from '@tanstack/react-table'
 import { useQueryState, parseAsInteger, parseAsString } from 'nuqs'
 import { ChevronRight, ChevronDown } from 'lucide-react'
+import Link from 'next/link'
 import { columns, type ProductRow } from './columns'
 import { ProductActions } from './product-actions'
 import { Pagination } from '@/components/ui/pagination'
@@ -222,12 +223,12 @@ export function ProductDataTable({ data, total, pageSize, page }: DataTableProps
                               옵션 {memberCount}
                             </span>
                           )}
-                          <a
+                          <Link
                             href={`/products/${row.original.id}`}
-                            className="rounded px-2 py-1 text-xs hover:bg-muted"
+                            className="rounded border bg-background px-2 py-1 text-xs font-medium text-primary hover:bg-muted"
                           >
-                            편집
-                          </a>
+                            운영 보기
+                          </Link>
                           <DeleteButton productId={row.original.id} />
                         </div>
                       </td>

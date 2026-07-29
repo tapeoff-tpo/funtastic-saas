@@ -2,7 +2,11 @@
 
 import { useMemo, useState } from 'react'
 import { ChevronDown, PackageSearch, Table2 } from 'lucide-react'
-import { findMarketplaceProductIds, getRegistrationMarketplaceColumns } from './price-table-columns'
+import {
+  findMarketplaceProductIds,
+  getInactiveRegistrationMarketplaceColumns,
+  getRegistrationMarketplaceColumns,
+} from './price-table-columns'
 import type { PriceTableGridRow } from './price-table-grid'
 
 type WorkspaceView = 'compare' | 'products'
@@ -45,8 +49,10 @@ export function PriceTableWorkspace(props: {
 }
 
 function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
-  const columns = useMemo(() => getRegistrationMarketplaceColumns(), [])
-  const defaults = columns.filter((column) => column.defaultVisible).slice(0, 4).map((column) => column.id)
+  const activeColumns = useMemo(() => getRegistrationMarketplaceColumns(), [])
+  const inactiveColumns = useMemo(() => getInactiveRegistrationMarketplaceColumns(), [])
+  const columns = [...activeColumns, ...inactiveColumns]
+  const defaults = activeColumns.filter((column) => column.defaultVisible).slice(0, 4).map((column) => column.id)
   const [selected, setSelected] = useState<string[]>(defaults)
   const selectedColumns = columns.filter((column) => selected.includes(column.id))
 
@@ -58,11 +64,11 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
     <div className="space-y-3">
       <div className="border-b bg-muted/15 px-3 py-2.5">
         <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-sm font-medium">비교할 몰</p>
+          <p className="text-sm font-medium">이용 중인 몰</p>
           <span className="text-xs text-muted-foreground">최대 6개</span>
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-2">
-          {columns.map((column) => (
+          {activeColumns.map((column) => (
             <label key={column.id} className="flex cursor-pointer items-center gap-1.5 text-xs">
               <input
                 type="checkbox"
@@ -75,6 +81,23 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
             </label>
           ))}
         </div>
+        <details className="mt-3 border-t pt-2.5">
+          <summary className="cursor-pointer text-xs text-muted-foreground">기타·과거 몰 {inactiveColumns.length}개</summary>
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-2">
+            {inactiveColumns.map((column) => (
+              <label key={column.id} className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(column.id)}
+                  onChange={() => toggle(column.id)}
+                  disabled={!selected.includes(column.id) && selected.length >= 6}
+                  className="size-3.5 accent-primary"
+                />
+                {column.label}
+              </label>
+            ))}
+          </div>
+        </details>
       </div>
       <div className="overflow-auto rounded-md border bg-card">
         <table className="w-full min-w-[680px] text-sm">

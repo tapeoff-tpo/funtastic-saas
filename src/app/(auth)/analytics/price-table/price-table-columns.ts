@@ -83,6 +83,14 @@ const productRegistrationColumns: PriceTableDisplayColumn[] = [
   priceColumn('funta-card', '펀타 카드몰', '★cafe24 (펀타 카드사이트) 판매가', 'B2B 가격으로 등록 배송비 3'),
 ]
 
+const ACTIVE_MARKETPLACE_IDS = new Set([
+  'b2b', 'b2c', 'domeme', 'domemae', 'onchannel', 'firstmall', 'funtab2b', 'ownerclan',
+  'domechango', 'domesin', 'tobizon', 'specialoffer', 'banana', 'tenbyten', 'coupang',
+  'smartstore-home', 'smartstore-life', 'smartstore-nat', 'smartstore-18', 'kakao-funta',
+  'kakao-life', 'kakao-gift', 'ohouse', 'ably', 'toss', 'ssg', 'cj', 'gs', 'ns', 'hyundai',
+  'ohouse-home', 'gmarket', 'auction', '11st', 'zigzag', 'smartstore-1530', 'funta-card',
+])
+
 const mainColumns: PriceTableDisplayColumn[] = [
   { id: 'current-funta', label: '기존 펀타가격', valueKey: '기존 펀타가격', format: 'money', defaultVisible: true },
   {
@@ -150,7 +158,11 @@ export function getPriceTableDisplayColumns(sheetName: string) {
 }
 
 export function getRegistrationMarketplaceColumns() {
-  return productRegistrationColumns
+  return productRegistrationColumns.filter((column) => ACTIVE_MARKETPLACE_IDS.has(column.id))
+}
+
+export function getInactiveRegistrationMarketplaceColumns() {
+  return productRegistrationColumns.filter((column) => !ACTIVE_MARKETPLACE_IDS.has(column.id))
 }
 
 export function findMarketplaceProductIds(

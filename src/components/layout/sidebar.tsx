@@ -160,6 +160,7 @@ export const navSections: NavSection[] = [
     title: '매출분석',
     items: [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
+      { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
       { href: '/analytics/sabangnet-review', label: '사방넷 검수', icon: FileSpreadsheet },
       { href: '/analytics/rocket-outbound', label: '로켓배송 출고', icon: FileSpreadsheet },
       { href: '/analytics/short-meeting', label: '숏미팅', icon: ClipboardList },

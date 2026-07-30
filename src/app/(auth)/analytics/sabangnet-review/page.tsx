@@ -81,6 +81,7 @@ export default async function SabangnetReviewPage({
   const readyRows = selectedBatch?.readyRows ?? 0
   const blockedRows = selectedBatch?.blockedRows ?? 0
   const confirmedRows = selectedBatch?.confirmedRows ?? 0
+  const excludedRows = Math.max(0, totalRows - readyRows - blockedRows - confirmedRows)
 
   const templates = [
     ...DEFAULT_ORDER_IMPORT_TEMPLATES.map((template) => ({ id: template.id, label: `[기본] ${template.name}` })),
@@ -108,10 +109,11 @@ export default async function SabangnetReviewPage({
         readyRows={readyRows}
       />
 
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-5">
         <SummaryCard label="전체" value={totalRows} icon="total" />
         <SummaryCard label="정상" value={readyRows} icon="ready" />
         <SummaryCard label="보류" value={blockedRows} icon="blocked" />
+        <SummaryCard label="제외" value={excludedRows} icon="excluded" />
         <SummaryCard label="확정 반영" value={confirmedRows} icon="confirmed" />
       </div>
 
@@ -126,6 +128,7 @@ export default async function SabangnetReviewPage({
               blocked: blockedRows,
               ready: readyRows,
               confirmed: confirmedRows,
+              excluded: excludedRows,
             }}
           />
           <ReviewLineTable lines={lines} marketplaces={marketplaces} />
@@ -136,11 +139,11 @@ export default async function SabangnetReviewPage({
 }
 
 function parseReviewStatus(value: string | undefined): SabangnetReviewStatus | 'all' {
-  if (value === 'blocked' || value === 'ready' || value === 'confirmed') return value
+  if (value === 'blocked' || value === 'ready' || value === 'confirmed' || value === 'excluded') return value
   return 'all'
 }
 
-function SummaryCard({ label, value, icon }: { label: string; value: number; icon: 'total' | 'ready' | 'blocked' | 'confirmed' }) {
+function SummaryCard({ label, value, icon }: { label: string; value: number; icon: 'total' | 'ready' | 'blocked' | 'confirmed' | 'excluded' }) {
   const Icon = icon === 'blocked' ? AlertTriangle : icon === 'confirmed' ? CheckCircle2 : icon === 'ready' ? CircleDashed : FileWarning
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -186,6 +189,7 @@ function BatchList({
                 <Badge>전체 {batch.totalRows}</Badge>
                 <Badge tone="ok">정상 {batch.readyRows}</Badge>
                 <Badge tone="warn">보류 {batch.blockedRows}</Badge>
+                <Badge tone="default">제외 {Math.max(0, batch.totalRows - batch.readyRows - batch.blockedRows - batch.confirmedRows)}</Badge>
                 <Badge tone="done">확정 {batch.confirmedRows}</Badge>
               </div>
             </Link>
@@ -203,12 +207,13 @@ function StatusFilter({
 }: {
   batchId?: string
   selectedStatus: SabangnetReviewStatus | 'all'
-  counts: { all: number; blocked: number; ready: number; confirmed: number }
+  counts: { all: number; blocked: number; ready: number; confirmed: number; excluded: number }
 }) {
   const filters: Array<{ status: SabangnetReviewStatus | 'all'; label: string; count: number }> = [
     { status: 'all', label: '전체', count: counts.all },
     { status: 'blocked', label: '보류건', count: counts.blocked },
     { status: 'ready', label: '정상', count: counts.ready },
+    { status: 'excluded', label: '제외', count: counts.excluded },
     { status: 'confirmed', label: '확정', count: counts.confirmed },
   ]
 

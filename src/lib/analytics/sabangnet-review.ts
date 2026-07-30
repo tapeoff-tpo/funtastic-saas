@@ -242,7 +242,7 @@ export async function importSabangnetReviewBatch(input: {
   })
 
   const readyRows = mappedLines.filter((line) => line.reviewStatus === 'ready').length
-  const blockedRows = mappedLines.length - readyRows
+  const blockedRows = mappedLines.filter((line) => line.reviewStatus === 'blocked').length
   const [batch] = resultRows(await db.execute<{ id: string }>(sql`
     INSERT INTO sabangnet_review_batches (user_id, source_file_name, total_rows, ready_rows, blocked_rows)
     VALUES (${input.userId}, ${input.fileName}, ${mappedLines.length}, ${readyRows}, ${blockedRows})
@@ -930,7 +930,7 @@ function buildReviewLine(input: {
     shippingFee: input.row.shippingFee ?? null,
     orderStatusText: orderStatusText || null,
     claimType,
-    reviewStatus: issueCodes.length === 0 ? 'ready' as const : 'blocked' as const,
+    reviewStatus: existingOrder ? 'excluded' as const : issueCodes.length === 0 ? 'ready' as const : 'blocked' as const,
     issueCodes,
     issueMessages,
     parsed: input.normalized,

@@ -700,6 +700,7 @@ function isKnownMarketplaceUiAsset(url: URL) {
   return path.includes('_sum.')
     || path.endsWith('/2020/428/378/22185873824_536529798.jpg')
     || path.endsWith('/o1cn01vsloda29ugirzpwdh_!!6000000008128-2-tps-82-86.png')
+    || path.endsWith('-tps-160-160.png')
 }
 
 function remoteStatusToLocal(status: RemoteDetailPageJob['status']): DetailPageJob['status'] {

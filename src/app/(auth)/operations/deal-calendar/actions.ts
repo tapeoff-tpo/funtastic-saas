@@ -59,7 +59,7 @@ export async function createDealEventAction(formData: FormData) {
     recommendationBid: Number(formData.get('recommendationBid')) || null,
     startsOn: String(formData.get('startsOn')),
     endsOn: String(formData.get('endsOn')),
-    status: 'draft',
+    status: String(formData.get('status') || 'registered'),
     dailyCapacity: 500,
     stock: 500,
   })

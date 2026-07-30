@@ -2,8 +2,8 @@ import { and, asc, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { dealEvents } from '@/lib/db/schema'
 
-export const DEAL_TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션', ad_campaign: '광고 캠페인', promotion_application: '프로모션 신청' }
-export const DEAL_STATUS_LABELS: Record<string, string> = { draft: '작성 중', application_pending: '신청 대기', submitted: '제안 완료', applied: '신청 완료', selected: '선정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
+export const DEAL_TYPE_LABELS: Record<string, string> = { today: '오늘의딜', talkdeal: '톡딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', always_on: '상시딜', promotion: '프로모션', ad_campaign: '광고 캠페인', promotion_application: '프로모션 신청' }
+export const DEAL_STATUS_LABELS: Record<string, string> = { draft: '작성 중', registered: '등록', application_pending: '신청 대기', submitted: '제안 완료', applied: '신청 완료', selected: '선정', planned: '선정·플랜확정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
 export const DEAL_PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', '11st': '11번가', other: '기타' }
 
 export type DealChecklistItem = { key: string; label: string; completed: boolean }

@@ -45,10 +45,11 @@ type CalendarMarker = { event: DealCalendarItem; phase: 'application' | 'event' 
 type ViewMode = 'calendar' | 'list' | 'performance'
 type PhaseFilter = 'all' | 'application' | 'event'
 type DeadlineFilter = 'all' | 'today' | '3days' | '7days' | 'overdue'
+type DealStageFilter = 'all' | 'registered' | 'planned'
 
 const PLATFORM_LABELS: Record<string, string> = { kakao: '카카오', '10x10': '텐바이텐', '11st': '11번가', other: '기타' }
-const TYPE_LABELS: Record<string, string> = { today: '오늘의딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', promotion: '프로모션', ad_campaign: '광고 캠페인', promotion_application: '프로모션 신청' }
-const STATUS_LABELS: Record<string, string> = { draft: '작성 중', application_pending: '신청 대기', submitted: '제안 완료', applied: '신청 완료', selected: '선정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
+const TYPE_LABELS: Record<string, string> = { today: '오늘의딜', talkdeal: '톡딜', one_plus_one: '1+1톡딜', under_10000: '만원톡딜', always_on: '상시딜', promotion: '프로모션', ad_campaign: '광고 캠페인', promotion_application: '프로모션 신청' }
+const STATUS_LABELS: Record<string, string> = { draft: '작성 중', registered: '등록', application_pending: '신청 대기', submitted: '제안 완료', applied: '신청 완료', selected: '선정', planned: '선정·플랜확정', setup_complete: '설정 완료', live: '진행 중', ended: '종료', rejected: '미선정' }
 const WEEKDAYS = ['월', '화', '수', '목', '금', '토', '일']
 
 function dateKey(date: Date) {
@@ -71,6 +72,18 @@ function won(value: number | null) {
 
 function eventSales(event: DealCalendarItem) {
   return event.salesAmount || event.dealPrice * event.soldQuantity
+}
+
+function isStandingDeal(event: DealCalendarItem) {
+  return event.dealType === 'always_on'
+}
+
+function statusTone(status: string) {
+  if (status === 'registered' || status === 'submitted' || status === 'applied') return 'border-blue-200 bg-blue-50 text-blue-700'
+  if (status === 'selected' || status === 'planned' || status === 'setup_complete') return 'border-violet-200 bg-violet-50 text-violet-700'
+  if (status === 'live') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (status === 'rejected') return 'border-red-200 bg-red-50 text-red-700'
+  return 'border-muted bg-muted/40 text-muted-foreground'
 }
 
 function addDays(value: Date, days: number) {
@@ -109,6 +122,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   const [platform, setPlatform] = useState('all')
   const [phase, setPhase] = useState<PhaseFilter>('all')
   const [deadline, setDeadline] = useState<DeadlineFilter>('all')
+  const [dealStage, setDealStage] = useState<DealStageFilter>('all')
   const [view, setView] = useState<ViewMode>('calendar')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
@@ -119,10 +133,13 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   sevenDaysLater.setDate(sevenDaysLater.getDate() + 7)
   const deadlineLimit = dateKey(sevenDaysLater)
   const threeDayLimit = addDays(new Date(), 3)
-  const todos = events.filter((event) => ['submitted', 'selected'].includes(event.status))
-  const closingSoon = events.filter((event) => event.applicationEndsOn && event.applicationEndsOn >= today && event.applicationEndsOn <= deadlineLimit)
-  const warnings = useMemo(() => eventWarnings(events), [events])
-  const warningEvents = events.filter((event) => warnings[event.id]?.length)
+  const registeredDeals = events.filter((event) => ['registered', 'submitted', 'applied'].includes(event.status))
+  const plannedDeals = events.filter((event) => ['selected', 'planned', 'setup_complete'].includes(event.status))
+  const todos = events.filter((event) => ['registered', 'submitted', 'applied', 'selected'].includes(event.status) && !isStandingDeal(event))
+  const datedEvents = events.filter((event) => !isStandingDeal(event))
+  const closingSoon = datedEvents.filter((event) => event.applicationEndsOn && event.applicationEndsOn >= today && event.applicationEndsOn <= deadlineLimit)
+  const warnings = useMemo(() => eventWarnings(datedEvents), [datedEvents])
+  const warningEvents = datedEvents.filter((event) => warnings[event.id]?.length)
 
   const days = useMemo(() => {
     const first = new Date(year, month - 1, 1)
@@ -136,7 +153,11 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   }, [month, year])
 
   const platformEvents = platform === 'all' ? events : events.filter((event) => event.platform === platform)
-  const productRows = useMemo(() => {
+  const platformDatedEvents = platformEvents.filter((event) => !isStandingDeal(event))
+  const standingDeals = platformEvents.filter(isStandingDeal)
+  const visibleRegisteredDeals = platformEvents.filter((event) => ['registered', 'submitted', 'applied'].includes(event.status))
+  const visiblePlannedDeals = platformEvents.filter((event) => ['selected', 'planned', 'setup_complete'].includes(event.status))
+  const productRows = (() => {
     const grouped = new Map<string, {
       key: string
       title: string
@@ -167,13 +188,18 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
       grouped.set(key, current)
     }
     return Array.from(grouped.values()).sort((left, right) => right.latestEndsOn.localeCompare(left.latestEndsOn))
-  }, [platformEvents])
+  })()
   const totalSoldQuantity = events.reduce((total, event) => total + event.soldQuantity, 0)
   const totalSalesAmount = events.reduce((total, event) => total + eventSales(event), 0)
   const phaseEvents = phase === 'application'
-    ? platformEvents.filter((event) => event.applicationStartsOn && event.applicationEndsOn)
-    : platformEvents
-  const filteredEvents = phaseEvents.filter((event) => {
+    ? platformDatedEvents.filter((event) => event.applicationStartsOn && event.applicationEndsOn)
+    : platformDatedEvents
+  const stageEvents = phaseEvents.filter((event) => {
+    if (dealStage === 'registered') return ['registered', 'submitted', 'applied'].includes(event.status)
+    if (dealStage === 'planned') return ['selected', 'planned', 'setup_complete'].includes(event.status)
+    return true
+  })
+  const filteredEvents = stageEvents.filter((event) => {
     const end = event.applicationEndsOn
     if (deadline === 'all') return true
     if (!end) return false
@@ -204,6 +230,9 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             <b>전체 {events.length}건</b>
+            <span className="text-muted-foreground">등록한 딜 <b className="text-blue-700">{registeredDeals.length}건</b></span>
+            <span className="text-muted-foreground">선정·플랜 <b className="text-violet-700">{plannedDeals.length}건</b></span>
+            <span className="text-muted-foreground">상시딜 <b className="text-foreground">{events.filter(isStandingDeal).length}건</b></span>
             <span className="text-muted-foreground">7일 내 신청 마감 <b className="text-foreground">{closingSoon.length}건</b></span>
             <span className="text-muted-foreground">후속 작업 <b className={cn(todos.length && 'text-amber-700', !todos.length && 'text-foreground')}>{todos.length}건</b></span>
             <span className="text-muted-foreground">주의 필요 <b className={cn(warningEvents.length && 'text-red-700', !warningEvents.length && 'text-foreground')}>{warningEvents.length}건</b></span>
@@ -231,6 +260,11 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                   <option value="3days">3일 이내</option>
                   <option value="7days">7일 이내</option>
                   <option value="overdue">마감 지남</option>
+                </select>
+                <select value={dealStage} onChange={(event) => setDealStage(event.target.value as DealStageFilter)} aria-label="딜 단계 필터" className="h-8 rounded border bg-background px-2 text-xs">
+                  <option value="all">분류 전체</option>
+                  <option value="registered">등록한 딜</option>
+                  <option value="planned">선정·플랜</option>
                 </select>
                 <div className="flex rounded border p-0.5 text-xs">
                   {([['all', '전체 기간'], ['application', '신청기간'], ['event', '행사기간']] as const).map(([value, label]) => <button key={value} type="button" onClick={() => setPhase(value)} className={cn(
@@ -279,7 +313,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                     const period = phase === 'application' && event.applicationStartsOn && event.applicationEndsOn
                       ? `${event.applicationStartsOn} ~ ${event.applicationEndsOn}`
                       : `${event.startsOn} ~ ${event.endsOn}`
-                    return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><span>{PLATFORM_LABELS[event.platform] ?? event.platform}</span><b className="flex min-w-0 items-center gap-1.5">{warnings[event.id]?.length ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-red-600" /> : null}<span className="truncate">{event.title}</span></b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className="text-xs">{STATUS_LABELS[event.status] ?? event.status}</span></button>
+                    return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[90px_minmax(220px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><span>{PLATFORM_LABELS[event.platform] ?? event.platform}</span><b className="flex min-w-0 items-center gap-1.5">{warnings[event.id]?.length ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-red-600" /> : null}<span className="truncate">{event.title}</span></b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className={cn('w-fit rounded-full border px-2 py-0.5 text-xs font-medium', statusTone(event.status))}>{STATUS_LABELS[event.status] ?? event.status}</span></button>
                   })}
                 </div>
               </div>
@@ -305,12 +339,41 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
           </div>
 
           <aside className="border-t bg-muted/10 p-4 xl:border-l xl:border-t-0">
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => { setDealStage('registered'); setView('list') }} className="rounded-md border bg-background p-3 text-left hover:bg-muted/50">
+                <span className="text-xs font-medium text-muted-foreground">등록한 딜</span>
+                <b className="mt-1 block text-xl text-blue-700">{visibleRegisteredDeals.length}</b>
+              </button>
+              <button type="button" onClick={() => { setDealStage('planned'); setView('list') }} className="rounded-md border bg-background p-3 text-left hover:bg-muted/50">
+                <span className="text-xs font-medium text-muted-foreground">선정·플랜</span>
+                <b className="mt-1 block text-xl text-violet-700">{visiblePlannedDeals.length}</b>
+              </button>
+            </div>
+
+            <div className="mt-5">
+              <h2 className="flex items-center gap-2 text-sm font-semibold"><CalendarDays className="h-4 w-4" />상시딜</h2>
+              <div className="mt-3 divide-y rounded-md border bg-background">
+                {standingDeals.slice(0, 6).map((event) => (
+                  <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full px-3 py-2.5 text-left hover:bg-muted/50">
+                    <span className={cn('mb-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium', statusTone(event.status))}>
+                      {STATUS_LABELS[event.status] ?? event.status}
+                    </span>
+                    <b className="block truncate text-sm">{event.title}</b>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{PLATFORM_LABELS[event.platform] ?? event.platform}{event.productCode ? ` · ${event.productCode}` : ''}</p>
+                  </button>
+                ))}
+                {!standingDeals.length ? <p className="px-3 py-5 text-sm text-muted-foreground">등록된 상시딜이 없습니다.</p> : null}
+              </div>
+            </div>
+
+            <div className="mt-5">
             <h2 className="flex items-center gap-2 text-sm font-semibold"><CircleAlert className="h-4 w-4" />후속 작업</h2>
             <div className="mt-3 divide-y border-y">
               {todos.slice(0, 5).map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full py-3 text-left hover:bg-muted/50"><b className="text-sm">{event.status === 'submitted' ? '선정 결과 확인' : '할인·배송 조건 설정'}</b><p className="mt-1 truncate text-xs text-muted-foreground">{PLATFORM_LABELS[event.platform]} · {event.title}</p></button>)}
               {!todos.length && <p className="flex items-center gap-2 py-5 text-sm text-muted-foreground"><CheckCircle2 className="h-4 w-4" />남은 작업이 없습니다.</p>}
             </div>
             {todos.length > 5 && <button type="button" onClick={() => setView('list')} className="mt-3 text-xs font-medium text-muted-foreground hover:text-foreground">전체 {todos.length}건 보기</button>}
+            </div>
             {warningEvents.length ? <div className="mt-5"><h3 className="flex items-center gap-2 text-sm font-semibold text-red-700"><TriangleAlert className="h-4 w-4" />주의 필요</h3><div className="mt-2 divide-y border-y">{warningEvents.slice(0, 3).map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full py-2.5 text-left"><b className="block truncate text-xs">{event.title}</b><p className="mt-1 truncate text-xs text-red-700">{warnings[event.id][0]}</p></button>)}</div></div> : null}
             <div className="mt-5 flex items-center gap-4 text-xs text-muted-foreground"><span className="flex items-center gap-1"><i className="size-2 rounded-full bg-blue-500" />신청 기간</span><span className="flex items-center gap-1"><i className="size-2 rounded-full bg-emerald-500" />행사 기간</span></div>
           </aside>
@@ -335,6 +398,8 @@ function EventDetail({ event, warnings, onClose }: { event: DealCalendarItem; wa
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
           {warnings.length ? <section className="rounded-md border border-red-200 bg-red-50 p-3"><h3 className="flex items-center gap-2 text-sm font-semibold text-red-800"><TriangleAlert className="h-4 w-4" />주의가 필요합니다</h3><ul className="mt-2 space-y-1 text-xs text-red-700">{warnings.map((warning) => <li key={warning}>· {warning}</li>)}</ul></section> : null}
           <section className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
+            <Detail label="상태" value={STATUS_LABELS[event.status] ?? event.status} />
+            <Detail label="딜 분류" value={TYPE_LABELS[event.dealType] ?? event.dealType} />
             <Detail label="행사 기간" value={`${event.startsOn} ~ ${event.endsOn}`} wide />
             {event.applicationStartsOn && event.applicationEndsOn ? <Detail label="신청 기간" value={`${event.applicationStartsOn} ~ ${event.applicationEndsOn}`} wide /> : null}
             <Detail label="상품코드" value={event.productCode || '-'} />
@@ -389,6 +454,7 @@ function AddEventModal({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between border-b px-5 py-4"><h2 className="font-semibold">새 일정 추가</h2><Button type="button" variant="ghost" size="icon" onClick={onClose} title="닫기"><X className="h-4 w-4" /></Button></div>
         <form action={createEvent} className="space-y-3 p-5">
           <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">플랫폼</span><select name="platform" className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(PLATFORM_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">구분</span><select name="dealType" value={dealType} onChange={(event) => setDealType(event.target.value)} className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
+          <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">상태</span><select name="status" defaultValue="registered" className="h-9 w-full rounded-md border bg-background px-3 text-sm">{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">일정 또는 상품명</span><Input required name="title" /></label>
           <div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">상품코드</span><Input name="productCode" /></label><label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">딜 판매가</span><Input name="dealPrice" type="number" /></label></div>
           <label className="block space-y-1"><span className="text-xs font-medium text-muted-foreground">상품 옵션</span><Input name="options" placeholder="옵션이 여러 개면 쉼표로 구분" /></label>

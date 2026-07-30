@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { BarChart3, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, CircleAlert, List, Plus, TriangleAlert, X } from 'lucide-react'
+import { BarChart3, CalendarDays, ChevronLeft, ChevronRight, List, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -82,31 +82,6 @@ function statusTone(status: string) {
   return 'border-muted bg-muted/40 text-muted-foreground'
 }
 
-function eventWarnings(events: DealCalendarItem[]) {
-  const warnings: Record<string, string[]> = {}
-  const add = (id: string, message: string) => {
-    warnings[id] = warnings[id] || []
-    if (!warnings[id].includes(message)) warnings[id].push(message)
-  }
-
-  for (let index = 0; index < events.length; index += 1) {
-    const event = events[index]
-    if (event.productCode && event.platform !== '10x10' && event.dealType !== 'ad_campaign') {
-      const days = Math.max(1, Math.round((new Date(`${event.endsOn}T00:00:00`).getTime() - new Date(`${event.startsOn}T00:00:00`).getTime()) / 86_400_000) + 1)
-      if (event.stock < event.dailyCapacity * days) add(event.id, `행사 최대 출고량 ${event.dailyCapacity * days}개 대비 재고가 ${event.stock}개입니다.`)
-    }
-    for (let otherIndex = index + 1; otherIndex < events.length; otherIndex += 1) {
-      const other = events[otherIndex]
-      if (!event.productCode || event.productCode !== other.productCode) continue
-      if (event.startsOn <= other.endsOn && other.startsOn <= event.endsOn) {
-        add(event.id, `같은 상품코드가 '${other.title}' 행사와 겹칩니다.`)
-        add(other.id, `같은 상품코드가 '${event.title}' 행사와 겹칩니다.`)
-      }
-    }
-  }
-  return warnings
-}
-
 export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   const [monthKey, setMonthKey] = useState(() => initialMonth(events))
   const [dealStage, setDealStage] = useState<DealStageFilter>('all')
@@ -118,10 +93,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
   const today = dateKey(new Date())
   const registeredDeals = events.filter((event) => ['registered', 'submitted', 'applied'].includes(event.status))
   const plannedDeals = events.filter((event) => ['selected', 'planned', 'setup_complete'].includes(event.status))
-  const todos = events.filter((event) => ['registered', 'submitted', 'applied', 'selected'].includes(event.status) && !isStandingDeal(event))
   const datedEvents = events.filter((event) => !isStandingDeal(event))
-  const warnings = useMemo(() => eventWarnings(datedEvents), [datedEvents])
-  const warningEvents = datedEvents.filter((event) => warnings[event.id]?.length)
 
   const days = useMemo(() => {
     const first = new Date(year, month - 1, 1)
@@ -199,8 +171,6 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
             <span className="text-muted-foreground">등록한 딜 <b className="text-blue-700">{registeredDeals.length}건</b></span>
             <span className="text-muted-foreground">선정·플랜 <b className="text-violet-700">{plannedDeals.length}건</b></span>
             <span className="text-muted-foreground">상시딜 <b className="text-foreground">{events.filter(isStandingDeal).length}건</b></span>
-            <span className="text-muted-foreground">후속 작업 <b className={cn(todos.length && 'text-amber-700', !todos.length && 'text-foreground')}>{todos.length}건</b></span>
-            <span className="text-muted-foreground">주의 필요 <b className={cn(warningEvents.length && 'text-red-700', !warningEvents.length && 'text-foreground')}>{warningEvents.length}건</b></span>
             <span className="text-muted-foreground">딜 판매 <b className="text-foreground">{totalSoldQuantity.toLocaleString('ko-KR')}개</b></span>
             <span className="text-muted-foreground">딜 매출 <b className="text-foreground">{won(totalSalesAmount)}</b></span>
           </div>
@@ -242,7 +212,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                         <div key={day} className={cn('min-h-24 border-b border-r p-1.5', inMonth ? 'bg-background' : 'bg-muted/20')}>
                           <span className={cn('text-xs', inMonth ? 'text-foreground' : 'text-muted-foreground/50', day === today && 'inline-grid size-5 place-items-center rounded-full bg-foreground text-background')}>{date.getDate()}</span>
                           <div className="mt-1 space-y-1">
-                            {markers.slice(0, 2).map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full truncate rounded-sm border-l-2 border-l-emerald-500 bg-muted/50 px-1.5 py-1 text-left text-[10px] font-medium text-emerald-800 hover:bg-muted" title={`행사 기간 · ${event.title}${warnings[event.id]?.length ? ' · 주의 필요' : ''}`}>{warnings[event.id]?.length ? '! ' : ''}{event.title}</button>)}
+                            {markers.slice(0, 2).map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full truncate rounded-sm border-l-2 border-l-emerald-500 bg-muted/50 px-1.5 py-1 text-left text-[10px] font-medium text-emerald-800 hover:bg-muted" title={`행사 기간 · ${event.title}`}>{event.title}</button>)}
                             {markers.length > 2 && <p className="px-1 text-[10px] text-muted-foreground">+{markers.length - 2}</p>}
                           </div>
                         </div>
@@ -257,7 +227,7 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
                   <div className="grid grid-cols-[minmax(240px,1fr)_120px_180px_90px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground"><span>일정</span><span>구분</span><span>행사 기간</span><span>상태</span></div>
                   {filteredEvents.map((event) => {
                     const period = `${event.startsOn} ~ ${event.endsOn}`
-                    return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[minmax(240px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><b className="flex min-w-0 items-center gap-1.5">{warnings[event.id]?.length ? <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-red-600" /> : null}<span className="truncate">{event.title}</span></b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className={cn('w-fit rounded-full border px-2 py-0.5 text-xs font-medium', statusTone(event.status))}>{STATUS_LABELS[event.status] ?? event.status}</span></button>
+                    return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="grid w-full grid-cols-[minmax(240px,1fr)_120px_180px_90px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/50"><b className="truncate">{event.title}</b><span className="text-muted-foreground">{TYPE_LABELS[event.dealType] ?? event.dealType}</span><span className="text-xs">{period}</span><span className={cn('w-fit rounded-full border px-2 py-0.5 text-xs font-medium', statusTone(event.status))}>{STATUS_LABELS[event.status] ?? event.status}</span></button>
                   })}
                 </div>
               </div>
@@ -310,27 +280,18 @@ export function DealCalendarGrid({ events }: { events: DealCalendarItem[] }) {
               </div>
             </div>
 
-            <div className="mt-5">
-            <h2 className="flex items-center gap-2 text-sm font-semibold"><CircleAlert className="h-4 w-4" />후속 작업</h2>
-            <div className="mt-3 divide-y border-y">
-              {todos.slice(0, 5).map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full py-3 text-left hover:bg-muted/50"><b className="text-sm">{event.status === 'submitted' ? '선정 결과 확인' : '할인·배송 조건 설정'}</b><p className="mt-1 truncate text-xs text-muted-foreground">{event.title}</p></button>)}
-              {!todos.length && <p className="flex items-center gap-2 py-5 text-sm text-muted-foreground"><CheckCircle2 className="h-4 w-4" />남은 작업이 없습니다.</p>}
-            </div>
-            {todos.length > 5 && <button type="button" onClick={() => setView('list')} className="mt-3 text-xs font-medium text-muted-foreground hover:text-foreground">전체 {todos.length}건 보기</button>}
-            </div>
-            {warningEvents.length ? <div className="mt-5"><h3 className="flex items-center gap-2 text-sm font-semibold text-red-700"><TriangleAlert className="h-4 w-4" />주의 필요</h3><div className="mt-2 divide-y border-y">{warningEvents.slice(0, 3).map((event) => <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} className="block w-full py-2.5 text-left"><b className="block truncate text-xs">{event.title}</b><p className="mt-1 truncate text-xs text-red-700">{warnings[event.id][0]}</p></button>)}</div></div> : null}
             <div className="mt-5 flex items-center gap-1 text-xs text-muted-foreground"><i className="size-2 rounded-full bg-emerald-500" />행사 기간</div>
           </aside>
         </div>
       </section>
 
-      {selected ? <EventDetail event={selected} warnings={warnings[selected.id] || []} onClose={() => setSelectedId(null)} /> : null}
+      {selected ? <EventDetail event={selected} onClose={() => setSelectedId(null)} /> : null}
       {addOpen ? <AddEventModal onClose={() => setAddOpen(false)} /> : null}
     </>
   )
 }
 
-function EventDetail({ event, warnings, onClose }: { event: DealCalendarItem; warnings: string[]; onClose: () => void }) {
+function EventDetail({ event, onClose }: { event: DealCalendarItem; onClose: () => void }) {
   const completedTasks = event.checklist.filter((item) => item.completed).length
   return (
     <div className="fixed inset-0 z-50 bg-black/30" onMouseDown={onClose}>
@@ -340,7 +301,6 @@ function EventDetail({ event, warnings, onClose }: { event: DealCalendarItem; wa
           <Button type="button" variant="ghost" size="icon" onClick={onClose} title="닫기"><X className="h-4 w-4" /></Button>
         </div>
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
-          {warnings.length ? <section className="rounded-md border border-red-200 bg-red-50 p-3"><h3 className="flex items-center gap-2 text-sm font-semibold text-red-800"><TriangleAlert className="h-4 w-4" />주의가 필요합니다</h3><ul className="mt-2 space-y-1 text-xs text-red-700">{warnings.map((warning) => <li key={warning}>· {warning}</li>)}</ul></section> : null}
           <section className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
             <Detail label="상태" value={STATUS_LABELS[event.status] ?? event.status} />
             <Detail label="딜 분류" value={TYPE_LABELS[event.dealType] ?? event.dealType} />

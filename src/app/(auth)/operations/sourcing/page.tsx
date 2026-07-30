@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { Search } from 'lucide-react'
+import { ProductFlowNav } from '@/components/product-flow-nav'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { listSourcingBoard, SOURCING_STATUS_LABELS } from '@/lib/operations/sourcing'
@@ -30,6 +31,8 @@ export default async function SourcingPage() {
           쿠팡에서 확인한 상품과 1688 후보를 내부 검토용으로 기록합니다.
         </p>
       </header>
+
+      <ProductFlowNav />
 
       <SourcingBoard
         items={items.map((item) => ({

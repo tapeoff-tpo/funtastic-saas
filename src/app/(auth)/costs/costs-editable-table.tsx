@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useTransition } from 'react'
-import { ChevronLeft, ChevronRight, ExternalLink, Pencil, Plus, Save, WandSparkles, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Pencil, Plus, Save, Tag, WandSparkles, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -144,6 +144,21 @@ export function CostsEditableTable({
       capacity: draft['용량'] || '',
     })
     router.push(`/operations/detail-pages?${params.toString()}`)
+  }
+
+  function openPurchaseReview() {
+    if (!editingRow) return
+    const params = new URLSearchParams({
+      purchaseSku: draft[codeHeader] || '',
+      purchaseName: draft[nameHeader] || '',
+      purchaseOption: draft['규격정보'] || '',
+    })
+    router.push(`/purchasing/purchases?${params.toString()}`)
+  }
+
+  function openPriceTable() {
+    if (!editingRow) return
+    router.push(`/analytics/price-table?q=${encodeURIComponent(draft[codeHeader] || '')}`)
   }
 
   function close() {
@@ -370,10 +385,20 @@ export function CostsEditableTable({
             <div className="flex flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-2">
                 {!isCreating ? (
-                  <Button type="button" variant="outline" onClick={openDetailPageWorkflow} disabled={isPending}>
-                    <WandSparkles />
-                    상세페이지 제작
-                  </Button>
+                  <>
+                    <Button type="button" variant="outline" onClick={openPurchaseReview} disabled={isPending}>
+                      <ClipboardList />
+                      발주검토로
+                    </Button>
+                    <Button type="button" variant="outline" onClick={openDetailPageWorkflow} disabled={isPending}>
+                      <WandSparkles />
+                      상세페이지 제작
+                    </Button>
+                    <Button type="button" variant="outline" onClick={openPriceTable} disabled={isPending}>
+                      <Tag />
+                      판매가 검토
+                    </Button>
+                  </>
                 ) : null}
                 <p className="truncate text-xs text-destructive">{message}</p>
               </div>

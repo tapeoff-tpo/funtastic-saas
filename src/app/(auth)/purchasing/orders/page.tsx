@@ -14,6 +14,7 @@ import {
 } from '@/lib/purchasing/purchase-request-status'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ProductFlowNav } from '@/components/product-flow-nav'
 import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
@@ -178,6 +179,7 @@ export async function PurchasingOrdersView({
 
   return (
     <div className="space-y-4">
+      <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">{title}</h1>

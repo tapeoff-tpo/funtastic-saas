@@ -4,6 +4,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { listMarketplaceRegistrationProducts } from '@/lib/operations/marketplace-registration'
 import { RegistrationBoard } from './registration-board'
+import { ProductFlowNav } from '@/components/product-flow-nav'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,6 +19,7 @@ export default async function MarketplaceRegistrationPage() {
 
   return (
     <div className="space-y-4">
+      <ProductFlowNav />
       <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">

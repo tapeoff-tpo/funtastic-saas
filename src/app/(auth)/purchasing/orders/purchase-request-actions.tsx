@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Check, Download, Loader2, Plus, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -215,9 +215,17 @@ export function PurchaseBulkBuyerApply() {
 
 export function PurchaseRequestCreateDialog() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+  const initialSku = searchParams.get('purchaseSku') ?? ''
+  const initialName = searchParams.get('purchaseName') ?? ''
+  const initialOption = searchParams.get('purchaseOption') ?? ''
+
+  useEffect(() => {
+    if (initialSku && initialName) setOpen(true)
+  }, [initialName, initialSku])
 
   function addPurchaseRequest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -283,6 +291,7 @@ export function PurchaseRequestCreateDialog() {
                   maxLength={100}
                   required
                   autoFocus
+                  defaultValue={initialSku}
                 />
               </div>
               <div className="space-y-1.5">
@@ -292,6 +301,7 @@ export function PurchaseRequestCreateDialog() {
                   name="productName"
                   maxLength={500}
                   required
+                  defaultValue={initialName}
                 />
               </div>
               <div className="space-y-1.5">
@@ -300,6 +310,7 @@ export function PurchaseRequestCreateDialog() {
                   id="manual-purchase-option-name"
                   name="optionName"
                   maxLength={200}
+                  defaultValue={initialOption}
                 />
               </div>
               <div className="space-y-1.5">

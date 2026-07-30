@@ -1,6 +1,6 @@
 export const SIDEBAR_MENU_ORDER_KEY = 'funtastic-sidebar-menu-order'
 export const SIDEBAR_MENU_ORDER_EVENT = 'funtastic-sidebar-menu-order-changed'
-export const SIDEBAR_MENU_ORDER_VERSION = 2
+export const SIDEBAR_MENU_ORDER_VERSION = 3
 
 export interface SidebarMenuOrder {
   version: number

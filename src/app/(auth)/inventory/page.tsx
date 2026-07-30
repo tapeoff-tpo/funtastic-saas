@@ -12,6 +12,7 @@ import { InventoryTable } from './inventory-table'
 import type { InventoryFilters } from '@/lib/inventory/types'
 import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { ProductFlowNav } from '@/components/product-flow-nav'
 
 export const metadata: Metadata = {
   title: '재고관리',
@@ -82,6 +83,7 @@ export default async function InventoryPage({
 
   return (
     <div className="space-y-2">
+      <ProductFlowNav />
       {/* Header */}
       <div className="flex items-baseline gap-3">
         <h1 className="text-xl font-bold">재고관리</h1>

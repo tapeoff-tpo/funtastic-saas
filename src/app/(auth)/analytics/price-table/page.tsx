@@ -8,6 +8,7 @@ import { type PriceTableGridRow } from './price-table-grid'
 import { PriceTableWorkspace } from './price-table-workspace'
 import { ChannelBundleOverridesUpload } from './channel-bundle-overrides-upload'
 import { PriceTableUpload } from './price-table-upload'
+import { ProductFlowNav } from '@/components/product-flow-nav'
 
 export const metadata: Metadata = {
   title: '판매가 테이블',
@@ -76,6 +77,7 @@ export default async function PriceTablePage({
   }))
   return (
     <div className="space-y-4">
+      <ProductFlowNav />
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold">판매가 테이블</h1>

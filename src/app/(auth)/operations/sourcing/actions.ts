@@ -5,6 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   addSourcingCandidate,
   createSourcingItem,
+  promoteSourcingItemToPurchasingItem,
   selectSourcingCandidate,
   updateSourcingItemStatus,
 } from '@/lib/operations/sourcing'
@@ -84,4 +85,20 @@ export async function selectSourcingCandidateAction(formData: FormData) {
     candidateId: String(formData.get('candidateId') ?? ''),
   })
   revalidatePath('/operations/sourcing')
+}
+
+export async function promoteSourcingItemToPurchasingItemAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+
+  const result = await promoteSourcingItemToPurchasingItem({
+    userId,
+    itemId: String(formData.get('itemId') ?? ''),
+    sku: String(formData.get('sku') ?? ''),
+    name: String(formData.get('name') ?? ''),
+    optionName: String(formData.get('optionName') ?? ''),
+  })
+  revalidatePath('/operations/sourcing')
+  revalidatePath('/costs')
+  return result
 }

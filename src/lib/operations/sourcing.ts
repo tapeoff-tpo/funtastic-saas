@@ -1,6 +1,7 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { sourcingCandidates, sourcingItems } from '@/lib/db/schema'
+import { products, sourcingCandidates, sourcingItems } from '@/lib/db/schema'
+import { ESA009M_HEADERS } from '@/lib/purchasing/items'
 
 export const SOURCING_STATUS_LABELS: Record<string, string> = {
   captured: '쿠팡 기록',
@@ -303,4 +304,88 @@ export async function selectSourcingCandidate(input: {
     .where(and(eq(sourcingItems.userId, input.userId), eq(sourcingItems.id, candidate.itemId)))
 
   return { success: true }
+}
+
+export async function promoteSourcingItemToPurchasingItem(input: {
+  userId: string
+  itemId: string
+  sku: string
+  name?: string | null
+  optionName?: string | null
+}) {
+  await ensureSourcingTables()
+  const sku = input.sku.trim()
+  const name = cleanText(input.name)
+  if (!sku || !name) return { error: '품목코드와 품목명을 입력해 주세요.' as const }
+
+  const [source] = await db
+    .select()
+    .from(sourcingItems)
+    .where(and(eq(sourcingItems.userId, input.userId), eq(sourcingItems.id, input.itemId)))
+    .limit(1)
+
+  if (!source) return { error: '소싱 상품을 찾을 수 없습니다.' as const }
+  if (source.status !== 'selected' || !source.selected1688Url) {
+    return { error: '1688 후보를 확정한 소싱 상품만 품목으로 등록할 수 있습니다.' as const }
+  }
+
+  const sourceData = isRecord(source.rawData) ? source.rawData : {}
+  const priorPromotion = isRecord(sourceData.purchasingItem) ? sourceData.purchasingItem : null
+  if (typeof priorPromotion?.productId === 'string' && typeof priorPromotion.sku === 'string') {
+    return { productId: priorPromotion.productId, sku: priorPromotion.sku, existing: true }
+  }
+
+  const [existing] = await db
+    .select({ id: products.id })
+    .from(products)
+    .where(and(eq(products.userId, input.userId), eq(products.internalSku, sku)))
+    .limit(1)
+  if (existing) return { error: '이미 같은 품목코드가 있습니다. 기존 품목을 사용하거나 다른 코드를 입력해 주세요.' as const }
+
+  const esa009m = Object.fromEntries(ESA009M_HEADERS.map((header) => [header, null])) as Record<string, string | null>
+  esa009m['품목코드'] = sku
+  esa009m['품목명'] = name
+  esa009m['규격정보'] = cleanText(input.optionName)
+  esa009m['구매 URL'] = source.selected1688Url
+
+  const [product] = await db
+    .insert(products)
+    .values({
+      userId: input.userId,
+      internalSku: sku,
+      name,
+      basePrice: '0',
+      status: 'draft',
+      manageInventory: false,
+      images: source.imageUrl ? [{ url: source.imageUrl, sortOrder: 0 }] : null,
+      metadata: {
+        esa009m,
+        sourcing: {
+          sourcingItemId: source.id,
+          sourcePlatform: source.sourcePlatform,
+          sourceTitle: source.sourceTitle,
+          sourceUrl: source.sourceUrl,
+          selected1688Url: source.selected1688Url,
+          promotedAt: new Date().toISOString(),
+        },
+      },
+    })
+    .returning({ id: products.id })
+
+  await db
+    .update(sourcingItems)
+    .set({
+      rawData: {
+        ...sourceData,
+        purchasingItem: { productId: product.id, sku, promotedAt: new Date().toISOString() },
+      },
+      updatedAt: new Date(),
+    })
+    .where(and(eq(sourcingItems.userId, input.userId), eq(sourcingItems.id, source.id)))
+
+  return { productId: product.id, sku, existing: false }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { ESA009M_HEADERS, getPurchasingItems } from '@/lib/purchasing/items'
 import { CostsPageClient } from './costs-page-client'
+import { ProductFlowNav } from '@/components/product-flow-nav'
 
 export const metadata: Metadata = { title: '품목' }
 
@@ -29,6 +30,7 @@ export default async function CostsPage({
 
   return (
     <div className="space-y-4">
+      <ProductFlowNav />
       <CostsPageClient
         headers={ESA009M_HEADERS}
         rows={items.map((item) => ({

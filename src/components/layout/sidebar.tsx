@@ -127,14 +127,21 @@ export const navSections: NavSection[] = [
     items: orderRelatedGroups.flatMap((group) => group.items),
   },
   {
-    id: 'purchasing',
-    title: '발주',
+    id: 'product-preparation',
+    title: '상품 준비',
     items: [
+      { href: '/operations/sourcing', label: '소싱', icon: Search },
       { href: '/costs', label: '품목', icon: Package },
-      { href: '/inventory', label: '재고관리', icon: Warehouse },
-      { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
-      { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
+    ],
+  },
+  {
+    id: 'purchasing',
+    title: '발주·입고',
+    items: [
       { href: '/purchasing/purchases', label: '발주검토', icon: CreditCard },
+      { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
+      { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
+      { href: '/inventory', label: '재고관리', icon: Warehouse },
       { href: '/purchasing/overdue', label: '구매/입고지연', icon: ClipboardList },
     ],
   },
@@ -142,7 +149,6 @@ export const navSections: NavSection[] = [
     id: 'product-registration',
     title: '상품등록·광고',
     items: [
-      { href: '/operations/sourcing', label: '소싱', icon: Search },
       { href: '/analytics/price-table', label: '판매가 테이블', icon: FileSpreadsheet },
       { href: '/operations/marketplace-registration', label: '상품 등록 관리', icon: Package },
       { href: '/operations/detail-pages', label: '상세페이지 제작', icon: PanelsTopLeft },

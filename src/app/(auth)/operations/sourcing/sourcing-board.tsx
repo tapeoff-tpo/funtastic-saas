@@ -1,8 +1,8 @@
 'use client'
 
-import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, FormEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, ExternalLink, Image as ImageIcon, Link2, Plus, Search, Star } from 'lucide-react'
+import { Check, ExternalLink, Image as ImageIcon, Link2, PackagePlus, Plus, Search, Star, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import {
   addSourcingCandidateAction,
   createSourcingItemAction,
+  promoteSourcingItemToPurchasingItemAction,
   selectSourcingCandidateAction,
   updateSourcingItemStatusAction,
 } from './actions'
@@ -125,6 +126,8 @@ export function SourcingBoard({ items, statusLabels }: Props) {
   const [extensionConnected, setExtensionConnected] = useState(false)
   const [supports1688Search, setSupports1688Search] = useState(false)
   const [searching1688Id, setSearching1688Id] = useState<string | null>(null)
+  const [promoteOpen, setPromoteOpen] = useState(false)
+  const [isPromoting, startPromoting] = useTransition()
   const processedCaptureIds = useRef<Set<string>>(new Set())
   const searchTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
 
@@ -300,6 +303,20 @@ export function SourcingBoard({ items, statusLabels }: Props) {
     await addSourcingCandidateAction(formData)
   }
 
+  function promoteToItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    startPromoting(async () => {
+      const result = await promoteSourcingItemToPurchasingItemAction(form)
+      if ('error' in result) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(result.existing ? '이미 연결된 품목으로 이동합니다.' : '품목을 생성했습니다.')
+      router.push(`/costs?search=${encodeURIComponent(result.sku)}`)
+    })
+  }
+
   function start1688ImageSearch(item: SourcingItemRow) {
     if (!item.imageUrl) {
       toast.error('이미지 URL이 있어야 1688 이미지검색을 시작할 수 있습니다.')
@@ -473,6 +490,16 @@ export function SourcingBoard({ items, statusLabels }: Props) {
                         <Search className="h-4 w-4" />
                         {searching1688Id === selected.id ? '1688 검색중' : '1688 이미지검색'}
                       </Button>
+                      <Button
+                        type="button"
+                        className="h-8 w-full justify-center"
+                        onClick={() => setPromoteOpen(true)}
+                        disabled={!selected.selected1688Url}
+                        title={selected.selected1688Url ? '확정한 1688 정보를 품목으로 생성합니다.' : '1688 후보를 확정한 뒤 품목으로 등록할 수 있습니다.'}
+                      >
+                        <PackagePlus className="h-4 w-4" />
+                        품목으로 등록
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -587,6 +614,44 @@ export function SourcingBoard({ items, statusLabels }: Props) {
           </aside>
         </div>
       </section>
+
+      {promoteOpen && selected ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-labelledby="promote-item-title">
+          <form onSubmit={promoteToItem} className="w-full max-w-lg rounded-md border bg-background shadow-xl">
+            <input type="hidden" name="itemId" value={selected.id} />
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <div>
+                <h2 id="promote-item-title" className="text-base font-semibold">품목으로 등록</h2>
+                <p className="mt-1 text-xs text-muted-foreground">확정한 1688 URL과 대표 이미지를 품목에 연결합니다.</p>
+              </div>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => setPromoteOpen(false)} disabled={isPromoting} aria-label="닫기">
+                <X />
+              </Button>
+            </div>
+            <div className="grid gap-3 p-4 sm:grid-cols-2">
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">품목코드</span>
+                <Input name="sku" required maxLength={100} autoFocus placeholder="예: 112345-0001" />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">규격/옵션</span>
+                <Input name="optionName" maxLength={200} placeholder="선택 사항" />
+              </label>
+              <label className="space-y-1.5 sm:col-span-2">
+                <span className="text-xs font-medium text-muted-foreground">품목명</span>
+                <Input name="name" required maxLength={500} defaultValue={selected.sourceTitle} />
+              </label>
+            </div>
+            <div className="flex justify-end gap-2 border-t px-4 py-3">
+              <Button type="button" variant="outline" onClick={() => setPromoteOpen(false)} disabled={isPromoting}>취소</Button>
+              <Button type="submit" disabled={isPromoting}>
+                <PackagePlus />
+                {isPromoting ? '등록 중...' : '품목 생성'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      ) : null}
     </div>
   )
 }

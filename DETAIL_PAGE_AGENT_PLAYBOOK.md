@@ -27,13 +27,16 @@ When purchase URL, supplier images, dimensions, options, or actual structure are
 ## Image And Layout Rules
 
 - Use a deliberate mix of verified 1688 source imagery and accurate generated lifestyle imagery. Do not use generated images only and do not pad with repeated supplier photos.
+- Every draft must use both source types when supplier evidence and generated cutouts/scenes are available: 1688 images prove the actual product, while AI images add a product-faithful clean hero or lifestyle scene. Never generate a generic substitute that changes the actual product.
+- Never cover Chinese text with a solid rectangle and place Korean text above it. Remove the text through a clean crop, use a text-free source crop, or regenerate a product-faithful visual without the Chinese graphic. The final result must look intentionally art-directed, not patched.
 - Every image has one distinct purpose. Reject a page when it repeats the same composition, pose, or crop in more than one meaningful section.
 - Reject impossible uses or scale, such as utensils falsely fitting inside a shallow tray.
-- Use the approved card-news + USP hybrid direction. The cover has the real product, Korean name, and one factual hook. Do not put a SKU on the cover.
-- Use three coordinated colors appropriate to the product. Avoid defaulting to brown/beige-only pages.
+- Use the approved card-news + USP hybrid direction. The cover has the real product, Korean name, and one factual hook. Do not put a SKU on the cover. The cover must be a strong clean visual, never a raw supplier banner with Chinese copy or an awkward crop.
+- Immediately after the cover and before `CHECK POINT 01`, place an accurate option-selection section. Follow the approved Marbin option-table pattern: one clear card per real option with its own verified visual, option name, and only evidence-backed short description. Do not substitute a generic fact panel or decorative filler for this section.
+- Use three coordinated but visibly differentiated colors appropriate to the product. Change section emphasis/backgrounds with intent; reject a page that reads as one near-identical color family from top to bottom.
 - Use verified `CHECK POINT 01` style labels. Do not add repetitive summaries or filler panels merely to add height.
 - Target approximately 12,000 px or more through meaningful images and information, never whitespace or duplicated content.
-- Use one accurate visual per option. Before product information, add an accurate size-information visual with the correct configuration and width/height/depth guides.
+- Use one accurate visual per option. Before product information, add an accurate size-information visual with a background-removed product cutout centered in the section, the correct configuration, and width/height/depth guides. Do not use a full rectangular supplier photo as the size visual.
 - If the user asks for images only, do not alter copy, checkpoint count, notice content, or layout text.
 
 ## Fixed Bottom Blocks
@@ -67,4 +70,4 @@ Use this as the general test: factual geometry and physical plausibility outrank
 - Never broadly regenerate a user-edited or approved frame. Change only the requested nodes unless a full rebuild is explicitly requested.
 - A request to delete an image means delete that image or section only.
 - Report briefly in Korean: Figma frame updated, sections/images changed, QA result, and one precise remaining `자료 보완 필요` item if applicable.
-- Before moving to `검수 요청`, confirm correct product facts, unique image purposes, no Chinese copy, correct options/size guide, correct fixed notices/IP notice, sensible spacing, and an actual visible Figma frame.
+- Before moving to `검수 요청`, capture the full frame and key sections, then confirm correct product facts, a deliberate 1688+AI asset mix, unique image purposes, no Chinese copy or box-over-text patching, strong cover, Marbin-style option table after cover, background-removed size cutout, differentiated colors, correct fixed notices/IP notice, sensible spacing, and an actual visible Figma frame. Store a concise Korean QA report with the job; without that report, do not move to user review.

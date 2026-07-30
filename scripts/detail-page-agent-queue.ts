@@ -100,9 +100,18 @@ async function main() {
     process.exit(updated ? 0 : 1)
   }
 
+  const note = option('note')
   const [updated] = await db
     .update(detailPageJobs)
-    .set({ status: 'agent_pending', errorMessage: null, claimedAt: null, updatedAt: new Date() })
+    .set({
+      status: 'agent_pending',
+      ...(note ? { note: note.slice(0, 2_000) } : {}),
+      errorMessage: null,
+      agentQa: null,
+      agentQaAt: null,
+      claimedAt: null,
+      updatedAt: new Date(),
+    })
     .where(and(eq(detailPageJobs.id, jobId!), inArray(detailPageJobs.status, ['needs_info', 'failed', 'review'])))
     .returning()
   output({ job: updated ?? null })

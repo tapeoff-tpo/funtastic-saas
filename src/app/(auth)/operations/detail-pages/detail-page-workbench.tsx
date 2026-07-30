@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,6 +52,7 @@ type PersistedWorkbenchState = {
   jobs: DetailPageJob[]
   activeId: string | null
   consumedProductIds: string[]
+  imageCollectionQueue?: string[]
 }
 
 const STATUS = {
@@ -95,6 +96,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [reviewCompletingId, setReviewCompletingId] = useState<string | null>(null)
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
   const [revisionNote, setRevisionNote] = useState('')
+  const [imageCollectionQueue, setImageCollectionQueue] = useState<string[]>([])
   const incomingProducts = useMemo(() => (
     Array.from(new Map([...sessionProducts, ...selectedProducts].map((product) => [product.id, product])).values())
   ), [selectedProducts, sessionProducts])
@@ -113,6 +115,9 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const hasDraftProducts = draftProducts.length > 0
   const allDraftsSelected = hasDraftProducts && selectedDraftProducts.length === draftProducts.length
   const activeJob = jobs.find((job) => job.id === activeId) ?? null
+  const collectableImageJobCount = useMemo(() => (
+    jobs.filter((job) => job.status === 'asset_pending' && Boolean(job.product.purchaseUrl)).length
+  ), [jobs])
   const activeProduct = activeJob?.product ?? selectedDraftProducts[0] ?? draftProducts[0] ?? EMPTY_PRODUCT
   const missingFields = useMemo(() => (
     [
@@ -134,6 +139,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
         setJobs(saved.jobs)
         setActiveId(saved.activeId)
         setConsumedProductIds(new Set(saved.consumedProductIds))
+        setImageCollectionQueue(saved.imageCollectionQueue ?? [])
       }
       setWorkbenchLoaded(true)
     }, 0)
@@ -151,11 +157,12 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
         jobs,
         activeId,
         consumedProductIds: Array.from(consumedProductIds),
+        imageCollectionQueue,
       } satisfies PersistedWorkbenchState))
     } catch {
       // Keep the current work usable even when browser storage is unavailable.
     }
-  }, [activeId, consumedProductIds, jobs, workbenchLoaded])
+  }, [activeId, consumedProductIds, imageCollectionQueue, jobs, workbenchLoaded])
 
   useEffect(() => {
     if (!workbenchLoaded) return
@@ -235,6 +242,43 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     const timer = window.setInterval(pingExtension, 1_000)
     return () => window.clearInterval(timer)
   }, [extensionReady])
+
+  const startImageCollectionForJob = useCallback((job: DetailPageJob, delayMs = 0) => {
+    const runId = createRunId()
+    setJobs((current) => current.map((currentJob) => (
+      currentJob.id === job.id
+        ? { ...currentJob, status: 'collecting', imageRunId: runId, imageAcknowledged: false, imageError: null }
+        : currentJob
+    )))
+    const dispatch = () => {
+      window.postMessage({
+        source: PAGE_SOURCE,
+        type: 'FUNTASTIC_1688_DETAIL_IMAGES_START',
+        runId,
+        jobId: job.id,
+        url: normalizeUrl(job.product.purchaseUrl),
+      }, window.location.origin)
+
+      window.setTimeout(() => {
+        setJobs((current) => current.map((currentJob) => (
+          currentJob.id === job.id && currentJob.imageRunId === runId && !currentJob.imageAcknowledged
+            ? { ...currentJob, status: 'asset_pending', imageRunId: null, imageError: '확장프로그램이 응답하지 않습니다. 확장프로그램을 다시 로드한 뒤 재시도해주세요.' }
+            : currentJob
+        )))
+      }, 8_000)
+    }
+    if (delayMs > 0) window.setTimeout(dispatch, delayMs)
+    else dispatch()
+  }, [])
+
+  useEffect(() => {
+    if (imageCollectionQueue.length === 0 || jobs.some((job) => job.status === 'collecting')) return
+    const [nextJobId, ...remainingJobIds] = imageCollectionQueue
+    const nextJob = jobs.find((job) => job.id === nextJobId)
+    setImageCollectionQueue(remainingJobIds)
+    if (!nextJob || nextJob.status !== 'asset_pending' || !nextJob.product.purchaseUrl) return
+    startImageCollectionForJob(nextJob, 500)
+  }, [imageCollectionQueue, jobs, startImageCollectionForJob])
 
   function createJobs() {
     if (selectedDraftProducts.length === 0) return
@@ -414,7 +458,14 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
 
   function startImageCollection() {
     if (!activeJob) return
-    if (!activeJob.product.purchaseUrl) {
+    const targets = [activeJob, ...jobs]
+      .filter((job, index, allJobs) => (
+        job.status === 'asset_pending'
+        && Boolean(job.product.purchaseUrl)
+        && allJobs.findIndex((candidate) => candidate.id === job.id) === index
+      ))
+
+    if (targets.length === 0) {
       setJobs((current) => current.map((job) => (
         job.id === activeJob.id
           ? { ...job, imageError: '품목에 구매 URL이 없어 1688 이미지를 수집할 수 없습니다.' }
@@ -422,28 +473,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       )))
       return
     }
-
-    const runId = createRunId()
-    setJobs((current) => current.map((job) => (
-      job.id === activeJob.id
-        ? { ...job, status: 'collecting', imageRunId: runId, imageAcknowledged: false, imageError: null }
-        : job
-    )))
-    window.postMessage({
-      source: PAGE_SOURCE,
-      type: 'FUNTASTIC_1688_DETAIL_IMAGES_START',
-      runId,
-      jobId: activeJob.id,
-      url: normalizeUrl(activeJob.product.purchaseUrl),
-    }, window.location.origin)
-
-    window.setTimeout(() => {
-      setJobs((current) => current.map((job) => (
-        job.id === activeJob.id && job.imageRunId === runId && !job.imageAcknowledged
-          ? { ...job, status: 'asset_pending', imageRunId: null, imageError: '확장프로그램이 응답하지 않습니다. 확장프로그램을 다시 로드한 뒤 재시도해주세요.' }
-          : job
-      )))
-    }, 8_000)
+    setImageCollectionQueue(targets.slice(1).map((job) => job.id))
+    startImageCollectionForJob(targets[0])
   }
 
   return (
@@ -579,7 +610,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         <WorkflowStep icon={FilePenLine} label="Figma 검수" active={activeJob.status === 'completed'} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
-                        {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />{extensionReady ? '이미지 수집 시작' : '확장프로그램 연결 중'}</Button> : null}
+                        {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />{extensionReady ? collectableImageJobCount > 1 ? `이미지 일괄 수집 ${collectableImageJobCount}` : '이미지 수집 시작' : '확장프로그램 연결 중'}</Button> : null}
+                        {imageCollectionQueue.length > 0 ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />다음 이미지 수집 {imageCollectionQueue.length}건</Badge> : null}
                         {activeJob.status === 'draft_pending' || activeJob.status === 'failed' || activeJob.status === 'needs_info' ? <Button type="button" variant="outline" onClick={requestAgentDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '에이전트 요청 중' : activeJob.status === 'draft_pending' ? '에이전트 초안 제작 요청' : '에이전트 초안 재요청'}</Button> : null}
                         {activeJob.status === 'agent_pending' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />상세페이지 에이전트 대기</Badge> : null}
                         {activeJob.status === 'agent_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />상세페이지 에이전트 제작 중</Badge> : null}
@@ -810,7 +842,11 @@ function readWorkbenchState(): PersistedWorkbenchState | null {
       ? parsed.activeId
       : jobs[0]?.id ?? null
 
-    return { jobs, activeId, consumedProductIds }
+    const imageCollectionQueue = Array.isArray(parsed.imageCollectionQueue)
+      ? parsed.imageCollectionQueue.filter((id: unknown): id is string => typeof id === 'string' && jobs.some((job) => job.id === id))
+      : []
+
+    return { jobs, activeId, consumedProductIds, imageCollectionQueue }
   } catch {
     return null
   }

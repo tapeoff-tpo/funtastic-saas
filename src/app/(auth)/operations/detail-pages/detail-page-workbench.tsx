@@ -326,7 +326,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       const response = await fetch(`/api/operations/detail-pages/jobs/${activeJob.remoteJobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'completed' }),
+        body: JSON.stringify({ action: 'complete' }),
       })
       const body = await response.json().catch(() => ({})) as { job?: RemoteDetailPageJob; error?: string }
       if (!response.ok || !body.job) throw new Error(body.error || 'Figma 검수 완료 처리를 하지 못했습니다.')
@@ -340,6 +340,30 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       )))
     } finally {
       setReviewCompletingId(null)
+    }
+  }
+
+  async function rebuildFigmaDraft() {
+    if (!activeJob?.remoteJobId) return
+    setDraftRequestingId(activeJob.id)
+    try {
+      const response = await fetch(`/api/operations/detail-pages/jobs/${activeJob.remoteJobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rebuild' }),
+      })
+      const body = await response.json().catch(() => ({})) as { job?: RemoteDetailPageJob; error?: string }
+      if (!response.ok || !body.job) throw new Error(body.error || 'Figma 초안 재제작 요청을 저장하지 못했습니다.')
+      setJobs((current) => current.map((job) => (
+        job.id === activeJob.id ? remoteJobToLocal(body.job!, job) : job
+      )))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Figma 초안 재제작 요청을 저장하지 못했습니다.'
+      setJobs((current) => current.map((job) => (
+        job.id === activeJob.id ? { ...job, imageError: message } : job
+      )))
+    } finally {
+      setDraftRequestingId(null)
     }
   }
 
@@ -571,7 +595,12 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         {activeJob.status === 'draft_pending' || activeJob.status === 'failed' ? <Button type="button" variant="outline" onClick={requestFigmaDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? 'Figma 초안 요청 중' : activeJob.status === 'failed' ? 'Figma 초안 재요청' : 'Figma 초안 제작 요청'}</Button> : null}
                         {activeJob.status === 'figma_queued' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />Figma 플러그인 대기</Badge> : null}
                         {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma에서 초안 제작 중</Badge> : null}
-                        {activeJob.status === 'review' ? <Button type="button" onClick={completeFigmaReview} disabled={reviewCompletingId === activeJob.id}><FilePenLine />{reviewCompletingId === activeJob.id ? '검수 완료 처리 중' : 'Figma 검수 완료'}</Button> : null}
+                        {activeJob.status === 'review' ? (
+                          <>
+                            <Button type="button" variant="outline" onClick={rebuildFigmaDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '재제작 요청 중' : 'Figma 초안 재제작'}</Button>
+                            <Button type="button" onClick={completeFigmaReview} disabled={reviewCompletingId === activeJob.id}><FilePenLine />{reviewCompletingId === activeJob.id ? '검수 완료 처리 중' : 'Figma 검수 완료'}</Button>
+                          </>
+                        ) : null}
                         {activeJob.status === 'completed' ? <Badge variant="outline" className="h-8 border-emerald-200 bg-emerald-50 px-3 text-emerald-800"><Check />Figma 검수 완료</Badge> : null}
                       </div>
                       {activeJob.imageError ? <p className="mt-3 text-xs text-destructive">{activeJob.imageError}</p> : null}

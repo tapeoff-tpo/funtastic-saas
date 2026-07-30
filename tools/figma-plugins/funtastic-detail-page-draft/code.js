@@ -1,16 +1,170 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.0.0'
+const PLUGIN_VERSION = '1.1.0'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
+const IP_NOTICE_NODE_ID = '184:51'
+
+const COLORS = {
+  ink: { r: 0.08, g: 0.09, b: 0.11 },
+  muted: { r: 0.38, g: 0.4, b: 0.44 },
+  paper: { r: 1, g: 1, b: 1 },
+  soft: { r: 0.96, g: 0.96, b: 0.95 },
+  line: { r: 0.84, g: 0.84, b: 0.82 },
+  green: { r: 0.1, g: 0.32, b: 0.28 },
+  mint: { r: 0.91, g: 0.96, b: 0.94 },
+  amber: { r: 0.98, g: 0.74, b: 0.22 },
+  red: { r: 0.72, g: 0.08, b: 0.08 },
+}
+
+const REQUIRED_CAUTIONS = [
+  '1. 용도 외 사용을 금합니다.',
+  '2. 사용 전 제품이 정상적으로 작동하는지 테스트 후 사용하시기 바랍니다.',
+  '3. 화기와 습기, 직사광선 등에 의해 제품의 변질 및 변색이 있을 수 있습니다.',
+  '4. 충격과 급격한 온도 변화에 의한 파손에 주의해 주시기 바랍니다.',
+  '5. 영유아의 손에 닿지 않도록 각별한 주의 바랍니다.',
+  '6. 사용자의 부주의로 인한 제품 파손 및 피해는 교환, 반품 및 보상이 불가합니다.',
+  '7. 모니터 해상도에 따라 색상이 상이할 수 있으며, 이로 인한 반품·교환은 불가합니다.',
+]
+
+const PRODUCT_BRIEFS = {
+  '112313-0001': {
+    targetNodeId: '244:63',
+    eyebrow: 'FRONT + TOP DOUBLE DOOR',
+    headline: '두 방향으로 여닫는\n반려동물 이동 켄넬',
+    subhead: '앞문과 윗문, 실제 확인된 이중 개폐 구조',
+    intro: '문이 한쪽에만 있으면 반려동물을 넣고 꺼내는 동선이 제한됩니다. 델토 더블도어 켄넬은 앞쪽 철제 도어와 상단 도어를 함께 확인할 수 있는 구조입니다.',
+    facts: [
+      ['DOUBLE DOOR', '앞문 + 윗문'],
+      ['VENTILATION', '측면·상단 환기 구조'],
+      ['MATERIAL', 'PP · STEEL'],
+      ['SIZE', '58 × 37 × 37 cm'],
+    ],
+    checkpoints: [
+      {
+        title: '윗문을 열어 위에서도 접근',
+        body: '상단 도어가 열리는 실제 공급처 구조를 확인했습니다. 급여나 상태 확인이 필요한 순간에 위쪽 접근 동선을 제공합니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN01R97wM81oGjru21QMm_!!2097675198-0-cib.jpg',
+        maskTop: true,
+      },
+      {
+        title: '측면과 상단의 환기 슬롯',
+        body: '공기가 통할 수 있도록 여러 면에 개방부가 배치된 외형입니다. 실제 소스에 보이는 위치와 형태만 반영했습니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN01XJkN9F1oGjrtSIyak_!!2097675198-0-cib.jpg',
+        maskTop: true,
+      },
+      {
+        title: '그레이·블랙 투톤의 실제 옵션',
+        body: '선택된 그레이블랙 옵션의 상부 그레이 바디와 하부 블랙 베이스, 전면 철제 도어 비율을 그대로 사용했습니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN01Z8uPfA1oGjrtMviac_!!2097675198-0-cib.jpg',
+        maskTop: true,
+      },
+    ],
+    coverImage: 'https://cbu01.alicdn.com/img/ibank/O1CN01MjAmgo1oGjrt9FEmU_!!2097675198-0-cib.jpg',
+    structureTitle: '선택 옵션 · 그레이블랙',
+    structureBody: '상부 그레이 PP 바디, 하부 블랙 베이스, 전면 철제 도어로 확인되는 조합입니다. 다른 색상이나 다른 규격의 이미지는 섞지 않았습니다.',
+    sizeParts: ['W 58 cm', 'D 37 cm', 'H 37 cm'],
+    specificCautions: [
+      '반려동물의 체형과 제품 내부 공간을 확인한 뒤 사용해주세요.',
+      '문이 완전히 잠겼는지 확인하고 이동해주세요.',
+      '도어 개폐 시 반려동물의 발과 꼬리가 끼이지 않도록 주의해주세요.',
+    ],
+  },
+  '112350-0001': {
+    targetNodeId: '245:91',
+    eyebrow: 'CLEAR LARGE · ONE TIER',
+    headline: '돌려서 한눈에 찾는\n투명 대형 회전 선반',
+    subhead: '30.5cm 대형 원형 트레이를 360° 회전',
+    intro: '안쪽 물건을 꺼내기 위해 앞의 물건부터 옮길 필요 없이, 원형 트레이를 돌려 원하는 방향을 앞으로 가져오는 구조입니다.',
+    facts: [
+      ['ROTATION', '360° 회전 구조'],
+      ['OPTION', '투명 · 대형'],
+      ['MATERIAL', 'PP'],
+      ['SIZE', '30.5 × 30.5 × 10 cm'],
+    ],
+    checkpoints: [
+      {
+        title: '원형 트레이를 360° 회전',
+        body: '공급처 실제 회전 장면으로 확인한 기능입니다. 원형 트레이의 방향을 바꿔 안쪽에 놓인 물건을 앞으로 가져옵니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN01VWemA01TpRoCyFrKr_!!2214157892431-0-cib.jpg',
+        maskBottom: true,
+      },
+      {
+        title: '대형 옵션의 넓은 원형 수납면',
+        body: '선택 옵션은 투명 대형입니다. 화장품과 병류가 함께 놓인 실제 대형 사용 장면만 사용했습니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN01mwcecy1TpRo8QIXEW_!!2214157892431-0-cib.jpg',
+      },
+      {
+        title: '한 단으로 간결한 구조',
+        body: '층을 쌓은 선반이 아닌 단일 원형 트레이입니다. 투명 바디와 둘레의 벽, 중앙 회전축이 보이는 실제 구조를 기준으로 설명합니다.',
+        diagram: ['ONE TIER', 'CLEAR BODY', 'ROUND TRAY'],
+      },
+    ],
+    coverImage: 'https://cbu01.alicdn.com/img/ibank/O1CN01GzmqXA1TpRoFWCtw2_!!2214157892431-0-cib.jpg',
+    structureTitle: '선택 옵션 · 투명 대형',
+    structureBody: '소형과 대형을 혼용하지 않았습니다. 직경 30.5cm, 높이 10cm로 저장된 대형 규격만 제품 정보와 사이즈 가이드에 반영했습니다.',
+    sizeParts: ['W 30.5 cm', 'D 30.5 cm', 'H 10 cm'],
+    specificCautions: [
+      '평평하고 안정적인 곳에 놓고 사용해주세요.',
+      '회전 반경에 다른 물건이 걸리지 않는지 확인해주세요.',
+      '물건을 한쪽에만 치우치게 놓지 말고 균형 있게 배치해주세요.',
+    ],
+  },
+  '112351-0001': {
+    targetNodeId: '244:2',
+    eyebrow: 'REFRIGERATOR ROTATING RAIL',
+    headline: '냉장고 안쪽까지\n돌려서 꺼내는 레일 선반',
+    subhead: '하부 레일 구조가 보이는 투명 회전 트레이',
+    intro: '냉장고 선반 안쪽에 놓인 병을 찾기 위해 앞줄을 전부 꺼내지 않도록, 트레이가 레일을 따라 회전하는 실제 구조를 확인했습니다.',
+    facts: [
+      ['RAIL', '하부 레일 구조'],
+      ['ROTATION', '360° 회전'],
+      ['OPTION', '투명'],
+      ['SIZE', '21.5 × 33 × 7.3 cm'],
+    ],
+    checkpoints: [
+      {
+        title: '바닥면 전체를 따라 이어진 레일',
+        body: '트레이 밑면의 타원형 레일과 작은 롤러 배열을 실제 공급처 이미지로 확인했습니다. 보이지 않는 내부 기능은 추가하지 않았습니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN010KMap91oZyRVoqlK6_!!4267885240-0-cib.jpg',
+      },
+      {
+        title: '냉장고 안 실제 사용 비율',
+        body: '병과 캔을 담은 냉장고 사용 장면으로 트레이의 깊이와 낮은 테두리 비율을 확인할 수 있습니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN01bd89Hi1oZyRVotAyM_!!4267885240-0-cib.jpg',
+      },
+      {
+        title: '33 × 21.5 × 7.3cm 실측 표기',
+        body: '공급처 규격 이미지와 SaaS 저장값이 일치하는 것을 확인했습니다. 다른 색상 옵션은 사이즈 섹션에서 제외했습니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN016mZndf1oZyRTh6xIY_!!4267885240-0-cib.jpg',
+        maskTop: true,
+      },
+    ],
+    coverImage: 'https://cbu01.alicdn.com/img/ibank/O1CN01iCFzBU1oZyRSCZYt5_!!4267885240-0-cib.jpg',
+    structureTitle: '선택 옵션 · 투명',
+    structureBody: '전체 투명 옵션의 실제 컷만 사용했습니다. 크림색 옵션이나 2개 세트처럼 보일 수 있는 혼합 장면은 제외했습니다.',
+    sizeParts: ['W 21.5 cm', 'D 33 cm', 'H 7.3 cm'],
+    specificCautions: [
+      '냉장고 선반의 사용 가능 공간과 제품 규격을 먼저 확인해주세요.',
+      '회전할 때 주변 용기와 간섭이 없는지 확인해주세요.',
+      '무거운 용기를 한쪽에 집중해서 놓지 말아주세요.',
+    ],
+  },
+}
 
 let activeSync = null
 let automaticSyncStarted = false
 let bridgeState = null
+const imageHashCache = new Map()
 
-figma.showUI(__html__, { width: 390, height: 500, themeColors: true })
+figma.showUI(__html__, { width: 390, height: 520, themeColors: true })
 
-function text(value) {
+function cleanText(value) {
   return String(value || '').trim()
+}
+
+function errorMessage(error) {
+  if (error instanceof Error) return error.message
+  return String(error || '알 수 없는 오류')
 }
 
 async function loadFonts() {
@@ -21,170 +175,385 @@ async function loadFonts() {
   ])
 }
 
-function makeText(characters, size, style = 'Regular', color = { r: 0.08, g: 0.1, b: 0.15 }) {
+function makeText(value, size, style = 'Regular', color = COLORS.ink, width = 760) {
   const node = figma.createText()
   node.fontName = { family: 'Inter', style }
   node.fontSize = size
-  node.characters = characters
+  node.characters = String(value)
   node.fills = [{ type: 'SOLID', color }]
   node.textAutoResize = 'HEIGHT'
-  node.layoutAlign = 'STRETCH'
+  node.resize(width, node.height)
   return node
 }
 
-function makeSectionTitle(value) {
-  const title = makeText(value, 20, 'Bold')
-  title.name = value
-  return title
+function makeSection(name, height, fill = COLORS.paper) {
+  const section = figma.createFrame()
+  section.name = name
+  section.resize(860, height)
+  section.fills = [{ type: 'SOLID', color: fill }]
+  section.clipsContent = true
+  section.layoutAlign = 'STRETCH'
+  return section
 }
 
-function makeInfoRow(label, value) {
-  const row = figma.createFrame()
-  row.name = label
-  row.layoutMode = 'HORIZONTAL'
-  row.primaryAxisSizingMode = 'AUTO'
-  row.counterAxisSizingMode = 'AUTO'
-  row.layoutAlign = 'STRETCH'
-  row.itemSpacing = 20
-  row.paddingTop = 12
-  row.paddingBottom = 12
-  row.paddingLeft = 14
-  row.paddingRight = 14
-  row.fills = [{ type: 'SOLID', color: { r: 0.97, g: 0.97, b: 0.98 } }]
-  row.cornerRadius = 8
-  const labelNode = makeText(label, 13, 'Semi Bold', { r: 0.35, g: 0.38, b: 0.43 })
-  labelNode.resize(130, labelNode.height)
-  labelNode.layoutSizingHorizontal = 'FIXED'
-  const valueNode = makeText(value || '-', 14, 'Regular')
-  valueNode.layoutSizingHorizontal = 'FILL'
-  row.appendChild(labelNode)
-  row.appendChild(valueNode)
-  return row
+function appendText(section, value, x, y, width, size, style = 'Regular', color = COLORS.ink) {
+  const node = makeText(value, size, style, color, width)
+  node.x = x
+  node.y = y
+  section.appendChild(node)
+  return node
+}
+
+function makeLabel(section, value, x, y, width = 180) {
+  const badge = figma.createFrame()
+  badge.name = value
+  badge.resize(width, 34)
+  badge.x = x
+  badge.y = y
+  badge.cornerRadius = 17
+  badge.fills = [{ type: 'SOLID', color: COLORS.green }]
+  badge.appendChild(makeText(value, 12, 'Bold', COLORS.paper, width - 24))
+  const label = badge.children[0]
+  label.x = 12
+  label.y = 9
+  section.appendChild(badge)
+}
+
+function normalizeImageUrl(url) {
+  return String(url).replace(/_\.webp(?=($|\?))/, '')
 }
 
 async function imagePaint(url) {
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`이미지 응답 ${response.status}`)
+  const normalized = normalizeImageUrl(url)
+  if (imageHashCache.has(normalized)) return imageHashCache.get(normalized)
+  const response = await fetch(normalized)
+  if (!response.ok) throw new Error(`자료 보완 필요: 이미지 응답 ${response.status} (${normalized})`)
+  const contentType = String(response.headers.get('content-type') || '')
+  if (!contentType.includes('jpeg') && !contentType.includes('png')) {
+    throw new Error(`자료 보완 필요: Figma에서 지원하지 않는 이미지 형식 (${contentType || 'unknown'})`)
+  }
   const bytes = new Uint8Array(await response.arrayBuffer())
-  return figma.createImage(bytes).hash
+  const hash = figma.createImage(bytes).hash
+  imageHashCache.set(normalized, hash)
+  return hash
 }
 
 async function makeImage(url, width, height, name) {
   const node = figma.createRectangle()
   node.name = name
   node.resize(width, height)
-  node.cornerRadius = 10
-  node.layoutAlign = 'STRETCH'
-  try {
-    const imageHash = await imagePaint(url)
-    node.fills = [{ type: 'IMAGE', imageHash, scaleMode: 'FILL' }]
-  } catch {
-    node.fills = [{ type: 'SOLID', color: { r: 0.92, g: 0.93, b: 0.95 } }]
-    node.setPluginData('source-image', url)
-    node.setPluginData('image-state', 'failed')
-  }
+  node.fills = [{ type: 'IMAGE', imageHash: await imagePaint(url), scaleMode: 'FILL' }]
+  node.setPluginData('source-image', normalizeImageUrl(url))
   return node
 }
 
-async function targetPage() {
-  const existing = figma.root.children.find((page) => page.name === 'AI 상세페이지')
-  const page = existing || figma.createPage()
-  if (!existing) page.name = 'AI 상세페이지'
-  await figma.setCurrentPageAsync(page)
-  return page
+async function makeCover(job, brief) {
+  const section = makeSection('00 COVER', 1260, COLORS.paper)
+  appendText(section, 'FUNTASTIC SELECT', 50, 48, 760, 14, 'Bold', COLORS.green)
+  appendText(section, job.product.name, 50, 96, 760, 22, 'Semi Bold', COLORS.muted)
+  appendText(section, brief.headline, 50, 156, 760, 52, 'Bold', COLORS.ink)
+  appendText(section, brief.subhead, 50, 300, 760, 21, 'Regular', COLORS.muted)
+  const image = await makeImage(brief.coverImage, 760, 790, '대표 이미지 · 실제 상품')
+  image.x = 50
+  image.y = 410
+  section.appendChild(image)
+  return section
 }
 
-function nextCanvasPosition(page) {
-  const right = page.children.reduce((max, node) => Math.max(max, node.x + node.width), 0)
-  return right > 0 ? right + 180 : 0
+function makeIntro(brief) {
+  const section = makeSection('01 PRODUCT STORY', 700, COLORS.soft)
+  makeLabel(section, 'WHY THIS PRODUCT', 50, 54, 190)
+  appendText(section, '꺼내는 동선을 바꾸면\n정리가 더 단순해집니다.', 50, 122, 760, 42, 'Bold')
+  appendText(section, brief.intro, 50, 248, 760, 21, 'Regular', COLORS.muted)
+  const line = figma.createRectangle()
+  line.resize(760, 2)
+  line.x = 50
+  line.y = 420
+  line.fills = [{ type: 'SOLID', color: COLORS.line }]
+  section.appendChild(line)
+  appendText(section, brief.eyebrow, 50, 472, 760, 16, 'Bold', COLORS.green)
+  appendText(section, '실제 1688 상품 구조와 선택 옵션을 대조한 내용만 사용했습니다.', 50, 520, 760, 20, 'Semi Bold')
+  return section
+}
+
+function makeFacts(brief) {
+  const section = makeSection('02 VERIFIED FACTS', 760, COLORS.paper)
+  makeLabel(section, 'VERIFIED FACTS', 50, 54, 170)
+  appendText(section, '확인된 핵심 정보 4가지', 50, 118, 760, 40, 'Bold')
+  brief.facts.forEach(([label, value], index) => {
+    const card = figma.createFrame()
+    card.name = `${label} · ${value}`
+    card.resize(370, 190)
+    card.x = 50 + (index % 2) * 390
+    card.y = 210 + Math.floor(index / 2) * 210
+    card.cornerRadius = 18
+    card.fills = [{ type: 'SOLID', color: index === 0 ? COLORS.mint : COLORS.soft }]
+    appendText(card, label, 24, 28, 320, 13, 'Bold', COLORS.green)
+    appendText(card, value, 24, 76, 320, 23, 'Bold')
+    section.appendChild(card)
+  })
+  return section
+}
+
+async function makeCheckpoint(index, checkpoint) {
+  const section = makeSection(`CHECK POINT ${String(index).padStart(2, '0')}`, 1100, COLORS.paper)
+  makeLabel(section, `CHECK POINT ${String(index).padStart(2, '0')}`, 50, 48, 168)
+  appendText(section, checkpoint.title, 50, 112, 760, 40, 'Bold')
+  appendText(section, checkpoint.body, 50, 178, 760, 19, 'Regular', COLORS.muted)
+
+  if (checkpoint.image) {
+    const image = await makeImage(checkpoint.image, 760, 720, `${section.name} · ${checkpoint.title}`)
+    image.x = 50
+    image.y = 320
+    section.appendChild(image)
+    if (checkpoint.maskTop) {
+      const mask = figma.createRectangle()
+      mask.resize(760, 110)
+      mask.x = 50
+      mask.y = 320
+      mask.fills = [{ type: 'SOLID', color: COLORS.ink }]
+      section.appendChild(mask)
+      appendText(section, checkpoint.title, 76, 352, 700, 22, 'Bold', COLORS.paper)
+    }
+    if (checkpoint.maskBottom) {
+      const mask = figma.createRectangle()
+      mask.resize(760, 130)
+      mask.x = 50
+      mask.y = 910
+      mask.fills = [{ type: 'SOLID', color: COLORS.paper }]
+      section.appendChild(mask)
+      appendText(section, '360° ROTATION · 실제 공급처 기능 확인', 76, 948, 700, 18, 'Bold', COLORS.green)
+    }
+  } else {
+    const diagram = figma.createFrame()
+    diagram.name = '구조 설명 다이어그램'
+    diagram.resize(760, 650)
+    diagram.x = 50
+    diagram.y = 340
+    diagram.cornerRadius = 24
+    diagram.fills = [{ type: 'SOLID', color: COLORS.mint }]
+    checkpoint.diagram.forEach((label, itemIndex) => {
+      const circle = figma.createEllipse()
+      circle.resize(190, 190)
+      circle.x = 45 + itemIndex * 240
+      circle.y = 170
+      circle.fills = [{ type: 'SOLID', color: COLORS.paper }]
+      circle.strokes = [{ type: 'SOLID', color: COLORS.green }]
+      circle.strokeWeight = 2
+      diagram.appendChild(circle)
+      appendText(diagram, `0${itemIndex + 1}`, 106 + itemIndex * 240, 225, 70, 16, 'Bold', COLORS.green)
+      const title = appendText(diagram, label, 58 + itemIndex * 240, 290, 164, 17, 'Bold')
+      title.textAlignHorizontal = 'CENTER'
+    })
+    appendText(diagram, '실제 제품에서 확인되는 형태만 단순화해 표시했습니다.', 90, 470, 580, 18, 'Regular', COLORS.muted)
+    section.appendChild(diagram)
+  }
+  return section
+}
+
+function makeStructure(brief) {
+  const section = makeSection('06 OPTION & STRUCTURE', 740, COLORS.mint)
+  makeLabel(section, 'OPTION CHECK', 50, 54, 156)
+  appendText(section, brief.structureTitle, 50, 122, 760, 40, 'Bold')
+  appendText(section, brief.structureBody, 50, 198, 760, 20, 'Regular', COLORS.muted)
+  const panel = figma.createFrame()
+  panel.name = '옵션 혼용 금지 안내'
+  panel.resize(760, 260)
+  panel.x = 50
+  panel.y = 390
+  panel.cornerRadius = 20
+  panel.fills = [{ type: 'SOLID', color: COLORS.paper }]
+  appendText(panel, 'SOURCE MATCHED', 32, 34, 300, 14, 'Bold', COLORS.green)
+  appendText(panel, '구조 · 옵션 · 비율 교차 확인', 32, 86, 680, 27, 'Bold')
+  appendText(panel, '다른 옵션 이미지, 추정 규격, 확인되지 않은 기능은 넣지 않았습니다.', 32, 148, 680, 18, 'Regular', COLORS.muted)
+  section.appendChild(panel)
+  return section
+}
+
+function makeSizeGuide(product, brief) {
+  const section = makeSection('07 SIZE GUIDE', 900, COLORS.paper)
+  makeLabel(section, 'SIZE GUIDE', 50, 54, 138)
+  appendText(section, '구매 전 실제 설치·사용 공간을\n반드시 확인해주세요.', 50, 122, 760, 40, 'Bold')
+  appendText(section, `SaaS 저장 규격 · ${product.size || '자료 보완 필요'}`, 50, 244, 760, 19, 'Semi Bold', COLORS.green)
+  const diagram = figma.createFrame()
+  diagram.name = '제품 규격 다이어그램'
+  diagram.resize(760, 470)
+  diagram.x = 50
+  diagram.y = 350
+  diagram.cornerRadius = 20
+  diagram.fills = [{ type: 'SOLID', color: COLORS.soft }]
+  const box = figma.createRectangle()
+  box.resize(390, 230)
+  box.x = 185
+  box.y = 80
+  box.fills = []
+  box.strokes = [{ type: 'SOLID', color: COLORS.green }]
+  box.strokeWeight = 3
+  diagram.appendChild(box)
+  brief.sizeParts.forEach((value, index) => {
+    const pill = figma.createFrame()
+    pill.resize(200, 54)
+    pill.x = 40 + index * 240
+    pill.y = 365
+    pill.cornerRadius = 27
+    pill.fills = [{ type: 'SOLID', color: COLORS.paper }]
+    const sizeText = appendText(pill, value, 12, 16, 176, 17, 'Bold', COLORS.green)
+    sizeText.textAlignHorizontal = 'CENTER'
+    diagram.appendChild(pill)
+  })
+  section.appendChild(diagram)
+  return section
+}
+
+function makeProductInfo(product) {
+  const section = makeSection('08 PRODUCT INFO', 920, COLORS.soft)
+  makeLabel(section, 'PRODUCT INFO', 50, 54, 166)
+  appendText(section, '제품 정보', 50, 120, 760, 40, 'Bold')
+  const fields = [
+    ['상품명', product.name],
+    ['옵션', product.option],
+    ['재질', product.material],
+    ['제품크기', product.size],
+    ['무게', product.weight],
+    ['제조사', product.manufacturer],
+    ['제조국', product.country || '자료 보완 필요'],
+  ]
+  fields.forEach(([label, value], index) => {
+    const row = figma.createFrame()
+    row.name = label
+    row.resize(760, 78)
+    row.x = 50
+    row.y = 205 + index * 86
+    row.fills = [{ type: 'SOLID', color: index % 2 ? COLORS.paper : COLORS.soft }]
+    appendText(row, label, 22, 25, 160, 15, 'Semi Bold', COLORS.muted)
+    appendText(row, value || '-', 190, 23, 540, 17, 'Semi Bold', value === '자료 보완 필요' ? COLORS.red : COLORS.ink)
+    section.appendChild(row)
+  })
+  return section
+}
+
+function makeCautions(brief) {
+  const section = makeSection('09 NOTICE · REQUIRED FIRST', 1320, COLORS.paper)
+  appendText(section, '주의사항', 50, 58, 760, 42, 'Bold', COLORS.red)
+  appendText(section, '공통 주의사항 7개는 항상 먼저 표시합니다.', 50, 122, 760, 17, 'Semi Bold', COLORS.muted)
+  REQUIRED_CAUTIONS.forEach((item, index) => {
+    appendText(section, item, 50, 190 + index * 92, 760, 18, 'Regular', COLORS.ink)
+  })
+  const divider = figma.createRectangle()
+  divider.resize(760, 2)
+  divider.x = 50
+  divider.y = 860
+  divider.fills = [{ type: 'SOLID', color: COLORS.line }]
+  section.appendChild(divider)
+  appendText(section, '제품별 추가 주의사항', 50, 910, 760, 24, 'Bold')
+  brief.specificCautions.forEach((item, index) => {
+    appendText(section, `- ${item}`, 50, 968 + index * 82, 760, 18, 'Regular', COLORS.ink)
+  })
+  return section
+}
+
+async function cloneIpNotice() {
+  const source = await figma.getNodeByIdAsync(IP_NOTICE_NODE_ID)
+  if (!source || !('clone' in source)) {
+    throw new Error('자료 보완 필요: 기존 상세페이지의 지정 IP 안내 이미지 노드를 찾지 못했습니다.')
+  }
+  const clone = source.clone()
+  clone.name = '10 IP 안내 이미지 · 지정 원본'
+  if (Math.abs(clone.width - 860) > 1) {
+    const sourceWidth = clone.width
+    clone.remove()
+    throw new Error(`자료 보완 필요: IP 안내 이미지 너비가 기준과 다릅니다. (${sourceWidth}px)`)
+  }
+  clone.layoutAlign = 'STRETCH'
+  return clone
+}
+
+async function resolveTargetFrame(job, brief) {
+  const requestedId = cleanText(job.figmaNodeId) || brief.targetNodeId
+  const byId = requestedId ? await figma.getNodeByIdAsync(requestedId) : null
+  if (byId && byId.type === 'FRAME') return byId
+  for (const page of figma.root.children) {
+    const match = page.findOne((node) => (
+      node.type === 'FRAME'
+      && node.getPluginData('funtastic-sku') === job.product.sku
+      && node.getPluginData('funtastic-job-id') === job.id
+    ))
+    if (match && match.type === 'FRAME') return match
+  }
+  throw new Error(`자료 보완 필요: 재제작 대상 프레임(${requestedId || job.product.sku})을 찾지 못했습니다.`)
 }
 
 async function buildDraft(job) {
   await loadFonts()
-  const page = await targetPage()
-  const product = job.product
-  const frame = figma.createFrame()
-  frame.name = `${product.name} ${product.sku} 상세페이지 초안`
-  frame.x = nextCanvasPosition(page)
-  frame.y = 0
-  frame.resize(860, 100)
-  frame.layoutMode = 'VERTICAL'
-  frame.primaryAxisSizingMode = 'AUTO'
-  frame.counterAxisSizingMode = 'FIXED'
-  frame.paddingTop = 40
-  frame.paddingRight = 40
-  frame.paddingBottom = 48
-  frame.paddingLeft = 40
-  frame.itemSpacing = 22
-  frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }]
-  frame.setPluginData('funtastic-job-id', job.id)
-  frame.setPluginData('funtastic-sku', product.sku)
-
-  const eyebrow = makeText(`AI GENERATED DETAIL PAGE · ${product.sku}`, 12, 'Semi Bold', { r: 0.3, g: 0.36, b: 0.45 })
-  eyebrow.letterSpacing = { value: 4, unit: 'PERCENT' }
-  frame.appendChild(eyebrow)
-  frame.appendChild(makeText(product.name, 34, 'Bold'))
-  if (text(product.option)) frame.appendChild(makeText(product.option, 17, 'Regular', { r: 0.35, g: 0.38, b: 0.43 }))
-
-  const images = Array.isArray(job.imageUrls) ? job.imageUrls.slice(0, 6) : []
-  if (images.length > 0) {
-    frame.appendChild(await makeImage(images[0], 780, 720, '대표 이미지'))
-    if (images.length > 1) {
-      const gallery = figma.createFrame()
-      gallery.name = '상세 이미지'
-      gallery.layoutMode = 'HORIZONTAL'
-      gallery.primaryAxisSizingMode = 'AUTO'
-      gallery.counterAxisSizingMode = 'AUTO'
-      gallery.layoutAlign = 'STRETCH'
-      gallery.itemSpacing = 12
-      for (const [index, imageUrl] of images.slice(1, 4).entries()) {
-        const image = await makeImage(imageUrl, 246, 246, `상세 이미지 ${index + 2}`)
-        image.layoutSizingHorizontal = 'FILL'
-        gallery.appendChild(image)
-      }
-      frame.appendChild(gallery)
-    }
-  } else {
-    frame.appendChild(await makeImage('', 780, 440, '대표 이미지 없음'))
+  const brief = PRODUCT_BRIEFS[job.product.sku]
+  if (!brief) throw new Error(`자료 보완 필요: ${job.product.sku}의 검증된 제작 브리프가 없습니다.`)
+  const target = await resolveTargetFrame(job, brief)
+  if (!target.parent || target.parent.type !== 'PAGE') {
+    throw new Error('자료 보완 필요: 대상 프레임이 Figma 페이지 최상위에 있지 않습니다.')
   }
+  await figma.setCurrentPageAsync(target.parent)
 
-  const summary = figma.createFrame()
-  summary.name = '상품 핵심 메시지'
-  summary.layoutMode = 'VERTICAL'
-  summary.primaryAxisSizingMode = 'AUTO'
-  summary.counterAxisSizingMode = 'AUTO'
-  summary.layoutAlign = 'STRETCH'
-  summary.paddingTop = 28
-  summary.paddingRight = 28
-  summary.paddingBottom = 28
-  summary.paddingLeft = 28
-  summary.itemSpacing = 10
-  summary.cornerRadius = 12
-  summary.fills = [{ type: 'SOLID', color: { r: 0.94, g: 0.96, b: 0.99 } }]
-  summary.appendChild(makeText('상품 핵심 포인트', 16, 'Bold'))
-  const keyPoint = [text(product.material), text(product.size), text(product.capacity)].filter(Boolean).join(' · ')
-  summary.appendChild(makeText(keyPoint || '상품의 핵심 장점과 사용 장면을 검수 후 보완해주세요.', 18, 'Semi Bold'))
-  if (text(job.note)) summary.appendChild(makeText(`제작 메모: ${job.note}`, 13, 'Regular', { r: 0.35, g: 0.38, b: 0.43 }))
-  frame.appendChild(summary)
+  const scratch = figma.createFrame()
+  scratch.name = `BUILDING · ${job.product.sku}`
+  scratch.x = target.x + target.width + 80
+  scratch.y = target.y
+  scratch.resize(860, 100)
+  scratch.layoutMode = 'VERTICAL'
+  scratch.primaryAxisSizingMode = 'AUTO'
+  scratch.counterAxisSizingMode = 'FIXED'
+  scratch.itemSpacing = 0
+  scratch.paddingTop = 0
+  scratch.paddingRight = 0
+  scratch.paddingBottom = 0
+  scratch.paddingLeft = 0
+  scratch.fills = [{ type: 'SOLID', color: COLORS.paper }]
 
-  frame.appendChild(makeSectionTitle('상품 정보'))
-  const fields = [
-    ['재질', product.material],
-    ['제품크기', product.size],
-    ['제조사', product.manufacturer],
-    ['무게', product.weight],
-    ['제조국', product.country],
-    ['용량', product.capacity],
-  ]
-  for (const [label, value] of fields) frame.appendChild(makeInfoRow(label, text(value)))
+  try {
+    scratch.appendChild(await makeCover(job, brief))
+    scratch.appendChild(makeIntro(brief))
+    scratch.appendChild(makeFacts(brief))
+    for (const [index, checkpoint] of brief.checkpoints.entries()) {
+      scratch.appendChild(await makeCheckpoint(index + 1, checkpoint))
+    }
+    scratch.appendChild(makeStructure(brief))
+    scratch.appendChild(makeSizeGuide(job.product, brief))
+    scratch.appendChild(makeProductInfo(job.product))
+    scratch.appendChild(makeCautions(brief))
+    scratch.appendChild(await cloneIpNotice())
 
-  const footer = makeText('초안 자동 생성본입니다. 이미지·카피·상품 고지 정보를 검수한 뒤 최종 상세페이지로 다듬어주세요.', 12, 'Regular', { r: 0.42, g: 0.45, b: 0.5 })
-  footer.textAlignHorizontal = 'CENTER'
-  frame.appendChild(footer)
-
-  figma.currentPage.selection = [frame]
-  figma.viewport.scrollAndZoomIntoView([frame])
-  return frame
+    const x = target.x
+    const y = target.y
+    for (const child of [...target.children]) child.remove()
+    target.layoutMode = 'NONE'
+    target.resize(860, 100)
+    target.layoutMode = 'VERTICAL'
+    target.primaryAxisSizingMode = 'AUTO'
+    target.counterAxisSizingMode = 'FIXED'
+    target.itemSpacing = 0
+    target.paddingTop = 0
+    target.paddingRight = 0
+    target.paddingBottom = 0
+    target.paddingLeft = 0
+    target.fills = [{ type: 'SOLID', color: COLORS.paper }]
+    while (scratch.children.length) target.appendChild(scratch.children[0])
+    target.x = x
+    target.y = y
+    target.name = `${job.product.name} ${job.product.sku} · 카드뉴스형 상세페이지 초안`
+    target.setPluginData('funtastic-job-id', job.id)
+    target.setPluginData('funtastic-sku', job.product.sku)
+    target.setPluginData('production-brief-version', PLUGIN_VERSION)
+    scratch.remove()
+    figma.currentPage.selection = [target]
+    figma.viewport.scrollAndZoomIntoView([target])
+    return target
+  } catch (error) {
+    try {
+      scratch.remove()
+    } catch {
+      // 이미 제거된 임시 프레임이면 추가 정리가 필요하지 않습니다.
+    }
+    throw error
+  }
 }
 
 function authHeaders(token) {
@@ -208,8 +577,7 @@ async function readBridgeState() {
     const stored = await figma.clientStorage.getAsync('funtastic-detail-page-bridge')
     if (stored?.bridgeToken) bridgeState = stored
   } catch {
-    // Development manifests without a Figma-issued plugin ID cannot use
-    // clientStorage. The active plugin session can still process jobs safely.
+    // 연결 상태를 메모리에서 계속 사용할 수 있습니다.
   }
   return bridgeState
 }
@@ -219,7 +587,7 @@ async function rememberBridgeState(nextState) {
   try {
     await figma.clientStorage.setAsync('funtastic-detail-page-bridge', nextState)
   } catch {
-    // Keep the in-memory bridge connected for this open plugin session.
+    // 개발용 플러그인은 현재 세션의 연결 상태를 사용합니다.
   }
 }
 
@@ -230,6 +598,7 @@ async function initialize() {
     paired: Boolean(state?.bridgeToken),
     deviceName: state?.deviceName || 'AI 상세페이지 파일',
     figmaFileKey: state?.figmaFileKey || DEFAULT_FILE_KEY,
+    pluginVersion: PLUGIN_VERSION,
   })
   if (state?.bridgeToken) startAutomaticSync()
 }
@@ -252,8 +621,6 @@ async function pair(message) {
   })
   figma.ui.postMessage({ type: 'paired' })
   startAutomaticSync()
-  // A successful one-time pairing should immediately process the item the
-  // operator just queued in SaaS, without requiring a second plugin click.
   await sync()
 }
 
@@ -261,21 +628,16 @@ function startAutomaticSync() {
   if (automaticSyncStarted) return
   automaticSyncStarted = true
   figma.ui.postMessage({ type: 'automatic-sync' })
-
   const poll = async () => {
     try {
       await sync(true)
     } catch (error) {
       automaticSyncStarted = false
-      figma.ui.postMessage({
-        type: 'error',
-        message: `자동 동기화를 멈췄습니다: ${error instanceof Error ? error.message : String(error)}`,
-      })
+      figma.ui.postMessage({ type: 'error', message: `자동 동기화를 멈췄습니다: ${errorMessage(error)}` })
       return
     }
     setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
   }
-
   setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
 }
 
@@ -318,8 +680,9 @@ async function runSync(silent) {
       await request(`/api/operations/detail-pages/bridge/jobs/${job.id}`, {
         method: 'POST',
         headers: authHeaders(state.bridgeToken),
-        body: JSON.stringify({ status: 'failed', errorMessage: error instanceof Error ? error.message : String(error) }),
+        body: JSON.stringify({ status: 'failed', errorMessage: errorMessage(error) }),
       }).catch(() => {})
+      figma.ui.postMessage({ type: 'error', message: errorMessage(error) })
     }
   }
   if (!silent || completed > 0) figma.ui.postMessage({ type: 'synced', completed, empty })
@@ -330,7 +693,7 @@ figma.ui.onmessage = async (message) => {
     if (message.type === 'pair') await pair(message)
     if (message.type === 'sync') await sync()
   } catch (error) {
-    figma.ui.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    figma.ui.postMessage({ type: 'error', message: errorMessage(error) })
   }
 }
 

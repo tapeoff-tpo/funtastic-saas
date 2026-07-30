@@ -1,8 +1,10 @@
 {
-  "name": "Funtastic AI Detail Page Draft",
+  "name": "[v1.1.0] Funtastic AI 상세페이지 자동 제작",
+  "id": "1664119384126809239",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",
+  "documentAccess": "dynamic-page",
   "editorType": ["figma"],
   "networkAccess": {
     "allowedDomains": [

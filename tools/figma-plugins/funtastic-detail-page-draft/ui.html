@@ -18,7 +18,7 @@
   </head>
   <body>
     <h1>Funtastic AI 상세페이지</h1>
-    <p>대기 중인 SaaS 작업을 이 파일의 새 편집 프레임으로 제작합니다.</p>
+    <p>대기 중인 SaaS 작업의 기존 대상 프레임을 검증된 카드뉴스형 초안으로 재제작합니다. 이미지가 하나라도 실패하면 검수 상태로 넘어가지 않습니다.</p>
     <div id="pairing">
       <label>연결 코드<input id="pairingToken" autocomplete="off" placeholder="SaaS에서 생성한 10분 코드" /></label>
       <label>연결 이름<input id="deviceName" value="AI 상세페이지 파일" /></label>
@@ -53,7 +53,7 @@
         if (data.type === 'state') {
           document.getElementById('deviceName').value = data.deviceName || 'AI 상세페이지 파일'
           document.getElementById('figmaFileKey').value = data.figmaFileKey || 'X8yYgVtrAFKycEA0yy0kWI'
-          if (data.paired) { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = '연결됨. 대기 작업을 제작할 수 있습니다.' }
+          if (data.paired) { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = `연결됨 · v${data.pluginVersion || '1.1.0'}. 대기 작업을 재제작할 수 있습니다.` }
         }
         if (data.type === 'paired') { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = '연결됐습니다. 이제 대기 작업을 제작하세요.'; setBusy(false) }
         if (data.type === 'automatic-sync') message.textContent = '연결됨. 이 창을 열어두면 SaaS의 초안 제작 요청을 자동으로 처리합니다.'

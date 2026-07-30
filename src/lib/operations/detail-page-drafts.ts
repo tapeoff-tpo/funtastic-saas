@@ -246,6 +246,27 @@ export async function completeDetailPageReview(userId: string, id: string) {
   return row ? toDetailPageDraftRecord(row) : null
 }
 
+export async function requeueDetailPageDraft(userId: string, id: string) {
+  await ensureDetailPageDraftTables()
+  const [row] = await db
+    .update(detailPageJobs)
+    .set({
+      status: 'queued',
+      errorMessage: null,
+      claimedByDeviceId: null,
+      claimedAt: null,
+      completedAt: null,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(detailPageJobs.userId, userId),
+      eq(detailPageJobs.id, id),
+      sql`${detailPageJobs.status} IN ('review', 'failed')`,
+    ))
+    .returning()
+  return row ? toDetailPageDraftRecord(row) : null
+}
+
 export async function deleteDetailPageDraft(userId: string, id: string) {
   await ensureDetailPageDraftTables()
   const [deleted] = await db

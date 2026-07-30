@@ -220,6 +220,24 @@ type ProductProfitQueryRow = {
 
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
 const ORDER_PROFIT_PAGE_SIZE = 50
+const ANALYTICS_SHIPPED_AT_TEXT = sql`
+  COALESCE(
+    NULLIF(o.raw_data->'rawLines'->0->>'출고완료일자', ''),
+    NULLIF(o.raw_data->'sabangnetRaw'->>'출고완료일자', '')
+  )
+`
+const ANALYTICS_SALES_AT = sql`
+  COALESCE(
+    CASE
+      WHEN ${ANALYTICS_SHIPPED_AT_TEXT} ~ '^[0-9]{8}$'
+        THEN to_timestamp(${ANALYTICS_SHIPPED_AT_TEXT}, 'YYYYMMDD')
+      WHEN ${ANALYTICS_SHIPPED_AT_TEXT} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+        THEN ${ANALYTICS_SHIPPED_AT_TEXT}::timestamptz
+      ELSE NULL
+    END,
+    o.ordered_at
+  )
+`
 const ANALYTICS_ORDER_AMOUNT = sql`
   CASE
     WHEN o.raw_data->>'sabangnetSeparated' = 'true' THEN COALESCE(
@@ -373,8 +391,8 @@ export async function getOrderProfitAnalysisData(
         ON ip.user_id = o.user_id
        AND ip.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
       WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
       GROUP BY o.id
     ),
@@ -466,15 +484,15 @@ export async function getOrderProfitAnalysisData(
         WHERE bcr.user_id = ${userId}
           AND bcr.is_active = true
           AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
-          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, o.ordered_at::date)
+          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, (${ANALYTICS_SALES_AT})::date)
         ORDER BY bcr.effective_from DESC
         LIMIT 1
       ) rate ON true
       WHERE ascost.user_id = ${userId}
         AND ascost.shipment_id IS NULL
         AND ascost.order_id IS NOT NULL
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
       GROUP BY o.id
     ),
@@ -504,7 +522,7 @@ export async function getOrderProfitAnalysisData(
           ) || ')'
           ELSE ''
         END AS marketplace_name,
-        o.ordered_at,
+        ${ANALYTICS_SALES_AT} AS ordered_at,
         COALESCE(items.product_summary, '상품정보 없음') AS product_summary,
         COALESCE(items.sku_summary, '미매핑') AS sku_summary,
         COALESCE(shipments.package_summary, order_costs.package_summary, '박스명 없음') AS package_summary,
@@ -545,8 +563,8 @@ export async function getOrderProfitAnalysisData(
       LEFT JOIN order_actual_costs order_costs ON order_costs.order_id = o.id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
     )
   `
@@ -752,8 +770,8 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
     ),
     current_costs AS (
@@ -765,8 +783,8 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         ON p.user_id = o.user_id
        AND p.internal_sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
       WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
     ),
     shipped_orders AS (
@@ -775,21 +793,21 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       JOIN shipments s ON s.order_id = o.id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
-        AND s.shipped_at >= ${monthStart}
-        AND s.shipped_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
     ),
     previous_months AS (
       SELECT
-        to_char(o.ordered_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') AS month_key,
+        to_char(${ANALYTICS_SALES_AT} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM') AS month_key,
         SUM(CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS sales
       FROM orders o
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${previousThreeMonthStart}
-        AND o.ordered_at < ${monthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${previousThreeMonthStart}
+        AND ${ANALYTICS_SALES_AT} < ${monthStart}
         AND o.status::text IN ${STATUS_FILTER}
-      GROUP BY to_char(o.ordered_at AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')
+      GROUP BY to_char(${ANALYTICS_SALES_AT} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM')
     )
     SELECT
       COALESCE((SELECT SUM(total_amount) FROM current_orders), 0)::text AS "monthSales",
@@ -804,8 +822,8 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         FROM orders o
         LEFT JOIN claim_effects ce ON ce.order_id = o.id
         WHERE o.user_id = ${userId}
-          AND o.ordered_at >= ${lastMonthStart}
-          AND o.ordered_at < ${lastMonthSameDayEnd}
+          AND ${ANALYTICS_SALES_AT} >= ${lastMonthStart}
+          AND ${ANALYTICS_SALES_AT} < ${lastMonthSameDayEnd}
           AND o.status::text IN ${STATUS_FILTER}
       ), 0)::text AS "lastMonthSamePeriodSales",
       COALESCE((SELECT AVG(sales) FROM previous_months), 0)::text AS "previousThreeMonthAverageSales"
@@ -879,8 +897,8 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
     ),
     product_costs AS (
@@ -962,7 +980,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         WHERE bcr.user_id = ${userId}
           AND bcr.is_active = true
           AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
-          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, o.ordered_at::date)
+          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, (${ANALYTICS_SALES_AT})::date)
         ORDER BY bcr.effective_from DESC
         LIMIT 1
       ) rate ON true
@@ -1119,8 +1137,8 @@ export async function getProductProfitAnalysisData(
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
-        AND o.ordered_at >= ${monthStart}
-        AND o.ordered_at < ${nextMonthStart}
+        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
+        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
     ),
     item_lines AS (
@@ -1216,7 +1234,7 @@ export async function getProductProfitAnalysisData(
         WHERE bcr.user_id = ${userId}
           AND bcr.is_active = true
           AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
-          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, o.ordered_at::date)
+          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, (${ANALYTICS_SALES_AT})::date)
         ORDER BY bcr.effective_from DESC
         LIMIT 1
       ) rate ON true
@@ -1339,12 +1357,12 @@ async function getSalesComparisonData(
     SELECT
       cm.month_key AS "monthKey",
       COALESCE(SUM(${ANALYTICS_ORDER_AMOUNT}), 0)::text AS "totalSales",
-      COALESCE(SUM(${ANALYTICS_ORDER_AMOUNT}) FILTER (WHERE o.ordered_at < cm.same_period_end), 0)::text AS "samePeriodSales"
+      COALESCE(SUM(${ANALYTICS_ORDER_AMOUNT}) FILTER (WHERE ${ANALYTICS_SALES_AT} < cm.same_period_end), 0)::text AS "samePeriodSales"
     FROM comparison_months cm
     LEFT JOIN orders o
       ON o.user_id = ${userId}
-     AND o.ordered_at >= cm.month_start
-     AND o.ordered_at < cm.month_end
+     AND ${ANALYTICS_SALES_AT} >= cm.month_start
+     AND ${ANALYTICS_SALES_AT} < cm.month_end
      AND o.status::text IN ${STATUS_FILTER}
     GROUP BY cm.month_key, cm.month_start
     ORDER BY cm.month_start

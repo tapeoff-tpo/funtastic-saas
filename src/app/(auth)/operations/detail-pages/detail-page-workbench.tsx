@@ -33,6 +33,8 @@ type DetailPageJob = {
   imageError: string | null
   remoteJobId: string | null
   figmaUrl: string | null
+  agentQa: string
+  agentQaAt: string | null
 }
 
 type RemoteDetailPageJob = {
@@ -45,6 +47,8 @@ type RemoteDetailPageJob = {
   status: 'agent_pending' | 'agent_creating' | 'needs_info' | 'queued' | 'creating' | 'review' | 'completed' | 'failed'
   errorMessage: string | null
   figmaUrl: string | null
+  agentQa: string
+  agentQaAt: string | null
   createdAt: string
 }
 
@@ -305,6 +309,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       imageError: null,
       remoteJobId: null,
       figmaUrl: null,
+      agentQa: '',
+      agentQaAt: null,
     }))
     setJobs((current) => [...created, ...current])
     setActiveId(created[0]?.id ?? null)
@@ -654,6 +660,14 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                     <p className="mt-1 text-xs text-muted-foreground">상세페이지 에이전트가 초안을 만들면 이 작업의 편집 링크가 표시됩니다.</p>
                     {activeJob?.figmaUrl ? <a href={activeJob.figmaUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted"><PanelsTopLeft className="size-3.5" />Figma 초안 열기<ExternalLink className="size-3" /></a> : null}
                   </div>
+                  {activeJob?.agentQa ? (
+                    <div className="mt-4 border-l-2 border-emerald-500 pl-3 text-xs">
+                      <p className="font-medium text-emerald-700">에이전트 자체 검수 완료</p>
+                      <p className="mt-1 whitespace-pre-wrap leading-5 text-muted-foreground">{activeJob.agentQa}</p>
+                    </div>
+                  ) : activeJob?.status === 'review' ? (
+                    <p className="mt-4 text-xs text-amber-700">에이전트 검수 기록을 확인 중입니다.</p>
+                  ) : null}
                   {activeJob?.images.length ? (
                     <div className="mt-4">
                       <p className="text-xs font-medium">수집 이미지 {activeJob.images.length}장</p>
@@ -782,6 +796,8 @@ function remoteJobToLocal(remote: RemoteDetailPageJob, existing?: DetailPageJob)
     imageError: remote.errorMessage,
     remoteJobId: remote.id,
     figmaUrl: remote.figmaUrl,
+    agentQa: remote.agentQa,
+    agentQaAt: remote.agentQaAt,
   }
 }
 
@@ -830,6 +846,8 @@ function readWorkbenchState(): PersistedWorkbenchState | null {
         images: normalizeImageUrls(job.images),
         remoteJobId: typeof job.remoteJobId === 'string' ? job.remoteJobId : null,
         figmaUrl: typeof job.figmaUrl === 'string' ? job.figmaUrl : null,
+        agentQa: typeof job.agentQa === 'string' ? job.agentQa : '',
+        agentQaAt: typeof job.agentQaAt === 'string' ? job.agentQaAt : null,
       }
       if (normalized.status === 'review' && !normalized.remoteJobId) {
         return { ...normalized, status: 'draft_pending' as const }

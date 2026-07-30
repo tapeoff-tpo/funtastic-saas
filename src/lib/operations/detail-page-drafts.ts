@@ -86,6 +86,8 @@ export function toDetailPageDraftRecord(row: typeof detailPageJobs.$inferSelect)
     figmaFileKey: row.figmaFileKey,
     figmaNodeId: row.figmaNodeId,
     figmaUrl: row.figmaUrl,
+    agentQa: row.agentQa ?? '',
+    agentQaAt: row.agentQaAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -112,6 +114,8 @@ export async function ensureDetailPageDraftTables() {
       "figma_file_key" varchar(120) NOT NULL,
       "figma_node_id" varchar(120),
       "figma_url" text,
+      "agent_qa" text,
+      "agent_qa_at" timestamptz,
       "claimed_by_device_id" uuid,
       "claimed_at" timestamptz,
       "completed_at" timestamptz,
@@ -119,6 +123,8 @@ export async function ensureDetailPageDraftTables() {
       "updated_at" timestamptz NOT NULL DEFAULT now()
     )
   `)
+  await db.execute(sql`ALTER TABLE "detail_page_jobs" ADD COLUMN IF NOT EXISTS "agent_qa" text`)
+  await db.execute(sql`ALTER TABLE "detail_page_jobs" ADD COLUMN IF NOT EXISTS "agent_qa_at" timestamptz`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "detail_page_jobs_user_client_key_uniq" ON "detail_page_jobs" ("user_id", "client_job_key")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "detail_page_jobs_user_status_created_idx" ON "detail_page_jobs" ("user_id", "status", "created_at")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "detail_page_jobs_file_status_created_idx" ON "detail_page_jobs" ("figma_file_key", "status", "created_at")`)
@@ -196,6 +202,8 @@ export async function createDetailPageDraft(input: DetailPageDraftInput) {
     figmaFileKey: DETAIL_PAGE_FIGMA_FILE_KEY,
     figmaNodeId: null,
     figmaUrl: null,
+    agentQa: null,
+    agentQaAt: null,
     claimedByDeviceId: null,
     claimedAt: null,
     completedAt: null,
@@ -256,6 +264,8 @@ export async function requeueDetailPageDraft(userId: string, id: string, note?: 
       status: 'agent_pending',
       ...(note === undefined ? {} : { note: cleanText(note, 2_000) }),
       errorMessage: null,
+      agentQa: null,
+      agentQaAt: null,
       claimedByDeviceId: null,
       claimedAt: null,
       completedAt: null,

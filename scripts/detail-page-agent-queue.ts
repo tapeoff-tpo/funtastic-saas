@@ -1,8 +1,9 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { detailPageJobs } from '@/lib/db/schema'
+import { ensureDetailPageDraftTables } from '@/lib/operations/detail-page-drafts'
 
-type Command = 'list' | 'claim' | 'review' | 'needs-info' | 'requeue'
+type Command = 'list' | 'claim' | 'review' | 'qa' | 'needs-info' | 'requeue'
 
 function option(name: string) {
   const index = process.argv.indexOf(`--${name}`)
@@ -19,11 +20,12 @@ function fail(message: string): never {
 }
 
 async function main() {
+  await ensureDetailPageDraftTables()
   const command = (process.argv[2] ?? 'list') as Command
   const jobId = option('job')
 
-  if (!['list', 'claim', 'review', 'needs-info', 'requeue'].includes(command)) {
-    fail('Usage: detail-page-agent-queue <list|claim|review|needs-info|requeue> [--job ID]')
+  if (!['list', 'claim', 'review', 'qa', 'needs-info', 'requeue'].includes(command)) {
+    fail('Usage: detail-page-agent-queue <list|claim|review|qa|needs-info|requeue> [--job ID]')
   }
 
   if (command === 'list') {
@@ -61,15 +63,28 @@ async function main() {
   }
 
   if (command === 'review') {
-  const figmaUrl = option('figma-url')
-  const figmaNodeId = option('figma-node-id')
-  if (!figmaUrl || !figmaNodeId) fail('--figma-url and --figma-node-id are required for review.')
-  const [updated] = await db
-    .update(detailPageJobs)
-    .set({ status: 'review', figmaUrl, figmaNodeId, errorMessage: null, updatedAt: new Date() })
-    .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'agent_creating')))
+    const figmaUrl = option('figma-url')
+    const figmaNodeId = option('figma-node-id')
+    const qaReport = option('qa-report')
+    if (!figmaUrl || !figmaNodeId || !qaReport) fail('--figma-url, --figma-node-id, and --qa-report are required for review.')
+    const [updated] = await db
+      .update(detailPageJobs)
+      .set({ status: 'review', figmaUrl, figmaNodeId, agentQa: qaReport.slice(0, 2_000), agentQaAt: new Date(), errorMessage: null, updatedAt: new Date() })
+      .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'agent_creating')))
     .returning()
   output({ job: updated ?? null })
+    process.exit(updated ? 0 : 1)
+  }
+
+  if (command === 'qa') {
+    const qaReport = option('qa-report')
+    if (!qaReport) fail('--qa-report is required for qa.')
+    const [updated] = await db
+      .update(detailPageJobs)
+      .set({ agentQa: qaReport.slice(0, 2_000), agentQaAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'review')))
+      .returning()
+    output({ job: updated ?? null })
     process.exit(updated ? 0 : 1)
   }
 

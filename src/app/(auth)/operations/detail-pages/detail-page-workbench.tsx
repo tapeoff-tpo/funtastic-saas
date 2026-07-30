@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { Check, CircleAlert, Clock3, Copy, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles } from 'lucide-react'
+import { Check, CircleAlert, Clock3, Copy, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -310,6 +310,15 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     }
   }
 
+  function excludeCollectedImage(imageUrl: string) {
+    if (!activeJob) return
+    setJobs((current) => current.map((job) => (
+      job.id === activeJob.id
+        ? { ...job, images: job.images.filter((url) => url !== imageUrl) }
+        : job
+    )))
+  }
+
   async function completeFigmaReview() {
     if (!activeJob?.remoteJobId) return
     setReviewCompletingId(activeJob.id)
@@ -592,11 +601,23 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                   {activeJob?.images.length ? (
                     <div className="mt-4">
                       <p className="text-xs font-medium">수집 이미지 {activeJob.images.length}장</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">중국어, 다른 옵션, 중복 이미지는 우측 상단 × 버튼으로 제작 목록에서 제외하세요.</p>
                       <div className="mt-2 grid grid-cols-3 gap-1.5">
-                        {activeJob.images.slice(0, 9).map((imageUrl) => (
-                          <a key={imageUrl} href={imageUrl} target="_blank" rel="noreferrer" className="aspect-square overflow-hidden border bg-background">
-                            <img src={imageUrl} alt={`${activeJob.product.name} 수집 이미지`} className="size-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
-                          </a>
+                        {activeJob.images.map((imageUrl, index) => (
+                          <div key={imageUrl} className="group relative aspect-square overflow-hidden border bg-background">
+                            <a href={imageUrl} target="_blank" rel="noreferrer" className="block size-full">
+                              <img src={imageUrl} alt={`${activeJob.product.name} 수집 이미지 ${index + 1}`} className="size-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() => excludeCollectedImage(imageUrl)}
+                              className="absolute top-1 right-1 grid size-6 place-items-center rounded-full border border-white/70 bg-black/75 text-white shadow-sm hover:bg-destructive"
+                              aria-label={`${activeJob.product.name} 수집 이미지 ${index + 1} 제외`}
+                              title="제작 목록에서 제외"
+                            >
+                              <X className="size-3.5" />
+                            </button>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -665,12 +686,20 @@ function normalizeImageUrls(value: unknown): string[] {
     try {
       const url = new URL(entry.startsWith('//') ? `https:${entry}` : entry)
       if (url.protocol !== 'https:' && url.protocol !== 'http:') continue
+      if (isKnownMarketplaceUiAsset(url)) continue
       images.add(url.toString())
     } catch {
       // Ignore malformed image addresses from the page.
     }
   }
   return Array.from(images)
+}
+
+function isKnownMarketplaceUiAsset(url: URL) {
+  const path = url.pathname.toLowerCase()
+  return path.includes('_sum.')
+    || path.endsWith('/2020/428/378/22185873824_536529798.jpg')
+    || path.endsWith('/o1cn01vsloda29ugirzpwdh_!!6000000008128-2-tps-82-86.png')
 }
 
 function remoteStatusToLocal(status: RemoteDetailPageJob['status']): DetailPageJob['status'] {
@@ -738,6 +767,7 @@ function readWorkbenchState(): PersistedWorkbenchState | null {
     const jobs: DetailPageJob[] = parsed.jobs.filter(isDetailPageJob).map((job: DetailPageJob) => {
       const normalized = {
         ...job,
+        images: normalizeImageUrls(job.images),
         remoteJobId: typeof job.remoteJobId === 'string' ? job.remoteJobId : null,
         figmaUrl: typeof job.figmaUrl === 'string' ? job.figmaUrl : null,
       }

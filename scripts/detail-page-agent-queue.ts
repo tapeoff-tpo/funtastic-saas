@@ -3,7 +3,7 @@ import { db } from '@/lib/db'
 import { detailPageJobs } from '@/lib/db/schema'
 import { ensureDetailPageDraftTables } from '@/lib/operations/detail-page-drafts'
 
-type Command = 'list' | 'claim' | 'review' | 'qa' | 'needs-info' | 'requeue'
+type Command = 'list' | 'claim' | 'submit' | 'review' | 'qa-stage' | 'qa-claim' | 'qa-approve' | 'qa-reject' | 'qa' | 'needs-info' | 'requeue'
 
 function option(name: string) {
   const index = process.argv.indexOf(`--${name}`)
@@ -24,22 +24,22 @@ async function main() {
   const command = (process.argv[2] ?? 'list') as Command
   const jobId = option('job')
 
-  if (!['list', 'claim', 'review', 'qa', 'needs-info', 'requeue'].includes(command)) {
-    fail('Usage: detail-page-agent-queue <list|claim|review|qa|needs-info|requeue> [--job ID]')
+  if (!['list', 'claim', 'submit', 'review', 'qa-stage', 'qa-claim', 'qa-approve', 'qa-reject', 'qa', 'needs-info', 'requeue'].includes(command)) {
+    fail('Usage: detail-page-agent-queue <list|claim|submit|review|qa-stage|qa-claim|qa-approve|qa-reject|qa|needs-info|requeue> [--job ID]')
   }
 
   if (command === 'list') {
   const jobs = await db
     .select()
     .from(detailPageJobs)
-    .where(inArray(detailPageJobs.status, ['agent_pending', 'agent_creating', 'review', 'needs_info']))
+    .where(inArray(detailPageJobs.status, ['agent_pending', 'agent_creating', 'agent_qa_pending', 'agent_qa_reviewing', 'review', 'needs_info']))
     .orderBy(asc(detailPageJobs.createdAt))
     .limit(50)
   output(jobs)
     process.exit(0)
   }
 
-  if (!jobId && command !== 'claim') fail('--job is required for this command.')
+  if (!jobId && command !== 'claim' && command !== 'qa-claim') fail('--job is required for this command.')
 
   if (command === 'claim') {
   const claimed = await db.transaction(async (tx) => {
@@ -62,17 +62,91 @@ async function main() {
     process.exit(0)
   }
 
-  if (command === 'review') {
+  if (command === 'submit' || command === 'review') {
     const figmaUrl = option('figma-url')
     const figmaNodeId = option('figma-node-id')
-    const qaReport = option('qa-report')
-    if (!figmaUrl || !figmaNodeId || !qaReport) fail('--figma-url, --figma-node-id, and --qa-report are required for review.')
+    if (!figmaUrl || !figmaNodeId) fail('--figma-url and --figma-node-id are required for submit.')
     const [updated] = await db
       .update(detailPageJobs)
-      .set({ status: 'review', figmaUrl, figmaNodeId, agentQa: qaReport.slice(0, 2_000), agentQaAt: new Date(), errorMessage: null, updatedAt: new Date() })
+      .set({ status: 'agent_qa_pending', figmaUrl, figmaNodeId, agentQa: null, agentQaAt: null, errorMessage: null, updatedAt: new Date() })
       .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'agent_creating')))
     .returning()
   output({ job: updated ?? null })
+    process.exit(updated ? 0 : 1)
+  }
+
+  if (command === 'qa-stage') {
+    const [updated] = await db
+      .update(detailPageJobs)
+      .set({ status: 'agent_qa_pending', agentQa: null, agentQaAt: null, errorMessage: null, updatedAt: new Date() })
+      .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'review')))
+      .returning()
+    output({ job: updated ?? null })
+    process.exit(updated ? 0 : 1)
+  }
+
+  if (command === 'qa-claim') {
+    const claimed = await db.transaction(async (tx) => {
+      const [candidate] = await tx
+        .select()
+        .from(detailPageJobs)
+        .where(jobId ? and(eq(detailPageJobs.id, jobId), eq(detailPageJobs.status, 'agent_qa_pending')) : eq(detailPageJobs.status, 'agent_qa_pending'))
+        .orderBy(asc(detailPageJobs.updatedAt), asc(detailPageJobs.createdAt))
+        .limit(1)
+      if (!candidate) return null
+
+      const [updated] = await tx
+        .update(detailPageJobs)
+        .set({ status: 'agent_qa_reviewing', errorMessage: null, updatedAt: new Date() })
+        .where(and(eq(detailPageJobs.id, candidate.id), eq(detailPageJobs.status, 'agent_qa_pending')))
+        .returning()
+      return updated ?? null
+    })
+    output({ job: claimed })
+    process.exit(0)
+  }
+
+  if (command === 'qa-approve') {
+    const qaReport = option('qa-report')
+    if (!qaReport) fail('--qa-report is required for qa-approve.')
+    const [updated] = await db
+      .update(detailPageJobs)
+      .set({ status: 'review', agentQa: qaReport.slice(0, 2_000), agentQaAt: new Date(), errorMessage: null, updatedAt: new Date() })
+      .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'agent_qa_reviewing')))
+      .returning()
+    output({ job: updated ?? null })
+    process.exit(updated ? 0 : 1)
+  }
+
+  if (command === 'qa-reject') {
+    const qaReport = option('qa-report')
+    if (!qaReport) fail('--qa-report is required for qa-reject.')
+    const [current] = await db
+      .select({ note: detailPageJobs.note })
+      .from(detailPageJobs)
+      .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'agent_qa_reviewing')))
+      .limit(1)
+    if (!current) {
+      output({ job: null })
+      process.exit(1)
+    }
+    const marker = '[독립 검수 재작업 지시]'
+    const baseNote = (current.note ?? '').split(`\n\n${marker}`)[0].trim()
+    const revisionNote = [baseNote, `${marker}\n${qaReport.trim()}`].filter(Boolean).join('\n\n').slice(0, 2_000)
+    const [updated] = await db
+      .update(detailPageJobs)
+      .set({
+        status: 'agent_pending',
+        note: revisionNote,
+        errorMessage: `독립 검수 불합격: ${qaReport.slice(0, 1_700)}`,
+        agentQa: qaReport.slice(0, 2_000),
+        agentQaAt: new Date(),
+        claimedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(detailPageJobs.id, jobId!), eq(detailPageJobs.status, 'agent_qa_reviewing')))
+      .returning()
+    output({ job: updated ?? null })
     process.exit(updated ? 0 : 1)
   }
 
@@ -112,7 +186,7 @@ async function main() {
       claimedAt: null,
       updatedAt: new Date(),
     })
-    .where(and(eq(detailPageJobs.id, jobId!), inArray(detailPageJobs.status, ['needs_info', 'failed', 'review'])))
+    .where(and(eq(detailPageJobs.id, jobId!), inArray(detailPageJobs.status, ['needs_info', 'failed', 'agent_qa_pending', 'agent_qa_reviewing', 'review'])))
     .returning()
   output({ job: updated ?? null })
   process.exit(updated ? 0 : 1)

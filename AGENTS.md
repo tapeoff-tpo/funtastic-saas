@@ -106,7 +106,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - `DETAIL_PAGE_AGENT_PLAYBOOK.md` is binding for every AI detail-page job. The dedicated agent creates the first editable Figma draft; the user then reviews and directs revisions.
 - New detail-page jobs use `agent_pending` and must not be claimed by the legacy Figma plugin queue. The old `queued` / `creating` statuses are reserved for already-created legacy plugin jobs.
-- Do not mark a job `검수 요청` until the exact Figma frame exists, has been visually checked, follows the product, image, fixed-notice, and IP-notice rules in the playbook, and has a persisted Korean agent QA report. The report must cover product fidelity, 1688+AI asset mix, Chinese-copy removal without patch boxes, cover quality, Marbin-style option table placement, background-removed size cutout, color variation, and fixed notices/IP notice.
+- A first-draft producer may only move `agent_creating` work to `agent_qa_pending`. It must never move its own work directly to `검수 요청`.
+- A separate independent QA agent must claim `agent_qa_pending` work, inspect Figma screenshots against the supplier evidence and playbook, then either approve it to `검수 요청` with a persisted Korean QA report or reject it back to `agent_pending` with explicit visual revision instructions.
+- Do not mark a job `검수 요청` until the independent QA agent confirmed the exact Figma frame, product fidelity, 1688+AI asset mix, Chinese-copy removal without patch boxes, cover quality, Marbin-style option table placement, background-removed size cutout, color variation, and fixed notices/IP notice.
 - Never overwrite an approved or user-edited Figma frame without an explicit full-rebuild request. Revision work is limited to the requested product and sections.
 
 ### Deployment

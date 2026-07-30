@@ -12,7 +12,7 @@ Read this file, `DETAIL_PAGE_PRODUCTION_GUIDELINES.md`, and `AGENTS.md` before e
 2. Verify actual product structure, tier count, color options, dimensions, components, removable parts, and supported uses from supplier evidence.
 3. Plan a distinct image purpose for every asset: cover, use scene, feature close-up, option proof, removable-part proof, size information, product information, and notices.
 4. Build only the requested frame inside the shared Figma file. Never create a separate Figma project per product.
-5. Perform visual QA at readable zoom, then change the job to `검수 요청`. Never mark it complete on behalf of the user.
+5. Do a maker-side sanity check, then use `submit` to move the job only to `agent_qa_pending`. Never mark your own work `검수 요청` or complete on behalf of the user.
 
 When purchase URL, supplier images, dimensions, options, or actual structure are missing, set `자료 보완 필요` and state exactly what is missing. Never infer a likely-looking product.
 
@@ -70,4 +70,4 @@ Use this as the general test: factual geometry and physical plausibility outrank
 - Never broadly regenerate a user-edited or approved frame. Change only the requested nodes unless a full rebuild is explicitly requested.
 - A request to delete an image means delete that image or section only.
 - Report briefly in Korean: Figma frame updated, sections/images changed, QA result, and one precise remaining `자료 보완 필요` item if applicable.
-- Before moving to `검수 요청`, capture the full frame and key sections, then confirm correct product facts, a deliberate 1688+AI asset mix, unique image purposes, no Chinese copy or box-over-text patching, strong cover, Marbin-style option table after cover, background-removed size cutout, differentiated colors, correct fixed notices/IP notice, sensible spacing, and an actual visible Figma frame. Store a concise Korean QA report with the job; without that report, do not move to user review.
+- Before submitting to independent QA, capture the full frame and key sections and check correct product facts, a deliberate 1688+AI asset mix, unique image purposes, no Chinese copy or box-over-text patching, strong cover, Marbin-style option table after cover, background-removed size cutout, differentiated colors, correct fixed notices/IP notice, sensible spacing, and an actual visible Figma frame. The independent QA agent alone may approve user review and store the Korean QA report.

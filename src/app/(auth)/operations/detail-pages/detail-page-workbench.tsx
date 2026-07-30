@@ -23,7 +23,7 @@ export type DetailPageProduct = {
 type DetailPageJob = {
   id: string
   product: DetailPageProduct
-  status: 'draft' | 'asset_pending' | 'collecting' | 'draft_pending' | 'agent_pending' | 'agent_creating' | 'needs_info' | 'figma_queued' | 'figma_creating' | 'review' | 'completed' | 'failed'
+  status: 'draft' | 'asset_pending' | 'collecting' | 'draft_pending' | 'agent_pending' | 'agent_creating' | 'agent_qa_pending' | 'agent_qa_reviewing' | 'needs_info' | 'figma_queued' | 'figma_creating' | 'review' | 'completed' | 'failed'
   template: string
   note: string
   createdAt: string
@@ -44,7 +44,7 @@ type RemoteDetailPageJob = {
   imageUrls: string[]
   template: string
   note: string
-  status: 'agent_pending' | 'agent_creating' | 'needs_info' | 'queued' | 'creating' | 'review' | 'completed' | 'failed'
+  status: 'agent_pending' | 'agent_creating' | 'agent_qa_pending' | 'agent_qa_reviewing' | 'needs_info' | 'queued' | 'creating' | 'review' | 'completed' | 'failed'
   errorMessage: string | null
   figmaUrl: string | null
   agentQa: string
@@ -66,6 +66,8 @@ const STATUS = {
   draft_pending: { label: '초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   agent_pending: { label: '에이전트 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   agent_creating: { label: '에이전트 제작 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
+  agent_qa_pending: { label: '독립 검수 대기', className: 'border-amber-200 bg-amber-50 text-amber-800' },
+  agent_qa_reviewing: { label: '독립 검수 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
   needs_info: { label: '자료 보완 필요', className: 'border-amber-200 bg-amber-50 text-amber-800' },
   figma_queued: { label: 'Figma 초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   figma_creating: { label: 'Figma 초안 제작 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
@@ -621,8 +623,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       <ol className="mt-4 grid gap-3 sm:grid-cols-4">
                         <WorkflowStep icon={Clock3} label="작업 생성" active />
                         <WorkflowStep icon={ImagePlus} label="이미지 수집" active={activeJob.status !== 'asset_pending' && activeJob.status !== 'collecting'} />
-                        <WorkflowStep icon={WandSparkles} label="에이전트 초안 제작" active={['agent_pending', 'agent_creating', 'figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
-                        <WorkflowStep icon={FilePenLine} label="Figma 검수" active={activeJob.status === 'completed'} />
+                        <WorkflowStep icon={WandSparkles} label="에이전트 초안 제작" active={['agent_pending', 'agent_creating', 'agent_qa_pending', 'agent_qa_reviewing', 'figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
+                        <WorkflowStep icon={FilePenLine} label="독립 검수" active={['agent_qa_pending', 'agent_qa_reviewing', 'review', 'completed'].includes(activeJob.status)} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
                         {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />{extensionReady ? collectableImageJobCount > 1 ? `이미지 일괄 수집 ${collectableImageJobCount}` : '이미지 수집 시작' : '확장프로그램 연결 중'}</Button> : null}
@@ -630,6 +632,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         {activeJob.status === 'draft_pending' || activeJob.status === 'failed' || activeJob.status === 'needs_info' ? <Button type="button" variant="outline" onClick={requestAgentDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '에이전트 요청 중' : activeJob.status === 'draft_pending' ? '에이전트 초안 제작 요청' : '에이전트 초안 재요청'}</Button> : null}
                         {activeJob.status === 'agent_pending' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />상세페이지 에이전트 대기</Badge> : null}
                         {activeJob.status === 'agent_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />상세페이지 에이전트 제작 중</Badge> : null}
+                        {activeJob.status === 'agent_qa_pending' ? <Badge variant="outline" className="h-8 border-amber-200 bg-amber-50 px-3 text-amber-800"><Clock3 />독립 검수 대기</Badge> : null}
+                        {activeJob.status === 'agent_qa_reviewing' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />독립 검수 중</Badge> : null}
                         {activeJob.status === 'figma_queued' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />Figma 플러그인 대기</Badge> : null}
                         {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma에서 초안 제작 중</Badge> : null}
                         {activeJob.status === 'review' ? (
@@ -661,8 +665,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                     {activeJob?.figmaUrl ? <a href={activeJob.figmaUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted"><PanelsTopLeft className="size-3.5" />Figma 초안 열기<ExternalLink className="size-3" /></a> : null}
                   </div>
                   {activeJob?.agentQa ? (
-                    <div className="mt-4 border-l-2 border-emerald-500 pl-3 text-xs">
-                      <p className="font-medium text-emerald-700">에이전트 자체 검수 완료</p>
+                    <div className={`mt-4 border-l-2 pl-3 text-xs ${activeJob.status === 'agent_pending' ? 'border-amber-500' : 'border-emerald-500'}`}>
+                      <p className={`font-medium ${activeJob.status === 'agent_pending' ? 'text-amber-700' : 'text-emerald-700'}`}>{activeJob.status === 'agent_pending' ? '독립 검수 재작업 지시' : '독립 검수 통과'}</p>
                       <p className="mt-1 whitespace-pre-wrap leading-5 text-muted-foreground">{activeJob.agentQa}</p>
                     </div>
                   ) : activeJob?.status === 'review' ? (
@@ -776,6 +780,8 @@ function isKnownMarketplaceUiAsset(url: URL) {
 function remoteStatusToLocal(status: RemoteDetailPageJob['status']): DetailPageJob['status'] {
   if (status === 'agent_pending') return 'agent_pending'
   if (status === 'agent_creating') return 'agent_creating'
+  if (status === 'agent_qa_pending') return 'agent_qa_pending'
+  if (status === 'agent_qa_reviewing') return 'agent_qa_reviewing'
   if (status === 'needs_info') return 'needs_info'
   if (status === 'queued') return 'figma_queued'
   if (status === 'creating') return 'figma_creating'
@@ -884,7 +890,7 @@ function isDetailPageJob(value: unknown): value is DetailPageJob {
   const job = value as Partial<DetailPageJob>
   return typeof job.id === 'string'
     && isDetailPageProduct(job.product)
-    && ['draft', 'asset_pending', 'collecting', 'draft_pending', 'agent_pending', 'agent_creating', 'needs_info', 'figma_queued', 'figma_creating', 'review', 'completed', 'failed'].includes(job.status ?? '')
+    && ['draft', 'asset_pending', 'collecting', 'draft_pending', 'agent_pending', 'agent_creating', 'agent_qa_pending', 'agent_qa_reviewing', 'needs_info', 'figma_queued', 'figma_creating', 'review', 'completed', 'failed'].includes(job.status ?? '')
     && typeof job.template === 'string'
     && typeof job.note === 'string'
     && typeof job.createdAt === 'string'

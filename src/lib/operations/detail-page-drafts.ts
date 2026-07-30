@@ -217,7 +217,7 @@ export async function createDetailPageDraft(input: DetailPageDraftInput) {
     .limit(1)
 
   if (existing) {
-    if (existing.status === 'agent_creating' || existing.status === 'creating' || existing.status === 'review' || existing.status === 'completed') {
+    if (existing.status === 'agent_creating' || existing.status === 'agent_qa_pending' || existing.status === 'agent_qa_reviewing' || existing.status === 'creating' || existing.status === 'review' || existing.status === 'completed') {
       return toDetailPageDraftRecord(existing)
     }
     const [updated] = await db
@@ -274,7 +274,7 @@ export async function requeueDetailPageDraft(userId: string, id: string, note?: 
     .where(and(
       eq(detailPageJobs.userId, userId),
       eq(detailPageJobs.id, id),
-      sql`${detailPageJobs.status} IN ('review', 'failed', 'needs_info')`,
+      sql`${detailPageJobs.status} IN ('agent_qa_pending', 'agent_qa_reviewing', 'review', 'failed', 'needs_info')`,
     ))
     .returning()
   return row ? toDetailPageDraftRecord(row) : null

@@ -45,7 +45,24 @@ export function CostsPageClient({
       country: row.data['제조국'] ?? '',
       capacity: row.data['용량'] ?? '',
     }))
-    window.sessionStorage.setItem(DETAIL_PAGE_SELECTION_KEY, JSON.stringify(products))
+    let pendingProducts: typeof products = []
+    try {
+      const saved = window.sessionStorage.getItem(DETAIL_PAGE_SELECTION_KEY)
+      const parsed = saved ? JSON.parse(saved) : []
+      if (Array.isArray(parsed)) {
+        pendingProducts = parsed.filter((product): product is (typeof products)[number] => (
+          Boolean(product)
+          && typeof product === 'object'
+          && typeof product.id === 'string'
+        ))
+      }
+    } catch {
+      // Replace malformed session data with the new valid selection.
+    }
+    const mergedProducts = Array.from(
+      new Map([...pendingProducts, ...products].map((product) => [product.id, product])).values(),
+    )
+    window.sessionStorage.setItem(DETAIL_PAGE_SELECTION_KEY, JSON.stringify(mergedProducts))
     router.push('/operations/detail-pages')
   }
 

@@ -76,6 +76,7 @@ const EMPTY_PRODUCTS: DetailPageProduct[] = []
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
 let cachedSessionProducts: DetailPageProduct[] | null = null
+let cachedSessionProductsRaw: string | null | undefined
 
 export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: DetailPageProduct[] }) {
   const sessionProducts = useSyncExternalStore(
@@ -255,8 +256,11 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     const remainingProducts = sessionProducts.filter((product) => !excludedIds.has(product.id))
     cachedSessionProducts = remainingProducts
     if (remainingProducts.length > 0) {
-      window.sessionStorage.setItem(DETAIL_PAGE_SELECTION_KEY, JSON.stringify(remainingProducts))
+      const serialized = JSON.stringify(remainingProducts)
+      cachedSessionProductsRaw = serialized
+      window.sessionStorage.setItem(DETAIL_PAGE_SELECTION_KEY, serialized)
     } else {
+      cachedSessionProductsRaw = null
       window.sessionStorage.removeItem(DETAIL_PAGE_SELECTION_KEY)
     }
   }
@@ -786,14 +790,15 @@ function subscribeToSessionProducts() {
 }
 
 function readSessionProducts() {
-  if (cachedSessionProducts) return cachedSessionProducts
   if (typeof window === 'undefined') return EMPTY_PRODUCTS
+  const saved = window.sessionStorage.getItem(DETAIL_PAGE_SELECTION_KEY)
+  if (cachedSessionProducts && cachedSessionProductsRaw === saved) return cachedSessionProducts
   try {
-    const saved = window.sessionStorage.getItem(DETAIL_PAGE_SELECTION_KEY)
     const parsed = saved ? JSON.parse(saved) : []
     cachedSessionProducts = Array.isArray(parsed) ? parsed.filter(isDetailPageProduct) : EMPTY_PRODUCTS
   } catch {
     cachedSessionProducts = EMPTY_PRODUCTS
   }
+  cachedSessionProductsRaw = saved
   return cachedSessionProducts
 }

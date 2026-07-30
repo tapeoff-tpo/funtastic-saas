@@ -76,6 +76,7 @@ const EMPTY_PRODUCT: DetailPageProduct = {
 
 const DETAIL_PAGE_SELECTION_KEY = 'funtastic-detail-page-selection'
 const DETAIL_PAGE_WORKBENCH_STATE_KEY = 'funtastic-detail-page-workbench-state-v1'
+const DETAIL_PAGE_WORKBENCH_CLEANUP_KEY = 'funtastic-detail-page-workbench-cleanup-v1'
 const EMPTY_PRODUCTS: DetailPageProduct[] = []
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
@@ -173,7 +174,15 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
         if (!response.ok) return
         const body = await response.json() as { jobs?: RemoteDetailPageJob[] }
         if (cancelled || !Array.isArray(body.jobs)) return
-        setJobs((current) => mergeRemoteJobs(current, body.jobs!))
+        setJobs((current) => {
+          const merged = mergeRemoteJobs(current, body.jobs!)
+          // One-time cleanup for the old browser-only attempts that were never submitted.
+          if (window.localStorage.getItem(DETAIL_PAGE_WORKBENCH_CLEANUP_KEY) !== '1') {
+            window.localStorage.setItem(DETAIL_PAGE_WORKBENCH_CLEANUP_KEY, '1')
+            return merged.filter((job) => Boolean(job.remoteJobId))
+          }
+          return merged
+        })
         setActiveId((currentId) => currentId ?? body.jobs?.[0]?.clientJobKey ?? null)
       } catch {
         // A local draft remains usable when the server is temporarily unavailable.

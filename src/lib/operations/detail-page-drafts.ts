@@ -189,7 +189,9 @@ export async function createDetailPageDraft(input: DetailPageDraftInput) {
     imageUrls: images,
     template: cleanText(input.template, 120) ?? '기본 상품 상세',
     note: cleanText(input.note, 2_000),
-    status: 'queued',
+    // New work is owned by the dedicated detail-page agent. The legacy Figma
+    // plugin only claims the older `queued` jobs.
+    status: 'agent_pending',
     errorMessage: null,
     figmaFileKey: DETAIL_PAGE_FIGMA_FILE_KEY,
     figmaNodeId: null,
@@ -207,7 +209,7 @@ export async function createDetailPageDraft(input: DetailPageDraftInput) {
     .limit(1)
 
   if (existing) {
-    if (existing.status === 'creating' || existing.status === 'review' || existing.status === 'completed') {
+    if (existing.status === 'agent_creating' || existing.status === 'creating' || existing.status === 'review' || existing.status === 'completed') {
       return toDetailPageDraftRecord(existing)
     }
     const [updated] = await db
@@ -251,7 +253,7 @@ export async function requeueDetailPageDraft(userId: string, id: string) {
   const [row] = await db
     .update(detailPageJobs)
     .set({
-      status: 'queued',
+      status: 'agent_pending',
       errorMessage: null,
       claimedByDeviceId: null,
       claimedAt: null,

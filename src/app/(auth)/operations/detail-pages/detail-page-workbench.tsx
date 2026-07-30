@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { Check, CircleAlert, Clock3, Copy, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
+import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,7 +23,7 @@ export type DetailPageProduct = {
 type DetailPageJob = {
   id: string
   product: DetailPageProduct
-  status: 'draft' | 'asset_pending' | 'collecting' | 'draft_pending' | 'figma_queued' | 'figma_creating' | 'review' | 'completed' | 'failed'
+  status: 'draft' | 'asset_pending' | 'collecting' | 'draft_pending' | 'agent_pending' | 'agent_creating' | 'needs_info' | 'figma_queued' | 'figma_creating' | 'review' | 'completed' | 'failed'
   template: string
   note: string
   createdAt: string
@@ -42,7 +42,7 @@ type RemoteDetailPageJob = {
   imageUrls: string[]
   template: string
   note: string
-  status: 'queued' | 'creating' | 'review' | 'completed' | 'failed'
+  status: 'agent_pending' | 'agent_creating' | 'needs_info' | 'queued' | 'creating' | 'review' | 'completed' | 'failed'
   errorMessage: string | null
   figmaUrl: string | null
   createdAt: string
@@ -59,6 +59,9 @@ const STATUS = {
   asset_pending: { label: '이미지 수집 대기', className: 'border-amber-200 bg-amber-50 text-amber-800' },
   collecting: { label: '이미지 수집 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
   draft_pending: { label: '초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
+  agent_pending: { label: '에이전트 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
+  agent_creating: { label: '에이전트 제작 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
+  needs_info: { label: '자료 보완 필요', className: 'border-amber-200 bg-amber-50 text-amber-800' },
   figma_queued: { label: 'Figma 초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   figma_creating: { label: 'Figma 초안 제작 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
   review: { label: '검수 필요', className: 'border-violet-200 bg-violet-50 text-violet-800' },
@@ -95,8 +98,6 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [draftRequestingId, setDraftRequestingId] = useState<string | null>(null)
   const [reviewCompletingId, setReviewCompletingId] = useState<string | null>(null)
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
-  const [pairingToken, setPairingToken] = useState<string | null>(null)
-  const [pairingError, setPairingError] = useState<string | null>(null)
   const incomingProducts = selectedProducts.length > 0 ? selectedProducts : sessionProducts
   const draftProducts = useMemo(
     () => incomingProducts.filter((product) => !consumedProductIds.has(product.id)),
@@ -280,7 +281,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     setActiveId(null)
   }
 
-  async function requestFigmaDraft() {
+  async function requestAgentDraft() {
     if (!activeJob || activeJob.images.length === 0) return
     setDraftRequestingId(activeJob.id)
     try {
@@ -296,12 +297,12 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
         }),
       })
       const body = await response.json().catch(() => ({})) as { job?: RemoteDetailPageJob; error?: string }
-      if (!response.ok || !body.job) throw new Error(body.error || 'Figma 초안 제작 요청을 저장하지 못했습니다.')
+      if (!response.ok || !body.job) throw new Error(body.error || '에이전트 초안 제작 요청을 저장하지 못했습니다.')
       setJobs((current) => current.map((job) => (
         job.id === activeJob.id ? remoteJobToLocal(body.job!, job) : job
       )))
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Figma 초안 제작 요청을 저장하지 못했습니다.'
+      const message = error instanceof Error ? error.message : '에이전트 초안 제작 요청을 저장하지 못했습니다.'
       setJobs((current) => current.map((job) => (
         job.id === activeJob.id ? { ...job, status: 'failed', imageError: message } : job
       )))
@@ -343,7 +344,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     }
   }
 
-  async function rebuildFigmaDraft() {
+  async function requestAgentRevision() {
     if (!activeJob?.remoteJobId) return
     setDraftRequestingId(activeJob.id)
     try {
@@ -353,12 +354,12 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
         body: JSON.stringify({ action: 'rebuild' }),
       })
       const body = await response.json().catch(() => ({})) as { job?: RemoteDetailPageJob; error?: string }
-      if (!response.ok || !body.job) throw new Error(body.error || 'Figma 초안 재제작 요청을 저장하지 못했습니다.')
+      if (!response.ok || !body.job) throw new Error(body.error || '에이전트 수정 요청을 저장하지 못했습니다.')
       setJobs((current) => current.map((job) => (
         job.id === activeJob.id ? remoteJobToLocal(body.job!, job) : job
       )))
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Figma 초안 재제작 요청을 저장하지 못했습니다.'
+      const message = error instanceof Error ? error.message : '에이전트 수정 요청을 저장하지 못했습니다.'
       setJobs((current) => current.map((job) => (
         job.id === activeJob.id ? { ...job, imageError: message } : job
       )))
@@ -396,31 +397,6 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       )))
     } finally {
       setDeletingJobId(null)
-    }
-  }
-
-  async function createFigmaPairing() {
-    setPairingError(null)
-    try {
-      const response = await fetch('/api/operations/detail-pages/bridge/pairing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deviceLabel: 'AI 상세페이지 파일' }),
-      })
-      const body = await response.json().catch(() => ({})) as { pairingToken?: string; error?: string }
-      if (!response.ok || !body.pairingToken) throw new Error(body.error || 'Figma 연결 코드를 만들지 못했습니다.')
-      setPairingToken(body.pairingToken)
-    } catch (error) {
-      setPairingError(error instanceof Error ? error.message : 'Figma 연결 코드를 만들지 못했습니다.')
-    }
-  }
-
-  async function copyPairingToken() {
-    if (!pairingToken) return
-    try {
-      await navigator.clipboard.writeText(pairingToken)
-    } catch {
-      setPairingError('연결 코드를 직접 선택해서 복사해주세요.')
     }
   }
 
@@ -587,17 +563,19 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       <ol className="mt-4 grid gap-3 sm:grid-cols-4">
                         <WorkflowStep icon={Clock3} label="작업 생성" active />
                         <WorkflowStep icon={ImagePlus} label="이미지 수집" active={activeJob.status !== 'asset_pending' && activeJob.status !== 'collecting'} />
-                        <WorkflowStep icon={WandSparkles} label="초안 제작" active={['figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
+                        <WorkflowStep icon={WandSparkles} label="에이전트 초안 제작" active={['agent_pending', 'agent_creating', 'figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
                         <WorkflowStep icon={FilePenLine} label="Figma 검수" active={activeJob.status === 'completed'} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
                         {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />{extensionReady ? '이미지 수집 시작' : '확장프로그램 연결 중'}</Button> : null}
-                        {activeJob.status === 'draft_pending' || activeJob.status === 'failed' ? <Button type="button" variant="outline" onClick={requestFigmaDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? 'Figma 초안 요청 중' : activeJob.status === 'failed' ? 'Figma 초안 재요청' : 'Figma 초안 제작 요청'}</Button> : null}
+                        {activeJob.status === 'draft_pending' || activeJob.status === 'failed' || activeJob.status === 'needs_info' ? <Button type="button" variant="outline" onClick={requestAgentDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '에이전트 요청 중' : activeJob.status === 'draft_pending' ? '에이전트 초안 제작 요청' : '에이전트 초안 재요청'}</Button> : null}
+                        {activeJob.status === 'agent_pending' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />상세페이지 에이전트 대기</Badge> : null}
+                        {activeJob.status === 'agent_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />상세페이지 에이전트 제작 중</Badge> : null}
                         {activeJob.status === 'figma_queued' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />Figma 플러그인 대기</Badge> : null}
                         {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma에서 초안 제작 중</Badge> : null}
                         {activeJob.status === 'review' ? (
                           <>
-                            <Button type="button" variant="outline" onClick={rebuildFigmaDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '재제작 요청 중' : 'Figma 초안 재제작'}</Button>
+                            <Button type="button" variant="outline" onClick={requestAgentRevision} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '수정 요청 중' : '에이전트 수정 요청'}</Button>
                             <Button type="button" onClick={completeFigmaReview} disabled={reviewCompletingId === activeJob.id}><FilePenLine />{reviewCompletingId === activeJob.id ? '검수 완료 처리 중' : 'Figma 검수 완료'}</Button>
                           </>
                         ) : null}
@@ -613,19 +591,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                   <div className="mt-3 border border-dashed bg-background px-3 py-4 text-center">
                     <PanelsTopLeft className="mx-auto size-5 text-muted-foreground" />
                     <p className="mt-2 text-sm font-medium">{activeJob?.figmaUrl ? '편집 파일 준비됨' : '편집 파일 대기'}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Figma 플러그인이 초안을 만들면 이 작업의 편집 링크가 표시됩니다.</p>
+                    <p className="mt-1 text-xs text-muted-foreground">상세페이지 에이전트가 초안을 만들면 이 작업의 편집 링크가 표시됩니다.</p>
                     {activeJob?.figmaUrl ? <a href={activeJob.figmaUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex h-8 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted"><PanelsTopLeft className="size-3.5" />Figma 초안 열기<ExternalLink className="size-3" /></a> : null}
-                  </div>
-                  <div className="mt-4 border bg-background p-3">
-                    <p className="text-xs font-semibold">Figma 플러그인 연결</p>
-                    <p className="mt-1 text-xs text-muted-foreground">연결 코드는 10분 동안만 유효합니다.</p>
-                    {pairingToken ? (
-                      <div className="mt-3 flex gap-1.5">
-                        <Input value={pairingToken} readOnly aria-label="Figma 연결 코드" className="font-mono text-xs" />
-                        <Button type="button" size="icon-sm" variant="outline" onClick={copyPairingToken} aria-label="Figma 연결 코드 복사" title="연결 코드 복사"><Copy /></Button>
-                      </div>
-                    ) : <Button type="button" size="sm" variant="outline" className="mt-3 w-full" onClick={createFigmaPairing}><Link2 />Figma 연결 코드 만들기</Button>}
-                    {pairingError ? <p className="mt-2 text-xs text-destructive">{pairingError}</p> : null}
                   </div>
                   {activeJob?.images.length ? (
                     <div className="mt-4">
@@ -733,6 +700,9 @@ function isKnownMarketplaceUiAsset(url: URL) {
 }
 
 function remoteStatusToLocal(status: RemoteDetailPageJob['status']): DetailPageJob['status'] {
+  if (status === 'agent_pending') return 'agent_pending'
+  if (status === 'agent_creating') return 'agent_creating'
+  if (status === 'needs_info') return 'needs_info'
   if (status === 'queued') return 'figma_queued'
   if (status === 'creating') return 'figma_creating'
   return status
@@ -832,7 +802,7 @@ function isDetailPageJob(value: unknown): value is DetailPageJob {
   const job = value as Partial<DetailPageJob>
   return typeof job.id === 'string'
     && isDetailPageProduct(job.product)
-    && ['draft', 'asset_pending', 'collecting', 'draft_pending', 'figma_queued', 'figma_creating', 'review', 'completed', 'failed'].includes(job.status ?? '')
+    && ['draft', 'asset_pending', 'collecting', 'draft_pending', 'agent_pending', 'agent_creating', 'needs_info', 'figma_queued', 'figma_creating', 'review', 'completed', 'failed'].includes(job.status ?? '')
     && typeof job.template === 'string'
     && typeof job.note === 'string'
     && typeof job.createdAt === 'string'

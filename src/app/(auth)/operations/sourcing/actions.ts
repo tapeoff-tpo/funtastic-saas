@@ -97,6 +97,17 @@ export async function promoteSourcingItemToPurchasingItemAction(formData: FormDa
     sku: String(formData.get('sku') ?? ''),
     name: String(formData.get('name') ?? ''),
     optionName: String(formData.get('optionName') ?? ''),
+    data: {
+      '한국창고기준 위치': String(formData.get('warehouseLocation') ?? ''),
+      '영문명': String(formData.get('englishName') ?? ''),
+      'HS CODE': String(formData.get('hsCode') ?? ''),
+      '재질': String(formData.get('material') ?? ''),
+      '제품크기': String(formData.get('size') ?? ''),
+      '제조사': String(formData.get('manufacturer') ?? ''),
+      '제조국': String(formData.get('country') ?? ''),
+      'works 신규 원가': String(formData.get('costPrice') ?? ''),
+      '구매 URL': String(formData.get('purchaseUrl') ?? ''),
+    },
   })
   revalidatePath('/operations/sourcing')
   revalidatePath('/costs')

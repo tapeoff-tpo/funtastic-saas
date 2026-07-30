@@ -8,6 +8,17 @@ export type CreatePurchaseRequestInput = {
   productName: string
   optionName?: string | null
   requestedQuantity: number
+  buyerCode?: string | null
+  memo?: string | null
+  createdFrom?: 'item_master' | 'purchasing_review'
+}
+
+const PURCHASE_BUYERS: Record<string, string> = {
+  '1': '한상철',
+  '2': '김기환',
+  '3': '최종석',
+  '4': '오지은',
+  '5': '김소희',
 }
 
 export async function createPurchaseRequest(input: CreatePurchaseRequestInput) {
@@ -31,9 +42,12 @@ export async function createPurchaseRequest(input: CreatePurchaseRequestInput) {
         productName: input.productName,
         optionName: input.optionName?.trim() || null,
         requestedQuantity: input.requestedQuantity,
+        buyerCode: input.buyerCode?.trim() || null,
+        buyerName: input.buyerCode ? PURCHASE_BUYERS[input.buyerCode] ?? null : null,
+        purchaseMemo: input.memo?.trim() || null,
         rawData: {
           source: 'manual_purchase_request',
-          createdFrom: 'purchasing_review',
+          createdFrom: input.createdFrom ?? 'purchasing_review',
         },
       })
       .returning({ id: purchaseRequestItems.id })

@@ -628,7 +628,7 @@ export function SourcingBoard({ items, statusLabels }: Props) {
                 <X />
               </Button>
             </div>
-            <div className="grid gap-3 p-4 sm:grid-cols-2">
+            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
               <label className="space-y-1.5">
                 <span className="text-xs font-medium text-muted-foreground">품목코드</span>
                 <Input name="sku" required maxLength={100} autoFocus placeholder="예: 112345-0001" />
@@ -640,6 +640,42 @@ export function SourcingBoard({ items, statusLabels }: Props) {
               <label className="space-y-1.5 sm:col-span-2">
                 <span className="text-xs font-medium text-muted-foreground">품목명</span>
                 <Input name="name" required maxLength={500} defaultValue={selected.sourceTitle} />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">창고 위치</span>
+                <Input name="warehouseLocation" maxLength={200} placeholder="예: 1창고 A-01" />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">영문명</span>
+                <Input name="englishName" maxLength={500} />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">HS CODE</span>
+                <Input name="hsCode" maxLength={100} />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">재질</span>
+                <Input name="material" maxLength={300} />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">제품 크기</span>
+                <Input name="size" maxLength={300} />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">제조사</span>
+                <Input name="manufacturer" maxLength={300} />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">제조국</span>
+                <Input name="country" maxLength={300} />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium text-muted-foreground">works 신규 원가</span>
+                <Input name="costPrice" inputMode="numeric" placeholder="원 단위" />
+              </label>
+              <label className="space-y-1.5 sm:col-span-2 lg:col-span-3">
+                <span className="text-xs font-medium text-muted-foreground">구매 URL</span>
+                <Input name="purchaseUrl" type="url" defaultValue={selected.selected1688Url ?? ''} />
               </label>
             </div>
             <div className="flex justify-end gap-2 border-t px-4 py-3">

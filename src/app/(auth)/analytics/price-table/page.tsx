@@ -85,9 +85,14 @@ export default async function PriceTablePage({
             상품별 판매가와 배송비를 플랫폼 단위로 비교합니다.
           </p>
         </div>
-        <Link href="/analytics" className="w-fit rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
-          매출분석으로
-        </Link>
+        <div className="flex w-fit gap-2">
+          <Link href="/operations/marketplace-registration" className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            상품 등록 관리로
+          </Link>
+          <Link href="/analytics" className="rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted">
+            매출분석으로
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-col gap-2 border-y py-2 sm:flex-row sm:items-center sm:justify-between">

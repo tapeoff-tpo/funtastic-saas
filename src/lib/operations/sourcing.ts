@@ -312,6 +312,7 @@ export async function promoteSourcingItemToPurchasingItem(input: {
   sku: string
   name?: string | null
   optionName?: string | null
+  data?: Partial<Record<(typeof ESA009M_HEADERS)[number], string | null>>
 }) {
   await ensureSourcingTables()
   const sku = input.sku.trim()
@@ -346,7 +347,12 @@ export async function promoteSourcingItemToPurchasingItem(input: {
   esa009m['품목코드'] = sku
   esa009m['품목명'] = name
   esa009m['규격정보'] = cleanText(input.optionName)
-  esa009m['구매 URL'] = source.selected1688Url
+  for (const header of ESA009M_HEADERS) {
+    if (header === '품목코드' || header === '품목명' || header === '규격정보') continue
+    const value = input.data?.[header]
+    if (value !== undefined) esa009m[header] = cleanText(value)
+  }
+  esa009m['구매 URL'] = cleanText(input.data?.['구매 URL']) ?? source.selected1688Url
 
   const [product] = await db
     .insert(products)
@@ -355,6 +361,7 @@ export async function promoteSourcingItemToPurchasingItem(input: {
       internalSku: sku,
       name,
       basePrice: '0',
+      costPrice: wonNumber(esa009m['works 신규 원가'] ?? esa009m['works 기존 원가']),
       status: 'draft',
       manageInventory: false,
       images: source.imageUrl ? [{ url: source.imageUrl, sortOrder: 0 }] : null,
@@ -388,4 +395,11 @@ export async function promoteSourcingItemToPurchasingItem(input: {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function wonNumber(value: string | null): string | null {
+  const normalized = String(value ?? '').replace(/[^\d.-]/g, '')
+  if (!normalized) return null
+  const amount = Number(normalized)
+  return Number.isFinite(amount) && amount >= 0 ? String(Math.trunc(amount)) : null
 }

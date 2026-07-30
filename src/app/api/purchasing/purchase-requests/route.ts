@@ -5,12 +5,20 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createPurchaseRequest } from '@/lib/purchasing/purchase-request-create'
 import { createClient } from '@/lib/supabase/server'
 
-const bodySchema = z.object({
+const purchaseItemSchema = z.object({
   sku: z.string().trim().min(1).max(100),
   productName: z.string().trim().min(1).max(500),
   optionName: z.string().trim().max(200).nullable().optional(),
   requestedQuantity: z.number().int().min(1).max(1_000_000),
+  buyerCode: z.string().trim().max(50).nullable().optional(),
+  memo: z.string().trim().max(1_000).nullable().optional(),
+  createdFrom: z.enum(['item_master', 'purchasing_review']).optional(),
 })
+
+const bodySchema = z.union([
+  purchaseItemSchema,
+  z.object({ items: z.array(purchaseItemSchema).min(1).max(100) }),
+])
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
@@ -26,13 +34,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const row = await createPurchaseRequest({
-      userId: await getWorkspaceUserId(user.id),
-      ...body.data,
-    })
+    const items = 'items' in body.data ? body.data.items : [body.data]
+    const workspaceUserId = await getWorkspaceUserId(user.id)
+    const rows = await Promise.all(items.map((item) => createPurchaseRequest({ userId: workspaceUserId, ...item })))
 
     revalidatePath('/purchasing/purchases')
-    return NextResponse.json({ id: row.id }, { status: 201 })
+    return NextResponse.json({ id: rows[0]?.id, created: rows.length }, { status: 201 })
   } catch (error) {
     console.error('[purchase-request-create]', error)
     return NextResponse.json({ error: '발주 항목을 추가하지 못했습니다.' }, { status: 500 })

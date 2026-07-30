@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import { ClipboardPenLine, Database, Layers3 } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
@@ -30,11 +31,14 @@ export default async function MarketplaceRegistrationPage() {
             Funtastic B2B 상품을 기준으로 옵션과 이미지를 불러오고, 몰별 등록에 필요한 정보만 보완합니다.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center justify-end gap-4 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1.5"><Database className="size-4" /> 상품 {rows.length.toLocaleString('ko-KR')}개</span>
           <span className="inline-flex items-center gap-1.5"><Layers3 className="size-4" /> 옵션 {optionCount.toLocaleString('ko-KR')}개</span>
           <span>판매코드 매칭 {matchedCodeCount.toLocaleString('ko-KR')}개</span>
           <span>최근 동기화 {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString('ko-KR') : '없음'}</span>
+          <Link href="/analytics/price-table" className="rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted">
+            판매가 테이블 확인
+          </Link>
         </div>
       </header>
       <RegistrationBoard rows={rows} />

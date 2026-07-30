@@ -94,6 +94,12 @@ function registrationChecks(row: RegistrationRow) {
   ]
 }
 
+function inventoryProductCode(sku: string | null | undefined) {
+  if (!sku) return null
+  const separator = sku.indexOf('-')
+  return separator > 0 ? sku.slice(0, separator) : sku
+}
+
 export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
   const router = useRouter()
   const [query, setQuery] = useState('')
@@ -107,6 +113,7 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
   const selectedImages = selected ? registrationImages(selected) : null
   const selectedChecks = selected ? registrationChecks(selected) : []
   const inventorySku = selected?.inventorySkus[0] ?? null
+  const inventoryProductCodeValue = inventoryProductCode(inventorySku)
 
   const counts = useMemo(() => ({
     all: rows.length,
@@ -291,9 +298,9 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                       {sourceStatusLabel(selected.sourceStatus)}
                     </Badge>
                     <Badge variant="outline">B2B 재고 {selected.stock.toLocaleString('ko-KR')}</Badge>
-                    {inventorySku ? (
+                    {inventoryProductCodeValue ? (
                       <a
-                        href={`/inventory?search=${encodeURIComponent(inventorySku)}&searched=1&focusSku=${encodeURIComponent(inventorySku)}`}
+                        href={`/inventory?productCode=${encodeURIComponent(inventoryProductCodeValue)}&searched=1`}
                         className="inline-flex h-6 items-center rounded-md border border-blue-200 bg-blue-50 px-2 text-xs font-medium text-blue-700 hover:bg-blue-100"
                       >
                         SaaS 재고 {selected.inventoryAvailableStock.toLocaleString('ko-KR')}
@@ -377,9 +384,9 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                     <div className="space-y-2 rounded border bg-background p-2.5 text-xs">
                       <div className="flex items-start justify-between gap-3">
                         <span className="shrink-0 text-muted-foreground">SaaS 재고</span>
-                        {inventorySku ? (
+                        {inventoryProductCodeValue ? (
                           <a
-                            href={`/inventory?search=${encodeURIComponent(inventorySku)}&searched=1&focusSku=${encodeURIComponent(inventorySku)}`}
+                            href={`/inventory?productCode=${encodeURIComponent(inventoryProductCodeValue)}&searched=1`}
                             className="min-w-0 text-right font-mono text-blue-700 hover:underline"
                           >
                             {selected.inventorySkus.join(', ')} · {selected.inventoryAvailableStock.toLocaleString('ko-KR')}개

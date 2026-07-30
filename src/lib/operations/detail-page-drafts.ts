@@ -248,12 +248,13 @@ export async function completeDetailPageReview(userId: string, id: string) {
   return row ? toDetailPageDraftRecord(row) : null
 }
 
-export async function requeueDetailPageDraft(userId: string, id: string) {
+export async function requeueDetailPageDraft(userId: string, id: string, note?: string) {
   await ensureDetailPageDraftTables()
   const [row] = await db
     .update(detailPageJobs)
     .set({
       status: 'agent_pending',
+      ...(note === undefined ? {} : { note: cleanText(note, 2_000) }),
       errorMessage: null,
       claimedByDeviceId: null,
       claimedAt: null,
@@ -263,7 +264,7 @@ export async function requeueDetailPageDraft(userId: string, id: string) {
     .where(and(
       eq(detailPageJobs.userId, userId),
       eq(detailPageJobs.id, id),
-      sql`${detailPageJobs.status} IN ('review', 'failed')`,
+      sql`${detailPageJobs.status} IN ('review', 'failed', 'needs_info')`,
     ))
     .returning()
   return row ? toDetailPageDraftRecord(row) : null

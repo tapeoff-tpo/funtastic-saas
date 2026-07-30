@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -82,11 +82,7 @@ let cachedSessionProducts: DetailPageProduct[] | null = null
 let cachedSessionProductsRaw: string | null | undefined
 
 export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: DetailPageProduct[] }) {
-  const sessionProducts = useSyncExternalStore(
-    subscribeToSessionProducts,
-    readSessionProducts,
-    () => EMPTY_PRODUCTS,
-  )
+  const [sessionProducts, setSessionProducts] = useState<DetailPageProduct[]>(EMPTY_PRODUCTS)
   const [jobs, setJobs] = useState<DetailPageJob[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
   const [template, setTemplate] = useState('기본 상품 상세')
@@ -98,10 +94,17 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [draftRequestingId, setDraftRequestingId] = useState<string | null>(null)
   const [reviewCompletingId, setReviewCompletingId] = useState<string | null>(null)
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
-  const incomingProducts = selectedProducts.length > 0 ? selectedProducts : sessionProducts
+  const [revisionNote, setRevisionNote] = useState('')
+  const incomingProducts = useMemo(() => (
+    Array.from(new Map([...sessionProducts, ...selectedProducts].map((product) => [product.id, product])).values())
+  ), [selectedProducts, sessionProducts])
   const draftProducts = useMemo(
-    () => incomingProducts.filter((product) => !consumedProductIds.has(product.id)),
-    [consumedProductIds, incomingProducts],
+    // A session selection is an explicit new request, even if the same SKU was drafted before.
+    () => incomingProducts.filter((product) => (
+      sessionProducts.some((sessionProduct) => sessionProduct.id === product.id)
+      || !consumedProductIds.has(product.id)
+    )),
+    [consumedProductIds, incomingProducts, sessionProducts],
   )
   const selectedDraftProducts = useMemo(
     () => draftProducts.filter((product) => selectedDraftIds.has(product.id)),
@@ -121,6 +124,10 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   ), [activeProduct])
 
   useEffect(() => {
+    setSessionProducts(readSessionProducts())
+  }, [])
+
+  useEffect(() => {
     const saved = readWorkbenchState()
     const restoreTimer = window.setTimeout(() => {
       if (saved) {
@@ -132,6 +139,10 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     }, 0)
     return () => window.clearTimeout(restoreTimer)
   }, [])
+
+  useEffect(() => {
+    setRevisionNote(activeJob?.note ?? '')
+  }, [activeJob?.id, activeJob?.note])
 
   useEffect(() => {
     if (!workbenchLoaded || typeof window === 'undefined') return
@@ -253,8 +264,9 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     setConsumedProductIds((current) => new Set([...current, ...excludedIds]))
     setSelectedDraftIds(new Set())
 
-    if (selectedProducts.length > 0 || typeof window === 'undefined') return
+    if (sessionProducts.length === 0 || typeof window === 'undefined') return
     const remainingProducts = sessionProducts.filter((product) => !excludedIds.has(product.id))
+    setSessionProducts(remainingProducts)
     cachedSessionProducts = remainingProducts
     if (remainingProducts.length > 0) {
       const serialized = JSON.stringify(remainingProducts)
@@ -351,7 +363,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       const response = await fetch(`/api/operations/detail-pages/jobs/${activeJob.remoteJobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'rebuild' }),
+        body: JSON.stringify({ action: 'rebuild', note: revisionNote.trim() || undefined }),
       })
       const body = await response.json().catch(() => ({})) as { job?: RemoteDetailPageJob; error?: string }
       if (!response.ok || !body.job) throw new Error(body.error || '에이전트 수정 요청을 저장하지 못했습니다.')
@@ -574,10 +586,17 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         {activeJob.status === 'figma_queued' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />Figma 플러그인 대기</Badge> : null}
                         {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma에서 초안 제작 중</Badge> : null}
                         {activeJob.status === 'review' ? (
-                          <>
+                          <div className="flex w-full flex-wrap items-center gap-2">
+                            <Input
+                              value={revisionNote}
+                              onChange={(event) => setRevisionNote(event.target.value)}
+                              placeholder="수정할 내용 입력"
+                              aria-label="에이전트 수정 메모"
+                              className="min-w-56 flex-1"
+                            />
                             <Button type="button" variant="outline" onClick={requestAgentRevision} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '수정 요청 중' : '에이전트 수정 요청'}</Button>
                             <Button type="button" onClick={completeFigmaReview} disabled={reviewCompletingId === activeJob.id}><FilePenLine />{reviewCompletingId === activeJob.id ? '검수 완료 처리 중' : 'Figma 검수 완료'}</Button>
-                          </>
+                          </div>
                         ) : null}
                         {activeJob.status === 'completed' ? <Badge variant="outline" className="h-8 border-emerald-200 bg-emerald-50 px-3 text-emerald-800"><Check />Figma 검수 완료</Badge> : null}
                       </div>
@@ -813,10 +832,6 @@ function isDetailPageJob(value: unknown): value is DetailPageJob {
     && (typeof job.imageError === 'string' || job.imageError === null)
     && (typeof job.remoteJobId === 'string' || job.remoteJobId === null || job.remoteJobId === undefined)
     && (typeof job.figmaUrl === 'string' || job.figmaUrl === null || job.figmaUrl === undefined)
-}
-
-function subscribeToSessionProducts() {
-  return () => {}
 }
 
 function readSessionProducts() {

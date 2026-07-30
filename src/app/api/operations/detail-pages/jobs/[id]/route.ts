@@ -9,7 +9,7 @@ import { getDetailPageWorkspaceUser } from '@/lib/operations/detail-page-bridge-
 
 const bodySchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('complete') }),
-  z.object({ action: z.literal('rebuild') }),
+  z.object({ action: z.literal('rebuild'), note: z.string().trim().max(2_000).optional() }),
 ])
 
 export async function PATCH(
@@ -25,7 +25,7 @@ export async function PATCH(
   const { id } = await context.params
   const job = body.data.action === 'complete'
     ? await completeDetailPageReview(identity.workspaceUserId, id)
-    : await requeueDetailPageDraft(identity.workspaceUserId, id)
+    : await requeueDetailPageDraft(identity.workspaceUserId, id, body.data.note)
   if (!job) {
     const error = body.data.action === 'complete'
       ? '검수 가능한 Figma 초안 작업을 찾지 못했습니다.'

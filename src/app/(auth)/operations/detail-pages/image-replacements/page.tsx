@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ImagePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,12 +8,37 @@ import { Label } from '@/components/ui/label'
 
 const DEFAULT_IMAGE_URL = 'https://funtastic-saas-vercel.vercel.app/detail-page-assets/delto-kennel-cp3-dog-paws-v2.png'
 
+type ReplacementCommand = {
+  targetFrameName: string
+  targetNodeName: string
+  status: string
+  errorMessage: string | null
+  updatedAt: string
+}
+
 export default function FigmaImageReplacementPage() {
   const [frameName, setFrameName] = useState('델토 더블도어 켄넬')
   const [layerName, setLayerName] = useState('top open door proof / pet peeking through open lid')
   const [imageUrl, setImageUrl] = useState(DEFAULT_IMAGE_URL)
   const [result, setResult] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [latestCommand, setLatestCommand] = useState<ReplacementCommand | null>(null)
+
+  async function loadLatestCommand() {
+    const response = await fetch('/api/operations/detail-pages/image-replacements', { cache: 'no-store' })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) throw new Error(payload.error || '교체 요청 상태를 불러오지 못했습니다.')
+    const command = (payload.commands as ReplacementCommand[] | undefined)?.find((item) => (
+      item.targetFrameName === frameName && item.targetNodeName === layerName
+    )) ?? null
+    setLatestCommand(command)
+  }
+
+  useEffect(() => {
+    void loadLatestCommand().catch(() => {})
+  // The values are initially populated for the Delto correction request.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function submit() {
     setSubmitting(true)
@@ -32,6 +57,7 @@ export default function FigmaImageReplacementPage() {
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) throw new Error(payload.error || '교체 요청을 저장하지 못했습니다.')
       setResult('교체 요청을 전달했습니다. 연결된 Figma 플러그인이 다음 동기화 때 적용합니다.')
+      await loadLatestCommand()
     } catch (error) {
       setResult(error instanceof Error ? error.message : '교체 요청을 저장하지 못했습니다.')
     } finally {
@@ -62,6 +88,11 @@ export default function FigmaImageReplacementPage() {
           <ImagePlus />{submitting ? '요청 중' : '이미지 교체 요청'}
         </Button>
         {result ? <p className="text-sm text-muted-foreground" role="status">{result}</p> : null}
+        {latestCommand ? (
+          <p className={latestCommand.status === 'failed' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
+            최근 요청: {latestCommand.status}{latestCommand.errorMessage ? ` - ${latestCommand.errorMessage}` : ''}
+          </p>
+        ) : null}
       </div>
     </main>
   )

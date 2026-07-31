@@ -1626,6 +1626,8 @@ export const figmaBridgeCommands = pgTable(
     targetFrameName: text('target_frame_name').notNull(),
     targetNodeName: text('target_node_name').notNull(),
     imageUrl: text('image_url').notNull(),
+    payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+    result: jsonb('result').$type<Record<string, unknown>>().notNull().default({}),
     status: varchar('status', { length: 30 }).notNull().default('queued'),
     errorMessage: text('error_message'),
     claimedByDeviceId: uuid('claimed_by_device_id'),

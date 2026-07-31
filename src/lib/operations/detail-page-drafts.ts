@@ -42,6 +42,17 @@ export type FigmaImageReplacementInput = {
   imageUrl: string
 }
 
+export type FigmaFinalCompositionInput = {
+  userId: string
+  figmaFileKey: string
+  productName: string
+  selections: Array<{
+    sourceFrameId: string
+    sectionId: string
+    sectionName: string
+  }>
+}
+
 function cleanText(value: string | null | undefined, limit: number) {
   const text = String(value ?? '').trim()
   return text ? text.slice(0, limit) : null
@@ -173,6 +184,8 @@ export async function ensureDetailPageDraftTables() {
       "target_frame_name" text NOT NULL,
       "target_node_name" text NOT NULL,
       "image_url" text NOT NULL,
+      "payload" jsonb NOT NULL DEFAULT '{}'::jsonb,
+      "result" jsonb NOT NULL DEFAULT '{}'::jsonb,
       "status" varchar(30) NOT NULL DEFAULT 'queued',
       "error_message" text,
       "claimed_by_device_id" uuid,
@@ -182,6 +195,8 @@ export async function ensureDetailPageDraftTables() {
       "updated_at" timestamptz NOT NULL DEFAULT now()
     )
   `)
+  await db.execute(sql`ALTER TABLE "figma_bridge_commands" ADD COLUMN IF NOT EXISTS "payload" jsonb NOT NULL DEFAULT '{}'::jsonb`)
+  await db.execute(sql`ALTER TABLE "figma_bridge_commands" ADD COLUMN IF NOT EXISTS "result" jsonb NOT NULL DEFAULT '{}'::jsonb`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "figma_bridge_commands_file_status_created_idx" ON "figma_bridge_commands" ("figma_file_key", "status", "created_at")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "figma_bridge_commands_user_created_idx" ON "figma_bridge_commands" ("user_id", "created_at")`)
 
@@ -198,6 +213,8 @@ function toFigmaBridgeCommand(row: typeof figmaBridgeCommands.$inferSelect) {
     targetFrameName: row.targetFrameName,
     targetNodeName: row.targetNodeName,
     imageUrl: row.imageUrl,
+    payload: row.payload,
+    result: row.result,
     status: row.status,
     errorMessage: row.errorMessage,
     createdAt: row.createdAt.toISOString(),
@@ -231,6 +248,86 @@ export async function queueFigmaImageReplacement(input: FigmaImageReplacementInp
   return toFigmaBridgeCommand(command)
 }
 
+export async function queueFigmaFrameCapture(input: {
+  userId: string
+  figmaFileKey: string
+}) {
+  await ensureDetailPageDraftTables()
+  const figmaFileKey = cleanText(input.figmaFileKey, 120)
+  if (!figmaFileKey) throw new Error('Figma file key is required.')
+
+  // Keep only the latest compare capture. The thumbnails are intentionally
+  // short-lived operational evidence, not a growing asset archive.
+  await db
+    .delete(figmaBridgeCommands)
+    .where(and(
+      eq(figmaBridgeCommands.userId, input.userId),
+      eq(figmaBridgeCommands.figmaFileKey, figmaFileKey),
+      eq(figmaBridgeCommands.commandType, 'capture-frames'),
+    ))
+
+  const [command] = await db
+    .insert(figmaBridgeCommands)
+    .values({
+      userId: input.userId,
+      figmaFileKey,
+      commandType: 'capture-frames',
+      targetFrameName: 'detail-page comparison',
+      targetNodeName: 'top-level product frames',
+      imageUrl: '',
+      payload: { nameFilters: ['델토', '헬리겔'], maxFrames: 8 },
+      status: 'queued',
+      updatedAt: new Date(),
+    })
+    .returning()
+  return toFigmaBridgeCommand(command)
+}
+
+export async function queueFigmaFinalComposition(input: FigmaFinalCompositionInput) {
+  await ensureDetailPageDraftTables()
+  const figmaFileKey = cleanText(input.figmaFileKey, 120)
+  const productName = cleanText(input.productName, 160)
+  const selections = input.selections
+    .map((selection) => ({
+      sourceFrameId: cleanText(selection.sourceFrameId, 120),
+      sectionId: cleanText(selection.sectionId, 120),
+      sectionName: cleanText(selection.sectionName, 500),
+    }))
+    .filter((selection): selection is { sourceFrameId: string; sectionId: string; sectionName: string } => Boolean(
+      selection.sourceFrameId && selection.sectionId && selection.sectionName,
+    ))
+    .slice(0, 24)
+  if (!figmaFileKey || !productName || selections.length < 3) {
+    throw new Error('A product name and at least three source sections are required.')
+  }
+
+  await db
+    .delete(figmaBridgeCommands)
+    .where(and(
+      eq(figmaBridgeCommands.userId, input.userId),
+      eq(figmaBridgeCommands.figmaFileKey, figmaFileKey),
+      eq(figmaBridgeCommands.commandType, 'compose-final'),
+      eq(figmaBridgeCommands.targetFrameName, productName),
+      eq(figmaBridgeCommands.status, 'queued'),
+    ))
+
+  const [command] = await db
+    .insert(figmaBridgeCommands)
+    .values({
+      userId: input.userId,
+      figmaFileKey,
+      commandType: 'compose-final',
+      targetFrameName: productName,
+      targetNodeName: 'selected source sections',
+      imageUrl: '',
+      payload: { selections },
+      status: 'queued',
+      updatedAt: new Date(),
+    })
+    .returning()
+  return toFigmaBridgeCommand(command)
+}
+
 export async function listFigmaBridgeCommands(userId: string) {
   await ensureDetailPageDraftTables()
   const commands = await db
@@ -239,6 +336,21 @@ export async function listFigmaBridgeCommands(userId: string) {
     .where(eq(figmaBridgeCommands.userId, userId))
     .orderBy(desc(figmaBridgeCommands.updatedAt), desc(figmaBridgeCommands.createdAt))
     .limit(50)
+  return commands.map(toFigmaBridgeCommand)
+}
+
+export async function listFigmaFrameCaptures(userId: string, figmaFileKey: string) {
+  await ensureDetailPageDraftTables()
+  const commands = await db
+    .select()
+    .from(figmaBridgeCommands)
+    .where(and(
+      eq(figmaBridgeCommands.userId, userId),
+      eq(figmaBridgeCommands.figmaFileKey, figmaFileKey),
+      eq(figmaBridgeCommands.commandType, 'capture-frames'),
+    ))
+    .orderBy(desc(figmaBridgeCommands.updatedAt))
+    .limit(1)
   return commands.map(toFigmaBridgeCommand)
 }
 
@@ -444,7 +556,6 @@ export async function claimNextFigmaBridgeCommand(device: typeof figmaBridgeDevi
       eq(figmaBridgeCommands.userId, device.userId),
       eq(figmaBridgeCommands.figmaFileKey, device.figmaFileKey),
       eq(figmaBridgeCommands.status, 'queued'),
-      eq(figmaBridgeCommands.commandType, 'replace-image'),
     ))
     .orderBy(asc(figmaBridgeCommands.createdAt))
     .limit(1)
@@ -469,6 +580,7 @@ export async function claimNextFigmaBridgeCommand(device: typeof figmaBridgeDevi
 export async function finishFigmaBridgeCommand(input: {
   device: typeof figmaBridgeDevices.$inferSelect
   commandId: string
+  result?: Record<string, unknown>
 }) {
   await ensureDetailPageDraftTables()
   const [command] = await db
@@ -476,6 +588,7 @@ export async function finishFigmaBridgeCommand(input: {
     .set({
       status: 'completed',
       errorMessage: null,
+      result: input.result ?? undefined,
       completedAt: new Date(),
       updatedAt: new Date(),
     })

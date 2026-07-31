@@ -26,16 +26,19 @@
       <button id="pairButton">Figma 파일 연결</button>
     </div>
     <button id="syncButton" class="hidden">대기 작업 전부 제작</button>
+    <button id="compareButton" class="hidden">델토·헬리겔 초안 비교 수집</button>
     <div id="message"></div>
     <script>
       const pairing = document.getElementById('pairing')
       const pairButton = document.getElementById('pairButton')
       const syncButton = document.getElementById('syncButton')
+      const compareButton = document.getElementById('compareButton')
       const message = document.getElementById('message')
       const input = (id) => document.getElementById(id).value.trim()
       const setBusy = (busy) => {
         pairButton.disabled = busy
         syncButton.disabled = busy
+        compareButton.disabled = busy
       }
       pairButton.onclick = () => {
         if (!input('pairingToken')) { message.textContent = 'SaaS에서 만든 연결 코드를 입력해주세요.'; return }
@@ -47,19 +50,27 @@
         message.textContent = '대기 작업을 확인하고 있습니다.'
         parent.postMessage({ pluginMessage: { type: 'sync' } }, '*')
       }
+      compareButton.onclick = () => {
+        setBusy(true)
+        message.textContent = '델토·헬리겔 초안의 미리보기를 수집하고 있습니다.'
+        parent.postMessage({ pluginMessage: { type: 'capture-comparison' } }, '*')
+      }
       onmessage = (event) => {
         const data = event.data.pluginMessage
         if (!data) return
         if (data.type === 'state') {
           document.getElementById('deviceName').value = data.deviceName || 'AI 상세페이지 파일'
           document.getElementById('figmaFileKey').value = data.figmaFileKey || 'X8yYgVtrAFKycEA0yy0kWI'
-          if (data.paired) { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = `연결됨 · v${data.pluginVersion || '1.1.0'}. 대기 작업을 재제작할 수 있습니다.` }
+          if (data.paired) { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); compareButton.classList.remove('hidden'); message.textContent = `연결됨 · v${data.pluginVersion || '1.1.0'}. 대기 작업을 재제작할 수 있습니다.` }
         }
-        if (data.type === 'paired') { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); message.textContent = '연결됐습니다. 이제 대기 작업을 제작하세요.'; setBusy(false) }
+        if (data.type === 'paired') { pairing.classList.add('hidden'); syncButton.classList.remove('hidden'); compareButton.classList.remove('hidden'); message.textContent = '연결됐습니다. 이제 대기 작업을 제작하세요.'; setBusy(false) }
         if (data.type === 'automatic-sync') message.textContent = '연결됨. 이 창을 열어두면 SaaS의 초안 제작 요청을 자동으로 처리합니다.'
         if (data.type === 'progress') message.textContent = `${data.index}번째: ${data.name} 초안을 만들고 있습니다.`
         if (data.type === 'synced') { message.textContent = data.completed ? `${data.completed}건 초안을 만들었습니다. SaaS에서 검수 상태를 확인하세요.` : '제작할 대기 작업이 없습니다.'; setBusy(false) }
         if (data.type === 'image-replaced') { message.textContent = `${data.name || 'Selected image'} was replaced.`; setBusy(false) }
+        if (data.type === 'comparison-requested') message.textContent = '비교 수집 요청을 처리하고 있습니다.'
+        if (data.type === 'comparison-captured') { message.textContent = `${data.frameCount}개 초안을 수집했습니다. SaaS 비교 화면에서 확인 중입니다.`; setBusy(false) }
+        if (data.type === 'final-composed') { message.textContent = `${data.name} 프레임을 만들었습니다.`; setBusy(false) }
         if (data.type === 'error') { message.textContent = data.message; setBusy(false) }
       }
     </script>

@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.6'
+const PLUGIN_VERSION = '1.1.7'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -625,6 +625,146 @@ async function buildDraft(job) {
   }
 }
 
+function bytesToDataUrl(bytes) {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+  }
+  return `data:image/jpeg;base64,${btoa(binary)}`
+}
+
+async function exportPreview(node, width) {
+  if (!node || typeof node.exportAsync !== 'function') return null
+  const bytes = await node.exportAsync({
+    format: 'JPG',
+    constraint: { type: 'WIDTH', value: width },
+  })
+  return bytesToDataUrl(bytes)
+}
+
+function isProductComparisonFrame(node, filters) {
+  if (node.type !== 'FRAME') return false
+  if (node.getPluginData('funtastic-final-composite') === 'true') return false
+  const name = node.name || ''
+  return filters.some((filter) => name.includes(filter))
+}
+
+async function captureComparisonFrames(command) {
+  await figma.loadAllPagesAsync()
+  const payload = command.payload || {}
+  const filters = Array.isArray(payload.nameFilters)
+    ? payload.nameFilters.filter((value) => typeof value === 'string' && value.trim()).slice(0, 4)
+    : ['델토', '헬리겔']
+  const maxFrames = Math.max(1, Math.min(Number(payload.maxFrames) || 8, 8))
+  const frameEntries = []
+  for (const page of figma.root.children) {
+    for (const node of page.children) {
+      if (isProductComparisonFrame(node, filters)) frameEntries.push({ page, frame: node })
+    }
+  }
+  frameEntries.sort((left, right) => left.frame.name.localeCompare(right.frame.name))
+  const selected = frameEntries.slice(0, maxFrames)
+  if (!selected.length) throw new Error('델토 또는 헬리겔 최상위 상세페이지 프레임을 찾지 못했습니다.')
+
+  const result = { capturedAt: new Date().toISOString(), frames: [] }
+  let storedCharacters = 0
+  const savePreview = async (node, width) => {
+    const preview = await exportPreview(node, width)
+    if (!preview || storedCharacters + preview.length > 3_000_000) return null
+    storedCharacters += preview.length
+    return preview
+  }
+
+  for (const { page, frame } of selected) {
+    const sections = []
+    const directSections = frame.children
+      .filter((node) => node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'SECTION')
+      .slice(0, 16)
+    for (const section of directSections) {
+      sections.push({
+        id: section.id,
+        name: section.name,
+        type: section.type,
+        width: Math.round(section.width),
+        height: Math.round(section.height),
+        preview: await savePreview(section, 128),
+      })
+    }
+    result.frames.push({
+      id: frame.id,
+      name: frame.name,
+      pageName: page.name,
+      width: Math.round(frame.width),
+      height: Math.round(frame.height),
+      preview: await savePreview(frame, 150),
+      sections,
+    })
+  }
+  figma.ui.postMessage({ type: 'comparison-captured', frameCount: result.frames.length })
+  return result
+}
+
+async function composeFinalDetailPage(command) {
+  await figma.loadAllPagesAsync()
+  const productName = cleanText(command.targetFrameName) || '상세페이지'
+  const selections = Array.isArray(command.payload?.selections) ? command.payload.selections.slice(0, 24) : []
+  if (selections.length < 3) throw new Error('통합 최종본에 넣을 섹션이 부족합니다.')
+
+  const sourceFrames = []
+  const sourceSections = []
+  for (const selection of selections) {
+    const sourceFrame = await figma.getNodeByIdAsync(selection.sourceFrameId)
+    const sourceSection = await figma.getNodeByIdAsync(selection.sectionId)
+    if (!sourceFrame || sourceFrame.type !== 'FRAME' || !sourceSection || typeof sourceSection.clone !== 'function') {
+      throw new Error(`통합할 원본 섹션을 찾지 못했습니다: ${selection.sectionName || 'unnamed section'}`)
+    }
+    sourceFrames.push(sourceFrame)
+    sourceSections.push(sourceSection)
+  }
+  const sourcePage = sourceFrames[0].parent
+  if (!sourcePage || sourcePage.type !== 'PAGE') throw new Error('원본 상세페이지가 Figma 페이지 최상위에 있어야 합니다.')
+  if (sourceFrames.some((frame) => frame.parent !== sourcePage)) {
+    throw new Error('한 번의 통합은 같은 Figma 페이지 안의 초안만 사용할 수 있습니다.')
+  }
+
+  await figma.setCurrentPageAsync(sourcePage)
+  const finalFrame = figma.createFrame()
+  finalFrame.name = `${productName} · 통합 최종본 · 2026-07-31`
+  finalFrame.resize(860, 100)
+  finalFrame.layoutMode = 'VERTICAL'
+  finalFrame.primaryAxisSizingMode = 'AUTO'
+  finalFrame.counterAxisSizingMode = 'FIXED'
+  finalFrame.itemSpacing = 0
+  finalFrame.paddingTop = 0
+  finalFrame.paddingRight = 0
+  finalFrame.paddingBottom = 0
+  finalFrame.paddingLeft = 0
+  finalFrame.fills = [{ type: 'SOLID', color: COLORS.paper }]
+
+  for (const section of sourceSections) {
+    const copy = section.clone()
+    if ('layoutAlign' in copy) copy.layoutAlign = 'STRETCH'
+    finalFrame.appendChild(copy)
+  }
+
+  const maxX = Math.max(...sourceFrames.map((frame) => frame.x + frame.width))
+  const minY = Math.min(...sourceFrames.map((frame) => frame.y))
+  finalFrame.x = maxX + 160
+  finalFrame.y = minY
+  finalFrame.setPluginData('funtastic-final-composite', 'true')
+  finalFrame.setPluginData('funtastic-composition', JSON.stringify(selections.map((selection) => ({
+    sourceFrameId: selection.sourceFrameId,
+    sectionId: selection.sectionId,
+    sectionName: selection.sectionName,
+  }))))
+  figma.currentPage.selection = [finalFrame]
+  figma.viewport.scrollAndZoomIntoView([finalFrame])
+  const figmaUrl = `https://www.figma.com/design/${DEFAULT_FILE_KEY}/ai-%EC%83%9D%EC%84%B1-%EC%83%81%EC%84%B8%ED%8E%98%EC%9D%B4%EC%A7%80?node-id=${encodeURIComponent(finalFrame.id.replace(':', '-'))}`
+  figma.ui.postMessage({ type: 'final-composed', name: finalFrame.name })
+  return { finalFrameId: finalFrame.id, finalFrameName: finalFrame.name, figmaUrl }
+}
+
 function authHeaders(token) {
   return {
     Authorization: `Bearer ${token}`,
@@ -707,6 +847,17 @@ async function pair(message) {
   await sync()
 }
 
+async function requestComparisonCapture() {
+  const state = await readBridgeState()
+  if (!state?.bridgeToken) throw new Error('먼저 SaaS에서 만든 연결 코드를 입력해주세요.')
+  await request('/api/operations/detail-pages/bridge/compare', {
+    method: 'POST',
+    headers: authHeaders(state.bridgeToken),
+  })
+  figma.ui.postMessage({ type: 'comparison-requested' })
+  await sync()
+}
+
 function startAutomaticSync() {
   if (automaticSyncStarted) return
   automaticSyncStarted = true
@@ -744,12 +895,28 @@ async function runSync(silent) {
     })
     if (command) {
       try {
-        figma.ui.postMessage({ type: 'progress', name: 'Image replacement', index: completed + 1 })
-        await replaceImageAtNode(command)
+        let result
+        const label = command.commandType === 'replace-image'
+          ? 'Image replacement'
+          : command.commandType === 'capture-frames'
+            ? 'Draft comparison'
+            : command.commandType === 'compose-final'
+              ? 'Final detail page'
+              : command.commandType
+        figma.ui.postMessage({ type: 'progress', name: label, index: completed + 1 })
+        if (command.commandType === 'replace-image') {
+          await replaceImageAtNode(command)
+        } else if (command.commandType === 'capture-frames') {
+          result = await captureComparisonFrames(command)
+        } else if (command.commandType === 'compose-final') {
+          result = await composeFinalDetailPage(command)
+        } else {
+          throw new Error(`지원하지 않는 Figma 작업입니다: ${command.commandType}`)
+        }
         await request(`/api/operations/detail-pages/bridge/commands/${command.id}`, {
           method: 'POST',
           headers: authHeaders(state.bridgeToken),
-          body: JSON.stringify({ status: 'completed' }),
+          body: JSON.stringify({ status: 'completed', ...(result ? { result } : {}) }),
         })
         completed += 1
       } catch (error) {
@@ -797,6 +964,7 @@ figma.ui.onmessage = async (message) => {
   try {
     if (message.type === 'pair') await pair(message)
     if (message.type === 'sync') await sync()
+    if (message.type === 'capture-comparison') await requestComparisonCapture()
   } catch (error) {
     figma.ui.postMessage({ type: 'error', message: errorMessage(error) })
   }

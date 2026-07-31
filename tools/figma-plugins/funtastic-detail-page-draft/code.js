@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.5'
+const PLUGIN_VERSION = '1.1.6'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -239,8 +239,8 @@ async function imagePaint(url) {
   if (imageHashCache.has(normalized)) return imageHashCache.get(normalized)
   const response = await fetch(normalized)
   if (!response.ok) throw new Error(`자료 보완 필요: 이미지 응답 ${response.status} (${normalized})`)
-  const contentType = String(response.headers.get('content-type') || '')
-  if (!contentType.includes('jpeg') && !contentType.includes('png')) {
+  const contentType = String(response.headers?.get?.('content-type') || '')
+  if (contentType && !contentType.includes('jpeg') && !contentType.includes('png')) {
     throw new Error(`자료 보완 필요: Figma에서 지원하지 않는 이미지 형식 (${contentType || 'unknown'})`)
   }
   const bytes = new Uint8Array(await response.arrayBuffer())

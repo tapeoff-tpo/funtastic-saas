@@ -14,6 +14,9 @@ export async function proxy(request: NextRequest) {
   // Figma plugins cannot send the browser's Supabase cookie. These routes
   // authenticate with a one-time pairing code or an opaque bridge token.
   const isFigmaBridgeEndpoint = pathname.startsWith('/api/operations/detail-pages/bridge/')
+  // Figma loads image fills directly and cannot carry the SaaS auth cookie.
+  // Detail-page assets are non-sensitive generated product images only.
+  const isDetailPageAsset = pathname.startsWith('/detail-page-assets/')
 
   if (
     pathname === '/api/health'
@@ -21,6 +24,7 @@ export async function proxy(request: NextRequest) {
     || pathname.startsWith('/auth/callback')
     || isSmsBridgeDeviceEndpoint
     || isFigmaBridgeEndpoint
+    || isDetailPageAsset
   ) {
     return supabaseResponse
   }

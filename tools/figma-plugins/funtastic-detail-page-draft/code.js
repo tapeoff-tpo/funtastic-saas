@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.10'
+const PLUGIN_VERSION = '1.1.11'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -787,9 +787,6 @@ async function renameFigmaFrame(command) {
   if (!node || node.type !== 'FRAME') throw new Error('The Figma frame to rename was not found.')
 
   node.name = name
-  if (node.parent?.type === 'PAGE') await figma.setCurrentPageAsync(node.parent)
-  figma.currentPage.selection = [node]
-  figma.viewport.scrollAndZoomIntoView([node])
   const figmaUrl = `https://www.figma.com/design/${DEFAULT_FILE_KEY}/ai-%EC%83%9D%EC%84%B1-%EC%83%81%EC%84%B8%ED%8E%98%EC%9D%B4%EC%A7%80?node-id=${encodeURIComponent(node.id.replace(':', '-'))}`
   return { frameId: node.id, frameName: node.name, figmaUrl }
 }

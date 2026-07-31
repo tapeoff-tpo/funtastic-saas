@@ -1,8 +1,9 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.2'
+const PLUGIN_VERSION = '1.1.3'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
+const BRIDGE_STATE_KEY = 'funtastic-detail-page-bridge'
 
 const COLORS = {
   ink: { r: 0.08, g: 0.09, b: 0.11 },
@@ -631,10 +632,19 @@ async function request(path, options = {}) {
 async function readBridgeState() {
   if (bridgeState?.bridgeToken) return bridgeState
   try {
-    const stored = await figma.clientStorage.getAsync('funtastic-detail-page-bridge')
+    const stored = await figma.clientStorage.getAsync(BRIDGE_STATE_KEY)
     if (stored?.bridgeToken) bridgeState = stored
   } catch {
-    // 연결 상태를 메모리에서 계속 사용할 수 있습니다.
+    // Development plugins can lack client-storage access in some Figma sessions.
+  }
+  if (!bridgeState?.bridgeToken) {
+    try {
+      const stored = figma.root.getPluginData(BRIDGE_STATE_KEY)
+      const parsed = stored ? JSON.parse(stored) : null
+      if (parsed?.bridgeToken) bridgeState = parsed
+    } catch {
+      // A corrupt or unavailable document fallback must not block the plugin.
+    }
   }
   return bridgeState
 }
@@ -642,9 +652,14 @@ async function readBridgeState() {
 async function rememberBridgeState(nextState) {
   bridgeState = nextState
   try {
-    await figma.clientStorage.setAsync('funtastic-detail-page-bridge', nextState)
+    await figma.clientStorage.setAsync(BRIDGE_STATE_KEY, nextState)
   } catch {
-    // 개발용 플러그인은 현재 세션의 연결 상태를 사용합니다.
+    // The document fallback below keeps development-plugin pairing durable.
+  }
+  try {
+    figma.root.setPluginData(BRIDGE_STATE_KEY, JSON.stringify(nextState))
+  } catch {
+    // Memory storage still lets the current session complete its active work.
   }
 }
 
@@ -689,13 +704,11 @@ function startAutomaticSync() {
     try {
       await sync(true)
     } catch (error) {
-      automaticSyncStarted = false
       figma.ui.postMessage({ type: 'error', message: `자동 동기화를 멈췄습니다: ${errorMessage(error)}` })
-      return
     }
     setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
   }
-  setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
+  void poll()
 }
 
 async function sync(silent = false) {

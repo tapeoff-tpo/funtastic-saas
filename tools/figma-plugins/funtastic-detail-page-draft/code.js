@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.0'
+const PLUGIN_VERSION = '1.1.1'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -245,6 +245,25 @@ async function makeImage(url, width, height, name) {
   node.fills = [{ type: 'IMAGE', imageHash: await imagePaint(url), scaleMode: 'FILL' }]
   node.setPluginData('source-image', normalizeImageUrl(url))
   return node
+}
+
+async function replaceSelectedImage(imageUrl) {
+  const node = figma.currentPage.selection.find((candidate) => 'fills' in candidate)
+  if (!node || !Array.isArray(node.fills)) {
+    throw new Error('Select an image layer first.')
+  }
+
+  const imageIndex = node.fills.findIndex((paint) => paint.type === 'IMAGE')
+  if (imageIndex < 0) {
+    throw new Error('The selected layer has no image fill.')
+  }
+
+  const fills = [...node.fills]
+  fills[imageIndex] = { ...fills[imageIndex], imageHash: await imagePaint(imageUrl) }
+  node.fills = fills
+  node.setPluginData('source-image', normalizeImageUrl(imageUrl))
+  figma.viewport.scrollAndZoomIntoView([node])
+  figma.ui.postMessage({ type: 'image-replaced', name: node.name })
 }
 
 async function makeCover(job, brief) {
@@ -692,6 +711,7 @@ figma.ui.onmessage = async (message) => {
   try {
     if (message.type === 'pair') await pair(message)
     if (message.type === 'sync') await sync()
+    if (message.type === 'replace-selected-image') await replaceSelectedImage(message.imageUrl)
   } catch (error) {
     figma.ui.postMessage({ type: 'error', message: errorMessage(error) })
   }

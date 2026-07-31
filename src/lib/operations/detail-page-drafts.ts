@@ -231,6 +231,17 @@ export async function queueFigmaImageReplacement(input: FigmaImageReplacementInp
   return toFigmaBridgeCommand(command)
 }
 
+export async function listFigmaBridgeCommands(userId: string) {
+  await ensureDetailPageDraftTables()
+  const commands = await db
+    .select()
+    .from(figmaBridgeCommands)
+    .where(eq(figmaBridgeCommands.userId, userId))
+    .orderBy(desc(figmaBridgeCommands.updatedAt), desc(figmaBridgeCommands.createdAt))
+    .limit(50)
+  return commands.map(toFigmaBridgeCommand)
+}
+
 export async function createDetailPageDraft(input: DetailPageDraftInput) {
   await ensureDetailPageDraftTables()
   const productName = cleanText(input.product.name, 1_000)

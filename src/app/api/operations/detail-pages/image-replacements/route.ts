@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { z } from 'zod'
-import { queueFigmaImageReplacement } from '@/lib/operations/detail-page-drafts'
+import {
+  listFigmaBridgeCommands,
+  queueFigmaImageReplacement,
+} from '@/lib/operations/detail-page-drafts'
 import { getDetailPageWorkspaceUser } from '@/lib/operations/detail-page-bridge-auth'
 
 const bodySchema = z.object({
@@ -9,6 +12,14 @@ const bodySchema = z.object({
   targetNodeName: z.string().trim().min(1).max(500),
   imageUrl: z.string().trim().url().max(4_000),
 })
+
+export async function GET() {
+  const identity = await getDetailPageWorkspaceUser()
+  if (!identity) return NextResponse.json({ error: 'Login is required.' }, { status: 401 })
+
+  const commands = await listFigmaBridgeCommands(identity.workspaceUserId)
+  return NextResponse.json({ commands }, { headers: { 'Cache-Control': 'no-store' } })
+}
 
 export async function POST(request: Request) {
   const identity = await getDetailPageWorkspaceUser()

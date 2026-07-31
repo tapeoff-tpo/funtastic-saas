@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.4'
+const PLUGIN_VERSION = '1.1.5'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -278,6 +278,7 @@ async function replaceSelectedImage(imageUrl) {
 }
 
 async function replaceImageAtNode(command) {
+  await figma.loadAllPagesAsync()
   let imageNode = null
   let sourcePage = null
   for (const page of figma.root.children) {

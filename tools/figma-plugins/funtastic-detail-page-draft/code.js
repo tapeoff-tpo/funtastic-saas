@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.7'
+const PLUGIN_VERSION = '1.1.8'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -676,30 +676,42 @@ async function captureComparisonFrames(command) {
     return preview
   }
 
-  for (const { page, frame } of selected) {
-    const sections = []
-    const directSections = frame.children
+  const captures = selected.map(({ page, frame }) => {
+    const sections = frame.children
       .filter((node) => node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'SECTION')
       .slice(0, 16)
-    for (const section of directSections) {
-      sections.push({
-        id: section.id,
-        name: section.name,
-        type: section.type,
-        width: Math.round(section.width),
-        height: Math.round(section.height),
-        preview: await savePreview(section, 128),
-      })
-    }
-    result.frames.push({
+    return {
+      frame,
+      sections,
+      entry: {
       id: frame.id,
       name: frame.name,
       pageName: page.name,
       width: Math.round(frame.width),
       height: Math.round(frame.height),
-      preview: await savePreview(frame, 150),
-      sections,
-    })
+      preview: null,
+      sections: sections.map((section) => ({
+          id: section.id,
+          name: section.name,
+          type: section.type,
+          width: Math.round(section.width),
+          height: Math.round(section.height),
+          preview: null,
+      })),
+    },
+  }
+  })
+
+  // A complete page thumbnail is mandatory for every source draft. Section
+  // thumbnails use only the remaining payload budget after that comparison set.
+  for (const capture of captures) {
+    capture.entry.preview = await savePreview(capture.frame, 150)
+    result.frames.push(capture.entry)
+  }
+  for (const capture of captures) {
+    for (let index = 0; index < capture.entry.sections.length; index += 1) {
+      capture.entry.sections[index].preview = await savePreview(capture.sections[index], 128)
+    }
   }
   figma.ui.postMessage({ type: 'comparison-captured', frameCount: result.frames.length })
   return result

@@ -1565,8 +1565,6 @@ export const detailPageJobs = pgTable(
     figmaFileKey: varchar('figma_file_key', { length: 120 }).notNull(),
     figmaNodeId: varchar('figma_node_id', { length: 120 }),
     figmaUrl: text('figma_url'),
-    agentQa: text('agent_qa'),
-    agentQaAt: timestamp('agent_qa_at', { withTimezone: true }),
     claimedByDeviceId: uuid('claimed_by_device_id'),
     claimedAt: timestamp('claimed_at', { withTimezone: true }),
     completedAt: timestamp('completed_at', { withTimezone: true }),

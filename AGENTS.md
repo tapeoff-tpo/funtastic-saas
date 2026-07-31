@@ -102,15 +102,6 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Multiple current users may use one AI account at the same time, and user start/end events must be independent rather than merged into one shared selection state.
 - If all current users end usage, the account status becomes `비어 있음`. If any usage ends due to a 5-hour or weekly limit, the visible status should indicate `한도 초과`.
 
-### Detail Page Agent Policy
-
-- `DETAIL_PAGE_AGENT_PLAYBOOK.md` is binding for every AI detail-page job. The dedicated agent creates the first editable Figma draft; the user then reviews and directs revisions.
-- New detail-page jobs use `agent_pending` and must not be claimed by the legacy Figma plugin queue. The old `queued` / `creating` statuses are reserved for already-created legacy plugin jobs.
-- A first-draft producer may only move `agent_creating` work to `agent_qa_pending`. It must never move its own work directly to `검수 요청`.
-- A separate independent QA agent must claim `agent_qa_pending` work, inspect Figma screenshots against the supplier evidence and playbook, then either approve it to `검수 요청` with a persisted Korean QA report or reject it back to `agent_pending` with explicit visual revision instructions.
-- Do not mark a job `검수 요청` until the independent QA agent confirmed the exact Figma frame, product fidelity, 1688+AI asset mix, Chinese-copy removal without patch boxes, cover quality, Marbin-style option table placement, background-removed size cutout, color variation, and fixed notices/IP notice.
-- Never overwrite an approved or user-edited Figma frame without an explicit full-rebuild request. Revision work is limited to the requested product and sections.
-
 ### Deployment
 
 - Production is deployed on Vercel from the GitHub `main` branch.

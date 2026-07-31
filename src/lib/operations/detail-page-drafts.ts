@@ -86,8 +86,6 @@ export function toDetailPageDraftRecord(row: typeof detailPageJobs.$inferSelect)
     figmaFileKey: row.figmaFileKey,
     figmaNodeId: row.figmaNodeId,
     figmaUrl: row.figmaUrl,
-    agentQa: row.agentQa ?? '',
-    agentQaAt: row.agentQaAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -114,8 +112,6 @@ export async function ensureDetailPageDraftTables() {
       "figma_file_key" varchar(120) NOT NULL,
       "figma_node_id" varchar(120),
       "figma_url" text,
-      "agent_qa" text,
-      "agent_qa_at" timestamptz,
       "claimed_by_device_id" uuid,
       "claimed_at" timestamptz,
       "completed_at" timestamptz,
@@ -123,8 +119,6 @@ export async function ensureDetailPageDraftTables() {
       "updated_at" timestamptz NOT NULL DEFAULT now()
     )
   `)
-  await db.execute(sql`ALTER TABLE "detail_page_jobs" ADD COLUMN IF NOT EXISTS "agent_qa" text`)
-  await db.execute(sql`ALTER TABLE "detail_page_jobs" ADD COLUMN IF NOT EXISTS "agent_qa_at" timestamptz`)
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "detail_page_jobs_user_client_key_uniq" ON "detail_page_jobs" ("user_id", "client_job_key")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "detail_page_jobs_user_status_created_idx" ON "detail_page_jobs" ("user_id", "status", "created_at")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "detail_page_jobs_file_status_created_idx" ON "detail_page_jobs" ("figma_file_key", "status", "created_at")`)
@@ -195,15 +189,11 @@ export async function createDetailPageDraft(input: DetailPageDraftInput) {
     imageUrls: images,
     template: cleanText(input.template, 120) ?? '기본 상품 상세',
     note: cleanText(input.note, 2_000),
-    // New work is owned by the dedicated detail-page agent. The legacy Figma
-    // plugin only claims the older `queued` jobs.
-    status: 'agent_pending',
+    status: 'queued',
     errorMessage: null,
     figmaFileKey: DETAIL_PAGE_FIGMA_FILE_KEY,
     figmaNodeId: null,
     figmaUrl: null,
-    agentQa: null,
-    agentQaAt: null,
     claimedByDeviceId: null,
     claimedAt: null,
     completedAt: null,
@@ -217,7 +207,7 @@ export async function createDetailPageDraft(input: DetailPageDraftInput) {
     .limit(1)
 
   if (existing) {
-    if (existing.status === 'agent_creating' || existing.status === 'agent_qa_pending' || existing.status === 'agent_qa_reviewing' || existing.status === 'creating' || existing.status === 'review' || existing.status === 'completed') {
+    if (existing.figmaUrl || existing.status === 'creating' || existing.status === 'review' || existing.status === 'completed') {
       return toDetailPageDraftRecord(existing)
     }
     const [updated] = await db
@@ -251,7 +241,7 @@ export async function completeDetailPageReview(userId: string, id: string) {
   const [row] = await db
     .update(detailPageJobs)
     .set({ status: 'completed', completedAt: new Date(), updatedAt: new Date() })
-    .where(and(eq(detailPageJobs.userId, userId), eq(detailPageJobs.id, id), eq(detailPageJobs.status, 'review')))
+    .where(and(eq(detailPageJobs.userId, userId), eq(detailPageJobs.id, id), sql`${detailPageJobs.status} <> 'completed'`))
     .returning()
   return row ? toDetailPageDraftRecord(row) : null
 }
@@ -261,11 +251,9 @@ export async function requeueDetailPageDraft(userId: string, id: string, note?: 
   const [row] = await db
     .update(detailPageJobs)
     .set({
-      status: 'agent_pending',
+      status: 'queued',
       ...(note === undefined ? {} : { note: cleanText(note, 2_000) }),
       errorMessage: null,
-      agentQa: null,
-      agentQaAt: null,
       claimedByDeviceId: null,
       claimedAt: null,
       completedAt: null,
@@ -274,7 +262,7 @@ export async function requeueDetailPageDraft(userId: string, id: string, note?: 
     .where(and(
       eq(detailPageJobs.userId, userId),
       eq(detailPageJobs.id, id),
-      sql`${detailPageJobs.status} IN ('agent_qa_pending', 'agent_qa_reviewing', 'review', 'failed', 'needs_info')`,
+      sql`${detailPageJobs.status} <> 'completed'`,
     ))
     .returning()
   return row ? toDetailPageDraftRecord(row) : null

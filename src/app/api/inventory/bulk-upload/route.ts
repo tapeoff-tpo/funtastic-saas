@@ -608,16 +608,6 @@ async function syncGroupedProductOptions(userId: string, rows: ParsedRow[]) {
     })
   }
 
-  for (const skuChunk of chunkArray(uniqueRows.map((row) => row.sku), DB_BATCH_SIZE)) {
-    await db.update(products).set({
-      status: 'deleted',
-      manageInventory: false,
-      updatedAt: new Date(),
-    }).where(and(
-      eq(products.userId, userId),
-      inArray(products.internalSku, skuChunk),
-    ))
-  }
 }
 
 function baseProductCode(sku: string): string {

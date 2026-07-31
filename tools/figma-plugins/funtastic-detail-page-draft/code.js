@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.1'
+const PLUGIN_VERSION = '1.1.2'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -264,6 +264,44 @@ async function replaceSelectedImage(imageUrl) {
   node.setPluginData('source-image', normalizeImageUrl(imageUrl))
   figma.viewport.scrollAndZoomIntoView([node])
   figma.ui.postMessage({ type: 'image-replaced', name: node.name })
+}
+
+async function replaceImageAtNode(command) {
+  let imageNode = null
+  let sourcePage = null
+  for (const page of figma.root.children) {
+    const targetFrames = page.findAll((node) => (
+      node.type === 'FRAME' && node.name.includes(command.targetFrameName)
+    ))
+    for (const targetFrame of targetFrames) {
+      imageNode = targetFrame.findOne((node) => (
+        node.name === command.targetNodeName
+        && 'fills' in node
+        && Array.isArray(node.fills)
+        && node.fills.some((paint) => paint.type === 'IMAGE')
+      ))
+      if (imageNode) {
+        sourcePage = page
+        break
+      }
+    }
+    if (imageNode) break
+  }
+
+  if (!imageNode || !Array.isArray(imageNode.fills)) {
+    throw new Error(`Image layer not found: ${command.targetNodeName}`)
+  }
+
+  const imageIndex = imageNode.fills.findIndex((paint) => paint.type === 'IMAGE')
+  if (imageIndex < 0) throw new Error(`Image fill not found: ${command.targetNodeName}`)
+  const fills = [...imageNode.fills]
+  fills[imageIndex] = { ...fills[imageIndex], imageHash: await imagePaint(command.imageUrl) }
+  imageNode.fills = fills
+  imageNode.setPluginData('source-image', normalizeImageUrl(command.imageUrl))
+  if (sourcePage) await figma.setCurrentPageAsync(sourcePage)
+  figma.currentPage.selection = [imageNode]
+  figma.viewport.scrollAndZoomIntoView([imageNode])
+  figma.ui.postMessage({ type: 'image-replaced', name: imageNode.name })
 }
 
 async function makeCover(job, brief) {
@@ -676,6 +714,30 @@ async function runSync(silent) {
   let completed = 0
   let empty = false
   for (let index = 0; index < 10; index += 1) {
+    const { command } = await request('/api/operations/detail-pages/bridge/commands', {
+      method: 'POST',
+      headers: authHeaders(state.bridgeToken),
+    })
+    if (command) {
+      try {
+        figma.ui.postMessage({ type: 'progress', name: 'Image replacement', index: completed + 1 })
+        await replaceImageAtNode(command)
+        await request(`/api/operations/detail-pages/bridge/commands/${command.id}`, {
+          method: 'POST',
+          headers: authHeaders(state.bridgeToken),
+          body: JSON.stringify({ status: 'completed' }),
+        })
+        completed += 1
+      } catch (error) {
+        await request(`/api/operations/detail-pages/bridge/commands/${command.id}`, {
+          method: 'POST',
+          headers: authHeaders(state.bridgeToken),
+          body: JSON.stringify({ status: 'failed', errorMessage: errorMessage(error) }),
+        }).catch(() => {})
+        figma.ui.postMessage({ type: 'error', message: errorMessage(error) })
+      }
+      continue
+    }
     const { job } = await request('/api/operations/detail-pages/bridge/jobs', {
       method: 'POST',
       headers: authHeaders(state.bridgeToken),

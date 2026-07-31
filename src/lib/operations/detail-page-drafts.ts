@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   detailPageJobs,
+  figmaBridgeCommands,
   figmaBridgeDevices,
   figmaBridgePairings,
 } from '@/lib/db/schema'
@@ -31,6 +32,14 @@ export type DetailPageDraftInput = {
   imageUrls: string[]
   template?: string | null
   note?: string | null
+}
+
+export type FigmaImageReplacementInput = {
+  userId: string
+  figmaFileKey: string
+  targetFrameName: string
+  targetNodeName: string
+  imageUrl: string
 }
 
 function cleanText(value: string | null | undefined, limit: number) {
@@ -155,10 +164,71 @@ export async function ensureDetailPageDraftTables() {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "figma_bridge_devices_user_created_idx" ON "figma_bridge_devices" ("user_id", "created_at")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "figma_bridge_devices_user_file_idx" ON "figma_bridge_devices" ("user_id", "figma_file_key")`)
 
-  for (const table of ['detail_page_jobs', 'figma_bridge_pairings', 'figma_bridge_devices']) {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "figma_bridge_commands" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "user_id" uuid NOT NULL,
+      "figma_file_key" varchar(120) NOT NULL,
+      "command_type" varchar(40) NOT NULL,
+      "target_frame_name" text NOT NULL,
+      "target_node_name" text NOT NULL,
+      "image_url" text NOT NULL,
+      "status" varchar(30) NOT NULL DEFAULT 'queued',
+      "error_message" text,
+      "claimed_by_device_id" uuid,
+      "claimed_at" timestamptz,
+      "completed_at" timestamptz,
+      "created_at" timestamptz NOT NULL DEFAULT now(),
+      "updated_at" timestamptz NOT NULL DEFAULT now()
+    )
+  `)
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "figma_bridge_commands_file_status_created_idx" ON "figma_bridge_commands" ("figma_file_key", "status", "created_at")`)
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "figma_bridge_commands_user_created_idx" ON "figma_bridge_commands" ("user_id", "created_at")`)
+
+  for (const table of ['detail_page_jobs', 'figma_bridge_pairings', 'figma_bridge_devices', 'figma_bridge_commands']) {
     await db.execute(sql.raw(`ALTER TABLE "${table}" ENABLE ROW LEVEL SECURITY`))
     await db.execute(sql.raw(`REVOKE ALL ON TABLE "${table}" FROM anon, authenticated`))
   }
+}
+
+function toFigmaBridgeCommand(row: typeof figmaBridgeCommands.$inferSelect) {
+  return {
+    id: row.id,
+    commandType: row.commandType,
+    targetFrameName: row.targetFrameName,
+    targetNodeName: row.targetNodeName,
+    imageUrl: row.imageUrl,
+    status: row.status,
+    errorMessage: row.errorMessage,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  }
+}
+
+export async function queueFigmaImageReplacement(input: FigmaImageReplacementInput) {
+  await ensureDetailPageDraftTables()
+  const imageUrl = cleanImages([input.imageUrl])[0]
+  const figmaFileKey = cleanText(input.figmaFileKey, 120)
+  const targetFrameName = cleanText(input.targetFrameName, 500)
+  const targetNodeName = cleanText(input.targetNodeName, 500)
+  if (!imageUrl || !figmaFileKey || !targetFrameName || !targetNodeName) {
+    throw new Error('Figma image replacement data is incomplete.')
+  }
+
+  const [command] = await db
+    .insert(figmaBridgeCommands)
+    .values({
+      userId: input.userId,
+      figmaFileKey,
+      commandType: 'replace-image',
+      targetFrameName,
+      targetNodeName,
+      imageUrl,
+      status: 'queued',
+      updatedAt: new Date(),
+    })
+    .returning()
+  return toFigmaBridgeCommand(command)
 }
 
 export async function createDetailPageDraft(input: DetailPageDraftInput) {
@@ -352,6 +422,83 @@ export async function touchFigmaBridgeDevice(deviceId: string, pluginVersion?: s
       updatedAt: new Date(),
     })
     .where(eq(figmaBridgeDevices.id, deviceId))
+}
+
+export async function claimNextFigmaBridgeCommand(device: typeof figmaBridgeDevices.$inferSelect) {
+  await ensureDetailPageDraftTables()
+  const [candidate] = await db
+    .select({ id: figmaBridgeCommands.id })
+    .from(figmaBridgeCommands)
+    .where(and(
+      eq(figmaBridgeCommands.userId, device.userId),
+      eq(figmaBridgeCommands.figmaFileKey, device.figmaFileKey),
+      eq(figmaBridgeCommands.status, 'queued'),
+      eq(figmaBridgeCommands.commandType, 'replace-image'),
+    ))
+    .orderBy(asc(figmaBridgeCommands.createdAt))
+    .limit(1)
+  if (!candidate) return null
+
+  const [claimed] = await db
+    .update(figmaBridgeCommands)
+    .set({
+      status: 'creating',
+      claimedByDeviceId: device.id,
+      claimedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(figmaBridgeCommands.id, candidate.id),
+      eq(figmaBridgeCommands.status, 'queued'),
+    ))
+    .returning()
+  return claimed ? toFigmaBridgeCommand(claimed) : null
+}
+
+export async function finishFigmaBridgeCommand(input: {
+  device: typeof figmaBridgeDevices.$inferSelect
+  commandId: string
+}) {
+  await ensureDetailPageDraftTables()
+  const [command] = await db
+    .update(figmaBridgeCommands)
+    .set({
+      status: 'completed',
+      errorMessage: null,
+      completedAt: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(figmaBridgeCommands.id, input.commandId),
+      eq(figmaBridgeCommands.userId, input.device.userId),
+      eq(figmaBridgeCommands.claimedByDeviceId, input.device.id),
+      eq(figmaBridgeCommands.status, 'creating'),
+    ))
+    .returning()
+  return command ? toFigmaBridgeCommand(command) : null
+}
+
+export async function failFigmaBridgeCommand(input: {
+  device: typeof figmaBridgeDevices.$inferSelect
+  commandId: string
+  errorMessage: string
+}) {
+  await ensureDetailPageDraftTables()
+  const [command] = await db
+    .update(figmaBridgeCommands)
+    .set({
+      status: 'failed',
+      errorMessage: cleanText(input.errorMessage, 2_000) ?? 'Figma image replacement failed.',
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(figmaBridgeCommands.id, input.commandId),
+      eq(figmaBridgeCommands.userId, input.device.userId),
+      eq(figmaBridgeCommands.claimedByDeviceId, input.device.id),
+      eq(figmaBridgeCommands.status, 'creating'),
+    ))
+    .returning()
+  return command ? toFigmaBridgeCommand(command) : null
 }
 
 export async function claimNextDetailPageDraft(device: typeof figmaBridgeDevices.$inferSelect) {

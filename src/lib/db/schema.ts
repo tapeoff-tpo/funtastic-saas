@@ -1615,3 +1615,31 @@ export const figmaBridgeDevices = pgTable(
     index('figma_bridge_devices_user_file_idx').on(table.userId, table.figmaFileKey),
   ],
 )
+
+export const figmaBridgeCommands = pgTable(
+  'figma_bridge_commands',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    figmaFileKey: varchar('figma_file_key', { length: 120 }).notNull(),
+    commandType: varchar('command_type', { length: 40 }).notNull(),
+    targetFrameName: text('target_frame_name').notNull(),
+    targetNodeName: text('target_node_name').notNull(),
+    imageUrl: text('image_url').notNull(),
+    status: varchar('status', { length: 30 }).notNull().default('queued'),
+    errorMessage: text('error_message'),
+    claimedByDeviceId: uuid('claimed_by_device_id'),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('figma_bridge_commands_file_status_created_idx').on(
+      table.figmaFileKey,
+      table.status,
+      table.createdAt,
+    ),
+    index('figma_bridge_commands_user_created_idx').on(table.userId, table.createdAt),
+  ],
+)

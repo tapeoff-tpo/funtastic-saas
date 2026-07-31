@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.12'
+const PLUGIN_VERSION = '1.1.13'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -937,15 +937,9 @@ function startAutomaticSync() {
   if (automaticSyncStarted) return
   automaticSyncStarted = true
   figma.ui.postMessage({ type: 'automatic-sync' })
-  const poll = async () => {
-    try {
-      await sync(true)
-    } catch (error) {
-      figma.ui.postMessage({ type: 'error', message: `자동 동기화 오류입니다. 8초 후 다시 시도합니다: ${errorMessage(error)}` })
-    }
-    setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
-  }
-  void poll()
+  void sync(true).catch((error) => {
+    figma.ui.postMessage({ type: 'error', message: `자동 동기화 오류입니다: ${errorMessage(error)}` })
+  })
 }
 
 async function sync(silent = false) {

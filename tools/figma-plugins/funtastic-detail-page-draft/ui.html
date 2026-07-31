@@ -13,7 +13,6 @@
       button[disabled] { opacity: .5; cursor: wait; }
       #message { min-height: 20px; margin-top: 12px; color: #374151; line-height: 1.45; }
       #pairing { margin-top: 12px; padding-top: 2px; }
-      #replaceImage { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e5e7eb; }
       .hidden { display: none; }
     </style>
   </head>
@@ -27,22 +26,16 @@
       <button id="pairButton">Figma 파일 연결</button>
     </div>
     <button id="syncButton" class="hidden">대기 작업 전부 제작</button>
-    <div id="replaceImage">
-      <label>Replace selected image URL<input id="replacementImageUrl" autocomplete="off" placeholder="https://...png" /></label>
-      <button id="replaceImageButton">Replace selected image</button>
-    </div>
     <div id="message"></div>
     <script>
       const pairing = document.getElementById('pairing')
       const pairButton = document.getElementById('pairButton')
       const syncButton = document.getElementById('syncButton')
-      const replaceImageButton = document.getElementById('replaceImageButton')
       const message = document.getElementById('message')
       const input = (id) => document.getElementById(id).value.trim()
       const setBusy = (busy) => {
         pairButton.disabled = busy
         syncButton.disabled = busy
-        replaceImageButton.disabled = busy
       }
       pairButton.onclick = () => {
         if (!input('pairingToken')) { message.textContent = 'SaaS에서 만든 연결 코드를 입력해주세요.'; return }
@@ -53,12 +46,6 @@
         setBusy(true)
         message.textContent = '대기 작업을 확인하고 있습니다.'
         parent.postMessage({ pluginMessage: { type: 'sync' } }, '*')
-      }
-      replaceImageButton.onclick = () => {
-        if (!input('replacementImageUrl')) { message.textContent = 'Enter an image URL first.'; return }
-        setBusy(true)
-        message.textContent = 'Replacing the selected image.'
-        parent.postMessage({ pluginMessage: { type: 'replace-selected-image', imageUrl: input('replacementImageUrl') } }, '*')
       }
       onmessage = (event) => {
         const data = event.data.pluginMessage

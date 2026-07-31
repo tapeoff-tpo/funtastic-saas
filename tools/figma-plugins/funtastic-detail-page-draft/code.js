@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.3'
+const PLUGIN_VERSION = '1.1.4'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -165,6 +165,16 @@ function cleanText(value) {
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message
+  if (error && typeof error === 'object' && 'message' in error) return String(error.message)
+  if (error && typeof error === 'object') {
+    try {
+      const details = {}
+      for (const key of Object.getOwnPropertyNames(error)) details[key] = error[key]
+      return JSON.stringify(details)
+    } catch {
+      return 'Unknown plugin error object.'
+    }
+  }
   return String(error || '알 수 없는 오류')
 }
 
@@ -704,7 +714,7 @@ function startAutomaticSync() {
     try {
       await sync(true)
     } catch (error) {
-      figma.ui.postMessage({ type: 'error', message: `자동 동기화를 멈췄습니다: ${errorMessage(error)}` })
+      figma.ui.postMessage({ type: 'error', message: `자동 동기화 오류입니다. 8초 후 다시 시도합니다: ${errorMessage(error)}` })
     }
     setTimeout(poll, AUTO_SYNC_INTERVAL_MS)
   }
@@ -786,7 +796,6 @@ figma.ui.onmessage = async (message) => {
   try {
     if (message.type === 'pair') await pair(message)
     if (message.type === 'sync') await sync()
-    if (message.type === 'replace-selected-image') await replaceSelectedImage(message.imageUrl)
   } catch (error) {
     figma.ui.postMessage({ type: 'error', message: errorMessage(error) })
   }

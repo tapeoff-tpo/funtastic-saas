@@ -60,6 +60,12 @@ export type FigmaFrameRenameInput = {
   name: string
 }
 
+export type FigmaSingleOptionInput = {
+  userId: string
+  figmaFileKey: string
+  frameId: string
+}
+
 function cleanText(value: string | null | undefined, limit: number) {
   const text = String(value ?? '').trim()
   return text ? text.slice(0, limit) : null
@@ -352,6 +358,29 @@ export async function queueFigmaFrameRename(input: FigmaFrameRenameInput) {
       targetNodeName: frameId,
       imageUrl: '',
       payload: { frameId, name },
+      status: 'queued',
+      updatedAt: new Date(),
+    })
+    .returning()
+  return toFigmaBridgeCommand(command)
+}
+
+export async function queueFigmaSingleTransparentOption(input: FigmaSingleOptionInput) {
+  await ensureDetailPageDraftTables()
+  const figmaFileKey = cleanText(input.figmaFileKey, 120)
+  const frameId = cleanText(input.frameId, 120)
+  if (!figmaFileKey || !frameId) throw new Error('Figma single-option data is incomplete.')
+
+  const [command] = await db
+    .insert(figmaBridgeCommands)
+    .values({
+      userId: input.userId,
+      figmaFileKey,
+      commandType: 'replace-option-section',
+      targetFrameName: 'single transparent option',
+      targetNodeName: frameId,
+      imageUrl: '',
+      payload: { frameId },
       status: 'queued',
       updatedAt: new Date(),
     })

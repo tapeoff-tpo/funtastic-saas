@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.9'
+const PLUGIN_VERSION = '1.1.10'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -794,6 +794,61 @@ async function renameFigmaFrame(command) {
   return { frameId: node.id, frameName: node.name, figmaUrl }
 }
 
+async function replaceWithSingleTransparentOption(command) {
+  await figma.loadAllPagesAsync()
+  await loadFonts()
+  const frameId = cleanText(command.payload?.frameId)
+  if (!frameId) throw new Error('The detail page frame is missing.')
+
+  const detailPage = await figma.getNodeByIdAsync(frameId)
+  if (!detailPage || detailPage.type !== 'FRAME') throw new Error('The detail page frame was not found.')
+  const optionSection = detailPage.children.find((child) => child.type === 'FRAME' && child.name.includes('옵션'))
+  if (!optionSection || optionSection.type !== 'FRAME') throw new Error('The existing option section was not found.')
+
+  const imageCandidates = optionSection.findAll((node) => (
+    'fills' in node
+    && Array.isArray(node.fills)
+    && node.fills.some((paint) => paint.type === 'IMAGE')
+  ))
+  const sourceImage = imageCandidates
+    .sort((left, right) => (right.width * right.height) - (left.width * left.height))[0]
+  if (!sourceImage || typeof sourceImage.clone !== 'function') {
+    throw new Error('A transparent product image could not be found in the option section.')
+  }
+
+  const replacement = makeSection('02 옵션 안내 / 투명 단일 옵션', 800, COLORS.soft)
+  makeLabel(replacement, 'OPTION', 50, 52, 124)
+  appendText(replacement, '완전 투명, 단일 옵션', 50, 118, 760, 44, 'Bold')
+  appendText(replacement, '색상 선택 없이 투명 단일 구성으로 판매합니다.', 50, 186, 760, 21, 'Regular', COLORS.muted)
+
+  const image = sourceImage.clone()
+  if ('resize' in image) image.resize(470, 470)
+  image.x = 50
+  image.y = 274
+  replacement.appendChild(image)
+
+  const card = figma.createFrame()
+  card.name = '투명 단일 옵션 안내'
+  card.resize(240, 470)
+  card.x = 570
+  card.y = 274
+  card.cornerRadius = 16
+  card.fills = [{ type: 'SOLID', color: COLORS.paper }]
+  appendText(card, '01', 28, 34, 184, 16, 'Bold', COLORS.green)
+  appendText(card, '투명', 28, 86, 184, 34, 'Bold')
+  appendText(card, '주방과 냉장고 안에서 내용물이 자연스럽게 보이는 투명 단일 옵션입니다.', 28, 154, 184, 18, 'Regular', COLORS.muted)
+  replacement.appendChild(card)
+
+  const index = detailPage.children.indexOf(optionSection)
+  detailPage.insertChild(index, replacement)
+  optionSection.remove()
+  if (detailPage.parent?.type === 'PAGE') await figma.setCurrentPageAsync(detailPage.parent)
+  figma.currentPage.selection = [replacement]
+  figma.viewport.scrollAndZoomIntoView([replacement])
+  const figmaUrl = `https://www.figma.com/design/${DEFAULT_FILE_KEY}/ai-%EC%83%9D%EC%84%B1-%EC%83%81%EC%84%B8%ED%8E%98%EC%9D%B4%EC%A7%80?node-id=${encodeURIComponent(detailPage.id.replace(':', '-'))}`
+  return { frameId: detailPage.id, sectionName: replacement.name, figmaUrl }
+}
+
 function authHeaders(token) {
   return {
     Authorization: `Bearer ${token}`,
@@ -933,6 +988,8 @@ async function runSync(silent) {
               ? 'Final detail page'
               : command.commandType === 'rename-frame'
                 ? 'Frame rename'
+                : command.commandType === 'replace-option-section'
+                  ? 'Single transparent option'
               : command.commandType
         figma.ui.postMessage({ type: 'progress', name: label, index: completed + 1 })
         if (command.commandType === 'replace-image') {
@@ -943,6 +1000,8 @@ async function runSync(silent) {
           result = await composeFinalDetailPage(command)
         } else if (command.commandType === 'rename-frame') {
           result = await renameFigmaFrame(command)
+        } else if (command.commandType === 'replace-option-section') {
+          result = await replaceWithSingleTransparentOption(command)
         } else {
           throw new Error(`지원하지 않는 Figma 작업입니다: ${command.commandType}`)
         }

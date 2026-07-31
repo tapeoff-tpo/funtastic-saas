@@ -53,6 +53,13 @@ export type FigmaFinalCompositionInput = {
   }>
 }
 
+export type FigmaFrameRenameInput = {
+  userId: string
+  figmaFileKey: string
+  frameId: string
+  name: string
+}
+
 function cleanText(value: string | null | undefined, limit: number) {
   const text = String(value ?? '').trim()
   return text ? text.slice(0, limit) : null
@@ -321,6 +328,30 @@ export async function queueFigmaFinalComposition(input: FigmaFinalCompositionInp
       targetNodeName: 'selected source sections',
       imageUrl: '',
       payload: { selections },
+      status: 'queued',
+      updatedAt: new Date(),
+    })
+    .returning()
+  return toFigmaBridgeCommand(command)
+}
+
+export async function queueFigmaFrameRename(input: FigmaFrameRenameInput) {
+  await ensureDetailPageDraftTables()
+  const figmaFileKey = cleanText(input.figmaFileKey, 120)
+  const frameId = cleanText(input.frameId, 120)
+  const name = cleanText(input.name, 300)
+  if (!figmaFileKey || !frameId || !name) throw new Error('Figma frame rename data is incomplete.')
+
+  const [command] = await db
+    .insert(figmaBridgeCommands)
+    .values({
+      userId: input.userId,
+      figmaFileKey,
+      commandType: 'rename-frame',
+      targetFrameName: 'frame rename',
+      targetNodeName: frameId,
+      imageUrl: '',
+      payload: { frameId, name },
       status: 'queued',
       updatedAt: new Date(),
     })

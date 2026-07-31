@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.8'
+const PLUGIN_VERSION = '1.1.9'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -777,6 +777,23 @@ async function composeFinalDetailPage(command) {
   return { finalFrameId: finalFrame.id, finalFrameName: finalFrame.name, figmaUrl }
 }
 
+async function renameFigmaFrame(command) {
+  await figma.loadAllPagesAsync()
+  const frameId = cleanText(command.payload?.frameId)
+  const name = cleanText(command.payload?.name)
+  if (!frameId || !name) throw new Error('The Figma frame rename data is incomplete.')
+
+  const node = await figma.getNodeByIdAsync(frameId)
+  if (!node || node.type !== 'FRAME') throw new Error('The Figma frame to rename was not found.')
+
+  node.name = name
+  if (node.parent?.type === 'PAGE') await figma.setCurrentPageAsync(node.parent)
+  figma.currentPage.selection = [node]
+  figma.viewport.scrollAndZoomIntoView([node])
+  const figmaUrl = `https://www.figma.com/design/${DEFAULT_FILE_KEY}/ai-%EC%83%9D%EC%84%B1-%EC%83%81%EC%84%B8%ED%8E%98%EC%9D%B4%EC%A7%80?node-id=${encodeURIComponent(node.id.replace(':', '-'))}`
+  return { frameId: node.id, frameName: node.name, figmaUrl }
+}
+
 function authHeaders(token) {
   return {
     Authorization: `Bearer ${token}`,
@@ -914,6 +931,8 @@ async function runSync(silent) {
             ? 'Draft comparison'
             : command.commandType === 'compose-final'
               ? 'Final detail page'
+              : command.commandType === 'rename-frame'
+                ? 'Frame rename'
               : command.commandType
         figma.ui.postMessage({ type: 'progress', name: label, index: completed + 1 })
         if (command.commandType === 'replace-image') {
@@ -922,6 +941,8 @@ async function runSync(silent) {
           result = await captureComparisonFrames(command)
         } else if (command.commandType === 'compose-final') {
           result = await composeFinalDetailPage(command)
+        } else if (command.commandType === 'rename-frame') {
+          result = await renameFigmaFrame(command)
         } else {
           throw new Error(`지원하지 않는 Figma 작업입니다: ${command.commandType}`)
         }

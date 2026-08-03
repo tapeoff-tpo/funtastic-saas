@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.13'
+const PLUGIN_VERSION = '1.1.14'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -280,7 +280,7 @@ async function replaceSelectedImage(imageUrl) {
 async function replaceImageAtNode(command) {
   await figma.loadAllPagesAsync()
   let imageNode = null
-  let sourcePage = null
+  let matchedByName = false
   for (const page of figma.root.children) {
     const targetFrames = page.findAll((node) => (
       node.type === 'FRAME' && node.name.includes(command.targetFrameName)
@@ -293,9 +293,36 @@ async function replaceImageAtNode(command) {
         && node.fills.some((paint) => paint.type === 'IMAGE')
       ))
       if (imageNode) {
-        sourcePage = page
+        matchedByName = true
         break
       }
+
+      // Final composites preserve section names but not every inner layer name.
+      // Prefer an image in the cover section, then fall back to the topmost image
+      // in the target frame so a user-edited cover can still be replaced safely.
+      const collectImageNodes = (scope) => {
+        const nodes = [scope, ...scope.findAll((node) => (
+          'fills' in node && Array.isArray(node.fills)
+        ))]
+        return nodes.filter((node) => (
+          'fills' in node
+          && Array.isArray(node.fills)
+          && node.fills.some((paint) => paint.type === 'IMAGE')
+        ))
+      }
+      const coverSections = targetFrame.children.filter((node) => (
+        node.name.toLowerCase().includes('cover') || node.name.includes('커버')
+      ))
+      const coverImages = coverSections.flatMap((section) => collectImageNodes(section))
+      const candidateImages = coverImages.length ? coverImages : collectImageNodes(targetFrame)
+      candidateImages.sort((left, right) => {
+        const leftY = left.absoluteTransform?.[1]?.[2] ?? 0
+        const rightY = right.absoluteTransform?.[1]?.[2] ?? 0
+        if (leftY !== rightY) return leftY - rightY
+        return (right.width * right.height) - (left.width * left.height)
+      })
+      imageNode = candidateImages[0] ?? null
+      if (imageNode) break
     }
     if (imageNode) break
   }
@@ -311,6 +338,7 @@ async function replaceImageAtNode(command) {
   imageNode.fills = fills
   imageNode.setPluginData('source-image', normalizeImageUrl(command.imageUrl))
   figma.ui.postMessage({ type: 'image-replaced', name: imageNode.name })
+  return { imageNodeName: imageNode.name, matchedByName }
 }
 
 async function makeCover(job, brief) {
@@ -978,7 +1006,7 @@ async function runSync(silent) {
               : command.commandType
         figma.ui.postMessage({ type: 'progress', name: label, index: completed + 1 })
         if (command.commandType === 'replace-image') {
-          await replaceImageAtNode(command)
+          result = await replaceImageAtNode(command)
         } else if (command.commandType === 'capture-frames') {
           result = await captureComparisonFrames(command)
         } else if (command.commandType === 'compose-final') {

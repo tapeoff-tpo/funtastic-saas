@@ -485,6 +485,28 @@ async function replaceTextInFrame(command) {
   return { frameId, appliedCount: applied.length, missingCount: missing.length }
 }
 
+async function captureFrameText(command) {
+  await figma.loadAllPagesAsync()
+  const frameId = cleanText(command.payload?.frameId)
+  const frame = frameId ? await figma.getNodeByIdAsync(frameId) : null
+  if (!frame || frame.type !== 'FRAME') throw new Error('The detail page frame for copy capture was not found.')
+
+  const texts = frame.findAll((node) => node.type === 'TEXT')
+    .map((node) => ({
+      id: node.id,
+      name: node.name,
+      characters: node.characters,
+      x: Math.round(node.x),
+      y: Math.round(node.y),
+      width: Math.round(node.width),
+      height: Math.round(node.height),
+    }))
+    .filter((node) => node.characters.trim())
+    .sort((left, right) => left.y - right.y || left.x - right.x)
+
+  return { frameId, frameName: frame.name, texts }
+}
+
 async function makeCover(job, brief) {
   const theme = pageTheme(brief)
   const section = makeSection('00 COVER / CARD NEWS', 1320, theme.soft)
@@ -1281,12 +1303,16 @@ async function runSync(silent) {
                 ? 'Frame rename'
                 : command.commandType === 'replace-option-section'
                   ? 'Single transparent option'
-              : command.commandType
+                  : command.commandType === 'capture-text'
+                    ? 'Detail page copy capture'
+                    : command.commandType
         figma.ui.postMessage({ type: 'progress', name: label, index: completed + 1 })
         if (command.commandType === 'replace-image') {
           result = await replaceImageAtNode(command)
         } else if (command.commandType === 'replace-text') {
           result = await replaceTextInFrame(command)
+        } else if (command.commandType === 'capture-text') {
+          result = await captureFrameText(command)
         } else if (command.commandType === 'capture-frames') {
           result = await captureComparisonFrames(command)
         } else if (command.commandType === 'compose-final') {

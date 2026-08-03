@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.18'
+const PLUGIN_VERSION = '1.1.19'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -347,6 +347,34 @@ async function replaceImageAtNode(command) {
   imageNode.setPluginData('source-image', normalizeImageUrl(command.imageUrl))
   figma.ui.postMessage({ type: 'image-replaced', name: imageNode.name })
   return { imageNodeName: imageNode.name, matchedByName }
+}
+
+async function replaceTextInFrame(command) {
+  await figma.loadAllPagesAsync()
+  await loadFonts()
+  const frameId = cleanText(command.payload?.frameId)
+  const replacements = Array.isArray(command.payload?.replacements) ? command.payload.replacements : []
+  const frame = frameId ? await figma.getNodeByIdAsync(frameId) : null
+  if (!frame || frame.type !== 'FRAME') throw new Error('The detail page frame for text replacement was not found.')
+  if (!replacements.length) throw new Error('No text replacements were provided.')
+
+  const textNodes = frame.findAll((node) => node.type === 'TEXT')
+  const applied = []
+  const missing = []
+  for (const replacement of replacements) {
+    const from = cleanText(replacement?.from)
+    const to = cleanText(replacement?.to)
+    if (!from || !to) continue
+    const node = textNodes.find((candidate) => candidate.characters.trim() === from)
+    if (!node) {
+      missing.push(from)
+      continue
+    }
+    node.characters = to
+    applied.push(node.name || from)
+  }
+  if (!applied.length) throw new Error('The requested source copy was not found in the target frame.')
+  return { frameId, appliedCount: applied.length, missingCount: missing.length }
 }
 
 async function makeCover(job, brief) {
@@ -1104,6 +1132,8 @@ async function runSync(silent) {
         let result
         const label = command.commandType === 'replace-image'
           ? 'Image replacement'
+          : command.commandType === 'replace-text'
+            ? 'USP copy replacement'
           : command.commandType === 'capture-frames'
             ? 'Draft comparison'
             : command.commandType === 'compose-final'
@@ -1116,6 +1146,8 @@ async function runSync(silent) {
         figma.ui.postMessage({ type: 'progress', name: label, index: completed + 1 })
         if (command.commandType === 'replace-image') {
           result = await replaceImageAtNode(command)
+        } else if (command.commandType === 'replace-text') {
+          result = await replaceTextInFrame(command)
         } else if (command.commandType === 'capture-frames') {
           result = await captureComparisonFrames(command)
         } else if (command.commandType === 'compose-final') {

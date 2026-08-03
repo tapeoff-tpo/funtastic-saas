@@ -28,8 +28,10 @@ Deploy the matching application change to Vercel before enabling the gateway.
 The change removes the last browser-to-Supabase request, so Chinese browsers
 only communicate with the Hong Kong hostname.
 
-For Cafe24 OAuth, set Vercel `NEXT_PUBLIC_APP_URL` to the public gateway URL
-and register `<gateway-url>/api/cafe24/callback` as the Cafe24 callback URL.
+Set Vercel `NEXT_SERVER_ACTIONS_ALLOWED_ORIGINS` to the gateway hostname, then
+redeploy Vercel after changing the variable. For Cafe24 OAuth, also set Vercel
+`NEXT_PUBLIC_APP_URL` to the public gateway URL and register
+`<gateway-url>/api/cafe24/callback` as the Cafe24 callback URL.
 
 ## Scope
 

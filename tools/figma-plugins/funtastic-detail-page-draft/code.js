@@ -160,6 +160,54 @@ const PRODUCT_BRIEFS = {
   },
 }
 
+Object.assign(PRODUCT_BRIEFS['112313-0001'], {
+  eyebrow: 'FRONT + TOP DOUBLE DOOR',
+  headline: '앞문과 윗문을 더한\n반려동물 더블도어 켄넬',
+  subhead: '이동 전후의 케어 동선을 한결 편하게 만드는 이중 개방 구조',
+  intro: '반려동물을 꺼내고, 물이나 간식을 챙기고, 상태를 확인하는 순간마다 문을 여는 방향을 달리할 수 있습니다. 전면과 상단의 두 개 문을 실용적으로 나눈 이동 켄넬입니다.',
+  facts: [
+    ['DOUBLE DOOR', '전면 + 상단 이중 개방'],
+    ['VENTILATION', '측면 + 하부 환기 슬롯'],
+    ['DOOR BOWL', '앞문 전용 식기 구성'],
+    ['SIZE', '58 x 37 x 37 cm'],
+  ],
+  options: [
+    {
+      name: '그레이블랙',
+      description: '차분한 그레이 바디와 블랙 철제 도어를 조합한 단일 판매 옵션입니다.',
+      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01MjAmgo1oGjrt9FEmU_!!2097675198-0-cib.jpg',
+    },
+  ],
+  checkpoints: [
+    {
+      title: '전면과 상단, 상황에 맞게 여는 더블도어',
+      body: '반려동물을 꺼낼 때는 앞문으로, 이동 중 상태를 살피거나 간식을 챙길 때는 상단 문으로 편하게 접근할 수 있습니다.',
+      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01R97wM81oGjru21QMm_!!2097675198-0-cib.jpg',
+      maskTop: true,
+    },
+    {
+      title: '답답함을 줄이는 사방 환기 구조',
+      body: '측면과 하부에 배치된 환기 슬롯으로 이동 중에도 내부 공기가 한곳에 머물지 않도록 도와줍니다.',
+      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01XJkN9F1oGjrtSIyak_!!2097675198-0-cib.jpg',
+      maskTop: true,
+    },
+    {
+      title: '문을 열지 않아도 챙기는 도어 식기',
+      body: '앞문에 걸어두는 전용 식기로, 문을 열지 않아도 물이나 간식을 챙기기 편합니다.',
+      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01Z8uPfA1oGjrtMviac_!!2097675198-0-cib.jpg',
+      maskTop: true,
+    },
+  ],
+  structureTitle: '그레이블랙 단일 옵션',
+  structureBody: '그레이 PP 바디, 블랙 철제 도어, 앞문 전용 식기까지 실제 판매 구성으로 확인된 요소만 담았습니다.',
+  sizeParts: ['W 58 cm', 'D 37 cm', 'H 37 cm'],
+  specificCautions: [
+    '반려동물의 체형과 켄넬 내부 공간이 맞는지 확인한 뒤 사용해주세요.',
+    '이동 전에는 앞문과 상단 문이 완전히 잠겼는지 확인해주세요.',
+    '도어 식기 사용 시 반려동물의 발이나 털이 문틈에 끼지 않도록 주의해주세요.',
+  ],
+})
+
 let activeSync = null
 let automaticSyncStarted = false
 let bridgeState = null
@@ -771,7 +819,10 @@ async function buildDraft(job) {
     while (scratch.children.length) target.appendChild(scratch.children[0])
     target.x = x
     target.y = y
-    target.name = `${job.product.name} ${job.product.sku} · 카드뉴스형 상세페이지 초안`
+    // Rebuilds of an approved final frame must retain the visible final-frame title.
+    target.name = target.name.includes('통합 최종본')
+      ? target.name
+      : `${job.product.name} ${job.product.sku} · 카드뉴스형 상세페이지 초안`
     target.setPluginData('funtastic-job-id', job.id)
     target.setPluginData('funtastic-sku', job.product.sku)
     target.setPluginData('production-brief-version', PLUGIN_VERSION)

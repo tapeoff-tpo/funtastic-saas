@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { and, asc, desc, eq, gt, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, isNull, lt, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   detailPageJobs,
@@ -11,6 +11,7 @@ import {
 export const DETAIL_PAGE_FIGMA_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 export const DETAIL_PAGE_FIGMA_FILE_URL = 'https://www.figma.com/design/X8yYgVtrAFKycEA0yy0kWI/ai-%EC%83%9D%EC%84%B1-%EC%83%81%EC%84%B8%ED%8E%98%EC%9D%B4%EC%A7%80?node-id=0-1'
 export const FIGMA_PAIRING_TTL_MINUTES = 10
+const STALE_DRAFT_CLAIM_MINUTES = 5
 
 export type DetailPageDraftInput = {
   userId: string
@@ -687,6 +688,20 @@ export async function failFigmaBridgeCommand(input: {
 
 export async function claimNextDetailPageDraft(device: typeof figmaBridgeDevices.$inferSelect) {
   await ensureDetailPageDraftTables()
+  const staleThreshold = new Date(Date.now() - STALE_DRAFT_CLAIM_MINUTES * 60_000)
+  await db
+    .update(detailPageJobs)
+    .set({
+      status: 'failed',
+      errorMessage: 'Figma 플러그인 연결이 5분 동안 응답하지 않아 작업을 중단했습니다. 다시 시도해주세요.',
+      updatedAt: new Date(),
+    })
+    .where(and(
+      eq(detailPageJobs.userId, device.userId),
+      eq(detailPageJobs.figmaFileKey, device.figmaFileKey),
+      eq(detailPageJobs.status, 'creating'),
+      lt(detailPageJobs.claimedAt, staleThreshold),
+    ))
   const [candidate] = await db
     .select({ id: detailPageJobs.id })
     .from(detailPageJobs)

@@ -3,6 +3,7 @@ const PLUGIN_VERSION = '1.1.19'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
+const IMAGE_FETCH_TIMEOUT_MS = 20_000
 const IP_NOTICE_NODE_ID = '184:51'
 const BRIDGE_STATE_KEY = 'funtastic-detail-page-bridge'
 
@@ -188,7 +189,7 @@ Object.assign(PRODUCT_BRIEFS['112313-0001'], {
     {
       name: '그레이블랙',
       description: '차분한 그레이 바디와 블랙 철제 도어를 조합한 단일 판매 옵션입니다.',
-      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01MjAmgo1oGjrt9FEmU_!!2097675198-0-cib.jpg',
+      image: `${SERVER_URL}/detail-page-assets/delto-kennel-greyblack-option-v1.jpg`,
     },
   ],
   checkpoints: [
@@ -304,16 +305,40 @@ function normalizeImageUrl(url) {
   return String(url).replace(/_\.webp(?=($|\?))/, '')
 }
 
+function withTimeout(promise, timeoutMs, errorText) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(errorText)), timeoutMs)
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 async function imagePaint(url) {
   const normalized = normalizeImageUrl(url)
   if (imageHashCache.has(normalized)) return imageHashCache.get(normalized)
-  const response = await fetch(normalized)
+  const response = await withTimeout(
+    fetch(normalized),
+    IMAGE_FETCH_TIMEOUT_MS,
+    `자료 보완 필요: 이미지 응답 시간이 ${IMAGE_FETCH_TIMEOUT_MS / 1_000}초를 초과했습니다.`,
+  )
   if (!response.ok) throw new Error(`자료 보완 필요: 이미지 응답 ${response.status} (${normalized})`)
   const contentType = String(response.headers?.get?.('content-type') || '')
   if (contentType && !contentType.includes('jpeg') && !contentType.includes('png')) {
     throw new Error(`자료 보완 필요: Figma에서 지원하지 않는 이미지 형식 (${contentType || 'unknown'})`)
   }
-  const bytes = new Uint8Array(await response.arrayBuffer())
+  const bytes = new Uint8Array(await withTimeout(
+    response.arrayBuffer(),
+    IMAGE_FETCH_TIMEOUT_MS,
+    `자료 보완 필요: 이미지 데이터를 ${IMAGE_FETCH_TIMEOUT_MS / 1_000}초 안에 읽지 못했습니다.`,
+  ))
   const hash = figma.createImage(bytes).hash
   imageHashCache.set(normalized, hash)
   return hash

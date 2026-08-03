@@ -1031,25 +1031,61 @@ async function captureComparisonFrames(command) {
   return result
 }
 
-function solidFill(color) {
-  return [{ type: 'SOLID', color }]
+function layoutOrder(nodes) {
+  return [...nodes].sort((left, right) => (
+    left.y - right.y || left.x - right.x || (right.width * right.height) - (left.width * left.height)
+  ))
 }
 
-function sectionColorsFromReference(reference) {
-  const fallback = [COLORS.sky, COLORS.paper, COLORS.peach, COLORS.mint, COLORS.lavender]
-  const colors = []
-  for (const child of reference.children) {
-    if (!('fills' in child) || !Array.isArray(child.fills)) continue
-    const paint = child.fills.find((candidate) => candidate.type === 'SOLID' && candidate.visible !== false)
-    if (!paint || !paint.color) continue
-    const duplicate = colors.some((color) => (
-      Math.abs(color.r - paint.color.r) < 0.01
-      && Math.abs(color.g - paint.color.g) < 0.01
-      && Math.abs(color.b - paint.color.b) < 0.01
-    ))
-    if (!duplicate) colors.push(paint.color)
+function detailSections(frame) {
+  return layoutOrder(frame.children.filter((node) => (
+    node.type === 'FRAME' && node.width >= frame.width * 0.7 && node.height >= 80
+  )))
+}
+
+function textNodesInLayoutOrder(scope) {
+  return layoutOrder(scope.findAll((node) => node.type === 'TEXT'))
+}
+
+function imageNodesInLayoutOrder(scope) {
+  return layoutOrder(scope.findAll((node) => (
+    'fills' in node
+    && Array.isArray(node.fills)
+    && node.fills.some((paint) => paint.type === 'IMAGE' && paint.imageHash)
+  )))
+}
+
+async function copySectionContent(sourceSection, targetSection) {
+  const sourceTexts = textNodesInLayoutOrder(sourceSection)
+  const targetTexts = textNodesInLayoutOrder(targetSection)
+  const sourceImages = imageNodesInLayoutOrder(sourceSection)
+  const targetImages = imageNodesInLayoutOrder(targetSection)
+  let textCount = 0
+  let imageCount = 0
+
+  for (let index = 0; index < Math.min(sourceTexts.length, targetTexts.length); index += 1) {
+    const sourceText = sourceTexts[index]
+    const targetText = targetTexts[index]
+    if (!sourceText.characters.trim()) continue
+    await loadTextNodeFonts(targetText)
+    targetText.characters = sourceText.characters
+    textCount += 1
   }
-  return colors.length >= 3 ? colors : fallback
+
+  for (let index = 0; index < Math.min(sourceImages.length, targetImages.length); index += 1) {
+    const sourceImage = sourceImages[index]
+    const targetImage = targetImages[index]
+    const sourcePaint = sourceImage.fills.find((paint) => paint.type === 'IMAGE' && paint.imageHash)
+    const targetIndex = targetImage.fills.findIndex((paint) => paint.type === 'IMAGE')
+    if (!sourcePaint?.imageHash || targetIndex < 0) continue
+    const targetFills = [...targetImage.fills]
+    targetFills[targetIndex] = { ...targetFills[targetIndex], imageHash: sourcePaint.imageHash }
+    targetImage.fills = targetFills
+    targetImage.setPluginData('source-image', sourceImage.getPluginData('source-image'))
+    imageCount += 1
+  }
+
+  return { textCount, imageCount }
 }
 
 async function restyleReferenceCopy(command) {
@@ -1072,43 +1108,54 @@ async function restyleReferenceCopy(command) {
   }
 
   await figma.setCurrentPageAsync(sourcePage)
-  const copy = source.clone()
+  const replaceFrameId = cleanText(command.payload?.replaceFrameId)
+  if (replaceFrameId) {
+    const previousCopy = await figma.getNodeByIdAsync(replaceFrameId)
+    if (
+      previousCopy
+      && previousCopy.type === 'FRAME'
+      && previousCopy.getPluginData('funtastic-derived-from') === source.id
+      && previousCopy.getPluginData('funtastic-design-reference') === reference.id
+    ) {
+      previousCopy.remove()
+    }
+  }
+
+  // The reference frame is the design source. Clone its full section tree so
+  // checkpoint count, spacing, cards, and visual hierarchy are exactly kept.
+  const copy = reference.clone()
   sourcePage.appendChild(copy)
   copy.name = copyName
   copy.x = source.x + source.width + 160
   copy.y = source.y
-  copy.fills = solidFill(COLORS.paper)
   copy.setPluginData('funtastic-derived-from', source.id)
   copy.setPluginData('funtastic-design-reference', reference.id)
 
-  // Keep the approved copy and image assets intact. Only the direct visual
-  // section surfaces inherit the card-news palette from the reference frame.
-  const palette = sectionColorsFromReference(reference)
-  const sections = copy.children.filter((node) => (
-    node.type === 'FRAME' && node.width >= copy.width * 0.7 && node.height >= 90
-  ))
-  sections.forEach((section, index) => {
-    const hasImageFill = Array.isArray(section.fills) && section.fills.some((paint) => paint.type === 'IMAGE')
-    if (!hasImageFill) section.fills = solidFill(palette[index % palette.length])
-    section.clipsContent = true
-
-    const imageNodes = section.findAll((node) => (
-      'fills' in node
-      && Array.isArray(node.fills)
-      && node.fills.some((paint) => paint.type === 'IMAGE')
-    ))
-    for (const image of imageNodes) {
-      if ('cornerRadius' in image && image.width >= 160 && image.height >= 120) {
-        image.cornerRadius = Math.min(24, Math.round(Math.min(image.width, image.height) * 0.04))
-      }
-    }
-  })
+  // Transfer the approved final content section by section while leaving the
+  // reference frame's card-news layout, checkpoints, spacing, and styling intact.
+  const sourceSections = detailSections(source)
+  const targetSections = detailSections(copy)
+  let copiedTextCount = 0
+  let copiedImageCount = 0
+  for (let index = 0; index < Math.min(sourceSections.length, targetSections.length); index += 1) {
+    const transferred = await copySectionContent(sourceSections[index], targetSections[index])
+    copiedTextCount += transferred.textCount
+    copiedImageCount += transferred.imageCount
+  }
 
   figma.currentPage.selection = [copy]
   figma.viewport.scrollAndZoomIntoView([copy])
   const figmaUrl = `https://www.figma.com/design/${DEFAULT_FILE_KEY}/ai-%EC%83%9D%EC%84%B1-%EC%83%81%EC%84%B8%ED%8E%98%EC%9D%B4%EC%A7%80?node-id=${encodeURIComponent(copy.id.replace(':', '-'))}`
   figma.ui.postMessage({ type: 'reference-copy-created', name: copy.name })
-  return { frameId: copy.id, frameName: copy.name, figmaUrl, sourceFrameId: source.id, referenceFrameId: reference.id }
+  return {
+    frameId: copy.id,
+    frameName: copy.name,
+    figmaUrl,
+    sourceFrameId: source.id,
+    referenceFrameId: reference.id,
+    copiedTextCount,
+    copiedImageCount,
+  }
 }
 
 async function composeFinalDetailPage(command) {

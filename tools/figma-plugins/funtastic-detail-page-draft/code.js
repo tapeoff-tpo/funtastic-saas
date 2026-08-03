@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.16'
+const PLUGIN_VERSION = '1.1.17'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -101,6 +101,13 @@ const PRODUCT_BRIEFS = {
       },
     ],
     coverImage: 'https://cbu01.alicdn.com/img/ibank/O1CN01GzmqXA1TpRoFWCtw2_!!2214157892431-0-cib.jpg',
+    options: [
+      {
+        name: '투명 대형',
+        description: '지름 30.5cm, 높이 10cm의 단일 투명 대형 옵션입니다. 소형이나 다단형은 판매 옵션에 포함하지 않습니다.',
+        image: 'https://cbu01.alicdn.com/img/ibank/O1CN01GzmqXA1TpRoFWCtw2_!!2214157892431-0-cib.jpg',
+      },
+    ],
     structureTitle: '선택 옵션 · 투명 대형',
     structureBody: '소형과 대형을 혼용하지 않았습니다. 직경 30.5cm, 높이 10cm로 저장된 대형 규격만 제품 정보와 사이즈 가이드에 반영했습니다.',
     sizeParts: ['W 30.5 cm', 'D 30.5 cm', 'H 10 cm'],
@@ -354,6 +361,57 @@ async function makeCover(job, brief) {
   return section
 }
 
+function optionEntries(brief) {
+  if (Array.isArray(brief.options) && brief.options.length) return brief.options
+  return [{
+    name: brief.structureTitle.replace(/^선택 옵션\s*[·-]?\s*/, '') || '확인된 옵션',
+    description: brief.structureBody,
+    image: brief.coverImage,
+  }]
+}
+
+async function makeOptionTable(brief) {
+  const options = optionEntries(brief).slice(0, 2)
+  const isSingle = options.length === 1
+  const section = makeSection('01 OPTION GUIDE / MARBIN STYLE', isSingle ? 940 : 860, COLORS.soft)
+  makeLabel(section, 'OPTION GUIDE', 50, 54, 154)
+  appendText(section, '내게 맞는 옵션을 골라보세요', 50, 120, 760, 42, 'Bold')
+  appendText(section, '실제 판매 옵션과 확인된 상품 이미지만 사용했습니다.', 50, 186, 760, 19, 'Regular', COLORS.muted)
+
+  const cardWidth = isSingle ? 760 : 370
+  const cardHeight = isSingle ? 610 : 560
+  const imageWidth = cardWidth - 48
+  const imageHeight = isSingle ? 360 : 300
+  for (const [index, option] of options.entries()) {
+    const card = figma.createFrame()
+    card.name = `OPTION ${String(index + 1).padStart(2, '0')} / ${option.name}`
+    card.resize(cardWidth, cardHeight)
+    card.x = 50 + (isSingle ? 0 : index * 390)
+    card.y = 250
+    card.cornerRadius = 22
+    card.fills = [{ type: 'SOLID', color: COLORS.paper }]
+
+    const image = await makeImage(option.image, imageWidth, imageHeight, `${card.name} · 실제 옵션 이미지`)
+    image.x = 24
+    image.y = 24
+    card.appendChild(image)
+
+    const badge = figma.createEllipse()
+    badge.resize(48, 48)
+    badge.x = 42
+    badge.y = 42
+    badge.fills = [{ type: 'SOLID', color: COLORS.amber }]
+    card.appendChild(badge)
+    const badgeText = appendText(card, String(index + 1).padStart(2, '0'), 42, 58, 48, 16, 'Bold', COLORS.paper)
+    badgeText.textAlignHorizontal = 'CENTER'
+
+    appendText(card, option.name, 24, imageHeight + 52, imageWidth, 28, 'Bold')
+    appendText(card, option.description, 24, imageHeight + 104, imageWidth, 18, 'Regular', COLORS.muted)
+    section.appendChild(card)
+  }
+  return section
+}
+
 function makeIntro(brief) {
   const section = makeSection('01 PRODUCT STORY', 700, COLORS.soft)
   makeLabel(section, 'WHY THIS PRODUCT', 50, 54, 190)
@@ -546,6 +604,32 @@ function makeCautions(brief) {
   return section
 }
 
+function makeStandardCautions(brief) {
+  const section = makeSection('09 NOTICE / FIXED CAUTIONS', 1160, COLORS.paper)
+  const panel = figma.createFrame()
+  panel.name = '주의사항 / 고정 7문구 + 제품별 안내'
+  panel.resize(760, 1040)
+  panel.x = 50
+  panel.y = 60
+  panel.fills = [{ type: 'SOLID', color: COLORS.soft }]
+  section.appendChild(panel)
+  appendText(panel, '주의사항', 32, 42, 680, 42, 'Bold', COLORS.red)
+  REQUIRED_CAUTIONS.forEach((item, index) => {
+    appendText(panel, item, 32, 142 + index * 64, 690, 18, 'Regular', COLORS.ink)
+  })
+  const divider = figma.createRectangle()
+  divider.resize(696, 2)
+  divider.x = 32
+  divider.y = 650
+  divider.fills = [{ type: 'SOLID', color: COLORS.line }]
+  panel.appendChild(divider)
+  appendText(panel, '제품별 주의사항', 32, 700, 690, 24, 'Bold')
+  brief.specificCautions.forEach((item, index) => {
+    appendText(panel, `- ${item}`, 32, 756 + index * 70, 690, 18, 'Regular', COLORS.ink)
+  })
+  return section
+}
+
 async function cloneIpNotice() {
   const source = await figma.getNodeByIdAsync(IP_NOTICE_NODE_ID)
   if (!source || !('clone' in source)) {
@@ -604,6 +688,7 @@ async function buildDraft(job) {
 
   try {
     scratch.appendChild(await makeCover(job, brief))
+    scratch.appendChild(await makeOptionTable(brief))
     scratch.appendChild(makeIntro(brief))
     scratch.appendChild(makeFacts(brief))
     for (const [index, checkpoint] of brief.checkpoints.entries()) {
@@ -612,7 +697,7 @@ async function buildDraft(job) {
     scratch.appendChild(makeStructure(brief))
     scratch.appendChild(makeSizeGuide(job.product, brief))
     scratch.appendChild(makeProductInfo(job.product))
-    scratch.appendChild(makeCautions(brief))
+    scratch.appendChild(makeStandardCautions(brief))
     scratch.appendChild(await cloneIpNotice())
 
     const x = target.x

@@ -1,6 +1,7 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.17'
+const PLUGIN_VERSION = '1.1.18'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
+const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
 const BRIDGE_STATE_KEY = 'funtastic-detail-page-bridge'
@@ -661,15 +662,29 @@ async function resolveTargetFrame(job, brief) {
   throw new Error(`자료 보완 필요: 재제작 대상 프레임(${requestedId || job.product.sku})을 찾지 못했습니다.`)
 }
 
+async function placeOnSharedDetailCanvas(target) {
+  const anchor = await figma.getNodeByIdAsync(CANONICAL_DETAIL_PAGE_ANCHOR_ID)
+  if (!anchor || anchor.type !== 'FRAME' || !anchor.parent || anchor.parent.type !== 'PAGE') {
+    if (!target.parent || target.parent.type !== 'PAGE') {
+      throw new Error('자료 보완 필요: 상세페이지 공용 캔버스를 찾지 못했습니다.')
+    }
+    return target.parent
+  }
+
+  const sharedPage = anchor.parent
+  if (target.parent !== sharedPage) sharedPage.appendChild(target)
+  target.x = anchor.x + anchor.width + 160
+  target.y = anchor.y
+  return sharedPage
+}
+
 async function buildDraft(job) {
   await loadFonts()
   const brief = PRODUCT_BRIEFS[job.product.sku]
   if (!brief) throw new Error(`자료 보완 필요: ${job.product.sku}의 검증된 제작 브리프가 없습니다.`)
   const target = await resolveTargetFrame(job, brief)
-  if (!target.parent || target.parent.type !== 'PAGE') {
-    throw new Error('자료 보완 필요: 대상 프레임이 Figma 페이지 최상위에 있지 않습니다.')
-  }
-  await figma.setCurrentPageAsync(target.parent)
+  const sharedPage = await placeOnSharedDetailCanvas(target)
+  await figma.setCurrentPageAsync(sharedPage)
 
   const scratch = figma.createFrame()
   scratch.name = `BUILDING · ${job.product.sku}`

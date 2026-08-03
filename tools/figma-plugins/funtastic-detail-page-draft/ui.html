@@ -78,6 +78,9 @@
         if (data.type === 'final-composed') { message.textContent = `${data.name} 프레임을 만들었습니다.`; setBusy(false) }
         if (data.type === 'error') { message.textContent = data.message; setBusy(false) }
       }
+      // Figma can post initial state before this iframe has installed its listener.
+      // Ask for it once the UI is ready so restored pairings also start polling.
+      parent.postMessage({ pluginMessage: { type: 'ui-ready' } }, '*')
     </script>
   </body>
 </html>

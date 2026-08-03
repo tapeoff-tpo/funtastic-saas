@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.14'
+const PLUGIN_VERSION = '1.1.15'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -1067,6 +1067,7 @@ async function runSync(silent) {
 
 figma.ui.onmessage = async (message) => {
   try {
+    if (message.type === 'ui-ready') await initialize()
     if (message.type === 'pair') await pair(message)
     if (message.type === 'sync') await sync()
     if (message.type === 'capture-comparison') await requestComparisonCapture()

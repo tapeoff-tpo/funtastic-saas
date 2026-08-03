@@ -16,6 +16,11 @@ const COLORS = {
   mint: { r: 0.91, g: 0.96, b: 0.94 },
   amber: { r: 0.98, g: 0.74, b: 0.22 },
   red: { r: 0.72, g: 0.08, b: 0.08 },
+  navy: { r: 0.06, g: 0.16, b: 0.24 },
+  sky: { r: 0.89, g: 0.94, b: 0.98 },
+  coral: { r: 0.9, g: 0.28, b: 0.21 },
+  peach: { r: 0.99, g: 0.92, b: 0.86 },
+  lavender: { r: 0.92, g: 0.91, b: 0.98 },
 }
 
 const REQUIRED_CAUTIONS = [
@@ -161,9 +166,17 @@ const PRODUCT_BRIEFS = {
 }
 
 Object.assign(PRODUCT_BRIEFS['112313-0001'], {
+  theme: {
+    dark: COLORS.navy,
+    soft: COLORS.sky,
+    warm: COLORS.peach,
+    accent: COLORS.coral,
+    accentSoft: COLORS.lavender,
+  },
   eyebrow: 'FRONT + TOP DOUBLE DOOR',
   headline: '앞문과 윗문을 더한\n반려동물 더블도어 켄넬',
   subhead: '이동 전후의 케어 동선을 한결 편하게 만드는 이중 개방 구조',
+  introHeading: '집에서 차까지,\n한 손으로 이어지는 이동 준비',
   intro: '반려동물을 꺼내고, 물이나 간식을 챙기고, 상태를 확인하는 순간마다 문을 여는 방향을 달리할 수 있습니다. 전면과 상단의 두 개 문을 실용적으로 나눈 이동 켄넬입니다.',
   facts: [
     ['DOUBLE DOOR', '전면 + 상단 이중 개방'],
@@ -180,24 +193,25 @@ Object.assign(PRODUCT_BRIEFS['112313-0001'], {
   ],
   checkpoints: [
     {
-      title: '전면과 상단, 상황에 맞게 여는 더블도어',
-      body: '반려동물을 꺼낼 때는 앞문으로, 이동 중 상태를 살피거나 간식을 챙길 때는 상단 문으로 편하게 접근할 수 있습니다.',
-      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01R97wM81oGjru21QMm_!!2097675198-0-cib.jpg',
-      maskTop: true,
+      title: '차에 싣기 전까지 이어지는 이동 동선',
+      cardTitle: '출발 준비도\n차분하게',
+      body: '현관에서 차량까지 옮길 때, 바닥을 안정적으로 받쳐 들고 이동하기 좋은 켄넬 형태입니다.',
+      image: `${SERVER_URL}/detail-page-assets/delto-kennel-car-loading-v1.png`,
     },
     {
-      title: '답답함을 줄이는 사방 환기 구조',
-      body: '측면과 하부에 배치된 환기 슬롯으로 이동 중에도 내부 공기가 한곳에 머물지 않도록 도와줍니다.',
-      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01XJkN9F1oGjrtSIyak_!!2097675198-0-cib.jpg',
-      maskTop: true,
+      title: '닫은 상태에서도 살피기 쉬운 전면 도어',
+      cardTitle: '문을 닫아도\n서로 보이는 거리',
+      body: '전면 철제 도어와 측면 환기 슬롯을 통해 이동 전후 반려동물 상태를 자연스럽게 확인할 수 있습니다.',
+      image: `${SERVER_URL}/detail-page-assets/delto-kennel-door-vent-v1.png`,
     },
     {
-      title: '문을 열지 않아도 챙기는 도어 식기',
-      body: '앞문에 걸어두는 전용 식기로, 문을 열지 않아도 물이나 간식을 챙기기 편합니다.',
-      image: 'https://cbu01.alicdn.com/img/ibank/O1CN01Z8uPfA1oGjrtMviac_!!2097675198-0-cib.jpg',
-      maskTop: true,
+      title: '한 손에 잡히는 상단 손잡이',
+      cardTitle: '가볍게 들고\n다음 장소로',
+      body: '상단 손잡이를 잡고 이동할 수 있어 외출, 병원 방문, 짧은 드라이브 준비에 활용하기 좋습니다.',
+      image: `${SERVER_URL}/detail-page-assets/delto-kennel-outdoor-travel-v1.png`,
     },
   ],
+  coverImage: `${SERVER_URL}/detail-page-assets/delto-kennel-outdoor-travel-v1.png`,
   structureTitle: '그레이블랙 단일 옵션',
   structureBody: '그레이 PP 바디, 블랙 철제 도어, 앞문 전용 식기까지 실제 판매 구성으로 확인된 요소만 담았습니다.',
   sizeParts: ['W 58 cm', 'D 37 cm', 'H 37 cm'],
@@ -271,14 +285,14 @@ function appendText(section, value, x, y, width, size, style = 'Regular', color 
   return node
 }
 
-function makeLabel(section, value, x, y, width = 180) {
+function makeLabel(section, value, x, y, width = 180, fill = COLORS.green) {
   const badge = figma.createFrame()
   badge.name = value
   badge.resize(width, 34)
   badge.x = x
   badge.y = y
   badge.cornerRadius = 17
-  badge.fills = [{ type: 'SOLID', color: COLORS.green }]
+  badge.fills = [{ type: 'SOLID', color: fill }]
   badge.appendChild(makeText(value, 12, 'Bold', COLORS.paper, width - 24))
   const label = badge.children[0]
   label.x = 12
@@ -312,6 +326,16 @@ async function makeImage(url, width, height, name) {
   node.fills = [{ type: 'IMAGE', imageHash: await imagePaint(url), scaleMode: 'FILL' }]
   node.setPluginData('source-image', normalizeImageUrl(url))
   return node
+}
+
+function pageTheme(brief) {
+  return brief.theme || {
+    dark: COLORS.green,
+    soft: COLORS.mint,
+    warm: COLORS.soft,
+    accent: COLORS.amber,
+    accentSoft: COLORS.paper,
+  }
 }
 
 async function replaceSelectedImage(imageUrl) {
@@ -437,15 +461,34 @@ async function replaceTextInFrame(command) {
 }
 
 async function makeCover(job, brief) {
-  const section = makeSection('00 COVER', 1260, COLORS.paper)
-  appendText(section, 'FUNTASTIC SELECT', 50, 48, 760, 14, 'Bold', COLORS.green)
-  appendText(section, job.product.name, 50, 96, 760, 22, 'Semi Bold', COLORS.muted)
-  appendText(section, brief.headline, 50, 156, 760, 52, 'Bold', COLORS.ink)
-  appendText(section, brief.subhead, 50, 300, 760, 21, 'Regular', COLORS.muted)
-  const image = await makeImage(brief.coverImage, 760, 790, '대표 이미지 · 실제 상품')
-  image.x = 50
-  image.y = 410
-  section.appendChild(image)
+  const theme = pageTheme(brief)
+  const section = makeSection('00 COVER / CARD NEWS', 1320, theme.soft)
+  const heroCard = figma.createFrame()
+  heroCard.name = 'COVER IMAGE CARD'
+  heroCard.resize(760, 820)
+  heroCard.x = 50
+  heroCard.y = 420
+  heroCard.cornerRadius = 28
+  heroCard.fills = [{ type: 'SOLID', color: theme.dark }]
+  section.appendChild(heroCard)
+  makeLabel(section, 'FUNTASTIC SELECT', 50, 48, 176, theme.accent)
+  appendText(section, job.product.name, 50, 108, 760, 22, 'Semi Bold', COLORS.muted)
+  appendText(section, brief.headline, 50, 170, 760, 52, 'Bold', theme.dark)
+  appendText(section, brief.subhead, 50, 316, 760, 21, 'Regular', COLORS.muted)
+  const image = await makeImage(brief.coverImage, 712, 728, '대표 이미지 · 이동 연출')
+  image.cornerRadius = 20
+  image.x = 24
+  image.y = 24
+  heroCard.appendChild(image)
+  const caption = figma.createFrame()
+  caption.name = 'COVER USP CARD'
+  caption.resize(712, 44)
+  caption.x = 24
+  caption.y = 752
+  caption.cornerRadius = 12
+  caption.fills = [{ type: 'SOLID', color: theme.accent }]
+  appendText(caption, 'DOUBLE DOOR · READY FOR THE NEXT TRIP', 22, 13, 668, 14, 'Bold', COLORS.paper)
+  heroCard.appendChild(caption)
   return section
 }
 
@@ -461,10 +504,11 @@ function optionEntries(brief) {
 async function makeOptionTable(brief) {
   const options = optionEntries(brief).slice(0, 2)
   const isSingle = options.length === 1
-  const section = makeSection('01 OPTION GUIDE / MARBIN STYLE', isSingle ? 940 : 860, COLORS.soft)
-  makeLabel(section, 'OPTION GUIDE', 50, 54, 154)
+  const theme = pageTheme(brief)
+  const section = makeSection('01 OPTION GUIDE / MARBIN STYLE', isSingle ? 940 : 860, theme.warm)
+  makeLabel(section, 'OPTION GUIDE', 50, 54, 154, theme.dark)
   appendText(section, '내게 맞는 옵션을 골라보세요', 50, 120, 760, 42, 'Bold')
-  appendText(section, '실제 판매 옵션과 확인된 상품 이미지만 사용했습니다.', 50, 186, 760, 19, 'Regular', COLORS.muted)
+  appendText(section, '사용 환경에 자연스럽게 어울리는 그레이블랙 단일 옵션입니다.', 50, 186, 760, 19, 'Regular', COLORS.muted)
 
   const cardWidth = isSingle ? 760 : 370
   const cardHeight = isSingle ? 610 : 560
@@ -488,7 +532,7 @@ async function makeOptionTable(brief) {
     badge.resize(48, 48)
     badge.x = 42
     badge.y = 42
-    badge.fills = [{ type: 'SOLID', color: COLORS.amber }]
+    badge.fills = [{ type: 'SOLID', color: theme.accent }]
     card.appendChild(badge)
     const badgeText = appendText(card, String(index + 1).padStart(2, '0'), 42, 58, 48, 16, 'Bold', COLORS.paper)
     badgeText.textAlignHorizontal = 'CENTER'
@@ -501,25 +545,28 @@ async function makeOptionTable(brief) {
 }
 
 function makeIntro(brief) {
-  const section = makeSection('01 PRODUCT STORY', 700, COLORS.soft)
-  makeLabel(section, 'WHY THIS PRODUCT', 50, 54, 190)
-  appendText(section, '꺼내는 동선을 바꾸면\n정리가 더 단순해집니다.', 50, 122, 760, 42, 'Bold')
-  appendText(section, brief.intro, 50, 248, 760, 21, 'Regular', COLORS.muted)
+  const theme = pageTheme(brief)
+  const section = makeSection('02 PRODUCT STORY', 700, theme.dark)
+  makeLabel(section, 'WHY THIS PRODUCT', 50, 54, 190, theme.accent)
+  appendText(section, brief.introHeading || '꺼내는 동선을 바꾸면\n정리가 더 단순해집니다.', 50, 122, 760, 42, 'Bold', COLORS.paper)
+  appendText(section, brief.intro, 50, 248, 760, 21, 'Regular', COLORS.paper)
   const line = figma.createRectangle()
   line.resize(760, 2)
   line.x = 50
   line.y = 420
-  line.fills = [{ type: 'SOLID', color: COLORS.line }]
+  line.fills = [{ type: 'SOLID', color: theme.accentSoft }]
   section.appendChild(line)
-  appendText(section, brief.eyebrow, 50, 472, 760, 16, 'Bold', COLORS.green)
-  appendText(section, '실제 1688 상품 구조와 선택 옵션을 대조한 내용만 사용했습니다.', 50, 520, 760, 20, 'Semi Bold')
+  appendText(section, brief.eyebrow, 50, 472, 760, 16, 'Bold', theme.accentSoft)
+  appendText(section, '반려동물과 함께하는 다음 이동을 더 편안하게 준비해보세요.', 50, 520, 760, 20, 'Semi Bold', COLORS.paper)
   return section
 }
 
 function makeFacts(brief) {
-  const section = makeSection('02 VERIFIED FACTS', 760, COLORS.paper)
-  makeLabel(section, 'VERIFIED FACTS', 50, 54, 170)
-  appendText(section, '확인된 핵심 정보 4가지', 50, 118, 760, 40, 'Bold')
+  const theme = pageTheme(brief)
+  const cardFills = [theme.soft, theme.warm, theme.accentSoft, COLORS.paper]
+  const section = makeSection('03 KEY POINTS', 760, COLORS.paper)
+  makeLabel(section, 'KEY POINTS', 50, 54, 150, theme.dark)
+  appendText(section, '이동 전에 확인하는\n델토 켄넬의 핵심 포인트', 50, 118, 760, 40, 'Bold', theme.dark)
   brief.facts.forEach(([label, value], index) => {
     const card = figma.createFrame()
     card.name = `${label} · ${value}`
@@ -527,43 +574,46 @@ function makeFacts(brief) {
     card.x = 50 + (index % 2) * 390
     card.y = 210 + Math.floor(index / 2) * 210
     card.cornerRadius = 18
-    card.fills = [{ type: 'SOLID', color: index === 0 ? COLORS.mint : COLORS.soft }]
-    appendText(card, label, 24, 28, 320, 13, 'Bold', COLORS.green)
+    card.fills = [{ type: 'SOLID', color: cardFills[index % cardFills.length] }]
+    appendText(card, label, 24, 28, 320, 13, 'Bold', theme.dark)
     appendText(card, value, 24, 76, 320, 23, 'Bold')
     section.appendChild(card)
   })
   return section
 }
 
-async function makeCheckpoint(index, checkpoint) {
-  const section = makeSection(`CHECK POINT ${String(index).padStart(2, '0')}`, 1100, COLORS.paper)
-  makeLabel(section, `CHECK POINT ${String(index).padStart(2, '0')}`, 50, 48, 168)
-  appendText(section, checkpoint.title, 50, 112, 760, 40, 'Bold')
-  appendText(section, checkpoint.body, 50, 178, 760, 19, 'Regular', COLORS.muted)
+async function makeCheckpoint(index, checkpoint, brief) {
+  const theme = pageTheme(brief)
+  const fills = [COLORS.paper, theme.soft, theme.warm]
+  const panelFills = [theme.dark, theme.accent, COLORS.green]
+  const section = makeSection(`CHECK POINT ${String(index).padStart(2, '0')} / CARD NEWS`, 1040, fills[(index - 1) % fills.length])
+  makeLabel(section, `CHECK POINT ${String(index).padStart(2, '0')}`, 50, 48, 168, panelFills[(index - 1) % panelFills.length])
+  appendText(section, checkpoint.title, 50, 112, 760, 40, 'Bold', theme.dark)
 
   if (checkpoint.image) {
-    const image = await makeImage(checkpoint.image, 760, 720, `${section.name} · ${checkpoint.title}`)
+    const image = await makeImage(checkpoint.image, 470, 620, `${section.name} · ${checkpoint.title}`)
     image.x = 50
-    image.y = 320
+    image.y = 280
+    image.cornerRadius = 22
     section.appendChild(image)
-    if (checkpoint.maskTop) {
-      const mask = figma.createRectangle()
-      mask.resize(760, 110)
-      mask.x = 50
-      mask.y = 320
-      mask.fills = [{ type: 'SOLID', color: COLORS.ink }]
-      section.appendChild(mask)
-      appendText(section, checkpoint.title, 76, 352, 700, 22, 'Bold', COLORS.paper)
-    }
-    if (checkpoint.maskBottom) {
-      const mask = figma.createRectangle()
-      mask.resize(760, 130)
-      mask.x = 50
-      mask.y = 910
-      mask.fills = [{ type: 'SOLID', color: COLORS.paper }]
-      section.appendChild(mask)
-      appendText(section, '360° ROTATION · 실제 공급처 기능 확인', 76, 948, 700, 18, 'Bold', COLORS.green)
-    }
+    const copyCard = figma.createFrame()
+    copyCard.name = `CHECK POINT ${String(index).padStart(2, '0')} / USP CARD`
+    copyCard.resize(266, 620)
+    copyCard.x = 544
+    copyCard.y = 280
+    copyCard.cornerRadius = 22
+    copyCard.fills = [{ type: 'SOLID', color: panelFills[(index - 1) % panelFills.length] }]
+    appendText(copyCard, `MOMENT 0${index}`, 26, 44, 214, 14, 'Bold', COLORS.paper)
+    appendText(copyCard, checkpoint.cardTitle || checkpoint.title, 26, 104, 214, 31, 'Bold', COLORS.paper)
+    appendText(copyCard, checkpoint.body, 26, 252, 214, 18, 'Regular', COLORS.paper)
+    const divider = figma.createRectangle()
+    divider.resize(214, 2)
+    divider.x = 26
+    divider.y = 510
+    divider.fills = [{ type: 'SOLID', color: COLORS.paper }]
+    copyCard.appendChild(divider)
+    appendText(copyCard, 'FUNTASTIC PET TRAVEL', 26, 548, 214, 12, 'Bold', COLORS.paper)
+    section.appendChild(copyCard)
   } else {
     const diagram = figma.createFrame()
     diagram.name = '구조 설명 다이어그램'
@@ -592,9 +642,10 @@ async function makeCheckpoint(index, checkpoint) {
 }
 
 function makeStructure(brief) {
-  const section = makeSection('06 OPTION & STRUCTURE', 740, COLORS.mint)
-  makeLabel(section, 'OPTION CHECK', 50, 54, 156)
-  appendText(section, brief.structureTitle, 50, 122, 760, 40, 'Bold')
+  const theme = pageTheme(brief)
+  const section = makeSection('07 OPTION & STRUCTURE', 740, theme.accentSoft)
+  makeLabel(section, 'TRAVEL DETAIL', 50, 54, 156, theme.dark)
+  appendText(section, brief.structureTitle, 50, 122, 760, 40, 'Bold', theme.dark)
   appendText(section, brief.structureBody, 50, 198, 760, 20, 'Regular', COLORS.muted)
   const panel = figma.createFrame()
   panel.name = '옵션 혼용 금지 안내'
@@ -603,31 +654,32 @@ function makeStructure(brief) {
   panel.y = 390
   panel.cornerRadius = 20
   panel.fills = [{ type: 'SOLID', color: COLORS.paper }]
-  appendText(panel, 'SOURCE MATCHED', 32, 34, 300, 14, 'Bold', COLORS.green)
-  appendText(panel, '구조 · 옵션 · 비율 교차 확인', 32, 86, 680, 27, 'Bold')
-  appendText(panel, '다른 옵션 이미지, 추정 규격, 확인되지 않은 기능은 넣지 않았습니다.', 32, 148, 680, 18, 'Regular', COLORS.muted)
+  appendText(panel, 'TRAVEL ROUTINE', 32, 34, 300, 14, 'Bold', theme.accent)
+  appendText(panel, '외출 준비부터 도착 후 휴식까지', 32, 86, 680, 27, 'Bold', theme.dark)
+  appendText(panel, '집 안에서 익숙해진 켄넬을 그대로 들어 이동하면 낯선 장소에서도 반려동물이 쉴 자리를 준비하기 편합니다.', 32, 148, 680, 18, 'Regular', COLORS.muted)
   section.appendChild(panel)
   return section
 }
 
 function makeSizeGuide(product, brief) {
-  const section = makeSection('07 SIZE GUIDE', 900, COLORS.paper)
-  makeLabel(section, 'SIZE GUIDE', 50, 54, 138)
+  const theme = pageTheme(brief)
+  const section = makeSection('08 SIZE GUIDE', 900, COLORS.paper)
+  makeLabel(section, 'SIZE GUIDE', 50, 54, 138, theme.accent)
   appendText(section, '구매 전 실제 설치·사용 공간을\n반드시 확인해주세요.', 50, 122, 760, 40, 'Bold')
-  appendText(section, `SaaS 저장 규격 · ${product.size || '자료 보완 필요'}`, 50, 244, 760, 19, 'Semi Bold', COLORS.green)
+  appendText(section, `제품 표기 규격 · ${product.size || '자료 보완 필요'}`, 50, 244, 760, 19, 'Semi Bold', theme.dark)
   const diagram = figma.createFrame()
   diagram.name = '제품 규격 다이어그램'
   diagram.resize(760, 470)
   diagram.x = 50
   diagram.y = 350
   diagram.cornerRadius = 20
-  diagram.fills = [{ type: 'SOLID', color: COLORS.soft }]
+  diagram.fills = [{ type: 'SOLID', color: theme.soft }]
   const box = figma.createRectangle()
   box.resize(390, 230)
   box.x = 185
   box.y = 80
   box.fills = []
-  box.strokes = [{ type: 'SOLID', color: COLORS.green }]
+  box.strokes = [{ type: 'SOLID', color: theme.dark }]
   box.strokeWeight = 3
   diagram.appendChild(box)
   brief.sizeParts.forEach((value, index) => {
@@ -637,7 +689,7 @@ function makeSizeGuide(product, brief) {
     pill.y = 365
     pill.cornerRadius = 27
     pill.fills = [{ type: 'SOLID', color: COLORS.paper }]
-    const sizeText = appendText(pill, value, 12, 16, 176, 17, 'Bold', COLORS.green)
+    const sizeText = appendText(pill, value, 12, 16, 176, 17, 'Bold', theme.dark)
     sizeText.textAlignHorizontal = 'CENTER'
     diagram.appendChild(pill)
   })
@@ -646,7 +698,7 @@ function makeSizeGuide(product, brief) {
 }
 
 function makeProductInfo(product) {
-  const section = makeSection('08 PRODUCT INFO', 920, COLORS.soft)
+  const section = makeSection('09 PRODUCT INFO', 920, COLORS.soft)
   makeLabel(section, 'PRODUCT INFO', 50, 54, 166)
   appendText(section, '제품 정보', 50, 120, 760, 40, 'Bold')
   const fields = [
@@ -693,7 +745,7 @@ function makeCautions(brief) {
 }
 
 function makeStandardCautions(brief) {
-  const section = makeSection('09 NOTICE / FIXED CAUTIONS', 1160, COLORS.paper)
+  const section = makeSection('10 NOTICE / FIXED CAUTIONS', 1160, COLORS.paper)
   const panel = figma.createFrame()
   panel.name = '주의사항 / 고정 7문구 + 제품별 안내'
   panel.resize(760, 1040)
@@ -724,7 +776,7 @@ async function cloneIpNotice() {
     throw new Error('자료 보완 필요: 기존 상세페이지의 지정 IP 안내 이미지 노드를 찾지 못했습니다.')
   }
   const clone = source.clone()
-  clone.name = '10 IP 안내 이미지 · 지정 원본'
+  clone.name = '11 IP 안내 이미지 · 지정 원본'
   if (Math.abs(clone.width - 860) > 1) {
     const sourceWidth = clone.width
     clone.remove()
@@ -794,7 +846,7 @@ async function buildDraft(job) {
     scratch.appendChild(makeIntro(brief))
     scratch.appendChild(makeFacts(brief))
     for (const [index, checkpoint] of brief.checkpoints.entries()) {
-      scratch.appendChild(await makeCheckpoint(index + 1, checkpoint))
+      scratch.appendChild(await makeCheckpoint(index + 1, checkpoint, brief))
     }
     scratch.appendChild(makeStructure(brief))
     scratch.appendChild(makeSizeGuide(job.product, brief))

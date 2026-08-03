@@ -206,9 +206,9 @@ Object.assign(PRODUCT_BRIEFS['112313-0001'], {
     },
     {
       title: '한 손에 잡히는 상단 손잡이',
-      cardTitle: '가볍게 들고\n다음 장소로',
-      body: '상단 손잡이를 잡고 이동할 수 있어 외출, 병원 방문, 짧은 드라이브 준비에 활용하기 좋습니다.',
-      image: `${SERVER_URL}/detail-page-assets/delto-kennel-outdoor-travel-v1.png`,
+      cardTitle: '도착한 곳에서도\n곁에 두기',
+      body: '상단 손잡이를 잡고 이동해 병원 대기, 외출, 짧은 드라이브처럼 반려동물과 함께 머무는 순간에 활용하기 좋습니다.',
+      image: `${SERVER_URL}/detail-page-assets/delto-kennel-clinic-wait-v1.png`,
     },
   ],
   coverImage: `${SERVER_URL}/detail-page-assets/delto-kennel-outdoor-travel-v1.png`,

@@ -57,8 +57,7 @@
         parent.postMessage({ pluginMessage: { type: 'capture-comparison' } }, '*')
       }
       setInterval(() => {
-        if (!paired) return
-        parent.postMessage({ pluginMessage: { type: 'sync', automatic: true } }, '*')
+        parent.postMessage({ pluginMessage: { type: 'heartbeat' } }, '*')
       }, 5000)
       onmessage = (event) => {
         const data = event.data.pluginMessage

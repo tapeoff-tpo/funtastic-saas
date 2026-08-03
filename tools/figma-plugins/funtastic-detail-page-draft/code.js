@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.15'
+const PLUGIN_VERSION = '1.1.16'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IP_NOTICE_NODE_ID = '184:51'
@@ -970,6 +970,15 @@ function startAutomaticSync() {
   })
 }
 
+async function heartbeat() {
+  const state = await readBridgeState()
+  if (!state?.bridgeToken) {
+    await initialize()
+    return
+  }
+  await sync(true)
+}
+
 async function sync(silent = false) {
   if (activeSync) return activeSync
   activeSync = runSync(silent)
@@ -1068,6 +1077,7 @@ async function runSync(silent) {
 figma.ui.onmessage = async (message) => {
   try {
     if (message.type === 'ui-ready') await initialize()
+    if (message.type === 'heartbeat') await heartbeat()
     if (message.type === 'pair') await pair(message)
     if (message.type === 'sync') await sync()
     if (message.type === 'capture-comparison') await requestComparisonCapture()

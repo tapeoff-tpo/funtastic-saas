@@ -538,6 +538,13 @@ function metadataWithPurchasingItemData(metadata: unknown, esa009m: Esa009mData)
   const root = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
     ? metadata as Record<string, unknown>
     : {}
+  const currentData = normalizeEsaData(root.esa009m)
+  const purchaseUrlChanged = currentData[PURCHASE_URL_HEADER]?.trim()
+    !== esa009m[PURCHASE_URL_HEADER]?.trim()
+  if (!purchaseUrlChanged) {
+    return { ...root, esa009m }
+  }
+
   const hasReplacementUrl = Boolean(esa009m[PURCHASE_URL_HEADER]?.trim())
   const withoutVerification = { ...root }
   delete withoutVerification.purchaseUrlVerification

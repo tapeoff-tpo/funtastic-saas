@@ -349,6 +349,16 @@ async function replaceImageAtNode(command) {
   return { imageNodeName: imageNode.name, matchedByName }
 }
 
+async function loadTextNodeFonts(node) {
+  const fonts = new Map()
+  for (let index = 0; index < node.characters.length; index += 1) {
+    const font = node.getRangeFontName(index, index + 1)
+    if (font === figma.mixed || !font?.family || !font?.style) continue
+    fonts.set(`${font.family}:${font.style}`, font)
+  }
+  await Promise.all([...fonts.values()].map((font) => figma.loadFontAsync(font)))
+}
+
 async function replaceTextInFrame(command) {
   await figma.loadAllPagesAsync()
   await loadFonts()
@@ -370,6 +380,7 @@ async function replaceTextInFrame(command) {
       missing.push(from)
       continue
     }
+    await loadTextNodeFonts(node)
     node.characters = to
     applied.push(node.name || from)
   }

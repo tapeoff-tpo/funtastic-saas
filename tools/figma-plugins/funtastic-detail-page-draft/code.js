@@ -1043,6 +1043,10 @@ function detailSections(frame) {
   )))
 }
 
+function checkpointSections(frame) {
+  return detailSections(frame).filter((section) => /check\s*point/i.test(section.name))
+}
+
 function textNodesInLayoutOrder(scope) {
   return layoutOrder(scope.findAll((node) => node.type === 'TEXT'))
 }
@@ -1121,9 +1125,9 @@ async function restyleReferenceCopy(command) {
     }
   }
 
-  // The reference frame is the design source. Clone its full section tree so
-  // checkpoint count, spacing, cards, and visual hierarchy are exactly kept.
-  const copy = reference.clone()
+  // Preserve the approved final page as-is. Only checkpoint sections are
+  // rebuilt from the reference card-news layout.
+  const copy = source.clone()
   sourcePage.appendChild(copy)
   copy.name = copyName
   copy.x = source.x + source.width + 160
@@ -1131,16 +1135,43 @@ async function restyleReferenceCopy(command) {
   copy.setPluginData('funtastic-derived-from', source.id)
   copy.setPluginData('funtastic-design-reference', reference.id)
 
-  // Transfer the approved final content section by section while leaving the
-  // reference frame's card-news layout, checkpoints, spacing, and styling intact.
-  const sourceSections = detailSections(source)
-  const targetSections = detailSections(copy)
+  const sourceCheckpoints = checkpointSections(source)
+  const targetCheckpoints = checkpointSections(copy)
+  const referenceCheckpoints = checkpointSections(reference)
+  if (!sourceCheckpoints.length || sourceCheckpoints.length !== targetCheckpoints.length || !referenceCheckpoints.length) {
+    throw new Error('The checkpoint sections could not be matched between the final and reference frames.')
+  }
+
   let copiedTextCount = 0
   let copiedImageCount = 0
-  for (let index = 0; index < Math.min(sourceSections.length, targetSections.length); index += 1) {
-    const transferred = await copySectionContent(sourceSections[index], targetSections[index])
+  let checkpointCount = 0
+  for (let index = 0; index < Math.min(sourceCheckpoints.length, referenceCheckpoints.length); index += 1) {
+    const sourceCheckpoint = sourceCheckpoints[index]
+    const targetCheckpoint = targetCheckpoints[index]
+    const replacement = referenceCheckpoints[index].clone()
+    replacement.name = sourceCheckpoint.name
+    const transferred = await copySectionContent(sourceCheckpoint, replacement)
     copiedTextCount += transferred.textCount
     copiedImageCount += transferred.imageCount
+
+    const previousHeight = targetCheckpoint.height
+    const nextHeight = replacement.height
+    const heightDelta = nextHeight - previousHeight
+    const targetIndex = copy.children.indexOf(targetCheckpoint)
+    const targetY = targetCheckpoint.y
+    replacement.x = targetCheckpoint.x
+    replacement.y = targetY
+    copy.insertChild(targetIndex, replacement)
+    targetCheckpoint.remove()
+
+    if (heightDelta !== 0) {
+      for (const child of copy.children) {
+        if (child.type === 'FRAME' && child.id !== replacement.id && child.y > targetY) {
+          child.y += heightDelta
+        }
+      }
+    }
+    checkpointCount += 1
   }
 
   figma.currentPage.selection = [copy]
@@ -1153,6 +1184,7 @@ async function restyleReferenceCopy(command) {
     figmaUrl,
     sourceFrameId: source.id,
     referenceFrameId: reference.id,
+    checkpointCount,
     copiedTextCount,
     copiedImageCount,
   }

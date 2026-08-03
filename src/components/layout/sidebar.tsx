@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -34,7 +34,7 @@ import {
   CalendarDays,
   PanelsTopLeft,
 } from 'lucide-react'
-import { createClient } from '@/lib/supabase/client'
+import { signOut } from '@/app/(auth)/actions'
 import { useNavState } from './nav-state'
 import {
   applySidebarMenuOrder,
@@ -191,7 +191,6 @@ interface SidebarProps {
 
 export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const pathname = usePathname()
-  const router = useRouter()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
   const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
@@ -213,12 +212,6 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
       window.removeEventListener('storage', syncOrder)
     }
   }, [])
-
-  async function handleSignOut() {
-    const supabase = createClient()
-    await supabase.auth.signOut({ scope: 'local' })
-    router.push('/login')
-  }
 
   const orderedNavItems = orderedSections.flatMap((section) => section.items)
   const favoriteItems = favorites
@@ -368,14 +361,15 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
       </nav>
 
       <div className="border-t border-gray-800 px-2 py-1.5">
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
-        >
+        <form action={signOut}>
+          <button
+            type="submit"
+            className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs font-medium text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+          >
           <LogOut className="h-3.5 w-3.5" />
           로그아웃
-        </button>
+          </button>
+        </form>
       </div>
     </aside>
   )

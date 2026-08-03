@@ -1,0 +1,14 @@
+{
+  email {$TLS_EMAIL}
+}
+
+{$APP_DOMAIN} {
+  encode zstd gzip
+
+  reverse_proxy https://{$UPSTREAM_HOST} {
+    # Vercel must receive its registered host while the browser stays on APP_DOMAIN.
+    header_up Host {$UPSTREAM_HOST}
+    header_up X-Forwarded-Host {host}
+    header_up X-Forwarded-Proto {scheme}
+  }
+}

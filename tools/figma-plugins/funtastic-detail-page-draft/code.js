@@ -1031,6 +1031,86 @@ async function captureComparisonFrames(command) {
   return result
 }
 
+function solidFill(color) {
+  return [{ type: 'SOLID', color }]
+}
+
+function sectionColorsFromReference(reference) {
+  const fallback = [COLORS.sky, COLORS.paper, COLORS.peach, COLORS.mint, COLORS.lavender]
+  const colors = []
+  for (const child of reference.children) {
+    if (!('fills' in child) || !Array.isArray(child.fills)) continue
+    const paint = child.fills.find((candidate) => candidate.type === 'SOLID' && candidate.visible !== false)
+    if (!paint || !paint.color) continue
+    const duplicate = colors.some((color) => (
+      Math.abs(color.r - paint.color.r) < 0.01
+      && Math.abs(color.g - paint.color.g) < 0.01
+      && Math.abs(color.b - paint.color.b) < 0.01
+    ))
+    if (!duplicate) colors.push(paint.color)
+  }
+  return colors.length >= 3 ? colors : fallback
+}
+
+async function restyleReferenceCopy(command) {
+  await figma.loadAllPagesAsync()
+  const sourceFrameId = cleanText(command.payload?.sourceFrameId)
+  const referenceFrameId = cleanText(command.payload?.referenceFrameId)
+  const copyName = cleanText(command.payload?.name) || 'Detail page card-news design copy'
+  if (!sourceFrameId || !referenceFrameId) {
+    throw new Error('The source and reference frame IDs are required.')
+  }
+
+  const source = await figma.getNodeByIdAsync(sourceFrameId)
+  const reference = await figma.getNodeByIdAsync(referenceFrameId)
+  if (!source || source.type !== 'FRAME' || !reference || reference.type !== 'FRAME') {
+    throw new Error('The source or reference detail-page frame was not found.')
+  }
+  const sourcePage = source.parent
+  if (!sourcePage || sourcePage.type !== 'PAGE') {
+    throw new Error('The source detail-page frame is not on a Figma page.')
+  }
+
+  await figma.setCurrentPageAsync(sourcePage)
+  const copy = source.clone()
+  sourcePage.appendChild(copy)
+  copy.name = copyName
+  copy.x = source.x + source.width + 160
+  copy.y = source.y
+  copy.fills = solidFill(COLORS.paper)
+  copy.setPluginData('funtastic-derived-from', source.id)
+  copy.setPluginData('funtastic-design-reference', reference.id)
+
+  // Keep the approved copy and image assets intact. Only the direct visual
+  // section surfaces inherit the card-news palette from the reference frame.
+  const palette = sectionColorsFromReference(reference)
+  const sections = copy.children.filter((node) => (
+    node.type === 'FRAME' && node.width >= copy.width * 0.7 && node.height >= 90
+  ))
+  sections.forEach((section, index) => {
+    const hasImageFill = Array.isArray(section.fills) && section.fills.some((paint) => paint.type === 'IMAGE')
+    if (!hasImageFill) section.fills = solidFill(palette[index % palette.length])
+    section.clipsContent = true
+
+    const imageNodes = section.findAll((node) => (
+      'fills' in node
+      && Array.isArray(node.fills)
+      && node.fills.some((paint) => paint.type === 'IMAGE')
+    ))
+    for (const image of imageNodes) {
+      if ('cornerRadius' in image && image.width >= 160 && image.height >= 120) {
+        image.cornerRadius = Math.min(24, Math.round(Math.min(image.width, image.height) * 0.04))
+      }
+    }
+  })
+
+  figma.currentPage.selection = [copy]
+  figma.viewport.scrollAndZoomIntoView([copy])
+  const figmaUrl = `https://www.figma.com/design/${DEFAULT_FILE_KEY}/ai-%EC%83%9D%EC%84%B1-%EC%83%81%EC%84%B8%ED%8E%98%EC%9D%B4%EC%A7%80?node-id=${encodeURIComponent(copy.id.replace(':', '-'))}`
+  figma.ui.postMessage({ type: 'reference-copy-created', name: copy.name })
+  return { frameId: copy.id, frameName: copy.name, figmaUrl, sourceFrameId: source.id, referenceFrameId: reference.id }
+}
+
 async function composeFinalDetailPage(command) {
   await figma.loadAllPagesAsync()
   const productName = cleanText(command.targetFrameName) || '상세페이지'
@@ -1301,8 +1381,10 @@ async function runSync(silent) {
               ? 'Final detail page'
               : command.commandType === 'rename-frame'
                 ? 'Frame rename'
-                : command.commandType === 'replace-option-section'
+              : command.commandType === 'replace-option-section'
                   ? 'Single transparent option'
+                  : command.commandType === 'restyle-reference'
+                    ? 'Card-news design copy'
                   : command.commandType === 'capture-text'
                     ? 'Detail page copy capture'
                     : command.commandType
@@ -1321,6 +1403,8 @@ async function runSync(silent) {
           result = await renameFigmaFrame(command)
         } else if (command.commandType === 'replace-option-section') {
           result = await replaceWithSingleTransparentOption(command)
+        } else if (command.commandType === 'restyle-reference') {
+          result = await restyleReferenceCopy(command)
         } else {
           throw new Error(`지원하지 않는 Figma 작업입니다: ${command.commandType}`)
         }

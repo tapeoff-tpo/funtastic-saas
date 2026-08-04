@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
+import { Check, CircleAlert, ClipboardCopy, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,7 +59,7 @@ const STATUS = {
   draft: { label: '작업 설정', className: 'border-slate-200 bg-slate-50 text-slate-700' },
   asset_pending: { label: '이미지 수집 대기', className: 'border-amber-200 bg-amber-50 text-amber-800' },
   collecting: { label: '이미지 수집 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
-  draft_pending: { label: '초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
+  draft_pending: { label: 'Codex 작업 준비 완료', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   needs_info: { label: '자료 보완 필요', className: 'border-amber-200 bg-amber-50 text-amber-800' },
   figma_queued: { label: 'Figma 초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   figma_creating: { label: 'Figma 초안 제작 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
@@ -78,6 +78,14 @@ const DETAIL_PAGE_WORKBENCH_CLEANUP_KEY = 'funtastic-detail-page-workbench-clean
 const EMPTY_PRODUCTS: DetailPageProduct[] = []
 const PAGE_SOURCE = 'funtastic-saas'
 const EXTENSION_SOURCE = 'funtastic-1688-extension'
+const TEMPLATE_OPTIONS = [
+  '자동 선택 · 최종 5개 기준',
+  '마미백플러스 최종',
+  '마빈 냄비뚜껑 조리도구 거치대 최종',
+  '델토 더블도어 켄넬 최종',
+  '헬리겔 회전식 1단 수납선반 최종',
+  '헬리겔 냉장고 회전 레일 수납선반 최종',
+] as const
 let cachedSessionProducts: DetailPageProduct[] | null = null
 let cachedSessionProductsRaw: string | null | undefined
 
@@ -85,7 +93,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [sessionProducts, setSessionProducts] = useState<DetailPageProduct[]>(EMPTY_PRODUCTS)
   const [jobs, setJobs] = useState<DetailPageJob[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
-  const [template, setTemplate] = useState('기본 상품 상세')
+  const [template, setTemplate] = useState<(typeof TEMPLATE_OPTIONS)[number]>(TEMPLATE_OPTIONS[0])
   const [note, setNote] = useState('')
   const [consumedProductIds, setConsumedProductIds] = useState<Set<string>>(() => new Set())
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set())
@@ -96,6 +104,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
   const [revisionNote, setRevisionNote] = useState('')
   const [imageCollectionQueue, setImageCollectionQueue] = useState<string[]>([])
+  const [handoffMessage, setHandoffMessage] = useState<string | null>(null)
   const incomingProducts = useMemo(() => (
     Array.from(new Map([...sessionProducts, ...selectedProducts].map((product) => [product.id, product])).values())
   ), [selectedProducts, sessionProducts])
@@ -132,6 +141,11 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   }, [])
 
   useEffect(() => {
+    if (draftProducts.length === 0) return
+    setSelectedDraftIds((current) => current.size > 0 ? current : new Set(draftProducts.map((product) => product.id)))
+  }, [draftProducts])
+
+  useEffect(() => {
     const saved = readWorkbenchState()
     const restoreTimer = window.setTimeout(() => {
       if (saved) {
@@ -147,6 +161,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
 
   useEffect(() => {
     setRevisionNote(activeJob?.note ?? '')
+    setHandoffMessage(null)
   }, [activeJob?.id, activeJob?.note])
 
   useEffect(() => {
@@ -279,13 +294,13 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   }, [])
 
   useEffect(() => {
-    if (imageCollectionQueue.length === 0 || jobs.some((job) => job.status === 'collecting')) return
+    if (!extensionReady || imageCollectionQueue.length === 0 || jobs.some((job) => job.status === 'collecting')) return
     const [nextJobId, ...remainingJobIds] = imageCollectionQueue
     const nextJob = jobs.find((job) => job.id === nextJobId)
     setImageCollectionQueue(remainingJobIds)
     if (!nextJob || nextJob.status !== 'asset_pending' || !nextJob.product.purchaseUrl) return
     startImageCollectionForJob(nextJob, 500)
-  }, [imageCollectionQueue, jobs, startImageCollectionForJob])
+  }, [extensionReady, imageCollectionQueue, jobs, startImageCollectionForJob])
 
   function createJobs() {
     if (selectedDraftProducts.length === 0) return
@@ -300,13 +315,28 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       images: [],
       imageRunId: null,
       imageAcknowledged: false,
-      imageError: null,
+      imageError: product.purchaseUrl ? null : '품목에 구매 URL이 없어 1688 이미지를 자동 수집할 수 없습니다.',
       remoteJobId: null,
       figmaUrl: null,
     }))
     setJobs((current) => [...created, ...current])
     setActiveId(created[0]?.id ?? null)
+    setImageCollectionQueue((current) => [
+      ...current,
+      ...created.filter((job) => Boolean(job.product.purchaseUrl)).map((job) => job.id),
+    ])
     excludeDraftProducts(selectedDraftProducts)
+  }
+
+  async function copyCodexHandoff() {
+    if (!activeJob || activeJob.images.length === 0) return
+    const request = buildCodexHandoff(activeJob)
+    try {
+      await navigator.clipboard.writeText(request)
+      setHandoffMessage('Codex 작업 요청을 복사했습니다. 현재 상세페이지 제작 대화에 붙여넣으면 됩니다.')
+    } catch {
+      setHandoffMessage('클립보드 복사에 실패했습니다. 브라우저의 클립보드 권한을 확인해주세요.')
+    }
   }
 
   function excludeDraftProducts(products: DetailPageProduct[]) {
@@ -342,36 +372,6 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   function toggleAllDrafts() {
     setSelectedDraftIds(allDraftsSelected ? new Set() : new Set(draftProducts.map((product) => product.id)))
     setActiveId(null)
-  }
-
-  async function queueFigmaDraft() {
-    if (!activeJob || activeJob.images.length === 0) return
-    setDraftRequestingId(activeJob.id)
-    try {
-      const response = await fetch('/api/operations/detail-pages/jobs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientJobKey: activeJob.id,
-          product: activeJob.product,
-          imageUrls: activeJob.images,
-          template: activeJob.template,
-          note: activeJob.note,
-        }),
-      })
-      const body = await response.json().catch(() => ({})) as { job?: RemoteDetailPageJob; error?: string }
-      if (!response.ok || !body.job) throw new Error(body.error || 'Figma 초안 제작 요청을 저장하지 못했습니다.')
-      setJobs((current) => current.map((job) => (
-        job.id === activeJob.id ? remoteJobToLocal(body.job!, job) : job
-      )))
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Figma 초안 제작 요청을 저장하지 못했습니다.'
-      setJobs((current) => current.map((job) => (
-        job.id === activeJob.id ? { ...job, status: 'failed', imageError: message } : job
-      )))
-    } finally {
-      setDraftRequestingId(null)
-    }
   }
 
   function excludeCollectedImage(imageUrl: string) {
@@ -590,10 +590,8 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       <div className="grid gap-3 sm:grid-cols-2">
                         <label className="space-y-1">
                           <span className="text-xs font-medium text-muted-foreground">Figma 템플릿</span>
-                          <select value={template} onChange={(event) => setTemplate(event.target.value)} className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
-                            <option>기본 상품 상세</option>
-                            <option>생활용품 상세</option>
-                            <option>패션/잡화 상세</option>
+                          <select value={template} onChange={(event) => setTemplate(event.target.value as (typeof TEMPLATE_OPTIONS)[number])} className="h-8 w-full rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                            {TEMPLATE_OPTIONS.map((option) => <option key={option}>{option}</option>)}
                           </select>
                         </label>
                         <label className="space-y-1">
@@ -603,9 +601,12 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       </div>
                       <div className="flex justify-end">
                         <Button type="button" onClick={createJobs} disabled={selectedDraftProducts.length === 0}>
-                          <WandSparkles />선택 작업 생성{selectedDraftProducts.length > 0 ? ` ${selectedDraftProducts.length}` : ''}
+                          <WandSparkles />작업 생성 및 이미지 수집{selectedDraftProducts.length > 0 ? ` ${selectedDraftProducts.length}` : ''}
                         </Button>
                       </div>
+                      <p className="text-right text-xs text-muted-foreground">
+                        {extensionReady ? '확장프로그램 연결됨 · 작업 생성 후 1688 이미지 수집을 자동으로 시작합니다.' : '작업은 생성되며, 확장프로그램이 연결되면 이미지 수집을 자동으로 시작합니다.'}
+                      </p>
                     </section>
                   ) : (
                     <section className="px-5 py-4">
@@ -613,13 +614,13 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       <ol className="mt-4 grid gap-3 sm:grid-cols-4">
                         <WorkflowStep icon={Clock3} label="작업 생성" active />
                         <WorkflowStep icon={ImagePlus} label="이미지 수집" active={activeJob.status !== 'asset_pending' && activeJob.status !== 'collecting'} />
-                        <WorkflowStep icon={WandSparkles} label="Figma 초안 제작" active={['figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
-                        <WorkflowStep icon={FilePenLine} label="Figma 검수" active={['review', 'completed'].includes(activeJob.status)} />
+                        <WorkflowStep icon={ClipboardCopy} label="Codex 작업 인계" active={['draft_pending', 'figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
+                        <WorkflowStep icon={FilePenLine} label="Figma 제작·검수" active={['review', 'completed'].includes(activeJob.status)} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
                         {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />{extensionReady ? collectableImageJobCount > 1 ? `이미지 일괄 수집 ${collectableImageJobCount}` : '이미지 수집 시작' : '확장프로그램 연결 중'}</Button> : null}
                         {imageCollectionQueue.length > 0 ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />다음 이미지 수집 {imageCollectionQueue.length}건</Badge> : null}
-                        {activeJob.status === 'draft_pending' || activeJob.status === 'failed' || activeJob.status === 'needs_info' ? <Button type="button" variant="outline" onClick={queueFigmaDraft} disabled={draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '요청 중' : activeJob.status === 'draft_pending' ? 'Figma 초안 제작 요청' : 'Figma 초안 재요청'}</Button> : null}
+                        {activeJob.status === 'draft_pending' || activeJob.status === 'failed' || activeJob.status === 'needs_info' ? <Button type="button" onClick={copyCodexHandoff} disabled={activeJob.images.length === 0}><ClipboardCopy />Codex 작업 요청 복사</Button> : null}
                         {activeJob.status === 'figma_queued' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />Figma 플러그인 대기</Badge> : null}
                         {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma에서 초안 제작 중</Badge> : null}
                         {activeJob.status === 'review' ? (
@@ -637,6 +638,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                         ) : null}
                         {activeJob.status === 'completed' ? <Badge variant="outline" className="h-8 border-emerald-200 bg-emerald-50 px-3 text-emerald-800"><Check />Figma 검수 완료</Badge> : null}
                       </div>
+                      {handoffMessage ? <p className="mt-3 text-xs text-emerald-700">{handoffMessage}</p> : null}
                       {activeJob.imageError ? <p className="mt-3 text-xs text-destructive">{activeJob.imageError}</p> : null}
                     </section>
                   )}
@@ -728,6 +730,38 @@ function WorkflowStep({ icon: Icon, label, active }: { icon: typeof Clock3; labe
 
 function normalizeUrl(value: string) {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`
+}
+
+function buildCodexHandoff(job: DetailPageJob) {
+  const product = job.product
+  const lines = [
+    '아래 품목의 상세페이지 작업을 진행해줘.',
+    '',
+    `상품명: ${product.name}`,
+    `품목코드: ${product.sku}`,
+    `옵션: ${product.option || '-'}`,
+    `구매 URL: ${product.purchaseUrl || '-'}`,
+    `재질: ${product.material || '-'}`,
+    `사이즈: ${product.size || '-'}`,
+    `무게: ${product.weight || '-'}`,
+    `제조국: ${product.country || '-'}`,
+    `용량: ${product.capacity || '-'}`,
+    `템플릿: ${job.template}`,
+    `제작 메모: ${job.note || '-'}`,
+    '',
+    'Figma 기준 최종본 5개:',
+    '- 마미백플러스 최종',
+    '- 마빈 냄비뚜껑 조리도구 거치대 최종',
+    '- 델토 더블도어 켄넬 최종',
+    '- 헬리겔 회전식 1단 수납선반 최종',
+    '- 헬리겔 냉장고 회전 레일 수납선반 최종',
+    '',
+    '수집 이미지:',
+    ...job.images.map((url, index) => `${index + 1}. ${url}`),
+    '',
+    '요청 사항: 중국어와 중복 이미지를 제거하고, 옵션표·사이즈·상품정보·체크포인트를 포함한 카드형 상세페이지를 새 프레임으로 제작해줘. 원본 최종본은 수정하지 마.',
+  ]
+  return lines.join('\n')
 }
 
 function normalizeImageUrls(value: unknown): string[] {

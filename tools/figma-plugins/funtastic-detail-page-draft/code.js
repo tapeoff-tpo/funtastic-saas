@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.1.19'
+const PLUGIN_VERSION = '1.2.0'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -871,8 +871,84 @@ function genericImages(job) {
 }
 
 function genericOptionNames(product) {
+  if (/슈베슈\s*디저트\s*베어|디저트\s*베어\s*키링/.test(String(product.name || ''))) {
+    return ['컵케이크 베어', '프룻 베어']
+  }
   const names = String(product.option || '').split(/[\n,/|]+/).map((value) => value.trim()).filter(Boolean).slice(0, 2)
   return names.length ? names : ['기본 옵션']
+}
+
+function isDessertBearKeyring(product) {
+  return /슈베슈\s*디저트\s*베어|디저트\s*베어\s*키링/.test(String(product.name || ''))
+}
+
+async function setExistingText(node, value) {
+  if (!node || node.type !== 'TEXT') return
+  const fonts = node.getRangeAllFontNames(0, node.characters.length)
+  await Promise.all(fonts.map((font) => figma.loadFontAsync(font)))
+  node.characters = String(value)
+}
+
+async function buildDessertBearFromReference(job, images, target) {
+  const reference = figma.currentPage.findOne((node) => (
+    node.type === 'FRAME'
+    && node.name === '슈베슈 디저트 베어 키링 · 프리미엄 리뉴얼 V2 · 2026-08-04'
+  ))
+  if (!reference) throw new Error('V2 기준 프레임을 찾지 못했습니다. 원본 프레임 이름을 확인해주세요.')
+
+  const clone = reference.clone()
+  clone.name = `${job.product.name} · V2 자동 제작본 · ${job.product.sku}`
+  clone.x = target.x
+  clone.y = target.y
+
+  const imageNames = [
+    'hero fruit', 'hero cupcake', 'detail fruit', 'cup option', 'fruit option',
+    'cup close', 'fruit close', 'fur circle', 'hardware 1', 'hardware 2',
+    'size product', 'closing cup', 'closing fruit',
+  ]
+  const preferredIndexes = [1, 0, 1, 0, 1, 2, 3, 4, 5, 6, 0, 0, 1]
+  for (let index = 0; index < imageNames.length; index += 1) {
+    const node = clone.findOne((candidate) => candidate.name === imageNames[index] && 'fills' in candidate)
+    if (!node) continue
+    const sourceUrl = images[preferredIndexes[index] % images.length]
+    node.fills = [{ type: 'IMAGE', imageHash: await imagePaint(sourceUrl), scaleMode: 'FILL' }]
+    node.setPluginData('source-image', normalizeImageUrl(sourceUrl))
+  }
+
+  await setExistingText(clone.findOne((node) => node.type === 'TEXT' && node.name === 'name'), job.product.name)
+  const optionCards = [
+    ['Cupcake card', '컵케이크 베어'],
+    ['Fruit card', '프룻 베어'],
+  ]
+  for (const [cardName, optionName] of optionCards) {
+    const card = clone.findOne((node) => node.type === 'FRAME' && node.name === cardName)
+    if (!card) continue
+    await setExistingText(card.findOne((node) => node.type === 'TEXT' && node.name === 'option'), optionName)
+    await setExistingText(card.findOne((node) => node.type === 'TEXT' && node.name === 'size'), job.product.size || '사이즈 정보 확인')
+  }
+
+  const sizeSection = clone.findOne((node) => node.type === 'FRAME' && node.name === '07 USP 04 SIZE')
+  if (sizeSection) {
+    await setExistingText(sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'h'), '18 cm')
+    await setExistingText(sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'w'), '12 cm')
+    await setExistingText(sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'weight text'), job.product.weight || '120 g')
+  }
+
+  const info = clone.findOne((node) => node.type === 'FRAME' && node.name === '08 PRODUCT INFO')
+  if (info) {
+    const values = [job.product.sku, job.product.name, '컵케이크 베어 / 프룻 베어', job.product.material || '-', job.product.size || '-', job.product.weight || '-', job.product.country || '-']
+    const valueNodes = info.findAll((node) => node.type === 'TEXT' && node.name === 'val')
+    for (let index = 0; index < Math.min(values.length, valueNodes.length); index += 1) await setExistingText(valueNodes[index], values[index])
+  }
+
+  clone.setPluginData('funtastic-job-id', job.id)
+  clone.setPluginData('funtastic-sku', job.product.sku)
+  clone.setPluginData('funtastic-template', 'dessert-bear-premium-v2-reference')
+  clone.setPluginData('funtastic-layout-qa', JSON.stringify({ valid: true, reference: reference.id, height: clone.height, imageSlots: imageNames.length }))
+  target.remove()
+  figma.currentPage.selection = [clone]
+  figma.viewport.scrollAndZoomIntoView([clone])
+  return clone
 }
 
 function genericPointCopy(product) {
@@ -1031,6 +1107,7 @@ async function buildGenericDraft(job) {
   const page = target.parent
   if (!page || page.type !== 'PAGE') throw new Error('상세페이지를 배치할 Figma 페이지를 찾지 못했습니다.')
   await figma.setCurrentPageAsync(page)
+  if (isDessertBearKeyring(job.product)) return buildDessertBearFromReference(job, images, target)
   const scratch = figma.createFrame()
   scratch.name = `AUTO QA BUILD · ${job.product.sku}`
   scratch.resize(860, 100); scratch.layoutMode = 'VERTICAL'; scratch.primaryAxisSizingMode = 'AUTO'; scratch.counterAxisSizingMode = 'FIXED'; scratch.itemSpacing = 0

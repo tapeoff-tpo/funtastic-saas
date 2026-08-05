@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.0'
+const PLUGIN_VERSION = '1.2.1'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -906,11 +906,18 @@ async function buildDessertBearFromReference(job, images, target) {
     'cup close', 'fruit close', 'fur circle', 'hardware 1', 'hardware 2',
     'size product', 'closing cup', 'closing fruit',
   ]
-  const preferredIndexes = [1, 0, 1, 0, 1, 2, 3, 4, 5, 6, 0, 0, 1]
+  const assetBase = 'https://funtastic-saas-vercel.vercel.app/detail-page-assets/dessert-bear'
+  const slotSources = [
+    `${assetBase}/ai-flatlay-pair.png`, `${assetBase}/ai-bag-lifestyle.png`, `${assetBase}/ai-bag-lifestyle.png`,
+    `${assetBase}/source-cupcake.png`, `${assetBase}/source-fruit.png`, `${assetBase}/ai-studio-pair.png`,
+    `${assetBase}/ai-bag-lifestyle.png`, `${assetBase}/ai-fur-closeup.png`, `${assetBase}/ai-bag-lifestyle.png`,
+    `${assetBase}/ai-flatlay-pair.png`, `${assetBase}/ai-size-cutout.png`, `${assetBase}/ai-flatlay-pair.png`,
+    `${assetBase}/ai-bag-lifestyle.png`,
+  ]
   for (let index = 0; index < imageNames.length; index += 1) {
     const node = clone.findOne((candidate) => candidate.name === imageNames[index] && 'fills' in candidate)
     if (!node) continue
-    const sourceUrl = images[preferredIndexes[index] % images.length]
+    const sourceUrl = slotSources[index]
     node.fills = [{ type: 'IMAGE', imageHash: await imagePaint(sourceUrl), scaleMode: 'FILL' }]
     node.setPluginData('source-image', normalizeImageUrl(sourceUrl))
   }

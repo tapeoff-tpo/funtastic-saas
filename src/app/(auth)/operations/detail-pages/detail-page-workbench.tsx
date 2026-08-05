@@ -1,7 +1,7 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Check, CircleAlert, ClipboardCopy, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Check, CircleAlert, Clock3, ExternalLink, FilePenLine, ImagePlus, Link2, LoaderCircle, PanelsTopLeft, Plus, Trash2, WandSparkles, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -59,11 +59,11 @@ const STATUS = {
   draft: { label: '작업 설정', className: 'border-slate-200 bg-slate-50 text-slate-700' },
   asset_pending: { label: '이미지 수집 대기', className: 'border-amber-200 bg-amber-50 text-amber-800' },
   collecting: { label: '이미지 수집 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
-  draft_pending: { label: 'Codex 작업 준비 완료', className: 'border-violet-200 bg-violet-50 text-violet-800' },
+  draft_pending: { label: '자동 제작 요청 중', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   needs_info: { label: '자료 보완 필요', className: 'border-amber-200 bg-amber-50 text-amber-800' },
-  figma_queued: { label: 'Figma 초안 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
-  figma_creating: { label: 'Figma 초안 제작 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
-  review: { label: '검수 필요', className: 'border-violet-200 bg-violet-50 text-violet-800' },
+  figma_queued: { label: '자동 제작 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
+  figma_creating: { label: '자동 제작·검수 중', className: 'border-sky-200 bg-sky-50 text-sky-800' },
+  review: { label: '최종검토 대기', className: 'border-violet-200 bg-violet-50 text-violet-800' },
   completed: { label: '제작 완료', className: 'border-emerald-200 bg-emerald-50 text-emerald-800' },
   failed: { label: '초안 제작 오류', className: 'border-red-200 bg-red-50 text-red-800' },
 } as const
@@ -105,6 +105,7 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
   const [revisionNote, setRevisionNote] = useState('')
   const [imageCollectionQueue, setImageCollectionQueue] = useState<string[]>([])
   const [handoffMessage, setHandoffMessage] = useState<string | null>(null)
+  const autoSubmittedJobIds = useRef(new Set<string>())
   const incomingProducts = useMemo(() => (
     Array.from(new Map([...sessionProducts, ...selectedProducts].map((product) => [product.id, product])).values())
   ), [selectedProducts, sessionProducts])
@@ -302,6 +303,50 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
     startImageCollectionForJob(nextJob, 500)
   }, [extensionReady, imageCollectionQueue, jobs, startImageCollectionForJob])
 
+  const queueFigmaDraft = useCallback(async (job: DetailPageJob) => {
+    setDraftRequestingId(job.id)
+    try {
+      const response = await fetch('/api/operations/detail-pages/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          clientJobKey: job.id,
+          product: job.product,
+          imageUrls: job.images,
+          template: job.template,
+          note: job.note,
+        }),
+      })
+      const body = await response.json().catch(() => ({})) as { job?: RemoteDetailPageJob; error?: string }
+      if (!response.ok || !body.job) throw new Error(body.error || '자동 상세페이지 제작 요청을 저장하지 못했습니다.')
+      setJobs((current) => current.map((entry) => (
+        entry.id === job.id ? remoteJobToLocal(body.job!, entry) : entry
+      )))
+      setHandoffMessage('이미지 수집이 끝나 자동 제작을 시작했습니다. 완료되면 Figma 링크가 표시됩니다.')
+    } catch (error) {
+      autoSubmittedJobIds.current.delete(job.id)
+      const message = error instanceof Error ? error.message : '자동 상세페이지 제작 요청을 저장하지 못했습니다.'
+      setJobs((current) => current.map((entry) => (
+        entry.id === job.id ? { ...entry, status: 'failed', imageError: message } : entry
+      )))
+    } finally {
+      setDraftRequestingId((current) => current === job.id ? null : current)
+    }
+  }, [])
+
+  useEffect(() => {
+    const readyJobs = jobs.filter((job) => (
+      job.status === 'draft_pending'
+      && job.images.length > 0
+      && !job.remoteJobId
+      && !autoSubmittedJobIds.current.has(job.id)
+    ))
+    for (const job of readyJobs) {
+      autoSubmittedJobIds.current.add(job.id)
+      void queueFigmaDraft(job)
+    }
+  }, [jobs, queueFigmaDraft])
+
   function createJobs() {
     if (selectedDraftProducts.length === 0) return
     const createdAt = new Date().toLocaleString('ko-KR')
@@ -326,17 +371,6 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
       ...created.filter((job) => Boolean(job.product.purchaseUrl)).map((job) => job.id),
     ])
     excludeDraftProducts(selectedDraftProducts)
-  }
-
-  async function copyCodexHandoff() {
-    if (!activeJob || activeJob.images.length === 0) return
-    const request = buildCodexHandoff(activeJob)
-    try {
-      await navigator.clipboard.writeText(request)
-      setHandoffMessage('Codex 작업 요청을 복사했습니다. 현재 상세페이지 제작 대화에 붙여넣으면 됩니다.')
-    } catch {
-      setHandoffMessage('클립보드 복사에 실패했습니다. 브라우저의 클립보드 권한을 확인해주세요.')
-    }
   }
 
   function excludeDraftProducts(products: DetailPageProduct[]) {
@@ -614,15 +648,16 @@ export function DetailPageWorkbench({ selectedProducts }: { selectedProducts: De
                       <ol className="mt-4 grid gap-3 sm:grid-cols-4">
                         <WorkflowStep icon={Clock3} label="작업 생성" active />
                         <WorkflowStep icon={ImagePlus} label="이미지 수집" active={activeJob.status !== 'asset_pending' && activeJob.status !== 'collecting'} />
-                        <WorkflowStep icon={ClipboardCopy} label="Codex 작업 인계" active={['draft_pending', 'figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
-                        <WorkflowStep icon={FilePenLine} label="Figma 제작·검수" active={['review', 'completed'].includes(activeJob.status)} />
+                        <WorkflowStep icon={WandSparkles} label="자동 제작·검수" active={['draft_pending', 'figma_queued', 'figma_creating', 'review', 'completed'].includes(activeJob.status)} />
+                        <WorkflowStep icon={FilePenLine} label="최종검토" active={['review', 'completed'].includes(activeJob.status)} />
                       </ol>
                       <div className="mt-5 flex flex-wrap gap-2">
                         {activeJob.status === 'asset_pending' ? <Button type="button" variant="outline" onClick={startImageCollection} disabled={!extensionReady}><ImagePlus />{extensionReady ? collectableImageJobCount > 1 ? `이미지 일괄 수집 ${collectableImageJobCount}` : '이미지 수집 시작' : '확장프로그램 연결 중'}</Button> : null}
                         {imageCollectionQueue.length > 0 ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />다음 이미지 수집 {imageCollectionQueue.length}건</Badge> : null}
-                        {activeJob.status === 'draft_pending' || activeJob.status === 'failed' || activeJob.status === 'needs_info' ? <Button type="button" onClick={copyCodexHandoff} disabled={activeJob.images.length === 0}><ClipboardCopy />Codex 작업 요청 복사</Button> : null}
+                        {activeJob.status === 'draft_pending' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />자동 제작 요청 중</Badge> : null}
+                        {activeJob.status === 'failed' || activeJob.status === 'needs_info' ? <Button type="button" onClick={() => { autoSubmittedJobIds.current.add(activeJob.id); void queueFigmaDraft(activeJob) }} disabled={activeJob.images.length === 0 || draftRequestingId === activeJob.id}><WandSparkles />{draftRequestingId === activeJob.id ? '다시 요청 중' : '자동 제작 다시 시작'}</Button> : null}
                         {activeJob.status === 'figma_queued' ? <Badge variant="outline" className="h-8 border-violet-200 bg-violet-50 px-3 text-violet-800"><LoaderCircle />Figma 플러그인 대기</Badge> : null}
-                        {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma에서 초안 제작 중</Badge> : null}
+                        {activeJob.status === 'figma_creating' ? <Badge variant="outline" className="h-8 border-sky-200 bg-sky-50 px-3 text-sky-800"><LoaderCircle />Figma 자동 제작·규격 검사 중</Badge> : null}
                         {activeJob.status === 'review' ? (
                           <div className="flex w-full flex-wrap items-center gap-2">
                             <Input
@@ -730,38 +765,6 @@ function WorkflowStep({ icon: Icon, label, active }: { icon: typeof Clock3; labe
 
 function normalizeUrl(value: string) {
   return /^https?:\/\//i.test(value) ? value : `https://${value}`
-}
-
-function buildCodexHandoff(job: DetailPageJob) {
-  const product = job.product
-  const lines = [
-    '아래 품목의 상세페이지 작업을 진행해줘.',
-    '',
-    `상품명: ${product.name}`,
-    `품목코드: ${product.sku}`,
-    `옵션: ${product.option || '-'}`,
-    `구매 URL: ${product.purchaseUrl || '-'}`,
-    `재질: ${product.material || '-'}`,
-    `사이즈: ${product.size || '-'}`,
-    `무게: ${product.weight || '-'}`,
-    `제조국: ${product.country || '-'}`,
-    `용량: ${product.capacity || '-'}`,
-    `템플릿: ${job.template}`,
-    `제작 메모: ${job.note || '-'}`,
-    '',
-    'Figma 기준 최종본 5개:',
-    '- 마미백플러스 최종',
-    '- 마빈 냄비뚜껑 조리도구 거치대 최종',
-    '- 델토 더블도어 켄넬 최종',
-    '- 헬리겔 회전식 1단 수납선반 최종',
-    '- 헬리겔 냉장고 회전 레일 수납선반 최종',
-    '',
-    '수집 이미지:',
-    ...job.images.map((url, index) => `${index + 1}. ${url}`),
-    '',
-    '요청 사항: 중국어와 중복 이미지를 제거하고, 옵션표·사이즈·상품정보·체크포인트를 포함한 카드형 상세페이지를 새 프레임으로 제작해줘. 원본 최종본은 수정하지 마.',
-  ]
-  return lines.join('\n')
 }
 
 function normalizeImageUrls(value: unknown): string[] {

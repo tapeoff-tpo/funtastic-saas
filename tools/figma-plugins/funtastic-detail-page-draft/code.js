@@ -864,9 +864,207 @@ async function placeOnSharedDetailCanvas(target) {
   return sharedPage
 }
 
+function genericImages(job) {
+  const urls = Array.isArray(job.imageUrls) ? job.imageUrls.filter(Boolean) : []
+  if (!urls.length) throw new Error('자동 제작에 사용할 상품 이미지가 없습니다.')
+  return urls
+}
+
+function genericOptionNames(product) {
+  const names = String(product.option || '').split(/[\n,/|]+/).map((value) => value.trim()).filter(Boolean).slice(0, 2)
+  return names.length ? names : ['기본 옵션']
+}
+
+function genericPointCopy(product) {
+  const text = `${product.name} ${product.option} ${product.material}`.toLowerCase()
+  if (/키링|인형|플러시|곰|베어/.test(text)) return [
+    ['한눈에 반하는 포인트', '작지만 또렷한 디테일로 매일 드는 가방의 분위기를 바꿔줘요.'],
+    ['보송하게 느껴지는 촉감', `${product.material || '부드러운 소재'}로 포근한 인상을 살렸어요.`],
+    ['원하는 곳에 간편하게', '가방과 파우치 등 자주 쓰는 소품에 가볍게 연결해보세요.'],
+  ]
+  if (/수납|선반|정리|거치/.test(text)) return [
+    ['흩어진 물건을 한곳에', '자주 쓰는 물건을 보기 좋게 모아 공간을 깔끔하게 정리해요.'],
+    ['꺼내기 편한 구조', '필요한 순간 빠르게 찾고 손쉽게 꺼낼 수 있도록 구성했어요.'],
+    ['공간을 알차게 활용', `${product.size || '실용적인 크기'}로 남는 공간까지 효율적으로 사용해요.`],
+  ]
+  if (/켄넬|반려|강아지|고양이|펫/.test(text)) return [
+    ['편안함을 생각한 구조', '반려동물이 머무는 시간을 고려해 안정적인 사용감을 담았어요.'],
+    ['일상에서 간편하게', '집과 이동 상황에서 부담 없이 사용할 수 있도록 구성했어요.'],
+    ['확인하기 쉬운 디테일', `${product.size || '제품 규격'}을 확인하고 알맞게 선택해보세요.`],
+  ]
+  return [
+    ['매일 쓰기 좋은 실용성', '복잡하지 않은 구성으로 일상에서 편하게 사용할 수 있어요.'],
+    ['제품에 맞춘 핵심 디테일', `${product.material || '제품 소재'}의 특징을 살려 완성했어요.`],
+    ['선택 전 확인할 규격', `${product.size || '상품정보의 규격'}을 확인하고 용도에 맞게 선택해보세요.`],
+  ]
+}
+
+async function makeGenericCover(job, images) {
+  const section = makeSection('00 COVER / PREMIUM EDITORIAL', 1220, COLORS.paper)
+  const accent = figma.createEllipse()
+  accent.resize(360, 360); accent.x = 570; accent.y = -80
+  accent.fills = [{ type: 'SOLID', color: COLORS.amber }]
+  section.appendChild(accent)
+  makeLabel(section, 'FUNTASTIC SELECT', 50, 52, 176, COLORS.amber)
+  const left = await makeImage(images[0], images.length > 1 ? 350 : 760, 650, 'COVER / PRIMARY PRODUCT IMAGE')
+  left.x = 50; left.y = 130; left.cornerRadius = images.length > 1 ? 175 : 28
+  section.appendChild(left)
+  if (images.length > 1) {
+    const right = await makeImage(images[1], 350, 650, 'COVER / SECONDARY PRODUCT IMAGE')
+    right.x = 460; right.y = 230; right.cornerRadius = 175
+    section.appendChild(right)
+  }
+  appendText(section, job.product.name, 50, 890, 760, 48, 'Bold', COLORS.ink)
+  appendText(section, 'FUNTASTIC PREMIUM PRODUCT DETAIL', 50, 970, 760, 15, 'Bold', COLORS.amber)
+  appendText(section, '상품의 핵심 이미지를 크게 보여주고 필요한 정보만 또렷하게 담았습니다.', 50, 1030, 760, 20, 'Regular', COLORS.muted)
+  return section
+}
+
+async function makeGenericOptions(job, images) {
+  const names = genericOptionNames(job.product)
+  const section = makeSection('01 OPTION / SPLIT EDITORIAL', 1120, COLORS.soft)
+  makeLabel(section, 'OPTION', 50, 54, 118, COLORS.amber)
+  appendText(section, '옵션을 한눈에 확인하세요', 50, 116, 760, 40, 'Bold')
+  const single = names.length === 1
+  const width = single ? 760 : 370
+  for (let index = 0; index < names.length; index += 1) {
+    const card = figma.createFrame()
+    card.name = `OPTION ${String(index + 1).padStart(2, '0')} / ${names[index]}`
+    card.resize(width, 790); card.x = 50 + index * 390; card.y = 220
+    card.cornerRadius = single ? 28 : 185; card.clipsContent = true
+    card.fills = [{ type: 'SOLID', color: COLORS.paper }]
+    card.appendChild(await makeImage(images[index % images.length], width, 590, `${card.name} / ACTUAL PRODUCT`))
+    const panel = figma.createFrame()
+    panel.resize(width, 220); panel.x = 0; panel.y = 570
+    panel.fills = [{ type: 'SOLID', color: index % 2 ? COLORS.red : COLORS.green }]
+    appendText(panel, names[index], 28, 46, width - 56, 26, 'Bold', COLORS.paper)
+    appendText(panel, job.product.size || '사이즈 정보 확인', 28, 116, width - 56, 17, 'Semi Bold', COLORS.paper)
+    card.appendChild(panel); section.appendChild(card)
+  }
+  appendText(section, '* 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1048, 760, 14, 'Regular', COLORS.muted)
+  return section
+}
+
+async function makeGenericPoint(index, point, imageUrl) {
+  const dark = index === 2
+  const fills = [COLORS.paper, COLORS.green, COLORS.mint]
+  const section = makeSection(`CHECK POINT ${String(index).padStart(2, '0')} / PREMIUM`, 1080, dark ? COLORS.green : fills[(index - 1) % fills.length])
+  appendText(section, String(index).padStart(2, '0'), 48, 24, 250, 130, 'Bold', dark ? COLORS.muted : COLORS.soft)
+  makeLabel(section, `CHECK POINT ${String(index).padStart(2, '0')}`, 610, 54, 180, dark ? COLORS.red : COLORS.amber)
+  appendText(section, point[0], 50, 190, 760, 42, 'Bold', dark ? COLORS.paper : COLORS.ink)
+  appendText(section, point[1], 50, 264, 760, 19, 'Regular', dark ? COLORS.soft : COLORS.muted)
+  const image = await makeImage(imageUrl, 760, 650, `CHECK POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
+  image.x = 50; image.y = 360; image.cornerRadius = index === 3 ? 325 : 28
+  section.appendChild(image)
+  return section
+}
+
+async function makeGenericSize(product, imageUrl) {
+  const section = makeSection('05 SIZE INFO / DIMENSION', 1120, COLORS.paper)
+  makeLabel(section, 'SIZE INFO', 50, 54, 136, COLORS.amber)
+  appendText(section, '구매 전 제품 크기를 확인하세요', 50, 118, 760, 40, 'Bold')
+  const image = await makeImage(imageUrl, 580, 650, 'SIZE INFO / ACTUAL PRODUCT')
+  image.x = 140; image.y = 250; image.cornerRadius = 28
+  section.appendChild(image)
+  const vertical = figma.createRectangle()
+  vertical.resize(4, 520); vertical.x = 80; vertical.y = 310
+  vertical.fills = [{ type: 'SOLID', color: COLORS.red }]
+  section.appendChild(vertical)
+  appendText(section, product.size || '사이즈 정보 확인', 50, 916, 760, 28, 'Bold', COLORS.red).textAlignHorizontal = 'CENTER'
+  appendText(section, '* 봉제·조립 제품은 측정 위치와 방법에 따라 오차가 있을 수 있습니다.', 50, 1014, 760, 14, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  return section
+}
+
+function makeGenericProductInfo(product) {
+  const section = makeSection('06 PRODUCT INFO', 890, COLORS.soft)
+  makeLabel(section, 'PRODUCT INFO', 50, 54, 166, COLORS.green)
+  appendText(section, '상품 고시 정보', 50, 118, 760, 40, 'Bold')
+  const fields = [['품목코드', product.sku], ['상품명', product.name], ['옵션', product.option || '-'], ['재질', product.material || '-'], ['사이즈', product.size || '-'], ['무게', product.weight || '-'], ['제조국', product.country || '-']]
+  fields.forEach(([label, value], index) => {
+    const row = figma.createFrame()
+    row.name = label; row.resize(760, 78); row.x = 50; row.y = 202 + index * 86
+    row.fills = [{ type: 'SOLID', color: index % 2 ? COLORS.paper : COLORS.soft }]
+    appendText(row, label, 22, 25, 150, 15, 'Semi Bold', COLORS.muted)
+    const valueText = appendText(row, value, 182, 23, 548, 17, 'Semi Bold', COLORS.ink)
+    valueText.textAlignHorizontal = 'RIGHT'; section.appendChild(row)
+  })
+  return section
+}
+
+function validateGeneratedFrame(frame, expectedImageCount) {
+  const errors = []
+  if (Math.round(frame.width) !== 860) errors.push(`프레임 너비 오류: ${Math.round(frame.width)}px`)
+  if (frame.height < 6000) errors.push(`상세페이지 길이 부족: ${Math.round(frame.height)}px`)
+  const texts = frame.findAll((node) => node.type === 'TEXT')
+  for (const text of texts) {
+    const parent = text.parent
+    if (!parent || !('width' in parent) || !('height' in parent)) continue
+    if (text.x < -1 || text.y < -1 || text.x + text.width > parent.width + 1 || text.y + text.height > parent.height + 1) errors.push(`텍스트 영역 이탈: ${text.name || text.characters.slice(0, 20)}`)
+  }
+  const images = frame.findAll((node) => 'fills' in node && Array.isArray(node.fills) && node.fills.some((paint) => paint.type === 'IMAGE' && paint.imageHash))
+  if (images.length < Math.min(expectedImageCount, 5)) errors.push(`이미지 슬롯 부족: ${images.length}개`)
+  if (errors.length) throw new Error(`자동 규격 검사 실패: ${errors.slice(0, 5).join(' / ')}`)
+  frame.setPluginData('funtastic-layout-qa', JSON.stringify({ checkedAt: new Date().toISOString(), textCount: texts.length, imageCount: images.length }))
+}
+
+async function findOrCreateGenericTarget(job) {
+  await figma.loadAllPagesAsync()
+  for (const page of figma.root.children) {
+    const match = page.findOne((node) => node.type === 'FRAME' && node.getPluginData('funtastic-job-id') === job.id)
+    if (match && match.type === 'FRAME') return match
+  }
+  const anchor = await figma.getNodeByIdAsync(CANONICAL_DETAIL_PAGE_ANCHOR_ID)
+  const page = anchor?.parent?.type === 'PAGE' ? anchor.parent : figma.currentPage
+  await figma.setCurrentPageAsync(page)
+  const target = figma.createFrame()
+  target.name = `${job.product.name} ${job.product.sku} · 자동 제작본`
+  target.resize(860, 100)
+  target.x = Math.max(...page.children.map((node) => node.x + node.width), 0) + 160
+  target.y = anchor?.type === 'FRAME' ? anchor.y : 0
+  page.appendChild(target)
+  return target
+}
+
+async function buildGenericDraft(job) {
+  const images = genericImages(job)
+  const target = await findOrCreateGenericTarget(job)
+  const page = target.parent
+  if (!page || page.type !== 'PAGE') throw new Error('상세페이지를 배치할 Figma 페이지를 찾지 못했습니다.')
+  await figma.setCurrentPageAsync(page)
+  const scratch = figma.createFrame()
+  scratch.name = `AUTO QA BUILD · ${job.product.sku}`
+  scratch.resize(860, 100); scratch.layoutMode = 'VERTICAL'; scratch.primaryAxisSizingMode = 'AUTO'; scratch.counterAxisSizingMode = 'FIXED'; scratch.itemSpacing = 0
+  scratch.fills = [{ type: 'SOLID', color: COLORS.paper }]
+  scratch.x = target.x + 1020; scratch.y = target.y
+  try {
+    scratch.appendChild(await makeGenericCover(job, images))
+    scratch.appendChild(await makeGenericOptions(job, images))
+    const points = genericPointCopy(job.product)
+    for (let index = 0; index < points.length; index += 1) scratch.appendChild(await makeGenericPoint(index + 1, points[index], images[(index + 2) % images.length]))
+    scratch.appendChild(await makeGenericSize(job.product, images[0]))
+    scratch.appendChild(makeGenericProductInfo(job.product))
+    validateGeneratedFrame(scratch, images.length)
+    const x = target.x; const y = target.y
+    for (const child of [...target.children]) child.remove()
+    target.layoutMode = 'NONE'; target.resize(860, 100); target.layoutMode = 'VERTICAL'; target.primaryAxisSizingMode = 'AUTO'; target.counterAxisSizingMode = 'FIXED'; target.itemSpacing = 0
+    target.fills = [{ type: 'SOLID', color: COLORS.paper }]
+    while (scratch.children.length) target.appendChild(scratch.children[0])
+    target.x = x; target.y = y
+    target.name = `${job.product.name} ${job.product.sku} · 프리미엄 자동 제작본`
+    target.setPluginData('funtastic-job-id', job.id); target.setPluginData('funtastic-sku', job.product.sku); target.setPluginData('funtastic-template', 'premium-editorial-v2')
+    target.setPluginData('funtastic-layout-qa', scratch.getPluginData('funtastic-layout-qa'))
+    scratch.remove(); figma.currentPage.selection = [target]; figma.viewport.scrollAndZoomIntoView([target])
+    return target
+  } catch (error) {
+    try { scratch.remove() } catch {}
+    throw error
+  }
+}
+
 async function buildDraft(job) {
   await loadFonts()
   const brief = PRODUCT_BRIEFS[job.product.sku]
+  if (!brief) return buildGenericDraft(job)
   if (!brief) throw new Error(`자료 보완 필요: ${job.product.sku}의 검증된 제작 브리프가 없습니다.`)
   const target = await resolveTargetFrame(job, brief)
   const sharedPage = await placeOnSharedDetailCanvas(target)

@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.6'
+const PLUGIN_VERSION = '1.2.7'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -916,8 +916,8 @@ async function buildDessertBearFromReference(job, images, target) {
   const slotSources = [
     `${assetBase}/ai-flatlay-pair.png`, `${assetBase}/ai-bag-lifestyle.png`, `${assetBase}/ai-bag-lifestyle.png`,
     `${assetBase}/source-cupcake.png`, `${assetBase}/source-fruit.png`, `${assetBase}/ai-studio-pair.png`,
-    `${assetBase}/ai-bag-lifestyle.png`, `${assetBase}/ai-fur-closeup.png`, `${assetBase}/ai-bag-lifestyle.png`,
-    `${assetBase}/ai-flatlay-pair.png`, `${assetBase}/ai-size-cutout.png`, `${assetBase}/ai-flatlay-pair.png`,
+    `${assetBase}/ai-bag-lifestyle.png`, `${assetBase}/ai-fur-closeup.png`, `${assetBase}/ai-brown-loop-strap-v1.png`,
+    `${assetBase}/source-brown-loop-front-back-v1.png`, `${assetBase}/ai-size-cutout.png`, `${assetBase}/ai-flatlay-pair.png`,
     `${assetBase}/ai-bag-lifestyle.png`,
   ]
   for (let index = 0; index < imageNames.length; index += 1) {

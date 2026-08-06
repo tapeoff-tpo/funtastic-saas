@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.7'
+const PLUGIN_VERSION = '1.2.8'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -917,8 +917,8 @@ async function buildDessertBearFromReference(job, images, target) {
     `${assetBase}/ai-flatlay-pair.png`, `${assetBase}/ai-bag-lifestyle.png`, `${assetBase}/ai-bag-lifestyle.png`,
     `${assetBase}/source-cupcake.png`, `${assetBase}/source-fruit.png`, `${assetBase}/ai-studio-pair.png`,
     `${assetBase}/ai-bag-lifestyle.png`, `${assetBase}/ai-fur-closeup.png`, `${assetBase}/ai-brown-loop-strap-v1.png`,
-    `${assetBase}/source-brown-loop-front-back-v1.png`, `${assetBase}/ai-size-cutout.png`, `${assetBase}/ai-flatlay-pair.png`,
-    `${assetBase}/ai-bag-lifestyle.png`,
+    `${assetBase}/source-brown-loop-front-back-v1.png`, `${assetBase}/ai-size-loop-cutout-v2.png`, `${assetBase}/ai-tote-loop-lifestyle-v2.png`,
+    `${assetBase}/ai-hand-loop-lifestyle-v2.png`,
   ]
   for (let index = 0; index < imageNames.length; index += 1) {
     const node = clone.findOne((candidate) => candidate.name === imageNames[index] && 'fills' in candidate)
@@ -926,6 +926,24 @@ async function buildDessertBearFromReference(job, images, target) {
     const sourceUrl = slotSources[index]
     node.fills = [{ type: 'IMAGE', imageHash: await imagePaint(sourceUrl), scaleMode: 'FILL' }]
     node.setPluginData('source-image', normalizeImageUrl(sourceUrl))
+  }
+
+  const strapSection = clone.findOne((node) => node.type === 'FRAME' && node.name === '06 USP 03')
+  if (strapSection) {
+    const oldMain = strapSection.findOne((node) => node.name === 'hardware 1' && 'fills' in node)
+    const oldProof = strapSection.findOne((node) => node.name === 'hardware 2' && 'fills' in node)
+    if (oldMain && oldProof) {
+      const large = figma.createRectangle()
+      large.name = 'hardware 1 / LARGE STRAP PROOF'
+      large.resize(520, 500); large.x = 54; large.y = 440; large.cornerRadius = 28; large.fills = [...oldMain.fills]
+      strapSection.appendChild(large)
+      const proof = figma.createRectangle()
+      proof.name = 'hardware 2 / FRONT BACK PROOF'
+      proof.resize(208, 300); proof.x = 598; proof.y = 520; proof.cornerRadius = 24; proof.fills = [...oldProof.fills]
+      strapSection.appendChild(proof)
+      oldMain.remove(); oldProof.remove()
+    }
+    for (const line of strapSection.findAll((node) => node.name === 'line')) line.visible = false
   }
 
   await setExistingText(clone.findOne((node) => node.type === 'TEXT' && node.name === 'name'), job.product.name)

@@ -1,16 +1,23 @@
 'use client'
 
 import Link from 'next/link'
+import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import { useState, useTransition } from 'react'
 import { ClipboardList, WandSparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { PurchasingItemUpload } from '@/components/purchasing-item-upload'
-import { PurchasingUrlCollector } from '@/components/purchasing-url-collector'
 import { Button } from '@/components/ui/button'
 import { CostsEditableTable, type CostEditableRow } from './costs-editable-table'
 
 const DETAIL_PAGE_SELECTION_KEY = 'funtastic-detail-page-selection'
+const PurchasingItemUpload = dynamic(
+  () => import('@/components/purchasing-item-upload').then((module) => module.PurchasingItemUpload),
+  { ssr: false },
+)
+const PurchasingUrlCollector = dynamic(
+  () => import('@/components/purchasing-url-collector').then((module) => module.PurchasingUrlCollector),
+  { ssr: false },
+)
 
 export function CostsPageClient({
   headers,

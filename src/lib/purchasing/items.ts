@@ -119,6 +119,7 @@ export async function getPurchasingItems(input: {
   filters?: Partial<Record<Esa009mHeader, string>>
   sort?: Esa009mHeader | 'updatedAt'
   direction?: PurchasingItemSortDirection
+  includeOutgoingMetrics?: boolean
 }) {
   const conditions = purchasingItemConditions(input.userId, input.search, input.filters)
   const orderBy = purchasingItemOrderBy(input.sort, input.direction)
@@ -134,7 +135,9 @@ export async function getPurchasingItems(input: {
     db.select({ total: count() }).from(products).where(where),
   ])
 
-  const metricsBySku = await getSkuOutgoingMetrics(input.userId, rows.map((row) => row.internalSku))
+  const metricsBySku = input.includeOutgoingMetrics
+    ? await getSkuOutgoingMetrics(input.userId, rows.map((row) => row.internalSku))
+    : null
 
   return {
     items: rows.map((row) => ({
@@ -142,14 +145,17 @@ export async function getPurchasingItems(input: {
       data: normalizeEsaData(row.metadata?.esa009m),
       purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
       purchaseUrlVerification: purchaseUrlVerification(row.metadata),
-      outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
+      outgoingMetrics: metricsBySku?.get(row.internalSku) ?? emptyOutgoingMetrics(),
       updatedAt: row.updatedAt,
     })),
     total,
   }
 }
 
-export async function getAllPurchasingItems(userId: string) {
+export async function getAllPurchasingItems(
+  userId: string,
+  options: { includeOutgoingMetrics?: boolean } = {},
+) {
   const rows = await db.select({
     id: products.id,
     internalSku: products.internalSku,
@@ -159,14 +165,16 @@ export async function getAllPurchasingItems(userId: string) {
     .where(and(...purchasingItemConditions(userId)))
     .orderBy(asc(products.internalSku))
 
-  const metricsBySku = await getSkuOutgoingMetrics(userId, rows.map((row) => row.internalSku))
+  const metricsBySku = options.includeOutgoingMetrics
+    ? await getSkuOutgoingMetrics(userId, rows.map((row) => row.internalSku))
+    : null
 
   return rows.map((row) => ({
     id: row.id,
     data: normalizeEsaData(row.metadata?.esa009m),
     purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
     purchaseUrlVerification: purchaseUrlVerification(row.metadata),
-    outgoingMetrics: metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics(),
+    outgoingMetrics: metricsBySku?.get(row.internalSku) ?? emptyOutgoingMetrics(),
     updatedAt: row.updatedAt,
   }))
 }

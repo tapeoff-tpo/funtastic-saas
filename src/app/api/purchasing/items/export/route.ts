@@ -40,7 +40,12 @@ export async function GET(request: NextRequest) {
   if (isTemplate) {
     addTemplateRows(sheet, selectedHeaders)
   } else {
-    const items = await getAllPurchasingItems(await getWorkspaceUserId(user.id))
+    const includeOutgoingMetrics = selectedExtraHeaders.includes('당월 출고수량')
+      || selectedExtraHeaders.includes('3개월 평균 출고수량')
+    const items = await getAllPurchasingItems(
+      await getWorkspaceUserId(user.id),
+      { includeOutgoingMetrics },
+    )
     for (const item of items) {
       sheet.addRow({
         ...Object.fromEntries(selectedHeaders.map((header) => [header, item.data[header] ?? null])),

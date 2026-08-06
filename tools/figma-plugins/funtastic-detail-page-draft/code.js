@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.1'
+const PLUGIN_VERSION = '1.2.2'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -947,6 +947,32 @@ async function buildDessertBearFromReference(job, images, target) {
     const valueNodes = info.findAll((node) => node.type === 'TEXT' && node.name === 'val')
     for (let index = 0; index < Math.min(values.length, valueNodes.length); index += 1) await setExistingText(valueNodes[index], values[index])
   }
+
+  const caution = makeSection('09 주의사항 / 구매 전 확인', 650, COLORS.paper)
+  caution.x = 0; caution.y = 9510
+  appendText(caution, 'NOTICE', 54, 54, 752, 15, 'Bold', COLORS.red)
+  appendText(caution, '구매 전 꼭 확인해주세요', 54, 98, 752, 36, 'Bold', COLORS.ink)
+  const cautionBody = appendText(caution, [
+    '• 제품의 색상은 모니터 환경과 촬영 조명에 따라 실제와 다르게 보일 수 있습니다.',
+    '• 봉제 제품 특성상 형태, 표정, 털 방향과 마감에 미세한 차이가 있을 수 있습니다.',
+    '• 사이즈와 무게는 측정 위치 및 방법에 따라 약간의 오차가 발생할 수 있습니다.',
+    '• 화기와 습기가 많은 장소를 피해 보관하고, 어린이가 사용할 때에는 보호자의 확인이 필요합니다.',
+  ].join('\n'), 54, 190, 752, 19, 'Regular', COLORS.muted)
+  cautionBody.lineHeight = { unit: 'PERCENT', value: 165 }
+  clone.appendChild(caution)
+
+  const ipReference = figma.currentPage.findOne((node) => node.type === 'FRAME' && node.name.includes('펀타스틱 지적재산권 안내'))
+  if (!ipReference) throw new Error('공용 지적재산권 안내 프레임을 찾지 못했습니다.')
+  const ipNotice = ipReference.clone()
+  ipNotice.name = '10 펀타스틱 지적재산권 안내 / 원본 이미지'
+  clone.appendChild(ipNotice)
+  ipNotice.x = 0; ipNotice.y = 10160
+  const closing = clone.findOne((node) => node.type === 'FRAME' && node.name === '09 CLOSING')
+  if (closing) {
+    closing.name = '11 CLOSING'
+    closing.y = 10615
+  }
+  clone.resize(860, 11965)
 
   clone.setPluginData('funtastic-job-id', job.id)
   clone.setPluginData('funtastic-sku', job.product.sku)

@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.3'
+const PLUGIN_VERSION = '1.2.4'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -950,7 +950,7 @@ async function buildDessertBearFromReference(job, images, target) {
 
   const caution = makeSection('09 주의사항 / 구매 전 확인', 650, COLORS.paper)
   caution.x = 0; caution.y = 9510
-  caution.resize(860, 430)
+  caution.resize(860, 300)
   appendText(caution, 'NOTICE', 54, 54, 752, 15, 'Bold', COLORS.red)
   appendText(caution, '구매 전 꼭 확인해주세요', 54, 98, 752, 36, 'Bold', COLORS.ink)
   const cautionBody = appendText(caution, [
@@ -967,13 +967,16 @@ async function buildDessertBearFromReference(job, images, target) {
   const ipNotice = ipReference.clone()
   ipNotice.name = '10 펀타스틱 지적재산권 안내 / 원본 이미지'
   clone.appendChild(ipNotice)
-  ipNotice.x = 0; ipNotice.y = 9940
+  ipNotice.x = 0; ipNotice.y = 9810
+  ipNotice.resize(860, 339)
+  const ipNoticeImage = ipNotice.findOne((node) => node.type === 'RECTANGLE')
+  if (ipNoticeImage) ipNoticeImage.y = 0
   const closing = clone.findOne((node) => node.type === 'FRAME' && node.name === '09 CLOSING')
   if (closing) {
     closing.name = '11 CLOSING'
-    closing.y = 10395
+    closing.y = 10149
   }
-  clone.resize(860, 11745)
+  clone.resize(860, 11499)
 
   clone.setPluginData('funtastic-job-id', job.id)
   clone.setPluginData('funtastic-sku', job.product.sku)

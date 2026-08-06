@@ -1,11 +1,17 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.5'
+const PLUGIN_VERSION = '1.2.6'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
 const IMAGE_FETCH_TIMEOUT_MS = 20_000
 const IP_NOTICE_NODE_ID = '184:51'
 const BRIDGE_STATE_KEY = 'funtastic-detail-page-bridge'
+
+const GENERATED_ASSETS_BY_SKU = {
+  '112369-0001': [`${SERVER_URL}/detail-page-assets/water-bucket-ai-lifestyle-v1.png`],
+  '112370-0001': [`${SERVER_URL}/detail-page-assets/ribbon-harness-ai-lifestyle-v1.png`],
+  '112371-0001': [`${SERVER_URL}/detail-page-assets/stripe-harness-ai-lifestyle-v1.png`],
+}
 
 const COLORS = {
   ink: { r: 0.08, g: 0.09, b: 0.11 },
@@ -1074,6 +1080,28 @@ async function makeGenericPoint(index, point, imageUrl) {
   return section
 }
 
+async function makeGenericAiScene(product, imageUrl) {
+  const section = makeSection('05 AI LIFESTYLE / PRODUCT-FAITHFUL', 1300, COLORS.sky)
+  makeLabel(section, 'AI LIFESTYLE', 50, 54, 154, COLORS.navy)
+  appendText(section, `${product.name}\n실사용 장면으로 확인해보세요`, 50, 120, 760, 40, 'Bold', COLORS.ink)
+  appendText(section, '1688 원본의 형태와 옵션을 기준으로 구성한 연출 이미지입니다.', 50, 232, 760, 18, 'Regular', COLORS.muted)
+  const image = await makeImage(imageUrl, 760, 900, 'AI GENERATED / PRODUCT-FAITHFUL LIFESTYLE')
+  image.x = 50; image.y = 330; image.cornerRadius = 28
+  section.appendChild(image)
+  return section
+}
+
+async function makeGenericSupplierGallery(images) {
+  const section = makeSection('06 SUPPLIER EVIDENCE / DISTINCT VIEWS', 1500, COLORS.peach)
+  makeLabel(section, 'PRODUCT VIEW', 50, 54, 154, COLORS.coral)
+  appendText(section, '실제 제품 디테일을\n다른 각도에서 확인하세요', 50, 120, 760, 40, 'Bold', COLORS.ink)
+  const first = await makeImage(images[0], 760, 560, 'SUPPLIER EVIDENCE / VIEW 01')
+  first.x = 50; first.y = 310; first.cornerRadius = 28; section.appendChild(first)
+  const second = await makeImage(images[Math.min(1, images.length - 1)], 760, 500, 'SUPPLIER EVIDENCE / VIEW 02')
+  second.x = 50; second.y = 920; second.cornerRadius = 28; section.appendChild(second)
+  return section
+}
+
 async function makeGenericSize(product, imageUrl) {
   const section = makeSection('05 SIZE INFO / DIMENSION', 1120, COLORS.paper)
   makeLabel(section, 'SIZE INFO', 50, 54, 136, COLORS.amber)
@@ -1109,7 +1137,7 @@ function makeGenericProductInfo(product) {
 function validateGeneratedFrame(frame, expectedImageCount) {
   const errors = []
   if (Math.round(frame.width) !== 860) errors.push(`프레임 너비 오류: ${Math.round(frame.width)}px`)
-  if (frame.height < 6000) errors.push(`상세페이지 길이 부족: ${Math.round(frame.height)}px`)
+  if (frame.height < 12000) errors.push(`상세페이지 길이 부족: ${Math.round(frame.height)}px`)
   const texts = frame.findAll((node) => node.type === 'TEXT')
   for (const text of texts) {
     const parent = text.parent
@@ -1142,6 +1170,8 @@ async function findOrCreateGenericTarget(job) {
 
 async function buildGenericDraft(job) {
   const images = genericImages(job)
+  const generatedImages = GENERATED_ASSETS_BY_SKU[job.product.sku] || []
+  if (!generatedImages.length) throw new Error('자료보완 필요: 제품 충실 AI 생성 이미지가 준비되지 않았습니다.')
   const target = await findOrCreateGenericTarget(job)
   const page = target.parent
   if (!page || page.type !== 'PAGE') throw new Error('상세페이지를 배치할 Figma 페이지를 찾지 못했습니다.')
@@ -1157,8 +1187,12 @@ async function buildGenericDraft(job) {
     scratch.appendChild(await makeGenericOptions(job, images))
     const points = genericPointCopy(job.product)
     for (let index = 0; index < points.length; index += 1) scratch.appendChild(await makeGenericPoint(index + 1, points[index], images[(index + 2) % images.length]))
+    scratch.appendChild(await makeGenericAiScene(job.product, generatedImages[0]))
+    scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
     scratch.appendChild(await makeGenericSize(job.product, images[0]))
     scratch.appendChild(makeGenericProductInfo(job.product))
+    scratch.appendChild(makeStandardCautions({ specificCautions: [] }))
+    scratch.appendChild(await cloneIpNotice())
     validateGeneratedFrame(scratch, images.length)
     const x = target.x; const y = target.y
     for (const child of [...target.children]) child.remove()

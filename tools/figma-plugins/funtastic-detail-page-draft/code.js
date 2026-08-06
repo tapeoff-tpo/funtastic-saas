@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.8'
+const PLUGIN_VERSION = '1.2.9'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -964,6 +964,21 @@ async function buildDessertBearFromReference(job, images, target) {
     await setExistingText(sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'h'), '18 cm')
     await setExistingText(sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'w'), '12 cm')
     await setExistingText(sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'weight text'), job.product.weight || '120 g')
+    const lines = sizeSection.findAll((node) => node.name === 'line' && node.type === 'RECTANGLE')
+    const vertical = lines.find((node) => node.width <= 5 && node.height > 100)
+    const verticalCaps = lines.filter((node) => node.width > 20 && node.height <= 5 && node.x < 200).sort((a, b) => a.y - b.y)
+    const horizontal = lines.find((node) => node.width > 100 && node.height <= 5 && node.x > 200)
+    const horizontalCaps = lines.filter((node) => node.width <= 5 && node.height > 20 && node.x > 200).sort((a, b) => a.x - b.x)
+    if (vertical) { vertical.x = 116; vertical.y = 210; vertical.resize(4, 614) }
+    if (verticalCaps[0]) { verticalCaps[0].x = 100; verticalCaps[0].y = 210; verticalCaps[0].resize(36, 4) }
+    if (verticalCaps[1]) { verticalCaps[1].x = 100; verticalCaps[1].y = 820; verticalCaps[1].resize(36, 4) }
+    if (horizontal) { horizontal.x = 290; horizontal.y = 860; horizontal.resize(280, 4) }
+    if (horizontalCaps[0]) { horizontalCaps[0].x = 290; horizontalCaps[0].y = 846; horizontalCaps[0].resize(4, 32) }
+    if (horizontalCaps[1]) { horizontalCaps[1].x = 566; horizontalCaps[1].y = 846; horizontalCaps[1].resize(4, 32) }
+    const heightText = sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'h')
+    const widthText = sizeSection.findOne((node) => node.type === 'TEXT' && node.name === 'w')
+    if (heightText) { heightText.x = 34; heightText.y = 497 }
+    if (widthText) { widthText.x = 350; widthText.y = 882 }
   }
 
   const info = clone.findOne((node) => node.type === 'FRAME' && node.name === '08 PRODUCT INFO')

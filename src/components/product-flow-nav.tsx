@@ -4,21 +4,24 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 const STAGES = [
-  { href: '/operations/sourcing', label: '소싱' },
-  { href: '/costs', label: '품목' },
-  { href: '/purchasing/purchases', label: '발주검토' },
-  { href: '/purchasing/orders', label: '발주' },
-  { href: '/purchasing/china-inventory', label: '중국재고' },
+  { href: '/operations/flow', label: '운영 플로우' },
+  { href: '/orders/import', label: '주문 업로드' },
+  { href: '/orders', label: '주문 처리' },
+  { href: '/shipping/scan', label: '출고·송장' },
   { href: '/inventory', label: '재고관리' },
-  { href: '/analytics/price-table', label: '판매가' },
+  { href: '/purchasing/purchases', label: '자동발주' },
+  { href: '/purchasing/orders', label: '발주·입고' },
+  { href: '/costs', label: '품목' },
+  { href: '/operations/detail-pages', label: '상세페이지' },
   { href: '/operations/marketplace-registration', label: '상품등록' },
+  { href: '/analytics', label: '매출분석' },
 ]
 
 export function ProductFlowNav() {
   const pathname = usePathname()
 
   return (
-    <nav aria-label="상품 운영 흐름" className="overflow-x-auto border-y bg-muted/20">
+    <nav aria-label="운영 흐름" className="overflow-x-auto border-y bg-muted/20">
       <div className="flex min-w-max items-center px-1 py-1">
         {STAGES.map((stage, index) => (
           <div key={stage.href} className="flex items-center">

@@ -116,6 +116,7 @@ export const navSections: NavSection[] = [
     id: 'dashboard',
     items: [
       { href: '/dashboard', label: '대시보드', icon: LayoutDashboard },
+      { href: '/operations/flow', label: '운영 플로우', icon: PanelsTopLeft },
     ],
   },
   {

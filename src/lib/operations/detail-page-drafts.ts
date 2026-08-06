@@ -692,8 +692,10 @@ export async function claimNextDetailPageDraft(device: typeof figmaBridgeDevices
   await db
     .update(detailPageJobs)
     .set({
-      status: 'failed',
-      errorMessage: 'Figma 플러그인 연결이 5분 동안 응답하지 않아 작업을 중단했습니다. 다시 시도해주세요.',
+      status: 'queued',
+      claimedByDeviceId: null,
+      claimedAt: null,
+      errorMessage: null,
       updatedAt: new Date(),
     })
     .where(and(

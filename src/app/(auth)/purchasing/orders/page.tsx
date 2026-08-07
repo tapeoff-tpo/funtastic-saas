@@ -6,6 +6,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
+import { getEcountPurchaseHistorySummary } from '@/lib/purchasing/ecount-purchase-history'
 import {
   getNextPurchaseStatus,
   PURCHASE_REQUEST_STATUSES,
@@ -22,6 +23,7 @@ import {
   PurchaseBulkStatusButton,
   PurchaseBuyerField,
   PurchaseDeleteButton,
+  EcountPurchaseHistoryImport,
   PurchasePlanFieldsV2,
   PurchasePaginationControls,
   PurchaseQuantityField,
@@ -94,6 +96,9 @@ export async function PurchasingOrdersView({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
+  const ecountHistory = showRecommendationGenerator
+    ? await getEcountPurchaseHistorySummary(workspaceUserId)
+    : null
   let purchaseRequestResult = await getPurchaseRequests({
     userId: workspaceUserId,
     status: selectedStatus,
@@ -208,6 +213,24 @@ export async function PurchasingOrdersView({
       </header>
 
       {showRecommendationGenerator ? <PurchaseRecommendationGenerator /> : null}
+
+      {showRecommendationGenerator ? (
+        <section className="rounded-md border bg-muted/20 px-3 py-2">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0 text-sm">
+              <p className="font-medium">이카운트 과거 발주 이력</p>
+              {ecountHistory && ecountHistory.total > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  {ecountHistory.firstDate ?? '-'} ~ {ecountHistory.lastDate ?? '-'} · 전체 {ecountHistory.total.toLocaleString('ko-KR')}행 · 완료 {ecountHistory.completed.toLocaleString('ko-KR')} · 진행중 {ecountHistory.inProgress.toLocaleString('ko-KR')} · 확정 SKU 매칭 {ecountHistory.exactMatched.toLocaleString('ko-KR')} · 검토 필요 {ecountHistory.reviewRequired.toLocaleString('ko-KR')}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">이카운트 발주요청조회 엑셀을 여러 파일 한 번에 선택해 가져오세요. 원본 이력은 활성 발주와 분리해 보관합니다.</p>
+              )}
+            </div>
+            <EcountPurchaseHistoryImport />
+          </div>
+        </section>
+      ) : null}
 
       {newProductFirstSaleItems.length > 0 ? (
         <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">

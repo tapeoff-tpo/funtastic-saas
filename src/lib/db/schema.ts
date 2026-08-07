@@ -765,6 +765,61 @@ export const purchaseRequestItems = pgTable(
   ],
 )
 
+// Historical Ecount purchase-request exports are kept separate from the active
+// purchase workflow. The source export does not always contain a SKU, so each
+// row retains its match confidence instead of being forced into an active item.
+export const ecountPurchaseHistoryBatches = pgTable(
+  'ecount_purchase_history_batches',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    sourceFileName: varchar('source_file_name', { length: 255 }).notNull(),
+    sourceSheetName: varchar('source_sheet_name', { length: 100 }).notNull().default('발주요청조회'),
+    periodStart: date('period_start'),
+    periodEnd: date('period_end'),
+    totalRows: integer('total_rows').notNull().default(0),
+    completedRows: integer('completed_rows').notNull().default(0),
+    inProgressRows: integer('in_progress_rows').notNull().default(0),
+    uploadedByUserId: uuid('uploaded_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('ecount_purchase_history_batches_user_file').on(table.userId, table.sourceFileName),
+    index('ecount_purchase_history_batches_user_created').on(table.userId, table.createdAt),
+  ],
+)
+
+export const ecountPurchaseHistoryItems = pgTable(
+  'ecount_purchase_history_items',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    batchId: uuid('batch_id')
+      .references(() => ecountPurchaseHistoryBatches.id, { onDelete: 'set null' }),
+    sourceRequestNumber: varchar('source_request_number', { length: 100 }).notNull(),
+    requestDate: date('request_date'),
+    managerName: varchar('manager_name', { length: 100 }),
+    warehouseName: varchar('warehouse_name', { length: 100 }),
+    sourceProductName: text('source_product_name').notNull(),
+    quantity: integer('quantity').notNull().default(0),
+    sourceNote: text('source_note'),
+    sourceStatus: varchar('source_status', { length: 30 }).notNull(),
+    matchStatus: varchar('match_status', { length: 30 }).notNull().default('unmatched'),
+    productId: uuid('product_id').references(() => products.id, { onDelete: 'set null' }),
+    sku: varchar('sku', { length: 100 }),
+    candidateSkus: jsonb('candidate_skus').$type<string[]>().notNull().default([]),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('ecount_purchase_history_items_user_request').on(table.userId, table.sourceRequestNumber),
+    index('ecount_purchase_history_items_user_date').on(table.userId, table.requestDate),
+    index('ecount_purchase_history_items_user_match').on(table.userId, table.matchStatus),
+    index('ecount_purchase_history_items_product').on(table.productId),
+  ],
+)
+
 export const chinaWarehouseInventory = pgTable(
   'china_warehouse_inventory',
   {

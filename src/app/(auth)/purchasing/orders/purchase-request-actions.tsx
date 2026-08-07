@@ -716,6 +716,63 @@ export function PurchaseRecommendationGenerator() {
   )
 }
 
+export function EcountPurchaseHistoryImport() {
+  const router = useRouter()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function upload() {
+    const files = Array.from(inputRef.current?.files ?? [])
+    if (files.length === 0) {
+      setError('이카운트 발주요청조회 엑셀 파일을 선택해주세요.')
+      return
+    }
+    setMessage(null)
+    setError(null)
+    startTransition(async () => {
+      try {
+        const form = new FormData()
+        files.forEach((file) => form.append('files', file))
+        const response = await fetch('/api/purchasing/ecount-history/import', { method: 'POST', body: form })
+        const body = await response.json().catch(() => ({})) as {
+          error?: string; saved?: number; completed?: number; inProgress?: number; exactMatched?: number; reviewRequired?: number
+        }
+        if (!response.ok) {
+          setError(body.error ?? '이카운트 과거 발주 이력을 가져오지 못했습니다.')
+          return
+        }
+        setMessage(
+          `${(body.saved ?? 0).toLocaleString('ko-KR')}행 저장 · 완료 ${(body.completed ?? 0).toLocaleString('ko-KR')} · 진행중 ${(body.inProgress ?? 0).toLocaleString('ko-KR')} · 확정 매칭 ${(body.exactMatched ?? 0).toLocaleString('ko-KR')}`,
+        )
+        if (inputRef.current) inputRef.current.value = ''
+        router.refresh()
+      } catch (uploadError) {
+        setError(uploadError instanceof Error ? uploadError.message : '이카운트 과거 발주 이력을 가져오지 못했습니다.')
+      }
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        multiple
+        className="h-8 max-w-64 rounded-md border border-input bg-background px-2 py-1 text-xs"
+      />
+      <Button type="button" size="sm" variant="outline" onClick={upload} disabled={isPending}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Upload />}
+        과거 발주 이력 가져오기
+      </Button>
+      {message ? <span className="text-xs text-emerald-700">{message}</span> : null}
+      {error ? <span className="text-xs text-destructive">{error}</span> : null}
+    </div>
+  )
+}
+
 export function PurchaseStatusButton({
   id,
   nextStatus,

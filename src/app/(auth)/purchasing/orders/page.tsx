@@ -99,12 +99,12 @@ export async function PurchasingOrdersView({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [ecountHistory, chinaPurchaseFunds] = showRecommendationGenerator
-    ? await Promise.all([
-      getEcountPurchaseHistorySummary(workspaceUserId),
-      getChinaPurchaseFundSummary(workspaceUserId),
-    ])
-    : [null, null]
+  const ecountHistory = showRecommendationGenerator
+    ? await getEcountPurchaseHistorySummary(workspaceUserId)
+    : null
+  const chinaPurchaseFunds = basePath === '/purchasing/orders'
+    ? await getChinaPurchaseFundSummary(workspaceUserId)
+    : null
   let purchaseRequestResult = await getPurchaseRequests({
     userId: workspaceUserId,
     status: selectedStatus,
@@ -220,10 +220,6 @@ export async function PurchasingOrdersView({
 
       {showRecommendationGenerator ? <PurchaseRecommendationGenerator /> : null}
 
-      {showRecommendationGenerator && chinaPurchaseFunds ? (
-        <ChinaPurchaseFundsPanel {...chinaPurchaseFunds} plannedCny={costTotals.totalCostYuan} />
-      ) : null}
-
       {showRecommendationGenerator ? (
         <section className="rounded-md border bg-muted/20 px-3 py-2">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
@@ -305,6 +301,10 @@ export async function PurchasingOrdersView({
           </span>
         ) : null}
       </section>
+
+      {chinaPurchaseFunds ? (
+        <ChinaPurchaseFundsPanel {...chinaPurchaseFunds} plannedCny={costTotals.totalCostYuan} />
+      ) : null}
 
       {overdueOnly ? (
         <nav className="flex flex-wrap gap-2" aria-label="지연 상태 필터">

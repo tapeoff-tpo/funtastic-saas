@@ -381,7 +381,7 @@ export async function PurchasingOrdersView({
                 className="inline-flex h-7 items-center justify-center gap-1 rounded-md border border-border bg-background px-2.5 text-[0.8rem] font-medium whitespace-nowrap hover:bg-muted"
               >
                 {showRecommendationBasis ? <EyeOff /> : <Eye />}
-                {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
+                {showRecommendationBasis ? '계산 근거 닫기' : '계산 근거 보기'}
               </Link>
               <PurchaseBulkDeleteButton />
               {isRequestedStatus ? <PurchaseBulkRecommendationHold /> : null}
@@ -425,7 +425,7 @@ export async function PurchasingOrdersView({
                       </th>
                     </>
                   ) : null}
-                  {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
+                  {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">계산 근거</th> : null}
                   {isRequestedStatus ? null : (
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                       <SortHeader label="구입관리코드" column="purchaseManagementCode" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />

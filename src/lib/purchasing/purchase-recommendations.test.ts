@@ -178,6 +178,22 @@ describe('purchase budget allocation', () => {
     expect(allocatePurchaseBudget(candidate, 15000).items[0]?.allocatedQuantity).toBe(10)
   })
 
+  it('excludes a one-unit shortage when its 10-unit purchase minimum does not fit the budget', () => {
+    const candidate = [{
+      sku: 'minimum-budget-exclusion',
+      recommendedQuantity: 10,
+      stockCoverageMonths: 0,
+      effectiveMonthlyOutgoing: 1,
+      unitCostKrw: 1000,
+      purchaseMinimumQuantity: 10,
+      purchaseRoundingUnit: 10,
+    }]
+
+    const result = allocatePurchaseBudget(candidate, 9000)
+    expect(result.items).toHaveLength(0)
+    expect(result.budgetLimitedCount).toBe(1)
+  })
+
   it('allocates an MOQ product group only when the full group fits the budget', () => {
     const moqCandidates = [
       {

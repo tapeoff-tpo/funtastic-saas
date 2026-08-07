@@ -134,6 +134,8 @@ function recommendationProgressMessage(
     `기존 검토 ${updated.toLocaleString('ko-KR')}건 갱신`,
   ]
   if (monitoring > 0) parts.push(`발주 보류 ${monitoring.toLocaleString('ko-KR')}건`)
+  const budgetLimitedCount = 'budgetLimitedCount' in result ? result.budgetLimitedCount : 0
+  if (budgetLimitedCount > 0) parts.push(`예산 부족 제외 ${budgetLimitedCount.toLocaleString('ko-KR')}건`)
   if (moqBudgetExcludedGroupCount > 0) {
     parts.push(`예산 부족 MOQ 그룹 ${moqBudgetExcludedGroupCount.toLocaleString('ko-KR')}개 제외`)
   }

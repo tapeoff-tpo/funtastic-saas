@@ -113,15 +113,17 @@ export async function POST(request: NextRequest) {
 function recommendationProgressMessage(
   result: Awaited<ReturnType<typeof generatePurchaseRecommendations>>,
 ) {
-  const replaced = 'replaced' in result ? result.replaced : 0
+  const updated = 'updated' in result ? result.updated : 0
+  const monitoring = 'monitoring' in result ? result.monitoring : 0
   const moqBudgetExcludedGroupCount = 'moqBudgetExcludedGroupCount' in result
     ? result.moqBudgetExcludedGroupCount
     : 0
   const parts = [
     `재고 ${result.evaluated.toLocaleString('ko-KR')}개 검토`,
     `추천 ${result.created.toLocaleString('ko-KR')}건 생성`,
-    `기존 자동추천 ${replaced.toLocaleString('ko-KR')}건 교체`,
+    `기존 검토 ${updated.toLocaleString('ko-KR')}건 갱신`,
   ]
+  if (monitoring > 0) parts.push(`발주 보류 ${monitoring.toLocaleString('ko-KR')}건`)
   if (moqBudgetExcludedGroupCount > 0) {
     parts.push(`예산 부족 MOQ 그룹 ${moqBudgetExcludedGroupCount.toLocaleString('ko-KR')}개 제외`)
   }

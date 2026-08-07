@@ -1,6 +1,5 @@
 ﻿import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { notExists } from 'drizzle-orm'
 import {
   chinaWarehouseInventory,
   inventory,
@@ -50,6 +49,8 @@ export type SpikeGuardPurchaseRecommendationCalculation = PurchaseRecommendation
   spikeGuardAdjustedToMinimum: boolean
 }
 
+export type PurchaseSalesTrend = 'increasing' | 'decreasing' | 'steady' | 'new_product'
+
 export type PurchaseBudgetCandidate = {
   sku: string
   recommendedQuantity: number
@@ -87,12 +88,40 @@ export function calculateStableMonthlyOutgoing(input: {
   const baselineMonthlyOutgoing = threeMonthAverageOutgoing
   const salesAnomalyDetected = currentMonthOutgoing >= baselineMonthlyOutgoing * 2
     && currentMonthOutgoing - baselineMonthlyOutgoing >= 20
+  const salesTrend = calculatePurchaseSalesTrend({
+    currentMonthOutgoing,
+    threeMonthAverageOutgoing: baselineMonthlyOutgoing,
+  })
+  const effectiveMonthlyOutgoing = salesAnomalyDetected
+    ? baselineMonthlyOutgoing
+    : salesTrend === 'increasing' || salesTrend === 'new_product'
+      ? currentMonthOutgoing
+      : salesTrend === 'decreasing'
+        ? (baselineMonthlyOutgoing + currentMonthOutgoing) / 2
+        : baselineMonthlyOutgoing
 
   return {
-    effectiveMonthlyOutgoing: roundToOneDecimal(baselineMonthlyOutgoing),
+    effectiveMonthlyOutgoing: roundToOneDecimal(effectiveMonthlyOutgoing),
     baselineMonthlyOutgoing: roundToOneDecimal(baselineMonthlyOutgoing),
     salesAnomalyDetected,
+    salesTrend: salesAnomalyDetected ? 'steady' as const : salesTrend,
   }
+}
+
+export function calculatePurchaseSalesTrend(input: {
+  currentMonthOutgoing: number
+  threeMonthAverageOutgoing: number
+}): PurchaseSalesTrend {
+  const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
+  const baselineMonthlyOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
+
+  if (baselineMonthlyOutgoing === 0 && currentMonthOutgoing > 0) return 'new_product'
+  if (baselineMonthlyOutgoing === 0) return 'steady'
+
+  const difference = currentMonthOutgoing - baselineMonthlyOutgoing
+  if (difference >= 3 && currentMonthOutgoing >= baselineMonthlyOutgoing * 1.2) return 'increasing'
+  if (difference <= -3 && currentMonthOutgoing <= baselineMonthlyOutgoing * 0.8) return 'decreasing'
+  return 'steady'
 }
 
 export function allocatePurchaseBudget<T extends PurchaseBudgetCandidate>(
@@ -341,6 +370,8 @@ export async function generatePurchaseRecommendations(input: {
       sku: products.internalSku,
       unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
       unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+      metadata: products.metadata,
+      createdAt: products.createdAt,
     }).from(products).where(and(
       eq(products.userId, input.userId),
       inArray(products.internalSku, recommendationInventoryRows.map((row) => row.sku)),
@@ -379,6 +410,7 @@ export async function generatePurchaseRecommendations(input: {
       calculation,
       unitCostYuan: costs.unitCostYuan,
       unitCostKrw: costs.unitCostKrw,
+      isNewProduct: isNewProductForPurchaseRecommendation(productCosts?.metadata, productCosts?.createdAt, now),
     })
   })
   const salesAnomalyCount = assessedRows.filter((item) => item.salesAnomalyDetected).length
@@ -404,13 +436,17 @@ export async function generatePurchaseRecommendations(input: {
         inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'outbound_requested']),
       ))
 
-    const replaceableRows = activeRequestRows.filter(
+    const autoReviewRows = activeRequestRows.filter(
       (row) => row.status === 'requested' && isAutoPurchaseRecommendation(row.rawData),
     )
-    const replaceableIds = new Set(replaceableRows.map((row) => row.id))
+    const autoReviewIds = new Set(autoReviewRows.map((row) => row.id))
+    const autoReviewRowBySku = new Map<string, typeof autoReviewRows[number]>()
+    for (const row of autoReviewRows) {
+      if (!autoReviewRowBySku.has(row.sku)) autoReviewRowBySku.set(row.sku, row)
+    }
     const pipelineQuantityBySku = new Map<string, number>()
     for (const row of activeRequestRows) {
-      if (replaceableIds.has(row.id)) continue
+      if (autoReviewIds.has(row.id)) continue
       pipelineQuantityBySku.set(
         row.sku,
         (pipelineQuantityBySku.get(row.sku) ?? 0) + purchasePipelineQuantity(row),
@@ -442,11 +478,8 @@ export async function generatePurchaseRecommendations(input: {
         stockCoverageMonths: calculation.stockCoverageMonths,
       }
     })
-    const recommendationCandidates = applyPurchaseMinimumQuantities(
-      applyProductGroupMoq(adjustedRows),
-    ).filter(
-      (item) => item.recommendedQuantity > 0,
-    )
+    const allRecommendationRows = applyPurchaseMinimumQuantities(applyProductGroupMoq(adjustedRows))
+    const recommendationCandidates = allRecommendationRows.filter((item) => item.recommendedQuantity > 0)
     const allocation = budgetKrw === null
       ? {
           items: recommendationCandidates.map((item) => ({
@@ -464,29 +497,54 @@ export async function generatePurchaseRecommendations(input: {
         }
       : allocatePurchaseBudget(recommendationCandidates, budgetKrw)
 
-    if (replaceableRows.length > 0) {
-      await tx.delete(purchaseRequestItems).where(inArray(
-        purchaseRequestItems.id,
-        replaceableRows.map((row) => row.id),
+    const allocatedQuantityBySku = new Map(
+      allocation.items.map((item) => [item.row.sku, item.allocatedQuantity]),
+    )
+    const reviewRows = allRecommendationRows
+      .filter((item) => (
+        autoReviewRowBySku.has(item.row.sku)
+        || allocatedQuantityBySku.has(item.row.sku)
+        || (item.isNewProduct && item.currentMonthOutgoing > 0)
       ))
-      const replaceableBatchIds = [...new Set(
-        replaceableRows.map((row) => row.batchId).filter((id): id is string => id !== null),
-      )]
-      if (replaceableBatchIds.length > 0) {
-        await tx.delete(purchaseRequestBatches).where(and(
-          inArray(purchaseRequestBatches.id, replaceableBatchIds),
-          notExists(
-            tx.select({ id: purchaseRequestItems.id })
-              .from(purchaseRequestItems)
-              .where(eq(purchaseRequestItems.batchId, purchaseRequestBatches.id)),
-          ),
+      .map((item) => ({
+        ...item,
+        allocatedQuantity: allocatedQuantityBySku.get(item.row.sku) ?? 0,
+      }))
+
+    let updated = 0
+    for (const item of reviewRows) {
+      const existing = autoReviewRowBySku.get(item.row.sku)
+      if (!existing) continue
+      await tx
+        .update(purchaseRequestItems)
+        .set({
+          productName: item.row.productName,
+          optionName: item.row.optionName,
+          requestedQuantity: item.allocatedQuantity,
+          isNewProduct: item.isNewProduct,
+          rawData: buildAutoRecommendationRawData({
+            item,
+            targetStockMonths,
+            budgetKrw,
+            now,
+            existingRawData: existing.rawData,
+          }),
+          updatedAt: now,
+        })
+        .where(and(
+          eq(purchaseRequestItems.userId, input.userId),
+          eq(purchaseRequestItems.id, existing.id),
+          eq(purchaseRequestItems.status, 'requested'),
         ))
-      }
+      updated += 1
     }
 
+    const newReviewRows = reviewRows.filter((item) => !autoReviewRowBySku.has(item.row.sku))
+
     const resultBase = {
-      replaced: replaceableRows.length,
-      skipped: inventoryRows.length - allocation.items.length,
+      updated,
+      monitoring: reviewRows.filter((item) => item.allocatedQuantity === 0).length,
+      skipped: inventoryRows.length - newReviewRows.length,
       evaluated: inventoryRows.length,
       domesticPurchaseExcluded: inventoryRows.length - recommendationInventoryRows.length,
       targetStockMonths,
@@ -498,7 +556,7 @@ export async function generatePurchaseRecommendations(input: {
       moqBudgetExcludedGroupCount: allocation.moqBudgetExcludedGroupCount,
       salesAnomalyCount,
     }
-    if (allocation.items.length === 0) return { ...resultBase, created: 0 }
+    if (newReviewRows.length === 0) return { ...resultBase, created: 0 }
 
     const [batch] = await tx
       .insert(purchaseRequestBatches)
@@ -507,14 +565,14 @@ export async function generatePurchaseRecommendations(input: {
         sourceFileName: `auto_purchase_recommendation ${formatSeoulDate(now)}`,
         sourceSheetName: 'auto_recommendation',
         totalRows: inventoryRows.length,
-        importedRows: allocation.items.length,
-        skippedRows: inventoryRows.length - allocation.items.length,
+        importedRows: newReviewRows.length,
+        skippedRows: inventoryRows.length - newReviewRows.length,
         uploadedByUserId: input.requestedByUserId,
       })
       .returning({ id: purchaseRequestBatches.id })
 
     let rowNumber = 1
-    for (const chunk of chunks(allocation.items, 250)) {
+    for (const chunk of chunks(newReviewRows, 250)) {
       await tx.insert(purchaseRequestItems).values(chunk.map((item, index) => ({
         userId: input.userId,
         batchId: batch.id,
@@ -526,38 +584,8 @@ export async function generatePurchaseRecommendations(input: {
         requestedQuantity: item.allocatedQuantity,
         recommendationBasis: 'manual_stock_months',
         salesAverageWindowDays: 90,
-        rawData: {
-          source: 'auto_purchase_recommendation',
-          targetStockMonths,
-          budgetKrw,
-          averageMonthlyOutgoing: item.averageMonthlyOutgoing,
-          effectiveMonthlyOutgoing: item.effectiveMonthlyOutgoing,
-          baselineMonthlyOutgoing: item.baselineMonthlyOutgoing,
-          previousThreeMonthOutgoing: item.previousThreeMonthOutgoing,
-          currentMonthOutgoing: item.currentMonthOutgoing,
-          salesAnomalyDetected: item.salesAnomalyDetected,
-          domesticAvailableStock: item.row.domesticAvailableStock,
-          chinaAvailableStock: item.row.chinaAvailableStock,
-          availableStock: item.row.availableStock,
-          pipelineQuantity: item.pipelineQuantity,
-          availableStockWithPipeline: item.availableStockWithPipeline,
-          targetStockQuantity: item.calculation.targetStockQuantity,
-          originalRecommendedQuantity: item.calculation.originalRecommendedQuantity,
-          baseRecommendedQuantity: item.baseRecommendedQuantity,
-          moqAdjustedQuantity: item.moqAdjustedQuantity,
-          moqProductGroupName: item.moqProductGroupName,
-          moqMinimumOrderQuantity: item.moqMinimumOrderQuantity,
-          moqRoundingUnit: item.moqRoundingUnit,
-          moqAddedQuantity: item.moqAddedQuantity,
-          purchaseMinimumQuantity: item.purchaseMinimumQuantity,
-          purchaseRoundingUnit: item.purchaseRoundingUnit,
-          purchaseMinimumAdjustedQuantity: item.purchaseMinimumAdjustedQuantity,
-          spikeGuardAdjustedToMinimum: item.calculation.spikeGuardAdjustedToMinimum,
-          allocatedQuantity: item.allocatedQuantity,
-          unitCostYuan: item.unitCostYuan,
-          unitCostKrw: item.unitCostKrw,
-          stockCoverageMonths: item.calculation.stockCoverageMonths,
-        },
+        isNewProduct: item.isNewProduct,
+        rawData: buildAutoRecommendationRawData({ item, targetStockMonths, budgetKrw, now }),
       })))
       rowNumber += chunk.length
     }
@@ -565,7 +593,7 @@ export async function generatePurchaseRecommendations(input: {
     return {
       ...resultBase,
       batchId: batch.id,
-      created: allocation.items.length,
+      created: newReviewRows.length,
     }
   })
 }
@@ -586,6 +614,7 @@ function buildAssessedPurchaseRow(input: {
   calculation: SpikeGuardPurchaseRecommendationCalculation
   unitCostYuan: number | null
   unitCostKrw: number | null
+  isNewProduct: boolean
 }) {
   return {
     row: input.row,
@@ -596,10 +625,110 @@ function buildAssessedPurchaseRow(input: {
     calculation: input.calculation,
     unitCostYuan: input.unitCostYuan,
     unitCostKrw: input.unitCostKrw,
+    isNewProduct: input.isNewProduct,
     sku: input.row.sku,
     recommendedQuantity: input.calculation.recommendedQuantity,
     stockCoverageMonths: input.calculation.stockCoverageMonths,
   }
+}
+
+function buildAutoRecommendationRawData(input: {
+  item: AssessedPurchaseRow & {
+    pipelineQuantity: number
+    availableStockWithPipeline: number
+    baseRecommendedQuantity: number
+    moqAdjustedQuantity: number
+    moqProductGroupName: string | null
+    moqMinimumOrderQuantity: number | null
+    moqRoundingUnit: number | null
+    moqAddedQuantity: number
+    purchaseMinimumQuantity: number
+    purchaseRoundingUnit: number
+    purchaseMinimumAdjustedQuantity: number
+    allocatedQuantity: number
+  }
+  targetStockMonths: number
+  budgetKrw: number | null
+  now: Date
+  existingRawData?: Record<string, unknown>
+}) {
+  const firstSaleDetected = input.item.isNewProduct && input.item.currentMonthOutgoing > 0
+  const existingFirstSaleAt = typeof input.existingRawData?.newProductFirstSaleDetectedAt === 'string'
+    ? input.existingRawData.newProductFirstSaleDetectedAt
+    : null
+  const priorSnapshots = Array.isArray(input.existingRawData?.recommendationHistory)
+    ? input.existingRawData.recommendationHistory.filter(isRecord).slice(-9)
+    : []
+  const recommendationState = input.item.allocatedQuantity > 0
+    ? 'purchase_recommended'
+    : firstSaleDetected
+      ? 'new_product_first_sale'
+      : 'monitoring'
+
+  return {
+    source: 'auto_purchase_recommendation',
+    targetStockMonths: input.targetStockMonths,
+    budgetKrw: input.budgetKrw,
+    averageMonthlyOutgoing: input.item.averageMonthlyOutgoing,
+    effectiveMonthlyOutgoing: input.item.effectiveMonthlyOutgoing,
+    baselineMonthlyOutgoing: input.item.baselineMonthlyOutgoing,
+    previousThreeMonthOutgoing: input.item.previousThreeMonthOutgoing,
+    currentMonthOutgoing: input.item.currentMonthOutgoing,
+    salesAnomalyDetected: input.item.salesAnomalyDetected,
+    salesTrend: input.item.salesTrend,
+    domesticAvailableStock: input.item.row.domesticAvailableStock,
+    chinaAvailableStock: input.item.row.chinaAvailableStock,
+    availableStock: input.item.row.availableStock,
+    pipelineQuantity: input.item.pipelineQuantity,
+    availableStockWithPipeline: input.item.availableStockWithPipeline,
+    targetStockQuantity: input.item.calculation.targetStockQuantity,
+    originalRecommendedQuantity: input.item.calculation.originalRecommendedQuantity,
+    baseRecommendedQuantity: input.item.baseRecommendedQuantity,
+    moqAdjustedQuantity: input.item.moqAdjustedQuantity,
+    moqProductGroupName: input.item.moqProductGroupName,
+    moqMinimumOrderQuantity: input.item.moqMinimumOrderQuantity,
+    moqRoundingUnit: input.item.moqRoundingUnit,
+    moqAddedQuantity: input.item.moqAddedQuantity,
+    purchaseMinimumQuantity: input.item.purchaseMinimumQuantity,
+    purchaseRoundingUnit: input.item.purchaseRoundingUnit,
+    purchaseMinimumAdjustedQuantity: input.item.purchaseMinimumAdjustedQuantity,
+    spikeGuardAdjustedToMinimum: input.item.calculation.spikeGuardAdjustedToMinimum,
+    allocatedQuantity: input.item.allocatedQuantity,
+    unitCostYuan: input.item.unitCostYuan,
+    unitCostKrw: input.item.unitCostKrw,
+    stockCoverageMonths: input.item.calculation.stockCoverageMonths,
+    recommendationState,
+    evaluatedAt: input.now.toISOString(),
+    newProductFirstSaleDetected: firstSaleDetected,
+    newProductFirstSaleDetectedAt: firstSaleDetected
+      ? existingFirstSaleAt ?? input.now.toISOString()
+      : null,
+    recommendationHistory: [
+      ...priorSnapshots,
+      {
+        evaluatedAt: input.now.toISOString(),
+        recommendedQuantity: input.item.allocatedQuantity,
+        salesTrend: input.item.salesTrend,
+        currentMonthOutgoing: input.item.currentMonthOutgoing,
+        averageMonthlyOutgoing: input.item.averageMonthlyOutgoing,
+      },
+    ],
+  }
+}
+
+function isNewProductForPurchaseRecommendation(
+  metadata: Record<string, unknown> | null | undefined,
+  createdAt: Date | null | undefined,
+  now: Date,
+) {
+  if (isRecord(metadata?.sourcing)) return true
+  if (!createdAt) return false
+  const ageMilliseconds = now.getTime() - createdAt.getTime()
+  return ageMilliseconds >= 0 && ageMilliseconds <= 120 * 24 * 60 * 60 * 1000
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function applyProductGroupMoq<T extends AssessedPurchaseRow & {

@@ -3,6 +3,7 @@ import {
   applyPurchaseMinimumQuantity,
   allocatePurchaseBudget,
   calculatePurchaseRecommendationWithSpikeGuard,
+  calculatePurchaseSalesTrend,
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
   isDomesticPurchaseProduct,
@@ -41,18 +42,39 @@ describe('stable monthly outgoing', () => {
       effectiveMonthlyOutgoing: 50,
       baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: true,
+      salesTrend: 'steady',
     })
   })
 
-  it('keeps the three-month average for normal sales movement', () => {
+  it('raises the effective demand when normal sales increase', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 70,
       threeMonthAverageOutgoing: 50,
     })).toEqual({
-      effectiveMonthlyOutgoing: 50,
+      effectiveMonthlyOutgoing: 70,
       baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: false,
+      salesTrend: 'increasing',
     })
+  })
+
+  it('reduces demand conservatively when sales fall', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 20,
+      threeMonthAverageOutgoing: 50,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 35,
+      baselineMonthlyOutgoing: 50,
+      salesAnomalyDetected: false,
+      salesTrend: 'decreasing',
+    })
+  })
+
+  it('identifies a first sale without a prior sales baseline', () => {
+    expect(calculatePurchaseSalesTrend({
+      currentMonthOutgoing: 2,
+      threeMonthAverageOutgoing: 0,
+    })).toBe('new_product')
   })
 })
 

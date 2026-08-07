@@ -131,6 +131,9 @@ export async function PurchasingOrdersView({
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
+  const newProductFirstSaleItems = isRequestedStatus
+    ? items.filter((item) => item.rawData.newProductFirstSaleDetected === true)
+    : []
   const showPurchaseUrlColumn = status === 'purchased' || status === 'purchase_completed' || overdueOnly
   const recommendationBasisParam = stringParam(params.showRecommendationBasis)
   const showRecommendationBasis = recommendationBasisParam === undefined
@@ -205,6 +208,16 @@ export async function PurchasingOrdersView({
       </header>
 
       {showRecommendationGenerator ? <PurchaseRecommendationGenerator /> : null}
+
+      {newProductFirstSaleItems.length > 0 ? (
+        <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+          <strong>신규상품 첫 판매 확인</strong>
+          <span className="ml-2">
+            {newProductFirstSaleItems.slice(0, 3).map((item) => item.productName).join(', ')}
+            {newProductFirstSaleItems.length > 3 ? ` 외 ${newProductFirstSaleItems.length - 3}건` : ''}의 첫 판매가 감지되었습니다.
+          </span>
+        </section>
+      ) : null}
 
       {!overdueOnly && status === 'purchased' && overduePurchaseRequestCount > 0 ? (
         <section className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
@@ -716,6 +729,12 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
       `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
     : null
+  const trendNote = recommendationTrendText(rawData.salesTrend)
+  const stateNote = rawData.recommendationState === 'new_product_first_sale'
+    ? '신규상품 첫 판매 감지'
+    : rawData.recommendationState === 'monitoring'
+      ? '현재 발주 보류 · 계속 관찰'
+      : null
 
   return (
     <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
@@ -723,8 +742,10 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {stockNote || pipelineNote || moqNote || anomalyNote || budgetNote ? (
+      {stockNote || pipelineNote || moqNote || anomalyNote || budgetNote || trendNote || stateNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
+          {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}
+          {stateNote ? <span className="text-emerald-700">{stateNote}</span> : null}
           {stockNote ? <span className="text-emerald-700">{stockNote}</span> : null}
           {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
@@ -734,6 +755,13 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       ) : null}
     </div>
   )
+}
+
+function recommendationTrendText(value: unknown) {
+  if (value === 'increasing') return { label: '판매 증가 · 발주량 상향 반영', className: 'text-blue-700' }
+  if (value === 'decreasing') return { label: '판매 감소 · 발주량 하향 반영', className: 'text-amber-700' }
+  if (value === 'new_product') return { label: '신규상품 판매 발생', className: 'text-emerald-700' }
+  return value === 'steady' ? { label: '판매 유지', className: 'text-slate-700' } : null
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

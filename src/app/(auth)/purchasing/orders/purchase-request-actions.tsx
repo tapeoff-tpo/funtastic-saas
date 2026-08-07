@@ -673,7 +673,7 @@ export function PurchaseRecommendationGenerator() {
       <div className="min-w-0">
         <p className="text-sm font-medium">자동 발주 추천</p>
         <p className="text-xs text-muted-foreground">
-          판매 급증을 보정하고 재고 소진 위험이 높은 품목부터 예산 안에서 발주수량을 배분합니다.
+          기존 자동 검토행은 유지한 채 판매 추세·재고·진행 발주를 다시 계산합니다. 발주요청으로 넘긴 건은 바꾸지 않습니다.
         </p>
         {message && <p className="mt-1 text-xs text-emerald-700">{message}</p>}
         {error && <p className="mt-1 text-xs text-destructive">{error}</p>}

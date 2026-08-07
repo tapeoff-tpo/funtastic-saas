@@ -32,6 +32,7 @@ import {
   ChevronDown,
   ChevronRight,
   CalendarDays,
+  PanelsTopLeft,
 } from 'lucide-react'
 import { signOut } from '@/app/(auth)/actions'
 import { useNavState } from './nav-state'

@@ -12,6 +12,9 @@ export const maxDuration = 300
 const bodySchema = z.object({
   targetStockMonths: z.coerce.number().min(0.1).max(12).default(1.2),
   budgetKrw: z.coerce.number().positive().max(10_000_000_000).nullable().optional(),
+  increaseThresholdPercent: z.coerce.number().min(1).max(95).default(20),
+  decreaseThresholdPercent: z.coerce.number().min(1).max(95).default(20),
+  newProductMinimumOutgoing: z.coerce.number().int().min(1).max(1000).default(1),
 })
 
 export async function POST(request: NextRequest) {
@@ -28,6 +31,11 @@ export async function POST(request: NextRequest) {
   const requestedByUserId = user.id
   const targetStockMonths = body.data.targetStockMonths
   const budgetKrw = body.data.budgetKrw ?? null
+  const criteria = {
+    increaseThresholdPercent: body.data.increaseThresholdPercent,
+    decreaseThresholdPercent: body.data.decreaseThresholdPercent,
+    newProductMinimumOutgoing: body.data.newProductMinimumOutgoing,
+  }
   let jobId: string | null = null
 
   try {
@@ -58,6 +66,7 @@ export async function POST(request: NextRequest) {
           requestedByUserId,
           targetStockMonths,
           budgetKrw,
+          criteria,
         })
         await db
           .update(jobLogs)
@@ -89,6 +98,7 @@ export async function POST(request: NextRequest) {
       jobId: job.id,
       targetStockMonths,
       budgetKrw,
+      criteria,
     })
   } catch (error) {
     if (jobId) {

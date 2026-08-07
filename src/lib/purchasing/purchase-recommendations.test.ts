@@ -7,6 +7,7 @@ import {
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
   isDomesticPurchaseProduct,
+  normalizePurchaseRecommendationCriteria,
 } from './purchase-recommendations'
 
 describe('purchase minimum quantities', () => {
@@ -75,6 +76,31 @@ describe('stable monthly outgoing', () => {
       currentMonthOutgoing: 2,
       threeMonthAverageOutgoing: 0,
     })).toBe('new_product')
+  })
+
+  it('uses the configured sales thresholds when classifying trends', () => {
+    expect(calculatePurchaseSalesTrend({
+      currentMonthOutgoing: 60,
+      threeMonthAverageOutgoing: 50,
+      criteria: { increaseThresholdPercent: 25 },
+    })).toBe('steady')
+    expect(calculatePurchaseSalesTrend({
+      currentMonthOutgoing: 60,
+      threeMonthAverageOutgoing: 50,
+      criteria: { increaseThresholdPercent: 15 },
+    })).toBe('increasing')
+  })
+
+  it('normalizes custom recommendation criteria to safe bounds', () => {
+    expect(normalizePurchaseRecommendationCriteria({
+      increaseThresholdPercent: 0,
+      decreaseThresholdPercent: 100,
+      newProductMinimumOutgoing: 0,
+    })).toEqual({
+      increaseThresholdPercent: 1,
+      decreaseThresholdPercent: 95,
+      newProductMinimumOutgoing: 1,
+    })
   })
 })
 

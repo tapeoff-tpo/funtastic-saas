@@ -51,6 +51,18 @@ export type SpikeGuardPurchaseRecommendationCalculation = PurchaseRecommendation
 
 export type PurchaseSalesTrend = 'increasing' | 'decreasing' | 'steady' | 'new_product'
 
+export type PurchaseRecommendationCriteria = {
+  increaseThresholdPercent: number
+  decreaseThresholdPercent: number
+  newProductMinimumOutgoing: number
+}
+
+export const DEFAULT_PURCHASE_RECOMMENDATION_CRITERIA: PurchaseRecommendationCriteria = {
+  increaseThresholdPercent: 20,
+  decreaseThresholdPercent: 20,
+  newProductMinimumOutgoing: 1,
+}
+
 export type PurchaseBudgetCandidate = {
   sku: string
   recommendedQuantity: number
@@ -82,6 +94,7 @@ export function applyPurchaseMinimumQuantity(recommendedQuantity: number) {
 export function calculateStableMonthlyOutgoing(input: {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
+  criteria?: Partial<PurchaseRecommendationCriteria>
 }) {
   const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
   const threeMonthAverageOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
@@ -91,6 +104,7 @@ export function calculateStableMonthlyOutgoing(input: {
   const salesTrend = calculatePurchaseSalesTrend({
     currentMonthOutgoing,
     threeMonthAverageOutgoing: baselineMonthlyOutgoing,
+    criteria: input.criteria,
   })
   const effectiveMonthlyOutgoing = salesAnomalyDetected
     ? baselineMonthlyOutgoing
@@ -111,16 +125,18 @@ export function calculateStableMonthlyOutgoing(input: {
 export function calculatePurchaseSalesTrend(input: {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
+  criteria?: Partial<PurchaseRecommendationCriteria>
 }): PurchaseSalesTrend {
   const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
   const baselineMonthlyOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
 
-  if (baselineMonthlyOutgoing === 0 && currentMonthOutgoing > 0) return 'new_product'
+  const criteria = normalizePurchaseRecommendationCriteria(input.criteria)
+  if (baselineMonthlyOutgoing === 0 && currentMonthOutgoing >= criteria.newProductMinimumOutgoing) return 'new_product'
   if (baselineMonthlyOutgoing === 0) return 'steady'
 
   const difference = currentMonthOutgoing - baselineMonthlyOutgoing
-  if (difference >= 3 && currentMonthOutgoing >= baselineMonthlyOutgoing * 1.2) return 'increasing'
-  if (difference <= -3 && currentMonthOutgoing <= baselineMonthlyOutgoing * 0.8) return 'decreasing'
+  if (difference >= 3 && currentMonthOutgoing >= baselineMonthlyOutgoing * (1 + criteria.increaseThresholdPercent / 100)) return 'increasing'
+  if (difference <= -3 && currentMonthOutgoing <= baselineMonthlyOutgoing * (1 - criteria.decreaseThresholdPercent / 100)) return 'decreasing'
   return 'steady'
 }
 
@@ -293,6 +309,7 @@ export async function generatePurchaseRecommendations(input: {
   requestedByUserId: string
   targetStockMonths: number
   budgetKrw?: number | null
+  criteria?: Partial<PurchaseRecommendationCriteria>
   now?: Date
 }) {
   const targetStockMonths = clampTargetMonths(input.targetStockMonths)
@@ -300,6 +317,7 @@ export async function generatePurchaseRecommendations(input: {
     ? null
     : Math.max(0, Math.trunc(finiteNumber(input.budgetKrw)))
   const now = input.now ?? new Date()
+  const criteria = normalizePurchaseRecommendationCriteria(input.criteria)
 
   const [domesticInventoryRows, chinaInventoryRows] = await Promise.all([
     db
@@ -385,6 +403,7 @@ export async function generatePurchaseRecommendations(input: {
     const stableOutgoing = calculateStableMonthlyOutgoing({
       currentMonthOutgoing,
       threeMonthAverageOutgoing: averageMonthlyOutgoing,
+      criteria,
     })
     const previousThreeMonthOutgoing = averageMonthlyOutgoing * 3
     const calculation = calculatePurchaseRecommendationWithSpikeGuard({
@@ -508,7 +527,9 @@ export async function generatePurchaseRecommendations(input: {
       ))
       .map((item) => ({
         ...item,
-        allocatedQuantity: allocatedQuantityBySku.get(item.row.sku) ?? 0,
+        allocatedQuantity: autoReviewRowBySku.get(item.row.sku)?.rawData?.manualHold === true
+          ? 0
+          : allocatedQuantityBySku.get(item.row.sku) ?? 0,
       }))
 
     let updated = 0
@@ -526,6 +547,7 @@ export async function generatePurchaseRecommendations(input: {
             item,
             targetStockMonths,
             budgetKrw,
+            criteria,
             now,
             existingRawData: existing.rawData,
           }),
@@ -585,7 +607,7 @@ export async function generatePurchaseRecommendations(input: {
         recommendationBasis: 'manual_stock_months',
         salesAverageWindowDays: 90,
         isNewProduct: item.isNewProduct,
-        rawData: buildAutoRecommendationRawData({ item, targetStockMonths, budgetKrw, now }),
+        rawData: buildAutoRecommendationRawData({ item, targetStockMonths, budgetKrw, criteria, now }),
       })))
       rowNumber += chunk.length
     }
@@ -649,6 +671,7 @@ function buildAutoRecommendationRawData(input: {
   }
   targetStockMonths: number
   budgetKrw: number | null
+  criteria: PurchaseRecommendationCriteria
   now: Date
   existingRawData?: Record<string, unknown>
 }) {
@@ -669,6 +692,11 @@ function buildAutoRecommendationRawData(input: {
     source: 'auto_purchase_recommendation',
     targetStockMonths: input.targetStockMonths,
     budgetKrw: input.budgetKrw,
+    recommendationCriteria: input.criteria,
+    manualHold: input.existingRawData?.manualHold === true,
+    manualHoldAt: input.existingRawData?.manualHold === true
+      ? input.existingRawData.manualHoldAt ?? input.now.toISOString()
+      : null,
     averageMonthlyOutgoing: input.item.averageMonthlyOutgoing,
     effectiveMonthlyOutgoing: input.item.effectiveMonthlyOutgoing,
     baselineMonthlyOutgoing: input.item.baselineMonthlyOutgoing,
@@ -713,6 +741,18 @@ function buildAutoRecommendationRawData(input: {
         averageMonthlyOutgoing: input.item.averageMonthlyOutgoing,
       },
     ],
+  }
+}
+
+export function normalizePurchaseRecommendationCriteria(
+  input: Partial<PurchaseRecommendationCriteria> | undefined,
+): PurchaseRecommendationCriteria {
+  return {
+    increaseThresholdPercent: clampPercent(input?.increaseThresholdPercent, DEFAULT_PURCHASE_RECOMMENDATION_CRITERIA.increaseThresholdPercent),
+    decreaseThresholdPercent: clampPercent(input?.decreaseThresholdPercent, DEFAULT_PURCHASE_RECOMMENDATION_CRITERIA.decreaseThresholdPercent),
+    newProductMinimumOutgoing: Math.min(1000, Math.max(1, Math.trunc(finiteNumber(
+      input?.newProductMinimumOutgoing ?? DEFAULT_PURCHASE_RECOMMENDATION_CRITERIA.newProductMinimumOutgoing,
+    )))),
   }
 }
 
@@ -823,6 +863,11 @@ function roundUpToUnit(value: number, unit: number) {
 function clampTargetMonths(value: number) {
   if (!Number.isFinite(value)) return 1.2
   return Math.min(12, Math.max(0.1, value))
+}
+
+function clampPercent(value: number | undefined, fallback: number) {
+  const normalized = finiteNumber(value ?? fallback)
+  return Math.min(95, Math.max(1, normalized))
 }
 
 function isAutoPurchaseRecommendation(rawData: unknown) {

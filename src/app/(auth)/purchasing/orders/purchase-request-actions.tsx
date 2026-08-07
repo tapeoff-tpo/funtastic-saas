@@ -156,6 +156,46 @@ export function PurchaseBulkStatusButton() {
   )
 }
 
+export function PurchaseBulkRecommendationHold() {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = context.selectedIds.size
+
+  function setHold(held: boolean) {
+    const ids = Array.from(context.selectedIds)
+    if (ids.length === 0) return
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests/recommendations/hold', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, held }),
+      })
+      const body = await response.json().catch(() => ({})) as { updatedCount?: number; error?: string }
+      if (!response.ok) {
+        setMessage(body.error ?? '발주 보류 상태를 바꾸지 못했습니다.')
+        return
+      }
+      context.clear()
+      setMessage(`${(body.updatedCount ?? 0).toLocaleString('ko-KR')}건 ${held ? '이번 주 보류' : '보류 해제'}`)
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      <Button type="button" size="sm" variant="outline" onClick={() => setHold(true)} disabled={isPending || selectedCount === 0}>
+        이번 주 보류
+      </Button>
+      <Button type="button" size="sm" variant="outline" onClick={() => setHold(false)} disabled={isPending || selectedCount === 0}>
+        보류 해제
+      </Button>
+      {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
+    </div>
+  )
+}
+
 const PURCHASE_BUYERS = [
   { code: '1', name: '한상철' },
   { code: '2', name: '김기환' },
@@ -556,6 +596,9 @@ export function PurchaseRecommendationGenerator() {
   const router = useRouter()
   const [targetStockMonths, setTargetStockMonths] = useState('1.2')
   const [budgetKrw, setBudgetKrw] = useState('')
+  const [increaseThresholdPercent, setIncreaseThresholdPercent] = useState('20')
+  const [decreaseThresholdPercent, setDecreaseThresholdPercent] = useState('20')
+  const [newProductMinimumOutgoing, setNewProductMinimumOutgoing] = useState('1')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
@@ -639,6 +682,14 @@ export function PurchaseRecommendationGenerator() {
       setError('구매예산은 1원~100억원 사이로 입력해주세요.')
       return
     }
+    const increaseThreshold = Number(increaseThresholdPercent)
+    const decreaseThreshold = Number(decreaseThresholdPercent)
+    const newProductMinimum = Number(newProductMinimumOutgoing)
+    if (![increaseThreshold, decreaseThreshold].every((value) => Number.isFinite(value) && value >= 1 && value <= 95)
+      || !Number.isInteger(newProductMinimum) || newProductMinimum < 1 || newProductMinimum > 1000) {
+      setError('판매 추세 기준은 1~95%, 신규상품 기준은 1~1,000개로 입력해주세요.')
+      return
+    }
 
     setMessage(null)
     setError(null)
@@ -647,7 +698,13 @@ export function PurchaseRecommendationGenerator() {
         const response = await fetch('/api/purchasing/purchase-requests/recommendations', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetStockMonths: months, budgetKrw: budget }),
+          body: JSON.stringify({
+            targetStockMonths: months,
+            budgetKrw: budget,
+            increaseThresholdPercent: increaseThreshold,
+            decreaseThresholdPercent: decreaseThreshold,
+            newProductMinimumOutgoing: newProductMinimum,
+          }),
         })
         const body = await response.json().catch(() => ({}))
         if (!response.ok) {
@@ -669,16 +726,16 @@ export function PurchaseRecommendationGenerator() {
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border bg-background p-3 md:flex-row md:items-center md:justify-between">
+    <div className="flex flex-col gap-3 rounded-md border bg-background p-3">
       <div className="min-w-0">
         <p className="text-sm font-medium">자동 발주 추천</p>
         <p className="text-xs text-muted-foreground">
-          기존 자동 검토행은 유지한 채 판매 추세·재고·진행 발주를 다시 계산합니다. 발주요청으로 넘긴 건은 바꾸지 않습니다.
+          판매 기준과 예산으로 후보를 만든 뒤, 목록에서 이번 주 보류 또는 발주요청으로 나눠 결정합니다. 발주요청으로 넘긴 건은 바꾸지 않습니다.
         </p>
         {message && <p className="mt-1 text-xs text-emerald-700">{message}</p>}
         {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <label className="text-xs text-muted-foreground" htmlFor="target-stock-months">
           목표 보유개월
         </label>
@@ -692,6 +749,15 @@ export function PurchaseRecommendationGenerator() {
           onChange={(event) => setTargetStockMonths(event.target.value)}
           className="h-9 w-24"
         />
+        <label className="text-xs text-muted-foreground" htmlFor="increase-threshold">증가 판단</label>
+        <Input id="increase-threshold" type="number" min="1" max="95" step="1" value={increaseThresholdPercent} onChange={(event) => setIncreaseThresholdPercent(event.target.value)} className="h-9 w-20" />
+        <span className="pb-2 text-xs text-muted-foreground">%</span>
+        <label className="text-xs text-muted-foreground" htmlFor="decrease-threshold">감소 판단</label>
+        <Input id="decrease-threshold" type="number" min="1" max="95" step="1" value={decreaseThresholdPercent} onChange={(event) => setDecreaseThresholdPercent(event.target.value)} className="h-9 w-20" />
+        <span className="pb-2 text-xs text-muted-foreground">%</span>
+        <label className="text-xs text-muted-foreground" htmlFor="new-product-outgoing">신상품 알림</label>
+        <Input id="new-product-outgoing" type="number" min="1" max="1000" step="1" value={newProductMinimumOutgoing} onChange={(event) => setNewProductMinimumOutgoing(event.target.value)} className="h-9 w-20" />
+        <span className="pb-2 text-xs text-muted-foreground">개 판매</span>
         <label className="text-xs text-muted-foreground" htmlFor="purchase-budget-krw">
           구매예산
         </label>

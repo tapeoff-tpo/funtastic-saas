@@ -18,6 +18,7 @@ import { Button } from '@/components/ui/button'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import {
   PurchaseBulkBuyerApply,
+  PurchaseBulkRecommendationHold,
   PurchaseBulkDeleteButton,
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
@@ -383,6 +384,7 @@ export async function PurchasingOrdersView({
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
               </Link>
               <PurchaseBulkDeleteButton />
+              {isRequestedStatus ? <PurchaseBulkRecommendationHold /> : null}
               {overdueOnly ? null : <PurchaseBulkStatusButton />}
             </div>
           </div>
@@ -758,6 +760,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     : rawData.recommendationState === 'monitoring'
       ? '현재 발주 보류 · 계속 관찰'
       : null
+  const manualHoldNote = rawData.manualHold === true ? '이번 주 수동 보류' : null
 
   return (
     <div className="grid grid-cols-4 gap-2 text-center tabular-nums">
@@ -765,10 +768,11 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {stockNote || pipelineNote || moqNote || anomalyNote || budgetNote || trendNote || stateNote ? (
+      {stockNote || pipelineNote || moqNote || anomalyNote || budgetNote || trendNote || stateNote || manualHoldNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
           {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}
           {stateNote ? <span className="text-emerald-700">{stateNote}</span> : null}
+          {manualHoldNote ? <span className="text-amber-700">{manualHoldNote}</span> : null}
           {stockNote ? <span className="text-emerald-700">{stockNote}</span> : null}
           {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}

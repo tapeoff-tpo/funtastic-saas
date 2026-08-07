@@ -1,11 +1,12 @@
 import ExcelJS from 'exceljs'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   ecountPurchaseHistoryBatches,
   ecountPurchaseHistoryItems,
   products,
   productVariants,
+  purchaseRequestItems,
 } from '@/lib/db/schema'
 
 const HISTORY_SHEET_NAME = '발주요청조회'
@@ -39,6 +40,18 @@ export type EcountPurchaseHistoryImportResult = {
   ambiguous: number
   unmatched: number
   summaryRows: number
+  latestComparison: PurchaseHistoryComparison | null
+}
+
+export type PurchaseHistoryComparison = {
+  comparedSkuCount: number
+  sameQuantityCount: number
+  increasedQuantityCount: number
+  decreasedQuantityCount: number
+  ecountOnlyCount: number
+  recommendationOnlyCount: number
+  ecountQuantity: number
+  recommendationQuantity: number
 }
 
 type ProductCandidate = {
@@ -57,6 +70,17 @@ export async function importEcountPurchaseHistory(input: {
   if (input.files.length === 0) throw new Error('업로드할 이카운트 발주요청조회 파일을 선택해주세요.')
 
   const candidates = await listProductCandidates(input.userId)
+  const recommendationRows = await db
+    .select({ sku: purchaseRequestItems.sku, requestedQuantity: purchaseRequestItems.requestedQuantity })
+    .from(purchaseRequestItems)
+    .where(and(
+      eq(purchaseRequestItems.userId, input.userId),
+      eq(purchaseRequestItems.status, 'requested'),
+      sql`${purchaseRequestItems.rawData}->>'source' = 'auto_purchase_recommendation'`,
+    ))
+  const recommendedQuantityBySku = new Map(
+    recommendationRows.map((row) => [row.sku, row.requestedQuantity]),
+  )
   const parsedFiles = await Promise.all(input.files.map(async (file) => ({
     fileName: file.fileName,
     rows: (await parseEcountPurchaseHistoryExcel(file.fileBuffer))
@@ -73,6 +97,7 @@ export async function importEcountPurchaseHistory(input: {
     ambiguous: 0,
     unmatched: 0,
     summaryRows: 0,
+    latestComparison: null,
   }
 
   for (const parsedFile of parsedFiles) {
@@ -83,6 +108,10 @@ export async function importEcountPurchaseHistory(input: {
     result.parsed += rows.length
     result.completed += completedRows
     result.inProgress += inProgressRows
+
+    const matchedRows = rows.map((row) => ({ row, match: matchPurchaseHistoryRow(row, candidates) }))
+    const comparison = compareEcountRowsToRecommendations(matchedRows, recommendedQuantityBySku)
+    result.latestComparison = comparison
 
     const [batch] = await db
       .insert(ecountPurchaseHistoryBatches)
@@ -95,6 +124,7 @@ export async function importEcountPurchaseHistory(input: {
         totalRows: rows.length,
         completedRows,
         inProgressRows,
+        comparisonData: comparison,
         uploadedByUserId: input.uploadedByUserId,
       })
       .onConflictDoUpdate({
@@ -105,6 +135,7 @@ export async function importEcountPurchaseHistory(input: {
           totalRows: rows.length,
           completedRows,
           inProgressRows,
+          comparisonData: comparison,
           uploadedByUserId: input.uploadedByUserId,
           createdAt: new Date(),
         },
@@ -113,8 +144,7 @@ export async function importEcountPurchaseHistory(input: {
 
     if (!batch || rows.length === 0) continue
 
-    const values = rows.map((row) => {
-      const match = matchPurchaseHistoryRow(row, candidates)
+    const values = matchedRows.map(({ row, match }) => {
       if (match.matchStatus === 'exact') result.exactMatched += 1
       else if (match.matchStatus === 'ambiguous') result.ambiguous += 1
       else if (match.matchStatus === 'summary') result.summaryRows += 1
@@ -171,7 +201,8 @@ export async function importEcountPurchaseHistory(input: {
 }
 
 export async function getEcountPurchaseHistorySummary(userId: string) {
-  const [summary] = await db
+  const [[summary], [latestBatch]] = await Promise.all([
+    db
     .select({
       total: sql<number>`count(*)::int`,
       completed: sql<number>`count(*) filter (where ${ecountPurchaseHistoryItems.sourceStatus} = 'completed')::int`,
@@ -182,16 +213,70 @@ export async function getEcountPurchaseHistorySummary(userId: string) {
       lastDate: sql<string | null>`max(${ecountPurchaseHistoryItems.requestDate})`,
     })
     .from(ecountPurchaseHistoryItems)
-    .where(eq(ecountPurchaseHistoryItems.userId, userId))
+      .where(eq(ecountPurchaseHistoryItems.userId, userId)),
+    db
+      .select({ comparisonData: ecountPurchaseHistoryBatches.comparisonData, sourceFileName: ecountPurchaseHistoryBatches.sourceFileName })
+      .from(ecountPurchaseHistoryBatches)
+      .where(eq(ecountPurchaseHistoryBatches.userId, userId))
+      .orderBy(desc(ecountPurchaseHistoryBatches.createdAt))
+      .limit(1),
+  ])
 
-  return summary ?? {
-    total: 0,
-    completed: 0,
-    inProgress: 0,
-    exactMatched: 0,
-    reviewRequired: 0,
-    firstDate: null,
-    lastDate: null,
+  return {
+    ...(summary ?? {
+      total: 0,
+      completed: 0,
+      inProgress: 0,
+      exactMatched: 0,
+      reviewRequired: 0,
+      firstDate: null,
+      lastDate: null,
+    }),
+    latestComparison: latestBatch?.comparisonData ?? null,
+    latestComparisonFileName: latestBatch?.sourceFileName ?? null,
+  }
+}
+
+function compareEcountRowsToRecommendations(
+  rows: Array<{ row: EcountPurchaseHistorySourceRow; match: ReturnType<typeof matchPurchaseHistoryRow> }>,
+  recommendedQuantityBySku: Map<string, number>,
+): PurchaseHistoryComparison {
+  const ecountQuantityBySku = new Map<string, number>()
+  for (const { row, match } of rows) {
+    if (match.matchStatus !== 'exact' || !match.sku) continue
+    ecountQuantityBySku.set(match.sku, (ecountQuantityBySku.get(match.sku) ?? 0) + row.quantity)
+  }
+
+  let sameQuantityCount = 0
+  let increasedQuantityCount = 0
+  let decreasedQuantityCount = 0
+  let ecountOnlyCount = 0
+  let recommendationOnlyCount = 0
+  for (const [sku, ecountQuantity] of ecountQuantityBySku) {
+    const recommendedQuantity = recommendedQuantityBySku.get(sku)
+    if (recommendedQuantity == null) {
+      ecountOnlyCount += 1
+    } else if (ecountQuantity === recommendedQuantity) {
+      sameQuantityCount += 1
+    } else if (ecountQuantity > recommendedQuantity) {
+      increasedQuantityCount += 1
+    } else {
+      decreasedQuantityCount += 1
+    }
+  }
+  for (const sku of recommendedQuantityBySku.keys()) {
+    if (!ecountQuantityBySku.has(sku)) recommendationOnlyCount += 1
+  }
+
+  return {
+    comparedSkuCount: sameQuantityCount + increasedQuantityCount + decreasedQuantityCount,
+    sameQuantityCount,
+    increasedQuantityCount,
+    decreasedQuantityCount,
+    ecountOnlyCount,
+    recommendationOnlyCount,
+    ecountQuantity: Array.from(ecountQuantityBySku.values()).reduce((total, quantity) => total + quantity, 0),
+    recommendationQuantity: Array.from(recommendedQuantityBySku.values()).reduce((total, quantity) => total + quantity, 0),
   }
 }
 

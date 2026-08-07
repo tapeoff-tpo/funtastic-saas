@@ -221,9 +221,14 @@ export async function PurchasingOrdersView({
             <div className="min-w-0 text-sm">
               <p className="font-medium">이카운트 과거 발주 이력</p>
               {ecountHistory && ecountHistory.total > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  {ecountHistory.firstDate ?? '-'} ~ {ecountHistory.lastDate ?? '-'} · 전체 {ecountHistory.total.toLocaleString('ko-KR')}행 · 완료 {ecountHistory.completed.toLocaleString('ko-KR')} · 진행중 {ecountHistory.inProgress.toLocaleString('ko-KR')} · 확정 SKU 매칭 {ecountHistory.exactMatched.toLocaleString('ko-KR')} · 검토 필요 {ecountHistory.reviewRequired.toLocaleString('ko-KR')}
-                </p>
+                <div className="space-y-0.5 text-xs text-muted-foreground">
+                  <p>
+                    {ecountHistory.firstDate ?? '-'} ~ {ecountHistory.lastDate ?? '-'} · 전체 {ecountHistory.total.toLocaleString('ko-KR')}행 · 완료 {ecountHistory.completed.toLocaleString('ko-KR')} · 진행중 {ecountHistory.inProgress.toLocaleString('ko-KR')} · 확정 SKU 매칭 {ecountHistory.exactMatched.toLocaleString('ko-KR')} · 검토 필요 {ecountHistory.reviewRequired.toLocaleString('ko-KR')}
+                  </p>
+                  {formatEcountComparison(ecountHistory.latestComparison, ecountHistory.latestComparisonFileName) ? (
+                    <p className="text-blue-700">{formatEcountComparison(ecountHistory.latestComparison, ecountHistory.latestComparisonFileName)}</p>
+                  ) : null}
+                </div>
               ) : (
                 <p className="text-xs text-muted-foreground">이카운트 발주요청조회 엑셀을 여러 파일 한 번에 선택해 가져오세요. 원본 이력은 활성 발주와 분리해 보관합니다.</p>
               )}
@@ -731,6 +736,19 @@ function getStageQuantity(
   }
   if (status === 'outbound_requested' || status === 'completed') return outboundRequestedQuantity
   return item.requestedQuantity
+}
+
+function formatEcountComparison(value: Record<string, unknown> | null, fileName: string | null) {
+  if (!value || typeof value.comparedSkuCount !== 'number') return null
+  const read = (key: string) => typeof value[key] === 'number' ? value[key] : 0
+  return [
+    fileName ? `${fileName} 대조` : '최근 이카운트 대조',
+    `동일 ${read('sameQuantityCount').toLocaleString('ko-KR')}`,
+    `증가 ${read('increasedQuantityCount').toLocaleString('ko-KR')}`,
+    `감소 ${read('decreasedQuantityCount').toLocaleString('ko-KR')}`,
+    `이카운트만 ${read('ecountOnlyCount').toLocaleString('ko-KR')}`,
+    `추천만 ${read('recommendationOnlyCount').toLocaleString('ko-KR')}`,
+  ].join(' · ')
 }
 
 function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown> }) {

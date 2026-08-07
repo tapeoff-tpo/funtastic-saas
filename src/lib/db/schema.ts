@@ -780,6 +780,7 @@ export const ecountPurchaseHistoryBatches = pgTable(
     totalRows: integer('total_rows').notNull().default(0),
     completedRows: integer('completed_rows').notNull().default(0),
     inProgressRows: integer('in_progress_rows').notNull().default(0),
+    comparisonData: jsonb('comparison_data').$type<Record<string, unknown>>().notNull().default({}),
     uploadedByUserId: uuid('uploaded_by_user_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

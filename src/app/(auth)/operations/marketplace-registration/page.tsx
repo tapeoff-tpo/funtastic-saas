@@ -9,11 +9,25 @@ import { ProductFlowNav } from '@/components/product-flow-nav'
 
 export const dynamic = 'force-dynamic'
 
-export default async function MarketplaceRegistrationPage() {
+export default async function MarketplaceRegistrationPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>
+}) {
   const user = await getCurrentUser()
   if (!user) redirect('/login')
 
-  const rows = await listMarketplaceRegistrationProducts(await getWorkspaceUserId(user.id))
+  const params = await searchParams
+  const query = params.q?.trim() ?? ''
+  const allRows = await listMarketplaceRegistrationProducts(await getWorkspaceUserId(user.id))
+  const rows = query
+    ? allRows.filter((row) => [
+      row.productCode,
+      ...row.salesCodes,
+      ...row.inventorySkus,
+      ...row.options.map((option) => option.barcode ?? ''),
+    ].some((value) => value.toLocaleLowerCase('ko-KR').includes(query.toLocaleLowerCase('ko-KR'))))
+    : allRows
   const optionCount = rows.reduce((total, row) => total + row.options.length, 0)
   const matchedCodeCount = rows.reduce((total, row) => total + row.matchedSalesCodes, 0)
   const lastSyncedAt = rows.find((row) => row.lastSyncedAt)?.lastSyncedAt
@@ -36,12 +50,12 @@ export default async function MarketplaceRegistrationPage() {
           <span className="inline-flex items-center gap-1.5"><Layers3 className="size-4" /> 옵션 {optionCount.toLocaleString('ko-KR')}개</span>
           <span>판매코드 매칭 {matchedCodeCount.toLocaleString('ko-KR')}개</span>
           <span>최근 동기화 {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString('ko-KR') : '없음'}</span>
-          <Link href="/analytics/price-table" className="rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted">
+          <Link href={query ? `/analytics/price-table?q=${encodeURIComponent(query)}&sheet=${encodeURIComponent('상품등록')}&view=products` : '/analytics/price-table'} className="rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-muted">
             판매가 테이블 확인
           </Link>
         </div>
       </header>
-      <RegistrationBoard rows={rows} />
+      <RegistrationBoard rows={rows} initialQuery={query} />
     </div>
   )
 }

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { ChevronDown, PackageSearch, Table2 } from 'lucide-react'
 import {
@@ -111,7 +112,13 @@ function PriceCompareView({ rows }: { rows: PriceTableGridRow[] }) {
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-t hover:bg-muted/30">
-                <td className="sticky left-0 bg-card px-3 py-2 font-mono text-xs font-medium">{row.productCode || '-'}</td>
+                <td className="sticky left-0 bg-card px-3 py-2 font-mono text-xs font-medium">
+                  {row.productCode ? (
+                    <Link href={`/products?search=${encodeURIComponent(row.productCode)}&searched=1`} className="text-primary hover:underline">
+                      {row.productCode}
+                    </Link>
+                  ) : '-'}
+                </td>
                 <td className="sticky left-[130px] max-w-[320px] bg-card px-3 py-2">
                   <div className="truncate font-medium" title={row.productName ?? ''}>{row.productName || row.registeredProductName || '-'}</div>
                   {row.optionName ? <div className="truncate text-xs text-muted-foreground">{row.optionName}</div> : null}

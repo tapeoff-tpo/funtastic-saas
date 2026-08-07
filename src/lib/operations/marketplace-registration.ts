@@ -311,6 +311,28 @@ export async function applyMarketplaceRegistration(input: RegistrationProfileInp
   for (const marketplaceId of ['coupang', 'smartstore', 'toss', 'ohouse']) {
     await db.execute(sql`INSERT INTO marketplace_registration_channels (profile_id, user_id, marketplace_id, category_name, payload) VALUES (${profileId}, ${input.userId}, ${marketplaceId}, ${input.commonCategory || null}, ${JSON.stringify({ source: 'funtastic-b2b', commonCategory: input.commonCategory || null })}::jsonb) ON CONFLICT (profile_id, marketplace_id) DO UPDATE SET category_name = EXCLUDED.category_name, payload = EXCLUDED.payload, updated_at = now()`)
   }
+  await syncRegistrationProfileToProducts(input)
+}
+
+async function syncRegistrationProfileToProducts(input: RegistrationProfileInput) {
+  if (!input.salesCodes.length) return
+  const imageUrls = [input.primaryImageUrl, ...input.imageUrls].filter((url): url is string => Boolean(url))
+  const productImages = imageUrls.map((url, sortOrder) => ({ url, sortOrder }))
+  await db.execute(sql`
+    UPDATE products
+    SET
+      category_id = CASE
+        WHEN ${input.commonCategory} IS NULL THEN category_id
+        ELSE ${input.commonCategory}
+      END,
+      images = CASE
+        WHEN ${productImages.length} = 0 THEN images
+        ELSE ${JSON.stringify(productImages)}::jsonb
+      END,
+      updated_at = now()
+    WHERE user_id = ${input.userId}
+      AND internal_sku IN (${sql.join(input.salesCodes.map((code) => sql`${code}`), sql`, `)})
+  `)
 }
 
 export async function syncMarketplaceRegistrationSalesCodes(userId: string) {

@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useTransition } from 'react'
+import Link from 'next/link'
+import { ExternalLink, FileSpreadsheet, Store, Warehouse } from 'lucide-react'
 import { useRouter, useParams } from 'next/navigation'
 import { Badge } from '@/components/ui/badge'
 import type { ProductDetail, VariantFormData, ProductMarketplaceLink } from '@/lib/products/types'
@@ -220,9 +222,15 @@ export default function EditProductPage() {
       <div>
         <h1 className="text-2xl font-bold">상품 수정</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          상품 정보를 수정하고 마켓플레이스 동기화 상태를 확인합니다.
+          품목 기준정보를 수정하고 재고, 판매가, 채널 등록 정보를 함께 확인합니다.
         </p>
       </div>
+
+      <ProductOperationsLinks
+        sku={internalSku}
+        variants={variants.map((variant) => variant.sku).filter(Boolean)}
+        marketplaceCount={product.marketplaceLinks.length}
+      />
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
@@ -570,12 +578,12 @@ export default function EditProductPage() {
 
         {/* Actions */}
         <div className="flex justify-end gap-2">
-          <a
+          <Link
             href="/products"
             className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
           >
             취소
-          </a>
+          </Link>
           <button
             type="submit"
             disabled={isPending}
@@ -586,5 +594,67 @@ export default function EditProductPage() {
         </div>
       </form>
     </div>
+  )
+}
+
+function ProductOperationsLinks({
+  sku,
+  variants,
+  marketplaceCount,
+}: {
+  sku: string
+  variants: string[]
+  marketplaceCount: number
+}) {
+  const code = sku.trim()
+  const inventoryCode = code.includes('-') ? code.split('-')[0] : code
+  const searchCode = variants[0] || code
+  const links = code ? [
+    {
+      href: `/inventory?productCode=${encodeURIComponent(inventoryCode)}&searched=1`,
+      label: '재고·입출고',
+      description: '옵션별 실재고와 위치',
+      icon: Warehouse,
+    },
+    {
+      href: `/analytics/price-table?q=${encodeURIComponent(searchCode)}&sheet=${encodeURIComponent('상품등록')}&view=products`,
+      label: '판매가 검토',
+      description: '채널별 가격과 등록 이력',
+      icon: FileSpreadsheet,
+    },
+    {
+      href: `/operations/marketplace-registration?q=${encodeURIComponent(searchCode)}`,
+      label: '채널 상품등록',
+      description: marketplaceCount ? `기본 연동 ${marketplaceCount}개` : '카테고리·이미지·등록 상태',
+      icon: Store,
+    },
+  ] : []
+
+  return (
+    <section className="border bg-muted/15">
+      <div className="flex flex-col gap-1 border-b bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold">연결된 상품 운영</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">같은 품목코드와 옵션 SKU를 기준으로 재고, 가격, 채널 정보를 엽니다.</p>
+        </div>
+        {code ? <span className="font-mono text-xs text-muted-foreground">기준 SKU {code}</span> : <span className="text-xs text-amber-700">상품코드를 입력하면 연결됩니다.</span>}
+      </div>
+      {links.length ? (
+        <div className="grid divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          {links.map((item) => {
+            const Icon = item.icon
+            return (
+              <Link key={item.label} href={item.href} className="flex items-center gap-3 bg-background px-4 py-3 transition-colors hover:bg-muted/50">
+                <Icon className="size-4 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1 text-sm font-medium">{item.label}<ExternalLink className="size-3" /></span>
+                  <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.description}</span>
+                </span>
+              </Link>
+            )
+          })}
+        </div>
+      ) : null}
+    </section>
   )
 }

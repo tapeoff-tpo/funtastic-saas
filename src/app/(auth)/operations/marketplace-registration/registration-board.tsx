@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useMemo, useState, useTransition } from 'react'
 import {
   AlertCircle,
@@ -100,9 +101,9 @@ function inventoryProductCode(sku: string | null | undefined) {
   return separator > 0 ? sku.slice(0, separator) : sku
 }
 
-export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
+export function RegistrationBoard({ rows, initialQuery = '' }: { rows: RegistrationRow[]; initialQuery?: string }) {
   const router = useRouter()
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(initialQuery)
   const [filter, setFilter] = useState<Filter>('all')
   const [selectedCode, setSelectedCode] = useState<string | null>(rows[0]?.productCode ?? null)
   const [syncMessage, setSyncMessage] = useState('')
@@ -408,6 +409,17 @@ export function RegistrationBoard({ rows }: { rows: RegistrationRow[] }) {
                             ))}
                           </span>
                         ) : <span className="text-right text-muted-foreground">연결된 판매코드 없음</span>}
+                      </div>
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="shrink-0 text-muted-foreground">품목 기준정보</span>
+                        {(selected.salesCodes[0] || selected.productCode) ? (
+                          <Link
+                            href={`/products?search=${encodeURIComponent(selected.salesCodes[0] || selected.productCode)}&searched=1`}
+                            className="text-right font-mono text-blue-700 hover:underline"
+                          >
+                            {selected.salesCodes[0] || selected.productCode}
+                          </Link>
+                        ) : <span className="text-right text-muted-foreground">연결된 품목코드 없음</span>}
                       </div>
                     </div>
                   </div>

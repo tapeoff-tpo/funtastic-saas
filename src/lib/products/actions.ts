@@ -12,9 +12,9 @@
 
 import { db } from '@/lib/db'
 import { products, productVariants, productChangeLogs } from '@/lib/db/schema'
-import { eq, and, notInArray } from 'drizzle-orm'
-import { logProductChanges } from './change-log'
+import { eq, and, notInArray, sql } from 'drizzle-orm'
 import { setStock } from '@/lib/inventory/actions'
+import { ensureMarketplaceRegistrationTables } from '@/lib/operations/marketplace-registration'
 import type { ProductFormData } from './types'
 
 type ActionResult<T = void> = { success: true; data: T } | { success: false; error: string }
@@ -194,8 +194,12 @@ export async function updateProduct(
         }
       }
 
-      return { newVariantSkus, manageInventory: formData.manageInventory ?? existing.manageInventory }
-    }).then(async ({ newVariantSkus, manageInventory }) => {
+      return {
+        newVariantSkus,
+        manageInventory: formData.manageInventory ?? existing.manageInventory,
+        previousSku: existing.internalSku,
+      }
+    }).then(async ({ newVariantSkus, manageInventory, previousSku }) => {
       // Create inventory records for new variants
       for (const sku of newVariantSkus) {
         await setStock(userId, sku, formData.name, 0)
@@ -208,6 +212,14 @@ export async function updateProduct(
           await setStock(userId, formData.internalSku, formData.name, 0)
         }
       }
+      if (formData.categoryId) {
+        await syncProductCategoryToRegistration({
+          userId,
+          previousSku,
+          currentSku: formData.internalSku,
+          categoryId: formData.categoryId,
+        })
+      }
     })
 
     return { success: true, data: undefined }
@@ -215,6 +227,25 @@ export async function updateProduct(
     const message = err instanceof Error ? err.message : 'Unknown error updating product'
     return { success: false, error: message }
   }
+}
+
+async function syncProductCategoryToRegistration(input: {
+  userId: string
+  previousSku: string
+  currentSku: string
+  categoryId: string
+}) {
+  await ensureMarketplaceRegistrationTables()
+  await db.execute(sql`
+    UPDATE marketplace_registration_profiles
+    SET common_category = ${input.categoryId}, updated_at = now()
+    WHERE user_id = ${input.userId}
+      AND (
+        product_code IN (${input.previousSku}, ${input.currentSku})
+        OR COALESCE(sales_codes, '[]'::jsonb) ? ${input.previousSku}
+        OR COALESCE(sales_codes, '[]'::jsonb) ? ${input.currentSku}
+      )
+  `)
 }
 
 /**

@@ -821,6 +821,32 @@ export const ecountPurchaseHistoryItems = pgTable(
   ],
 )
 
+export const chinaPurchaseFundTransactionTypeEnum = pgEnum('china_purchase_fund_transaction_type', [
+  'transfer_in',
+  'purchase_out',
+  'adjustment_in',
+  'adjustment_out',
+])
+
+export const chinaPurchaseFundTransactions = pgTable(
+  'china_purchase_fund_transactions',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    transactionDate: date('transaction_date').notNull(),
+    type: chinaPurchaseFundTransactionTypeEnum('type').notNull(),
+    amountCny: numeric('amount_cny', { precision: 14, scale: 2 }).notNull(),
+    amountKrw: numeric('amount_krw', { precision: 14, scale: 0 }),
+    exchangeRate: numeric('exchange_rate', { precision: 12, scale: 4 }),
+    memo: text('memo'),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('china_purchase_fund_transactions_user_date').on(table.userId, table.transactionDate),
+  ],
+)
+
 export const chinaWarehouseInventory = pgTable(
   'china_warehouse_inventory',
   {

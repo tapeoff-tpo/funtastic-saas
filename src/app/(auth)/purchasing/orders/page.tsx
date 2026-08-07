@@ -7,6 +7,7 @@ import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
 import { getEcountPurchaseHistorySummary } from '@/lib/purchasing/ecount-purchase-history'
+import { getChinaPurchaseFundSummary } from '@/lib/purchasing/china-purchase-funds'
 import {
   getNextPurchaseStatus,
   PURCHASE_REQUEST_STATUSES,
@@ -22,6 +23,7 @@ import {
   PurchaseBulkDeleteButton,
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
+  ChinaPurchaseFundsPanel,
   PurchaseBuyerField,
   PurchaseDeleteButton,
   EcountPurchaseHistoryImport,
@@ -97,9 +99,12 @@ export async function PurchasingOrdersView({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const ecountHistory = showRecommendationGenerator
-    ? await getEcountPurchaseHistorySummary(workspaceUserId)
-    : null
+  const [ecountHistory, chinaPurchaseFunds] = showRecommendationGenerator
+    ? await Promise.all([
+      getEcountPurchaseHistorySummary(workspaceUserId),
+      getChinaPurchaseFundSummary(workspaceUserId),
+    ])
+    : [null, null]
   let purchaseRequestResult = await getPurchaseRequests({
     userId: workspaceUserId,
     status: selectedStatus,
@@ -214,6 +219,10 @@ export async function PurchasingOrdersView({
       </header>
 
       {showRecommendationGenerator ? <PurchaseRecommendationGenerator /> : null}
+
+      {showRecommendationGenerator && chinaPurchaseFunds ? (
+        <ChinaPurchaseFundsPanel {...chinaPurchaseFunds} plannedCny={costTotals.totalCostYuan} />
+      ) : null}
 
       {showRecommendationGenerator ? (
         <section className="rounded-md border bg-muted/20 px-3 py-2">

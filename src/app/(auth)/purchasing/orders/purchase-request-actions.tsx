@@ -782,6 +782,144 @@ export function PurchaseRecommendationGenerator() {
   )
 }
 
+type ChinaFundTransactionView = {
+  id: string
+  transactionDate: string
+  type: 'transfer_in' | 'purchase_out' | 'adjustment_in' | 'adjustment_out'
+  amountCny: number
+  amountKrw: number | null
+  memo: string | null
+}
+
+const CHINA_FUND_TYPE_LABELS: Record<ChinaFundTransactionView['type'], string> = {
+  transfer_in: '이체 입금',
+  purchase_out: '구매 사용',
+  adjustment_in: '잔액 조정(+)',
+  adjustment_out: '잔액 조정(-)',
+}
+
+export function ChinaPurchaseFundsPanel({
+  balanceCny,
+  plannedCny,
+  transactions,
+}: {
+  balanceCny: number
+  plannedCny: number
+  transactions: ChinaFundTransactionView[]
+}) {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [type, setType] = useState<ChinaFundTransactionView['type']>('transfer_in')
+  const [transactionDate, setTransactionDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [amountCny, setAmountCny] = useState('')
+  const [amountKrw, setAmountKrw] = useState('')
+  const [memo, setMemo] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const cny = Number(amountCny.replaceAll(',', ''))
+    const krw = amountKrw.trim() === '' ? null : Number(amountKrw.replaceAll(',', ''))
+    if (!Number.isFinite(cny) || cny <= 0 || (krw !== null && (!Number.isFinite(krw) || krw <= 0))) {
+      setError('CNY 금액과 원화 이체금액을 확인해주세요.')
+      return
+    }
+    setError(null)
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/china-funds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionDate, type, amountCny: cny, amountKrw: krw, memo: memo || null }),
+      })
+      const body = await response.json().catch(() => ({})) as { error?: string }
+      if (!response.ok) {
+        setError(body.error ?? '중국 통장 내역을 저장하지 못했습니다.')
+        return
+      }
+      setOpen(false)
+      setAmountCny('')
+      setAmountKrw('')
+      setMemo('')
+      router.refresh()
+    })
+  }
+
+  return (
+    <section className="rounded-md border bg-background px-3 py-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-medium">중국 현지 통장</p>
+          <p className="text-xs text-muted-foreground">발주 예산 확인용 자금 원장</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground">현재 검토 발주 예상</p>
+            <p className="text-sm font-medium tabular-nums">¥ {plannedCny.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-muted-foreground">가용 잔액</p>
+            <p className={`text-base font-semibold tabular-nums ${balanceCny < 0 ? 'text-destructive' : ''}`}>¥ {balanceCny.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}</p>
+          </div>
+          <Dialog.Root open={open} onOpenChange={setOpen}>
+            <Dialog.Trigger render={(props) => <Button {...props} type="button" size="sm">이체/사용 등록</Button>} />
+            <Dialog.Portal>
+              <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+              <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(94vw,460px)] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-xl">
+                <Dialog.Title className="text-base font-semibold">중국 현지 통장 내역</Dialog.Title>
+                <form className="mt-4 space-y-3" onSubmit={submit}>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1 text-xs font-medium">구분
+                      <select value={type} onChange={(event) => setType(event.target.value as ChinaFundTransactionView['type'])} className="h-9 w-full rounded-md border bg-background px-2 text-sm">
+                        {Object.entries(CHINA_FUND_TYPE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-xs font-medium">일자
+                      <Input type="date" value={transactionDate} onChange={(event) => setTransactionDate(event.target.value)} required />
+                    </label>
+                  </div>
+                  <label className="block space-y-1 text-xs font-medium">중국 통장 금액 (CNY)
+                    <Input inputMode="decimal" value={amountCny} onChange={(event) => setAmountCny(event.target.value.replace(/[^\d.]/g, ''))} placeholder="예: 10000" required />
+                  </label>
+                  <label className="block space-y-1 text-xs font-medium">원화 이체금액 (선택)
+                    <Input inputMode="numeric" value={amountKrw} onChange={(event) => setAmountKrw(event.target.value.replace(/\D/g, ''))} placeholder="예: 1900000" />
+                  </label>
+                  <label className="block space-y-1 text-xs font-medium">메모
+                    <Input value={memo} onChange={(event) => setMemo(event.target.value)} placeholder="예: 8월 2주차 발주 자금 이체" />
+                  </label>
+                  {error ? <p className="text-xs text-destructive">{error}</p> : null}
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline">취소</Button>} />
+                    <Button type="submit" disabled={isPending}>{isPending ? <Loader2 className="animate-spin" /> : null}저장</Button>
+                  </div>
+                </form>
+              </Dialog.Popup>
+            </Dialog.Portal>
+          </Dialog.Root>
+        </div>
+      </div>
+      {plannedCny > 0 ? (
+        <p className={`mt-1 text-xs ${balanceCny - plannedCny < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+          검토 발주 후 예상 잔액: ¥ {(balanceCny - plannedCny).toLocaleString('ko-KR', { maximumFractionDigits: 2 })}
+          {balanceCny - plannedCny < 0 ? ' · 현재 잔액보다 부족합니다.' : ''}
+        </p>
+      ) : null}
+      {transactions.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 border-t pt-2 text-xs text-muted-foreground">
+          {transactions.slice(0, 4).map((transaction) => {
+            const outgoing = transaction.type === 'purchase_out' || transaction.type === 'adjustment_out'
+            return <span key={transaction.id} className={outgoing ? 'text-rose-700' : 'text-emerald-700'}>
+              {transaction.transactionDate} · {CHINA_FUND_TYPE_LABELS[transaction.type]} {outgoing ? '-' : '+'}¥{transaction.amountCny.toLocaleString('ko-KR')} {transaction.memo ? `(${transaction.memo})` : ''}
+            </span>
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">이체 내역을 등록하면 중국 현지 통장 잔액과 최근 사용 내역이 표시됩니다.</p>
+      )}
+    </section>
+  )
+}
+
 export function EcountPurchaseHistoryImport() {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)

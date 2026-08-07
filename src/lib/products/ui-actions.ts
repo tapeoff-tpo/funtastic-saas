@@ -9,8 +9,8 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
-import { products } from '@/lib/db/schema'
-import { and, eq, inArray, like, notLike } from 'drizzle-orm'
+import { analyticsChannelProductOverrides, inventory, products, purchaseRequestItems } from '@/lib/db/schema'
+import { and, eq, inArray, like, notLike, or, sql } from 'drizzle-orm'
 import { getProducts, getProductById } from './queries'
 import { createProduct, updateProduct, deleteProduct, updateProductStatus } from './actions'
 import { syncProductToMarketplace, syncProductToAllMarketplaces } from './sync'
@@ -45,8 +45,72 @@ export async function getProductsAction(
 export async function getProductByIdAction(
   productId: string,
 ): Promise<ProductDetail | null> {
-  await requireUser()
-  return getProductById(productId)
+  const userId = await requireUser()
+  return getProductById(userId, productId)
+}
+
+export type ProductOperationsSummary = {
+  totalAvailableStock: number
+  zeroStockSkuCount: number
+  inventorySkuCount: number
+  purchaseRowCount: number
+  purchaseQuantity: number
+  purchaseStatuses: Array<{ status: string; count: number }>
+  channelProductCount: number
+  sellingChannelProductCount: number
+}
+
+/**
+ * Product detail's compact operational view. Every value is read by the
+ * internal SKU and active option SKUs, so it does not create a second source
+ * of truth for stock, purchasing, or channel registrations.
+ */
+export async function getProductOperationsSummaryAction(productId: string): Promise<ProductOperationsSummary> {
+  const userId = await requireUser()
+  const product = await getProductById(userId, productId)
+  if (!product) throw new Error('Product not found or access denied')
+
+  const skus = Array.from(new Set([product.internalSku, ...product.variants.filter((variant) => variant.isActive).map((variant) => variant.sku)]))
+  if (skus.length === 0) {
+    return { totalAvailableStock: 0, zeroStockSkuCount: 0, inventorySkuCount: 0, purchaseRowCount: 0, purchaseQuantity: 0, purchaseStatuses: [], channelProductCount: 0, sellingChannelProductCount: 0 }
+  }
+
+  const componentConditions = skus.map((sku) => sql`${analyticsChannelProductOverrides.components} @> ${JSON.stringify([{ sku }])}::jsonb`)
+  const [inventoryRows, purchaseRows, channelRows] = await Promise.all([
+    db
+      .select({
+        sku: inventory.sku,
+        availableStock: sql<number>`COALESCE(SUM(${inventory.availableStock}), 0)::int`,
+      })
+      .from(inventory)
+      .where(and(eq(inventory.userId, userId), inArray(inventory.sku, skus)))
+      .groupBy(inventory.sku),
+    db
+      .select({ status: purchaseRequestItems.status, requestedQuantity: purchaseRequestItems.requestedQuantity })
+      .from(purchaseRequestItems)
+      .where(and(eq(purchaseRequestItems.userId, userId), inArray(purchaseRequestItems.sku, skus))),
+    db
+      .select({ saleStatus: analyticsChannelProductOverrides.saleStatus })
+      .from(analyticsChannelProductOverrides)
+      .where(and(eq(analyticsChannelProductOverrides.userId, userId), or(...componentConditions))),
+  ])
+
+  const stockBySku = new Map(inventoryRows.map((row) => [row.sku, row.availableStock]))
+  const statusCounts = new Map<string, number>()
+  for (const row of purchaseRows) {
+    statusCounts.set(row.status, (statusCounts.get(row.status) ?? 0) + 1)
+  }
+
+  return {
+    totalAvailableStock: inventoryRows.reduce((sum, row) => sum + row.availableStock, 0),
+    zeroStockSkuCount: skus.filter((sku) => (stockBySku.get(sku) ?? 0) <= 0).length,
+    inventorySkuCount: inventoryRows.length,
+    purchaseRowCount: purchaseRows.length,
+    purchaseQuantity: purchaseRows.reduce((sum, row) => sum + row.requestedQuantity, 0),
+    purchaseStatuses: Array.from(statusCounts, ([status, count]) => ({ status, count })),
+    channelProductCount: channelRows.length,
+    sellingChannelProductCount: channelRows.filter((row) => /판매중/.test(row.saleStatus)).length,
+  }
 }
 
 /**

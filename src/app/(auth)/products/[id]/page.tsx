@@ -8,6 +8,17 @@ import { Badge } from '@/components/ui/badge'
 import type { ProductDetail, VariantFormData, ProductMarketplaceLink } from '@/lib/products/types'
 import { CategoryEditor } from './category-editor'
 
+type ProductOperationsSummary = {
+  totalAvailableStock: number
+  zeroStockSkuCount: number
+  inventorySkuCount: number
+  purchaseRowCount: number
+  purchaseQuantity: number
+  purchaseStatuses: Array<{ status: string; count: number }>
+  channelProductCount: number
+  sellingChannelProductCount: number
+}
+
 const SYNC_STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
   synced: 'default',
   pending: 'outline',
@@ -41,6 +52,7 @@ export default function EditProductPage() {
   const [error, setError] = useState<string | null>(null)
   const [product, setProduct] = useState<ProductDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  const [operationsSummary, setOperationsSummary] = useState<ProductOperationsSummary | null>(null)
 
   // Form fields
   const [name, setName] = useState('')
@@ -62,8 +74,11 @@ export default function EditProductPage() {
   useEffect(() => {
     let cancelled = false
     async function load() {
-      const { getProductByIdAction } = await import('@/lib/products/ui-actions')
-      const data = await getProductByIdAction(productId)
+      const { getProductByIdAction, getProductOperationsSummaryAction } = await import('@/lib/products/ui-actions')
+      const [data, summary] = await Promise.all([
+        getProductByIdAction(productId),
+        getProductOperationsSummaryAction(productId).catch(() => null),
+      ])
       if (cancelled) return
 
       if (!data) {
@@ -73,6 +88,7 @@ export default function EditProductPage() {
       }
 
       setProduct(data)
+      setOperationsSummary(summary)
       setName(data.name)
       setInternalSku(data.internalSku)
       setDescription(data.description ?? '')
@@ -230,6 +246,7 @@ export default function EditProductPage() {
         sku={internalSku}
         variants={variants.map((variant) => variant.sku).filter(Boolean)}
         marketplaceCount={product.marketplaceLinks.length}
+        summary={operationsSummary}
       />
 
       {error && (
@@ -601,10 +618,12 @@ function ProductOperationsLinks({
   sku,
   variants,
   marketplaceCount,
+  summary,
 }: {
   sku: string
   variants: string[]
   marketplaceCount: number
+  summary: ProductOperationsSummary | null
 }) {
   const code = sku.trim()
   const inventoryCode = code.includes('-') ? code.split('-')[0] : code
@@ -655,6 +674,31 @@ function ProductOperationsLinks({
           })}
         </div>
       ) : null}
+      {summary ? (
+        <div className="grid divide-y border-t bg-background sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          <OperationsMetric label="실재고" value={`${summary.totalAvailableStock.toLocaleString('ko-KR')}개`} detail={`${summary.inventorySkuCount}개 SKU 집계`} tone={summary.totalAvailableStock > 0 ? 'default' : 'warning'} />
+          <OperationsMetric label="재고 확인" value={summary.zeroStockSkuCount ? `0재고 ${summary.zeroStockSkuCount}개` : '이상 없음'} detail="품목·옵션 SKU 기준" tone={summary.zeroStockSkuCount ? 'warning' : 'success'} />
+          <OperationsMetric label="진행 발주" value={`${summary.purchaseRowCount.toLocaleString('ko-KR')}건`} detail={summary.purchaseRowCount ? `${summary.purchaseQuantity.toLocaleString('ko-KR')}개 · ${summary.purchaseStatuses.map((item) => `${purchaseStatusLabel(item.status)} ${item.count}`).join(', ')}` : '진행 중인 발주 없음'} tone={summary.purchaseRowCount ? 'default' : 'success'} />
+          <OperationsMetric label="채널 상품" value={`${summary.channelProductCount.toLocaleString('ko-KR')}개`} detail={summary.channelProductCount ? `판매중 ${summary.sellingChannelProductCount.toLocaleString('ko-KR')}개` : '수동 채널 등록 없음'} tone={summary.channelProductCount ? 'default' : 'warning'} />
+        </div>
+      ) : null}
     </section>
   )
+}
+
+function OperationsMetric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: 'default' | 'success' | 'warning' }) {
+  const valueClass = tone === 'success' ? 'text-emerald-700' : tone === 'warning' ? 'text-amber-700' : 'text-foreground'
+  return <div className="min-w-0 px-4 py-3"><p className="text-xs text-muted-foreground">{label}</p><p className={`mt-0.5 text-sm font-semibold tabular-nums ${valueClass}`}>{value}</p><p className="mt-0.5 truncate text-xs text-muted-foreground" title={detail}>{detail}</p></div>
+}
+
+function purchaseStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    requested: '검토',
+    purchased: '요청',
+    purchase_completed: '구매완료',
+    china_arrived: '중국도착',
+    outbound_requested: '중국출고',
+    completed: '출고완료',
+  }
+  return labels[status] ?? status
 }

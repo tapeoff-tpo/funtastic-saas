@@ -144,6 +144,7 @@ export async function POST(request: NextRequest) {
             and(
               eq(orders.marketplaceId, marketplaceId),
               eq(orders.marketplaceOrderId, orderNumber),
+              eq(orders.userId, workspaceUserId),
             ),
           )
           .limit(1)

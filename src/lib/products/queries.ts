@@ -157,12 +157,13 @@ export async function getProducts(
  * Get a single product by ID with all variants and marketplace links.
  */
 export async function getProductById(
+  userId: string,
   productId: string,
 ): Promise<ProductDetail | null> {
   const [product] = await db
     .select()
     .from(products)
-    .where(eq(products.id, productId))
+    .where(and(eq(products.id, productId), eq(products.userId, userId)))
     .limit(1)
 
   if (!product) return null

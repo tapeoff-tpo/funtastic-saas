@@ -68,6 +68,15 @@ export async function createProduct(
       await setStock(userId, variant.sku, formData.name, 0)
     }
 
+    if (formData.categoryId) {
+      await syncProductCategoryToRegistration({
+        userId,
+        previousSku: formData.internalSku,
+        currentSku: formData.internalSku,
+        categoryId: formData.categoryId,
+      })
+    }
+
     return { success: true, data: { productId: result } }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error creating product'
@@ -198,8 +207,9 @@ export async function updateProduct(
         newVariantSkus,
         manageInventory: formData.manageInventory ?? existing.manageInventory,
         previousSku: existing.internalSku,
+        previousCategoryId: existing.categoryId,
       }
-    }).then(async ({ newVariantSkus, manageInventory, previousSku }) => {
+    }).then(async ({ newVariantSkus, manageInventory, previousSku, previousCategoryId }) => {
       // Create inventory records for new variants
       for (const sku of newVariantSkus) {
         await setStock(userId, sku, formData.name, 0)
@@ -212,12 +222,13 @@ export async function updateProduct(
           await setStock(userId, formData.internalSku, formData.name, 0)
         }
       }
-      if (formData.categoryId) {
+      const currentCategoryId = formData.categoryId ?? null
+      if (previousCategoryId !== currentCategoryId) {
         await syncProductCategoryToRegistration({
           userId,
           previousSku,
           currentSku: formData.internalSku,
-          categoryId: formData.categoryId,
+          categoryId: currentCategoryId,
         })
       }
     })
@@ -233,7 +244,7 @@ async function syncProductCategoryToRegistration(input: {
   userId: string
   previousSku: string
   currentSku: string
-  categoryId: string
+  categoryId: string | null
 }) {
   await ensureMarketplaceRegistrationTables()
   await db.execute(sql`

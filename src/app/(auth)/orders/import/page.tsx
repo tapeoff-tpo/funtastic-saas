@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 
 interface ImportResult {
@@ -11,7 +11,6 @@ interface ImportResult {
 }
 
 function OrderImportForm() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [file, setFile] = useState<File | null>(null)
   const [marketplaceId, setMarketplaceId] = useState(() => searchParams.get('marketplace') ?? '')
@@ -64,10 +63,6 @@ function OrderImportForm() {
         })
       } else {
         setResult(data)
-        if (data.inserted > 0) {
-          // 업로드 성공 시 1초 후 신규주문 페이지로 이동
-          setTimeout(() => router.push('/orders?status=new'), 1000)
-        }
       }
     } catch {
       setResult({
@@ -230,14 +225,14 @@ function OrderImportForm() {
                   </ul>
                 </div>
               )}
-              {result.inserted > 0 && result.errors.length === 0 && (
-                <Link
-                  href="/orders"
-                  className="mt-2 inline-block text-sm text-primary hover:underline"
-                >
-                  주문관리에서 확인하기
-                </Link>
-              )}
+              {result.inserted > 0 ? (
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+                  <Link href="/orders?status=new" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+                    신규 주문 확인
+                  </Link>
+                  <span className="text-xs text-muted-foreground">매핑을 확인한 뒤 주문 확정을 거쳐 출고 작업으로 이어집니다.</span>
+                </div>
+              ) : null}
             </div>
           </div>
         )}

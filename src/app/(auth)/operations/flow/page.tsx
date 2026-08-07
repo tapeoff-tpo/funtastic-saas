@@ -26,10 +26,9 @@ import {
 } from '@/lib/db/schema'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { ProductFlowNav } from '@/components/product-flow-nav'
 import { ensureSourcingTables } from '@/lib/operations/sourcing'
 
-export const metadata: Metadata = { title: '운영 플로우' }
+export const metadata: Metadata = { title: '업무 구조 참고' }
 export const dynamic = 'force-dynamic'
 
 type FlowStage = {
@@ -167,11 +166,10 @@ export default async function OperationsFlowPage() {
 
   return (
     <div className="space-y-5">
-      <ProductFlowNav />
       <header className="flex flex-col gap-2 border-b pb-4">
-        <h1 className="text-2xl font-semibold">운영 플로우</h1>
+        <h1 className="text-2xl font-semibold">업무 구조 참고</h1>
         <p className="text-sm text-muted-foreground">
-          사방넷 주문 엑셀을 시작점으로 출고, 재고, 발주, 입고, 신상품 등록과 매출분석까지 이어서 관리합니다.
+          담당자별 업무를 순서대로 강제하지 않습니다. 주문·출고, 재고·발주, 상품 운영, 매출·정산 화면이 같은 품목코드로 연결되는 구조를 참고합니다.
         </p>
       </header>
 

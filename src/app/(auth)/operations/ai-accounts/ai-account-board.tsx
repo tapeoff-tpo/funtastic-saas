@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   addAiAccountMessageAction,
-  bulkUpdateAiAccountOperationalStateAction,
   bulkUpdateAiAccountRenewalAction,
   deleteAiAccountAction,
   readAiAccountPasswordAction,
@@ -80,8 +79,6 @@ export function AiAccountBoard({
   const [passwordError, setPasswordError] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
   const [bulkRenewalDueOn, setBulkRenewalDueOn] = useState('')
-  const [bulkStatus, setBulkStatus] = useState('')
-  const [bulkUserName, setBulkUserName] = useState('')
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkPending, startBulkTransition] = useTransition()
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
@@ -158,47 +155,7 @@ export function AiAccountBoard({
         setBulkMessage(result.error || '갱신 예정일을 변경하지 못했습니다.')
         return
       }
-      setBulkStatus('')
-      setBulkUserName('')
       setBulkMessage(`${result.count}개 계정의 갱신 예정일을 변경하고 사용자/상태를 초기화했습니다.`)
-    })
-  }
-
-  function applyBulkStatus(status: string) {
-    setBulkStatus(status)
-    if (!accounts.length || !status) return
-    setBulkMessage('')
-    startBulkTransition(async () => {
-      const result = await bulkUpdateAiAccountOperationalStateAction({
-        status,
-        changedField: 'status',
-      })
-      if ('error' in result) {
-        setBulkMessage(result.error || '상태를 변경하지 못했습니다.')
-        return
-      }
-      setBulkMessage(`${result.count}개 계정의 상태를 변경했습니다.`)
-      setBulkStatus('')
-    })
-  }
-
-  function applyBulkUser(value: string) {
-    const currentUserName = value === '__none__' ? '' : value
-    setBulkUserName(value)
-    if (!accounts.length) return
-    setBulkMessage('')
-    startBulkTransition(async () => {
-      const result = await bulkUpdateAiAccountOperationalStateAction({
-        status: currentUserName ? 'in_use' : 'unselected',
-        currentUserName,
-        changedField: 'currentUserName',
-      })
-      if ('error' in result) {
-        setBulkMessage(result.error || '사용자를 변경하지 못했습니다.')
-        return
-      }
-      setBulkMessage(`${result.count}개 계정의 사용자와 상태를 변경했습니다.`)
-      setBulkUserName('')
     })
   }
 
@@ -224,31 +181,6 @@ export function AiAccountBoard({
                   disabled={bulkPending || accounts.length === 0}
                   className="h-9 w-40 bg-background"
                 />
-              </label>
-              <label className="space-y-1">
-                <span className="block text-xs font-medium text-muted-foreground">전체 사용자</span>
-                <select
-                  value={bulkUserName}
-                  onChange={(event) => applyBulkUser(event.target.value)}
-                  disabled={bulkPending || accounts.length === 0}
-                  className="h-9 w-36 rounded-md border bg-background px-2 text-sm"
-                >
-                  <option value="" disabled>사용자 선택</option>
-                  <option value="__none__">사용자 없음</option>
-                  {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
-                </select>
-              </label>
-              <label className="space-y-1">
-                <span className="block text-xs font-medium text-muted-foreground">전체 상태</span>
-                <select
-                  value={bulkStatus}
-                  onChange={(event) => applyBulkStatus(event.target.value)}
-                  disabled={bulkPending || accounts.length === 0}
-                  className="h-9 w-36 rounded-md border bg-background px-2 text-sm"
-                >
-                  <option value="" disabled>상태 선택</option>
-                  {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
               </label>
               <p className="pb-2 text-xs text-muted-foreground">갱신 예정일을 선택하면 {accounts.length}개 계정의 사용자와 상태도 초기화됩니다.</p>
             </div>

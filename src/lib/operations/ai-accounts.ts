@@ -566,7 +566,12 @@ export async function bulkUpdateAiAccountRenewal(input: {
   }
 
   const rows = await db.update(gptAccounts)
-    .set({ renewalDueOn, updatedAt: new Date() })
+    .set({
+      renewalDueOn,
+      status: 'unselected',
+      currentUserName: null,
+      updatedAt: new Date(),
+    })
     .where(and(eq(gptAccounts.userId, input.userId), inArray(gptAccounts.id, accountIds)))
     .returning({ id: gptAccounts.id })
   if (!rows.length) return { error: '선택한 계정을 찾을 수 없습니다.' as const }
@@ -575,7 +580,7 @@ export async function bulkUpdateAiAccountRenewal(input: {
     userId: input.userId,
     accountId: row.id,
     eventType: 'renewal_bulk_updated',
-    message: `갱신 예정일: ${renewalDueOn} (일괄 적용)`,
+    message: `갱신 예정일: ${renewalDueOn} (일괄 적용) · 사용자/상태 초기화`,
   })))
   return { success: true, count: rows.length }
 }

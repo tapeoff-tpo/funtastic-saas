@@ -158,7 +158,9 @@ export function AiAccountBoard({
         setBulkMessage(result.error || '갱신 예정일을 변경하지 못했습니다.')
         return
       }
-      setBulkMessage(`${result.count}개 계정의 갱신 예정일을 변경했습니다.`)
+      setBulkStatus('')
+      setBulkUserName('')
+      setBulkMessage(`${result.count}개 계정의 갱신 예정일을 변경하고 사용자/상태를 초기화했습니다.`)
     })
   }
 
@@ -248,7 +250,7 @@ export function AiAccountBoard({
                   {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </label>
-              <p className="pb-2 text-xs text-muted-foreground">값을 선택하면 {accounts.length}개 계정에 바로 적용됩니다.</p>
+              <p className="pb-2 text-xs text-muted-foreground">갱신 예정일을 선택하면 {accounts.length}개 계정의 사용자와 상태도 초기화됩니다.</p>
             </div>
             {bulkMessage ? <p className="mt-2 text-xs text-muted-foreground">{bulkMessage}</p> : null}
           </div>

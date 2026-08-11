@@ -37,39 +37,46 @@ export const getProfile = cache(async (userId: string): Promise<UserProfile | nu
 export const getWorkspaceUserId = cache(async (userId: string): Promise<string> => {
   const profile = await getProfile(userId)
 
-  const [admin123Owner] = await db
-    .select({ id: userProfiles.id })
-    .from(userProfiles)
-    .where(and(
-      isNull(userProfiles.deactivatedAt),
-      or(
-        ilike(userProfiles.email, 'admin123%'),
-        ilike(userProfiles.displayName, 'admin123%'),
-      ),
-    ))
-    .orderBy(asc(userProfiles.createdAt))
-    .limit(1)
+  // Keep the existing owner precedence, but avoid serial database round trips
+  // on every server-rendered page.
+  const [admin123Rows, connectionRows, orderRows, productRows] = await Promise.all([
+    db
+      .select({ id: userProfiles.id })
+      .from(userProfiles)
+      .where(and(
+        isNull(userProfiles.deactivatedAt),
+        or(
+          ilike(userProfiles.email, 'admin123%'),
+          ilike(userProfiles.displayName, 'admin123%'),
+        ),
+      ))
+      .orderBy(asc(userProfiles.createdAt))
+      .limit(1),
+    db
+      .select({ id: marketplaceConnections.userId })
+      .from(marketplaceConnections)
+      .orderBy(asc(marketplaceConnections.createdAt))
+      .limit(1),
+    db
+      .select({ id: orders.userId })
+      .from(orders)
+      .orderBy(asc(orders.createdAt))
+      .limit(1),
+    db
+      .select({ id: products.userId })
+      .from(products)
+      .orderBy(asc(products.createdAt))
+      .limit(1),
+  ])
+
+  const admin123Owner = admin123Rows[0]
+  const connectionOwner = connectionRows[0]
+  const orderOwner = orderRows[0]
+  const productOwner = productRows[0]
+
   if (admin123Owner?.id) return admin123Owner.id
-
-  const [connectionOwner] = await db
-    .select({ id: marketplaceConnections.userId })
-    .from(marketplaceConnections)
-    .orderBy(asc(marketplaceConnections.createdAt))
-    .limit(1)
   if (connectionOwner?.id) return connectionOwner.id
-
-  const [orderOwner] = await db
-    .select({ id: orders.userId })
-    .from(orders)
-    .orderBy(asc(orders.createdAt))
-    .limit(1)
   if (orderOwner?.id) return orderOwner.id
-
-  const [productOwner] = await db
-    .select({ id: products.userId })
-    .from(products)
-    .orderBy(asc(products.createdAt))
-    .limit(1)
   if (productOwner?.id) return productOwner.id
 
   if (profile?.createdBy) return profile.createdBy

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next'
-import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { ESA009M_HEADERS, getPurchasingItems } from '@/lib/purchasing/items'
 import { CostsPageClient } from './costs-page-client'
 import { ProductFlowNav } from '@/components/product-flow-nav'
@@ -16,8 +16,7 @@ export default async function CostsPage({
   const page = Math.max(1, Number(single(params.page)) || 1)
   const pageSize = 50
   const search = single(params.search)?.trim() || undefined
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) return null
 
   const { items, total } = await getPurchasingItems({

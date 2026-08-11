@@ -3,7 +3,6 @@ import {
   parseAsString,
   parseAsInteger,
 } from 'nuqs/server'
-import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { inventory } from '@/lib/db/schema'
 import { eq, isNotNull, and } from 'drizzle-orm'
@@ -12,6 +11,7 @@ import { InventoryTable } from './inventory-table'
 import type { InventoryFilters } from '@/lib/inventory/types'
 import type { Metadata } from 'next'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 
 export const metadata: Metadata = {
@@ -40,10 +40,7 @@ export default async function InventoryPage({
 }) {
   const params = await searchParamsCache.parse(searchParams)
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
 
   if (!user) {
     return null

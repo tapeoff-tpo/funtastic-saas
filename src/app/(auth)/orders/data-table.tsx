@@ -27,6 +27,7 @@ interface DataTableProps {
   stage?: OrderStage
   showMappingAction?: boolean
   showAllMappingsAction?: boolean
+  showConfirmMappedAction?: boolean
   showMappingColumn?: boolean
   showScanColumn?: boolean
   canUnlockOrderSnapshots?: boolean
@@ -41,6 +42,7 @@ export function DataTable({
   stage,
   showMappingAction = false,
   showAllMappingsAction = false,
+  showConfirmMappedAction = false,
   showMappingColumn: showMappingColumnProp = false,
   showScanColumn = false,
   canUnlockOrderSnapshots = false,
@@ -153,6 +155,7 @@ export function DataTable({
           stage={stage}
           showMappingAction={showMappingAction}
           showAllMappingsAction={showAllMappingsAction}
+          showConfirmMappedAction={showConfirmMappedAction}
         />
         {selectedCount > 0 && (
           <span className="text-sm text-muted-foreground">

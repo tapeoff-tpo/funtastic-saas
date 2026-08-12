@@ -71,6 +71,7 @@ interface ShippingActionsProps {
   stage?: OrderStage
   showMappingAction?: boolean
   showAllMappingsAction?: boolean
+  showConfirmMappedAction?: boolean
 }
 
 /** Download a file by fetching — allows catching errors from the server */
@@ -266,6 +267,7 @@ export function ShippingActions({
   stage,
   showMappingAction = false,
   showAllMappingsAction = false,
+  showConfirmMappedAction = false,
 }: ShippingActionsProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -276,6 +278,8 @@ export function ShippingActions({
   const [giftRulesOpen, setGiftRulesOpen] = useState(false)
   const [applyingMappings, setApplyingMappings] = useState(false)
   const [allMappingProgress, setAllMappingProgress] = useState<number | null>(null)
+  const [confirmingAllMapped, setConfirmingAllMapped] = useState(false)
+  const [allMappedConfirmProgress, setAllMappedConfirmProgress] = useState<number | null>(null)
   const [unapplyingMappings, setUnapplyingMappings] = useState(false)
   const [splittingSets, setSplittingSets] = useState(false)
   const [applyingGifts, setApplyingGifts] = useState(false)
@@ -973,6 +977,51 @@ export function ShippingActions({
     }
   }
 
+  const handleConfirmAllMappedOrders = async () => {
+    if (confirmingAllMapped) return
+    if (!window.confirm('매핑 완료 탭의 주문 전체를 확인 단계로 이동합니다.\n\n이동 후에는 신규·매핑 완료 목록에서 빠집니다. 계속할까요?')) {
+      return
+    }
+
+    setConfirmingAllMapped(true)
+    let cursor: string | null = null
+    let updated = 0
+    let failed = 0
+
+    try {
+      do {
+        const res = await fetch('/api/orders/confirm-mapped', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ cursor }),
+        })
+        const data = await res.json().catch(() => ({})) as {
+          updated?: number
+          failed?: number
+          hasMore?: boolean
+          nextCursor?: string | null
+          error?: string
+        }
+        if (!res.ok) {
+          toast.error(data.error ?? '전체 확인 처리에 실패했습니다.')
+          return
+        }
+
+        updated += data.updated ?? 0
+        failed += data.failed ?? 0
+        cursor = data.hasMore ? (data.nextCursor ?? null) : null
+        setAllMappedConfirmProgress(updated + failed)
+      } while (cursor)
+
+      const failureNote = failed > 0 ? `, ${failed}건 실패` : ''
+      toast.success(`전체 확인 완료: ${updated}건${failureNote}`, { duration: 8000 })
+      router.refresh()
+    } finally {
+      setConfirmingAllMapped(false)
+      setAllMappedConfirmProgress(null)
+    }
+  }
+
   const handleUnapplyMappings = async () => {
     if (selectedOrderIds.length === 0) {
       toast.info('매핑해제할 주문을 선택하세요.')
@@ -1135,6 +1184,17 @@ export function ShippingActions({
                 title="신규 탭의 미매핑 주문 전체에 저장된 매핑을 적용합니다"
               >
                 {allMappingProgress == null ? '전체 매핑' : `전체 매핑 ${allMappingProgress.toLocaleString('ko-KR')}건`}
+              </button>
+            )}
+            {showConfirmMappedAction && (
+              <button
+                type="button"
+                onClick={() => void handleConfirmAllMappedOrders()}
+                disabled={confirmingAllMapped}
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                title="매핑 완료 탭의 주문 전체를 확인 단계로 이동합니다"
+              >
+                {allMappedConfirmProgress == null ? '전체 확인 완료' : `전체 확인 ${allMappedConfirmProgress.toLocaleString('ko-KR')}건`}
               </button>
             )}
             <button

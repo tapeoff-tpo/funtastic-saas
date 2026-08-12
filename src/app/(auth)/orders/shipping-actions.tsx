@@ -984,22 +984,21 @@ export function ShippingActions({
     }
 
     setConfirmingAllMapped(true)
-    let cursor: string | null = null
     let updated = 0
     let failed = 0
+    let hasMore = false
 
     try {
       do {
         const res = await fetch('/api/orders/confirm-mapped', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ cursor }),
+          body: JSON.stringify({}),
         })
         const data = await res.json().catch(() => ({})) as {
           updated?: number
           failed?: number
           hasMore?: boolean
-          nextCursor?: string | null
           error?: string
         }
         if (!res.ok) {
@@ -1009,9 +1008,9 @@ export function ShippingActions({
 
         updated += data.updated ?? 0
         failed += data.failed ?? 0
-        cursor = data.hasMore ? (data.nextCursor ?? null) : null
+        hasMore = Boolean(data.hasMore) && ((data.updated ?? 0) + (data.failed ?? 0) > 0)
         setAllMappedConfirmProgress(updated + failed)
-      } while (cursor)
+      } while (hasMore)
 
       const failureNote = failed > 0 ? `, ${failed}건 실패` : ''
       toast.success(`전체 확인 완료: ${updated}건${failureNote}`, { duration: 8000 })

@@ -144,6 +144,7 @@ export default async function OrdersPage({
   const businessSettingsPromise = listMarketplaceBusinessSettings(workspaceUserId)
 
   const isNewTab = singleStatus === 'new'
+  const isMappingDoneTab = params.tab === 'mapping-done'
   const isConfirmedTab = singleStatus === 'confirmed'
   const isScanFilterTab = selectedStatuses.length > 0 && selectedStatuses.every((status) => SCAN_FILTER_STATUSES.has(status))
   const isGeneralStatusTab = Boolean(params.status) && !params.claimType && !params.cancel && !params.held
@@ -151,9 +152,11 @@ export default async function OrdersPage({
   const needsStockDetails = isNewTab || isConfirmedTab || isScanFilterTab
   const hasSearch = Boolean(params.search?.trim())
   const shouldExcludeHeld = !params.held && !hasSearch && Boolean(params.status || params.claimType || params.cancel)
-  const mappingFilter = params.mapping === 'all'
-    ? undefined
-    : ((params.mapping ?? undefined) as 'mapped' | 'unmapped' | undefined)
+  const mappingFilter = isMappingDoneTab
+    ? 'mapped'
+    : params.mapping === 'all'
+      ? undefined
+      : ((params.mapping ?? (isNewTab ? 'unmapped' : undefined)) as 'mapped' | 'unmapped' | undefined)
 
   // 탭 미선택(사이드바 진입 직후) — 어떤 쿼리도 실행하지 않는다.
   // 탭(전체/신규/.../반품) 클릭 시점에만 status/claimType/cancel/tab 중 하나가 붙어 fetch 시작.
@@ -161,7 +164,7 @@ export default async function OrdersPage({
   const shouldRunQuery = tabSelected && (
     hasDateFilter
     || Boolean(params.held)
-    || Boolean(params.status || params.claimType || params.cancel || params.search?.trim() || params.marketplace)
+    || Boolean(params.status || params.tab === 'mapping-done' || params.claimType || params.cancel || params.search?.trim() || params.marketplace)
   )
 
   // 탭별 카운트(getOrderStats)는 매 조회마다 11개 status COUNT 쿼리를 추가로 실행해
@@ -171,7 +174,7 @@ export default async function OrdersPage({
         page: params.page,
         pageSize: params.pageSize,
         userId: workspaceUserId,
-        status: singleStatus,
+        status: isMappingDoneTab ? 'new' : singleStatus,
         statuses: multipleStatuses as OrderFiltersParams['statuses'],
         marketplace: singleMarketplace,
         marketplaces: multipleMarketplaces,
@@ -303,8 +306,9 @@ export default async function OrdersPage({
           total={total}
           page={params.page}
           pageSize={params.pageSize}
-          showMappingAction={isNewTab}
-          showMappingColumn={isNewTab || isConfirmedTab}
+          showMappingAction={isNewTab || isMappingDoneTab}
+          showAllMappingsAction={isNewTab}
+          showMappingColumn={isNewTab || isMappingDoneTab || isConfirmedTab}
           showScanColumn={isScanFilterTab}
           canUnlockOrderSnapshots={profile?.role === 'super_admin'}
         />

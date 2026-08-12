@@ -70,6 +70,7 @@ interface ShippingActionsProps {
   allOrders?: OrderRow[]
   stage?: OrderStage
   showMappingAction?: boolean
+  showAllMappingsAction?: boolean
 }
 
 /** Download a file by fetching — allows catching errors from the server */
@@ -264,6 +265,7 @@ export function ShippingActions({
   allOrders = [],
   stage,
   showMappingAction = false,
+  showAllMappingsAction = false,
 }: ShippingActionsProps) {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -273,6 +275,7 @@ export function ShippingActions({
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false)
   const [giftRulesOpen, setGiftRulesOpen] = useState(false)
   const [applyingMappings, setApplyingMappings] = useState(false)
+  const [allMappingProgress, setAllMappingProgress] = useState<number | null>(null)
   const [unapplyingMappings, setUnapplyingMappings] = useState(false)
   const [splittingSets, setSplittingSets] = useState(false)
   const [applyingGifts, setApplyingGifts] = useState(false)
@@ -917,6 +920,59 @@ export function ShippingActions({
     }
   }
 
+  const handleApplyAllUnmappedMappings = async () => {
+    if (applyingMappings) return
+    if (selectedOrderIds.length > 0) {
+      toast.info('전체 매핑은 선택과 관계없이 신규 탭의 미매핑 주문 전체를 처리합니다.')
+    }
+    if (!window.confirm('신규 탭의 미매핑 주문 전체에 저장된 매핑을 적용합니다.\n\n매핑에 실패한 주문만 신규 목록에 남습니다. 계속할까요?')) {
+      return
+    }
+
+    setApplyingMappings(true)
+    let cursor: string | null = null
+    let applied = 0
+    let failed = 0
+    let firstFailure: { marketplaceOrderId: string; reason: string } | undefined
+
+    try {
+      do {
+        const res = await fetch('/api/orders/apply-mappings', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ scope: 'all-unmapped', cursor }),
+        })
+        const data = await res.json().catch(() => ({})) as {
+          applied?: number
+          failed?: number
+          failures?: Array<{ marketplaceOrderId: string; reason: string }>
+          hasMore?: boolean
+          nextCursor?: string | null
+          error?: string
+        }
+        if (!res.ok && data.applied === undefined && data.failed === undefined) {
+          toast.error(data.error ?? '전체 매핑 처리에 실패했습니다.')
+          return
+        }
+
+        applied += data.applied ?? 0
+        failed += data.failed ?? 0
+        firstFailure ??= data.failures?.[0]
+        cursor = data.hasMore ? (data.nextCursor ?? null) : null
+        setAllMappingProgress(applied + failed)
+      } while (cursor)
+
+      const failureNote = firstFailure
+        ? `, ${failed}건 확인 필요 (${firstFailure.marketplaceOrderId}: ${firstFailure.reason})`
+        : ''
+      toast.success(`전체 매핑 완료: ${applied}건${failureNote}`, { duration: 8000 })
+      router.refresh()
+    } finally {
+      setApplyingMappings(false)
+      setAllMappingProgress(null)
+    }
+  }
+
   const handleUnapplyMappings = async () => {
     if (selectedOrderIds.length === 0) {
       toast.info('매핑해제할 주문을 선택하세요.')
@@ -1070,6 +1126,17 @@ export function ShippingActions({
                 ? '매핑 중...'
                 : `매핑${ordersForMapping.length > 0 ? ` (${ordersForMapping.length})` : ''}`}
             </button>
+            {showAllMappingsAction && (
+              <button
+                type="button"
+                onClick={() => void handleApplyAllUnmappedMappings()}
+                disabled={applyingMappings}
+                className="rounded-md border border-emerald-300 bg-white px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+                title="신규 탭의 미매핑 주문 전체에 저장된 매핑을 적용합니다"
+              >
+                {allMappingProgress == null ? '전체 매핑' : `전체 매핑 ${allMappingProgress.toLocaleString('ko-KR')}건`}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {

@@ -17,7 +17,7 @@
 import { useTransition } from 'react'
 import { useRouter, usePathname, useSearchParams } from 'next/navigation'
 
-type TabKind = 'all' | 'status' | 'cancel' | 'claim' | 'held' | 'archive'
+type TabKind = 'all' | 'status' | 'mapping-done' | 'cancel' | 'claim' | 'held' | 'archive'
 
 interface TabDef {
   id: string
@@ -29,6 +29,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: 'all', label: '전체', kind: 'all' },
   { id: 'new', label: '신규', kind: 'status' },
+  { id: 'mapping-done', label: '매핑 완료', kind: 'mapping-done', accent: 'text-emerald-700' },
   { id: 'confirmed', label: '확인', kind: 'status' },
   { id: 'preparing', label: '출고대기', kind: 'status' },
   { id: 'ready', label: '출고준비', kind: 'status' },
@@ -57,6 +58,7 @@ export function OrderTabs() {
   const tab = searchParams.get('tab')
   const currentTab: string | null = (() => {
     if (archive === 'mapping') return 'mapping-archive'
+    if (tab === 'mapping-done') return 'mapping-done'
     if (held === 'true' || held === '1') return 'held'
     if (cancel === 'true' || cancel === '1') return 'cancel'
     if (claimType === 'exchange') return 'exchange'
@@ -89,6 +91,8 @@ export function OrderTabs() {
 
     if (tab.kind === 'status') {
       params.set('status', tab.id)
+    } else if (tab.kind === 'mapping-done') {
+      params.set('tab', 'mapping-done')
     } else if (tab.kind === 'cancel') {
       showAllDatesByDefault()
       params.set('cancel', 'true')

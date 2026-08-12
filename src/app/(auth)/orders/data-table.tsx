@@ -26,6 +26,7 @@ interface DataTableProps {
   page: number
   stage?: OrderStage
   showMappingAction?: boolean
+  showAllMappingsAction?: boolean
   showMappingColumn?: boolean
   showScanColumn?: boolean
   canUnlockOrderSnapshots?: boolean
@@ -39,6 +40,7 @@ export function DataTable({
   page,
   stage,
   showMappingAction = false,
+  showAllMappingsAction = false,
   showMappingColumn: showMappingColumnProp = false,
   showScanColumn = false,
   canUnlockOrderSnapshots = false,
@@ -150,6 +152,7 @@ export function DataTable({
           allOrders={data}
           stage={stage}
           showMappingAction={showMappingAction}
+          showAllMappingsAction={showAllMappingsAction}
         />
         {selectedCount > 0 && (
           <span className="text-sm text-muted-foreground">

@@ -17,7 +17,7 @@ import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
 import { inventory, mappingCodes, mappingComponents, mappingSources, orderItems, orders, products, productVariants } from '@/lib/db/schema'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, isNull, or, sql } from 'drizzle-orm'
 import { logOrderChanges } from '@/lib/orders/change-log'
 import { getRawMappingCandidateIdsForItem, isIgnoredMappingCandidate, lookupCompatibleMappingRef, normalizeMappingOptionText, type MappingSource } from '@/lib/orders/mapping-match'
 import { lockOrderItemsForOrders } from '@/lib/orders/locking'
@@ -47,6 +47,30 @@ type ItemMappingLookupResult = {
 type SkuInfo = {
   productName: string | null
   optionName: string | null
+}
+
+const ALL_UNMAPPED_MAPPING_BATCH_SIZE = 500
+
+type AllUnmappedCursor = {
+  createdAt: string
+  id: string
+}
+
+function parseAllUnmappedCursor(value: unknown): AllUnmappedCursor | null {
+  if (typeof value !== 'string' || !value) return null
+
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<AllUnmappedCursor>
+    const createdAt = parsed.createdAt ? new Date(parsed.createdAt) : null
+    if (!parsed.id || !createdAt || Number.isNaN(createdAt.getTime())) return null
+    return { id: parsed.id, createdAt: createdAt.toISOString() }
+  } catch {
+    return null
+  }
+}
+
+function createAllUnmappedCursor(row: { id: string; createdAt: Date }): string {
+  return Buffer.from(JSON.stringify({ id: row.id, createdAt: row.createdAt.toISOString() })).toString('base64url')
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -329,18 +353,50 @@ export async function POST(req: NextRequest) {
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
 
-  let body: { orderIds?: string[] }
+  let body: { orderIds?: string[]; scope?: 'all-unmapped'; cursor?: string }
   try {
-    body = await req.json() as { orderIds?: string[] }
+    body = await req.json() as { orderIds?: string[]; scope?: 'all-unmapped'; cursor?: string }
   } catch {
     return NextResponse.json({ error: 'invalid JSON' }, { status: 400 })
   }
 
-  const orderIds = Array.isArray(body.orderIds)
+  let orderIds = Array.isArray(body.orderIds)
     ? body.orderIds.filter((id): id is string => typeof id === 'string' && id.length > 0)
     : []
 
+  let nextCursor: string | null = null
+  let hasMore = false
+  if (body.scope === 'all-unmapped') {
+    const cursor = parseAllUnmappedCursor(body.cursor)
+    const cursorDate = cursor ? new Date(cursor.createdAt) : null
+    const cursorCondition = cursor && cursorDate
+      ? or(
+          gt(orders.createdAt, cursorDate),
+          and(eq(orders.createdAt, cursorDate), gt(orders.id, cursor.id)),
+        )
+      : undefined
+    const candidates = await db
+      .select({ id: orders.id, createdAt: orders.createdAt })
+      .from(orders)
+      .where(and(
+        eq(orders.userId, workspaceUserId),
+        eq(orders.status, 'new'),
+        isNull(orders.mappedAt),
+        cursorCondition,
+      ))
+      .orderBy(asc(orders.createdAt), asc(orders.id))
+      .limit(ALL_UNMAPPED_MAPPING_BATCH_SIZE + 1)
+
+    const page = candidates.slice(0, ALL_UNMAPPED_MAPPING_BATCH_SIZE)
+    orderIds = page.map((order) => order.id)
+    hasMore = candidates.length > ALL_UNMAPPED_MAPPING_BATCH_SIZE
+    nextCursor = hasMore && page.length > 0 ? createAllUnmappedCursor(page[page.length - 1]) : null
+  }
+
   if (orderIds.length === 0) {
+    if (body.scope === 'all-unmapped') {
+      return NextResponse.json({ applied: 0, failed: 0, failures: [], hasMore: false, nextCursor: null })
+    }
     return NextResponse.json({ error: 'orderIds must be a non-empty array' }, { status: 400 })
   }
 
@@ -351,6 +407,8 @@ export async function POST(req: NextRequest) {
       applied: 0,
       failed: failures.length,
       failures,
+      hasMore,
+      nextCursor,
       error: failures[0]?.reason ?? '내부 상품코드로 매핑된 주문이 없습니다.',
     }, { status: 409 })
   }
@@ -402,6 +460,8 @@ export async function POST(req: NextRequest) {
       applied: 0,
       failed: validOrderIds.length + failures.length,
       failures,
+      hasMore,
+      nextCursor,
       error: error instanceof Error ? error.message : '매핑 결과를 확정상품으로 저장하지 못했습니다.',
     }, { status: 409 })
   }
@@ -416,5 +476,11 @@ export async function POST(req: NextRequest) {
     after: { mappedAt: order.mappedAt },
   })))
 
-  return NextResponse.json({ applied: result.length, failed: failures.length, failures })
+  return NextResponse.json({
+    applied: result.length,
+    failed: failures.length,
+    failures,
+    hasMore,
+    nextCursor,
+  })
 }

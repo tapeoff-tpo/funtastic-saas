@@ -219,6 +219,7 @@ type ProductProfitQueryRow = {
 }
 
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
+const OUTBOUND_STATUS_FILTER = sql`('shipped', 'delivering', 'delivered')`
 const ORDER_PROFIT_PAGE_SIZE = 50
 const ANALYTICS_SHIPPED_AT_TEXT = sql`
   COALESCE(
@@ -788,14 +789,15 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         AND o.status::text IN ${STATUS_FILTER}
     ),
     shipped_orders AS (
-      SELECT DISTINCT o.id, (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS total_amount
+      SELECT
+        o.id,
+        (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS total_amount
       FROM orders o
-      JOIN shipments s ON s.order_id = o.id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
-        AND o.status::text IN ${STATUS_FILTER}
+        AND o.status::text IN ${OUTBOUND_STATUS_FILTER}
     ),
     previous_months AS (
       SELECT
@@ -1028,13 +1030,13 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         key: 'month-sales',
         label: '선택 월 매출',
         value: toNumber(metric?.monthSales),
-        subLabel: '주문일 기준',
+        subLabel: '출고완료일 우선 / 주문일 보조',
       },
       {
         key: 'shipped-expected',
         label: '선택 월 출고완료 매출예상금액',
         value: toNumber(metric?.shippedExpectedSales),
-        subLabel: '출고일 기준',
+        subLabel: '출고완료 상태 기준',
       },
       {
         key: 'profit-excluding-shipping',

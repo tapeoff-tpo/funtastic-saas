@@ -14,7 +14,7 @@ import { useQueryState, parseAsInteger } from 'nuqs'
 import { columns, type OrderRow } from './columns'
 import { ShippingActions } from './shipping-actions'
 import { OrderDetailDialog } from './order-detail-dialog'
-import { ManualInvoiceButton, ManualStatusChangeButton } from './status-actions'
+import { ManualInvoiceButton, ManualStatusChangeButton, ShipAllCurrentOrdersButton } from './status-actions'
 import { Pagination, PageSizeSelector } from '@/components/ui/pagination'
 import { useColumnSizing } from '@/lib/hooks/use-column-sizing'
 import type { OrderStage } from '@/lib/orders/types'
@@ -156,6 +156,12 @@ export function DataTable({
           showMappingAction={showMappingAction}
           showAllMappingsAction={showAllMappingsAction}
           showConfirmMappedAction={showConfirmMappedAction}
+        />
+        <ShipAllCurrentOrdersButton
+          onChanged={() => {
+            setRowSelection({})
+            router.refresh()
+          }}
         />
         {selectedCount > 0 && (
           <span className="text-sm text-muted-foreground">

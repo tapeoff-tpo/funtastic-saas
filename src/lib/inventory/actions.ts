@@ -229,6 +229,9 @@ export async function expandOrderItemsForDeduction(
       optionText: orderItems.optionText,
       quantity: orderItems.quantity,
       skuMultiplier: orderItems.skuMultiplier,
+      lockedSku: orderItems.lockedSku,
+      lockedQuantity: orderItems.lockedQuantity,
+      lockedAt: orderItems.lockedAt,
       orderMarketplaceId: orders.marketplaceId,
     })
     .from(orderItems)
@@ -236,6 +239,19 @@ export async function expandOrderItemsForDeduction(
     .where(eq(orderItems.orderId, orderId))
 
   if (rawItems.length === 0) return []
+
+  // A direct-SKU snapshot is the exact item that was approved at mapping time.
+  // Reusing it avoids rebuilding the entire mapping index for every shipment
+  // and prevents later mapping edits from changing a pending shipment.
+  const directLockedItems = rawItems.filter((item) => item.lockedAt && item.lockedSku)
+  if (directLockedItems.length === rawItems.length) {
+    const accumulated = new Map<string, number>()
+    for (const item of directLockedItems) {
+      const quantity = item.lockedQuantity ?? item.quantity * (item.skuMultiplier ?? 1)
+      accumulated.set(item.lockedSku!, (accumulated.get(item.lockedSku!) ?? 0) + quantity)
+    }
+    return Array.from(accumulated.entries()).map(([sku, quantity]) => ({ sku, quantity }))
+  }
 
   // mapping_sources + components 한 번에 join — 사방넷 품번/단품 둘 다.
   const mappingRows = await tx

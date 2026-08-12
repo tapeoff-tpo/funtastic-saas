@@ -17,7 +17,41 @@ import {
 } from '@/lib/shipping/actions'
 import type { OrderStatus } from '@/lib/orders/types'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray } from 'drizzle-orm'
+
+const CURRENT_ORDER_SHIPMENT_BATCH_SIZE = 50
+const SHIPPABLE_ORDER_STATUSES: OrderStatus[] = [
+  'new',
+  'confirmed',
+  'preparing',
+  'ready',
+]
+
+type BulkStatusResult = {
+  updated: number
+  errors: Array<{ orderId: string; error: string }>
+}
+
+/**
+ * A single inventory failure rolls back the whole transaction. Split a failed
+ * batch so healthy orders can still ship while the failed order stays visible.
+ */
+async function forceShipWithIsolation(
+  userId: string,
+  orderIds: string[],
+): Promise<BulkStatusResult> {
+  const result = await forceBulkUpdateStatus(userId, orderIds, 'shipped')
+  if (result.errors.length === 0 || orderIds.length <= 1) return result
+
+  const midpoint = Math.ceil(orderIds.length / 2)
+  const left = await forceShipWithIsolation(userId, orderIds.slice(0, midpoint))
+  const right = await forceShipWithIsolation(userId, orderIds.slice(midpoint))
+
+  return {
+    updated: left.updated + right.updated,
+    errors: [...left.errors, ...right.errors],
+  }
+}
 
 function revalidateOrderAnalytics() {
   revalidatePath('/analytics')
@@ -104,6 +138,76 @@ export async function forceBulkChangeStatusAction(
   revalidateTag('orders', 'max')
   revalidateOrderAnalytics()
   return result
+}
+
+/**
+ * Ships the next page of all active orders for the workspace.
+ *
+ * This is intentionally cursor-based instead of one giant Server Action so a
+ * large manual shipment does not hit a Vercel timeout. Inventory is deducted
+ * in the same transaction as each order status change.
+ */
+export async function shipCurrentOrdersBatchAction(
+  cursor: string | null,
+): Promise<{
+  updated: number
+  processed: number
+  errors: Array<{ orderId: string; error: string }>
+  nextCursor: string | null
+  hasMore: boolean
+}> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return {
+      updated: 0,
+      processed: 0,
+      errors: [{ orderId: '', error: 'Unauthorized' }],
+      nextCursor: null,
+      hasMore: false,
+    }
+  }
+
+  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const candidates = await db
+    .select({ id: orders.id })
+    .from(orders)
+    .where(and(
+      eq(orders.userId, workspaceUserId),
+      eq(orders.isCopy, false),
+      eq(orders.isHeld, false),
+      inArray(orders.status, SHIPPABLE_ORDER_STATUSES),
+      cursor ? gt(orders.id, cursor) : undefined,
+    ))
+    .orderBy(asc(orders.id))
+    .limit(CURRENT_ORDER_SHIPMENT_BATCH_SIZE + 1)
+
+  if (candidates.length === 0) {
+    return {
+      updated: 0,
+      processed: 0,
+      errors: [],
+      nextCursor: null,
+      hasMore: false,
+    }
+  }
+
+  const batch = candidates.slice(0, CURRENT_ORDER_SHIPMENT_BATCH_SIZE)
+  const hasMore = candidates.length > batch.length
+  const result = await forceShipWithIsolation(workspaceUserId, batch.map((order) => order.id))
+  if (!hasMore) {
+    revalidatePath('/orders')
+    revalidateTag('orders', 'max')
+    revalidateOrderAnalytics()
+  }
+
+  return {
+    updated: result.updated,
+    processed: batch.length,
+    errors: result.errors,
+    nextCursor: batch[batch.length - 1]?.id ?? null,
+    hasMore,
+  }
 }
 
 /**

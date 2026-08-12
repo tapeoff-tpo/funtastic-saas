@@ -11,6 +11,7 @@ import {
   bulkChangeStatusAction,
   forceBulkChangeStatusAction,
   forceBulkHoldOrdersAction,
+  shipCurrentOrdersBatchAction,
   bulkUploadInvoiceAction,
   unlockOrderSnapshotsAction,
 } from './actions'
@@ -614,6 +615,66 @@ export function ManualStatusChangeButton({
         </div>
       )}
     </>
+  )
+}
+
+export function ShipAllCurrentOrdersButton({
+  onChanged,
+}: {
+  onChanged?: () => void
+}) {
+  const [isPending, startTransition] = useTransition()
+  const [progress, setProgress] = useState<{ processed: number; updated: number } | null>(null)
+
+  const handleShipAll = () => {
+    if (isPending) return
+    if (!window.confirm('현재 미출고 주문을 모두 출고완료 처리할까요?\n\n출고완료 처리된 주문만 재고가 차감됩니다. 재고 또는 SKU가 없는 주문은 상태를 유지하고 실패 목록으로 남습니다.')) {
+      return
+    }
+
+    setProgress({ processed: 0, updated: 0 })
+    startTransition(async () => {
+      let cursor: string | null = null
+      let processed = 0
+      let updated = 0
+      const errors: Array<{ orderId: string; error: string }> = []
+
+      do {
+        const result = await shipCurrentOrdersBatchAction(cursor)
+        processed += result.processed
+        updated += result.updated
+        errors.push(...result.errors)
+        setProgress({ processed, updated })
+        cursor = result.nextCursor
+        if (!result.hasMore) break
+      } while (cursor)
+
+      if (errors.length === 0) {
+        toast.success(`${updated.toLocaleString('ko-KR')}건을 출고완료 처리했습니다.`)
+      } else {
+        toast.warning(`${updated.toLocaleString('ko-KR')}건 출고완료, ${errors.length}건은 처리하지 않았습니다.`)
+        for (const failure of errors.slice(0, 3)) {
+          toast.error(failure.error, { duration: 8000 })
+        }
+      }
+      onChanged?.()
+    })
+  }
+
+  const label = isPending
+    ? `전체 출고완료 중 (${(progress?.updated ?? 0).toLocaleString('ko-KR')}건)`
+    : '전체 출고완료'
+
+  return (
+    <button
+      type="button"
+      onClick={handleShipAll}
+      disabled={isPending}
+      className="rounded-md bg-black px-3 py-1.5 text-sm font-medium text-white hover:bg-black/80 disabled:cursor-not-allowed disabled:opacity-50"
+      title="현재 미출고 주문 전체를 출고완료 처리하고 재고를 차감합니다."
+    >
+      {label}
+    </button>
   )
 }
 

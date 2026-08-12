@@ -88,7 +88,8 @@ export async function bulkChangeStatusAction(
 
 /**
  * Server action: selected orders manual status override.
- * This is intentionally "status only": no marketplace notification, no inventory side effects.
+ * Marketplace notification is skipped, but shipment-boundary inventory updates
+ * still run to keep manually processed Sabangnet orders in sync.
  */
 export async function forceBulkChangeStatusAction(
   orderIds: string[],

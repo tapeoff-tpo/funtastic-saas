@@ -278,8 +278,9 @@ export async function expandOrderItemsForDeduction(
  * Called INSIDE an existing transaction (receives tx parameter).
  * Queries order_items for SKU + quantity pairs and decrements stock.
  * Bundle SKUs are expanded to their component SKUs before deduction.
- * Items without SKU are silently skipped.
- * Does NOT fail if inventory record doesn't exist for a SKU -- logs warning and continues.
+ * Missing or unresolved SKUs abort the shipment transaction.
+ * A missing inventory row aborts the surrounding transaction, so an order can
+ * never be marked shipped without a matching inventory adjustment.
  */
 export async function deductForOrder(
   tx: DrizzleTransaction,
@@ -287,11 +288,14 @@ export async function deductForOrder(
   orderId: string,
 ): Promise<void> {
   const items = await expandOrderItemsForDeduction(tx, userId, orderId)
+  if (items.length === 0) {
+    throw new Error(`출고 차감 SKU가 없습니다: 주문 ${orderId}`)
+  }
 
   for (const item of items) {
     const result = await adjustStockInTx(tx, userId, item.sku, -item.quantity, 'order_ship', { orderId })
     if (!result.success) {
-      console.warn(`[inventory] deductForOrder: SKU '${item.sku}' not found for order ${orderId}, skipping`)
+      throw new Error(`출고 재고를 찾을 수 없습니다: ${item.sku}`)
     }
   }
 }
@@ -307,11 +311,14 @@ export async function restoreForOrder(
   orderId: string,
 ): Promise<void> {
   const items = await expandOrderItemsForDeduction(tx, userId, orderId)
+  if (items.length === 0) {
+    throw new Error(`재고 복구 SKU가 없습니다: 주문 ${orderId}`)
+  }
 
   for (const item of items) {
     const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'order_cancel', { orderId })
     if (!result.success) {
-      console.warn(`[inventory] restoreForOrder: SKU '${item.sku}' not found for order ${orderId}, skipping`)
+      throw new Error(`복구 재고를 찾을 수 없습니다: ${item.sku}`)
     }
   }
 }

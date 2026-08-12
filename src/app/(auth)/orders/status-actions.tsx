@@ -495,7 +495,7 @@ export function ManualStatusChangeButton({
           onClick={() => setOpen((value) => !value)}
           disabled={selectedCount === 0 || isPending}
           className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-          title="선택한 주문의 상태만 변경합니다. 몰 통보와 재고 차감은 실행하지 않습니다."
+          title="선택한 주문의 상태를 수동 변경합니다. 몰 통보는 생략되며, 출고완료 이후로 변경하면 재고가 차감됩니다."
         >
           {isPending ? '변경 중...' : `주문상태변경${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
         </button>

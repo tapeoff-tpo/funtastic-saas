@@ -16,6 +16,22 @@ import { logOrderChange, logOrderChanges } from './change-log'
 
 type ActionResult = { success: boolean; error?: string }
 
+const INVENTORY_DEDUCTED_STATUSES = new Set<OrderStatus>([
+  'shipped',
+  'delivering',
+  'delivered',
+])
+
+function requiresInventoryDeduction(from: OrderStatus, to: OrderStatus): boolean {
+  return !INVENTORY_DEDUCTED_STATUSES.has(from)
+    && INVENTORY_DEDUCTED_STATUSES.has(to)
+}
+
+function requiresInventoryRestore(from: OrderStatus, to: OrderStatus): boolean {
+  return INVENTORY_DEDUCTED_STATUSES.has(from)
+    && !INVENTORY_DEDUCTED_STATUSES.has(to)
+}
+
 /**
  * Update order status with transition validation.
  * Rejects invalid transitions and held orders (per D-11).
@@ -24,7 +40,8 @@ export async function updateOrderStatus(
   orderId: string,
   newStatus: OrderStatus,
 ): Promise<ActionResult> {
-  return db.transaction(async (tx) => {
+  try {
+    return await db.transaction(async (tx) => {
     // Lock the row for update
     const [order] = await tx
       .select({
@@ -84,8 +101,14 @@ export async function updateOrderStatus(
       await restoreForOrder(tx, order.userId, orderId)
     }
 
-    return { success: true }
-  })
+      return { success: true }
+    })
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : '주문 상태를 변경하지 못했습니다.',
+    }
+  }
 }
 
 /**
@@ -197,8 +220,8 @@ export async function bulkUpdateStatus(
  * Manual status override for admin/user operations.
  *
  * Unlike updateOrderStatus(), this intentionally does not validate workflow
- * direction and does not trigger marketplace calls or inventory side effects.
- * It is used for correction cases such as 출고대기 → 신규.
+ * direction or trigger marketplace calls. Inventory is still synchronized when
+ * the manual change crosses the shipment boundary.
  */
 export async function forceBulkUpdateStatus(
   userId: string,
@@ -232,7 +255,28 @@ export async function forceBulkUpdateStatus(
     .filter((order) => !blockedIds.has(order.id))
     .map((order) => order.id)
   if (orderIdsToUpdate.length === 0) return { updated: 0, errors }
-  const result = await db.transaction(async (tx) => {
+  let result: Array<{ id: string }>
+  try {
+    result = await db.transaction(async (tx) => {
+    // Lock before deciding whether this is the first shipment transition.
+    // This serializes concurrent manual updates for the same order and prevents
+    // a double inventory deduction.
+    const lockedOrders = await tx
+      .select({ id: orders.id, status: orders.status, mappedAt: orders.mappedAt })
+      .from(orders)
+      .where(and(eq(orders.userId, userId), inArray(orders.id, orderIdsToUpdate)))
+      .for('update')
+
+    const lockedIds = new Set(lockedOrders.map((order) => order.id))
+    const missingAfterLock = orderIdsToUpdate
+      .filter((orderId) => !lockedIds.has(orderId))
+      .map((orderId) => ({ orderId, error: 'Order not found' }))
+    errors.push(...missingAfterLock)
+
+    const lockedBlockedIds = new Set(errors.map((error) => error.orderId).filter(Boolean))
+    const updateableOrders = lockedOrders.filter((order) => !lockedBlockedIds.has(order.id))
+    if (updateableOrders.length === 0) return []
+
     const updatedOrders = await tx
       .update(orders)
       .set({
@@ -241,13 +285,13 @@ export async function forceBulkUpdateStatus(
         isHeld: false,
         holdReason: null,
         heldAt: null,
-        preparingAt: newStatus === 'preparing' ? new Date() : null,
+        ...(newStatus === 'preparing' ? { preparingAt: new Date() } : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(orders.userId, userId), inArray(orders.id, orderIdsToUpdate)))
+      .where(and(eq(orders.userId, userId), inArray(orders.id, updateableOrders.map((order) => order.id))))
       .returning({ id: orders.id })
 
-    await logOrderChanges(ownedOrders.map((order) => ({
+    await logOrderChanges(updateableOrders.map((order) => ({
       orderId: order.id,
       userId,
       action: 'status.changed',
@@ -258,12 +302,33 @@ export async function forceBulkUpdateStatus(
       metadata: { source: 'manual-bulk' },
     })), tx)
 
-    if (newStatus === 'shipped') {
-      await lockOrderItemsForOrders(tx, userId, updatedOrders.map((order) => order.id))
+    const ordersToDeduct = updateableOrders.filter((order) => requiresInventoryDeduction(order.status, newStatus))
+    if (ordersToDeduct.length > 0) {
+      const orderIdsToDeduct = ordersToDeduct.map((order) => order.id)
+      await lockOrderItemsForOrders(tx, userId, orderIdsToDeduct)
+      for (const orderId of orderIdsToDeduct) {
+        await deductForOrder(tx, userId, orderId)
+      }
     }
 
-    return updatedOrders
-  })
+    const ordersToRestore = updateableOrders.filter((order) => requiresInventoryRestore(order.status, newStatus))
+    if (ordersToRestore.length > 0) {
+      for (const order of ordersToRestore) {
+        await restoreForOrder(tx, userId, order.id)
+      }
+    }
+
+      return updatedOrders
+    })
+  } catch (error) {
+    return {
+      updated: 0,
+      errors: [{
+        orderId: '',
+        error: error instanceof Error ? error.message : '주문 상태를 변경하지 못했습니다.',
+      }],
+    }
+  }
 
   return { updated: result.length, errors }
 }

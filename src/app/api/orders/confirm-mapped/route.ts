@@ -41,12 +41,17 @@ export async function POST(req: NextRequest) {
       : { updated: 0, errors: [] }
     const processed = result.updated + result.errors.length
 
+    const hasMore = page.length === CONFIRM_MAPPED_BATCH_SIZE && processed > 0 && result.errors.length === 0
+
     return NextResponse.json({
       updated: result.updated,
       failed: result.errors.length,
       errors: result.errors,
-      hasMore: page.length === CONFIRM_MAPPED_BATCH_SIZE && processed > 0 && result.errors.length === 0,
-      nextCursor: null,
+      hasMore,
+      // The cursor is intentionally ignored by the server. Keep a non-empty
+      // value while a previous browser bundle is still cached so it can also
+      // continue requesting the remaining pages during a rolling deploy.
+      nextCursor: hasMore ? 'next' : null,
     })
   } catch (error) {
     console.error('Failed to confirm mapped orders', error)

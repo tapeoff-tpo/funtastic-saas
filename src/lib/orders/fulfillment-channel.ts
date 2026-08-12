@@ -3,6 +3,7 @@ export const COUPANG_STANDARD_FILTER_ID = 'coupang-standard'
 export const COUPANG_ROCKET_FILTER_ID = 'coupang-rocket'
 export const COUPANG_ROCKET_DISPLAY_NAME = '로켓배송'
 export const COUPANG_ROCKET_WAREHOUSE_ZONE = '쿠팡'
+export const COUPANG_STANDARD_WAREHOUSE_ZONE = '1창고'
 
 type OrderSource = {
   marketplaceId: string
@@ -44,7 +45,13 @@ export function getOrderChannelDisplayName(order: OrderSource): string | null {
   return isCoupangRocketOrder(order) ? COUPANG_ROCKET_DISPLAY_NAME : null
 }
 
-/** 로켓배송 주문은 일반 출고 창고가 아니라 쿠팡 전용 재고에서만 처리한다. */
+/**
+ * 쿠팡 주문은 출고 채널에 따라 고정 위치에서만 재고를 처리한다.
+ * 일반 쿠팡은 1창고, 로켓배송은 쿠팡 전용 재고를 사용한다.
+ */
 export function getOrderInventoryWarehouseZone(order: OrderSource): string | null {
-  return isCoupangRocketOrder(order) ? COUPANG_ROCKET_WAREHOUSE_ZONE : null
+  if (order.marketplaceId !== COUPANG_MARKETPLACE_ID) return null
+  return isCoupangRocketOrder(order)
+    ? COUPANG_ROCKET_WAREHOUSE_ZONE
+    : COUPANG_STANDARD_WAREHOUSE_ZONE
 }

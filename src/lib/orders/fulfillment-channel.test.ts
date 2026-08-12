@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   COUPANG_ROCKET_DISPLAY_NAME,
   COUPANG_ROCKET_WAREHOUSE_ZONE,
+  COUPANG_STANDARD_WAREHOUSE_ZONE,
   getOrderChannelDisplayName,
   getOrderInventoryWarehouseZone,
   isCoupangRocketOrder,
@@ -26,6 +27,6 @@ describe('Coupang rocket fulfillment channel', () => {
     const standardOrder = { marketplaceId: 'coupang', rawData: { rawLines: [{ 쇼핑몰명: '쿠팡' }] } }
     expect(isCoupangRocketOrder(standardOrder)).toBe(false)
     expect(getOrderChannelDisplayName(standardOrder)).toBeNull()
-    expect(getOrderInventoryWarehouseZone(standardOrder)).toBeNull()
+    expect(getOrderInventoryWarehouseZone(standardOrder)).toBe(COUPANG_STANDARD_WAREHOUSE_ZONE)
   })
 })

@@ -4,6 +4,7 @@ export const COUPANG_ROCKET_FILTER_ID = 'coupang-rocket'
 export const COUPANG_ROCKET_DISPLAY_NAME = '로켓배송'
 export const COUPANG_ROCKET_WAREHOUSE_ZONE = '쿠팡'
 export const COUPANG_STANDARD_WAREHOUSE_ZONE = '1창고'
+export const COUPANG_ROCKET_RECIPIENT_NAME = '쿠팡 물류센터'
 
 type OrderSource = {
   marketplaceId: string
@@ -54,4 +55,21 @@ export function getOrderInventoryWarehouseZone(order: OrderSource): string | nul
   return isCoupangRocketOrder(order)
     ? COUPANG_ROCKET_WAREHOUSE_ZONE
     : COUPANG_STANDARD_WAREHOUSE_ZONE
+}
+
+/**
+ * 사방넷 검수 파일은 로켓배송의 실제 구매자/수취인 정보를 포함하지 않는다.
+ * 기존 사방넷 기본값만 물류 주문에 맞는 표시값으로 바꿔, 실제 고객 정보인 것처럼
+ * 보이지 않게 한다.
+ */
+export function getImportedOrderPartyNames(
+  order: OrderSource,
+  parties: { buyerName: string; recipientName: string },
+): { buyerName: string; recipientName: string } {
+  if (!isCoupangRocketOrder(order)) return parties
+
+  return {
+    buyerName: parties.buyerName === '사방넷' ? COUPANG_ROCKET_DISPLAY_NAME : parties.buyerName,
+    recipientName: parties.recipientName === '사방넷' ? COUPANG_ROCKET_RECIPIENT_NAME : parties.recipientName,
+  }
 }

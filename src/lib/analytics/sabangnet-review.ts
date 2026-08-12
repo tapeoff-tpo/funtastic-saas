@@ -10,6 +10,7 @@ import { parseImportedOrderedAt } from '@/lib/orders/import-date'
 import { normalizeImportedOrderItem } from '@/lib/orders/import-normalize'
 import { splitPhonePair } from '@/lib/orders/phone-normalize'
 import { normalizeShippingAddress } from '@/lib/orders/shipping-address'
+import { getImportedOrderPartyNames } from '@/lib/orders/fulfillment-channel'
 import { generateInternalNo } from '@/lib/orders/internal-no'
 
 export type SabangnetReviewStatus = 'ready' | 'blocked' | 'confirmed' | 'excluded'
@@ -591,6 +592,10 @@ export async function confirmSabangnetReviewBatch(
     for (const group of groupsToConfirm) {
       const firstLine = group[0]
       const parsed = firstLine.parsedData
+      const parties = getImportedOrderPartyNames(firstLine, {
+        buyerName: parsed.buyerName,
+        recipientName: parsed.recipientName,
+      })
       const effectiveOrderNumber = getSabangnetOrderNumber(firstLine.rawData) || firstLine.orderNumber
       const existingOrderId = existingOrdersByKey.get(createExistingOrderKey(firstLine.marketplaceId, effectiveOrderNumber))
       if (existingOrderId) {
@@ -623,10 +628,10 @@ export async function confirmSabangnetReviewBatch(
         marketplaceId: firstLine.marketplaceId,
         marketplaceOrderId: effectiveOrderNumber,
         status: 'new',
-        buyerName: parsed.buyerName,
+        buyerName: parties.buyerName,
         buyerPhone: buyerPhones.phone1,
         buyerPhone2: buyerPhones.phone2,
-        recipientName: parsed.recipientName,
+        recipientName: parties.recipientName,
         recipientPhone: recipientPhones.phone1,
         recipientPhone2: recipientPhones.phone2,
         shippingAddress,

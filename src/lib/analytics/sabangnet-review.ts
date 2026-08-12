@@ -85,6 +85,8 @@ type MarketplaceConnectionForReview = {
 
 const ORDER_STATUS_HEADERS = ['주문상태', '상태', 'CS상태', '클레임상태', '처리상태']
 const MARKETPLACE_HEADERS = ['쇼핑몰명', '마켓명', '쇼핑몰', '마켓', '사이트명', '판매처']
+const SABANGNET_ORDER_NUMBER_HEADERS = ['\uC0AC\uBC29\uB137 \uC8FC\uBB38\uBC88\uD638', '\uC0AC\uBC29\uB137\uC8FC\uBB38\uBC88\uD638']
+const SABANGNET_SKU_HEADERS = ['\uC0AC\uBC29\uB137 \uC0C1\uD488\uCF54\uB4DC', '\uC0AC\uBC29\uB137\uC0C1\uD488\uCF54\uB4DC']
 const KNOWN_MARKETPLACE_ALIASES: Array<{ marketplaceId: string; displayName: string; aliases: string[] }> = [
   { marketplaceId: 'ably', displayName: '에이블리', aliases: ['에이블리', 'ably', 'a-bly'] },
   { marketplaceId: 'zigzag', displayName: '지그재그', aliases: ['지그재그', '카카오스타일', '카카오스타일 (지그재그, 포스티)', 'zigzag'] },
@@ -171,14 +173,22 @@ export async function importSabangnetReviewBatch(input: {
     parseOrderExcel(buffer, input.mappings),
     parseRawRows(buffer),
   ])
+  const rawRowAlignment = alignSabangnetRawRows(parseResult.rows, rawRows)
+  const importErrors = [
+    ...parseResult.errors,
+    ...rawRowAlignment.unmatchedParsedRowNumbers.map((row) => ({
+      row,
+      message: '\uC8FC\uBB38\uBC88\uD638\uC640 \uC0C1\uD488\uCF54\uB4DC\uB85C \uC6D0\uBCF8 \uC0AC\uBC29\uB137 \uD589\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.',
+    })),
+  ]
 
   if (parseResult.rows.length === 0) {
-    return { batchId: null, totalRows: 0, readyRows: 0, blockedRows: 0, errors: parseResult.errors }
+    return { batchId: null, totalRows: 0, readyRows: 0, blockedRows: 0, errors: importErrors }
   }
 
   const lineCounts = new Map<string, number>()
   for (const [index, row] of parseResult.rows.entries()) {
-    const raw = rawRows[index] ?? {}
+    const raw = rawRowAlignment.rows[index] ?? {}
     const key = getDuplicateLineKey(row, raw)
     lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1)
   }
@@ -210,7 +220,7 @@ export async function importSabangnetReviewBatch(input: {
   ])
 
   const pendingLines = parseResult.rows.map((row, index) => {
-    const raw = rawRows[index] ?? {}
+    const raw = rawRowAlignment.rows[index] ?? {}
     const rawMarketplaceName = pickByHeaders(raw, MARKETPLACE_HEADERS)
     const marketplaceName = rawMarketplaceName || input.fallbackMarketplaceName || input.fallbackMarketplaceId || ''
     const connection = matchMarketplaceConnection(connections, marketplaceName, input.fallbackMarketplaceId)
@@ -283,7 +293,7 @@ export async function importSabangnetReviewBatch(input: {
     `)
   }
 
-  return { batchId: batch.id, totalRows: mappedLines.length, readyRows, blockedRows, errors: parseResult.errors }
+  return { batchId: batch.id, totalRows: mappedLines.length, readyRows, blockedRows, errors: importErrors }
 }
 
 export async function listSabangnetReviewBatches(userId: string): Promise<SabangnetReviewBatch[]> {
@@ -787,7 +797,77 @@ function cleanString(value: unknown): string {
 }
 
 function getSabangnetOrderNumber(row: RawExcelRow): string {
-  return pickByHeaders(row, ['사방넷 주문번호', '사방넷주문번호'])
+  return pickByHeaders(row, SABANGNET_ORDER_NUMBER_HEADERS)
+}
+
+function getSabangnetSku(row: RawExcelRow): string {
+  return pickByHeaders(row, SABANGNET_SKU_HEADERS)
+}
+
+type RawRowEntry = {
+  row: RawExcelRow
+  used: boolean
+}
+
+export function alignSabangnetRawRows(
+  parsedRows: ParsedOrderRow[],
+  rawRows: RawExcelRow[],
+): { rows: RawExcelRow[]; unmatchedParsedRowNumbers: number[] } {
+  const entries: RawRowEntry[] = rawRows.map((row) => ({ row, used: false }))
+  const byOrderAndSku = new Map<string, number[]>()
+  const byOrder = new Map<string, number[]>()
+
+  for (const [index, entry] of entries.entries()) {
+    const orderNumber = getSabangnetOrderNumber(entry.row)
+    const sku = getSabangnetSku(entry.row)
+    const orderKey = normalizeKey(orderNumber)
+    const orderAndSkuKey = createSabangnetRowKey(orderNumber, sku)
+    if (orderAndSkuKey) appendRawRowIndex(byOrderAndSku, orderAndSkuKey, index)
+    if (orderKey) appendRawRowIndex(byOrder, orderKey, index)
+  }
+
+  const rows: RawExcelRow[] = []
+  const unmatchedParsedRowNumbers: number[] = []
+  for (const [index, parsed] of parsedRows.entries()) {
+    const row =
+      takeNextUnusedRawRow(entries, byOrderAndSku.get(createSabangnetRowKey(parsed.orderNumber, parsed.sku))) ??
+      takeNextUnusedRawRow(entries, byOrder.get(normalizeKey(parsed.orderNumber)))
+
+    if (!row) {
+      rows.push({})
+      unmatchedParsedRowNumbers.push(index + 1)
+      continue
+    }
+    rows.push(row)
+  }
+
+  return { rows, unmatchedParsedRowNumbers }
+}
+
+function createSabangnetRowKey(orderNumber?: string | null, sku?: string | null) {
+  const orderKey = normalizeKey(String(orderNumber ?? ''))
+  const skuKey = normalizeKey(String(sku ?? ''))
+  return orderKey && skuKey ? `${orderKey}\u0000${skuKey}` : ''
+}
+
+function appendRawRowIndex(indexes: Map<string, number[]>, key: string, index: number) {
+  const existing = indexes.get(key)
+  if (existing) {
+    existing.push(index)
+    return
+  }
+  indexes.set(key, [index])
+}
+
+function takeNextUnusedRawRow(entries: RawRowEntry[], indexes?: number[]) {
+  if (!indexes) return undefined
+  for (const index of indexes) {
+    const entry = entries[index]
+    if (!entry || entry.used) continue
+    entry.used = true
+    return entry.row
+  }
+  return undefined
 }
 
 function cleanOptionalString(value: unknown): string | undefined {
@@ -944,7 +1024,7 @@ function buildReviewLine(input: {
   }
 }
 
-function matchMarketplaceConnection(
+export function matchMarketplaceConnection(
   connections: MarketplaceConnectionForReview[],
   marketplaceName: string,
   fallbackMarketplaceId?: string,

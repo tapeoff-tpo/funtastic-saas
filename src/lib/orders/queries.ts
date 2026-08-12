@@ -476,7 +476,13 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) IN ('saas', 'order-excel', 'saas-excel')
     OR LOWER(COALESCE(${orders.rawData}->>'source', '')) LIKE 'saas-%'
   )`
-  const isMappingArchiveOrder = and(isSabangnetOrderSource, isNotNull(orders.mappedAt))!
+  // Review-imported orders still need to move through the fulfillment workflow after mapping.
+  // Keep only legacy Sabangnet imports in the mapping archive.
+  const isMappingArchiveOrder = and(
+    isSabangnetOrderSource,
+    sql`LOWER(COALESCE(${orders.rawData}->>'source', '')) <> 'sabangnet-review'`,
+    isNotNull(orders.mappedAt),
+  )!
   const hasSabangnetSibling = sql`EXISTS (
     SELECT 1
     FROM orders sabang_sibling

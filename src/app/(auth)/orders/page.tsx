@@ -10,6 +10,7 @@ import { getOrders } from '@/lib/orders/queries'
 import { db } from '@/lib/db'
 import { marketplaceConnections } from '@/lib/db/schema'
 import { AUTO_MARKETPLACE_OPTIONS, MARKETPLACE_DISPLAY_NAMES } from '@/lib/marketplace/collect-options'
+import { COUPANG_ROCKET_FILTER_ID, COUPANG_STANDARD_FILTER_ID } from '@/lib/orders/fulfillment-channel'
 import { listMarketplaceBusinessSettings, type MarketplaceBusinessSetting } from '@/lib/marketplace/business-settings'
 import { eq, sql } from 'drizzle-orm'
 import { DataTable } from './data-table'
@@ -106,6 +107,14 @@ function buildMarketplaceFilterOptions(
           ? connection.displayName
           : (MARKETPLACE_DISPLAY_NAMES[connection.marketplaceId] ?? connection.displayName)),
     )
+  }
+
+  // 쿠팡 주문의 매핑키는 하나로 유지하되, 사방넷 쇼핑몰명 기준으로
+  // 일반 쿠팡과 로켓배송을 주문 필터에서 별도로 볼 수 있게 한다.
+  if (options.has('coupang')) {
+    options.delete('coupang')
+    options.set(COUPANG_STANDARD_FILTER_ID, '쿠팡')
+    options.set(COUPANG_ROCKET_FILTER_ID, '로켓배송')
   }
 
   return Array.from(options, ([value, label]) => ({ value, label }))

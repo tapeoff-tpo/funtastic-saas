@@ -7,7 +7,6 @@ import { ORDER_STATUS_LABELS, type OrderSearchField, type OrderStatus } from '@/
 import { CARRIERS } from '@/lib/shipping/carrier-codes'
 
 const MARKETPLACE_OPTIONS = [
-  { value: 'coupang', label: '쿠팡' },
   { value: 'naver', label: '네이버 스마트스토어' },
   { value: 'gmarket', label: 'G마켓' },
   { value: 'auction', label: '옥션' },

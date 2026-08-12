@@ -17,6 +17,13 @@ import { listInquiriesByOrderIds } from './inquiry-queries'
 import { EXACT_OPTION_ID, getRawMappingCandidateIdsForItem, isMappingSourceSnapshotCompatible, lookupCompatibleMappingRef, type MappingSource } from './mapping-match'
 import { getOrderChangeLogs } from './change-log'
 import { resolveMarketplaceDisplayName } from '@/lib/marketplace/collect-options'
+import {
+  COUPANG_MARKETPLACE_ID,
+  COUPANG_ROCKET_FILTER_ID,
+  COUPANG_STANDARD_FILTER_ID,
+  getOrderChannelDisplayName,
+  getOrderMarketplaceSourceNames,
+} from './fulfillment-channel'
 
 const SABANGNET_MALL_NAMES_BY_MARKETPLACE: Record<string, string[]> = {
   '10x10': ['텐바이텐'],
@@ -274,8 +281,16 @@ async function getConfirmedProductSearchSkus(userId: string, search: string): Pr
 }
 
 function getOrderMarketplaceDisplayName(order: typeof orders.$inferSelect): string | null {
+  const channelDisplayName = getOrderChannelDisplayName(order)
+  if (channelDisplayName) return channelDisplayName
+
   const rawData = order.rawData
   if (!rawData || typeof rawData !== 'object' || Array.isArray(rawData)) return null
+
+  const sourceMarketplaceName = getOrderMarketplaceSourceNames(rawData)
+    .find((name) => name !== '사방넷' && name.toLowerCase() !== 'sabangnet')
+  if (sourceMarketplaceName) return resolveMarketplaceDisplayName(order.marketplaceId, sourceMarketplaceName)
+
   const data = rawData as {
     mallName?: unknown
     empSiteName?: unknown
@@ -509,6 +524,14 @@ export function buildOrderWhereClause(filters: OrderFilters): SQL[] {
       )
   )`
   const marketplaceCondition = (marketplaceId: string): SQL<unknown> => {
+    const isRocketDelivery = sql`COALESCE(${orders.rawData}::text, '') LIKE '%로켓배송%'`
+    if (marketplaceId === COUPANG_ROCKET_FILTER_ID) {
+      return and(eq(orders.marketplaceId, COUPANG_MARKETPLACE_ID), isRocketDelivery)!
+    }
+    if (marketplaceId === COUPANG_STANDARD_FILTER_ID) {
+      return and(eq(orders.marketplaceId, COUPANG_MARKETPLACE_ID), sql`NOT (${isRocketDelivery})`)!
+    }
+
     const sabangnetMallNames = SABANGNET_MALL_NAMES_BY_MARKETPLACE[marketplaceId] ?? []
     const sabangnetCanonicalCondition = and(
       isSabangnetOrderSource,
@@ -1430,9 +1453,8 @@ export async function getOrders(filters: OrderFilters = {}) {
       hasInquiries: inquirySet.has(order.id),
       items: orderItemsData,
       mappingStatus: getComputedMappingStatus(order, orderItemsData),
-      marketplaceDisplayName: (
-        order.connectionId ? systemMarketplaceNameByConnection.get(order.connectionId) : null
-      ) || getOrderMarketplaceDisplayName(order),
+      marketplaceDisplayName: getOrderMarketplaceDisplayName(order)
+        || (order.connectionId ? systemMarketplaceNameByConnection.get(order.connectionId) : null),
       orderSourceType: isSabangnetOrderRawData(order) ? 'sabangnet' : 'saas',
       historicalClaimStatuses: getOrderHistoricalClaimStatuses(order),
     }
@@ -1651,7 +1673,8 @@ export async function getOrderById(id: string, userId?: string) {
 
   return {
     ...order,
-    marketplaceDisplayName: detailConnection?.systemMarketplaceName || getOrderMarketplaceDisplayName(order),
+    marketplaceDisplayName: getOrderMarketplaceDisplayName(order)
+      || detailConnection?.systemMarketplaceName,
     items,
     claims: claimRows,
     memos: memoRows,

@@ -14,8 +14,10 @@ import { claims, inventory, inventoryHistory, orderItems, orders, mappingCodes, 
 import { eq, and, asc, desc, sql, inArray } from 'drizzle-orm'
 import type { AdjustmentReason } from './types'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
+import { getOrderInventoryWarehouseZone } from '@/lib/orders/fulfillment-channel'
 
 type ActionResult = { success: boolean; error?: string; newTotal?: number }
+type StockAdjustmentOptions = { note?: string; orderId?: string; warehouseZone?: string | null }
 
 // Use the transaction type from Drizzle's callback parameter
 type DrizzleTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
@@ -30,7 +32,7 @@ export async function adjustStock(
   sku: string,
   delta: number,
   reason: AdjustmentReason,
-  opts?: { note?: string; orderId?: string },
+  opts?: StockAdjustmentOptions,
 ): Promise<ActionResult> {
   return db.transaction(async (tx) => {
     return adjustStockInTx(tx, userId, sku, delta, reason, opts)
@@ -46,13 +48,25 @@ async function adjustStockInTx(
   sku: string,
   delta: number,
   reason: AdjustmentReason,
-  opts?: { note?: string; orderId?: string },
+  opts?: StockAdjustmentOptions,
 ): Promise<ActionResult> {
-  // Lock the inventory row
-  const [record] = await tx
+  const baseQuery = tx
     .select()
     .from(inventory)
-    .where(and(eq(inventory.userId, userId), eq(inventory.sku, sku)))
+    .where(and(
+      eq(inventory.userId, userId),
+      eq(inventory.sku, sku),
+      opts?.warehouseZone ? eq(inventory.warehouseZone, opts.warehouseZone) : undefined,
+    ))
+
+  // Lock the inventory row. A rocket order is always locked in the Coupang zone;
+  // regular orders retain the existing main-warehouse preference.
+  const [record] = opts?.warehouseZone
+    ? await baseQuery
+      .orderBy(desc(inventory.availableStock), asc(inventory.createdAt))
+      .limit(1)
+      .for('update')
+    : await baseQuery
     .orderBy(
       sql`CASE WHEN ${inventory.warehouseZone} = '1창고' THEN 0 WHEN ${inventory.warehouseZone} IS NULL THEN 1 ELSE 2 END`,
       desc(inventory.availableStock),
@@ -90,6 +104,21 @@ async function adjustStockInTx(
   })
 
   return { success: true, newTotal }
+}
+
+async function resolveOrderInventoryWarehouseZone(
+  tx: DrizzleTransaction,
+  userId: string,
+  orderId: string,
+): Promise<string | null> {
+  const [order] = await tx
+    .select({ marketplaceId: orders.marketplaceId, rawData: orders.rawData })
+    .from(orders)
+    .where(and(eq(orders.id, orderId), eq(orders.userId, userId)))
+    .limit(1)
+
+  if (!order) throw new Error(`Order not found: ${orderId}`)
+  return getOrderInventoryWarehouseZone(order)
 }
 
 /**
@@ -287,13 +316,14 @@ export async function deductForOrder(
   userId: string,
   orderId: string,
 ): Promise<void> {
+  const warehouseZone = await resolveOrderInventoryWarehouseZone(tx, userId, orderId)
   const items = await expandOrderItemsForDeduction(tx, userId, orderId)
   if (items.length === 0) {
     throw new Error(`출고 차감 SKU가 없습니다: 주문 ${orderId}`)
   }
 
   for (const item of items) {
-    const result = await adjustStockInTx(tx, userId, item.sku, -item.quantity, 'order_ship', { orderId })
+    const result = await adjustStockInTx(tx, userId, item.sku, -item.quantity, 'order_ship', { orderId, warehouseZone })
     if (!result.success) {
       throw new Error(`출고 재고를 찾을 수 없습니다: ${item.sku}`)
     }
@@ -310,13 +340,14 @@ export async function restoreForOrder(
   userId: string,
   orderId: string,
 ): Promise<void> {
+  const warehouseZone = await resolveOrderInventoryWarehouseZone(tx, userId, orderId)
   const items = await expandOrderItemsForDeduction(tx, userId, orderId)
   if (items.length === 0) {
     throw new Error(`재고 복구 SKU가 없습니다: 주문 ${orderId}`)
   }
 
   for (const item of items) {
-    const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'order_cancel', { orderId })
+    const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'order_cancel', { orderId, warehouseZone })
     if (!result.success) {
       throw new Error(`복구 재고를 찾을 수 없습니다: ${item.sku}`)
     }
@@ -334,12 +365,14 @@ export async function restoreForClaim(
   orderId: string,
 ): Promise<void> {
   return db.transaction(async (tx) => {
+    const warehouseZone = await resolveOrderInventoryWarehouseZone(tx, userId, orderId)
     const items = await expandOrderItemsForDeduction(tx, userId, orderId)
 
     for (const item of items) {
       const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'return', {
         orderId,
         note: 'Return claim completed',
+        warehouseZone,
       })
       if (!result.success) {
         console.warn(`[inventory] restoreForClaim: SKU '${item.sku}' not found for order ${orderId}, skipping`)

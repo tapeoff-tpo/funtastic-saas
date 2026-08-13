@@ -70,6 +70,9 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ### Sabangnet Review And Purchasing Metrics Policy
 
+- Sabangnet review is the authoritative source for collected orders, outbound completion, and inventory deductions. Do not use separate Rocket or bulk sales files to create orders, change order status, deduct inventory, or affect purchasing quantities.
+- Rocket delivery and bulk sales files may omit order numbers. Store them as independent sales ledgers using their sales recognition date, SKU or product name, quantity, sales amount, and optional cost/profit fields; include them in sales analysis only.
+- An independently uploaded Rocket or bulk sales file must be deduplicated by workspace, channel, and file hash. It must not be force-matched to Sabangnet orders merely because a SKU or date is similar.
 - Current-month outgoing quantity for purchasing review must be calculated from files imported through `사방넷 검수`, not from the manually entered item master values.
 - Use the Sabangnet review file's `출고완료일자` as the primary date for assigning outgoing quantity to a month. Order date and collection date are fallbacks only when the shipment completion date is unavailable.
 - The manually entered three-month average outgoing quantity is authoritative for now and must not be overwritten automatically.

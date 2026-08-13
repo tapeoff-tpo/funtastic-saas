@@ -53,7 +53,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/analytics': '매출분석',
   '/analytics/price-table': '판매가 테이블',
   '/analytics/sabangnet-review': '사방넷 검수',
-  '/analytics/rocket-outbound': '로켓배송 출고',
+  '/analytics/rocket-outbound': '로켓배송/대량 매출',
   '/analytics/short-meeting': '숏미팅',
   '/operations/deal-calendar': '딜 캘린더',
   '/operations/sourcing': '소싱',

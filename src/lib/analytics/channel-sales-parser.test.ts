@@ -36,7 +36,7 @@ describe('parseChannelSalesWorkbook', () => {
     })])
   })
 
-  it('treats Rocket purchase price as a unit sale price when importing the PO CSV', async () => {
+  it('uses confirmed quantities, not received quantities, for Rocket PO CSV files', async () => {
     const csv = [
       '발주번호,발주유형,발주현황,SKU ID,SKU 이름,SKU Barcode,물류센터,입고예정일,발주일,발주수량,확정수량,입고수량,매입유형,면세여부,생산연도,제조일자,유통(소비)기한,매입가,공급가,부가세,총발주 매입금,입고금액,Xdock',
       '139039001,일반,거래명세서확인요청,60043717,생활살림 키치니굿즈 2단 타올 걸이 화이트 1개,R231841910001,경기광주1,2026-08-12,2026-08-07 19:54:23,18,18,18,직매입,N,,,,2432,2211,221,43776,43776,N',
@@ -50,8 +50,9 @@ describe('parseChannelSalesWorkbook', () => {
 
     expect(parsed.sheetName).toBe('CSV')
     expect(parsed.totalRows).toBe(2)
-    expect(parsed.invalidRows).toBe(1)
-    expect(parsed.validRows).toEqual([expect.objectContaining({
+    expect(parsed.invalidRows).toBe(0)
+    expect(parsed.validRows).toEqual([
+      expect.objectContaining({
       occurredOn: '2026-08-12',
       sourceSku: '60043717',
       productName: '생활살림 키치니굿즈 2단 타올 걸이 화이트 1개',
@@ -59,6 +60,13 @@ describe('parseChannelSalesWorkbook', () => {
       unitSalePrice: 2432,
       salesAmount: 43776,
       productCost: null,
-    })])
+      }),
+      expect.objectContaining({
+        sourceSku: '12699167',
+        quantity: 84,
+        unitSalePrice: 1300,
+        salesAmount: 109200,
+      }),
+    ])
   })
 })

@@ -52,7 +52,7 @@ const FIELD_ALIASES: Record<ChannelSalesField, readonly string[]> = {
   sourceSku: ['상품코드', '품목코드', '사방넷 상품코드', '판매자상품코드', '판매자 상품코드', 'SKU ID', 'SKU'],
   productName: ['제품명', '상품명', '사방넷 상품명', '판매자상품명', '판매자 상품명', 'SKU 이름'],
   optionText: ['옵션', '옵션명', '규격정보', '사방넷 옵션'],
-  quantity: ['입고수량', '확정수량', '수량', '출고수량', '실 출고수량', '주문수량', '판매수량'],
+  quantity: ['확정수량', '입고수량', '수량', '출고수량', '실 출고수량', '주문수량', '판매수량'],
   unitSalePrice: ['개당 판매가', '판매단가', '판매가', '매입가', '단가'],
   salesAmount: ['총 판매금액', '매출금액', '판매금액', '입고금액', '결제금액', '최종결제금액', '총매출'],
   unitCost: ['원가', '개당 원가', '상품원가'],
@@ -139,10 +139,11 @@ function parseChannelSalesCsv(fileBuffer: ArrayBuffer): ParsedChannelSalesWorkbo
   const columns = header
     .map((label, index) => ({ column: index, label }))
     .filter((column) => Boolean(column.label))
-  const headers = Object.fromEntries((Object.keys(FIELD_ALIASES) as ChannelSalesField[]).map((field) => [
+  const detectedHeaders = Object.fromEntries((Object.keys(FIELD_ALIASES) as ChannelSalesField[]).map((field) => [
     field,
     findHeader(columns, FIELD_ALIASES[field]),
   ])) as Record<ChannelSalesField, string | null>
+  const headers = applySourceSpecificHeaderRules(columns, detectedHeaders)
 
   const hasIdentity = Boolean(headers.sourceSku || headers.productName)
   const hasSales = Boolean(headers.salesAmount || headers.unitSalePrice)
@@ -189,10 +190,11 @@ function findHeaderCandidate(sheet: ExcelJS.Worksheet): HeaderCandidate | null {
     }
     if (columns.length === 0) continue
 
-    const headers = Object.fromEntries((Object.keys(FIELD_ALIASES) as ChannelSalesField[]).map((field) => [
+    const detectedHeaders = Object.fromEntries((Object.keys(FIELD_ALIASES) as ChannelSalesField[]).map((field) => [
       field,
       findHeader(columns, FIELD_ALIASES[field]),
     ])) as Record<ChannelSalesField, string | null>
+    const headers = applySourceSpecificHeaderRules(columns, detectedHeaders)
     const hasIdentity = Boolean(headers.sourceSku || headers.productName)
     const hasSales = Boolean(headers.salesAmount || headers.unitSalePrice)
     if (!headers.occurredOn || !headers.quantity || !hasIdentity || !hasSales) continue
@@ -205,6 +207,30 @@ function findHeaderCandidate(sheet: ExcelJS.Worksheet): HeaderCandidate | null {
     if (!best || score > best.score) best = { headerRow: rowNumber, score, columns, headers }
   }
   return best
+}
+
+function applySourceSpecificHeaderRules(
+  columns: Array<{ column: number; label: string }>,
+  headers: Record<ChannelSalesField, string | null>,
+) {
+  const hasHeader = (name: string) => columns.some((column) => normalizeHeader(column.label) === normalizeHeader(name))
+  const isCoupangPurchaseOrder = [
+    '발주번호',
+    'SKU ID',
+    '확정수량',
+    '입고수량',
+    '매입가',
+  ].every(hasHeader)
+
+  if (!isCoupangPurchaseOrder) return headers
+
+  // PO_SKU_LIST rows are purchase confirmations. "입고수량" is only the later receipt result.
+  // The confirmed quantity times purchase price is the amount that belongs in the Rocket sales ledger.
+  return {
+    ...headers,
+    quantity: findHeader(columns, ['확정수량']),
+    salesAmount: null,
+  }
 }
 
 function parseChannelSalesRow(input: {

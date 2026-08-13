@@ -16,11 +16,11 @@ import type { AdjustmentReason } from './types'
 import { buildMappingIndex, lookupMappingRef, type MappingSource } from '@/lib/orders/mapping-match'
 import { getOrderInventoryWarehouseZone } from '@/lib/orders/fulfillment-channel'
 
-type ActionResult = { success: boolean; error?: string; newTotal?: number }
-type StockAdjustmentOptions = { note?: string; orderId?: string; warehouseZone?: string | null }
+export type InventoryActionResult = { success: boolean; error?: string; newTotal?: number }
+export type StockAdjustmentOptions = { note?: string; orderId?: string; warehouseZone?: string | null }
 
 // Use the transaction type from Drizzle's callback parameter
-type DrizzleTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
+export type InventoryTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 /**
  * Adjust stock by a delta amount with reason tracking.
@@ -33,23 +33,26 @@ export async function adjustStock(
   delta: number,
   reason: AdjustmentReason,
   opts?: StockAdjustmentOptions,
-): Promise<ActionResult> {
+): Promise<InventoryActionResult> {
   return db.transaction(async (tx) => {
-    return adjustStockInTx(tx, userId, sku, delta, reason, opts)
+    return adjustStockInTransaction(tx, userId, sku, delta, reason, opts)
   })
 }
 
 /**
- * Internal: adjust stock within an existing transaction.
+ * Adjust stock inside a caller-owned transaction.
+ *
+ * This is used by batch operations that must atomically update every stock row
+ * and every audit entry, or leave the batch untouched when one SKU is missing.
  */
-async function adjustStockInTx(
-  tx: DrizzleTransaction,
+export async function adjustStockInTransaction(
+  tx: InventoryTransaction,
   userId: string,
   sku: string,
   delta: number,
   reason: AdjustmentReason,
   opts?: StockAdjustmentOptions,
-): Promise<ActionResult> {
+): Promise<InventoryActionResult> {
   const baseQuery = tx
     .select()
     .from(inventory)
@@ -107,7 +110,7 @@ async function adjustStockInTx(
 }
 
 async function resolveOrderInventoryWarehouseZone(
-  tx: DrizzleTransaction,
+  tx: InventoryTransaction,
   userId: string,
   orderId: string,
 ): Promise<string | null> {
@@ -132,7 +135,7 @@ export async function setStock(
   productName: string,
   totalStock: number,
   opts?: { warehouseZone?: string; sectorCode?: string },
-): Promise<ActionResult> {
+): Promise<InventoryActionResult> {
   return db.transaction(async (tx) => {
     // Try to find existing record with lock
     const [existing] = await tx
@@ -218,7 +221,7 @@ export async function setStock(
  * 같은 SKU 가 여러 번 등장할 수 있으므로 합산해서 한 번에 차감.
  */
 export async function expandOrderItemsForDeduction(
-  tx: DrizzleTransaction,
+  tx: InventoryTransaction,
   userId: string,
   orderId: string,
 ): Promise<Array<{ sku: string; quantity: number }>> {
@@ -328,7 +331,7 @@ export async function expandOrderItemsForDeduction(
  * never be marked shipped without a matching inventory adjustment.
  */
 export async function deductForOrder(
-  tx: DrizzleTransaction,
+  tx: InventoryTransaction,
   userId: string,
   orderId: string,
 ): Promise<void> {
@@ -339,7 +342,7 @@ export async function deductForOrder(
   }
 
   for (const item of items) {
-    const result = await adjustStockInTx(tx, userId, item.sku, -item.quantity, 'order_ship', { orderId, warehouseZone })
+    const result = await adjustStockInTransaction(tx, userId, item.sku, -item.quantity, 'order_ship', { orderId, warehouseZone })
     if (!result.success) {
       throw new Error(`출고 재고를 찾을 수 없습니다: ${item.sku}`)
     }
@@ -352,7 +355,7 @@ export async function deductForOrder(
  * Bundle SKUs are expanded to their component SKUs before restoration.
  */
 export async function restoreForOrder(
-  tx: DrizzleTransaction,
+  tx: InventoryTransaction,
   userId: string,
   orderId: string,
 ): Promise<void> {
@@ -363,7 +366,7 @@ export async function restoreForOrder(
   }
 
   for (const item of items) {
-    const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'order_cancel', { orderId, warehouseZone })
+    const result = await adjustStockInTransaction(tx, userId, item.sku, item.quantity, 'order_cancel', { orderId, warehouseZone })
     if (!result.success) {
       throw new Error(`복구 재고를 찾을 수 없습니다: ${item.sku}`)
     }
@@ -385,7 +388,7 @@ export async function restoreForClaim(
     const items = await expandOrderItemsForDeduction(tx, userId, orderId)
 
     for (const item of items) {
-      const result = await adjustStockInTx(tx, userId, item.sku, item.quantity, 'return', {
+      const result = await adjustStockInTransaction(tx, userId, item.sku, item.quantity, 'return', {
         orderId,
         note: 'Return claim completed',
         warehouseZone,
@@ -398,7 +401,7 @@ export async function restoreForClaim(
 }
 
 async function resolveReturnProcessingClaimId(
-  tx: DrizzleTransaction,
+  tx: InventoryTransaction,
   userId: string,
   claimId: string,
 ): Promise<string | null> {
@@ -460,7 +463,7 @@ export async function completeReturnClaim(
   userId: string,
   claimId: string,
   quantities: Array<{ sku: string; availableQuantity: number; defectiveQuantity: number; warehouseZone?: string | null }>,
-): Promise<ActionResult> {
+): Promise<InventoryActionResult> {
   return db.transaction(async (tx) => {
     const processingClaimId = await resolveReturnProcessingClaimId(tx, userId, claimId)
     if (!processingClaimId) return { success: false, error: '반품/교환 클레임을 찾을 수 없습니다.' }

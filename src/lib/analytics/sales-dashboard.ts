@@ -6,6 +6,10 @@ import {
   getChannelSalesAggregates,
   type ChannelSalesAggregate,
 } from './channel-sales'
+import {
+  getOutboundReflectionSalesAggregates,
+  type OutboundReflectionSalesAggregate,
+} from '../outbound-reflection'
 
 export interface SalesSummaryCard {
   key: string
@@ -1033,25 +1037,57 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     start: previousThreeMonthStart,
     end: monthStart,
   })
+  const outboundReflectionSalesPromise = getOutboundReflectionSalesAggregates({
+    userId,
+    start: monthStart,
+    end: nextMonthStart,
+  })
+  const lastMonthOutboundReflectionSalesPromise = getOutboundReflectionSalesAggregates({
+    userId,
+    start: lastMonthStart,
+    end: lastMonthSameDayEnd,
+  })
+  const previousThreeMonthOutboundReflectionSalesPromise = getOutboundReflectionSalesAggregates({
+    userId,
+    start: previousThreeMonthStart,
+    end: monthStart,
+  })
 
-  const [metricRows, detailRows, channelSales, lastMonthChannelSales, previousThreeMonthChannelSales] = await Promise.all([
+  const [
+    metricRows,
+    detailRows,
+    channelSales,
+    lastMonthChannelSales,
+    previousThreeMonthChannelSales,
+    outboundReflectionSales,
+    lastMonthOutboundReflectionSales,
+    previousThreeMonthOutboundReflectionSales,
+  ] = await Promise.all([
     metricRowsPromise,
     detailRowsPromise,
     channelSalesPromise,
     lastMonthChannelSalesPromise,
     previousThreeMonthChannelSalesPromise,
+    outboundReflectionSalesPromise,
+    lastMonthOutboundReflectionSalesPromise,
+    previousThreeMonthOutboundReflectionSalesPromise,
   ])
   const metric = resultRows(metricRows)[0]
   const channelSalesTotal = sumChannelSales(channelSales)
-  const currentSales = toNumber(metric?.currentPeriodSales) + channelSalesTotal.sales
+  const outboundReflectionTotal = sumOutboundReflectionSales(outboundReflectionSales)
+  const currentSales = toNumber(metric?.currentPeriodSales) + channelSalesTotal.sales + outboundReflectionTotal.sales
   const comparisonPromise = getSalesComparisonData(userId, now, currentSales)
-  const rows = [
+  const rows = mergeMarketplaceRows([
     ...resultRows(detailRows).map(toMarketplaceRow),
     ...channelSales.map(toChannelMarketplaceRow),
-  ].sort((left, right) => right.sales - left.sales)
+    ...outboundReflectionSales.map(toOutboundReflectionMarketplaceRow),
+  ]).sort((left, right) => right.sales - left.sales)
   const totals = buildTotals(rows)
-  const lastMonthSamePeriod = toNumber(metric?.lastMonthSamePeriodSales) + sumChannelSales(lastMonthChannelSales).sales
-  const previousThreeAverage = toNumber(metric?.previousThreeMonthAverageSales) + (sumChannelSales(previousThreeMonthChannelSales).sales / 3)
+  const lastMonthSamePeriod = toNumber(metric?.lastMonthSamePeriodSales)
+    + sumChannelSales(lastMonthChannelSales).sales
+    + sumOutboundReflectionSales(lastMonthOutboundReflectionSales).sales
+  const previousThreeAverage = toNumber(metric?.previousThreeMonthAverageSales)
+    + ((sumChannelSales(previousThreeMonthChannelSales).sales + sumOutboundReflectionSales(previousThreeMonthOutboundReflectionSales).sales) / 3)
   const comparison = await comparisonPromise
 
   return {
@@ -1060,22 +1096,22 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       {
         key: 'month-sales',
         label: '선택 월 매출',
-        value: toNumber(metric?.monthSales) + channelSalesTotal.sales,
-        subLabel: '출고완료일 우선 / 매출파일 반영일 포함',
+        value: toNumber(metric?.monthSales) + channelSalesTotal.sales + outboundReflectionTotal.sales,
+        subLabel: '출고완료일 우선 / 매출파일·출고반영 포함',
       },
       {
         key: 'shipped-expected',
         label: '선택 월 출고완료 매출예상금액',
-        value: toNumber(metric?.shippedExpectedSales) + channelSalesTotal.sales,
-        subLabel: '출고완료 상태 / 매출파일 반영일 기준',
+        value: toNumber(metric?.shippedExpectedSales) + channelSalesTotal.sales + outboundReflectionTotal.sales,
+        subLabel: '출고완료 상태 / 매출파일·출고반영 기준',
       },
       {
         key: 'profit-excluding-shipping',
         label: '배송비 제외 현 이익금',
-        value: toNumber(metric?.currentProfitExcludingShipping) + channelSalesTotal.finalProfit,
-        subLabel: channelSalesTotal.hasProfitData
-          ? '주문 계산값 + 로켓배송/대량 파일상 마진'
-          : '로켓배송/대량 매출은 원가 자료 전까지 이익 계산에서 제외',
+        value: toNumber(metric?.currentProfitExcludingShipping) + channelSalesTotal.finalProfit + outboundReflectionTotal.finalProfit,
+        subLabel: channelSalesTotal.hasProfitData || outboundReflectionTotal.hasProfitData
+          ? '주문 계산값 + 매출파일·출고반영 파일상 마진'
+          : '매출파일·출고반영 매출은 원가 자료 전까지 이익 계산에서 제외',
       },
       {
         key: 'last-month-same-period',
@@ -1087,7 +1123,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       {
         key: 'three-month-average',
         label: '직전 3개월 평균 대비',
-        value: percentChange(toNumber(metric?.monthSales) + channelSalesTotal.sales, previousThreeAverage),
+        value: percentChange(toNumber(metric?.monthSales) + channelSalesTotal.sales + outboundReflectionTotal.sales, previousThreeAverage),
         suffix: '%',
         subLabel: `3개월 평균 ${formatWon(previousThreeAverage)}`,
       },
@@ -1461,6 +1497,23 @@ function toChannelMarketplaceRow(row: ChannelSalesAggregate): MarketplaceSalesRo
   }
 }
 
+function toOutboundReflectionMarketplaceRow(row: OutboundReflectionSalesAggregate): MarketplaceSalesRow {
+  return {
+    marketplaceId: row.marketplaceId,
+    marketplaceName: row.marketplaceName,
+    sales: row.sales,
+    marketplaceFee: row.marketplaceFee,
+    productCost: 0,
+    paidShippingFee: row.paidShippingFee,
+    actualShippingFee: 0,
+    shippingMargin: row.paidShippingFee,
+    boxCost: 0,
+    finalProfit: row.finalProfit,
+    profitRate: row.hasProfitData && row.sales > 0 ? (row.finalProfit / row.sales) * 100 : null,
+    hasProfitData: row.hasProfitData,
+  }
+}
+
 function sumChannelSales(rows: ChannelSalesAggregate[]) {
   return rows.reduce<ChannelSalesAggregate>((total, row) => ({
     channel: 'bulk',
@@ -1483,6 +1536,48 @@ function sumChannelSales(rows: ChannelSalesAggregate[]) {
     finalProfit: 0,
     hasProfitData: rows.length > 0,
   })
+}
+
+function sumOutboundReflectionSales(rows: OutboundReflectionSalesAggregate[]) {
+  return rows.reduce<OutboundReflectionSalesAggregate>((total, row) => ({
+    marketplaceId: 'total',
+    marketplaceName: '합계',
+    sales: total.sales + row.sales,
+    marketplaceFee: total.marketplaceFee + row.marketplaceFee,
+    paidShippingFee: total.paidShippingFee + row.paidShippingFee,
+    finalProfit: total.finalProfit + row.finalProfit,
+    hasProfitData: total.hasProfitData && row.hasProfitData,
+  }), {
+    marketplaceId: 'total',
+    marketplaceName: '합계',
+    sales: 0,
+    marketplaceFee: 0,
+    paidShippingFee: 0,
+    finalProfit: 0,
+    hasProfitData: rows.length > 0,
+  })
+}
+
+function mergeMarketplaceRows(rows: MarketplaceSalesRow[]) {
+  const grouped = new Map<string, MarketplaceSalesRow>()
+  for (const row of rows) {
+    const current = grouped.get(row.marketplaceId)
+    if (!current) {
+      grouped.set(row.marketplaceId, { ...row })
+      continue
+    }
+    current.sales += row.sales
+    current.marketplaceFee += row.marketplaceFee
+    current.productCost += row.productCost
+    current.paidShippingFee += row.paidShippingFee
+    current.actualShippingFee += row.actualShippingFee
+    current.shippingMargin += row.shippingMargin
+    current.boxCost += row.boxCost
+    current.finalProfit += row.finalProfit
+    current.hasProfitData = current.hasProfitData && row.hasProfitData
+    current.profitRate = current.hasProfitData && current.sales > 0 ? (current.finalProfit / current.sales) * 100 : null
+  }
+  return Array.from(grouped.values())
 }
 
 function toOrderProfitRow(row: OrderProfitQueryRow): OrderProfitRow {

@@ -91,6 +91,14 @@ const orderRelatedGroups: NavGroup[] = [
     ],
   },
   {
+    id: 'outbound-reflection',
+    title: '출고반영',
+    items: [
+      { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
+      { href: '/analytics/sabangnet-review', label: '사방넷 검수', icon: FileSpreadsheet },
+    ],
+  },
+  {
     id: 'products',
     title: '상품',
     items: [
@@ -161,7 +169,6 @@ export const navSections: NavSection[] = [
     items: [
       { href: '/analytics', label: '매출분석', icon: BarChart3 },
       { href: '/analytics/settlements', label: '정산 캘린더', icon: CalendarDays },
-      { href: '/analytics/sabangnet-review', label: '사방넷 검수', icon: FileSpreadsheet },
       { href: '/analytics/rocket-outbound', label: '로켓배송/대량 매출', icon: FileSpreadsheet },
       { href: '/analytics/short-meeting', label: '숏미팅', icon: ClipboardList },
     ],

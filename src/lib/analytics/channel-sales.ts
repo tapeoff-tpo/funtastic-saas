@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { parseChannelSalesWorkbook, type ParsedChannelSalesRow } from './channel-sales-parser'
+import { parseChannelSalesFile, type ParsedChannelSalesRow } from './channel-sales-parser'
 
 export const CHANNEL_SALES_CHANNELS = ['rocket', 'bulk'] as const
 export type ChannelSalesChannel = typeof CHANNEL_SALES_CHANNELS[number]
@@ -30,6 +30,7 @@ export type ChannelSalesAggregate = {
   actualShippingFee: number
   boxCost: number
   finalProfit: number
+  hasProfitData: boolean
 }
 
 type AggregateQueryRow = {
@@ -41,6 +42,7 @@ type AggregateQueryRow = {
   actualShippingFee: string | number | null
   boxCost: string | number | null
   finalProfit: string | number | null
+  hasProfitData: boolean | null
 }
 
 const TABLE_SQL = sql`
@@ -134,7 +136,10 @@ export async function importChannelSalesBatch(input: {
   fileName: string
   fileBuffer: ArrayBuffer
 }) {
-  const parsed = await parseChannelSalesWorkbook(input.fileBuffer)
+  const parsed = await parseChannelSalesFile({
+    fileName: input.fileName,
+    fileBuffer: input.fileBuffer,
+  })
   await ensureChannelSalesTables()
 
   const fileHash = createHash('sha256').update(Buffer.from(input.fileBuffer)).digest('hex')
@@ -264,16 +269,25 @@ export async function getChannelSalesAggregates(input: {
       COALESCE(SUM(actual_shipping_fee), 0)::text AS "actualShippingFee",
       COALESCE(SUM(box_cost), 0)::text AS "boxCost",
       COALESCE(SUM(
-        COALESCE(
-          profit_amount,
-          sales_amount
-            - COALESCE(product_cost, 0)
+        CASE
+          WHEN profit_amount IS NOT NULL THEN profit_amount
+          WHEN product_cost IS NOT NULL THEN sales_amount
+            - product_cost
             - COALESCE(marketplace_fee, 0)
             + COALESCE(paid_shipping_fee, 0)
             - COALESCE(actual_shipping_fee, 0)
             - COALESCE(box_cost, 0)
-        )
-      ), 0)::text AS "finalProfit"
+          ELSE 0
+        END
+      ), 0)::text AS "finalProfit",
+      BOOL_OR(
+        profit_amount IS NOT NULL
+        OR product_cost IS NOT NULL
+        OR marketplace_fee IS NOT NULL
+        OR paid_shipping_fee IS NOT NULL
+        OR actual_shipping_fee IS NOT NULL
+        OR box_cost IS NOT NULL
+      ) AS "hasProfitData"
     FROM channel_sales_lines
     WHERE user_id = ${input.userId}::uuid
       AND occurred_on >= ${input.start}::date
@@ -290,6 +304,7 @@ export async function getChannelSalesAggregates(input: {
     actualShippingFee: toNumber(row.actualShippingFee),
     boxCost: toNumber(row.boxCost),
     finalProfit: toNumber(row.finalProfit),
+    hasProfitData: Boolean(row.hasProfitData),
   }))
 }
 

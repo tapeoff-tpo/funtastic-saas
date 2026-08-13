@@ -1129,8 +1129,8 @@ function SalesRow({ row, total = false }: { row: MarketplaceSalesRow; total?: bo
         {formatWon(row.shippingMargin)}
       </Td>
       <Td>{formatWon(row.boxCost)}</Td>
-      <Td className={row.finalProfit < 0 ? 'text-red-600' : 'text-emerald-700'}>
-        {formatWon(row.finalProfit)}
+      <Td className={row.hasProfitData ? (row.finalProfit < 0 ? 'text-red-600' : 'text-emerald-700') : 'text-muted-foreground'}>
+        {row.hasProfitData ? formatWon(row.finalProfit) : '-'}
       </Td>
       <Td>{row.profitRate == null ? '-' : formatPercent(row.profitRate)}</Td>
     </tr>

@@ -27,6 +27,7 @@ export interface MarketplaceSalesRow {
   boxCost: number
   finalProfit: number
   profitRate: number | null
+  hasProfitData: boolean
 }
 
 export interface SalesDashboardData {
@@ -1072,7 +1073,9 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         key: 'profit-excluding-shipping',
         label: '배송비 제외 현 이익금',
         value: toNumber(metric?.currentProfitExcludingShipping) + channelSalesTotal.finalProfit,
-        subLabel: '주문 계산값 + 로켓배송/대량 파일상 마진',
+        subLabel: channelSalesTotal.hasProfitData
+          ? '주문 계산값 + 로켓배송/대량 파일상 마진'
+          : '로켓배송/대량 매출은 원가 자료 전까지 이익 계산에서 제외',
       },
       {
         key: 'last-month-same-period',
@@ -1436,6 +1439,7 @@ function toMarketplaceRow(row: DetailRow): MarketplaceSalesRow {
     boxCost,
     finalProfit,
     profitRate: sales > 0 ? (finalProfit / sales) * 100 : null,
+    hasProfitData: true,
   }
 }
 
@@ -1452,7 +1456,8 @@ function toChannelMarketplaceRow(row: ChannelSalesAggregate): MarketplaceSalesRo
     shippingMargin,
     boxCost: row.boxCost,
     finalProfit: row.finalProfit,
-    profitRate: row.sales > 0 ? (row.finalProfit / row.sales) * 100 : null,
+    profitRate: row.hasProfitData && row.sales > 0 ? (row.finalProfit / row.sales) * 100 : null,
+    hasProfitData: row.hasProfitData,
   }
 }
 
@@ -1466,6 +1471,7 @@ function sumChannelSales(rows: ChannelSalesAggregate[]) {
     actualShippingFee: total.actualShippingFee + row.actualShippingFee,
     boxCost: total.boxCost + row.boxCost,
     finalProfit: total.finalProfit + row.finalProfit,
+    hasProfitData: total.hasProfitData && row.hasProfitData,
   }), {
     channel: 'bulk',
     sales: 0,
@@ -1475,6 +1481,7 @@ function sumChannelSales(rows: ChannelSalesAggregate[]) {
     actualShippingFee: 0,
     boxCost: 0,
     finalProfit: 0,
+    hasProfitData: rows.length > 0,
   })
 }
 
@@ -1559,6 +1566,7 @@ function buildTotals(rows: MarketplaceSalesRow[]): MarketplaceSalesRow {
     acc.shippingMargin += row.shippingMargin
     acc.boxCost += row.boxCost
     acc.finalProfit += row.finalProfit
+    acc.hasProfitData = acc.hasProfitData && row.hasProfitData
     return acc
   }, {
     marketplaceId: 'total',
@@ -1572,8 +1580,9 @@ function buildTotals(rows: MarketplaceSalesRow[]): MarketplaceSalesRow {
     boxCost: 0,
     finalProfit: 0,
     profitRate: null,
+    hasProfitData: rows.length > 0,
   })
-  totals.profitRate = totals.sales > 0 ? (totals.finalProfit / totals.sales) * 100 : null
+  totals.profitRate = totals.hasProfitData && totals.sales > 0 ? (totals.finalProfit / totals.sales) * 100 : null
   return totals
 }
 

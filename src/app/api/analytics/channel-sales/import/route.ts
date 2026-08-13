@@ -21,8 +21,8 @@ export async function POST(request: NextRequest) {
   const channel = String(formData.get('channel') ?? '')
   if (!file) return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 })
   if (!isChannelSalesChannel(channel)) return NextResponse.json({ error: '올바른 매출 구분을 선택해 주세요.' }, { status: 400 })
-  if (!file.name.toLocaleLowerCase('ko-KR').endsWith('.xlsx')) {
-    return NextResponse.json({ error: 'Excel .xlsx 파일만 업로드할 수 있습니다.' }, { status: 400 })
+  if (!/\.(xlsx|csv)$/i.test(file.name)) {
+    return NextResponse.json({ error: 'Excel .xlsx 또는 CSV 파일만 업로드할 수 있습니다.' }, { status: 400 })
   }
 
   try {

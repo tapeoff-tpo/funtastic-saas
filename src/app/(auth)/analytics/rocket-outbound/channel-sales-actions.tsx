@@ -50,11 +50,11 @@ export function ChannelSalesActions() {
           </select>
         </label>
         <label className="min-w-0 space-y-1">
-          <span className="text-xs font-medium text-muted-foreground">매출 파일 (.xlsx)</span>
+          <span className="text-xs font-medium text-muted-foreground">매출 파일 (.xlsx, .csv)</span>
           <input
             type="file"
             name="file"
-            accept=".xlsx"
+            accept=".xlsx,.csv"
             required
             className="h-9 w-full rounded-md border bg-background px-3 py-1.5 text-sm"
           />

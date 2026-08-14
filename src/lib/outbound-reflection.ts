@@ -762,10 +762,13 @@ async function getAppliedSourceKeys(userId: string) {
 async function getLegacyConfirmedSourceKeys(userId: string) {
   try {
     const rows = resultRows<{ rawData: RawExcelRow; parsedData: ParsedOrderRow }>(await db.execute(sql`
-      SELECT raw_data AS "rawData", parsed_data AS "parsedData"
-      FROM sabangnet_review_lines
-      WHERE user_id = ${userId}::uuid
-        AND confirmed_order_id IS NOT NULL
+      SELECT
+        review_line.raw_data AS "rawData",
+        review_line.parsed_data AS "parsedData"
+      FROM sabangnet_review_lines review_line
+      INNER JOIN orders legacy_order ON legacy_order.id = review_line.confirmed_order_id
+      WHERE review_line.user_id = ${userId}::uuid
+        AND legacy_order.status::text IN ('shipped', 'delivering', 'delivered')
     `))
     return new Set(rows.map((row) => createSourceKey(
       pickByHeaders(row.rawData ?? {}, SABANGNET_ORDER_NUMBER_HEADERS) || row.parsedData?.orderNumber || '',

@@ -77,11 +77,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - 로켓배송은 사방넷 원본 쇼핑몰명이 `로켓배송`인 경우에만 `쿠팡` 재고 위치를 사용하고, 일반 쿠팡은 `1창고`를 사용한다. 별도 Rocket 또는 bulk 매출 파일은 주문 생성, 주문 상태 변경, 재고 차감, 발주 추천 수량에 사용하지 않는다.
 - Rocket delivery and bulk sales files may omit order numbers. Store them as independent sales ledgers using their sales recognition date, SKU or product name, quantity, sales amount, and optional cost/profit fields; include them in sales analysis only.
 - An independently uploaded Rocket or bulk sales file must be deduplicated by workspace, channel, and file hash. It must not be force-matched to Sabangnet orders merely because a SKU or date is similar.
-- Current-month outgoing quantity for purchasing review must be calculated from files imported through `사방넷 검수`, not from the manually entered item master values.
+- Current-month outgoing quantity for purchasing review must be calculated from Sabangnet review files applied through `출고반영`, not from the manually entered item master values.
 - Use the Sabangnet review file's `출고완료일자` as the primary date for assigning outgoing quantity to a month. Order date and collection date are fallbacks only when the shipment completion date is unavailable.
 - The manually entered three-month average outgoing quantity is authoritative for now and must not be overwritten automatically.
 - The manual three-month average is a completed-period baseline through the previous month. Never subtract current-month outgoing quantity from that baseline to reconstruct prior-month demand.
-- When a new monthly Sabangnet review file is imported, update the current-month outgoing quantity for matching SKUs from that month's reviewed data.
+- When a new monthly Sabangnet review file is applied through `출고반영`, update the current-month outgoing quantity for matching SKUs from that month's reviewed data.
 - For July 2026, the current-month outgoing quantity should come from July Sabangnet review data, while the three-month average remains the user's manually entered average through June 2026.
 - From August 2026 onward, the purchasing metric logic may combine the user's manually entered baseline with July Sabangnet review data to calculate rolling averages, but do not switch to automatic overwrite without preserving the user's manual baseline and the agreed calculation rule.
 - Purchasing recommendation logic must distinguish abnormal one-off bulk orders from repeatable demand. A single large one-off order should not inflate recommended purchase quantity by itself.

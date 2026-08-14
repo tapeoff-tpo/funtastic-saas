@@ -91,10 +91,9 @@ const orderRelatedGroups: NavGroup[] = [
     ],
   },
   {
-    id: 'outbound-reflection',
-    title: '출고반영',
+    id: 'sabangnet-review',
+    title: '사방넷 검수',
     items: [
-      { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
       { href: '/analytics/sabangnet-review', label: '사방넷 검수', icon: FileSpreadsheet },
     ],
   },
@@ -148,6 +147,7 @@ export const navSections: NavSection[] = [
     items: [
       { href: '/purchasing/purchases', label: '발주검토', icon: CreditCard },
       { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
+      { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
       { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
       { href: '/inventory', label: '재고관리', icon: Warehouse },
       { href: '/purchasing/overdue', label: '구매/입고지연', icon: ClipboardList },

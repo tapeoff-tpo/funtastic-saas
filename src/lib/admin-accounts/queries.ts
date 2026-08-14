@@ -4,6 +4,7 @@
  * bypassing RLS for server-side use.
  */
 import { cache } from 'react'
+import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import { marketplaceConnections, orders, products, userProfiles, auditLogs, type UserProfile } from '@/lib/db/schema'
 import { and, asc, desc, eq, ilike, isNull, or } from 'drizzle-orm'
@@ -34,7 +35,7 @@ export const getProfile = cache(async (userId: string): Promise<UserProfile | nu
  * Super admins own the marketplace connections/orders; regular admin accounts read/write
  * through that owner id so staff see the same synced orders after logging in.
  */
-export const getWorkspaceUserId = cache(async (userId: string): Promise<string> => {
+async function resolveWorkspaceUserId(userId: string): Promise<string> {
   const profile = await getProfile(userId)
 
   // Keep the existing owner precedence, but avoid serial database round trips
@@ -91,7 +92,18 @@ export const getWorkspaceUserId = cache(async (userId: string): Promise<string> 
     .limit(1)
 
   return owner?.id ?? userId
-})
+}
+
+// The workspace owner changes rarely, but resolving it used four database
+// lookups on every route transition. Keep operational data uncached while
+// sharing this stable routing decision for a short time across requests.
+const getCachedWorkspaceUserId = unstable_cache(
+  resolveWorkspaceUserId,
+  ['workspace-user-id'],
+  { revalidate: 60 },
+)
+
+export const getWorkspaceUserId = cache((userId: string) => getCachedWorkspaceUserId(userId))
 
 export async function getProfileByEmail(email: string): Promise<UserProfile | null> {
   const [row] = await db

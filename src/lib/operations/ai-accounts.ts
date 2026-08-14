@@ -29,89 +29,10 @@ function normalizeResetAvailableCount(value: number | undefined) {
   return Math.min(3, Math.max(0, Math.round(value || 0)))
 }
 
+// The account schema is managed by the committed database migrations. Runtime
+// DDL here made a normal page visit issue dozens of CREATE/ALTER statements.
 export async function ensureAiAccountTables() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS "gpt_accounts" (
-      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-      "user_id" uuid NOT NULL,
-      "name" varchar(100) NOT NULL,
-      "email" varchar(255),
-      "secondary_email" varchar(255),
-      "status" varchar(30) NOT NULL DEFAULT 'in_use',
-      "current_user_name" varchar(100),
-      "daily_reset_time" varchar(10),
-      "weekly_reset_at" timestamp with time zone,
-      "five_hour_limit" varchar(100),
-      "five_hour_limit_period" varchar(10),
-      "weekly_limit" varchar(100),
-      "notes" text,
-      "sort_order" integer NOT NULL DEFAULT 0,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-    )
-  `)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "secondary_email" varchar(255)`)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit" varchar(100)`)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "five_hour_limit_period" varchar(10)`)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "weekly_limit" varchar(100)`)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "renewal_due_on" date`)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "reset_available_count" integer NOT NULL DEFAULT 0`)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ADD COLUMN IF NOT EXISTS "shared_use" boolean NOT NULL DEFAULT false`)
-  await db.execute(sql`ALTER TABLE "gpt_accounts" ALTER COLUMN "status" SET DEFAULT 'in_use'`)
-  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "gpt_accounts_user_name_uniq" ON "gpt_accounts" ("user_id", "name")`)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_sort_idx" ON "gpt_accounts" ("user_id", "sort_order")`)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_accounts_user_status_idx" ON "gpt_accounts" ("user_id", "status")`)
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS "gpt_account_messages" (
-      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-      "user_id" uuid NOT NULL,
-      "account_id" uuid NOT NULL REFERENCES "gpt_accounts"("id") ON DELETE cascade,
-      "author_name" varchar(100),
-      "event_type" varchar(50) NOT NULL DEFAULT 'memo',
-      "message" text NOT NULL,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL
-    )
-  `)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_messages_account_created_idx" ON "gpt_account_messages" ("account_id", "created_at")`)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_messages_user_created_idx" ON "gpt_account_messages" ("user_id", "created_at")`)
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS "gpt_account_sessions" (
-      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-      "user_id" uuid NOT NULL,
-      "account_id" uuid NOT NULL REFERENCES "gpt_accounts"("id") ON DELETE cascade,
-      "user_name" varchar(100) NOT NULL,
-      "started_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "ended_at" timestamp with time zone,
-      "status" varchar(30) NOT NULL DEFAULT 'active'
-    )
-  `)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_sessions_account_started_idx" ON "gpt_account_sessions" ("account_id", "started_at")`)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_sessions_user_status_idx" ON "gpt_account_sessions" ("user_id", "status")`)
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS "gpt_account_waitlist" (
-      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-      "user_id" uuid NOT NULL,
-      "account_id" uuid NOT NULL REFERENCES "gpt_accounts"("id") ON DELETE cascade,
-      "user_name" varchar(100) NOT NULL,
-      "status" varchar(30) NOT NULL DEFAULT 'waiting',
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "resolved_at" timestamp with time zone
-    )
-  `)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_waitlist_account_status_idx" ON "gpt_account_waitlist" ("account_id", "status", "created_at")`)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_waitlist_user_status_idx" ON "gpt_account_waitlist" ("user_id", "status")`)
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS "gpt_account_users" (
-      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-      "user_id" uuid NOT NULL,
-      "name" varchar(100) NOT NULL,
-      "sort_order" integer NOT NULL DEFAULT 0,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-    )
-  `)
-  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "gpt_account_users_user_name_uniq" ON "gpt_account_users" ("user_id", "name")`)
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS "gpt_account_users_user_sort_idx" ON "gpt_account_users" ("user_id", "sort_order")`)
+  return undefined
 }
 
 export async function seedDefaultAiAccountUsers(userId: string) {

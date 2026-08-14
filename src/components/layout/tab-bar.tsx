@@ -1,21 +1,33 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
+import { useRef } from 'react'
 import { Home, X } from 'lucide-react'
 import { tabPathname, useNavState } from './nav-state'
 
 export function TabBar() {
   const pathname = usePathname()
+  const router = useRouter()
   const { tabs, closeTab } = useNavState()
+  const prefetchedHrefs = useRef(new Set<string>())
 
   const isDashboard = pathname === '/dashboard'
+
+  function prefetchTab(href: string) {
+    if (prefetchedHrefs.current.has(href)) return
+    prefetchedHrefs.current.add(href)
+    router.prefetch(href)
+  }
 
   return (
     <div className="flex h-9 items-stretch gap-px overflow-x-auto border-b border-gray-200 bg-gray-100 px-1">
       {/* Home / Dashboard tab — always present, not closable */}
       <Link
         href="/dashboard"
+        prefetch={false}
+        onMouseEnter={() => prefetchTab('/dashboard')}
+        onFocus={() => prefetchTab('/dashboard')}
         className={`flex items-center gap-1.5 px-3 text-xs font-medium transition-colors ${
           isDashboard
             ? 'border-t-2 border-blue-500 bg-white text-gray-900'
@@ -41,6 +53,9 @@ export function TabBar() {
           >
             <Link
               href={tab.href}
+              prefetch={false}
+              onMouseEnter={() => prefetchTab(tab.href)}
+              onFocus={() => prefetchTab(tab.href)}
               className="flex items-center px-3 py-1 text-xs font-medium"
               title={tab.label}
             >

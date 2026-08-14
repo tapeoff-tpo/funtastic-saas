@@ -1,8 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
-import { usePathname } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
+import { usePathname, useRouter } from 'next/navigation'
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -198,7 +198,9 @@ interface SidebarProps {
 
 export function Sidebar({ onCollapse }: SidebarProps = {}) {
   const pathname = usePathname()
+  const router = useRouter()
   const { favorites, toggleFavorite, isFavorite } = useNavState()
+  const prefetchedHrefs = useRef(new Set<string>())
   const [orderedSections, setOrderedSections] = useState<NavSection[]>(navSections)
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({})
 
@@ -237,6 +239,12 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
     return section.items.some((item) => isItemActive(item.href))
   }
 
+  function prefetchItem(href: string) {
+    if (prefetchedHrefs.current.has(href)) return
+    prefetchedHrefs.current.add(href)
+    router.prefetch(href)
+  }
+
   function renderNavItem(item: NavItem, opts: { showStar: boolean }) {
     const Icon = item.icon
     const active = isItemActive(item.href)
@@ -251,6 +259,9 @@ export function Sidebar({ onCollapse }: SidebarProps = {}) {
       >
         <Link
           href={item.href}
+          prefetch={false}
+          onMouseEnter={() => prefetchItem(item.href)}
+          onFocus={() => prefetchItem(item.href)}
           className="flex flex-1 items-center gap-2 px-2 py-1 text-xs font-medium"
         >
           <Icon className="h-3.5 w-3.5 shrink-0" />

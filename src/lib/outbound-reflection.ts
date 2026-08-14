@@ -588,7 +588,7 @@ export async function applyOutboundReflectionBatch(
         inventoryDelta,
         adjustmentReason,
         {
-          warehouseZone: outboundWarehouseZone(line.marketplaceId, line.marketplaceName),
+          warehouseZone: outboundWarehouseZone(line.marketplaceName),
           note: `출고반영 ${line.sourceOrderNumber}${claimType === 'return' ? ' 반품입고' : claimType === 'exchange' ? ' 교환출고' : ''}`,
         },
       )
@@ -875,10 +875,10 @@ function formatShipmentDate(value: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`
 }
 
-function outboundWarehouseZone(marketplaceId: string | null, marketplaceName: string | null) {
+function outboundWarehouseZone(marketplaceName: string | null) {
   const normalizedName = normalizeKey(marketplaceName ?? '')
   if (normalizedName.includes(normalizeKey('로켓배송'))) return '쿠팡'
-  return marketplaceId === 'coupang' ? '1창고' : null
+  return '1창고'
 }
 
 function parseCurrency(value: string): number | null {

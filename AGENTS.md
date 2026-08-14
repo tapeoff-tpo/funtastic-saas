@@ -74,7 +74,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - 실제 사방넷 검수 파일의 출고완료 행은 `출고반영`에서 처리한다. 출고반영은 주문 레코드나 주문 단계를 만들지 않고, 재고 이력과 매출분석만 반영한다.
 - 출고반영은 워크스페이스별 파일 해시와 `사방넷 주문번호 + SKU`를 모두 중복 검사해야 한다. 동일 출고 행은 재고·매출에 두 번 반영되면 안 된다.
 - 출고반영 한 묶음은 재고 행을 하나라도 찾지 못하면 그 묶음 전체가 반영되지 않아야 한다. 반품은 재고를 복구하고 매출은 차감하며, 교환은 대체 출고 수량만 재고에서 차감한다.
-- 로켓배송은 사방넷 원본 쇼핑몰명이 `로켓배송`인 경우에만 `쿠팡` 재고 위치를 사용하고, 일반 쿠팡은 `1창고`를 사용한다. 별도 Rocket 또는 bulk 매출 파일은 주문 생성, 주문 상태 변경, 재고 차감, 발주 추천 수량에 사용하지 않는다.
+- 출고반영에서 사방넷 원본 쇼핑몰명이 `로켓배송`인 경우에만 `쿠팡` 재고 위치를 사용하고, 그 외 모든 주문은 반드시 `1창고` 재고 위치를 사용한다. 별도 Rocket 또는 bulk 매출 파일은 주문 생성, 주문 상태 변경, 재고 차감, 발주 추천 수량에 사용하지 않는다.
 - Rocket delivery and bulk sales files may omit order numbers. Store them as independent sales ledgers using their sales recognition date, SKU or product name, quantity, sales amount, and optional cost/profit fields; include them in sales analysis only.
 - An independently uploaded Rocket or bulk sales file must be deduplicated by workspace, channel, and file hash. It must not be force-matched to Sabangnet orders merely because a SKU or date is similar.
 - Current-month outgoing quantity for purchasing review must be calculated from Sabangnet review files applied through `출고반영`, not from the manually entered item master values.

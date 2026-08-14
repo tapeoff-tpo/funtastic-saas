@@ -29,24 +29,7 @@ export function parseSidebarMenuOrder(value: unknown): SidebarMenuOrder {
   }
 }
 
-export async function ensureSidebarMenuSettingsTable() {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS sidebar_menu_settings (
-      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-      user_id uuid NOT NULL,
-      menu_order jsonb NOT NULL,
-      created_at timestamptz NOT NULL DEFAULT now(),
-      updated_at timestamptz NOT NULL DEFAULT now()
-    )
-  `)
-  await db.execute(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS sidebar_menu_settings_user_id
-    ON sidebar_menu_settings (user_id)
-  `)
-}
-
 export async function getSidebarMenuOrder(userId: string): Promise<SidebarMenuOrder | null> {
-  await ensureSidebarMenuSettingsTable()
   const [row] = await db
     .select({ menuOrder: sidebarMenuSettings.menuOrder })
     .from(sidebarMenuSettings)
@@ -56,7 +39,6 @@ export async function getSidebarMenuOrder(userId: string): Promise<SidebarMenuOr
 }
 
 export async function saveSidebarMenuOrderForUser(userId: string, order: SidebarMenuOrder) {
-  await ensureSidebarMenuSettingsTable()
   await db
     .insert(sidebarMenuSettings)
     .values({ userId, menuOrder: order })
@@ -70,7 +52,6 @@ export async function saveSidebarMenuOrderForUser(userId: string, order: Sidebar
 }
 
 export async function deleteSidebarMenuOrderForUser(userId: string) {
-  await ensureSidebarMenuSettingsTable()
   await db
     .delete(sidebarMenuSettings)
     .where(eq(sidebarMenuSettings.userId, userId))

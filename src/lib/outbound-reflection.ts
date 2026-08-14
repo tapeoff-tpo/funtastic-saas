@@ -309,7 +309,6 @@ export async function importOutboundReflectionBatch(input: {
 }
 
 export async function listOutboundReflectionBatches(userId: string): Promise<OutboundReflectionBatch[]> {
-  await ensureOutboundReflectionTables()
   const rows = resultRows<OutboundReflectionBatch>(await db.execute(sql`
     SELECT
       id,
@@ -343,7 +342,6 @@ export async function listOutboundReflectionBatches(userId: string): Promise<Out
 }
 
 export async function deleteOutboundReflectionBatch(userId: string, batchId: string) {
-  await ensureOutboundReflectionTables()
   const [batch] = resultRows<{ appliedRows: number }>(await db.execute(sql`
     SELECT applied_rows AS "appliedRows"
     FROM outbound_reflection_batches
@@ -371,7 +369,6 @@ export async function getOutboundReflectionLines(
   batchId: string,
   options: { status?: OutboundReflectionStatus | 'all'; limit?: number } = {},
 ): Promise<OutboundReflectionLine[]> {
-  await ensureOutboundReflectionTables()
   const statusFilter = options.status && options.status !== 'all'
     ? sql`AND reflection_status = ${options.status}`
     : sql``
@@ -427,7 +424,6 @@ export async function updateOutboundReflectionLine(
   lineId: string,
   patch: OutboundReflectionLinePatch,
 ) {
-  await ensureOutboundReflectionTables()
   const [current] = resultRows<{
     id: string
     batchId: string
@@ -535,7 +531,6 @@ export async function applyOutboundReflectionBatch(
   batchId: string,
   options: { limit?: number } = {},
 ) {
-  await ensureOutboundReflectionTables()
   const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 300), 500))
   return db.transaction(async (tx) => {
     const lines = resultRows<{
@@ -638,7 +633,6 @@ export async function getOutboundReflectionSalesAggregates(input: {
   start: string
   end: string
 }): Promise<OutboundReflectionSalesAggregate[]> {
-  await ensureOutboundReflectionTables()
   const rows = resultRows<{
     marketplaceId: string | null
     marketplaceName: string | null

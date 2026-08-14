@@ -14,6 +14,7 @@ import {
   type OutboundReflectionStatus,
 } from '@/lib/outbound-reflection'
 import { OutboundReflectionActions } from './outbound-reflection-actions'
+import { OutboundReflectionBatchList } from './outbound-reflection-batch-list'
 import { OutboundReflectionLineEdit } from './outbound-reflection-line-edit'
 
 const DISPLAY_LIMIT = 300
@@ -101,7 +102,20 @@ export default async function OutboundReflectionPage({
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[320px_1fr]">
-        <BatchList batches={batches} selectedBatchId={selectedBatchId} selectedStatus={selectedStatus} />
+        <OutboundReflectionBatchList
+          batches={batches.map((batch) => ({
+            id: batch.id,
+            sourceFileName: batch.sourceFileName,
+            totalRows: batch.totalRows,
+            readyRows: batch.readyRows,
+            blockedRows: batch.blockedRows,
+            appliedRows: batch.appliedRows,
+            excludedRows: batch.excludedRows,
+            createdAt: batch.createdAt.toISOString(),
+          }))}
+          selectedBatchId={selectedBatchId}
+          selectedStatus={selectedStatus}
+        />
         <div className="space-y-3">
           <StatusFilter
             batchId={selectedBatchId}
@@ -128,45 +142,6 @@ function SummaryCard({ label, value, icon }: { label: string; value: number; ico
         {label}
       </div>
       <div className="mt-2 text-2xl font-bold tabular-nums">{value.toLocaleString('ko-KR')}건</div>
-    </div>
-  )
-}
-
-function BatchList({
-  batches,
-  selectedBatchId,
-  selectedStatus,
-}: {
-  batches: Awaited<ReturnType<typeof listOutboundReflectionBatches>>
-  selectedBatchId?: string
-  selectedStatus: OutboundReflectionStatus | 'all'
-}) {
-  return (
-    <div className="rounded-lg border bg-card">
-      <div className="border-b px-4 py-3">
-        <h2 className="text-base font-semibold">반영 이력</h2>
-      </div>
-      <div className="divide-y">
-        {batches.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-muted-foreground">등록된 출고반영 파일이 없습니다.</div>
-        ) : batches.map((batch) => (
-          <Link
-            key={batch.id}
-            href={reflectionHref(batch.id, selectedStatus)}
-            className={`block px-4 py-3 text-sm hover:bg-muted ${selectedBatchId === batch.id ? 'bg-muted/70' : ''}`}
-          >
-            <div className="truncate font-medium" title={batch.sourceFileName}>{batch.sourceFileName}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{batch.createdAt.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</div>
-            <div className="mt-2 flex flex-wrap gap-1 text-[11px]">
-              <Badge>전체 {batch.totalRows}</Badge>
-              <Badge tone="ready">대기 {batch.readyRows}</Badge>
-              <Badge tone="blocked">확인 {batch.blockedRows}</Badge>
-              <Badge tone="applied">완료 {batch.appliedRows}</Badge>
-              {batch.excludedRows ? <Badge>제외 {batch.excludedRows}</Badge> : null}
-            </div>
-          </Link>
-        ))}
-      </div>
     </div>
   )
 }
@@ -285,17 +260,6 @@ function StatusBadge({ status }: { status: OutboundReflectionStatus }) {
         ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
         : 'border-border bg-muted text-muted-foreground'
   return <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}>{label}</span>
-}
-
-function Badge({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'ready' | 'blocked' | 'applied' }) {
-  const className = tone === 'ready'
-    ? 'border-blue-200 bg-blue-50 text-blue-700'
-    : tone === 'blocked'
-      ? 'border-amber-200 bg-amber-50 text-amber-700'
-      : tone === 'applied'
-        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-        : 'border-border bg-background text-muted-foreground'
-  return <span className={`rounded-full border px-1.5 py-0.5 ${className}`}>{children}</span>
 }
 
 function claimLabel(claimType: OutboundReflectionLine['claimType']) {

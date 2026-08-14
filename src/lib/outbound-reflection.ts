@@ -342,6 +342,30 @@ export async function listOutboundReflectionBatches(userId: string): Promise<Out
   }))
 }
 
+export async function deleteOutboundReflectionBatch(userId: string, batchId: string) {
+  await ensureOutboundReflectionTables()
+  const [batch] = resultRows<{ appliedRows: number }>(await db.execute(sql`
+    SELECT applied_rows AS "appliedRows"
+    FROM outbound_reflection_batches
+    WHERE id = ${batchId}::uuid
+      AND user_id = ${userId}::uuid
+    LIMIT 1
+  `))
+
+  if (!batch) throw new Error('삭제할 출고반영 파일을 찾을 수 없습니다.')
+  if (toNumber(batch.appliedRows) > 0) {
+    throw new Error('이미 반영한 파일은 삭제할 수 없습니다. 재고와 매출을 함께 되돌리는 반영 취소가 필요합니다.')
+  }
+
+  await db.execute(sql`
+    DELETE FROM outbound_reflection_batches
+    WHERE id = ${batchId}::uuid
+      AND user_id = ${userId}::uuid
+  `)
+
+  return { deleted: true }
+}
+
 export async function getOutboundReflectionLines(
   userId: string,
   batchId: string,

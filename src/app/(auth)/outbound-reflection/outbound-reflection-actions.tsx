@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { CheckCircle2, Loader2, Upload } from 'lucide-react'
+import { CheckCircle2, Loader2, Trash2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 
 type Option = { id: string; label: string }
@@ -24,21 +24,29 @@ type ApplyResponse = {
   error?: string
 }
 
+type DeleteResponse = {
+  deleted?: boolean
+  error?: string
+}
+
 export function OutboundReflectionActions({
   marketplaces,
   templates,
   selectedBatchId,
   readyRows,
+  appliedRows,
 }: {
   marketplaces: Option[]
   templates: Option[]
   selectedBatchId?: string
   readyRows: number
+  appliedRows: number
 }) {
   const router = useRouter()
   const uploadInFlightRef = useRef(false)
   const [uploading, setUploading] = useState(false)
   const [applying, setApplying] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
 
   async function handleUpload(formData: FormData) {
@@ -99,8 +107,29 @@ export function OutboundReflectionActions({
     }
   }
 
+  async function handleDelete() {
+    if (!selectedBatchId || appliedRows > 0 || deleting) return
+    if (!window.confirm('이 출고반영 대기열을 삭제하시겠습니까? 아직 반영 전이라 재고와 매출에는 영향이 없습니다.')) return
+
+    setDeleting(true)
+    try {
+      const response = await fetch(`/api/outbound-reflection/${selectedBatchId}`, { method: 'DELETE' })
+      const json = await readJson<DeleteResponse>(response)
+      if (!response.ok) throw new Error(json.error ?? '출고반영 파일 삭제에 실패했습니다.')
+      toast.success('출고반영 대기열을 삭제했습니다.')
+      router.push('/outbound-reflection')
+      router.refresh()
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '출고반영 파일 삭제에 실패했습니다.'
+      setMessage(errorMessage)
+      toast.error(errorMessage)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
-    <div className="space-y-3 rounded-lg border bg-card p-4" aria-busy={uploading || applying}>
+    <div className="space-y-3 rounded-lg border bg-card p-4" aria-busy={uploading || applying || deleting}>
       <form action={handleUpload} className="grid gap-3 lg:grid-cols-[1.45fr_1fr_1fr_auto] lg:items-end">
         <label className="space-y-1">
           <span className="text-xs font-medium text-muted-foreground">사방넷 검수 엑셀</span>
@@ -127,10 +156,16 @@ export function OutboundReflectionActions({
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
         <p className="text-xs text-muted-foreground">주문관리 단계는 만들지 않습니다. 반영 버튼을 눌러야 재고 이력과 매출분석에 기록됩니다.</p>
-        <button type="button" onClick={handleApply} disabled={!selectedBatchId || readyRows <= 0 || uploading || applying} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">
-          {applying ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
-          {applying ? '반영 중...' : `반영 대기 ${readyRows.toLocaleString('ko-KR')}건 실행`}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={handleDelete} disabled={!selectedBatchId || appliedRows > 0 || uploading || applying || deleting} title={appliedRows > 0 ? '이미 반영한 파일은 삭제할 수 없습니다.' : undefined} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-200 bg-background px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">
+            {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            {deleting ? '삭제 중...' : '대기열 삭제'}
+          </button>
+          <button type="button" onClick={handleApply} disabled={!selectedBatchId || readyRows <= 0 || uploading || applying || deleting} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">
+            {applying ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+            {applying ? '반영 중...' : `반영 대기 ${readyRows.toLocaleString('ko-KR')}건 실행`}
+          </button>
+        </div>
       </div>
       {message ? <div className="rounded-md bg-muted px-3 py-2 text-sm">{message}</div> : null}
     </div>

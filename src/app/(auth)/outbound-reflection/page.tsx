@@ -90,6 +90,7 @@ export default async function OutboundReflectionPage({
         templates={templates}
         selectedBatchId={selectedBatchId}
         readyRows={readyRows}
+        appliedRows={appliedRows}
       />
 
       <div className="grid gap-3 sm:grid-cols-4">
@@ -155,7 +156,7 @@ function BatchList({
             className={`block px-4 py-3 text-sm hover:bg-muted ${selectedBatchId === batch.id ? 'bg-muted/70' : ''}`}
           >
             <div className="truncate font-medium" title={batch.sourceFileName}>{batch.sourceFileName}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{batch.createdAt.toLocaleString('ko-KR')}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{batch.createdAt.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}</div>
             <div className="mt-2 flex flex-wrap gap-1 text-[11px]">
               <Badge>전체 {batch.totalRows}</Badge>
               <Badge tone="ready">대기 {batch.readyRows}</Badge>

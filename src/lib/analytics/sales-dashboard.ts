@@ -1454,6 +1454,10 @@ async function getSalesComparisonData(
   return { currentSamePeriodSales, rows }
 }
 
+function isRocketMarketplaceName(name: string | null | undefined) {
+  return (name ?? '').replace(/\s+/g, '').includes('로켓배송')
+}
+
 function toMarketplaceRow(row: DetailRow): MarketplaceSalesRow {
   const sales = toNumber(row.sales)
   const marketplaceFee = toNumber(row.marketplaceFee)
@@ -1463,9 +1467,12 @@ function toMarketplaceRow(row: DetailRow): MarketplaceSalesRow {
   const boxCost = toNumber(row.boxCost)
   const shippingMargin = paidShippingFee - actualShippingFee
   const finalProfit = sales - marketplaceFee - productCost + shippingMargin - boxCost
+  const isRocket = isRocketMarketplaceName(row.marketplaceName)
   return {
-    marketplaceId: row.marketplaceId,
-    marketplaceName: row.marketplaceName || row.marketplaceId,
+    // SaBangnet exports use both "쿠팡 로켓배송(신)" and "로켓배송 쇼핑몰" for one channel.
+    // Give regular orders the same key as outbound reflection rows so the dashboard combines them.
+    marketplaceId: isRocket ? 'coupang-rocket' : row.marketplaceId,
+    marketplaceName: isRocket ? '로켓배송' : (row.marketplaceName || row.marketplaceId),
     sales,
     marketplaceFee,
     productCost,

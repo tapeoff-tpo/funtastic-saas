@@ -13,6 +13,7 @@ type ImportResponse = {
   totalRows?: number
   readyRows?: number
   blockedRows?: number
+  applyInventory?: boolean
   error?: string
 }
 
@@ -21,6 +22,7 @@ type ApplyResponse = {
   excluded?: number
   readyRows?: number
   done?: boolean
+  applyInventory?: boolean
   error?: string
 }
 
@@ -35,12 +37,14 @@ export function OutboundReflectionActions({
   selectedBatchId,
   readyRows,
   appliedRows,
+  applyInventory,
 }: {
   marketplaces: Option[]
   templates: Option[]
   selectedBatchId?: string
   readyRows: number
   appliedRows: number
+  applyInventory: boolean
 }) {
   const router = useRouter()
   const uploadInFlightRef = useRef(false)
@@ -57,12 +61,14 @@ export function OutboundReflectionActions({
     try {
       const file = formData.get('file')
       if (!(file instanceof File) || file.size === 0) throw new Error('업로드할 엑셀 파일을 선택해주세요.')
+      const willApplyInventory = formData.get('applyInventory') === 'true'
+      if (!willApplyInventory && !window.confirm('이 파일은 재고 수량이 이미 반영된 상태입니다. 출고·매출만 기록하고 재고 수량과 재고 이력은 변경하지 않습니다. 계속할까요?')) return
       const response = await fetch('/api/outbound-reflection/import', { method: 'POST', body: formData })
       const json = await readJson<ImportResponse>(response)
       if (!response.ok) throw new Error(json.error ?? '출고반영 파일 업로드에 실패했습니다.')
       const summary = json.skipped
         ? '같은 파일이 이미 등록되어 기존 대기열을 열었습니다.'
-        : `대기열 등록: 전체 ${(json.totalRows ?? 0).toLocaleString('ko-KR')}건, 반영 대기 ${(json.readyRows ?? 0).toLocaleString('ko-KR')}건, 확인 필요 ${(json.blockedRows ?? 0).toLocaleString('ko-KR')}건`
+        : `대기열 등록: ${json.applyInventory === false ? '재고 변동 없음, 매출·출고만 기록' : '재고·매출 반영'} · 전체 ${(json.totalRows ?? 0).toLocaleString('ko-KR')}건, 반영 대기 ${(json.readyRows ?? 0).toLocaleString('ko-KR')}건, 확인 필요 ${(json.blockedRows ?? 0).toLocaleString('ko-KR')}건`
       setMessage(summary)
       toast.success(summary)
       if (json.batchId) router.push(`/outbound-reflection?batch=${json.batchId}`)
@@ -85,7 +91,7 @@ export function OutboundReflectionActions({
     let totalExcluded = 0
     try {
       for (let step = 0; step < 100 && remaining > 0; step += 1) {
-        setMessage(`재고와 매출을 반영하고 있습니다. 남은 대기 ${remaining.toLocaleString('ko-KR')}건`)
+        setMessage(`${applyInventory ? '재고와 매출' : '매출과 출고 이력만'} 반영하고 있습니다. 남은 대기 ${remaining.toLocaleString('ko-KR')}건`)
         const response = await fetch(`/api/outbound-reflection/${selectedBatchId}/apply?limit=300`, { method: 'POST' })
         const json = await readJson<ApplyResponse>(response)
         if (!response.ok) throw new Error(json.error ?? '출고반영에 실패했습니다.')
@@ -94,7 +100,7 @@ export function OutboundReflectionActions({
         remaining = Number(json.readyRows ?? 0)
         if (json.done) break
       }
-      const summary = `출고반영 완료: 재고·매출 ${totalApplied.toLocaleString('ko-KR')}건${totalExcluded ? `, 중복 제외 ${totalExcluded.toLocaleString('ko-KR')}건` : ''}`
+      const summary = `출고반영 완료: ${applyInventory ? '재고·매출' : '매출·출고 이력만'} ${totalApplied.toLocaleString('ko-KR')}건${totalExcluded ? `, 중복 제외 ${totalExcluded.toLocaleString('ko-KR')}건` : ''}`
       setMessage(summary)
       toast.success(summary)
       router.refresh()
@@ -130,7 +136,7 @@ export function OutboundReflectionActions({
 
   return (
     <div className="space-y-3 rounded-lg border bg-card p-4" aria-busy={uploading || applying || deleting}>
-      <form action={handleUpload} className="grid gap-3 lg:grid-cols-[1.45fr_1fr_1fr_auto] lg:items-end">
+      <form action={handleUpload} className="grid gap-3 lg:grid-cols-[1.45fr_1fr_1fr_1.2fr_auto] lg:items-end">
         <label className="space-y-1">
           <span className="text-xs font-medium text-muted-foreground">사방넷 검수 엑셀</span>
           <input name="file" type="file" accept=".xlsx" required disabled={uploading || applying} className="h-9 w-full rounded-md border bg-background px-3 py-1.5 text-sm disabled:opacity-60" />
@@ -148,6 +154,13 @@ export function OutboundReflectionActions({
             {templates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}
           </select>
         </label>
+        <label className="space-y-1">
+          <span className="text-xs font-medium text-muted-foreground">재고 반영</span>
+          <span className="flex h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm">
+            <input name="applyInventory" value="true" type="checkbox" defaultChecked disabled={uploading || applying} className="size-4 rounded border-input accent-primary" />
+            재고 수량도 반영
+          </span>
+        </label>
         <button type="submit" disabled={uploading || applying} className="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60">
           {uploading ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
           {uploading ? '등록 중...' : '대기열 등록'}
@@ -155,7 +168,7 @@ export function OutboundReflectionActions({
       </form>
 
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3">
-        <p className="text-xs text-muted-foreground">주문관리 단계는 만들지 않습니다. 반영 버튼을 눌러야 재고 이력과 매출분석에 기록됩니다.</p>
+        <p className="text-xs text-muted-foreground">주문관리 단계는 만들지 않습니다. 재고 수량도 반영을 끄면 매출·출고 이력만 기록하고 재고는 변경하지 않습니다.</p>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={handleDelete} disabled={!selectedBatchId || appliedRows > 0 || uploading || applying || deleting} title={appliedRows > 0 ? '이미 반영한 파일은 삭제할 수 없습니다.' : undefined} className="inline-flex h-9 items-center justify-center gap-2 rounded-md border border-red-200 bg-background px-3 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50">
             {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}

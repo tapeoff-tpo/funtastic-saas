@@ -23,6 +23,7 @@ export type OutboundReflectionIssueCode =
 export type OutboundReflectionBatch = {
   id: string
   sourceFileName: string
+  applyInventory: boolean
   totalRows: number
   readyRows: number
   blockedRows: number
@@ -92,6 +93,7 @@ const TABLE_SQL = sql`
     user_id uuid NOT NULL,
     source_file_name varchar(255) NOT NULL,
     file_hash varchar(64) NOT NULL,
+    apply_inventory boolean NOT NULL DEFAULT true,
     total_rows integer NOT NULL DEFAULT 0,
     ready_rows integer NOT NULL DEFAULT 0,
     blocked_rows integer NOT NULL DEFAULT 0,
@@ -177,6 +179,7 @@ export async function importOutboundReflectionBatch(input: {
   mappings?: OrderImportMapping[]
   fallbackMarketplaceId?: string
   fallbackMarketplaceName?: string
+  applyInventory?: boolean
 }) {
   const buffer = normalizeExcelWorkbookBuffer(Buffer.from(input.fileBuffer))
   await ensureOutboundReflectionTables()
@@ -282,9 +285,9 @@ export async function importOutboundReflectionBatch(input: {
   const totalSales = mappedLines.reduce((sum, line) => sum + line.salesAmount, 0)
   const [batch] = resultRows<{ id: string }>(await db.execute(sql`
     INSERT INTO outbound_reflection_batches (
-      user_id, source_file_name, file_hash, total_rows, ready_rows, blocked_rows, excluded_rows, total_quantity, total_sales
+      user_id, source_file_name, file_hash, apply_inventory, total_rows, ready_rows, blocked_rows, excluded_rows, total_quantity, total_sales
     ) VALUES (
-      ${input.userId}::uuid, ${input.fileName}, ${fileHash}, ${mappedLines.length}, ${readyRows}, ${blockedRows}, ${excludedRows}, ${totalQuantity}, ${totalSales}
+      ${input.userId}::uuid, ${input.fileName}, ${fileHash}, ${input.applyInventory ?? true}, ${mappedLines.length}, ${readyRows}, ${blockedRows}, ${excludedRows}, ${totalQuantity}, ${totalSales}
     )
     RETURNING id
   `))
@@ -313,6 +316,7 @@ export async function listOutboundReflectionBatches(userId: string): Promise<Out
     SELECT
       id,
       source_file_name AS "sourceFileName",
+      apply_inventory AS "applyInventory",
       total_rows AS "totalRows",
       ready_rows AS "readyRows",
       blocked_rows AS "blockedRows",
@@ -329,6 +333,7 @@ export async function listOutboundReflectionBatches(userId: string): Promise<Out
   `))
   return rows.map((row) => ({
     ...row,
+    applyInventory: Boolean(row.applyInventory),
     totalRows: toNumber(row.totalRows),
     readyRows: toNumber(row.readyRows),
     blockedRows: toNumber(row.blockedRows),
@@ -533,6 +538,16 @@ export async function applyOutboundReflectionBatch(
 ) {
   const limit = Math.max(1, Math.min(Math.floor(options.limit ?? 300), 500))
   return db.transaction(async (tx) => {
+    const [batch] = resultRows<{ applyInventory: boolean }>(await tx.execute(sql`
+      SELECT apply_inventory AS "applyInventory"
+      FROM outbound_reflection_batches
+      WHERE id = ${batchId}::uuid
+        AND user_id = ${userId}::uuid
+      FOR UPDATE
+    `))
+    if (!batch) throw new Error('반영할 출고반영 파일을 찾을 수 없습니다.')
+    const applyInventory = Boolean(batch.applyInventory)
+
     const lines = resultRows<{
       id: string
       sourceKey: string
@@ -592,26 +607,29 @@ export async function applyOutboundReflectionBatch(
         continue
       }
 
-      const sku = line.sku?.trim()
-      if (!sku) throw new Error(`재고 반영 SKU가 없습니다: ${line.sourceOrderNumber}`)
       const quantity = toNumber(line.quantity)
-      if (!Number.isInteger(quantity) || quantity <= 0) throw new Error(`출고 수량이 올바르지 않습니다: ${sku}`)
+      if (!Number.isInteger(quantity) || quantity <= 0) throw new Error(`출고 수량이 올바르지 않습니다: ${line.sku ?? line.sourceOrderNumber}`)
 
-      const claimType = normalizeClaimType(line.claimType)
-      const inventoryDelta = claimType === 'return' ? quantity : -quantity
-      const adjustmentReason = claimType === 'return' ? 'return' : 'order_ship'
-      const result = await adjustStockInTransaction(
-        tx,
-        userId,
-        sku,
-        inventoryDelta,
-        adjustmentReason,
-        {
-          warehouseZone: outboundWarehouseZone(line.marketplaceName),
-          note: `출고반영 ${line.sourceOrderNumber}${claimType === 'return' ? ' 반품입고' : claimType === 'exchange' ? ' 교환출고' : ''}`,
-        },
-      )
-      if (!result.success) throw new Error(`출고 재고를 찾을 수 없습니다: ${sku}`)
+      if (applyInventory) {
+        const sku = line.sku?.trim()
+        if (!sku) throw new Error(`재고 반영 SKU가 없습니다: ${line.sourceOrderNumber}`)
+
+        const claimType = normalizeClaimType(line.claimType)
+        const inventoryDelta = claimType === 'return' ? quantity : -quantity
+        const adjustmentReason = claimType === 'return' ? 'return' : 'order_ship'
+        const result = await adjustStockInTransaction(
+          tx,
+          userId,
+          sku,
+          inventoryDelta,
+          adjustmentReason,
+          {
+            warehouseZone: outboundWarehouseZone(line.marketplaceName),
+            note: `출고반영 ${line.sourceOrderNumber}${claimType === 'return' ? ' 반품입고' : claimType === 'exchange' ? ' 교환출고' : ''}`,
+          },
+        )
+        if (!result.success) throw new Error(`출고 재고를 찾을 수 없습니다: ${sku}`)
+      }
 
       await tx.execute(sql`
         UPDATE outbound_reflection_lines
@@ -624,7 +642,7 @@ export async function applyOutboundReflectionBatch(
     }
 
     const counts = await refreshOutboundReflectionBatchCounts(tx, batchId, userId)
-    return { applied, excluded, readyRows: counts.readyRows, done: counts.readyRows === 0 }
+    return { applied, excluded, readyRows: counts.readyRows, done: counts.readyRows === 0, applyInventory }
   })
 }
 

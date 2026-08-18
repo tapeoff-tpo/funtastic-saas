@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
   const file = formData.get('file') as File | null
   const marketplaceId = String(formData.get('marketplaceId') ?? '').trim()
   const templateId = String(formData.get('templateId') ?? '').trim()
+  const applyInventory = formData.get('applyInventory') === 'true'
 
   if (!file) return NextResponse.json({ error: '파일을 선택해 주세요.' }, { status: 400 })
   if (!file.name.toLowerCase().endsWith('.xlsx')) {
@@ -34,6 +35,7 @@ export async function POST(request: NextRequest) {
       fileBuffer: await file.arrayBuffer(),
       mappings,
       fallbackMarketplaceId: marketplaceId || undefined,
+      applyInventory,
     })
     revalidatePath('/outbound-reflection')
     return NextResponse.json(result)

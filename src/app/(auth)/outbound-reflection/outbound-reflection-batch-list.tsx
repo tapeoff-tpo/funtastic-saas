@@ -10,6 +10,7 @@ import type { OutboundReflectionStatus } from '@/lib/outbound-reflection'
 type BatchItem = {
   id: string
   sourceFileName: string
+  applyInventory: boolean
   totalRows: number
   readyRows: number
   blockedRows: number
@@ -138,6 +139,7 @@ export function OutboundReflectionBatchList({
                   <Badge tone="ready">대기 {batch.readyRows}</Badge>
                   <Badge tone="blocked">확인 {batch.blockedRows}</Badge>
                   <Badge tone="applied">완료 {batch.appliedRows}</Badge>
+                  <Badge>{batch.applyInventory ? '재고 반영' : '재고 유지'}</Badge>
                   {batch.excludedRows ? <Badge>제외 {batch.excludedRows}</Badge> : null}
                 </div>
               </Link>

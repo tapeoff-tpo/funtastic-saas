@@ -92,6 +92,7 @@ export default async function OutboundReflectionPage({
         selectedBatchId={selectedBatchId}
         readyRows={readyRows}
         appliedRows={appliedRows}
+        applyInventory={selectedBatch?.applyInventory ?? true}
       />
 
       <div className="grid gap-3 sm:grid-cols-4">
@@ -106,6 +107,7 @@ export default async function OutboundReflectionPage({
           batches={batches.map((batch) => ({
             id: batch.id,
             sourceFileName: batch.sourceFileName,
+            applyInventory: batch.applyInventory,
             totalRows: batch.totalRows,
             readyRows: batch.readyRows,
             blockedRows: batch.blockedRows,

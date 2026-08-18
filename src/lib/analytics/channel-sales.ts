@@ -305,14 +305,108 @@ export async function getChannelSalesAggregates(input: {
         AND unit_cost IS NOT NULL
       GROUP BY user_id, sku
     ),
+    mapping_source_keys AS (
+      SELECT DISTINCT
+        ms.user_id,
+        ms.marketplace_product_id AS source_sku,
+        ms.mapping_code_id
+      FROM mapping_sources ms
+      WHERE ms.marketplace_id = 'coupang'
+        AND NULLIF(BTRIM(ms.marketplace_product_id), '') IS NOT NULL
+      UNION
+      SELECT DISTINCT
+        ms.user_id,
+        ms.marketplace_option_id AS source_sku,
+        ms.mapping_code_id
+      FROM mapping_sources ms
+      WHERE ms.marketplace_id = 'coupang'
+        AND NULLIF(BTRIM(ms.marketplace_option_id), '') IS NOT NULL
+    ),
+    mapped_source_cost_lookup AS (
+      SELECT
+        source.user_id,
+        source.source_sku,
+        CASE
+          WHEN COUNT(DISTINCT source.mapping_code_id) = 1
+            THEN SUM(cost.unit_cost * component.quantity)
+          ELSE NULL
+        END AS unit_cost
+      FROM mapping_source_keys source
+      JOIN mapping_components component
+        ON component.user_id = source.user_id
+       AND component.mapping_code_id = source.mapping_code_id
+      LEFT JOIN product_cost_lookup cost
+        ON cost.user_id = source.user_id
+       AND cost.sku = component.sku
+      GROUP BY source.user_id, source.source_sku
+    ),
+    product_name_cost_candidates AS (
+      SELECT
+        p.user_id,
+        LOWER(regexp_replace(BTRIM(p.name), '\\s+', '', 'g')) AS normalized_name,
+        NULLIF(
+          regexp_replace(
+            COALESCE(
+              NULLIF(p.metadata->'esa009m'->>'works 신규 원가', ''),
+              NULLIF(p.metadata->'esa009m'->>'works 기존 원가', ''),
+              ''
+            ),
+            '[^0-9.-]',
+            '',
+            'g'
+          ),
+          ''
+        )::numeric AS unit_cost
+      FROM products p
+      WHERE NULLIF(BTRIM(p.name), '') IS NOT NULL
+      UNION ALL
+      SELECT
+        p.user_id,
+        LOWER(regexp_replace(BTRIM(p.metadata->'esa009m'->>'품목명'), '\\s+', '', 'g')) AS normalized_name,
+        NULLIF(
+          regexp_replace(
+            COALESCE(
+              NULLIF(p.metadata->'esa009m'->>'works 신규 원가', ''),
+              NULLIF(p.metadata->'esa009m'->>'works 기존 원가', ''),
+              ''
+            ),
+            '[^0-9.-]',
+            '',
+            'g'
+          ),
+          ''
+        )::numeric AS unit_cost
+      FROM products p
+      WHERE NULLIF(BTRIM(p.metadata->'esa009m'->>'품목명'), '') IS NOT NULL
+    ),
+    product_name_cost_lookup AS (
+      SELECT
+        user_id,
+        normalized_name,
+        CASE WHEN COUNT(DISTINCT unit_cost) = 1 THEN MAX(unit_cost) ELSE NULL END AS unit_cost
+      FROM product_name_cost_candidates
+      WHERE unit_cost IS NOT NULL
+      GROUP BY user_id, normalized_name
+    ),
     sales_lines AS (
       SELECT
         line.*,
-        COALESCE(line.product_cost, lookup.unit_cost * line.quantity) AS resolved_product_cost
+        COALESCE(
+          line.product_cost,
+          mapped.unit_cost * line.quantity,
+          sku_cost.unit_cost * line.quantity,
+          name_cost.unit_cost * line.quantity
+        ) AS resolved_product_cost
       FROM channel_sales_lines line
-      LEFT JOIN product_cost_lookup lookup
-        ON lookup.user_id = line.user_id
-       AND lookup.sku = line.source_sku
+      LEFT JOIN mapped_source_cost_lookup mapped
+        ON mapped.user_id = line.user_id
+       AND mapped.source_sku = line.source_sku
+      LEFT JOIN product_cost_lookup sku_cost
+        ON sku_cost.user_id = line.user_id
+       AND sku_cost.sku = line.source_sku
+      LEFT JOIN product_name_cost_lookup name_cost
+        ON name_cost.user_id = line.user_id
+       AND name_cost.normalized_name = LOWER(regexp_replace(BTRIM(COALESCE(line.product_name, '')), '\\s+', '', 'g'))
       WHERE line.user_id = ${input.userId}::uuid
         AND line.occurred_on >= ${input.start}::date
         AND line.occurred_on < ${input.end}::date

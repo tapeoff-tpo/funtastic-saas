@@ -1489,7 +1489,7 @@ function toMarketplaceRow(row: DetailRow): MarketplaceSalesRow {
 function toChannelMarketplaceRow(row: ChannelSalesAggregate): MarketplaceSalesRow {
   const shippingMargin = row.paidShippingFee - row.actualShippingFee
   return {
-    marketplaceId: `channel-sales:${row.channel}`,
+    marketplaceId: row.channel === 'rocket' ? 'coupang-rocket' : `channel-sales:${row.channel}`,
     marketplaceName: channelSalesLabel(row.channel),
     sales: row.sales,
     marketplaceFee: row.marketplaceFee,

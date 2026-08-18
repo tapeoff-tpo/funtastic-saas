@@ -260,10 +260,67 @@ export async function getChannelSalesAggregates(input: {
 }): Promise<ChannelSalesAggregate[]> {
   await ensureChannelSalesTables()
   const rows = resultRows<AggregateQueryRow>(await db.execute(sql`
+    WITH product_cost_candidates AS (
+      SELECT
+        p.user_id,
+        p.internal_sku AS sku,
+        NULLIF(
+          regexp_replace(
+            COALESCE(
+              NULLIF(p.metadata->'esa009m'->>'works 신규 원가', ''),
+              NULLIF(p.metadata->'esa009m'->>'works 기존 원가', ''),
+              ''
+            ),
+            '[^0-9.-]',
+            '',
+            'g'
+          ),
+          ''
+        )::numeric AS unit_cost
+      FROM products p
+      UNION ALL
+      SELECT
+        p.user_id,
+        pv.sku,
+        NULLIF(
+          regexp_replace(
+            COALESCE(
+              NULLIF(p.metadata->'esa009m'->>'works 신규 원가', ''),
+              NULLIF(p.metadata->'esa009m'->>'works 기존 원가', ''),
+              ''
+            ),
+            '[^0-9.-]',
+            '',
+            'g'
+          ),
+          ''
+        )::numeric AS unit_cost
+      FROM product_variants pv
+      JOIN products p ON p.id = pv.product_id
+    ),
+    product_cost_lookup AS (
+      SELECT user_id, sku, MAX(unit_cost) AS unit_cost
+      FROM product_cost_candidates
+      WHERE sku IS NOT NULL
+        AND unit_cost IS NOT NULL
+      GROUP BY user_id, sku
+    ),
+    sales_lines AS (
+      SELECT
+        line.*,
+        COALESCE(line.product_cost, lookup.unit_cost * line.quantity) AS resolved_product_cost
+      FROM channel_sales_lines line
+      LEFT JOIN product_cost_lookup lookup
+        ON lookup.user_id = line.user_id
+       AND lookup.sku = line.source_sku
+      WHERE line.user_id = ${input.userId}::uuid
+        AND line.occurred_on >= ${input.start}::date
+        AND line.occurred_on < ${input.end}::date
+    )
     SELECT
       channel,
       COALESCE(SUM(sales_amount), 0)::text AS sales,
-      COALESCE(SUM(product_cost), 0)::text AS "productCost",
+      COALESCE(SUM(resolved_product_cost), 0)::text AS "productCost",
       COALESCE(SUM(marketplace_fee), 0)::text AS "marketplaceFee",
       COALESCE(SUM(paid_shipping_fee), 0)::text AS "paidShippingFee",
       COALESCE(SUM(actual_shipping_fee), 0)::text AS "actualShippingFee",
@@ -271,8 +328,8 @@ export async function getChannelSalesAggregates(input: {
       COALESCE(SUM(
         CASE
           WHEN profit_amount IS NOT NULL THEN profit_amount
-          WHEN product_cost IS NOT NULL THEN sales_amount
-            - product_cost
+          WHEN resolved_product_cost IS NOT NULL THEN sales_amount
+            - resolved_product_cost
             - COALESCE(marketplace_fee, 0)
             + COALESCE(paid_shipping_fee, 0)
             - COALESCE(actual_shipping_fee, 0)
@@ -282,16 +339,13 @@ export async function getChannelSalesAggregates(input: {
       ), 0)::text AS "finalProfit",
       BOOL_OR(
         profit_amount IS NOT NULL
-        OR product_cost IS NOT NULL
+        OR resolved_product_cost IS NOT NULL
         OR marketplace_fee IS NOT NULL
         OR paid_shipping_fee IS NOT NULL
         OR actual_shipping_fee IS NOT NULL
         OR box_cost IS NOT NULL
       ) AS "hasProfitData"
-    FROM channel_sales_lines
-    WHERE user_id = ${input.userId}::uuid
-      AND occurred_on >= ${input.start}::date
-      AND occurred_on < ${input.end}::date
+    FROM sales_lines
     GROUP BY channel
     ORDER BY channel
   `))

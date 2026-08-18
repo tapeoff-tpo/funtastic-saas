@@ -305,6 +305,22 @@ export async function getChannelSalesAggregates(input: {
         AND unit_cost IS NOT NULL
       GROUP BY user_id, sku
     ),
+    purchase_barcode_cost_lookup AS (
+      SELECT
+        request.user_id,
+        request.barcode_no AS barcode,
+        CASE
+          WHEN COUNT(DISTINCT request.sku) = 1 THEN MAX(cost.unit_cost)
+          ELSE NULL
+        END AS unit_cost
+      FROM purchase_request_items request
+      LEFT JOIN product_cost_lookup cost
+        ON cost.user_id = request.user_id
+       AND cost.sku = request.sku
+      WHERE NULLIF(BTRIM(request.barcode_no), '') IS NOT NULL
+        AND cost.unit_cost IS NOT NULL
+      GROUP BY request.user_id, request.barcode_no
+    ),
     mapping_source_keys AS (
       SELECT DISTINCT
         ms.user_id,
@@ -395,6 +411,7 @@ export async function getChannelSalesAggregates(input: {
           line.product_cost,
           mapped.unit_cost * line.quantity,
           sku_cost.unit_cost * line.quantity,
+          barcode_cost.unit_cost * line.quantity,
           name_cost.unit_cost * line.quantity
         ) AS resolved_product_cost
       FROM channel_sales_lines line
@@ -404,6 +421,12 @@ export async function getChannelSalesAggregates(input: {
       LEFT JOIN product_cost_lookup sku_cost
         ON sku_cost.user_id = line.user_id
        AND sku_cost.sku = line.source_sku
+      LEFT JOIN purchase_barcode_cost_lookup barcode_cost
+        ON barcode_cost.user_id = line.user_id
+       AND barcode_cost.barcode = COALESCE(
+         NULLIF(BTRIM(line.raw_data->>'SKU Barcode'), ''),
+         NULLIF(BTRIM(line.raw_data->>'상품바코드'), '')
+       )
       LEFT JOIN product_name_cost_lookup name_cost
         ON name_cost.user_id = line.user_id
        AND name_cost.normalized_name = LOWER(regexp_replace(BTRIM(COALESCE(line.product_name, '')), '\\s+', '', 'g'))

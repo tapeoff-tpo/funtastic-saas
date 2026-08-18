@@ -743,6 +743,55 @@ export async function getOutboundReflectionSalesAggregates(input: {
        AND inventory.sku = line.sku
       GROUP BY line.source_order_number
     ),
+    outbound_tracking AS (
+      SELECT DISTINCT
+        line.source_order_number,
+        NULLIF(
+          REGEXP_REPLACE(
+            COALESCE(
+              NULLIF(BTRIM(line.raw_data ->> '송장번호'), ''),
+              NULLIF(BTRIM(line.raw_data ->> '운송장번호'), ''),
+              NULLIF(BTRIM(line.raw_data ->> '운송장 번호'), '')
+            ),
+            '[^0-9A-Za-z]',
+            '',
+            'g'
+          ),
+          ''
+        ) AS normalized_tracking_number
+      FROM applied_lines line
+    ),
+    shipping_matches AS (
+      SELECT DISTINCT
+        packages.source_order_number,
+        cost.id AS shipping_cost_id
+      FROM order_packaging packages
+      INNER JOIN outbound_tracking tracking
+        ON tracking.source_order_number = packages.source_order_number
+       AND tracking.normalized_tracking_number IS NOT NULL
+      INNER JOIN actual_shipping_costs cost
+        ON cost.user_id = ${input.userId}::uuid
+       AND cost.normalized_tracking_number = tracking.normalized_tracking_number
+
+      UNION
+
+      SELECT DISTINCT
+        packages.source_order_number,
+        cost.id AS shipping_cost_id
+      FROM order_packaging packages
+      INNER JOIN actual_shipping_costs cost
+        ON cost.user_id = ${input.userId}::uuid
+       AND BTRIM(COALESCE(cost.order_number, '')) = BTRIM(packages.source_order_number)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM outbound_tracking tracking
+        INNER JOIN actual_shipping_costs tracking_cost
+          ON tracking_cost.user_id = ${input.userId}::uuid
+         AND tracking_cost.normalized_tracking_number = tracking.normalized_tracking_number
+        WHERE tracking.source_order_number = packages.source_order_number
+          AND tracking.normalized_tracking_number IS NOT NULL
+      )
+    ),
     shipping_costs AS (
       SELECT
         packages.source_order_number,
@@ -751,9 +800,10 @@ export async function getOutboundReflectionSalesAggregates(input: {
           COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(cost.quantity, 1), 1)
         ), 0) AS box_cost
       FROM order_packaging packages
+      LEFT JOIN shipping_matches matches
+        ON matches.source_order_number = packages.source_order_number
       LEFT JOIN actual_shipping_costs cost
-        ON cost.user_id = ${input.userId}::uuid
-       AND BTRIM(COALESCE(cost.order_number, '')) = BTRIM(packages.source_order_number)
+        ON cost.id = matches.shipping_cost_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(NULLIF(BTRIM(cost.package_type), ''), packages.fallback_package_name) AS package_name
       ) resolved ON true

@@ -71,8 +71,11 @@ export type OutboundReflectionSalesAggregate = {
   marketplaceId: string
   marketplaceName: string
   sales: number
+  productCost: number
   marketplaceFee: number
   paidShippingFee: number
+  actualShippingFee: number
+  boxCost: number
   finalProfit: number
   hasProfitData: boolean
 }
@@ -86,6 +89,24 @@ const SABANGNET_SKU_HEADERS = ['사방넷 상품코드', '사방넷상품코드'
 const SHIPMENT_DATE_HEADERS = ['출고완료일자', '출고완료 날짜', '출고일자', '출고일']
 const MARKETPLACE_FEE_HEADERS = ['결제금액 수수료', '판매수수료', '수수료']
 const PROFIT_HEADERS = ['순이익액', '순이익', '이익금액']
+
+// 품목 화면과 매출분석이 같은 Works 원가를 사용하도록 고정한다.
+// p 별칭은 출고반영 집계 CTE의 products 조인에서 사용한다.
+const OUTBOUND_ITEM_COST = sql`
+  NULLIF(
+    regexp_replace(
+      COALESCE(
+        NULLIF(p.metadata->'esa009m'->>'works 신규 원가', ''),
+        NULLIF(p.metadata->'esa009m'->>'works 기존 원가', ''),
+        ''
+      ),
+      '[^0-9.-]',
+      '',
+      'g'
+    ),
+    ''
+  )::numeric
+`
 
 const TABLE_SQL = sql`
   CREATE TABLE IF NOT EXISTS outbound_reflection_batches (
@@ -242,6 +263,10 @@ export async function importOutboundReflectionBatch(input: {
     const rawMarketplaceName = pickByHeaders(raw, MARKETPLACE_HEADERS)
     const marketplaceName = rawMarketplaceName || input.fallbackMarketplaceName || input.fallbackMarketplaceId || ''
     const connection = matchMarketplaceConnection(connections, marketplaceName, input.fallbackMarketplaceId)
+    const reportingMarketplace = normalizeOutboundReflectionMarketplace(
+      marketplaceName,
+      connection?.marketplaceId ?? input.fallbackMarketplaceId ?? null,
+    )
     const sourceOrderNumber = pickByHeaders(raw, SABANGNET_ORDER_NUMBER_HEADERS) || row.orderNumber
     const sourceSku = pickByHeaders(raw, SABANGNET_SKU_HEADERS) || row.sku || ''
     return {
@@ -251,8 +276,8 @@ export async function importOutboundReflectionBatch(input: {
       sourceOrderNumber,
       sourceKey: createSourceKey(sourceOrderNumber, sourceSku || row.sku || `row-${index + 1}`),
       shipmentDate: formatShipmentDate(pickByHeaders(raw, SHIPMENT_DATE_HEADERS) || row.orderedAt),
-      marketplaceName,
-      marketplaceId: connection?.marketplaceId ?? input.fallbackMarketplaceId ?? null,
+      marketplaceName: reportingMarketplace.name ?? '',
+      marketplaceId: reportingMarketplace.id,
     }
   })
 
@@ -408,20 +433,25 @@ export async function getOutboundReflectionLines(
     ORDER BY row_number ASC
     LIMIT ${limit}
   `))
-  return rows.map((row) => ({
-    ...row,
-    quantity: toNumber(row.quantity),
-    salesAmount: toNumber(row.salesAmount),
-    shippingFee: row.shippingFee == null ? null : toNumber(row.shippingFee),
-    marketplaceFee: row.marketplaceFee == null ? null : toNumber(row.marketplaceFee),
-    profitAmount: row.profitAmount == null ? null : toNumber(row.profitAmount),
-    claimType: normalizeClaimType(row.claimType),
-    reflectionStatus: row.reflectionStatus as OutboundReflectionStatus,
-    issueCodes: Array.isArray(row.issueCodes) ? row.issueCodes as OutboundReflectionIssueCode[] : [],
-    issueMessages: Array.isArray(row.issueMessages) ? row.issueMessages : [],
-    appliedAt: row.appliedAt ? new Date(row.appliedAt) : null,
-    createdAt: new Date(row.createdAt),
-  }))
+  return rows.map((row) => {
+    const marketplace = normalizeOutboundReflectionMarketplace(row.marketplaceName, row.marketplaceId)
+    return {
+      ...row,
+      marketplaceName: marketplace.name,
+      marketplaceId: marketplace.id,
+      quantity: toNumber(row.quantity),
+      salesAmount: toNumber(row.salesAmount),
+      shippingFee: row.shippingFee == null ? null : toNumber(row.shippingFee),
+      marketplaceFee: row.marketplaceFee == null ? null : toNumber(row.marketplaceFee),
+      profitAmount: row.profitAmount == null ? null : toNumber(row.profitAmount),
+      claimType: normalizeClaimType(row.claimType),
+      reflectionStatus: row.reflectionStatus as OutboundReflectionStatus,
+      issueCodes: Array.isArray(row.issueCodes) ? row.issueCodes as OutboundReflectionIssueCode[] : [],
+      issueMessages: Array.isArray(row.issueMessages) ? row.issueMessages : [],
+      appliedAt: row.appliedAt ? new Date(row.appliedAt) : null,
+      createdAt: new Date(row.createdAt),
+    }
+  })
 }
 
 export async function updateOutboundReflectionLine(
@@ -655,33 +685,147 @@ export async function getOutboundReflectionSalesAggregates(input: {
     marketplaceId: string | null
     marketplaceName: string | null
     sales: string | number | null
+    productCost: string | number | null
     marketplaceFee: string | number | null
     paidShippingFee: string | number | null
+    actualShippingFee: string | number | null
+    boxCost: string | number | null
     finalProfit: string | number | null
     hasProfitData: boolean | null
   }>(await db.execute(sql`
+    WITH applied_lines AS (
+      SELECT
+        line.*,
+        CASE
+          WHEN regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%로켓배송%'
+            OR line.marketplace_id = 'coupang-rocket'
+            THEN 'coupang-rocket'
+          ELSE NULLIF(line.marketplace_id, '')
+        END AS reporting_marketplace_id,
+        CASE
+          WHEN regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%로켓배송%'
+            OR line.marketplace_id = 'coupang-rocket'
+            THEN '로켓배송'
+          ELSE NULLIF(line.marketplace_name, '')
+        END AS reporting_marketplace_name
+      FROM outbound_reflection_lines line
+      WHERE line.user_id = ${input.userId}::uuid
+        AND line.reflection_status = 'applied'
+        AND line.shipment_date >= ${input.start}::date
+        AND line.shipment_date < ${input.end}::date
+    ),
+    product_costs AS (
+      SELECT p.user_id, p.internal_sku AS sku, ${OUTBOUND_ITEM_COST} AS unit_cost
+      FROM products p
+      WHERE p.user_id = ${input.userId}::uuid
+        AND p.status::text <> 'deleted'
+      UNION ALL
+      SELECT p.user_id, pv.sku, ${OUTBOUND_ITEM_COST} AS unit_cost
+      FROM product_variants pv
+      INNER JOIN products p ON p.id = pv.product_id
+      WHERE p.user_id = ${input.userId}::uuid
+        AND p.status::text <> 'deleted'
+        AND pv.is_active = true
+    ),
+    order_packaging AS (
+      SELECT
+        line.source_order_number,
+        MIN(line.shipment_date) AS shipment_date,
+        CASE
+          WHEN COUNT(DISTINCT NULLIF(BTRIM(inventory.packaging_unit), '')) = 1
+            AND BOOL_AND(NULLIF(BTRIM(inventory.packaging_unit), '') IS NOT NULL)
+            THEN MAX(NULLIF(BTRIM(inventory.packaging_unit), ''))
+          ELSE NULL
+        END AS fallback_package_name
+      FROM applied_lines line
+      LEFT JOIN inventory
+        ON inventory.user_id = line.user_id
+       AND inventory.sku = line.sku
+      GROUP BY line.source_order_number
+    ),
+    shipping_costs AS (
+      SELECT
+        packages.source_order_number,
+        COALESCE(SUM(cost.actual_fee::numeric), 0) AS actual_shipping_fee,
+        COALESCE(SUM(
+          COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(cost.quantity, 1), 1)
+        ), 0) AS box_cost
+      FROM order_packaging packages
+      LEFT JOIN actual_shipping_costs cost
+        ON cost.user_id = ${input.userId}::uuid
+       AND BTRIM(COALESCE(cost.order_number, '')) = BTRIM(packages.source_order_number)
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(NULLIF(BTRIM(cost.package_type), ''), packages.fallback_package_name) AS package_name
+      ) resolved ON true
+      LEFT JOIN LATERAL (
+        SELECT rate.unit_cost::numeric AS unit_cost
+        FROM box_cost_rates rate
+        WHERE rate.user_id = ${input.userId}::uuid
+          AND rate.is_active = true
+          AND LOWER(BTRIM(rate.package_name)) = LOWER(BTRIM(resolved.package_name))
+          AND rate.effective_from <= COALESCE(cost.delivered_at, cost.accepted_at, packages.shipment_date)
+        ORDER BY rate.effective_from DESC
+        LIMIT 1
+      ) rate ON true
+      GROUP BY packages.source_order_number
+    ),
+    order_totals AS (
+      SELECT
+        line.source_order_number,
+        line.reporting_marketplace_id,
+        MAX(line.reporting_marketplace_name) AS reporting_marketplace_name,
+        COALESCE(SUM(CASE WHEN line.claim_type = 'return' THEN -line.sales_amount ELSE line.sales_amount END), 0) AS sales,
+        COALESCE(SUM(CASE WHEN line.claim_type = 'return' THEN -COALESCE(line.marketplace_fee, 0) ELSE COALESCE(line.marketplace_fee, 0) END), 0) AS marketplace_fee,
+        COALESCE(SUM(CASE WHEN line.claim_type = 'return' THEN -COALESCE(line.shipping_fee, 0) ELSE COALESCE(line.shipping_fee, 0) END), 0) AS paid_shipping_fee,
+        COALESCE(SUM(
+          CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
+          * COALESCE(product_cost.unit_cost, 0)
+        ), 0) AS product_cost,
+        BOOL_AND(product_cost.unit_cost IS NOT NULL) AS has_product_cost,
+        COALESCE(SUM(CASE WHEN line.claim_type = 'return' THEN -COALESCE(line.profit_amount, 0) ELSE COALESCE(line.profit_amount, 0) END), 0) AS source_profit,
+        BOOL_OR(line.profit_amount IS NOT NULL) AS has_source_profit
+      FROM applied_lines line
+      LEFT JOIN product_costs product_cost
+        ON product_cost.user_id = line.user_id
+       AND product_cost.sku = line.sku
+      GROUP BY line.source_order_number, line.reporting_marketplace_id
+    )
     SELECT
-      NULLIF(marketplace_id, '') AS "marketplaceId",
-      NULLIF(MAX(marketplace_name), '') AS "marketplaceName",
-      COALESCE(SUM(CASE WHEN claim_type = 'return' THEN -sales_amount ELSE sales_amount END), 0)::text AS sales,
-      COALESCE(SUM(CASE WHEN claim_type = 'return' THEN -COALESCE(marketplace_fee, 0) ELSE COALESCE(marketplace_fee, 0) END), 0)::text AS "marketplaceFee",
-      COALESCE(SUM(CASE WHEN claim_type = 'return' THEN -COALESCE(shipping_fee, 0) ELSE COALESCE(shipping_fee, 0) END), 0)::text AS "paidShippingFee",
-      COALESCE(SUM(CASE WHEN claim_type = 'return' THEN -COALESCE(profit_amount, 0) ELSE COALESCE(profit_amount, 0) END), 0)::text AS "finalProfit",
-      BOOL_OR(profit_amount IS NOT NULL) AS "hasProfitData"
-    FROM outbound_reflection_lines
-    WHERE user_id = ${input.userId}::uuid
-      AND reflection_status = 'applied'
-      AND shipment_date >= ${input.start}::date
-      AND shipment_date < ${input.end}::date
-    GROUP BY NULLIF(marketplace_id, '')
+      COALESCE(order_totals.reporting_marketplace_id, 'sabangnet-other') AS "marketplaceId",
+      COALESCE(MAX(order_totals.reporting_marketplace_name), '사방넷 출고반영') AS "marketplaceName",
+      COALESCE(SUM(order_totals.sales), 0)::text AS sales,
+      COALESCE(SUM(order_totals.product_cost), 0)::text AS "productCost",
+      COALESCE(SUM(order_totals.marketplace_fee), 0)::text AS "marketplaceFee",
+      COALESCE(SUM(order_totals.paid_shipping_fee), 0)::text AS "paidShippingFee",
+      COALESCE(SUM(shipping_costs.actual_shipping_fee), 0)::text AS "actualShippingFee",
+      COALESCE(SUM(shipping_costs.box_cost), 0)::text AS "boxCost",
+      COALESCE(SUM(
+        CASE
+          WHEN order_totals.has_source_profit THEN order_totals.source_profit
+          ELSE order_totals.sales
+            - order_totals.marketplace_fee
+            + order_totals.paid_shipping_fee
+            - order_totals.product_cost
+            - COALESCE(shipping_costs.actual_shipping_fee, 0)
+            - COALESCE(shipping_costs.box_cost, 0)
+        END
+      ), 0)::text AS "finalProfit",
+      BOOL_AND(order_totals.has_source_profit OR order_totals.has_product_cost) AS "hasProfitData"
+    FROM order_totals
+    LEFT JOIN shipping_costs
+      ON shipping_costs.source_order_number = order_totals.source_order_number
+    GROUP BY order_totals.reporting_marketplace_id
     ORDER BY sales DESC
   `))
   return rows.map((row) => ({
     marketplaceId: row.marketplaceId || 'sabangnet-other',
     marketplaceName: row.marketplaceName || '사방넷 출고반영',
     sales: toNumber(row.sales),
+    productCost: toNumber(row.productCost),
     marketplaceFee: toNumber(row.marketplaceFee),
     paidShippingFee: toNumber(row.paidShippingFee),
+    actualShippingFee: toNumber(row.actualShippingFee),
+    boxCost: toNumber(row.boxCost),
     finalProfit: toNumber(row.finalProfit),
     hasProfitData: Boolean(row.hasProfitData),
   }))
@@ -915,6 +1059,18 @@ function outboundWarehouseZone(marketplaceName: string | null) {
   const normalizedName = normalizeKey(marketplaceName ?? '')
   if (normalizedName.includes(normalizeKey('로켓배송'))) return '쿠팡'
   return '1창고'
+}
+
+export function normalizeOutboundReflectionMarketplace(
+  marketplaceName: string | null | undefined,
+  marketplaceId: string | null | undefined,
+): { name: string | null; id: string | null } {
+  const name = marketplaceName?.trim() || null
+  const id = marketplaceId?.trim() || null
+  if (normalizeKey(name ?? '').includes(normalizeKey('로켓배송')) || id === 'coupang-rocket') {
+    return { name: '로켓배송', id: 'coupang-rocket' }
+  }
+  return { name, id }
 }
 
 function parseCurrency(value: string): number | null {

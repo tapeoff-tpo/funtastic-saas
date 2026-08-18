@@ -94,7 +94,7 @@ const KNOWN_MARKETPLACE_ALIASES: Array<{ marketplaceId: string; displayName: str
   { marketplaceId: 'naver', displayName: '스마트스토어', aliases: ['스마트스토어', '네이버', 'naver'] },
   { marketplaceId: 'ohouse', displayName: '오늘의집', aliases: ['오늘의집', 'ohouse'] },
   { marketplaceId: 'ssgmall', displayName: '신세계몰', aliases: ['신세계몰', 'ssg', 'ssgmall'] },
-  { marketplaceId: 'coupang', displayName: '쿠팡', aliases: ['쿠팡', 'coupang'] },
+  { marketplaceId: 'coupang', displayName: '쿠팡', aliases: ['쿠팡', 'coupang', '쿠팡 로켓배송(신)', '로켓배송 쇼핑몰', '로켓배송'] },
   { marketplaceId: 'elevenst', displayName: '11번가', aliases: ['11번가', 'elevenst'] },
   { marketplaceId: 'gmarket', displayName: 'G마켓', aliases: ['g마켓', '지마켓', 'esm지마켓', 'gmarket'] },
   { marketplaceId: 'auction', displayName: '옥션', aliases: ['옥션', 'esm옥션', 'auction'] },

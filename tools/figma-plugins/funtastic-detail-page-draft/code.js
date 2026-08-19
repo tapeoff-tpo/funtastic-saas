@@ -12,6 +12,8 @@ const GENERATED_ASSETS_BY_SKU = {
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-wash-v1.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-hang-v1.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-texture-v1.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-flatlay-v1.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-flex-v1.png`,
   ],
   '112369-0001': [`${SERVER_URL}/detail-page-assets/water-bucket-ai-lifestyle-v1.png`],
   '112370-0001': [`${SERVER_URL}/detail-page-assets/ribbon-harness-ai-lifestyle-v1.png`],
@@ -1207,9 +1209,12 @@ async function findOrCreateGenericTarget(job) {
 }
 
 async function buildGenericDraft(job) {
-  const images = genericImages(job)
   const generatedImages = GENERATED_ASSETS_BY_SKU[job.product.sku] || []
   if (!generatedImages.length) throw new Error('자료보완 필요: 제품 충실 AI 생성 이미지가 준비되지 않았습니다.')
+  const supplierImages = genericImages(job)
+  const images = job.product.sku === '110336-0001'
+    ? [...supplierImages.slice(0, 1), ...generatedImages]
+    : supplierImages
   const target = await findOrCreateGenericTarget(job)
   const page = target.parent
   if (!page || page.type !== 'PAGE') throw new Error('상세페이지를 배치할 Figma 페이지를 찾지 못했습니다.')

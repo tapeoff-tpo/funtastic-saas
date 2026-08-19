@@ -408,6 +408,23 @@ export async function getOrderProfitAnalysisData(
         AND o.status::text IN ${STATUS_FILTER}
       GROUP BY o.id
     ),
+    order_tracking_numbers AS (
+      SELECT DISTINCT ON (UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')))
+        items.order_id,
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')) AS normalized_tracking_number
+      FROM item_summary items
+      JOIN orders o ON o.id = items.order_id
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(o.raw_data->'rawLines') = 'array' THEN o.raw_data->'rawLines'
+          ELSE '[]'::jsonb
+        END
+      ) line
+      WHERE NULLIF(BTRIM(line->>'송장번호'), '') IS NOT NULL
+      ORDER BY
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')),
+        items.order_id
+    ),
     shipment_summary AS (
       SELECT
         s.order_id,
@@ -478,8 +495,32 @@ export async function getOrderProfitAnalysisData(
         ON ascost.user_id = ${userId}
        AND ascost.shipment_id IS NULL
        AND ascost.order_id = items.order_id
+       AND NOT EXISTS (
+         SELECT 1
+         FROM order_tracking_numbers tracking
+         WHERE tracking.normalized_tracking_number = ascost.normalized_tracking_number
+       )
 
-      UNION ALL
+      UNION
+
+      SELECT
+        tracking.order_id,
+        ascost.id,
+        ascost.tracking_number,
+        ascost.package_type,
+        ascost.actual_fee,
+        ascost.quantity,
+        ascost.delivered_at,
+        ascost.accepted_at,
+        items.sales_at
+      FROM order_tracking_numbers tracking
+      JOIN item_summary items ON items.order_id = tracking.order_id
+      JOIN actual_shipping_costs ascost
+        ON ascost.user_id = ${userId}
+       AND ascost.shipment_id IS NULL
+       AND ascost.normalized_tracking_number = tracking.normalized_tracking_number
+
+      UNION
 
       SELECT
         items.order_id,
@@ -497,6 +538,11 @@ export async function getOrderProfitAnalysisData(
         ON ascost.user_id = ${userId}
        AND ascost.shipment_id IS NULL
        AND ascost.order_id IS NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM order_tracking_numbers tracking
+         WHERE tracking.normalized_tracking_number = ascost.normalized_tracking_number
+       )
        AND ascost.order_number IN (o.marketplace_order_id, o.internal_no)
     ),
     order_actual_costs AS (
@@ -993,6 +1039,23 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       WHERE s.user_id = ${userId}
       GROUP BY ob.account_key
     ),
+    order_tracking_numbers AS (
+      SELECT DISTINCT ON (UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')))
+        ob.id AS order_id,
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')) AS normalized_tracking_number
+      FROM order_base ob
+      JOIN orders o ON o.id = ob.id
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(o.raw_data->'rawLines') = 'array' THEN o.raw_data->'rawLines'
+          ELSE '[]'::jsonb
+        END
+      ) line
+      WHERE NULLIF(BTRIM(line->>'송장번호'), '') IS NOT NULL
+      ORDER BY
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')),
+        ob.id
+    ),
     order_actual_costs AS (
       SELECT
         ob.account_key,
@@ -1001,8 +1064,10 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
           COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
         ), 0) AS box_cost
       FROM actual_shipping_costs ascost
+      LEFT JOIN order_tracking_numbers tracking
+        ON tracking.normalized_tracking_number = ascost.normalized_tracking_number
       JOIN orders o
-        ON o.id = ascost.order_id
+        ON o.id = COALESCE(tracking.order_id, ascost.order_id)
        AND o.user_id = ascost.user_id
       JOIN order_base ob ON ob.id = o.id
       LEFT JOIN order_packaging op ON op.order_id = o.id
@@ -1021,7 +1086,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       ) rate ON true
       WHERE ascost.user_id = ${userId}
         AND ascost.shipment_id IS NULL
-        AND ascost.order_id IS NOT NULL
+        AND COALESCE(tracking.order_id, ascost.order_id) IS NOT NULL
       GROUP BY ob.account_key
     )
     SELECT
@@ -1306,6 +1371,23 @@ export async function getProductProfitAnalysisData(
       WHERE s.user_id = ${userId}
       GROUP BY s.order_id
     )
+    , order_tracking_numbers AS (
+      SELECT DISTINCT ON (UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')))
+        ob.id AS order_id,
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')) AS normalized_tracking_number
+      FROM order_base ob
+      JOIN orders o ON o.id = ob.id
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(o.raw_data->'rawLines') = 'array' THEN o.raw_data->'rawLines'
+          ELSE '[]'::jsonb
+        END
+      ) line
+      WHERE NULLIF(BTRIM(line->>'송장번호'), '') IS NOT NULL
+      ORDER BY
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')),
+        ob.id
+    )
     , order_actual_costs AS (
       SELECT
         o.id AS order_id,
@@ -1314,8 +1396,10 @@ export async function getProductProfitAnalysisData(
           COALESCE(rate.unit_cost, 0) * GREATEST(COALESCE(ascost.quantity, 1), 1)
         ), 0) AS box_cost
       FROM actual_shipping_costs ascost
+      LEFT JOIN order_tracking_numbers tracking
+        ON tracking.normalized_tracking_number = ascost.normalized_tracking_number
       JOIN orders o
-        ON o.id = ascost.order_id
+        ON o.id = COALESCE(tracking.order_id, ascost.order_id)
        AND o.user_id = ascost.user_id
       JOIN order_base ob ON ob.id = o.id
       LEFT JOIN order_packaging op ON op.order_id = o.id
@@ -1334,7 +1418,7 @@ export async function getProductProfitAnalysisData(
       ) rate ON true
       WHERE ascost.user_id = ${userId}
         AND ascost.shipment_id IS NULL
-        AND ascost.order_id IS NOT NULL
+        AND COALESCE(tracking.order_id, ascost.order_id) IS NOT NULL
       GROUP BY o.id
     )
     , product_rows AS (

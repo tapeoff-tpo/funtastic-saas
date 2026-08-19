@@ -223,14 +223,20 @@ export async function importActualShippingCosts(data: {
 }): Promise<ActualShippingCostImportResult> {
   await ensureActualShippingCostsTable()
   const parsed = await parseActualShippingCostWorkbook(data.carrierId, data.fileBuffer)
-  const shipmentByTracking = await findShipmentsByNormalizedTracking(
-    data.userId,
-    parsed.rows.map((row) => row.normalizedTrackingNumber),
-  )
-  const orderByNumber = await findOrdersByNumber(
-    data.userId,
-    parsed.rows.map((row) => row.orderNumber),
-  )
+  const [shipmentByTracking, orderByTracking, orderByNumber] = await Promise.all([
+    findShipmentsByNormalizedTracking(
+      data.userId,
+      parsed.rows.map((row) => row.normalizedTrackingNumber),
+    ),
+    findOrdersByNormalizedTracking(
+      data.userId,
+      parsed.rows.map((row) => row.normalizedTrackingNumber),
+    ),
+    findOrdersByNumber(
+      data.userId,
+      parsed.rows.map((row) => row.orderNumber),
+    ),
+  ])
 
   const uniqueRows = Array.from(new Map(
     parsed.rows.map((row) => [`${row.carrierId}:${row.normalizedTrackingNumber}`, row]),
@@ -242,13 +248,19 @@ export async function importActualShippingCosts(data: {
   const unmatchedRows: ActualShippingCostResultRow[] = []
   const insertRows = uniqueRows.map((row) => {
     const shipment = shipmentByTracking.get(row.normalizedTrackingNumber) ?? null
+    const trackingOrder = orderByTracking.get(row.normalizedTrackingNumber) ?? null
     const order = shipment?.orderId
       ? { id: shipment.orderId }
-      : orderByNumber.get(normalizeOrderNumber(row.orderNumber)) ?? null
+      : trackingOrder ?? orderByNumber.get(normalizeOrderNumber(row.orderNumber)) ?? null
     const resultRow = toResultRow(row)
-    if (shipment) {
+    if (shipment || trackingOrder) {
       shipmentMatched += 1
-      shipmentMatchedRows.push({ ...resultRow, reason: '운송장번호로 매칭되었습니다.' })
+      shipmentMatchedRows.push({
+        ...resultRow,
+        reason: shipment
+          ? '운송장번호로 출고 데이터와 매칭되었습니다.'
+          : '운송장번호로 사방넷 주문과 매칭되었습니다.',
+      })
     } else if (order) {
       orderMatched += 1
       orderMatchedRows.push({ ...resultRow, reason: '주문번호로 매칭되었습니다.' })
@@ -382,6 +394,37 @@ export async function relinkActualShippingCosts(userId: string): Promise<number>
     )
     SELECT COUNT(*)::text AS count FROM updated
   `)
+  const trackingOrderLinked = await db.execute<{ count: string | number }>(sql`
+    WITH order_tracking_numbers AS (
+      SELECT DISTINCT ON (UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')))
+        o.id AS order_id,
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')) AS normalized_tracking_number
+      FROM orders o
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(o.raw_data->'rawLines') = 'array' THEN o.raw_data->'rawLines'
+          ELSE '[]'::jsonb
+        END
+      ) line
+      WHERE o.user_id = ${userId}
+        AND NULLIF(BTRIM(line->>'송장번호'), '') IS NOT NULL
+      ORDER BY
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')),
+        o.id
+    ),
+    updated AS (
+      UPDATE actual_shipping_costs a
+      SET
+        order_id = tracking.order_id,
+        updated_at = now()
+      FROM order_tracking_numbers tracking
+      WHERE a.user_id = ${userId}
+        AND a.shipment_id IS NULL
+        AND tracking.normalized_tracking_number = a.normalized_tracking_number
+      RETURNING a.id
+    )
+    SELECT COUNT(*)::text AS count FROM updated
+  `)
   const orderLinked = await db.execute<{ count: string | number }>(sql`
     WITH updated AS (
       UPDATE actual_shipping_costs a
@@ -399,7 +442,9 @@ export async function relinkActualShippingCosts(userId: string): Promise<number>
     SELECT COUNT(*)::text AS count FROM updated
   `)
 
-  return Number(shipmentLinked[0]?.count ?? 0) + Number(orderLinked[0]?.count ?? 0)
+  return Number(shipmentLinked[0]?.count ?? 0)
+    + Number(trackingOrderLinked[0]?.count ?? 0)
+    + Number(orderLinked[0]?.count ?? 0)
 }
 
 async function findShipmentsByNormalizedTracking(userId: string, normalizedValues: string[]) {
@@ -424,6 +469,40 @@ async function findShipmentsByNormalizedTracking(userId: string, normalizedValue
 
     for (const row of rows) {
       matched.set(row.normalizedTrackingNumber, { id: row.id, orderId: row.orderId })
+    }
+  }
+  return matched
+}
+
+async function findOrdersByNormalizedTracking(userId: string, normalizedValues: string[]) {
+  const values = Array.from(new Set(normalizedValues.filter(Boolean)))
+  const matched = new Map<string, { id: string }>()
+  if (values.length === 0) return matched
+
+  for (const valueChunk of chunks(values, 1000)) {
+    const result = await db.execute<{ id: string; normalizedTrackingNumber: string }>(sql`
+      SELECT DISTINCT ON (UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')))
+        o.id,
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')) AS "normalizedTrackingNumber"
+      FROM orders o
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(o.raw_data->'rawLines') = 'array' THEN o.raw_data->'rawLines'
+          ELSE '[]'::jsonb
+        END
+      ) line
+      WHERE o.user_id = ${userId}
+        AND ${inArray(
+          sql<string>`UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g'))`,
+          valueChunk,
+        )}
+      ORDER BY
+        UPPER(REGEXP_REPLACE(line->>'송장번호', '[^0-9A-Za-z]', '', 'g')),
+        o.id
+    `)
+
+    for (const row of result) {
+      matched.set(row.normalizedTrackingNumber, { id: row.id })
     }
   }
   return matched

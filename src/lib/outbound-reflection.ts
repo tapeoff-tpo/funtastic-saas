@@ -302,7 +302,7 @@ export async function importOutboundReflectionBatch(input: {
       marketplaceId: line.marketplaceId,
     }),
     shippingFee: line.row.shippingFee ?? null,
-    marketplaceFee: parseNonNegativeCurrency(pickByHeaders(line.raw, MARKETPLACE_FEE_HEADERS)),
+    marketplaceFee: outboundMarketplaceFee(line.raw, line.marketplaceName),
     profitAmount: parseCurrency(pickByHeaders(line.raw, PROFIT_HEADERS)),
     claimType: claimTypeFromText(pickByHeaders(line.raw, ORDER_STATUS_HEADERS)),
     duplicateInFile: (sourceKeyCounts.get(line.sourceKey) ?? 0) > 1,
@@ -1174,6 +1174,12 @@ function parseCurrency(value: string): number | null {
 function parseNonNegativeCurrency(value: string): number | null {
   const amount = parseCurrency(value)
   return amount == null ? null : Math.max(0, amount)
+}
+
+function outboundMarketplaceFee(raw: RawExcelRow, marketplaceName: string): number | null {
+  // 온채널의 값은 실제 수수료가 아니라 -4~1원의 정산 반올림 차이다.
+  if (normalizeKey(marketplaceName).includes(normalizeKey('온채널'))) return 0
+  return parseNonNegativeCurrency(pickByHeaders(raw, MARKETPLACE_FEE_HEADERS))
 }
 
 function cleanOptionalString(value: unknown): string | undefined {

@@ -1104,11 +1104,23 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     ORDER BY SUM(ob.total_amount) DESC
   `)
 
-  // Legacy channel-sales files stay available in their own data store, but do not
-  // contribute to the dashboard. Only outbound reflection is an analytics source.
-  const channelSalesPromise = Promise.resolve<ChannelSalesAggregate[]>([])
-  const lastMonthChannelSalesPromise = Promise.resolve<ChannelSalesAggregate[]>([])
-  const previousThreeMonthChannelSalesPromise = Promise.resolve<ChannelSalesAggregate[]>([])
+  // Rocket/bulk sales are entered separately from the outbound-reflection file.
+  // Sabangnet review and legacy order imports remain excluded from analytics.
+  const channelSalesPromise = getChannelSalesAggregates({
+    userId,
+    start: monthStart,
+    end: nextMonthStart,
+  })
+  const lastMonthChannelSalesPromise = getChannelSalesAggregates({
+    userId,
+    start: lastMonthStart,
+    end: lastMonthSameDayEnd,
+  })
+  const previousThreeMonthChannelSalesPromise = getChannelSalesAggregates({
+    userId,
+    start: previousThreeMonthStart,
+    end: monthStart,
+  })
   const outboundReflectionSalesPromise = getOutboundReflectionSalesAggregates({
     userId,
     start: monthStart,

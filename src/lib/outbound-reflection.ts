@@ -706,14 +706,23 @@ export async function getOutboundReflectionSalesAggregates(input: {
           WHEN regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%로켓배송%'
             OR line.marketplace_id = 'coupang-rocket'
             THEN 'coupang-rocket'
+          WHEN regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%대량%'
+            THEN 'channel-sales:bulk'
           ELSE NULLIF(line.marketplace_id, '')
         END AS reporting_marketplace_id,
         CASE
           WHEN regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%로켓배송%'
             OR line.marketplace_id = 'coupang-rocket'
             THEN '로켓배송'
+          WHEN regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%대량%'
+            THEN '대량'
           ELSE NULLIF(line.marketplace_name, '')
-        END AS reporting_marketplace_name
+        END AS reporting_marketplace_name,
+        (
+          regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%로켓배송%'
+          OR line.marketplace_id = 'coupang-rocket'
+          OR regexp_replace(COALESCE(line.marketplace_name, ''), '\\s+', '', 'g') LIKE '%대량%'
+        ) AS separately_entered_sales
       FROM outbound_reflection_lines line
       WHERE line.user_id = ${input.userId}::uuid
         AND line.reflection_status = 'applied'
@@ -830,12 +839,18 @@ export async function getOutboundReflectionSalesAggregates(input: {
         COALESCE(SUM(CASE WHEN line.claim_type = 'return' THEN -COALESCE(line.marketplace_fee, 0) ELSE COALESCE(line.marketplace_fee, 0) END), 0) AS marketplace_fee,
         COALESCE(SUM(CASE WHEN line.claim_type = 'return' THEN -COALESCE(line.shipping_fee, 0) ELSE COALESCE(line.shipping_fee, 0) END), 0) AS paid_shipping_fee,
         COALESCE(SUM(
-          CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
-          * COALESCE(product_cost.unit_cost, 0)
+          CASE WHEN line.separately_entered_sales THEN 0 ELSE
+            CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
+            * COALESCE(product_cost.unit_cost, 0)
+          END
         ), 0) AS product_cost,
-        BOOL_AND(product_cost.unit_cost IS NOT NULL) AS has_product_cost,
-        COALESCE(SUM(CASE WHEN line.claim_type = 'return' THEN -COALESCE(line.profit_amount, 0) ELSE COALESCE(line.profit_amount, 0) END), 0) AS source_profit,
-        BOOL_OR(line.profit_amount IS NOT NULL) AS has_source_profit
+        BOOL_AND(line.separately_entered_sales OR product_cost.unit_cost IS NOT NULL) AS has_product_cost,
+        COALESCE(SUM(CASE
+          WHEN line.separately_entered_sales THEN 0
+          WHEN line.claim_type = 'return' THEN -COALESCE(line.profit_amount, 0)
+          ELSE COALESCE(line.profit_amount, 0)
+        END), 0) AS source_profit,
+        BOOL_OR(NOT line.separately_entered_sales AND line.profit_amount IS NOT NULL) AS has_source_profit
       FROM applied_lines line
       LEFT JOIN product_costs product_cost
         ON product_cost.user_id = line.user_id
@@ -1121,6 +1136,9 @@ export function normalizeOutboundReflectionMarketplace(
   const id = marketplaceId?.trim() || null
   if (normalizeKey(name ?? '').includes(normalizeKey('로켓배송')) || id === 'coupang-rocket') {
     return { name: '로켓배송', id: 'coupang-rocket' }
+  }
+  if (normalizeKey(name ?? '').includes(normalizeKey('대량'))) {
+    return { name: '대량', id: 'channel-sales:bulk' }
   }
   return { name, id }
 }

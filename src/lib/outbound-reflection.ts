@@ -87,7 +87,9 @@ const MARKETPLACE_HEADERS = ['쇼핑몰명', '마켓명', '쇼핑몰', '마켓',
 const SABANGNET_ORDER_NUMBER_HEADERS = ['사방넷 주문번호', '사방넷주문번호']
 const SABANGNET_SKU_HEADERS = ['사방넷 상품코드', '사방넷상품코드']
 const SHIPMENT_DATE_HEADERS = ['출고완료일자', '출고완료 날짜', '출고일자', '출고일']
-const MARKETPLACE_FEE_HEADERS = ['결제금액 수수료', '판매수수료', '수수료']
+// `결제금액 수수료` is a payment-difference field and becomes negative when
+// 최종결제금액 is zero. Only the explicit seller discount/fee field is usable.
+const MARKETPLACE_FEE_HEADERS = ['판매자할인금액+수수료']
 const PROFIT_HEADERS = ['순이익액', '순이익', '이익금액']
 const SALES_TOTAL_HEADERS = ['판매가x수량', '판매가×수량']
 
@@ -300,7 +302,7 @@ export async function importOutboundReflectionBatch(input: {
       marketplaceId: line.marketplaceId,
     }),
     shippingFee: line.row.shippingFee ?? null,
-    marketplaceFee: parseCurrency(pickByHeaders(line.raw, MARKETPLACE_FEE_HEADERS)),
+    marketplaceFee: parseNonNegativeCurrency(pickByHeaders(line.raw, MARKETPLACE_FEE_HEADERS)),
     profitAmount: parseCurrency(pickByHeaders(line.raw, PROFIT_HEADERS)),
     claimType: claimTypeFromText(pickByHeaders(line.raw, ORDER_STATUS_HEADERS)),
     duplicateInFile: (sourceKeyCounts.get(line.sourceKey) ?? 0) > 1,
@@ -1167,6 +1169,11 @@ function parseCurrency(value: string): number | null {
   const normalized = value.replaceAll(',', '').replace(/[₩원\s]/g, '')
   const amount = Number(normalized)
   return Number.isFinite(amount) ? amount : null
+}
+
+function parseNonNegativeCurrency(value: string): number | null {
+  const amount = parseCurrency(value)
+  return amount == null ? null : Math.max(0, amount)
 }
 
 function cleanOptionalString(value: unknown): string | undefined {

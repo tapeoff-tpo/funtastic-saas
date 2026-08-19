@@ -1221,7 +1221,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
 
 export const getCachedSalesDashboardData = unstable_cache(
   async (userId: string, monthKey: string) => getSalesDashboardData(userId, parseAnalyticsMonth(monthKey)),
-  ['sales-dashboard-v2'],
+  ['sales-dashboard-v3'],
   { revalidate: 30, tags: ['analytics'] },
 )
 

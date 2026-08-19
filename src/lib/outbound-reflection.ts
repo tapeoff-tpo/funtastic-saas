@@ -89,6 +89,7 @@ const SABANGNET_SKU_HEADERS = ['사방넷 상품코드', '사방넷상품코드'
 const SHIPMENT_DATE_HEADERS = ['출고완료일자', '출고완료 날짜', '출고일자', '출고일']
 const MARKETPLACE_FEE_HEADERS = ['결제금액 수수료', '판매수수료', '수수료']
 const PROFIT_HEADERS = ['순이익액', '순이익', '이익금액']
+const SALES_TOTAL_HEADERS = ['판매가x수량', '판매가×수량']
 
 // 품목 화면과 매출분석이 같은 Works 원가를 사용하도록 고정한다.
 // p 별칭은 출고반영 집계 CTE의 products 조인에서 사용한다.
@@ -292,7 +293,12 @@ export async function importOutboundReflectionBatch(input: {
     productName: line.row.productName || null,
     optionText: line.row.optionText || null,
     quantity: line.row.quantity,
-    salesAmount: line.row.totalAmount,
+    salesAmount: resolveOutboundSalesAmount({
+      parsedAmount: line.row.totalAmount,
+      raw: line.raw,
+      marketplaceName: line.marketplaceName,
+      marketplaceId: line.marketplaceId,
+    }),
     shippingFee: line.row.shippingFee ?? null,
     marketplaceFee: parseCurrency(pickByHeaders(line.raw, MARKETPLACE_FEE_HEADERS)),
     profitAmount: parseCurrency(pickByHeaders(line.raw, PROFIT_HEADERS)),
@@ -1121,6 +1127,25 @@ export function normalizeOutboundReflectionMarketplace(
     return { name: '로켓배송', id: 'coupang-rocket' }
   }
   return { name, id }
+}
+
+export function resolveOutboundSalesAmount(input: {
+  parsedAmount: number
+  raw: RawExcelRow
+  marketplaceName: string | null | undefined
+  marketplaceId: string | null | undefined
+}): number {
+  const parsedAmount = Math.max(0, toNumber(input.parsedAmount))
+  if (parsedAmount > 0) return parsedAmount
+
+  const marketplaceKey = normalizeKey(`${input.marketplaceName ?? ''} ${input.marketplaceId ?? ''}`)
+  const isSeparatelyEntered = marketplaceKey.includes(normalizeKey('로켓배송'))
+    || marketplaceKey.includes(normalizeKey('대량'))
+    || input.marketplaceId === 'coupang-rocket'
+  if (isSeparatelyEntered) return parsedAmount
+
+  const salesTotal = parseCurrency(pickByHeaders(input.raw, SALES_TOTAL_HEADERS))
+  return salesTotal != null && salesTotal > 0 ? salesTotal : parsedAmount
 }
 
 function parseCurrency(value: string): number | null {

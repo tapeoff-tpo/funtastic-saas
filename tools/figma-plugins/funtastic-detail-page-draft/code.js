@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.9'
+const PLUGIN_VERSION = '1.2.10'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -8,6 +8,11 @@ const IP_NOTICE_NODE_ID = '184:51'
 const BRIDGE_STATE_KEY = 'funtastic-detail-page-bridge'
 
 const GENERATED_ASSETS_BY_SKU = {
+  '110336-0001': [
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-wash-v1.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-hang-v1.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-texture-v1.png`,
+  ],
   '112369-0001': [`${SERVER_URL}/detail-page-assets/water-bucket-ai-lifestyle-v1.png`],
   '112370-0001': [`${SERVER_URL}/detail-page-assets/ribbon-harness-ai-lifestyle-v1.png`],
   '112371-0001': [`${SERVER_URL}/detail-page-assets/stripe-harness-ai-lifestyle-v1.png`],
@@ -1219,8 +1224,10 @@ async function buildGenericDraft(job) {
     scratch.appendChild(await makeGenericCover(job, images))
     scratch.appendChild(await makeGenericOptions(job, images))
     const points = genericPointCopy(job.product)
-    for (let index = 0; index < points.length; index += 1) scratch.appendChild(await makeGenericPoint(index + 1, points[index], images[(index + 2) % images.length]))
-    scratch.appendChild(await makeGenericAiScene(job.product, generatedImages[0]))
+    for (let index = 0; index < points.length; index += 1) {
+      scratch.appendChild(await makeGenericPoint(index + 1, points[index], images[(index + 2) % images.length]))
+      if (generatedImages[index]) scratch.appendChild(await makeGenericAiScene(job.product, generatedImages[index]))
+    }
     scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
     scratch.appendChild(await makeGenericSize(job.product, images[0]))
     scratch.appendChild(makeGenericProductInfo(job.product))

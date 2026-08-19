@@ -724,14 +724,10 @@ export async function getOutboundReflectionSalesAggregates(input: {
       SELECT p.user_id, p.internal_sku AS sku, ${OUTBOUND_ITEM_COST} AS unit_cost
       FROM products p
       WHERE p.user_id = ${input.userId}::uuid
-        AND p.status::text <> 'deleted'
-      UNION ALL
-      SELECT p.user_id, pv.sku, ${OUTBOUND_ITEM_COST} AS unit_cost
-      FROM product_variants pv
-      INNER JOIN products p ON p.id = pv.product_id
-      WHERE p.user_id = ${input.userId}::uuid
-        AND p.status::text <> 'deleted'
-        AND pv.is_active = true
+        -- SKU 통합 전 원가 품목은 deleted 상태로 남고, 활성 품목/옵션에는
+        -- 원가 메타데이터가 없다. 출고 SKU와 정확히 일치하는 기존 품목을
+        -- 포함해야 Works 원가가 유지된다.
+        AND ${OUTBOUND_ITEM_COST} IS NOT NULL
     ),
     order_packaging AS (
       SELECT

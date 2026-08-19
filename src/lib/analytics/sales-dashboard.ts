@@ -1169,21 +1169,21 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         key: 'month-sales',
         label: '선택 월 매출',
         value: toNumber(metric?.monthSales) + channelSalesTotal.sales + outboundReflectionTotal.sales,
-        subLabel: '출고완료일 우선 / 매출파일·출고반영 포함',
+        subLabel: '출고반영 적용 데이터 기준',
       },
       {
         key: 'shipped-expected',
         label: '선택 월 출고완료 매출예상금액',
         value: toNumber(metric?.shippedExpectedSales) + channelSalesTotal.sales + outboundReflectionTotal.sales,
-        subLabel: '출고완료 상태 / 매출파일·출고반영 기준',
+        subLabel: '출고반영 적용 데이터 기준',
       },
       {
         key: 'profit-excluding-shipping',
         label: '배송비 제외 현 이익금',
         value: toNumber(metric?.currentProfitExcludingShipping) + channelSalesTotal.finalProfit + outboundReflectionTotal.finalProfit,
-        subLabel: channelSalesTotal.hasProfitData || outboundReflectionTotal.hasProfitData
-          ? '주문 계산값 + 매출파일·출고반영 파일상 마진'
-          : '매출파일·출고반영 매출은 원가 자료 전까지 이익 계산에서 제외',
+        subLabel: outboundReflectionTotal.hasProfitData
+          ? '출고반영 파일상 마진'
+          : '출고반영 매출은 원가 자료 전까지 이익 계산에서 제외',
       },
       {
         key: 'last-month-same-period',

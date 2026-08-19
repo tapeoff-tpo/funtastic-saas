@@ -3,6 +3,7 @@ import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import {
   channelSalesLabel,
+  getChannelSalesAggregates,
   type ChannelSalesAggregate,
 } from './channel-sales'
 import {

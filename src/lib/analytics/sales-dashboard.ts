@@ -230,6 +230,7 @@ type ProductProfitQueryRow = {
 
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
 const OUTBOUND_STATUS_FILTER = sql`('shipped', 'delivering', 'delivered')`
+const EXCLUDE_SABANGNET_REVIEW = sql`COALESCE(o.raw_data->>'source', '') <> 'sabangnet-review'`
 const ORDER_PROFIT_PAGE_SIZE = 50
 const ANALYTICS_SHIPPED_AT_TEXT = sql`
   COALESCE(
@@ -403,6 +404,7 @@ export async function getOrderProfitAnalysisData(
         ON ip.user_id = o.user_id
        AND ip.sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -643,6 +645,7 @@ export async function getOrderProfitAnalysisData(
       LEFT JOIN order_actual_costs order_costs ON order_costs.order_id = o.id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -850,6 +853,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -863,6 +867,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         ON p.user_id = o.user_id
        AND p.internal_sku = COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -874,6 +879,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       FROM orders o
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${OUTBOUND_STATUS_FILTER}
@@ -885,6 +891,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
       FROM orders o
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${previousThreeMonthStart}
         AND ${ANALYTICS_SALES_AT} < ${monthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -903,6 +910,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
         FROM orders o
         LEFT JOIN claim_effects ce ON ce.order_id = o.id
         WHERE o.user_id = ${userId}
+          AND ${EXCLUDE_SABANGNET_REVIEW}
           AND ${ANALYTICS_SALES_AT} >= ${lastMonthStart}
           AND ${ANALYTICS_SALES_AT} < ${lastMonthSameDayEnd}
           AND o.status::text IN ${STATUS_FILTER}
@@ -962,6 +970,7 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -1280,6 +1289,7 @@ export async function getProductProfitAnalysisData(
        AND mfs.marketplace_id = o.marketplace_id
       LEFT JOIN claim_effects ce ON ce.order_id = o.id
       WHERE o.user_id = ${userId}
+        AND ${EXCLUDE_SABANGNET_REVIEW}
         AND ${ANALYTICS_SALES_AT} >= ${monthStart}
         AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
         AND o.status::text IN ${STATUS_FILTER}
@@ -1523,6 +1533,7 @@ async function getSalesComparisonData(
     FROM comparison_months cm
     LEFT JOIN orders o
       ON o.user_id = ${userId}
+     AND ${EXCLUDE_SABANGNET_REVIEW}
      AND ${ANALYTICS_SALES_AT} >= cm.month_start
      AND ${ANALYTICS_SALES_AT} < cm.month_end
      AND o.status::text IN ${STATUS_FILTER}

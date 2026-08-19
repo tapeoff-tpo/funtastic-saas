@@ -3,7 +3,6 @@ import { unstable_cache } from 'next/cache'
 import { db } from '@/lib/db'
 import {
   channelSalesLabel,
-  getChannelSalesAggregates,
   type ChannelSalesAggregate,
 } from './channel-sales'
 import {
@@ -230,7 +229,9 @@ type ProductProfitQueryRow = {
 
 const STATUS_FILTER = sql`('new', 'confirmed', 'preparing', 'ready', 'shipped', 'delivering', 'delivered')`
 const OUTBOUND_STATUS_FILTER = sql`('shipped', 'delivering', 'delivered')`
-const EXCLUDE_SABANGNET_REVIEW = sql`COALESCE(o.raw_data->>'source', '') <> 'sabangnet-review'`
+// Sales analytics is sourced exclusively from applied outbound-reflection rows.
+// Keep order-backed analysis queries empty so review/imported orders cannot alter totals.
+const EXCLUDE_SABANGNET_REVIEW = sql`FALSE`
 const ORDER_PROFIT_PAGE_SIZE = 50
 const ANALYTICS_SHIPPED_AT_TEXT = sql`
   COALESCE(
@@ -1103,21 +1104,11 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     ORDER BY SUM(ob.total_amount) DESC
   `)
 
-  const channelSalesPromise = getChannelSalesAggregates({
-    userId,
-    start: monthStart,
-    end: nextMonthStart,
-  })
-  const lastMonthChannelSalesPromise = getChannelSalesAggregates({
-    userId,
-    start: lastMonthStart,
-    end: lastMonthSameDayEnd,
-  })
-  const previousThreeMonthChannelSalesPromise = getChannelSalesAggregates({
-    userId,
-    start: previousThreeMonthStart,
-    end: monthStart,
-  })
+  // Legacy channel-sales files stay available in their own data store, but do not
+  // contribute to the dashboard. Only outbound reflection is an analytics source.
+  const channelSalesPromise = Promise.resolve<ChannelSalesAggregate[]>([])
+  const lastMonthChannelSalesPromise = Promise.resolve<ChannelSalesAggregate[]>([])
+  const previousThreeMonthChannelSalesPromise = Promise.resolve<ChannelSalesAggregate[]>([])
   const outboundReflectionSalesPromise = getOutboundReflectionSalesAggregates({
     userId,
     start: monthStart,

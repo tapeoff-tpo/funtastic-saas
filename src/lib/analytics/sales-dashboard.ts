@@ -374,6 +374,7 @@ export async function getOrderProfitAnalysisData(
     item_summary AS (
       SELECT
         o.id AS order_id,
+        MAX(${ANALYTICS_SALES_AT}) AS sales_at,
         STRING_AGG(DISTINCT COALESCE(NULLIF(oi.locked_product_name, ''), oi.product_name), ', ') AS product_summary,
         STRING_AGG(DISTINCT COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''), '미매핑'), ', ') AS sku_summary,
         COALESCE(SUM(
@@ -461,9 +462,46 @@ export async function getOrderProfitAnalysisData(
       WHERE s.user_id = ${userId}
       GROUP BY s.order_id
     ),
+    order_actual_cost_matches AS (
+      SELECT
+        items.order_id,
+        ascost.id,
+        ascost.tracking_number,
+        ascost.package_type,
+        ascost.actual_fee,
+        ascost.quantity,
+        ascost.delivered_at,
+        ascost.accepted_at,
+        items.sales_at
+      FROM item_summary items
+      JOIN actual_shipping_costs ascost
+        ON ascost.user_id = ${userId}
+       AND ascost.shipment_id IS NULL
+       AND ascost.order_id = items.order_id
+
+      UNION ALL
+
+      SELECT
+        items.order_id,
+        ascost.id,
+        ascost.tracking_number,
+        ascost.package_type,
+        ascost.actual_fee,
+        ascost.quantity,
+        ascost.delivered_at,
+        ascost.accepted_at,
+        items.sales_at
+      FROM item_summary items
+      JOIN orders o ON o.id = items.order_id
+      JOIN actual_shipping_costs ascost
+        ON ascost.user_id = ${userId}
+       AND ascost.shipment_id IS NULL
+       AND ascost.order_id IS NULL
+       AND ascost.order_number IN (o.marketplace_order_id, o.internal_no)
+    ),
     order_actual_costs AS (
       SELECT
-        o.id AS order_id,
+        matched.order_id,
         STRING_AGG(DISTINCT ascost.tracking_number, ', ') AS tracking_summary,
         STRING_AGG(DISTINCT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name, '박스명 없음'), ', ') AS package_summary,
         COALESCE(SUM(ascost.actual_fee::numeric), 0) AS actual_shipping_fee,
@@ -474,18 +512,9 @@ export async function getOrderProfitAnalysisData(
           WHERE COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) IS NULL
             OR rate.unit_cost IS NULL
         ) AS missing_box_cost_count
-      FROM actual_shipping_costs ascost
-      JOIN orders o
-        ON o.user_id = ascost.user_id
-       AND (
-         o.id = ascost.order_id
-         OR (
-           ascost.shipment_id IS NULL
-           AND ascost.order_number IS NOT NULL
-           AND ascost.order_number IN (o.marketplace_order_id, o.internal_no)
-         )
-       )
-      LEFT JOIN item_summary items ON items.order_id = o.id
+      FROM order_actual_cost_matches matched
+      JOIN actual_shipping_costs ascost ON ascost.id = matched.id
+      JOIN item_summary items ON items.order_id = matched.order_id
       LEFT JOIN LATERAL (
         SELECT COALESCE(NULLIF(BTRIM(ascost.package_type), ''), items.fallback_package_name) AS package_name
       ) resolved ON true
@@ -495,17 +524,11 @@ export async function getOrderProfitAnalysisData(
         WHERE bcr.user_id = ${userId}
           AND bcr.is_active = true
           AND LOWER(BTRIM(bcr.package_name)) = LOWER(BTRIM(resolved.package_name))
-          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, (${ANALYTICS_SALES_AT})::date)
+          AND bcr.effective_from <= COALESCE(ascost.delivered_at, ascost.accepted_at, matched.sales_at::date)
         ORDER BY bcr.effective_from DESC
         LIMIT 1
       ) rate ON true
-      WHERE ascost.user_id = ${userId}
-        AND ascost.shipment_id IS NULL
-        AND ascost.order_id IS NOT NULL
-        AND ${ANALYTICS_SALES_AT} >= ${monthStart}
-        AND ${ANALYTICS_SALES_AT} < ${nextMonthStart}
-        AND o.status::text IN ${STATUS_FILTER}
-      GROUP BY o.id
+      GROUP BY matched.order_id
     ),
     profit_rows AS (
       SELECT

@@ -938,30 +938,14 @@ export async function getSalesDashboardData(userId: string, now = new Date()): P
     order_base AS (
       SELECT
         o.id,
-        o.marketplace_id || ':' || COALESCE(
-          NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
-          o.connection_id::text,
-          mfs.fallback_sales_export_id,
-          'unlinked'
-        ) AS account_key,
+        o.marketplace_id AS account_key,
         COALESCE(
           NULLIF(mc.metadata->>'systemMarketplaceName', ''),
           NULLIF(mfs.fallback_system_name, ''),
           NULLIF(mc.display_name, ''),
           NULLIF(mfs.fallback_display_name, ''),
           o.marketplace_id
-        )
-        || CASE
-          WHEN COALESCE(
-            NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
-            NULLIF(mfs.fallback_sales_export_id, '')
-          ) IS NOT NULL
-          THEN '(' || COALESCE(
-            NULLIF(mc.metadata->>'salesExportMarketplaceId', ''),
-            NULLIF(mfs.fallback_sales_export_id, '')
-          ) || ')'
-          ELSE ''
-        END AS marketplace_name,
+        ) AS marketplace_name,
         (CASE WHEN COALESCE(ce.has_return, false) THEN -1 ELSE 1 END * ${ANALYTICS_ORDER_AMOUNT}) AS total_amount,
         COALESCE(o.shipping_fee::numeric, 0) AS paid_shipping_fee,
         CASE

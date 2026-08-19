@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.11'
+const PLUGIN_VERSION = '1.2.12'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1038,6 +1038,12 @@ async function buildDessertBearFromReference(job, images, target) {
 
 function genericPointCopy(product) {
   const text = `${product.name} ${product.option} ${product.material}`.toLowerCase()
+  if (product.sku === '110336-0001' || /뼈다귀.*수세미|수세미.*뼈다귀/.test(text)) return [
+    ['잘록한 가운데를 편안하게 쥐어요', '뼈다귀 모양의 가운데 부분이 손에 자연스럽게 잡혀 설거지할 때 움직이기 편해요.'],
+    ['촘촘한 수세미 결로 꼼꼼하게', '풍성한 섬유 조직이 그릇에 남은 음식물과 기름기를 닦아내는 데 도움을 줘요.'],
+    ['유연하게 닿아 굴곡진 곳까지', '부드럽게 휘어지는 소재라 접시 가장자리와 굴곡진 부분도 구석구석 닦기 좋아요.'],
+    ['사용 후에는 걸어서 깔끔하게', '걸이끈으로 통풍이 잘되는 곳에 걸어두면 싱크대 주변을 간결하게 정리할 수 있어요.'],
+  ]
   if (/키링|인형|플러시|곰|베어/.test(text)) return [
     ['한눈에 반하는 포인트', '작지만 또렷한 디테일로 매일 드는 가방의 분위기를 바꿔줘요.'],
     ['보송하게 느껴지는 촉감', `${product.material || '부드러운 소재'}로 포근한 인상을 살렸어요.`],

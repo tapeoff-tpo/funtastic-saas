@@ -12,6 +12,7 @@ describe('parseEcountPurchasingSnapshot', () => {
         ['20260715-001', '100001-0001', '중국창고', '테스트 상품', '블루', 'N', 10, '2026-07-30', 'P-001', '발주요청', '진행중', '담당자'],
         ['20260715-002', '100002-0001', '중국창고', '완료 상품', '레드', 'N', 30, '2026-07-30', 'P-002', '발주요청', '완료', '담당자'],
         ['20260610-001', '100003-0001', '중국창고', '6월 완료 상품', '그린', 'N', 15, '2026-07-30', 'P-003', '발주요청', '완료', '담당자'],
+        ['20260716-001', '100005-0001', '중국창고', '계획 누락 완료 상품', '화이트', 'N', 12, '', 'P-NOPLAN', '발주요청', '완료', '담당자'],
       ]),
       makeUpload('발주 계획 현황.xlsx', [
         '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
@@ -54,12 +55,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       purchasePlanConfirmedSince: '2026-07-01',
     })
 
-    expect(snapshot.activeRequests).toHaveLength(1)
-    expect(snapshot.activeRequests[0]).toMatchObject({
-      sku: '100001-0001',
-      requestedQuantity: 10,
-      purchaseManagementCode: 'P-001',
-    })
+    expect(snapshot.activeRequests).toEqual([])
     expect(snapshot.chinaInventory).toHaveLength(3)
     expect(snapshot.chinaInventory.map((item) => item.quantity)).toEqual([4, 50, 7])
     expect(snapshot.chinaInventory).toContainEqual(expect.objectContaining({
@@ -70,57 +66,35 @@ describe('parseEcountPurchasingSnapshot', () => {
         중국창고: 30,
       },
     }))
-    expect(snapshot.purchaseCompleted).toHaveLength(4)
-    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
-      {
-        source: 'ecount_purchasing_snapshot_purchase_completed',
-        sku: '100001-0001',
-        quantity: 10,
-        purchaseManagementCode: 'P-001',
-      },
-    ))
-    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
-      {
+    expect(snapshot.purchaseCompleted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
         source: 'ecount_purchasing_snapshot_plan_purchase_completed',
         sku: '100002-0001',
         quantity: 25,
         purchaseManagementCode: 'P-002',
         chinaArrivalRequestDate: '2026-07-30',
         supplierOrderNumber: '987654321',
-      },
-    ))
-    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
-      {
-        source: 'ecount_purchasing_snapshot_plan_purchase_completed',
-        sku: '100003-0001',
-        quantity: 15,
-        purchaseManagementCode: 'P-003',
-      },
-    ))
-    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining(
-      {
-        source: 'ecount_purchasing_snapshot_purchase_completed',
-        sku: '100004-0001',
-        quantity: 25,
-        purchaseManagementCode: 'P-OLD',
-        chinaArrivalRequestDate: '2026-07-30',
-      },
-    ))
+      }),
+      expect.objectContaining({
+        source: 'ecount_purchasing_snapshot_request_completed',
+        sku: '100005-0001',
+        quantity: 12,
+        purchaseManagementCode: 'P-NOPLAN',
+      }),
+    ]))
+    expect(snapshot.purchaseCompleted).toHaveLength(2)
     expect(snapshot.outboundCompleted).toMatchObject([
+      { sku: '100001-0001', quantity: 10, effectiveDate: '2026-07-13' },
       { sku: '109037-9998-package', quantity: 20, effectiveDate: '2026-07-15' },
       { sku: '100002-0001', quantity: 5, effectiveDate: '2026-07-20' },
     ])
-    expect(snapshot.outboundCompleted).not.toContainEqual(expect.objectContaining({
-      sku: '100001-0001',
-      effectiveDate: '2026-07-13',
-    }))
     expect(snapshot.outboundPending).toEqual([])
     expect(snapshot.validation).toMatchObject({
-      activeRequestsMatchedToPlan: 1,
-      activeRequestsMatchedToPurchase: 1,
-      outboundRowsWithSupplierOrder: 0,
-      outboundRowsMatchedToPurchase: 0,
-      outboundRowsWithoutReliableSupplierOrder: 0,
+      activeRequestsMatchedToPlan: 0,
+      activeRequestsMatchedToPurchase: 0,
+      outboundRowsWithSupplierOrder: 2,
+      outboundRowsMatchedToPurchase: 2,
+      outboundRowsWithoutReliableSupplierOrder: 1,
     })
   })
 
@@ -134,6 +108,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       ], [
         ['20260610-001', '100001-0001', 'Past item', 'basic', 'N', 10, '2026-07-20', 'P-PAST', '', '\uC644\uB8CC', ''],
         ['20260715-001', '100002-0001', 'Future item', 'basic', 'N', 20, '2026-07-30', 'P-FUTURE', '', '\uC644\uB8CC', ''],
+        ['20260716-001', '100003-0001', 'No identifier item', 'basic', 'N', 15, '', '', '', '\uC644\uB8CC', ''],
       ]),
       makeUpload('purchase-plan.xlsx', [
         '\uC77C\uC790-No.', '\uC785\uACE0\uCC3D\uACE0\uBA85', '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9',
@@ -142,12 +117,15 @@ describe('parseEcountPurchasingSnapshot', () => {
       ], [
         ['20260610-001', '\uC911\uAD6D\uCC3D\uACE0', '100001-0001', 'Past item', 'basic', 10, '', '\uAC1C\uC778', 'P-PAST', '\uBC1C\uC8FC\uACC4\uD68D'],
         ['20260715-001', '\uC911\uAD6D\uCC3D\uACE0', '100002-0001', 'Future item', 'basic', 20, '', '\uAC1C\uC778', 'P-FUTURE', '\uBC1C\uC8FC\uACC4\uD68D'],
+        ['20260716-001', '\uC911\uAD6D\uCC3D\uACE0', '100003-0001', 'No identifier item', 'basic', 15, '', '\uAC1C\uC778', '', '\uBC1C\uC8FC\uACC4\uD68D'],
       ]),
       makeUpload('purchase-history.xlsx', [
         '\uC77C\uC790-No.', '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9', '\uBC1C\uC8FC\uACC4\uD68D\uC77C\uC790',
         '\uAD6C\uB9E4\uC218\uB7C9(EA)', '\uC911\uAD6D\uCC3D\uACE0 \uB3C4\uCC29\uC694\uCCAD\uC77C',
         '\uBC1C\uC8FC\uC11C-no', '\uAD6C\uC785\uAD00\uB9AC\uCF54\uB4DC', '\uC9C4\uD589\uC0C1\uD0DC', '\uC8FC\uBB38\uC11C\uBC88\uD638 (C)',
-      ], []),
+      ], [
+        ['20260717-001', '100003-0001', 'No identifier item', 'basic', '2026-07-16', 15, '', '', '', '\uD655\uC778', ''],
+      ]),
       makeUpload('china-inventory.xlsx', [
         '\uD488\uBAA9\uCF54\uB4DC', '\uD488\uBAA9\uBA85', '\uADDC\uACA9', '\uD488\uBAA9\uAD6C\uBD84', '\uD569\uACC4', '\uC911\uAD6D\uCC3D\uACE0',
       ], []),
@@ -164,6 +142,9 @@ describe('parseEcountPurchasingSnapshot', () => {
     })
 
     expect(snapshot.purchaseCompleted).toHaveLength(2)
+    expect(snapshot.purchaseCompleted).not.toContainEqual(expect.objectContaining({
+      sku: '100003-0001',
+    }))
     expect(snapshot.purchaseCompleted).toEqual(expect.arrayContaining([
       expect.objectContaining({
         sku: '100001-0001',

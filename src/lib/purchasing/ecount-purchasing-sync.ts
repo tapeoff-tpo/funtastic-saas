@@ -8,6 +8,7 @@ import {
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
+export const ECOUNT_REQUEST_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_request_completed'
 export const ECOUNT_PURCHASE_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_purchase_completed'
 export const ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_plan_purchase_completed'
 export const ECOUNT_CHINA_ARRIVED_SOURCE = 'ecount_purchasing_snapshot_china_arrived'
@@ -17,6 +18,7 @@ export const ECOUNT_OUTBOUND_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_outb
 const REPLACEABLE_ECOUNT_SOURCES = [
   ECOUNT_PURCHASING_LEGACY_SOURCE,
   ECOUNT_PENDING_REQUEST_SOURCE,
+  ECOUNT_REQUEST_COMPLETED_SOURCE,
   ECOUNT_PURCHASE_COMPLETED_SOURCE,
   ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
   ECOUNT_CHINA_ARRIVED_SOURCE,
@@ -42,6 +44,7 @@ const REPORT_KINDS = [
 
 type EcountReportKind = (typeof REPORT_KINDS)[number]
 type EcountPurchaseCompletedSource =
+  | typeof ECOUNT_REQUEST_COMPLETED_SOURCE
   | typeof ECOUNT_PURCHASE_COMPLETED_SOURCE
   | typeof ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE
 type PurchaseRequestItemInsert = typeof purchaseRequestItems.$inferInsert
@@ -235,7 +238,7 @@ export async function parseEcountPurchasingSnapshot(input: {
     ))
     .filter((key) => key !== null))
 
-  const activeRequests = readRows(purchaseRequest)
+  let activeRequests = readRows(purchaseRequest)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchaseRequest, '품목코드')))
     .filter((row) => valueAt(row, purchaseRequest, '진행상태') === '진행중')
     .map((row) => {
@@ -328,76 +331,109 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountOutboundPendingItem => row !== null)
 
-  // Rows through the reflected-through date are already in domestic inventory.
-  // Later rows become completed once their China outbound date has passed.
-  const outboundCompleted = chinaOutboundItems.filter((row) => (
-    row.effectiveDate > reflectedThrough && row.effectiveDate <= asOfDate
-  ))
+  // The effective date is the China outbound date. A row remains a Korea-arrival
+  // pipeline item, but moves from outbound-requested to China-outbound-completed
+  // as soon as that date is reached.
+  const outboundCompleted = chinaOutboundItems.filter((row) => row.effectiveDate <= asOfDate)
   const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > asOfDate)
 
-  // The plan is the current stage record. Purchase history is only a fallback when no live plan remains.
-  const purchaseCompletedFromPlan: EcountPurchaseCompletedItem[] = []
-  const handledPlanPurchaseKeys = new Set<string>()
+  // Plans are the purchase-in-progress stage. Purchase history consumes plan
+  // quantities that have already reached China. Identifiers improve matching,
+  // but missing management/order numbers never cause a row to be dropped.
+  const requestRowsByPurchaseKey = new Map<string, Array<{ number: number; row: ExcelJS.Row }>>()
   for (const request of readRows(purchaseRequest)) {
-    const sku = valueAt(request, purchaseRequest, '품목코드')
-    if (!isPurchaseItemSku(sku) || valueAt(request, purchaseRequest, '진행상태') !== '완료') continue
-
-    const purchaseManagementCode = valueAt(request, purchaseRequest, '구입관리코드')
-    const matchKey = purchaseKey(purchaseManagementCode, sku)
-    const requestDate = parseDate(valueAt(request, purchaseRequest, '일자-No.'))
-    const chinaArrivalRequestDate = parseDate(valueAt(request, purchaseRequest, '중국창고 도착요청일'))
-    if (
-      !matchKey
-      || handledPlanPurchaseKeys.has(matchKey)
-      || !requestDate
-      || !chinaArrivalRequestDate
-    ) continue
-
-    const matchingPlanRows = planRowsByPurchaseKey.get(matchKey) ?? []
-    if (matchingPlanRows.length !== 1) continue
-    const plan = matchingPlanRows[0]
-    const sourceQuantity = positiveInteger(valueAt(plan, purchasePlan, '실 구매 수량(C)'))
-    const supplierOrderNumber = emptyToNull(valueAt(plan, purchasePlan, '주문서번호 (C)'))
-    handledPlanPurchaseKeys.add(matchKey)
-    if (sourceQuantity === 0) continue
-
-    purchaseCompletedFromPlan.push({
-      source: ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
-      sourceFileName: purchasePlan.fileName,
-      sourceRowNumber: plan.number,
-      sourceDateNo: valueAt(plan, purchasePlan, '일자-No.'),
-      sourceRequestFileName: purchaseRequest.fileName,
-      sourceRequestRowNumber: request.number,
-      purchaseDate: requestDate,
-      sku,
-      productName: valueAt(plan, purchasePlan, '품목명') || valueAt(request, purchaseRequest, '품목명'),
-      optionName: emptyToNull(valueAt(plan, purchasePlan, '규격'))
-        ?? emptyToNull(valueAt(request, purchaseRequest, '규격')),
-      quantity: sourceQuantity,
-      chinaArrivalRequestDate,
-      purchaseManagementCode,
-      purchaseOrderNumber: null,
-      supplierOrderNumber,
-      purchaseMethod: emptyToNull(valueAt(plan, purchasePlan, '구매진행여부 (C)')),
-      unitPriceCny: null,
-      shippingFeeCny: null,
-    })
+    const key = purchaseKey(
+      valueAt(request, purchaseRequest, '구입관리코드'),
+      valueAt(request, purchaseRequest, '품목코드'),
+    )
+    if (!key) continue
+    const matches = requestRowsByPurchaseKey.get(key) ?? []
+    matches.push(request)
+    requestRowsByPurchaseKey.set(key, matches)
   }
-  const purchaseCompletedFromHistory = readRows(purchaseHistory)
+  const planItems = purchasePlanRows
+    .map<EcountPurchaseCompletedItem | null>((plan) => {
+      const sku = valueAt(plan, purchasePlan, '품목코드')
+      const quantity = positiveInteger(valueAt(plan, purchasePlan, '실 구매 수량(C)'))
+      if (!isPurchaseItemSku(sku) || quantity === 0) return null
+      const purchaseManagementCode = emptyToNull(valueAt(plan, purchasePlan, '구입관리코드'))
+      const requestMatches = purchaseManagementCode
+        ? requestRowsByPurchaseKey.get(purchaseKey(purchaseManagementCode, sku)!) ?? []
+        : []
+      const request = requestMatches.length === 1 ? requestMatches[0] : null
+
+      return {
+        source: ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
+        sourceFileName: purchasePlan.fileName,
+        sourceRowNumber: plan.number,
+        sourceDateNo: valueAt(plan, purchasePlan, '일자-No.'),
+        sourceRequestFileName: request ? purchaseRequest.fileName : null,
+        sourceRequestRowNumber: request?.number ?? null,
+        purchaseDate: parseDate(valueAt(plan, purchasePlan, '일자-No.')),
+        sku,
+        productName: valueAt(plan, purchasePlan, '품목명'),
+        optionName: emptyToNull(valueAt(plan, purchasePlan, '규격')),
+        quantity,
+        chinaArrivalRequestDate: request
+          ? parseDate(valueAt(request, purchaseRequest, '중국창고 도착요청일'))
+          : null,
+        purchaseManagementCode,
+        purchaseOrderNumber: null,
+        supplierOrderNumber: emptyToNull(valueAt(plan, purchasePlan, '주문서번호 (C)')),
+        purchaseMethod: emptyToNull(valueAt(plan, purchasePlan, '구매진행여부 (C)')),
+        unitPriceCny: null,
+        shippingFeeCny: null,
+      }
+    })
+    .filter((row): row is EcountPurchaseCompletedItem => row !== null)
+  const completedRequestItems = readRows(purchaseRequest)
+    .filter((row) => isPurchaseItemSku(valueAt(row, purchaseRequest, '품목코드')))
+    .filter((row) => valueAt(row, purchaseRequest, '진행상태') === '완료')
+    .map<EcountPurchaseCompletedItem | null>((request) => {
+      const sku = valueAt(request, purchaseRequest, '품목코드')
+      const quantity = positiveInteger(valueAt(request, purchaseRequest, '구매수량(EA)'))
+      if (quantity === 0) return null
+      return {
+        source: ECOUNT_REQUEST_COMPLETED_SOURCE,
+        sourceFileName: purchaseRequest.fileName,
+        sourceRowNumber: request.number,
+        sourceDateNo: valueAt(request, purchaseRequest, '일자-No.'),
+        sourceRequestFileName: purchaseRequest.fileName,
+        sourceRequestRowNumber: request.number,
+        purchaseDate: parseDate(valueAt(request, purchaseRequest, '일자-No.')),
+        sku,
+        productName: valueAt(request, purchaseRequest, '품목명'),
+        optionName: emptyToNull(valueAt(request, purchaseRequest, '규격')),
+        quantity,
+        chinaArrivalRequestDate: parseDate(valueAt(request, purchaseRequest, '중국창고 도착요청일')),
+        purchaseManagementCode: emptyToNull(valueAt(request, purchaseRequest, '구입관리코드')),
+        purchaseOrderNumber: null,
+        supplierOrderNumber: null,
+        purchaseMethod: null,
+        unitPriceCny: null,
+        shippingFeeCny: null,
+      }
+    })
+    .filter((row): row is EcountPurchaseCompletedItem => row !== null)
+  const uniqueCompletedRequestItems = deduplicateCompletedRequests(completedRequestItems)
+  activeRequests = activeRequests.filter((request) => (
+    !uniqueCompletedRequestItems.some((progressed) => pendingRequestMatchesProgressed(request, progressed))
+    && !planItems.some((progressed) => pendingRequestMatchesProgressed(request, progressed))
+  ))
+  const unplannedCompletedRequests = uniqueCompletedRequestItems.filter((request) => (
+    !planItems.some((plan) => (
+      sameManagedSku(request, plan) || pipelineMatchScore(request, plan) > 0
+    ))
+  ))
+  const historyItems = readRows(purchaseHistory)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchaseHistory, '품목코드')))
     .filter((row) => valueAt(row, purchaseHistory, '진행상태') === '확인')
     .map<EcountPurchaseCompletedItem | null>((row) => {
       const sku = valueAt(row, purchaseHistory, '품목코드')
       const sourceQuantity = positiveInteger(valueAt(row, purchaseHistory, '구매수량(EA)'))
       const purchaseManagementCode = emptyToNull(valueAt(row, purchaseHistory, '구입관리코드'))
-      const planMatchKey = purchaseKey(purchaseManagementCode ?? '', sku)
       const chinaArrivalRequestDate = parseDate(valueAt(row, purchaseHistory, '중국창고 도착요청일'))
-      if (
-        sourceQuantity === 0
-        || !chinaArrivalRequestDate
-        || chinaArrivalRequestDate <= asOfDate
-        || (planMatchKey && handledPlanPurchaseKeys.has(planMatchKey))
-      ) return null
+      if (sourceQuantity === 0) return null
 
       const supplierOrderNumber = emptyToNull(valueAt(row, purchaseHistory, '주문서번호 (C)'))
       return {
@@ -422,8 +458,12 @@ export async function parseEcountPurchasingSnapshot(input: {
       }
     })
     .filter((row): row is EcountPurchaseCompletedItem => row !== null)
+  const purchaseCompletedFromPlan = reconcilePlanWithPurchaseHistory(
+    [...planItems, ...unplannedCompletedRequests],
+    historyItems,
+  )
   const purchaseCompleted = reconcilePurchaseCompletedWithOutbound(
-    [...purchaseCompletedFromHistory, ...purchaseCompletedFromPlan],
+    purchaseCompletedFromPlan,
     chinaOutboundItems,
   )
 
@@ -433,11 +473,11 @@ export async function parseEcountPurchasingSnapshot(input: {
   const activeRequestsMatchedToPurchase = activeRequests.filter((row) => purchaseKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
   )).length
-  const outboundRowsWithSupplierOrder = outboundPending.filter((row) => row.supplierOrderNumber !== null)
+  const outboundRowsWithSupplierOrder = chinaOutboundItems.filter((row) => row.supplierOrderNumber !== null)
   const outboundRowsMatchedToPurchase = outboundRowsWithSupplierOrder.filter((row) => purchaseSupplierKeys.has(
     supplierKey(row.supplierOrderNumber, row.sku)!,
   )).length
-  const outboundRowsWithoutReliableSupplierOrder = outboundPending.length - outboundRowsWithSupplierOrder.length
+  const outboundRowsWithoutReliableSupplierOrder = chinaOutboundItems.length - outboundRowsWithSupplierOrder.length
 
   const warnings: string[] = []
   if (activeRequests.length === 0) warnings.push('진행중 발주요청이 없습니다.')
@@ -475,6 +515,125 @@ export async function parseEcountPurchasingSnapshot(input: {
     },
     warnings,
   }
+}
+
+function deduplicateCompletedRequests(items: EcountPurchaseCompletedItem[]) {
+  const keyed = new Map<string, EcountPurchaseCompletedItem>()
+  const unkeyed: EcountPurchaseCompletedItem[] = []
+  for (const item of items) {
+    const key = purchaseKey(item.purchaseManagementCode ?? '', item.sku)
+    if (!key) {
+      unkeyed.push(item)
+      continue
+    }
+    const existing = keyed.get(key)
+    if (!existing || item.sourceRowNumber > existing.sourceRowNumber) keyed.set(key, item)
+  }
+  return [...keyed.values(), ...unkeyed]
+}
+
+function pendingRequestMatchesProgressed(
+  request: EcountPendingRequest,
+  progressed: EcountPurchaseCompletedItem,
+) {
+  if (request.sku !== progressed.sku) return false
+  if (request.purchaseManagementCode && progressed.purchaseManagementCode) {
+    return request.purchaseManagementCode === progressed.purchaseManagementCode
+  }
+  const requestOption = request.optionName?.trim() ?? ''
+  const progressedOption = progressed.optionName?.trim() ?? ''
+  if (requestOption && progressedOption && requestOption !== progressedOption) return false
+  return true
+}
+
+function sameManagedSku(
+  left: EcountPurchaseCompletedItem,
+  right: EcountPurchaseCompletedItem,
+) {
+  return Boolean(
+    left.purchaseManagementCode
+    && right.purchaseManagementCode
+    && left.purchaseManagementCode === right.purchaseManagementCode
+    && left.sku === right.sku,
+  )
+}
+
+function reconcilePlanWithPurchaseHistory(
+  planItems: EcountPurchaseCompletedItem[],
+  historyItems: EcountPurchaseCompletedItem[],
+) {
+  const remainingHistoryQuantity = new Map<number, number>(
+    historyItems.map((item, index) => [index, item.quantity]),
+  )
+  const orderedHistory = historyItems
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => (
+      (left.item.purchaseDate ?? '9999-12-31').localeCompare(right.item.purchaseDate ?? '9999-12-31')
+      || left.item.sourceRowNumber - right.item.sourceRowNumber
+      || left.index - right.index
+    ))
+
+  return planItems.flatMap((plan) => {
+    let remaining = plan.quantity
+    const candidates = orderedHistory
+      .map(({ item, index }) => ({ item, index, score: pipelineMatchScore(plan, item) }))
+      .filter((candidate) => candidate.score > 0 && (remainingHistoryQuantity.get(candidate.index) ?? 0) > 0)
+      .sort((left, right) => (
+        right.score - left.score
+        || (left.item.purchaseDate ?? '9999-12-31').localeCompare(right.item.purchaseDate ?? '9999-12-31')
+        || left.item.sourceRowNumber - right.item.sourceRowNumber
+      ))
+
+    for (const candidate of candidates) {
+      if (remaining === 0) break
+      const historyRemaining = remainingHistoryQuantity.get(candidate.index) ?? 0
+      const consumed = Math.min(remaining, historyRemaining)
+      if (consumed === 0) continue
+      remaining -= consumed
+      remainingHistoryQuantity.set(candidate.index, historyRemaining - consumed)
+    }
+
+    return remaining > 0 ? [{ ...plan, quantity: remaining }] : []
+  })
+}
+
+function pipelineMatchScore(
+  left: EcountPurchaseCompletedItem,
+  right: EcountPurchaseCompletedItem,
+) {
+  if (left.sku !== right.sku) return 0
+  const leftOption = left.optionName?.trim() ?? ''
+  const rightOption = right.optionName?.trim() ?? ''
+  if (leftOption && rightOption && leftOption !== rightOption) return 0
+
+  const managementMatches = Boolean(
+    left.purchaseManagementCode
+    && right.purchaseManagementCode
+    && left.purchaseManagementCode === right.purchaseManagementCode,
+  )
+  const orderMatches = Boolean(
+    left.supplierOrderNumber
+    && right.supplierOrderNumber
+    && left.supplierOrderNumber === right.supplierOrderNumber,
+  )
+  const managementConflicts = Boolean(
+    left.purchaseManagementCode
+    && right.purchaseManagementCode
+    && left.purchaseManagementCode !== right.purchaseManagementCode,
+  )
+  const orderConflicts = Boolean(
+    left.supplierOrderNumber
+    && right.supplierOrderNumber
+    && left.supplierOrderNumber !== right.supplierOrderNumber,
+  )
+  if (!managementMatches && !orderMatches && managementConflicts && orderConflicts) return 0
+
+  let score = 10
+  if (leftOption && rightOption) score += 10
+  if (managementMatches) score += 80
+  if (orderMatches) score += 100
+  if (left.quantity === right.quantity) score += 5
+  return score
 }
 
 function reconcilePurchaseCompletedWithOutbound(

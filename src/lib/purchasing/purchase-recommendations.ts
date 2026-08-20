@@ -433,7 +433,7 @@ export async function generatePurchaseRecommendations(input: {
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'outbound_requested']),
+        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'outbound_requested', 'completed']),
       ))
 
     const autoReviewRows = activeRequestRows.filter(
@@ -840,7 +840,13 @@ function purchasePipelineQuantity(input: {
   rawData: unknown
 }) {
   const outboundRequestedQuantity = readPositiveInteger(input.rawData, 'outboundRequestedQuantity')
-  const quantity = input.status === 'outbound_requested'
+  const outboundCompletedQuantity = readPositiveInteger(input.rawData, 'outboundCompletedQuantity')
+  const quantity = input.status === 'completed'
+    ? outboundCompletedQuantity
+      ?? input.chinaReceivedQuantity
+      ?? input.actualPurchaseQuantity
+      ?? input.requestedQuantity
+    : input.status === 'outbound_requested'
     ? outboundRequestedQuantity
       ?? input.chinaReceivedQuantity
       ?? input.actualPurchaseQuantity

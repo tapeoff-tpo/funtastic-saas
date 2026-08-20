@@ -12,7 +12,7 @@ export type PurchaseRequestStatus = (typeof PURCHASE_REQUEST_STATUSES)[number]
 export const PURCHASE_REQUEST_STATUS_LABELS: Record<PurchaseRequestStatus, string> = {
   requested: '발주검토',
   purchased: '발주요청',
-  purchase_completed: '구매완료',
+  purchase_completed: '구매중',
   china_arrived: '중국창고도착',
   outbound_requested: '중국출고요청',
   completed: '중국출고완료',

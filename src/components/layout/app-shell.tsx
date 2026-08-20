@@ -36,7 +36,7 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <NavStateProvider>
-      <div className="flex h-screen">
+      <div className="flex h-dvh overflow-hidden">
         {collapsed ? (
           <button
             type="button"
@@ -49,9 +49,9 @@ export function AppShell({ children }: AppShellProps) {
         ) : (
           <Sidebar onCollapse={toggleCollapsed} />
         )}
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <TabBar />
-          <main className="flex-1 overflow-auto bg-gray-50 p-6">
+          <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-gray-50 p-6">
             <PurchasingLanguageSwitcher />
             {children}
           </main>

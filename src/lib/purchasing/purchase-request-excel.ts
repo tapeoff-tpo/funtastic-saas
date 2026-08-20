@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import ExcelJS from 'exceljs'
-import { and, asc, desc, eq, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import { purchaseRequestItems } from '@/lib/db/schema'
+import { products, purchaseRequestItems } from '@/lib/db/schema'
+import { calculatePurchaseCosts } from './purchase-costs'
 import { purchaseRequestWriteLockKey } from './purchase-request-create'
 import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
 import {
@@ -30,6 +31,10 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '실제구매수량',
   '중국입고수량',
   '중국출고요청수량',
+  '개당 원가(元)',
+  '개당 원가(₩)',
+  '총 원가(元)',
+  '총 원가(₩)',
   '구입관리코드',
   '주문서번호',
   '발주요청 날짜',
@@ -77,6 +82,11 @@ export async function exportPurchaseRequestsExcel(input: {
   })
 
   for (const row of rows) {
+    const costs = calculatePurchaseCosts({
+      requestedQuantity: row.requestedQuantity,
+      unitCostYuan: row.unitCostYuan,
+      unitCostKrw: row.unitCostKrw,
+    })
     sheet.addRow({
       ID: row.id,
       상태: PURCHASE_REQUEST_STATUS_LABELS[row.status],
@@ -87,6 +97,10 @@ export async function exportPurchaseRequestsExcel(input: {
       실제구매수량: row.actualPurchaseQuantity ?? '',
       중국입고수량: row.chinaReceivedQuantity ?? '',
       중국출고요청수량: outboundRequestedQuantity(row.rawData),
+      '개당 원가(元)': costs.unitCostYuan ?? '',
+      '개당 원가(₩)': costs.unitCostKrw ?? '',
+      '총 원가(元)': costs.totalCostYuan ?? '',
+      '총 원가(₩)': costs.totalCostKrw ?? '',
       구입관리코드: row.purchaseManagementCode ?? '',
       주문서번호: row.supplierOrderNumber ?? '',
       '발주요청 날짜': dateText(row.requestDate),
@@ -97,6 +111,11 @@ export async function exportPurchaseRequestsExcel(input: {
       메모: row.memo ?? '',
     })
   }
+
+  sheet.getColumn('개당 원가(元)').numFmt = '#,##0.00'
+  sheet.getColumn('개당 원가(₩)').numFmt = '#,##0'
+  sheet.getColumn('총 원가(元)').numFmt = '#,##0.00'
+  sheet.getColumn('총 원가(₩)').numFmt = '#,##0'
 
   const buffer = await workbook.xlsx.writeBuffer()
   return new Uint8Array(buffer)
@@ -280,7 +299,15 @@ async function getPurchaseRequestRowsForExcel(input: {
     )!)
   }
 
-  return db.select().from(purchaseRequestItems)
+  return db.select({
+    ...getTableColumns(purchaseRequestItems),
+    unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+    unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+  }).from(purchaseRequestItems)
+    .leftJoin(products, and(
+      eq(products.userId, purchaseRequestItems.userId),
+      eq(products.internalSku, purchaseRequestItems.sku),
+    ))
     .where(and(...conditions))
     .orderBy(desc(purchaseRequestItems.requestDate), asc(purchaseRequestItems.productName), asc(purchaseRequestItems.sku))
 }

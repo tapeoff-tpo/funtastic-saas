@@ -160,6 +160,49 @@ describe('parseEcountPurchasingSnapshot', () => {
       }),
     ]))
   })
+
+  it('does not consume a newer plan with an older purchase when management codes conflict', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-request.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '사전포장여부코드', '구매수량(EA)',
+        '중국창고 도착요청일', '구입관리코드', '현재상태', '진행상태', '사원(담당)명',
+      ], [
+        ['20260729-8', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', 'N', 400, '', '20260729-110151-9', '', '완료', ''],
+      ]),
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260807-1', '중국창고', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', 400, '웨이신', '', '20260729-110151-9', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260720-22', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', '2026-07-20', 400, '', '20260720-33', '20260625-110151-17', '확인', '웨이신'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], []),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+      ], []),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-20',
+      asOfDate: '2026-08-21',
+      purchasePlanConfirmedSince: '2026-07-01',
+    })
+
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining({
+      source: 'ecount_purchasing_snapshot_plan_purchase_completed',
+      sku: '101542-0001',
+      quantity: 400,
+      purchaseManagementCode: '20260729-110151-9',
+    }))
+  })
 })
 
 async function makeUpload(

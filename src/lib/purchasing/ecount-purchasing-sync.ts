@@ -379,7 +379,7 @@ export async function parseEcountPurchasingSnapshot(input: {
           : null,
         purchaseManagementCode,
         purchaseOrderNumber: null,
-        supplierOrderNumber: emptyToNull(valueAt(plan, purchasePlan, '주문서번호 (C)')),
+        supplierOrderNumber: reliableSupplierOrderNumber(valueAt(plan, purchasePlan, '주문서번호 (C)')),
         purchaseMethod: emptyToNull(valueAt(plan, purchasePlan, '구매진행여부 (C)')),
         unitPriceCny: null,
         shippingFeeCny: null,
@@ -435,7 +435,7 @@ export async function parseEcountPurchasingSnapshot(input: {
       const chinaArrivalRequestDate = parseDate(valueAt(row, purchaseHistory, '중국창고 도착요청일'))
       if (sourceQuantity === 0) return null
 
-      const supplierOrderNumber = emptyToNull(valueAt(row, purchaseHistory, '주문서번호 (C)'))
+      const supplierOrderNumber = reliableSupplierOrderNumber(valueAt(row, purchaseHistory, '주문서번호 (C)'))
       return {
         source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
         sourceFileName: purchaseHistory.fileName,
@@ -626,7 +626,11 @@ function pipelineMatchScore(
     && right.supplierOrderNumber
     && left.supplierOrderNumber !== right.supplierOrderNumber,
   )
-  if (!managementMatches && !orderMatches && managementConflicts && orderConflicts) return 0
+  // A conflicting strong identifier means these are different purchases unless
+  // the other strong identifier explicitly matches. Do not merge two orders
+  // merely because SKU, option, and quantity happen to be identical.
+  if (managementConflicts && !orderMatches) return 0
+  if (orderConflicts && !managementMatches) return 0
 
   let score = 10
   if (leftOption && rightOption) score += 10
@@ -1146,6 +1150,11 @@ function isPurchaseItemSku(value: string) {
 
 function isReliableSupplierOrderNumber(value: string) {
   return /^[1-9]\d{8,}$/.test(value)
+}
+
+function reliableSupplierOrderNumber(value: string) {
+  const normalized = value.trim()
+  return isReliableSupplierOrderNumber(normalized) ? normalized : null
 }
 
 function purchaseKey(code: string, sku: string) {

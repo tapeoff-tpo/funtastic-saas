@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, getTableColumns, gt, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, getTableColumns, gt, ilike, ne, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
@@ -62,6 +62,9 @@ export async function getPurchaseRequests(input: {
     }
   } else if (input.status) {
     conditions.push(eq(purchaseRequestItems.status, input.status))
+    if (input.status === 'requested') {
+      conditions.push(gt(purchaseRequestItems.requestedQuantity, 0))
+    }
   }
   if (input.search) {
     const pattern = `%${input.search}%`
@@ -136,7 +139,13 @@ export async function getPurchaseRequests(input: {
         total: count(),
       })
       .from(purchaseRequestItems)
-      .where(eq(purchaseRequestItems.userId, input.userId))
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        or(
+          ne(purchaseRequestItems.status, 'requested'),
+          gt(purchaseRequestItems.requestedQuantity, 0),
+        ),
+      ))
       .groupBy(purchaseRequestItems.status),
     db
       .select({

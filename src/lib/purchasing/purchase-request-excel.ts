@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import ExcelJS from 'exceljs'
-import { and, asc, desc, eq, getTableColumns, ilike, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, getTableColumns, gt, ilike, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
@@ -287,6 +287,9 @@ async function getPurchaseRequestRowsForExcel(input: {
     }
   } else if (input.status) {
     conditions.push(eq(purchaseRequestItems.status, input.status))
+    if (input.status === 'requested') {
+      conditions.push(gt(purchaseRequestItems.requestedQuantity, 0))
+    }
   }
   if (input.search) {
     const pattern = `%${input.search}%`

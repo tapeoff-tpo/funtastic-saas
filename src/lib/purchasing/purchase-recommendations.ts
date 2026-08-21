@@ -10,10 +10,18 @@ import {
 import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics } from './items'
 
-const PRODUCT_GROUP_MOQ_RULES = [
+type ProductGroupMoqRule = {
+  productName: string
+  sku?: string
+  minimumOrderQuantity: number
+  roundingUnit: number
+}
+
+const PRODUCT_GROUP_MOQ_RULES: readonly ProductGroupMoqRule[] = [
   { productName: '테피 USB 캔들라이터', minimumOrderQuantity: 200, roundingUnit: 10 },
   { productName: '루멘 철제 사이드 테이블', minimumOrderQuantity: 200, roundingUnit: 10 },
   { productName: '린블 아기옷 원형 건조대', minimumOrderQuantity: 200, roundingUnit: 10 },
+  { productName: '미니스텝퍼', sku: '101542-0001', minimumOrderQuantity: 300, roundingUnit: 10 },
 ] as const
 
 const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
@@ -26,6 +34,17 @@ const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
 
 const DEFAULT_PURCHASE_MINIMUM_QUANTITY = 10
 const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
+const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set(['109055-0001'])
+
+export function isExcludedPurchaseRecommendationSku(sku: string) {
+  return EXCLUDED_PURCHASE_RECOMMENDATION_SKUS.has(sku.trim())
+}
+
+export function getProductGroupMoqRule(sku: string, productName: string) {
+  return PRODUCT_GROUP_MOQ_RULES.find((rule) => rule.sku
+    ? sku.trim() === rule.sku
+    : productName.trim() === rule.productName) ?? null
+}
 
 export type PurchaseRecommendationInput = {
   averageMonthlyOutgoing: number
@@ -361,7 +380,8 @@ export async function generatePurchaseRecommendations(input: {
   }
 
   const recommendationInventoryRows = inventoryRows.filter(
-    (row) => !isDomesticPurchaseProduct(row.productName),
+    (row) => !isDomesticPurchaseProduct(row.productName) &&
+      !isExcludedPurchaseRecommendationSku(row.sku),
   )
 
   const [outgoingMetricsBySku, productCostRows] = await Promise.all([
@@ -745,7 +765,9 @@ function applyProductGroupMoq<T extends AssessedPurchaseRow & {
   }))
 
   for (const rule of PRODUCT_GROUP_MOQ_RULES) {
-    const groupItems = enriched.filter((item) => item.row.productName === rule.productName)
+    const groupItems = enriched.filter((item) => rule.sku
+      ? item.row.sku === rule.sku
+      : item.row.productName === rule.productName)
     if (groupItems.length === 0) continue
 
     const hasRecommendation = groupItems.some((item) => item.baseRecommendedQuantity > 0)

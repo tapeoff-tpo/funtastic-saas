@@ -6,7 +6,9 @@ import {
   calculatePurchaseSalesTrend,
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
+  getProductGroupMoqRule,
   isDomesticPurchaseProduct,
+  isExcludedPurchaseRecommendationSku,
 } from './purchase-recommendations'
 
 describe('purchase minimum quantities', () => {
@@ -17,6 +19,21 @@ describe('purchase minimum quantities', () => {
     expect(applyPurchaseMinimumQuantity(10)).toBe(10)
     expect(applyPurchaseMinimumQuantity(11)).toBe(20)
     expect(applyPurchaseMinimumQuantity(27)).toBe(30)
+  })
+})
+
+describe('product-specific purchasing rules', () => {
+  it('applies the 300-unit MOQ only to the mini stepper SKU', () => {
+    expect(getProductGroupMoqRule('101542-0001', '미니스텝퍼')).toMatchObject({
+      minimumOrderQuantity: 300,
+      roundingUnit: 10,
+    })
+    expect(getProductGroupMoqRule('100560-0001', '스탠딩테이블')).toBeNull()
+  })
+
+  it('excludes the gift package material from purchase recommendations', () => {
+    expect(isExcludedPurchaseRecommendationSku('109055-0001')).toBe(true)
+    expect(isExcludedPurchaseRecommendationSku('109055-0002')).toBe(false)
   })
 })
 

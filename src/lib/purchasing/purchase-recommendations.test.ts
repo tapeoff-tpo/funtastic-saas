@@ -8,7 +8,7 @@ import {
   formatSeoulDate,
   getProductGroupMoqRule,
   isDomesticPurchaseProduct,
-  isExcludedPurchaseRecommendationSku,
+  isExcludedPurchaseRecommendation,
 } from './purchase-recommendations'
 
 describe('purchase minimum quantities', () => {
@@ -32,8 +32,13 @@ describe('product-specific purchasing rules', () => {
   })
 
   it('excludes the gift package material from purchase recommendations', () => {
-    expect(isExcludedPurchaseRecommendationSku('109055-0001')).toBe(true)
-    expect(isExcludedPurchaseRecommendationSku('109055-0002')).toBe(false)
+    expect(isExcludedPurchaseRecommendation('109055-0001')).toBe(true)
+    expect(isExcludedPurchaseRecommendation('109055-0002')).toBe(false)
+  })
+
+  it('excludes all WeUse products by their product-name suffix', () => {
+    expect(isExcludedPurchaseRecommendation('112227-0001', '모듈러 내열유리 찜기_위유즈')).toBe(true)
+    expect(isExcludedPurchaseRecommendation('111973-0001', '모듈러 내열유리 찜기')).toBe(false)
   })
 })
 
@@ -92,6 +97,18 @@ describe('stable monthly outgoing', () => {
       currentMonthOutgoing: 2,
       threeMonthAverageOutgoing: 0,
     })).toBe('new_product')
+  })
+
+  it('uses current sales for a new product instead of suppressing them as an anomaly', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 39,
+      threeMonthAverageOutgoing: 0,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 39,
+      baselineMonthlyOutgoing: 0,
+      salesAnomalyDetected: false,
+      salesTrend: 'new_product',
+    })
   })
 })
 

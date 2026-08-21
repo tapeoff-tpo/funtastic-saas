@@ -27,7 +27,6 @@ async function main() {
       SELECT internal_sku
       FROM products
       WHERE user_id = ${ownerId}
-        AND metadata->'esa009m' IS NOT NULL
     `
     const productSkus = new Set(products.map((row) => row.internal_sku))
     const workbookSkus = new Set(rows.map((row) => row.internalSku))
@@ -79,7 +78,6 @@ async function main() {
           FROM jsonb_to_recordset(${transaction.json(payload)}::jsonb) AS incoming(sku text, metrics jsonb)
           WHERE product.user_id = ${ownerId}
             AND product.internal_sku = incoming.sku
-            AND product.metadata->'esa009m' IS NOT NULL
           RETURNING product.internal_sku
         `
         updated += result.length

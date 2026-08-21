@@ -36,8 +36,9 @@ const DEFAULT_PURCHASE_MINIMUM_QUANTITY = 10
 const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
 const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set(['109055-0001'])
 
-export function isExcludedPurchaseRecommendationSku(sku: string) {
+export function isExcludedPurchaseRecommendation(sku: string, productName?: string | null) {
   return EXCLUDED_PURCHASE_RECOMMENDATION_SKUS.has(sku.trim())
+    || (productName?.includes('_위유즈') ?? false)
 }
 
 export function getProductGroupMoqRule(sku: string, productName: string) {
@@ -105,7 +106,8 @@ export function calculateStableMonthlyOutgoing(input: {
   const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
   const threeMonthAverageOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
   const baselineMonthlyOutgoing = threeMonthAverageOutgoing
-  const salesAnomalyDetected = currentMonthOutgoing >= baselineMonthlyOutgoing * 2
+  const salesAnomalyDetected = baselineMonthlyOutgoing > 0
+    && currentMonthOutgoing >= baselineMonthlyOutgoing * 2
     && currentMonthOutgoing - baselineMonthlyOutgoing >= 20
   const salesTrend = calculatePurchaseSalesTrend({
     currentMonthOutgoing,
@@ -379,9 +381,20 @@ export async function generatePurchaseRecommendations(input: {
     return { created: 0, skipped: 0, evaluated: 0, targetStockMonths }
   }
 
+  const canonicalProductRows = await db
+    .select({ sku: products.internalSku, productName: products.name })
+    .from(products)
+    .where(and(
+      eq(products.userId, input.userId),
+      inArray(products.internalSku, inventoryRows.map((row) => row.sku)),
+    ))
+  const excludedCanonicalProductSkus = new Set(canonicalProductRows
+    .filter((row) => isExcludedPurchaseRecommendation(row.sku, row.productName))
+    .map((row) => row.sku))
   const recommendationInventoryRows = inventoryRows.filter(
     (row) => !isDomesticPurchaseProduct(row.productName) &&
-      !isExcludedPurchaseRecommendationSku(row.sku),
+      !isExcludedPurchaseRecommendation(row.sku, row.productName) &&
+      !excludedCanonicalProductSkus.has(row.sku),
   )
 
   const [outgoingMetricsBySku, productCostRows] = await Promise.all([
@@ -459,6 +472,18 @@ export async function generatePurchaseRecommendations(input: {
     const autoReviewRows = activeRequestRows.filter(
       (row) => row.status === 'requested' && isAutoPurchaseRecommendation(row.rawData),
     )
+    const eligibleRecommendationSkus = new Set(recommendationInventoryRows.map((row) => row.sku))
+    for (const row of autoReviewRows) {
+      if (eligibleRecommendationSkus.has(row.sku)) continue
+      await tx
+        .update(purchaseRequestItems)
+        .set({ requestedQuantity: 0, updatedAt: now })
+        .where(and(
+          eq(purchaseRequestItems.userId, input.userId),
+          eq(purchaseRequestItems.id, row.id),
+          eq(purchaseRequestItems.status, 'requested'),
+        ))
+    }
     const autoReviewIds = new Set(autoReviewRows.map((row) => row.id))
     const autoReviewRowBySku = new Map<string, typeof autoReviewRows[number]>()
     for (const row of autoReviewRows) {

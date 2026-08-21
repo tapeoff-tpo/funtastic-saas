@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.12'
+const PLUGIN_VERSION = '1.2.13'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1067,6 +1067,14 @@ function genericPointCopy(product) {
 }
 
 async function makeGenericCover(job, images) {
+  if (job.product.sku === '110336-0001') {
+    const section = makeSection('00 COVER / BONE LOOFAH EDITORIAL', 1220, COLORS.paper)
+    const hero = await makeImage(`${SERVER_URL}/detail-page-assets/bone-loofah-cover-editorial-v1.png`, 760, 880, 'COVER / BONE LOOFAH HERO')
+    hero.x = 50; hero.y = 50; hero.cornerRadius = 32; section.appendChild(hero)
+    appendText(section, 'BONE SHAPED NATURAL LOOFAH SCRUBBER', 50, 988, 760, 16, 'Bold', COLORS.amber)
+    appendText(section, job.product.name, 50, 1038, 760, 48, 'Bold', COLORS.ink)
+    return section
+  }
   const section = makeSection('00 COVER / PREMIUM EDITORIAL', 1220, COLORS.paper)
   const accent = figma.createEllipse()
   accent.resize(360, 360); accent.x = 570; accent.y = -80

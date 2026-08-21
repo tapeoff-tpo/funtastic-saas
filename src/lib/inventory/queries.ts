@@ -1,9 +1,9 @@
 import { db } from '@/lib/db'
-import { inventory, inventoryHistory, orders, products } from '@/lib/db/schema'
-import { eq, and, or, ilike, desc, asc, count, sql, inArray } from 'drizzle-orm'
+import { inventory, inventoryHistory, orders } from '@/lib/db/schema'
+import { eq, and, or, ilike, desc, asc, count, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { InventoryFilters } from './types'
-import { resolveOutgoingMetrics } from '@/lib/purchasing/items'
+import { getSkuOutgoingMetrics } from '@/lib/purchasing/items'
 
 const DEFAULT_PAGE_SIZE = 50
 
@@ -83,20 +83,9 @@ export async function getInventoryList(
     pageQuery.orderBy(sortDirection(sortColumn)).limit(pageSize).offset(offset),
     countQuery,
   ])
-  const metricRows = pageRows.length > 0
-    ? await db.select({ internalSku: products.internalSku, metadata: products.metadata })
-        .from(products).where(and(
-          eq(products.userId, userId),
-          inArray(products.internalSku, pageRows.map((row) => row.sku)),
-        ))
-    : []
-  const outgoingMetricsBySku = new Map(metricRows.map((row) => [
-    row.internalSku,
-    resolveOutgoingMetrics(row.metadata, {
-      currentMonthOutgoing: 0,
-      threeMonthAverageOutgoing: 0,
-    }),
-  ]))
+  const outgoingMetricsBySku = pageRows.length > 0
+    ? await getSkuOutgoingMetrics(userId, pageRows.map((row) => row.sku))
+    : new Map()
 
   return {
     items: pageRows.map((row) => {

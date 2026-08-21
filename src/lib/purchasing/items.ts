@@ -49,11 +49,6 @@ export type PurchaseUrlVerification = {
 export type PurchasingItemOutgoingMetricRow = PurchasingItemOutgoingMetrics & {
   internalSku: string
 }
-type PurchasingItemCurrentMonthReviewRow = {
-  internalSku: string
-  currentMonthOutgoing: number
-}
-
 const NUMERIC_HEADERS = new Set<Esa009mHeader>([
   '특가(元)',
   '신규원가(元)',
@@ -416,25 +411,12 @@ export async function getSkuOutgoingMetrics(
   if (uniqueSkus.length === 0) return new Map()
 
   const {
-    currentMonthStart,
-    previousThreeMonthStart,
-    nextMonthStart,
+    previousThreeMonthDate,
     currentMonthDate,
     nextMonthDate,
   } = getOutgoingMetricWindows(now)
   const skuSql = sql.join(uniqueSkus.map((sku) => sql`${sku}`), sql`, `)
-  const reviewDateExpression = sql`
-    CASE
-      WHEN raw_data->>'출고완료일자' ~ '^\\d{8}$' THEN to_date(raw_data->>'출고완료일자', 'YYYYMMDD')
-      WHEN raw_data->>'출고완료일자' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(raw_data->>'출고완료일자', 10)::date
-      WHEN parsed_data->>'orderedAt' ~ '^\\d{8}$' THEN to_date(parsed_data->>'orderedAt', 'YYYYMMDD')
-      WHEN parsed_data->>'orderedAt' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(parsed_data->>'orderedAt', 10)::date
-      WHEN raw_data->>'수집일자' ~ '^\\d{8}$' THEN to_date(raw_data->>'수집일자', 'YYYYMMDD')
-      WHEN raw_data->>'수집일자' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(raw_data->>'수집일자', 10)::date
-      ELSE NULL
-    END
-  `
-  const [storedRows, result, currentMonthReviewResult] = await Promise.all([
+  const [storedRows, result] = await Promise.all([
     db.select({
       internalSku: products.internalSku,
       metadata: products.metadata,
@@ -444,53 +426,30 @@ export async function getSkuOutgoingMetrics(
     )),
     db.execute<PurchasingItemOutgoingMetricRow>(sql`
       SELECT
-        COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) AS "internalSku",
+        line.sku AS "internalSku",
         COALESCE(SUM(
           CASE
-            WHEN o.ordered_at >= ${currentMonthStart.toISOString()}::timestamptz
-             AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
-            THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+            WHEN line.shipment_date >= ${currentMonthDate}::date
+             AND line.shipment_date < ${nextMonthDate}::date
+            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
             ELSE 0
           END
         ), 0)::numeric AS "currentMonthOutgoing",
         (COALESCE(SUM(
           CASE
-            WHEN o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
-             AND o.ordered_at < ${currentMonthStart.toISOString()}::timestamptz
-            THEN COALESCE(oi.locked_quantity, oi.quantity * COALESCE(oi.sku_multiplier, 1))
+            WHEN line.shipment_date >= ${previousThreeMonthDate}::date
+             AND line.shipment_date < ${currentMonthDate}::date
+            THEN CASE WHEN line.claim_type = 'return' THEN -line.quantity ELSE line.quantity END
             ELSE 0
           END
         ), 0) / 3.0)::numeric AS "threeMonthAverageOutgoing"
-      FROM orders o
-      JOIN order_items oi ON oi.order_id = o.id
-      WHERE o.user_id = ${userId}
-        AND o.raw_data->>'source' = 'sabangnet-review'
-        AND o.ordered_at >= ${previousThreeMonthStart.toISOString()}::timestamptz
-        AND o.ordered_at < ${nextMonthStart.toISOString()}::timestamptz
-        AND COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, '')) IN (${skuSql})
-      GROUP BY COALESCE(NULLIF(oi.locked_sku, ''), NULLIF(oi.sku, ''))
-    `),
-    db.execute<PurchasingItemCurrentMonthReviewRow>(sql`
-      WITH latest_current_month_batch AS (
-        SELECT batch_id
-        FROM sabangnet_review_lines
-        WHERE user_id = ${userId}
-          AND sku IN (${skuSql})
-          AND ${reviewDateExpression} >= ${currentMonthDate}::date
-          AND ${reviewDateExpression} < ${nextMonthDate}::date
-        ORDER BY created_at DESC
-        LIMIT 1
-      )
-      SELECT
-        sku AS "internalSku",
-        COALESCE(SUM(quantity), 0)::numeric AS "currentMonthOutgoing"
-      FROM sabangnet_review_lines
-      WHERE user_id = ${userId}
-        AND sku IN (${skuSql})
-        AND batch_id = (SELECT batch_id FROM latest_current_month_batch)
-        AND ${reviewDateExpression} >= ${currentMonthDate}::date
-        AND ${reviewDateExpression} < ${nextMonthDate}::date
-      GROUP BY sku
+      FROM outbound_reflection_lines line
+      WHERE line.user_id = ${userId}::uuid
+        AND line.reflection_status = 'applied'
+        AND line.shipment_date >= ${previousThreeMonthDate}::date
+        AND line.shipment_date < ${nextMonthDate}::date
+        AND line.sku IN (${skuSql})
+      GROUP BY line.sku
     `),
   ])
 
@@ -501,13 +460,6 @@ export async function getSkuOutgoingMetrics(
       threeMonthAverageOutgoing: cleanOutgoingNumber(row.threeMonthAverageOutgoing),
     },
   ]))
-  for (const row of resultRows<PurchasingItemCurrentMonthReviewRow>(currentMonthReviewResult)) {
-    const current = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
-    metricsBySku.set(row.internalSku, {
-      ...current,
-      currentMonthOutgoing: cleanOutgoingNumber(row.currentMonthOutgoing),
-    })
-  }
   for (const row of storedRows) {
     const calculated = metricsBySku.get(row.internalSku) ?? emptyOutgoingMetrics()
     metricsBySku.set(row.internalSku, resolveOutgoingMetrics(row.metadata, calculated))

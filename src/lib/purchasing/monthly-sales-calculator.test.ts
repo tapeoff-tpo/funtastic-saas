@@ -3,21 +3,17 @@ import ExcelJS from 'exceljs'
 import { parseMonthlySalesCalculator } from './monthly-sales-calculator'
 
 describe('parseMonthlySalesCalculator', () => {
-  it('uses June as current month and averages April through June', async () => {
+  it('uses column A as SKU and column D as the three-month average', async () => {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('메인')
     sheet.addRow([
       '사방넷상품코드\n[수정불가]',
       '상품명\n[수정불가]',
       '옵션상세명칭',
-      '1달 평균판매',
-      '3개월판매',
-      '26/06',
-      '26/05',
-      '26/04',
+      '평균 판매수량',
     ])
-    sheet.addRow(['A001', '상품', '옵션', null, null, 20, 10, 7])
-    sheet.addRow(['A002', '상품2', '옵션2', null, null, null, '-', 3])
+    sheet.addRow(['A001', '상품', '옵션', 12.34])
+    sheet.addRow(['A002', '상품2', '옵션2', '-'])
     const buffer = await workbook.xlsx.writeBuffer()
 
     const result = await parseMonthlySalesCalculator(buffer as ArrayBuffer)
@@ -25,28 +21,28 @@ describe('parseMonthlySalesCalculator', () => {
     expect(result.rows).toEqual([
       {
         internalSku: 'A001',
-        currentMonthOutgoing: 20,
+        currentMonthOutgoing: 0,
         threeMonthAverageOutgoing: 12.3,
       },
       {
         internalSku: 'A002',
         currentMonthOutgoing: 0,
-        threeMonthAverageOutgoing: 1,
+        threeMonthAverageOutgoing: 0,
       },
     ])
   })
 
-  it('recognizes Excel date serial month headers', async () => {
+  it('uses the first worksheet even when its name changes', async () => {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('메인')
-    sheet.addRow(['사방넷상품코드', '26/04', '26/05', new Date(Date.UTC(2026, 5, 1))])
-    sheet.addRow(['A001', 3, 6, 9])
+    sheet.addRow(['사방넷상품코드', '상품명', '옵션', '평균'])
+    sheet.addRow(['A001', '상품', '옵션', 6])
     const buffer = await workbook.xlsx.writeBuffer()
 
     const result = await parseMonthlySalesCalculator(buffer as ArrayBuffer)
 
     expect(result.rows[0]).toMatchObject({
-      currentMonthOutgoing: 9,
+      currentMonthOutgoing: 0,
       threeMonthAverageOutgoing: 6,
     })
   })

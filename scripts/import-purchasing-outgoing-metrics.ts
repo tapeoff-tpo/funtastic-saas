@@ -59,10 +59,10 @@ async function main() {
         const payload = batch.map((row) => ({
           sku: row.internalSku,
           metrics: {
-            currentMonthOutgoing: row.currentMonthOutgoing,
             threeMonthAverageOutgoing: row.threeMonthAverageOutgoing,
             source: 'monthly-sales-calculator',
-            referenceMonth: '2026-06',
+            sourceSheet: 'first-sheet',
+            sourceColumn: 'D',
             importedAt,
           },
         }))
@@ -85,7 +85,7 @@ async function main() {
         updated += result.length
       }
     })
-    console.log(JSON.stringify({ updated, referenceMonth: '2026-06', importedAt }, null, 2))
+    console.log(JSON.stringify({ updated, sourceColumn: 'D', importedAt }, null, 2))
   } finally {
     await sql.end()
   }

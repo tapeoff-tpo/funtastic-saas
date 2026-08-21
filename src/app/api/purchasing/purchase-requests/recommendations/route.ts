@@ -1,4 +1,5 @@
 import { after, NextRequest, NextResponse } from 'next/server'
+import { revalidatePath } from 'next/cache'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
           targetStockMonths,
           budgetKrw,
         })
+        revalidatePath('/purchasing/purchases')
         await db
           .update(jobLogs)
           .set({

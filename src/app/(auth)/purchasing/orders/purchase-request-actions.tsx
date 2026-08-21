@@ -600,7 +600,9 @@ export function PurchaseRecommendationGenerator() {
           setError(null)
           sessionStorage.removeItem('purchase-recommendation-job-id')
           setActiveJobId(null)
-          router.refresh()
+          startTransition(() => {
+            router.refresh()
+          })
           return
         }
         if (job.status === 'failed' || job.status === 'cancelled') {
@@ -626,7 +628,7 @@ export function PurchaseRecommendationGenerator() {
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [activeJobId, router])
+  }, [activeJobId, router, startTransition])
 
   function generate() {
     const months = Number(targetStockMonths)

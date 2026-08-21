@@ -41,6 +41,13 @@ export function isExcludedPurchaseRecommendation(sku: string, productName?: stri
     || (productName?.includes('_위유즈') ?? false)
 }
 
+export function isDiscontinuedPurchaseProduct(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return false
+  const metrics = (metadata as Record<string, unknown>).purchasingOutgoingMetrics
+  return Boolean(metrics && typeof metrics === 'object' && !Array.isArray(metrics)
+    && (metrics as Record<string, unknown>).isDiscontinued === true)
+}
+
 export function getProductGroupMoqRule(sku: string, productName: string) {
   return PRODUCT_GROUP_MOQ_RULES.find((rule) => rule.sku
     ? sku.trim() === rule.sku
@@ -382,14 +389,15 @@ export async function generatePurchaseRecommendations(input: {
   }
 
   const canonicalProductRows = await db
-    .select({ sku: products.internalSku, productName: products.name })
+    .select({ sku: products.internalSku, productName: products.name, metadata: products.metadata })
     .from(products)
     .where(and(
       eq(products.userId, input.userId),
       inArray(products.internalSku, inventoryRows.map((row) => row.sku)),
     ))
   const excludedCanonicalProductSkus = new Set(canonicalProductRows
-    .filter((row) => isExcludedPurchaseRecommendation(row.sku, row.productName))
+    .filter((row) => isExcludedPurchaseRecommendation(row.sku, row.productName)
+      || isDiscontinuedPurchaseProduct(row.metadata))
     .map((row) => row.sku))
   const recommendationInventoryRows = inventoryRows.filter(
     (row) => !isDomesticPurchaseProduct(row.productName) &&

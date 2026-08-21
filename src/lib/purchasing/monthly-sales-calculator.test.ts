@@ -12,7 +12,7 @@ describe('parseMonthlySalesCalculator', () => {
       '옵션상세명칭',
       '평균 판매수량',
     ])
-    sheet.addRow(['A001', '상품', '옵션', 12.34])
+    sheet.addRow(['A001', '상품', '옵션', 12.34, null, null, null, null, null, null, null, null, '단종'])
     sheet.addRow(['A002', '상품2', '옵션2', '-'])
     const buffer = await workbook.xlsx.writeBuffer()
 
@@ -23,11 +23,13 @@ describe('parseMonthlySalesCalculator', () => {
         internalSku: 'A001',
         currentMonthOutgoing: 0,
         threeMonthAverageOutgoing: 12.3,
+        isDiscontinued: true,
       },
       {
         internalSku: 'A002',
         currentMonthOutgoing: 0,
         threeMonthAverageOutgoing: 0,
+        isDiscontinued: false,
       },
     ])
   })
@@ -44,6 +46,7 @@ describe('parseMonthlySalesCalculator', () => {
     expect(result.rows[0]).toMatchObject({
       currentMonthOutgoing: 0,
       threeMonthAverageOutgoing: 6,
+      isDiscontinued: false,
     })
   })
 })

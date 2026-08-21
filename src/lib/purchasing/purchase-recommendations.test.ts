@@ -8,6 +8,7 @@ import {
   formatSeoulDate,
   getProductGroupMoqRule,
   isDomesticPurchaseProduct,
+  isDiscontinuedPurchaseProduct,
   isExcludedPurchaseRecommendation,
 } from './purchase-recommendations'
 
@@ -39,6 +40,11 @@ describe('product-specific purchasing rules', () => {
   it('excludes all WeUse products by their product-name suffix', () => {
     expect(isExcludedPurchaseRecommendation('112227-0001', '모듈러 내열유리 찜기_위유즈')).toBe(true)
     expect(isExcludedPurchaseRecommendation('111973-0001', '모듈러 내열유리 찜기')).toBe(false)
+  })
+
+  it('recognizes discontinued products imported from the purchasing workbook', () => {
+    expect(isDiscontinuedPurchaseProduct({ purchasingOutgoingMetrics: { isDiscontinued: true } })).toBe(true)
+    expect(isDiscontinuedPurchaseProduct({ purchasingOutgoingMetrics: { isDiscontinued: false } })).toBe(false)
   })
 })
 

@@ -4,6 +4,7 @@ export type MonthlySalesMetricRow = {
   internalSku: string
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
+  isDiscontinued: boolean
 }
 
 export async function parseMonthlySalesCalculator(fileBuffer: ArrayBuffer) {
@@ -22,6 +23,7 @@ export async function parseMonthlySalesCalculator(fileBuffer: ArrayBuffer) {
       internalSku,
       currentMonthOutgoing: 0,
       threeMonthAverageOutgoing: roundOneDecimal(cellNumber(row.getCell(4))),
+      isDiscontinued: cellText(row.getCell(13)) === '단종',
     })
   }
 

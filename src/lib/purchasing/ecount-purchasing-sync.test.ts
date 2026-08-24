@@ -323,6 +323,40 @@ describe('parseEcountPurchasingSnapshot', () => {
       }),
     ])
   })
+
+  it('does not leave an old delayed order when the latest order already arrived', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-request.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '사전포장여부코드', '구매수량(EA)',
+        '중국창고 도착요청일', '구입관리코드', '현재상태', '진행상태', '사원(담당)명',
+      ], [
+        ['20260702-86', '111697-0001', '비안스 받침대', '화이트', 'Y', 150, '', 'P-OLD', '', '완료', ''],
+      ]),
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260806-8', '중국창고', '111697-0001', '비안스 받침대', '화이트', 150, '3315604479129009579', '개인', 'P-NEW', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260813-6', '111697-0001', '비안스 받침대', '화이트', '', 150, '', '', 'P-NEW', '확인', '3315604479129009579'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-24',
+      asOfDate: '2026-08-24',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.purchaseCompleted).not.toContainEqual(expect.objectContaining({
+      sku: '111697-0001',
+    }))
+  })
 })
 
 async function makeUpload(

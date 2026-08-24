@@ -462,14 +462,18 @@ export async function parseEcountPurchasingSnapshot(input: {
       }
     })
     .filter((row): row is EcountPurchaseCompletedItem => row !== null)
+  const latestPurchasePlans = keepLatestPurchaseCompletedBySku([
+    ...planItems,
+    ...unplannedCompletedRequests,
+  ])
   const purchaseCompletedFromPlan = reconcilePlanWithPurchaseHistory(
-    [...planItems, ...unplannedCompletedRequests],
+    latestPurchasePlans,
     historyItems,
   )
   // Purchase-history rows already represent quantities that reached China.
   // China-outbound rows are a later stage of those same quantities, so they
   // must not consume the remaining purchase-plan quantity a second time.
-  const purchaseCompleted = keepLatestPurchaseCompletedBySku(purchaseCompletedFromPlan)
+  const purchaseCompleted = purchaseCompletedFromPlan
 
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,

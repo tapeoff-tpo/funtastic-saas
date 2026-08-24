@@ -469,7 +469,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   // Purchase-history rows already represent quantities that reached China.
   // China-outbound rows are a later stage of those same quantities, so they
   // must not consume the remaining purchase-plan quantity a second time.
-  const purchaseCompleted = purchaseCompletedFromPlan
+  const purchaseCompleted = keepLatestPurchaseCompletedBySku(purchaseCompletedFromPlan)
 
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
@@ -684,6 +684,23 @@ function pipelineMatchScore(
   if (managementMatches) score += 80
   if (orderMatches) score += 100
   return score
+}
+
+function keepLatestPurchaseCompletedBySku(items: EcountPurchaseCompletedItem[]) {
+  const latestBySku = new Map<string, EcountPurchaseCompletedItem>()
+  for (const item of items) {
+    const current = latestBySku.get(item.sku)
+    if (!current || comparePurchaseRecency(item, current) > 0) {
+      latestBySku.set(item.sku, item)
+    }
+  }
+  return [...latestBySku.values()]
+}
+
+function comparePurchaseRecency(left: EcountPurchaseCompletedItem, right: EcountPurchaseCompletedItem) {
+  const dateComparison = (left.purchaseDate ?? '').localeCompare(right.purchaseDate ?? '')
+  if (dateComparison !== 0) return dateComparison
+  return left.sourceRowNumber - right.sourceRowNumber
 }
 
 export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnapshot) {

@@ -296,6 +296,33 @@ describe('parseEcountPurchasingSnapshot', () => {
       sku: '111896-0001',
     }))
   })
+
+  it('keeps only the latest purchase-in-progress order for each sku', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260702-32', '중국창고', '110806-0001', '폰디 북마커', '3종', 20, '5122655749206006728', '법인', 'P-OLD', '발주계획'],
+        ['20260804-2', '중국창고', '110806-0001', '폰디 북마커', '3종', 20, '3315471351420009579', '개인', 'P-NEW', '발주계획'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-24',
+      asOfDate: '2026-08-24',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.purchaseCompleted).toEqual([
+      expect.objectContaining({
+        sku: '110806-0001',
+        supplierOrderNumber: '3315471351420009579',
+        purchaseDate: '2026-08-04',
+      }),
+    ])
+  })
 })
 
 async function makeUpload(

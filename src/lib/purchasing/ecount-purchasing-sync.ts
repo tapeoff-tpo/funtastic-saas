@@ -465,10 +465,10 @@ export async function parseEcountPurchasingSnapshot(input: {
     [...planItems, ...unplannedCompletedRequests],
     historyItems,
   )
-  const purchaseCompleted = reconcilePurchaseCompletedWithOutbound(
-    purchaseCompletedFromPlan,
-    chinaOutboundItems,
-  )
+  // Purchase-history rows already represent quantities that reached China.
+  // China-outbound rows are a later stage of those same quantities, so they
+  // must not consume the remaining purchase-plan quantity a second time.
+  const purchaseCompleted = purchaseCompletedFromPlan
 
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
@@ -661,82 +661,7 @@ function pipelineMatchScore(
   if (leftOption && rightOption) score += 10
   if (managementMatches) score += 80
   if (orderMatches) score += 100
-  if (left.quantity === right.quantity) score += 5
   return score
-}
-
-function reconcilePurchaseCompletedWithOutbound(
-  purchaseItems: EcountPurchaseCompletedItem[],
-  outboundItems: EcountOutboundPendingItem[],
-) {
-  const remainingOutboundQuantity = new Map<number, number>(
-    outboundItems.map((item, index) => [index, item.quantity]),
-  )
-  const orderedOutbound = outboundItems
-    .map((item, index) => ({ item, index }))
-    .sort((left, right) => (
-      left.item.effectiveDate.localeCompare(right.item.effectiveDate)
-      || left.item.sourceRowNumber - right.item.sourceRowNumber
-      || left.index - right.index
-    ))
-  const orderedPurchases = purchaseItems
-    .map((item, index) => ({ item, index }))
-    .sort((left, right) => (
-      (left.item.purchaseDate ?? '9999-12-31').localeCompare(right.item.purchaseDate ?? '9999-12-31')
-      || left.item.sourceRowNumber - right.item.sourceRowNumber
-      || left.index - right.index
-    ))
-  const remainingPurchaseQuantity = new Map<number, number>()
-
-  const consumeOutbound = (
-    quantity: number,
-    matches: (outbound: EcountOutboundPendingItem) => boolean,
-  ) => {
-    let remaining = quantity
-    for (const { item: outbound, index } of orderedOutbound) {
-      if (remaining === 0 || !matches(outbound)) continue
-      const outboundRemaining = remainingOutboundQuantity.get(index) ?? 0
-      const allocated = Math.min(remaining, outboundRemaining)
-      if (allocated === 0) continue
-      remainingOutboundQuantity.set(index, outboundRemaining - allocated)
-      remaining -= allocated
-    }
-    return remaining
-  }
-
-  for (const { item: purchase, index } of orderedPurchases) {
-    let remaining = purchase.quantity
-    const exactSupplierKey = supplierKey(purchase.supplierOrderNumber, purchase.sku)
-    if (exactSupplierKey) {
-      remaining = consumeOutbound(
-        remaining,
-        (outbound) => (
-          outbound.effectiveDate >= (purchase.purchaseDate ?? '')
-          && supplierKey(outbound.supplierOrderNumber, outbound.sku) === exactSupplierKey
-        ),
-      )
-    }
-
-    // China outbound reports often omit the supplier order number. In that case,
-    // the SKU is variant-level, so consume only later outbound rows in FIFO order.
-    if (remaining > 0 && purchase.purchaseDate) {
-      const purchaseDate = purchase.purchaseDate
-      remaining = consumeOutbound(
-        remaining,
-        (outbound) => (
-          outbound.supplierOrderNumber === null
-          && outbound.sku === purchase.sku
-          && outbound.effectiveDate >= purchaseDate
-        ),
-      )
-    }
-    remainingPurchaseQuantity.set(index, remaining)
-  }
-
-  return purchaseItems.flatMap((item, index) => {
-    const quantity = remainingPurchaseQuantity.get(index) ?? item.quantity
-    return quantity > 0 ? [{ ...item, quantity }] : []
-  })
 }
 
 export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnapshot) {

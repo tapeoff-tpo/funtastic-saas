@@ -92,7 +92,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       expect.objectContaining({
         source: 'ecount_purchasing_snapshot_plan_purchase_completed',
         sku: '100002-0001',
-        quantity: 25,
+        quantity: 30,
         purchaseManagementCode: 'P-002',
         chinaArrivalRequestDate: '2026-07-30',
         supplierOrderNumber: '987654321',
@@ -224,6 +224,50 @@ describe('parseEcountPurchasingSnapshot', () => {
       sku: '101542-0001',
       quantity: 400,
       purchaseManagementCode: '20260729-110151-9',
+    }))
+  })
+
+  it('matches by supplier order number and sku without double-counting outbound quantity', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-request.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '사전포장여부코드', '구매수량(EA)',
+        '중국창고 도착요청일', '구입관리코드', '현재상태', '진행상태', '사원(담당)명',
+      ], [
+        ['20260708-4', '101920-0001', '거품수세미', '2개입', 'Y', 1200, '', 'P-1', '', '완료', ''],
+      ]),
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260708-21', '중국창고', '101920-0001', '거품수세미', '2개입', 1200, '3311769613413009579', '개인', 'P-1', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260713-30', '101920-0001', '거품수세미', '2개입', '', 400, '', '', 'P-1', '확인', '3311769613413009579'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], []),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+      ], [
+        ['101920-0001', '20260714-1', '거품수세미', '2개입', 400, '2026-07-15', '3311769613413009579', 'OUT-1'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-07-15',
+      asOfDate: '2026-07-21',
+      purchasePlanConfirmedSince: '2026-07-01',
+    })
+
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining({
+      sku: '101920-0001',
+      supplierOrderNumber: '3311769613413009579',
+      quantity: 800,
     }))
   })
 })

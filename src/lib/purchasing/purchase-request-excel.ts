@@ -5,6 +5,7 @@ import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
+import { getSkuOutgoingMetrics } from './items'
 import { purchaseRequestWriteLockKey } from './purchase-request-create'
 import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
 import {
@@ -28,6 +29,8 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '상품명',
   '옵션명',
   '요청수량',
+  '당월 출고수량',
+  '3개월 평균 출고수량',
   '실제구매수량',
   '중국입고수량',
   '중국출고요청수량',
@@ -62,6 +65,7 @@ export async function exportPurchaseRequestsExcel(input: {
   search?: string
 }) {
   const rows = await getPurchaseRequestRowsForExcel(input)
+  const outgoingMetricsBySku = await getSkuOutgoingMetrics(input.userId, rows.map((row) => row.sku))
   const workbook = new ExcelJS.Workbook()
   const sheet = workbook.addWorksheet('발주')
 
@@ -82,6 +86,7 @@ export async function exportPurchaseRequestsExcel(input: {
   })
 
   for (const row of rows) {
+    const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
     const costs = calculatePurchaseCosts({
       requestedQuantity: row.requestedQuantity,
       unitCostYuan: row.unitCostYuan,
@@ -94,6 +99,8 @@ export async function exportPurchaseRequestsExcel(input: {
       상품명: row.productName,
       옵션명: row.optionName ?? '',
       요청수량: row.requestedQuantity,
+      '당월 출고수량': outgoingMetrics?.currentMonthOutgoing ?? 0,
+      '3개월 평균 출고수량': outgoingMetrics?.threeMonthAverageOutgoing ?? 0,
       실제구매수량: row.actualPurchaseQuantity ?? '',
       중국입고수량: row.chinaReceivedQuantity ?? '',
       중국출고요청수량: outboundRequestedQuantity(row.rawData),
@@ -113,6 +120,8 @@ export async function exportPurchaseRequestsExcel(input: {
   }
 
   sheet.getColumn('개당 원가(元)').numFmt = '#,##0.00'
+  sheet.getColumn('당월 출고수량').numFmt = '#,##0.0'
+  sheet.getColumn('3개월 평균 출고수량').numFmt = '#,##0.0'
   sheet.getColumn('개당 원가(₩)').numFmt = '#,##0'
   sheet.getColumn('총 원가(元)').numFmt = '#,##0.00'
   sheet.getColumn('총 원가(₩)').numFmt = '#,##0'

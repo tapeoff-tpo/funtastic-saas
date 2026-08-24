@@ -6,6 +6,7 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { getReflectedOutboundMatchKeys } from './reflected-outbound-items'
+import { getIgnoredPurchasingItemKeys, purchasingItemIdentity } from './ignored-purchasing-items'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -777,6 +778,7 @@ export async function syncEcountPurchasingSnapshot(input: {
   reportKinds?: EcountReportKind[]
 }) {
   const reflectedOutboundMatchKeys = await getReflectedOutboundMatchKeys(input.userId)
+  const ignoredPurchasingItemKeys = await getIgnoredPurchasingItemKeys(input.userId)
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
 
@@ -794,7 +796,12 @@ export async function syncEcountPurchasingSnapshot(input: {
       (item.source === ECOUNT_REQUEST_COMPLETED_SOURCE && reportKinds.has('purchaseRequest'))
       || (item.source === ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE && reportKinds.has('purchasePlan'))
       || (item.source === ECOUNT_PURCHASE_COMPLETED_SOURCE && reportKinds.has('purchaseHistory'))
-    ))
+    )).filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
+      source: item.source,
+      sku: item.sku,
+      purchaseManagementCode: item.purchaseManagementCode,
+      supplierOrderNumber: item.supplierOrderNumber,
+    })))
     const snapshotManagedItems = [
       ...(reportKinds.has('purchaseRequest') ? input.snapshot.activeRequests : []),
       ...selectedPurchaseCompleted,

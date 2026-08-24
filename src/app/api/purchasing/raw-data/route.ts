@@ -18,6 +18,7 @@ import {
   summarizeStoredEcountRawFiles,
   type StoredEcountRawFile,
 } from '@/lib/purchasing/ecount-raw-files'
+import { recordDataRefresh } from '@/lib/purchasing/data-freshness'
 
 const MAX_TOTAL_SIZE = 4 * 1024 * 1024
 const REPORT_KINDS: EcountReportKind[] = ['purchaseRequest', 'purchasePlan', 'purchaseHistory', 'chinaInventory', 'chinaOutbound']
@@ -103,6 +104,11 @@ export async function POST(request: NextRequest) {
       reportKinds: classified.map((file) => file.kind),
     })
     await saveStoredEcountRawFiles(workspaceUserId, classified)
+    await Promise.all(classified.map((file) => recordDataRefresh({
+      userId: workspaceUserId,
+      source: `purchasing_raw:${file.kind}`,
+      metadata: { fileName: file.fileName },
+    })))
     revalidatePath('/purchasing/raw-data')
     revalidatePath('/purchasing/purchases')
     revalidatePath('/purchasing/orders')

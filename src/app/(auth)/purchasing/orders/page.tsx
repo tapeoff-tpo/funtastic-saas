@@ -6,6 +6,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import { getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
+import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
 import {
   getNextPurchaseStatus,
   PURCHASE_REQUEST_STATUSES,
@@ -128,11 +129,14 @@ export async function PurchasingOrdersView({
     overduePurchaseCompletedCount,
     overdueTotalCount,
   } = purchaseRequestResult
+  const dataFreshness = showRecommendationGenerator
+    ? await getPurchasingDataFreshness(workspaceUserId)
+    : null
   const latestTargetStockMonths = items.reduce<number | null>((latest, item) => {
     if (item.rawData.source !== 'auto_purchase_recommendation') return latest
     const value = Number(item.rawData.targetStockMonths)
     return Number.isFinite(value) && value >= 0.1 && value <= 12 ? value : latest
-  }, null) ?? 1.2
+  }, null) ?? (Number(dataFreshness?.targetStockMonths) || 1.2)
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
@@ -272,6 +276,21 @@ export async function PurchasingOrdersView({
           <span className="text-xs text-amber-700">
             원가 누락: 元 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 / ₩ {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건
           </span>
+        ) : null}
+        {showRecommendationGenerator && dataFreshness ? (
+          <div className="ml-auto min-w-[320px] border-l pl-4 text-xs leading-5 text-muted-foreground">
+            <div className="font-medium text-foreground">
+              추천계산: {formatKstTimestamp(dataFreshness.recommendationCalculatedAt)}
+              {dataFreshness.targetStockMonths ? ` · 목표 ${Number(dataFreshness.targetStockMonths).toLocaleString('ko-KR')}개월` : ''}
+            </div>
+            <div className="flex flex-wrap gap-x-3">
+              <span>발주 로우데이터 {formatKstTimestamp(dataFreshness.rawDataAppliedAt)}</span>
+              <span>국내재고 {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span>
+              <span>중국재고 {formatKstTimestamp(dataFreshness.chinaInventoryAt)}</span>
+              <span>중국출고 {formatKstTimestamp(dataFreshness.outboundRawAt)}</span>
+              <span>출고반영 {formatKstTimestamp(dataFreshness.outboundReflectionAt)}</span>
+            </div>
+          </div>
         ) : null}
       </section>
 
@@ -856,4 +875,20 @@ function formatCost(value: number | null, maximumFractionDigits: number) {
     minimumFractionDigits: 0,
     maximumFractionDigits,
   })
+}
+
+function formatKstTimestamp(value: string | null) {
+  if (!value) return '기록 없음'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '기록 없음'
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
 }

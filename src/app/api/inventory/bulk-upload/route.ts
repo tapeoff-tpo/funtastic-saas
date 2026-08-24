@@ -17,6 +17,7 @@ import { products, productVariants, inventory } from '@/lib/db/schema'
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { normalizeExcelWorkbookBuffer } from '@/lib/orders/excel-workbook-buffer'
+import { recordDataRefresh } from '@/lib/purchasing/data-freshness'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -544,6 +545,13 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
   }
 
   const allErrors = [...parseErrors, ...dbErrors]
+  if (successCount > 0) {
+    await recordDataRefresh({
+      userId: workspaceUserId,
+      source: 'domestic_inventory',
+      metadata: { totalRows: rows.length, successRows: successCount },
+    })
+  }
   const result: UploadResult = {
     total: rows.length + parseErrors.length,
     success: successCount,

@@ -559,7 +559,6 @@ export function PurchaseRecommendationGenerator({
 }: {
   initialTargetStockMonths?: number
 }) {
-  const router = useRouter()
   const [targetStockMonths, setTargetStockMonths] = useState(String(initialTargetStockMonths))
   const [budgetKrw, setBudgetKrw] = useState('')
   const [message, setMessage] = useState<string | null>(null)
@@ -615,9 +614,7 @@ export function PurchaseRecommendationGenerator({
           setError(null)
           sessionStorage.removeItem('purchase-recommendation-job-id')
           setActiveJobId(null)
-          startTransition(() => {
-            router.refresh()
-          })
+          window.location.reload()
           return
         }
         if (job.status === 'failed' || job.status === 'cancelled') {
@@ -643,7 +640,7 @@ export function PurchaseRecommendationGenerator({
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [activeJobId, router, startTransition])
+  }, [activeJobId])
 
   function generate() {
     const months = Number(targetStockMonths)

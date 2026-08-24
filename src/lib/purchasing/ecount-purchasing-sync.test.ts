@@ -227,7 +227,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     }))
   })
 
-  it('matches by supplier order number and sku without double-counting outbound quantity', async () => {
+  it('matches by supplier order number and sku regardless of quantity differences', async () => {
     const files = await Promise.all([
       makeUpload('purchase-request.xlsx', [
         '일자-No.', '품목코드', '품목명', '규격', '사전포장여부코드', '구매수량(EA)',
@@ -264,10 +264,8 @@ describe('parseEcountPurchasingSnapshot', () => {
       purchasePlanConfirmedSince: '2026-07-01',
     })
 
-    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining({
+    expect(snapshot.purchaseCompleted).not.toContainEqual(expect.objectContaining({
       sku: '101920-0001',
-      supplierOrderNumber: '3311769613413009579',
-      quantity: 800,
     }))
   })
 

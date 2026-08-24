@@ -599,6 +599,25 @@ function reconcilePlanWithPurchaseHistory(
     ))
 
   return planItems.flatMap((plan) => {
+    // Strong identifiers define the workflow identity. Once the same supplier
+    // order + SKU (or management code + SKU when an order number is missing)
+    // appears in purchase history, the plan has progressed regardless of a
+    // quantity discrepancy between reports.
+    const strongMatch = orderedHistory.some(({ item }) => {
+      if (plan.sku !== item.sku) return false
+      const planOrderKey = supplierKey(plan.supplierOrderNumber, plan.sku)
+      const historyOrderKey = supplierKey(item.supplierOrderNumber, item.sku)
+      if (planOrderKey && historyOrderKey) return planOrderKey === historyOrderKey
+      return Boolean(
+        !planOrderKey
+        && !historyOrderKey
+        && plan.purchaseManagementCode
+        && item.purchaseManagementCode
+        && plan.purchaseManagementCode === item.purchaseManagementCode,
+      )
+    })
+    if (strongMatch) return []
+
     let remaining = plan.quantity
     const candidates = orderedHistory
       .map(({ item, index }) => ({ item, index, score: pipelineMatchScore(plan, item) }))

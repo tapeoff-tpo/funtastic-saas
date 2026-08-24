@@ -294,6 +294,16 @@ async function handleUpload(req: NextRequest): Promise<NextResponse> {
     })
   })
 
+  if (formData.get('mode') === 'preview') {
+    return NextResponse.json({
+      mode: 'preview',
+      total: rows.length + parseErrors.length,
+      success: rows.length,
+      failed: parseErrors.length,
+      errors: parseErrors,
+    })
+  }
+
   // Save the uploaded workbook as an inventory snapshot in bounded DB batches.
   let successCount = 0
   const dbErrors: Array<{ sku: string; error: string }> = []

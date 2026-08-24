@@ -5,6 +5,7 @@ import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X
 import { Button } from '@/components/ui/button'
 
 type PreviewSection = { rows: number; quantity: number; samples: Array<{ sku: string; productName: string; quantity: number }> }
+type InventoryPreview = { total: number; success: number; failed: number; errors?: Array<{ sku: string; error: string }> }
 type StoredFiles = Partial<Record<FileKey, { fileName: string; updatedAt: string }>>
 type SnapshotSummary = {
   asOfDate: string
@@ -25,6 +26,7 @@ const REQUIRED_FILES = [
   { key: 'purchaseHistory', label: '구매현황', detail: '구매되어 중국창고에 도착한 건' },
   { key: 'chinaInventory', label: '중국재고현황', detail: '현재 중국창고에 보유한 재고' },
   { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건' },
+  { key: 'domesticInventory', label: '국내재고현황', detail: '재고관리에 반영할 국내 창고 현재고' },
 ] as const
 type FileKey = (typeof REQUIRED_FILES)[number]['key']
 
@@ -32,13 +34,17 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
   const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
+  const [inventoryPreview, setInventoryPreview] = useState<InventoryPreview | null>(null)
   const [previewKinds, setPreviewKinds] = useState<FileKey[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedFiles = REQUIRED_FILES.flatMap(({ key }) => files[key] ? [files[key]!] : [])
+  const selectedPurchasingFiles = REQUIRED_FILES.flatMap(({ key }) => key !== 'domesticInventory' && files[key] ? [files[key]!] : [])
+  const domesticInventoryFile = files.domesticInventory
   const readyCount = REQUIRED_FILES.filter(({ key }) => files[key] || storedFiles[key]).length
+  const isVerified = Boolean(preview || inventoryPreview)
 
   function selectFile(key: FileKey, file?: File) {
     if (file && !/\.xlsx$/i.test(file.name)) {
@@ -47,6 +53,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     }
     setFiles((current) => ({ ...current, [key]: file }))
     setPreview(null)
+    setInventoryPreview(null)
+    setPreviewKinds([])
     setMessage(null)
     setError(null)
   }
@@ -62,7 +70,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
       setError('변경할 파일을 하나 이상 선택해주세요.')
       return
     }
-    if (mode === 'apply' && !preview) {
+    if (mode === 'apply' && !isVerified) {
       setError('먼저 미리보기로 파일 검증을 완료해주세요.')
       return
     }
@@ -70,40 +78,53 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     setMessage(null)
     startTransition(async () => {
       try {
-        const form = new FormData()
-        form.set('mode', mode)
-        form.set('asOfDate', today)
-        form.set('domesticInventoryReflectedThrough', inventoryUpdatedDate)
-        form.set('purchasePlanConfirmedSince', '2026-07-01')
-        for (const file of selectedFiles) form.append('files', file)
-        const response = await fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
-        const responseText = await response.text()
-        let body: { error?: string; summary?: SnapshotSummary; storedFiles?: StoredFiles; changedKinds?: FileKey[] }
-        try {
-          body = responseText ? JSON.parse(responseText) : {}
-        } catch {
-          body = { error: response.status === 413
-            ? '업로드 용량이 서버 한도를 초과했습니다. 파일을 나누어 한 종류씩 올려주세요.'
-            : `서버가 정상 응답하지 않았습니다. (HTTP ${response.status})` }
+        let purchasingBody: { error?: string; summary?: SnapshotSummary; storedFiles?: StoredFiles; changedKinds?: FileKey[] } | null = null
+        let domesticBody: (InventoryPreview & { error?: string }) | null = null
+
+        if (selectedPurchasingFiles.length > 0) {
+          const form = new FormData()
+          form.set('mode', mode)
+          form.set('asOfDate', today)
+          form.set('domesticInventoryReflectedThrough', inventoryUpdatedDate)
+          form.set('purchasePlanConfirmedSince', '2026-07-01')
+          for (const file of selectedPurchasingFiles) form.append('files', file)
+          const response = await fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
+          purchasingBody = await readJsonResponse<NonNullable<typeof purchasingBody>>(response, '발주 로우데이터를 처리하지 못했습니다.')
+          if (purchasingBody.storedFiles) setStoredFiles(purchasingBody.storedFiles)
+          if (!response.ok || !purchasingBody.summary) throw new Error(purchasingBody.error ?? '발주 로우데이터를 처리하지 못했습니다.')
+          if (mode === 'preview') {
+            const filesByName = new Map(selectedPurchasingFiles.map((file) => [file.name, file]))
+            setFiles((current) => Object.fromEntries(REQUIRED_FILES.map(({ key }) => [
+              key,
+              key === 'domesticInventory' ? current[key] : filesByName.get(purchasingBody!.summary!.files[key]),
+            ])))
+          }
+          setPreview(purchasingBody.summary)
+          setPreviewKinds(purchasingBody.changedKinds ?? [])
         }
-        if (body.storedFiles) setStoredFiles(body.storedFiles)
-        if (!response.ok || !body.summary) {
-          setError(body.error ?? '발주 로우데이터를 처리하지 못했습니다.')
-          return
+
+        if (domesticInventoryFile) {
+          const inventoryForm = new FormData()
+          inventoryForm.set('mode', mode)
+          inventoryForm.set('file', domesticInventoryFile)
+          const response = await fetch('/api/inventory/bulk-upload', { method: 'POST', body: inventoryForm })
+          domesticBody = await readJsonResponse<NonNullable<typeof domesticBody>>(response, '국내재고 파일을 처리하지 못했습니다.')
+          if (!response.ok || domesticBody.failed > 0) {
+            const detail = domesticBody.errors?.slice(0, 3).map((item) => `${item.sku}: ${item.error}`).join(' / ')
+            throw new Error(domesticBody.error ?? detail ?? '국내재고 파일을 처리하지 못했습니다.')
+          }
+          setInventoryPreview(domesticBody)
         }
-        if (mode === 'preview') {
-          const filesByName = new Map(selectedFiles.map((file) => [file.name, file]))
-          setFiles(Object.fromEntries(
-            REQUIRED_FILES.map(({ key }) => [key, filesByName.get(body.summary!.files[key])]),
-          ))
-        }
-        setPreview(body.summary)
-        setPreviewKinds(body.changedKinds ?? [])
+
         if (mode === 'apply') {
           setFiles({})
-          setMessage('발주 로우데이터 반영이 완료되었습니다. 이제 발주검토에서 추천계산을 다시 실행해주세요.')
+          setMessage(domesticInventoryFile && selectedPurchasingFiles.length === 0
+            ? '국내재고가 재고관리에 반영되었습니다.'
+            : domesticInventoryFile
+              ? '발주 로우데이터와 국내재고 반영이 완료되었습니다.'
+              : '발주 로우데이터 반영이 완료되었습니다. 이제 발주검토에서 추천계산을 다시 실행해주세요.')
         } else {
-          setMessage('파일 종류를 자동으로 구분했습니다. 아래 내역을 확인한 뒤 최종 반영하세요.')
+          setMessage('파일 검증이 완료되었습니다. 아래 내역을 확인한 뒤 최종 반영하세요.')
         }
       } catch (requestError) {
         setError(requestError instanceof Error ? requestError.message : '발주 로우데이터를 처리하지 못했습니다.')
@@ -117,9 +138,9 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
-            <p className="mt-1 text-sm text-muted-foreground">처음에는 기준 파일 5종을 등록하고, 이후에는 변경된 파일만 넣으면 됩니다. 실제 종류는 검증할 때 자동 확인합니다.</p>
+            <p className="mt-1 text-sm text-muted-foreground">변경할 파일만 넣으면 됩니다. 국내재고 파일은 최종 반영 시 재고관리에 바로 적용됩니다.</p>
           </div>
-          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 5 준비 · {selectedFiles.length}개 변경</span>
+          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 6 준비 · {selectedFiles.length}개 변경</span>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {REQUIRED_FILES.map(({ key, label, detail }, index) => {
@@ -155,7 +176,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         <Button type="button" variant="outline" disabled={isPending || selectedFiles.length === 0} onClick={() => submit('preview')}>
           {isPending ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}미리보기·검증
         </Button>
-        <Button type="button" disabled={isPending || !preview} onClick={() => submit('apply')}>
+        <Button type="button" disabled={isPending || !isVerified} onClick={() => submit('apply')}>
           {isPending ? <Loader2 className="animate-spin" /> : <Upload />}최종 반영
         </Button>
         {message ? <span className="text-sm text-emerald-700">{message}</span> : null}
@@ -163,10 +184,11 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
       </div>
 
       {preview ? <Preview summary={preview} kinds={previewKinds} /> : null}
+      {inventoryPreview ? <section className="rounded-lg border bg-background p-4"><h2 className="font-semibold">국내재고 미리보기</h2><div className="mt-3 grid gap-3 sm:grid-cols-3"><StateCard label="전체 행" value={`${inventoryPreview.total.toLocaleString('ko-KR')}건`} /><StateCard label="정상" value={`${inventoryPreview.success.toLocaleString('ko-KR')}건`} /><StateCard label="오류" value={`${inventoryPreview.failed.toLocaleString('ko-KR')}건`} /></div></section> : null}
 
       <section className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-        <p>최종 반영은 이전에 SaaS 원본 업로드로 생성된 발주 진행·중국재고 스냅샷을 새 파일 내용으로 교체합니다. 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.</p>
+        <p>최종 반영은 선택한 항목만 교체합니다. 국내재고 파일을 선택하면 재고관리 현재고를 갱신하며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.</p>
       </section>
     </div>
   )
@@ -201,4 +223,15 @@ function Preview({ summary, kinds }: { summary: SnapshotSummary; kinds: FileKey[
 
 function StateCard({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>
+}
+
+async function readJsonResponse<T extends { error?: string }>(response: Response, fallback: string): Promise<T> {
+  const responseText = await response.text()
+  try {
+    return (responseText ? JSON.parse(responseText) : {}) as T
+  } catch {
+    return { error: response.status === 413
+      ? '업로드 용량이 서버 한도를 초과했습니다. 파일을 나누어 올려주세요.'
+      : `${fallback} (HTTP ${response.status})` } as T
+  }
 }

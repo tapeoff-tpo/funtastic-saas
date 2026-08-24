@@ -128,6 +128,11 @@ export async function PurchasingOrdersView({
     overduePurchaseCompletedCount,
     overdueTotalCount,
   } = purchaseRequestResult
+  const latestTargetStockMonths = items.reduce<number | null>((latest, item) => {
+    if (item.rawData.source !== 'auto_purchase_recommendation') return latest
+    const value = Number(item.rawData.targetStockMonths)
+    return Number.isFinite(value) && value >= 0.1 && value <= 12 ? value : latest
+  }, null) ?? 1.2
   const nextStatus = getNextPurchaseStatus(status)
   const quantityColumn = getStageQuantityColumn(status)
   const isRequestedStatus = status === 'requested'
@@ -207,7 +212,9 @@ export async function PurchasingOrdersView({
         </form>
       </header>
 
-      {showRecommendationGenerator ? <PurchaseRecommendationGenerator /> : null}
+      {showRecommendationGenerator ? (
+        <PurchaseRecommendationGenerator initialTargetStockMonths={latestTargetStockMonths} />
+      ) : null}
 
       {newProductFirstSaleItems.length > 0 ? (
         <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">

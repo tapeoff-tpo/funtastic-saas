@@ -552,14 +552,29 @@ function useBulkSelection() {
   return context
 }
 
-export function PurchaseRecommendationGenerator() {
+const TARGET_STOCK_MONTHS_STORAGE_KEY = 'purchase-recommendation-target-stock-months'
+
+export function PurchaseRecommendationGenerator({
+  initialTargetStockMonths = 1.2,
+}: {
+  initialTargetStockMonths?: number
+}) {
   const router = useRouter()
-  const [targetStockMonths, setTargetStockMonths] = useState('1.2')
+  const [targetStockMonths, setTargetStockMonths] = useState(String(initialTargetStockMonths))
   const [budgetKrw, setBudgetKrw] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
+
+  useEffect(() => {
+    const storedTargetStockMonths = localStorage.getItem(TARGET_STOCK_MONTHS_STORAGE_KEY)
+    if (!storedTargetStockMonths) return
+    const months = Number(storedTargetStockMonths)
+    if (Number.isFinite(months) && months >= 0.1 && months <= 12) {
+      setTargetStockMonths(storedTargetStockMonths)
+    }
+  }, [])
 
   useEffect(() => {
     const storedJobId = sessionStorage.getItem('purchase-recommendation-job-id')
@@ -644,6 +659,7 @@ export function PurchaseRecommendationGenerator() {
 
     setMessage(null)
     setError(null)
+    localStorage.setItem(TARGET_STOCK_MONTHS_STORAGE_KEY, String(months))
     startTransition(async () => {
       try {
         const response = await fetch('/api/purchasing/purchase-requests/recommendations', {
@@ -691,7 +707,14 @@ export function PurchaseRecommendationGenerator() {
           max="12"
           step="0.1"
           value={targetStockMonths}
-          onChange={(event) => setTargetStockMonths(event.target.value)}
+          onChange={(event) => {
+            const value = event.target.value
+            setTargetStockMonths(value)
+            const months = Number(value)
+            if (Number.isFinite(months) && months >= 0.1 && months <= 12) {
+              localStorage.setItem(TARGET_STOCK_MONTHS_STORAGE_KEY, value)
+            }
+          }}
           className="h-9 w-24"
         />
         <label className="text-xs text-muted-foreground" htmlFor="purchase-budget-krw">

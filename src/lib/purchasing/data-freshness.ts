@@ -64,9 +64,9 @@ export async function getPurchasingDataFreshness(userId: string) {
         ORDER BY (raw_data->>'evaluatedAt')::timestamptz DESC
         LIMIT 1
       ) AS "targetStockMonths",
-      (
-        SELECT MAX(completed_at) FROM data_refresh_events
-        WHERE user_id = ${userId}::uuid AND source LIKE 'purchasing_raw:%'
+      COALESCE(
+        (SELECT MAX(completed_at) FROM data_refresh_events WHERE user_id = ${userId}::uuid AND source LIKE 'purchasing_raw:%'),
+        (SELECT MAX(updated_at) FROM purchasing_ecount_raw_files WHERE user_id = ${userId}::uuid)
       )::text AS "rawDataAppliedAt",
       COALESCE(
         (SELECT MAX(completed_at) FROM data_refresh_events WHERE user_id = ${userId}::uuid AND source = 'domestic_inventory'),
@@ -76,9 +76,9 @@ export async function getPurchasingDataFreshness(userId: string) {
         (SELECT MAX(completed_at) FROM data_refresh_events WHERE user_id = ${userId}::uuid AND source = 'purchasing_raw:chinaInventory'),
         (SELECT MAX(updated_at) FROM china_warehouse_inventory WHERE user_id = ${userId}::uuid)
       )::text AS "chinaInventoryAt",
-      (
-        SELECT MAX(completed_at) FROM data_refresh_events
-        WHERE user_id = ${userId}::uuid AND source = 'purchasing_raw:chinaOutbound'
+      COALESCE(
+        (SELECT MAX(completed_at) FROM data_refresh_events WHERE user_id = ${userId}::uuid AND source = 'purchasing_raw:chinaOutbound'),
+        (SELECT MAX(updated_at) FROM purchasing_ecount_raw_files WHERE user_id = ${userId}::uuid AND report_kind = 'chinaOutbound')
       )::text AS "outboundRawAt",
       (
         SELECT MAX(applied_at) FROM outbound_reflection_batches

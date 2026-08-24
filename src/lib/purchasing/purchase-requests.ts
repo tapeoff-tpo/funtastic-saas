@@ -30,6 +30,7 @@ export async function getPurchaseRequests(input: {
   pageSize?: number
   sort?: string
   order?: string
+  outboundDate?: string
 }) {
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
@@ -65,6 +66,9 @@ export async function getPurchaseRequests(input: {
     if (input.status === 'requested') {
       conditions.push(gt(purchaseRequestItems.requestedQuantity, 0))
     }
+  }
+  if (input.status === 'completed' && input.outboundDate) {
+    conditions.push(eq(purchaseRequestItems.outboundExpectedDate, input.outboundDate))
   }
   if (input.search) {
     const pattern = `%${input.search}%`
@@ -175,6 +179,22 @@ export async function getPurchaseRequests(input: {
     overdueTotalCount: overduePurchaseRequestCount + overduePurchaseCompletedCount,
     statusCounts: Object.fromEntries(statusCounts.map((row) => [row.status, row.total])) as Partial<Record<PurchaseRequestStatus, number>>,
   }
+}
+
+export async function getCompletedOutboundDateOptions(userId: string) {
+  return db
+    .select({
+      date: purchaseRequestItems.outboundExpectedDate,
+      count: count(),
+    })
+    .from(purchaseRequestItems)
+    .where(and(
+      eq(purchaseRequestItems.userId, userId),
+      eq(purchaseRequestItems.status, 'completed'),
+      sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
+    ))
+    .groupBy(purchaseRequestItems.outboundExpectedDate)
+    .orderBy(desc(purchaseRequestItems.outboundExpectedDate))
 }
 
 export async function updatePurchaseRequestStatus(input: {

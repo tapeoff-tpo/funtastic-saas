@@ -31,10 +31,14 @@ export async function getReflectedOutboundMatchKeys(userId: string) {
 export async function reflectSelectedOutboundItems(input: {
   userId: string
   reflectedByUserId: string
-  ids: string[]
+  ids?: string[]
+  outboundDate?: string
 }) {
   await ensureReflectedOutboundItemsTable()
   return db.transaction(async (tx) => {
+    const selection = input.outboundDate
+      ? eq(purchaseRequestItems.outboundExpectedDate, input.outboundDate)
+      : inArray(purchaseRequestItems.id, input.ids ?? [])
     const rows = await tx
       .select({
         id: purchaseRequestItems.id,
@@ -46,7 +50,7 @@ export async function reflectSelectedOutboundItems(input: {
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
         eq(purchaseRequestItems.status, 'completed'),
-        inArray(purchaseRequestItems.id, input.ids),
+        selection,
         sql`${purchaseRequestItems.rawData}->>'source' = ${OUTBOUND_COMPLETED_SOURCE}`,
       ))
 

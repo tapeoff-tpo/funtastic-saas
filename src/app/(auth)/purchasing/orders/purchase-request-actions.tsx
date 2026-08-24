@@ -197,6 +197,64 @@ export function PurchaseBulkInventoryReflectedButton() {
   )
 }
 
+export function CompletedOutboundDateFilter({
+  dates,
+  selectedDate,
+}: {
+  dates: Array<{ date: string; count: number }>
+  selectedDate: string
+}) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const selected = dates.find((item) => item.date === selectedDate)
+
+  function changeDate(value: string) {
+    const params = new URLSearchParams(window.location.search)
+    if (value) params.set('outboundDate', value)
+    else params.delete('outboundDate')
+    params.delete('page')
+    router.push(`${window.location.pathname}?${params.toString()}`)
+  }
+
+  function reflectDate() {
+    if (!selected) return
+    if (!window.confirm(`${selected.date} 출고완료 ${selected.count.toLocaleString('ko-KR')}건을 목록에서 삭제하시겠습니까?`)) return
+    if (!window.confirm('정말 삭제하시겠습니까? 국내재고 반영이 완료된 경우에만 진행해주세요.')) return
+
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests/reflected-outbound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ outboundDate: selected.date }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        toast.error(body.error ?? '출고완료 삭제에 실패했습니다.')
+        return
+      }
+      toast.success(`${body.reflectedCount.toLocaleString('ko-KR')}건 · ${body.reflectedQuantity.toLocaleString('ko-KR')}개 삭제 완료`)
+      const params = new URLSearchParams(window.location.search)
+      params.delete('outboundDate')
+      params.delete('page')
+      router.push(`${window.location.pathname}?${params.toString()}`)
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select value={selectedDate} onChange={(event) => changeDate(event.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-xs">
+        <option value="">출고날짜 전체</option>
+        {dates.map((item) => <option key={item.date} value={item.date}>{item.date} ({item.count.toLocaleString('ko-KR')}건)</option>)}
+      </select>
+      <Button type="button" size="sm" variant="destructive" disabled={!selected || isPending} onClick={reflectDate}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
+        해당 날짜 전체 삭제
+      </Button>
+    </div>
+  )
+}
+
 const PURCHASE_BUYERS = [
   { code: '1', name: '한상철' },
   { code: '2', name: '김기환' },

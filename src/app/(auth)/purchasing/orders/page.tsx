@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
-import { getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
+import { getCompletedOutboundDateOptions, getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
 import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
 import {
   getNextPurchaseStatus,
@@ -22,6 +22,7 @@ import {
   PurchaseBulkInventoryReflectedButton,
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
+  CompletedOutboundDateFilter,
   PurchaseBuyerField,
   PurchaseDeleteButton,
   PurchasePlanFieldsV2,
@@ -90,6 +91,9 @@ export async function PurchasingOrdersView({
   const showCosts = stringParam(params.showCosts) === '1'
   const sort = stringParam(params.sort)
   const order = parseOrder(stringParam(params.order)) ?? 'desc'
+  const outboundDate = /^\d{4}-\d{2}-\d{2}$/.test(stringParam(params.outboundDate) ?? '')
+    ? stringParam(params.outboundDate)!
+    : ''
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -105,6 +109,7 @@ export async function PurchasingOrdersView({
     pageSize,
     sort: sort ?? undefined,
     order,
+    outboundDate: status === 'completed' ? outboundDate : undefined,
   })
   const totalPages = Math.max(1, Math.ceil(purchaseRequestResult.total / pageSize))
   const page = Math.min(requestedPage, totalPages)
@@ -118,6 +123,7 @@ export async function PurchasingOrdersView({
       pageSize,
       sort: sort ?? undefined,
       order,
+      outboundDate: status === 'completed' ? outboundDate : undefined,
     })
   }
   const {
@@ -133,6 +139,9 @@ export async function PurchasingOrdersView({
   const dataFreshness = showRecommendationGenerator
     ? await getPurchasingDataFreshness(workspaceUserId)
     : null
+  const completedOutboundDates = status === 'completed'
+    ? await getCompletedOutboundDateOptions(workspaceUserId)
+    : []
   const latestTargetStockMonths = items.reduce<number | null>((latest, item) => {
     if (item.rawData.source !== 'auto_purchase_recommendation') return latest
     const value = Number(item.rawData.targetStockMonths)
@@ -362,6 +371,12 @@ export async function PurchasingOrdersView({
               <p className="text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {status === 'completed' ? (
+                <CompletedOutboundDateFilter
+                  dates={completedOutboundDates.flatMap((item) => item.date ? [{ date: String(item.date), count: item.count }] : [])}
+                  selectedDate={outboundDate}
+                />
+              ) : null}
               {isRequestedStatus ? <PurchaseRequestCreateDialog /> : null}
               <PurchaseRequestExcelActions exportHref={excelExportHref} defaultStatus={status} />
               {isRequestedStatus ? <PurchaseBulkBuyerApply /> : null}

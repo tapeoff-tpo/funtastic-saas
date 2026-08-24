@@ -6,6 +6,13 @@ import { Button } from '@/components/ui/button'
 
 type PreviewSection = { rows: number; quantity: number; samples: Array<{ sku: string; productName: string; quantity: number }> }
 type InventoryPreview = { total: number; success: number; failed: number; errors?: Array<{ sku: string; error: string }> }
+type DataFreshness = {
+  rawDataAppliedAt: string | null
+  domesticInventoryAt: string | null
+  chinaInventoryAt: string | null
+  outboundRawAt: string | null
+  outboundReflectionAt: string | null
+}
 type StoredFiles = Partial<Record<FileKey, { fileName: string; updatedAt: string }>>
 type SnapshotSummary = {
   asOfDate: string
@@ -30,7 +37,7 @@ const REQUIRED_FILES = [
 ] as const
 type FileKey = (typeof REQUIRED_FILES)[number]['key']
 
-export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles }) {
+export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles, dataFreshness }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles; dataFreshness: DataFreshness }) {
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
   const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
@@ -163,6 +170,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
                   <span className="block font-medium">{label}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
                   <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : stored ? 'text-sky-800' : 'text-muted-foreground'}`}>{file?.name ?? (stored ? `저장됨: ${stored.fileName}` : '여기에 드래그하거나 클릭해서 .xlsx 선택')}</span>
+                  {!file && stored ? <span className="mt-1 block text-xs text-muted-foreground">마지막 등록: {formatKstTimestamp(stored.updatedAt)}</span> : null}
+                  {key === 'domesticInventory' && !file ? <span className="mt-1 block text-xs text-muted-foreground">마지막 반영: {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span> : null}
                   {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
                 </span>
                 {file ? <button type="button" aria-label={`${label} 파일 제거`} className="rounded p-1 hover:bg-background" onClick={(event) => { event.preventDefault(); selectFile(key) }}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 text-muted-foreground" />}
@@ -170,6 +179,17 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
               </label>
             )
           })}
+        </div>
+      </section>
+
+      <section className="rounded-lg border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+        <h2 className="font-medium text-foreground">연결 데이터 기준</h2>
+        <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+          <span>발주 로우데이터 {formatKstTimestamp(dataFreshness.rawDataAppliedAt)}</span>
+          <span>국내재고 {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span>
+          <span>중국재고 {formatKstTimestamp(dataFreshness.chinaInventoryAt)}</span>
+          <span>중국출고 {formatKstTimestamp(dataFreshness.outboundRawAt)}</span>
+          <span>출고반영 {formatKstTimestamp(dataFreshness.outboundReflectionAt)}</span>
         </div>
       </section>
 
@@ -235,4 +255,20 @@ async function readJsonResponse<T extends { error?: string }>(response: Response
       ? '업로드 용량이 서버 한도를 초과했습니다. 파일을 나누어 올려주세요.'
       : `${fallback} (HTTP ${response.status})` } as T
   }
+}
+
+function formatKstTimestamp(value: string | null) {
+  if (!value) return '기록 없음'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '기록 없음'
+  return new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date)
 }

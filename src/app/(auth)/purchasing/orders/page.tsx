@@ -278,17 +278,10 @@ export async function PurchasingOrdersView({
           </span>
         ) : null}
         {showRecommendationGenerator && dataFreshness ? (
-          <div className="ml-auto min-w-[320px] border-l pl-4 text-xs leading-5 text-muted-foreground">
+          <div className="ml-auto border-l pl-4 text-xs leading-5 text-muted-foreground">
             <div className="font-medium text-foreground">
               추천계산: {formatKstTimestamp(dataFreshness.recommendationCalculatedAt)}
               {dataFreshness.targetStockMonths ? ` · 목표 ${Number(dataFreshness.targetStockMonths).toLocaleString('ko-KR')}개월` : ''}
-            </div>
-            <div className="flex flex-wrap gap-x-3">
-              <span>발주 로우데이터 {formatKstTimestamp(dataFreshness.rawDataAppliedAt)}</span>
-              <span>국내재고 {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span>
-              <span>중국재고 {formatKstTimestamp(dataFreshness.chinaInventoryAt)}</span>
-              <span>중국출고 {formatKstTimestamp(dataFreshness.outboundRawAt)}</span>
-              <span>출고반영 {formatKstTimestamp(dataFreshness.outboundReflectionAt)}</span>
             </div>
           </div>
         ) : null}

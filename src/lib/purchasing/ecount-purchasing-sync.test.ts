@@ -118,6 +118,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       outboundRowsMatchedToPurchase: 2,
       outboundRowsWithoutReliableSupplierOrder: 1,
     })
+    expect(snapshot.warnings.join(' ')).not.toContain('[object Object]')
   })
 
   it('keeps plan rows regardless of their arrival target date and preserves the source purchase date', async () => {

@@ -488,7 +488,7 @@ export async function parseEcountPurchasingSnapshot(input: {
     warnings.push(`중국출고 ${outboundRowsWithoutReliableSupplierOrder.toLocaleString('ko-KR')}건은 주문서번호가 없어 출고관리코드 또는 행 기준 보조키로 보관합니다.`)
   }
   if (outboundRowsWithSupplierOrder.length !== outboundRowsMatchedToPurchase) {
-    warnings.push(`중국출고 주문서번호 대조 ${outboundRowsMatchedToPurchase.toLocaleString('ko-KR')}/${outboundRowsWithSupplierOrder.toLocaleString('ko-KR')}건이 구매현황과 일치합니다.`)
+    warnings.push(`중국출고 주문서번호 대조 ${outboundRowsMatchedToPurchase.toLocaleString('ko-KR')}/${outboundRowsWithSupplierOrder.length.toLocaleString('ko-KR')}건이 구매현황과 일치합니다.`)
   }
 
   return {

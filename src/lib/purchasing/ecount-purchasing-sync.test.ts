@@ -270,6 +270,34 @@ describe('parseEcountPurchasingSnapshot', () => {
       quantity: 800,
     }))
   })
+
+  it('matches the same supplier order and sku even when option labels differ', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260722-16', '중국창고', '111896-0001', '창틀 청소브러쉬', '창틀청소기', 20, '3315527619767009579', '개인', 'P-64', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260810-2', '111896-0001', '창틀 청소브러쉬', '창틀청소기 2개입', '', 20, '', '', 'P-64', '확인', '3315527619767009579'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-24',
+      asOfDate: '2026-08-24',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.purchaseCompleted).not.toContainEqual(expect.objectContaining({
+      sku: '111896-0001',
+    }))
+  })
 })
 
 async function makeUpload(

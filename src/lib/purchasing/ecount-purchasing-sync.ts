@@ -627,10 +627,6 @@ function pipelineMatchScore(
   right: EcountPurchaseCompletedItem,
 ) {
   if (left.sku !== right.sku) return 0
-  const leftOption = left.optionName?.trim() ?? ''
-  const rightOption = right.optionName?.trim() ?? ''
-  if (leftOption && rightOption && leftOption !== rightOption) return 0
-
   const managementMatches = Boolean(
     left.purchaseManagementCode
     && right.purchaseManagementCode
@@ -657,8 +653,14 @@ function pipelineMatchScore(
   if (managementConflicts && !orderMatches) return 0
   if (orderConflicts && !managementMatches) return 0
 
+  const leftOption = left.optionName?.trim() ?? ''
+  const rightOption = right.optionName?.trim() ?? ''
+  // Order number + SKU (or management code + SKU when no order number exists)
+  // is authoritative. Option labels often change between Ecount reports.
+  if (!orderMatches && !managementMatches && leftOption && rightOption && leftOption !== rightOption) return 0
+
   let score = 10
-  if (leftOption && rightOption) score += 10
+  if (leftOption && rightOption && leftOption === rightOption) score += 10
   if (managementMatches) score += 80
   if (orderMatches) score += 100
   return score

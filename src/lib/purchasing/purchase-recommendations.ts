@@ -474,7 +474,7 @@ export async function generatePurchaseRecommendations(input: {
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'outbound_requested']),
+        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'outbound_requested', 'completed']),
       ))
 
     const autoReviewRows = activeRequestRows.filter(

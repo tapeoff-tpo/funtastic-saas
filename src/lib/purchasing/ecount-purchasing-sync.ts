@@ -5,6 +5,7 @@ import {
   chinaWarehouseInventory,
   purchaseRequestItems,
 } from '@/lib/db/schema'
+import { getReflectedOutboundMatchKeys } from './reflected-outbound-items'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -829,6 +830,7 @@ export async function syncEcountPurchasingSnapshot(input: {
   snapshot: EcountPurchasingSnapshot
   reportKinds?: EcountReportKind[]
 }) {
+  const reflectedOutboundMatchKeys = await getReflectedOutboundMatchKeys(input.userId)
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
 
@@ -1006,7 +1008,9 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundCompletedRows = (reportKinds.has('chinaOutbound') ? input.snapshot.outboundCompleted : []).map((item) => ({
+    const outboundCompletedRows = (reportKinds.has('chinaOutbound') ? input.snapshot.outboundCompleted : [])
+      .filter((item) => !reflectedOutboundMatchKeys.has(item.fallbackMatchKey))
+      .map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'completed' as const,
@@ -1032,7 +1036,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedByUserId: input.requestedByUserId,
         syncedAt: now.toISOString(),
       },
-    }))
+      }))
     const rowsToInsert: PurchaseRequestItemInsert[] = [
       ...requestRows,
       ...purchaseCompletedRows,

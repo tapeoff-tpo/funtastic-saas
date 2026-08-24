@@ -156,6 +156,47 @@ export function PurchaseBulkStatusButton() {
   )
 }
 
+export function PurchaseBulkInventoryReflectedButton() {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = context.selectedIds.size
+
+  function reflectSelected() {
+    const ids = Array.from(context.selectedIds)
+    if (ids.length === 0) return
+    if (!window.confirm(`선택한 ${ids.length.toLocaleString('ko-KR')}건이 국내재고에 반영됐습니까?\n처리 후 중국출고완료 목록과 발주 계산에서 제외됩니다.`)) return
+
+    setMessage(null)
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests/reflected-outbound', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setMessage(body.error ?? '재고 반영 완료 처리에 실패했습니다.')
+        return
+      }
+      context.clear()
+      setMessage(`${body.reflectedCount.toLocaleString('ko-KR')}건 · ${body.reflectedQuantity.toLocaleString('ko-KR')}개 재고 반영 완료`)
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button type="button" size="sm" variant="outline" onClick={reflectSelected} disabled={isPending || selectedCount === 0}>
+        {isPending ? <Loader2 className="animate-spin" /> : <Check />}
+        선택 {selectedCount.toLocaleString('ko-KR')}건 재고 반영 완료
+      </Button>
+      {message ? <span className="text-xs text-muted-foreground">{message}</span> : null}
+    </div>
+  )
+}
+
 const PURCHASE_BUYERS = [
   { code: '1', name: '한상철' },
   { code: '2', name: '김기환' },

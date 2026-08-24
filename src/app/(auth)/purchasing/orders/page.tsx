@@ -19,6 +19,7 @@ import { ProductFlowNav } from '@/components/product-flow-nav'
 import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
+  PurchaseBulkInventoryReflectedButton,
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
   PurchaseBuyerField,
@@ -379,6 +380,7 @@ export async function PurchasingOrdersView({
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
               </Link>
               <PurchaseBulkDeleteButton />
+              {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
               {overdueOnly ? null : <PurchaseBulkStatusButton />}
             </div>
           </div>

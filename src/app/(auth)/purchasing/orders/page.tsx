@@ -5,7 +5,13 @@ import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
-import { getCompletedOutboundDateOptions, getOutboundRequestedQuantity, getPurchaseRequests } from '@/lib/purchasing/purchase-requests'
+import {
+  getCompletedOutboundDateOptions,
+  getOutboundRequestedQuantity,
+  getPurchaseRequests,
+  getPurchaseStageCostSummary,
+  PURCHASE_COST_SUMMARY_STATUSES,
+} from '@/lib/purchasing/purchase-requests'
 import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
 import {
   getNextPurchaseStatus,
@@ -100,17 +106,23 @@ export async function PurchasingOrdersView({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  let purchaseRequestResult = await getPurchaseRequests({
-    userId: workspaceUserId,
-    status: selectedStatus,
-    overdueOnly,
-    search: search ?? undefined,
-    page: requestedPage,
-    pageSize,
-    sort: sort ?? undefined,
-    order,
-    outboundDate: status === 'completed' ? outboundDate : undefined,
-  })
+  const [initialPurchaseRequestResult, purchaseStageCostSummary] = await Promise.all([
+    getPurchaseRequests({
+      userId: workspaceUserId,
+      status: selectedStatus,
+      overdueOnly,
+      search: search ?? undefined,
+      page: requestedPage,
+      pageSize,
+      sort: sort ?? undefined,
+      order,
+      outboundDate: status === 'completed' ? outboundDate : undefined,
+    }),
+    basePath === '/purchasing/orders' && !overdueOnly
+      ? getPurchaseStageCostSummary(workspaceUserId)
+      : Promise.resolve(null),
+  ])
+  let purchaseRequestResult = initialPurchaseRequestResult
   const totalPages = Math.max(1, Math.ceil(purchaseRequestResult.total / pageSize))
   const page = Math.min(requestedPage, totalPages)
   if (page !== requestedPage) {
@@ -268,6 +280,44 @@ export async function PurchasingOrdersView({
             발주요청 지연 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건,
             구매완료 입고지연 {overduePurchaseCompletedCount.toLocaleString('ko-KR')}건입니다.
           </span>
+        </section>
+      ) : null}
+
+      {purchaseStageCostSummary ? (
+        <section className="grid gap-3 sm:grid-cols-2" aria-label="발주 단계별 구매금액">
+          {PURCHASE_COST_SUMMARY_STATUSES.map((summaryStatus) => {
+            const summary = purchaseStageCostSummary[summaryStatus]
+            const hasMissingCost = summary.missingYuanCostCount > 0 || summary.missingKrwCostCount > 0
+            return (
+              <Link
+                key={summaryStatus}
+                href={purchaseOrdersHref({
+                  basePath,
+                  status: summaryStatus,
+                  showCosts,
+                  showRecommendationBasis,
+                  pageSize,
+                })}
+                className={`rounded-md border px-4 py-3 transition-colors hover:bg-muted/40 ${
+                  status === summaryStatus ? 'border-foreground bg-muted/20' : 'bg-background'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-medium">{PURCHASE_REQUEST_STATUS_LABELS[summaryStatus]}</span>
+                  <span className="text-xs text-muted-foreground">{summary.itemCount.toLocaleString('ko-KR')}건</span>
+                </div>
+                <div className="mt-2 text-xl font-semibold tabular-nums">
+                  ₩ {formatCost(summary.totalCostKrw, 0)}
+                </div>
+                <div className="mt-1 text-xs tabular-nums text-muted-foreground">
+                  元 {formatCost(summary.totalCostYuan, 2)}
+                  {hasMissingCost
+                    ? ` · 원가 누락 ₩ ${summary.missingKrwCostCount.toLocaleString('ko-KR')}건 / 元 ${summary.missingYuanCostCount.toLocaleString('ko-KR')}건`
+                    : ' · 원가 누락 없음'}
+                </div>
+              </Link>
+            )
+          })}
         </section>
       ) : null}
 

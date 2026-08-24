@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, getTableColumns, gt, ilike, ne, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, getTableColumns, gt, ilike, inArray, ne, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
@@ -20,6 +20,47 @@ const CHINA_INVENTORY_WAREHOUSE_ORDER = [
   '중국발생비용 (中国产生费用)',
   '중국창고',
 ] as const
+
+export const PURCHASE_COST_SUMMARY_STATUSES = ['purchased', 'purchase_completed'] as const
+export type PurchaseCostSummaryStatus = (typeof PURCHASE_COST_SUMMARY_STATUSES)[number]
+
+export async function getPurchaseStageCostSummary(userId: string) {
+  const rows = await db
+    .select({
+      status: purchaseRequestItems.status,
+      requestedQuantity: purchaseRequestItems.requestedQuantity,
+      actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+      unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+      unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+    })
+    .from(purchaseRequestItems)
+    .leftJoin(products, and(
+      eq(products.userId, purchaseRequestItems.userId),
+      eq(products.internalSku, purchaseRequestItems.sku),
+    ))
+    .where(and(
+      eq(purchaseRequestItems.userId, userId),
+      inArray(purchaseRequestItems.status, [...PURCHASE_COST_SUMMARY_STATUSES]),
+    ))
+
+  return Object.fromEntries(PURCHASE_COST_SUMMARY_STATUSES.map((status) => {
+    const statusRows = rows.filter((row) => row.status === status)
+    return [status, {
+      itemCount: statusRows.length,
+      ...sumPurchaseCosts(statusRows.map((row) => ({
+        requestedQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
+        unitCostYuan: row.unitCostYuan,
+        unitCostKrw: row.unitCostKrw,
+      }))),
+    }]
+  })) as Record<PurchaseCostSummaryStatus, {
+    itemCount: number
+    totalCostYuan: number
+    totalCostKrw: number
+    missingYuanCostCount: number
+    missingKrwCostCount: number
+  }>
+}
 
 export async function getPurchaseRequests(input: {
   userId: string
@@ -82,7 +123,7 @@ export async function getPurchaseRequests(input: {
   }
 
   const where = and(...conditions)
-  const orderBy = purchaseRequestOrderBy(input.sort, input.order, input.status)
+  const orderBy = purchaseRequestOrderBy(input.sort, input.order)
   const overduePurchaseRequestConditions: SQL[] = [
     eq(purchaseRequestItems.userId, input.userId),
     eq(purchaseRequestItems.status, 'purchased'),
@@ -153,9 +194,11 @@ export async function getPurchaseRequests(input: {
       .groupBy(purchaseRequestItems.status),
     db
       .select({
+        status: purchaseRequestItems.status,
         sku: purchaseRequestItems.sku,
         productName: purchaseRequestItems.productName,
         requestedQuantity: purchaseRequestItems.requestedQuantity,
+        actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
         unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
         unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
       })
@@ -182,7 +225,12 @@ export async function getPurchaseRequests(input: {
   return {
     items,
     total,
-    costTotals: sumPurchaseCosts(costRows),
+    costTotals: sumPurchaseCosts(costRows.map((row) => ({
+      ...row,
+      requestedQuantity: row.status === 'purchased' || row.status === 'purchase_completed'
+        ? row.actualPurchaseQuantity ?? row.requestedQuantity
+        : row.requestedQuantity,
+    }))),
     missingCostItems,
     overduePurchasedCount: overduePurchaseCompletedCount,
     overduePurchaseRequestCount,
@@ -382,7 +430,7 @@ export function getOutboundRequestedQuantity(item: {
   return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity
 }
 
-export function purchaseRequestOrderBy(sort?: string, order?: string, status?: PurchaseRequestStatus): SQL[] {
+export function purchaseRequestOrderBy(sort?: string, order?: string): SQL[] {
   const direction = order === 'asc' ? asc : desc
   const unitCostYuan = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'신규원가(元)', ''), '[^0-9.-]', '', 'g'), '')::numeric`
   const unitCostKrw = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'works 신규 원가', ''), '[^0-9.-]', '', 'g'), '')::numeric`

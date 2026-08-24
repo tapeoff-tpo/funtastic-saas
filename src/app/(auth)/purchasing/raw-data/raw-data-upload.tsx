@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useState, useTransition, type DragEvent } from 'react'
 import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -32,14 +32,25 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [dragOver, setDragOver] = useState<FileKey | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedFiles = REQUIRED_FILES.flatMap(({ key }) => files[key] ? [files[key]!] : [])
 
   function selectFile(key: FileKey, file?: File) {
+    if (file && !/\.xlsx$/i.test(file.name)) {
+      setError('엑셀 파일(.xlsx)만 넣을 수 있습니다.')
+      return
+    }
     setFiles((current) => ({ ...current, [key]: file }))
     setPreview(null)
     setMessage(null)
     setError(null)
+  }
+
+  function dropFile(event: DragEvent<HTMLLabelElement>, key: FileKey) {
+    event.preventDefault()
+    setDragOver(null)
+    selectFile(key, event.dataTransfer.files[0])
   }
 
   function submit(mode: 'preview' | 'apply') {
@@ -101,12 +112,19 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today
             const recognized = preview?.files[key]
             const matches = !recognized || recognized === file?.name
             return (
-              <label key={key} className={`relative flex min-h-28 cursor-pointer gap-3 rounded-lg border-2 border-dashed p-4 transition-colors hover:bg-muted/30 ${file ? 'border-emerald-300 bg-emerald-50/50' : 'border-muted-foreground/25'}`}>
+              <label
+                key={key}
+                className={`relative flex min-h-28 cursor-pointer gap-3 rounded-lg border-2 border-dashed p-4 transition-colors hover:bg-muted/30 ${dragOver === key ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : file ? 'border-emerald-300 bg-emerald-50/50' : 'border-muted-foreground/25'}`}
+                onDragEnter={(event) => { event.preventDefault(); setDragOver(key) }}
+                onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
+                onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(null) }}
+                onDrop={(event) => dropFile(event, key)}
+              >
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">{file ? <Check className="size-4 text-emerald-700" /> : index + 1}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">{label}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
-                  <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : 'text-muted-foreground'}`}>{file?.name ?? '클릭해서 .xlsx 선택'}</span>
+                  <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : 'text-muted-foreground'}`}>{file?.name ?? '여기에 드래그하거나 클릭해서 .xlsx 선택'}</span>
                   {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
                 </span>
                 {file ? <button type="button" aria-label={`${label} 파일 제거`} className="rounded p-1 hover:bg-background" onClick={(event) => { event.preventDefault(); selectFile(key) }}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 text-muted-foreground" />}

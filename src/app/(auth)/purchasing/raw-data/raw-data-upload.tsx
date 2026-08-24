@@ -3,9 +3,7 @@
 import { useState, useTransition } from 'react'
 import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 
-type SyncState = { purchaseRows: number; chinaRows: number; chinaQuantity: number }
 type PreviewSection = { rows: number; quantity: number; samples: Array<{ sku: string; productName: string; quantity: number }> }
 type SnapshotSummary = {
   asOfDate: string
@@ -29,13 +27,9 @@ const REQUIRED_FILES = [
 ] as const
 type FileKey = (typeof REQUIRED_FILES)[number]['key']
 
-export function PurchasingRawDataUpload({ initialState, today, inventoryUpdatedDate }: { initialState: SyncState; today: string; inventoryUpdatedDate: string }) {
+export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today: string; inventoryUpdatedDate: string }) {
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
-  const [asOfDate, setAsOfDate] = useState(today)
-  const [domesticThrough, setDomesticThrough] = useState(inventoryUpdatedDate)
-  const [planSince, setPlanSince] = useState('2026-07-01')
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
-  const [state, setState] = useState(initialState)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
@@ -63,12 +57,12 @@ export function PurchasingRawDataUpload({ initialState, today, inventoryUpdatedD
       try {
         const form = new FormData()
         form.set('mode', mode)
-        form.set('asOfDate', asOfDate)
-        form.set('domesticInventoryReflectedThrough', domesticThrough)
-        form.set('purchasePlanConfirmedSince', planSince)
+        form.set('asOfDate', today)
+        form.set('domesticInventoryReflectedThrough', inventoryUpdatedDate)
+        form.set('purchasePlanConfirmedSince', '2026-07-01')
         for (const file of selectedFiles) form.append('files', file)
         const response = await fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
-        const body = await response.json().catch(() => ({})) as { error?: string; summary?: SnapshotSummary; currentState?: SyncState }
+        const body = await response.json().catch(() => ({})) as { error?: string; summary?: SnapshotSummary }
         if (!response.ok || !body.summary) {
           setError(body.error ?? '발주 로우데이터를 처리하지 못했습니다.')
           return
@@ -80,7 +74,6 @@ export function PurchasingRawDataUpload({ initialState, today, inventoryUpdatedD
           ))
         }
         setPreview(body.summary)
-        if (body.currentState) setState(body.currentState)
         if (mode === 'apply') {
           setMessage('발주 로우데이터 반영이 완료되었습니다. 이제 발주검토에서 추천계산을 다시 실행해주세요.')
         } else {
@@ -94,12 +87,6 @@ export function PurchasingRawDataUpload({ initialState, today, inventoryUpdatedD
 
   return (
     <div className="space-y-4">
-      <section className="grid gap-3 sm:grid-cols-3">
-        <StateCard label="현재 발주 진행" value={`${state.purchaseRows.toLocaleString('ko-KR')}행`} />
-        <StateCard label="현재 중국재고 SKU" value={`${state.chinaRows.toLocaleString('ko-KR')}개`} />
-        <StateCard label="현재 중국재고 수량" value={`${state.chinaQuantity.toLocaleString('ko-KR')}개`} />
-      </section>
-
       <section className="rounded-lg border bg-background p-4">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -128,16 +115,6 @@ export function PurchasingRawDataUpload({ initialState, today, inventoryUpdatedD
             )
           })}
         </div>
-      </section>
-
-      <section className="rounded-lg border bg-background p-4">
-        <h2 className="font-semibold">2. 기준일 설정</h2>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <DateField label="Ecount 기준일" value={asOfDate} onChange={(value) => { setAsOfDate(value); setPreview(null) }} />
-          <DateField label="국내재고 반영 기준일" value={domesticThrough} onChange={(value) => { setDomesticThrough(value); setPreview(null) }} helper={`재고관리 최근 업데이트: ${inventoryUpdatedDate}`} />
-          <DateField label="완료 발주계획 시작일" value={planSince} onChange={(value) => { setPlanSince(value); setPreview(null) }} />
-        </div>
-        <p className="mt-2 text-xs text-muted-foreground">국내재고 반영 기준일까지 한국 출고가 끝난 중국출고 건은 완료로 처리합니다. 완료 발주계획 시작일은 기존 이력 연결 기준인 2026-07-01을 유지합니다.</p>
       </section>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -171,7 +148,7 @@ function Preview({ summary }: { summary: SnapshotSummary }) {
   ] as const
   return (
     <section className="rounded-lg border bg-background p-4">
-      <h2 className="font-semibold">3. 반영 미리보기</h2>
+      <h2 className="font-semibold">반영 미리보기</h2>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {sections.map(([label, section]) => <StateCard key={label} label={label} value={`${section.rows.toLocaleString('ko-KR')}행 / ${section.quantity.toLocaleString('ko-KR')}개`} />)}
       </div>
@@ -182,8 +159,4 @@ function Preview({ summary }: { summary: SnapshotSummary }) {
 
 function StateCard({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>
-}
-
-function DateField({ label, value, onChange, helper }: { label: string; value: string; onChange: (value: string) => void; helper?: string }) {
-  return <label className="space-y-1 text-sm"><span className="font-medium">{label}</span><Input type="date" value={value} onChange={(event) => onChange(event.target.value)} />{helper ? <span className="block text-xs text-emerald-700">{helper}</span> : null}</label>
 }

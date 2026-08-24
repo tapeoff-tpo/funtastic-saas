@@ -70,7 +70,6 @@ export async function POST(request: NextRequest) {
     const stored = await getStoredEcountRawFiles(workspaceUserId)
     const combined = new Map<EcountReportKind, StoredEcountRawFile>(stored.map((file) => [file.kind, file]))
     for (const file of classified) combined.set(file.kind, file)
-    if (mode === 'preview') await saveStoredEcountRawFiles(workspaceUserId, classified)
     let snapshot
     try {
       snapshot = await parseEcountPurchasingSnapshot({

@@ -905,31 +905,21 @@ export async function syncEcountPurchasingSnapshot(input: {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
 
-    const reportKinds = new Set(input.reportKinds ?? REPORT_KINDS)
-    const sourcesToReplace = input.reportKinds
-      ? [
-          ...(reportKinds.has('purchaseRequest') ? [ECOUNT_PENDING_REQUEST_SOURCE, ECOUNT_REQUEST_COMPLETED_SOURCE] : []),
-          ...(reportKinds.has('purchasePlan') ? [ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE] : []),
-          ...(reportKinds.has('purchaseHistory')
-            ? [ECOUNT_PURCHASE_COMPLETED_SOURCE, ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE]
-            : []),
-          ...(reportKinds.has('chinaInventory') ? [ECOUNT_CHINA_ARRIVED_SOURCE] : []),
-          ...(reportKinds.has('chinaOutbound') ? [ECOUNT_OUTBOUND_SOURCE, ECOUNT_OUTBOUND_COMPLETED_SOURCE] : []),
-        ]
-      : [...REPLACEABLE_ECOUNT_SOURCES]
-    const selectedPurchaseCompleted = input.snapshot.purchaseCompleted.filter((item) => (
-      (item.source === ECOUNT_REQUEST_COMPLETED_SOURCE && reportKinds.has('purchaseRequest'))
-      || (item.source === ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE
-        && (reportKinds.has('purchasePlan') || reportKinds.has('purchaseHistory')))
-      || (item.source === ECOUNT_PURCHASE_COMPLETED_SOURCE && reportKinds.has('purchaseHistory'))
-    )).filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
+    const {
+      reportKinds,
+      refreshPurchasePipeline,
+      refreshOutbound,
+      sourcesToReplace,
+    } = getEcountPurchasingRefreshScope(input.reportKinds)
+    const selectedPurchaseCompleted = (refreshPurchasePipeline ? input.snapshot.purchaseCompleted : [])
+      .filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
       source: item.source,
       sku: item.sku,
       purchaseManagementCode: item.purchaseManagementCode,
       supplierOrderNumber: item.supplierOrderNumber,
     })))
     const snapshotManagedItems = [
-      ...(reportKinds.has('purchaseRequest') ? input.snapshot.activeRequests : []),
+      ...(refreshPurchasePipeline ? input.snapshot.activeRequests : []),
       ...selectedPurchaseCompleted,
     ]
     const activeCodes = [...new Set(snapshotManagedItems
@@ -981,7 +971,7 @@ export async function syncEcountPurchasingSnapshot(input: {
     const now = new Date()
     const snapshotDate = new Date(`${input.snapshot.asOfDate}T00:00:00.000Z`)
 
-    const requestRows = (reportKinds.has('purchaseRequest') ? input.snapshot.activeRequests : []).map((item) => ({
+    const requestRows = (refreshPurchasePipeline ? input.snapshot.activeRequests : []).map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'purchased' as const,
@@ -1061,7 +1051,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundRows = (reportKinds.has('chinaOutbound') ? input.snapshot.outboundPending : []).map((item) => ({
+    const outboundRows = (refreshOutbound ? input.snapshot.outboundPending : []).map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'outbound_requested' as const,
@@ -1093,7 +1083,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundCompletedRows = (reportKinds.has('chinaOutbound') ? input.snapshot.outboundCompleted : [])
+    const outboundCompletedRows = (refreshOutbound ? input.snapshot.outboundCompleted : [])
       .map((item) => removeReflectedOutboundComponents(item, reflectedOutboundMatchKeys))
       .filter((item): item is EcountOutboundPendingItem => item !== null)
       .map((item) => ({
@@ -1173,6 +1163,27 @@ export async function syncEcountPurchasingSnapshot(input: {
       chinaInventoryQuantity: reportKinds.has('chinaInventory') ? sumQuantities(input.snapshot.chinaInventory) : 0,
     }
   })
+}
+
+export function getEcountPurchasingRefreshScope(reportKindsInput?: EcountReportKind[]) {
+  const reportKinds = new Set(reportKindsInput ?? REPORT_KINDS)
+  const refreshPurchasePipeline = reportKinds.has('purchaseRequest')
+    || reportKinds.has('purchasePlan')
+    || reportKinds.has('purchaseHistory')
+  const refreshOutbound = reportKinds.has('chinaOutbound') || reportKinds.has('purchaseHistory')
+  const sourcesToReplace: Array<(typeof REPLACEABLE_ECOUNT_SOURCES)[number]> = []
+  if (refreshPurchasePipeline) {
+    sourcesToReplace.push(
+      ECOUNT_PENDING_REQUEST_SOURCE,
+      ECOUNT_REQUEST_COMPLETED_SOURCE,
+      ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE,
+      ECOUNT_PURCHASE_COMPLETED_SOURCE,
+    )
+  }
+  if (reportKinds.has('chinaInventory')) sourcesToReplace.push(ECOUNT_CHINA_ARRIVED_SOURCE)
+  if (refreshOutbound) sourcesToReplace.push(ECOUNT_OUTBOUND_SOURCE, ECOUNT_OUTBOUND_COMPLETED_SOURCE)
+
+  return { reportKinds, refreshPurchasePipeline, refreshOutbound, sourcesToReplace }
 }
 
 async function loadEcountReport(input: EcountPurchasingUpload): Promise<ParsedReport> {

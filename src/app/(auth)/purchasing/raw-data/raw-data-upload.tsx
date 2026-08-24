@@ -14,6 +14,13 @@ type DataFreshness = {
   outboundReflectionAt: string | null
 }
 type StoredFiles = Partial<Record<FileKey, { fileName: string; updatedAt: string }>>
+type PurchasingUploadResponse = {
+  error?: string
+  summary?: SnapshotSummary
+  storedFiles?: StoredFiles
+  changedKinds?: FileKey[]
+}
+type DomesticInventoryResponse = InventoryPreview & { error?: string }
 type SnapshotSummary = {
   asOfDate: string
   domesticInventoryReflectedThrough: string
@@ -85,8 +92,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     setMessage(null)
     startTransition(async () => {
       try {
-        let purchasingBody: { error?: string; summary?: SnapshotSummary; storedFiles?: StoredFiles; changedKinds?: FileKey[] } | null = null
-        let domesticBody: (InventoryPreview & { error?: string }) | null = null
+        let purchasingBody: PurchasingUploadResponse | null = null
+        let domesticBody: DomesticInventoryResponse | null = null
 
         if (selectedPurchasingFiles.length > 0) {
           const form = new FormData()
@@ -96,8 +103,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           form.set('purchasePlanConfirmedSince', '2026-07-01')
           for (const file of selectedPurchasingFiles) form.append('files', file)
           const response = await fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
-          purchasingBody = await readJsonResponse<NonNullable<typeof purchasingBody>>(response, '발주 로우데이터를 처리하지 못했습니다.')
-          if (purchasingBody.storedFiles) setStoredFiles(purchasingBody.storedFiles)
+          purchasingBody = await readJsonResponse<PurchasingUploadResponse>(response, '발주 로우데이터를 처리하지 못했습니다.')
+          if (mode === 'apply' && purchasingBody.storedFiles) setStoredFiles(purchasingBody.storedFiles)
           if (!response.ok || !purchasingBody.summary) throw new Error(purchasingBody.error ?? '발주 로우데이터를 처리하지 못했습니다.')
           if (mode === 'preview') {
             const filesByName = new Map(selectedPurchasingFiles.map((file) => [file.name, file]))
@@ -115,7 +122,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           inventoryForm.set('mode', mode)
           inventoryForm.set('file', domesticInventoryFile)
           const response = await fetch('/api/inventory/bulk-upload', { method: 'POST', body: inventoryForm })
-          domesticBody = await readJsonResponse<NonNullable<typeof domesticBody>>(response, '국내재고 파일을 처리하지 못했습니다.')
+          domesticBody = await readJsonResponse<DomesticInventoryResponse>(response, '국내재고 파일을 처리하지 못했습니다.')
           if (!response.ok || domesticBody.failed > 0) {
             const detail = domesticBody.errors?.slice(0, 3).map((item) => `${item.sku}: ${item.error}`).join(' / ')
             throw new Error(domesticBody.error ?? detail ?? '국내재고 파일을 처리하지 못했습니다.')
@@ -209,7 +216,10 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
 
       <section className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-        <p>최종 반영은 선택한 항목만 교체합니다. 국내재고 파일을 선택하면 재고관리 현재고를 갱신하며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.</p>
+        <p>
+          최종 반영은 선택한 파일만 새 파일로 교체하고, 연관된 발주 단계는 저장된 나머지 파일과 함께 다시 계산합니다.
+          미리보기만으로는 파일이 저장되거나 데이터가 반영되지 않습니다. 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
+        </p>
       </section>
     </div>
   )

@@ -1,6 +1,35 @@
 import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
-import { parseEcountPurchasingSnapshot, type EcountPurchasingUpload } from './ecount-purchasing-sync'
+import {
+  getEcountPurchasingRefreshScope,
+  parseEcountPurchasingSnapshot,
+  type EcountPurchasingUpload,
+} from './ecount-purchasing-sync'
+
+describe('getEcountPurchasingRefreshScope', () => {
+  it('rebuilds every linked purchase stage when one purchase file changes', () => {
+    const planScope = getEcountPurchasingRefreshScope(['purchasePlan'])
+    expect(planScope.refreshPurchasePipeline).toBe(true)
+    expect(planScope.refreshOutbound).toBe(false)
+    expect(planScope.sourcesToReplace).toEqual(expect.arrayContaining([
+      'ecount_purchasing_snapshot_request',
+      'ecount_purchasing_snapshot_request_completed',
+      'ecount_purchasing_snapshot_plan_purchase_completed',
+      'ecount_purchasing_snapshot_purchase_completed',
+    ]))
+
+    const historyScope = getEcountPurchasingRefreshScope(['purchaseHistory'])
+    expect(historyScope.refreshPurchasePipeline).toBe(true)
+    expect(historyScope.refreshOutbound).toBe(true)
+  })
+
+  it('keeps an independent inventory-only update limited to inventory', () => {
+    const scope = getEcountPurchasingRefreshScope(['chinaInventory'])
+    expect(scope.refreshPurchasePipeline).toBe(false)
+    expect(scope.refreshOutbound).toBe(false)
+    expect(scope.sourcesToReplace).toEqual(['ecount_purchasing_snapshot_china_arrived'])
+  })
+})
 
 describe('parseEcountPurchasingSnapshot', () => {
   it('parses a single report for a partial update without inventing other stages', async () => {

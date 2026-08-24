@@ -153,6 +153,8 @@ export async function getPurchaseRequests(input: {
       .groupBy(purchaseRequestItems.status),
     db
       .select({
+        sku: purchaseRequestItems.sku,
+        productName: purchaseRequestItems.productName,
         requestedQuantity: purchaseRequestItems.requestedQuantity,
         unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
         unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
@@ -168,11 +170,20 @@ export async function getPurchaseRequests(input: {
   ])
   const overduePurchaseRequestCount = overduePurchaseRequestRows[0]?.total ?? 0
   const overduePurchaseCompletedCount = overduePurchaseCompletedRows[0]?.total ?? 0
+  const missingCostItems = costRows
+    .filter((row) => row.unitCostYuan == null || row.unitCostKrw == null)
+    .map((row) => ({
+      sku: row.sku,
+      productName: row.productName,
+      missingYuan: row.unitCostYuan == null,
+      missingKrw: row.unitCostKrw == null,
+    }))
 
   return {
     items,
     total,
     costTotals: sumPurchaseCosts(costRows),
+    missingCostItems,
     overduePurchasedCount: overduePurchaseCompletedCount,
     overduePurchaseRequestCount,
     overduePurchaseCompletedCount,

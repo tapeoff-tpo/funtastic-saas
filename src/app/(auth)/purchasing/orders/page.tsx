@@ -130,6 +130,7 @@ export async function PurchasingOrdersView({
     items,
     total,
     costTotals,
+    missingCostItems,
     statusCounts,
     overduePurchasedCount,
     overduePurchaseRequestCount,
@@ -283,9 +284,21 @@ export async function PurchasingOrdersView({
           <strong>{formatCost(costTotals.totalCostKrw, 0)}</strong>
         </span>
         {costTotals.missingYuanCostCount > 0 || costTotals.missingKrwCostCount > 0 ? (
-          <span className="text-xs text-amber-700">
-            원가 누락: 元 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 / ₩ {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건
-          </span>
+          <details className="text-xs text-amber-700">
+            <summary className="cursor-pointer">
+              원가 누락: 元 {costTotals.missingYuanCostCount.toLocaleString('ko-KR')}건 / ₩ {costTotals.missingKrwCostCount.toLocaleString('ko-KR')}건 · 품목 확인
+            </summary>
+            <div className="mt-2 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-950">
+              {missingCostItems.map((item) => (
+                <div key={`${item.sku}:${item.productName}`}>
+                  <strong>{item.sku}</strong> {item.productName}
+                  <span className="ml-1 text-amber-700">
+                    ({[item.missingYuan ? '元' : '', item.missingKrw ? '₩' : ''].filter(Boolean).join('·')} 누락)
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
         ) : null}
         {showRecommendationGenerator && dataFreshness ? (
           <div className="ml-auto border-l pl-4 text-xs leading-5 text-muted-foreground">

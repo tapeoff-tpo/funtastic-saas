@@ -147,7 +147,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
             const file = files[key]
             const stored = storedFiles[key]
             const recognized = preview?.files[key]
-            const matches = !recognized || recognized === file?.name
+            const displayedFileName = file?.name ?? stored?.fileName
+            const matches = !recognized || recognized === displayedFileName
             return (
               <label
                 key={key}

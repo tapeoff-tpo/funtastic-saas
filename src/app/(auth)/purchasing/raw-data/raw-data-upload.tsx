@@ -32,6 +32,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
   const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
+  const [previewKinds, setPreviewKinds] = useState<FileKey[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
@@ -77,7 +78,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         for (const file of selectedFiles) form.append('files', file)
         const response = await fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
         const responseText = await response.text()
-        let body: { error?: string; summary?: SnapshotSummary; storedFiles?: StoredFiles }
+        let body: { error?: string; summary?: SnapshotSummary; storedFiles?: StoredFiles; changedKinds?: FileKey[] }
         try {
           body = responseText ? JSON.parse(responseText) : {}
         } catch {
@@ -97,6 +98,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           ))
         }
         setPreview(body.summary)
+        setPreviewKinds(body.changedKinds ?? [])
         if (mode === 'apply') {
           setFiles({})
           setMessage('발주 로우데이터 반영이 완료되었습니다. 이제 발주검토에서 추천계산을 다시 실행해주세요.')
@@ -160,7 +162,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         {error ? <span className="text-sm text-destructive">{error}</span> : null}
       </div>
 
-      {preview ? <Preview summary={preview} /> : null}
+      {preview ? <Preview summary={preview} kinds={previewKinds} /> : null}
 
       <section className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -170,21 +172,29 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   )
 }
 
-function Preview({ summary }: { summary: SnapshotSummary }) {
+function Preview({ summary, kinds }: { summary: SnapshotSummary; kinds: FileKey[] }) {
   const sections = [
-    ['발주요청(구매요청)', summary.activeRequests],
-    ['구매완료·구매중', summary.purchaseCompleted],
-    ['중국현재고', summary.chinaInventory],
-    ['한국출고 진행', summary.outboundPending],
-    ['중국출고 완료', summary.outboundCompleted],
+    ['purchaseRequest', '발주요청(구매요청)', summary.activeRequests],
+    ['purchasePlan', '구매완료·구매중', summary.purchaseCompleted],
+    ['chinaInventory', '중국현재고', summary.chinaInventory],
+    ['chinaOutbound', '한국출고 진행', summary.outboundPending],
+    ['chinaOutbound', '중국출고 완료', summary.outboundCompleted],
   ] as const
+  const visibleSections = sections.filter(([kind]) => (
+    kinds.includes(kind) || (kind === 'purchasePlan' && kinds.includes('purchaseHistory'))
+  ))
+  const warnings = summary.warnings.filter((warning) => (
+    (kinds.includes('purchaseRequest') && warning.startsWith('진행중 발주요청'))
+    || (kinds.includes('chinaInventory') && warning.startsWith('중국창고 재고'))
+    || (kinds.includes('chinaOutbound') && warning.startsWith('중국출고'))
+  ))
   return (
     <section className="rounded-lg border bg-background p-4">
-      <h2 className="font-semibold">반영 미리보기</h2>
+      <h2 className="font-semibold">이번에 변경할 항목 미리보기</h2>
       <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {sections.map(([label, section]) => <StateCard key={label} label={label} value={`${section.rows.toLocaleString('ko-KR')}행 / ${section.quantity.toLocaleString('ko-KR')}개`} />)}
+        {visibleSections.map(([, label, section]) => <StateCard key={label} label={label} value={`${section.rows.toLocaleString('ko-KR')}행 / ${section.quantity.toLocaleString('ko-KR')}개`} />)}
       </div>
-      {summary.warnings.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">{summary.warnings.map((warning) => <p key={warning}>• {warning}</p>)}</div> : null}
+      {warnings.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">{warnings.map((warning) => <p key={warning}>• {warning}</p>)}</div> : null}
     </section>
   )
 }

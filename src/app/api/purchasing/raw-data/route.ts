@@ -70,15 +70,6 @@ export async function POST(request: NextRequest) {
     const combined = new Map<EcountReportKind, StoredEcountRawFile>(stored.map((file) => [file.kind, file]))
     for (const file of classified) combined.set(file.kind, file)
     if (mode === 'preview') await saveStoredEcountRawFiles(workspaceUserId, classified)
-    const missingKinds = REPORT_KINDS.filter((kind) => !combined.has(kind))
-    if (missingKinds.length > 0) {
-      return NextResponse.json({
-        error: `선택한 파일은 임시 저장했습니다. 나머지 파일도 올려주세요: ${missingKinds.map(getEcountReportLabel).join(', ')}`,
-        recognizedFiles: Object.fromEntries(classified.map((file) => [file.kind, file.fileName])),
-        storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
-      }, { status: 400 })
-    }
-
     let snapshot
     try {
       snapshot = await parseEcountPurchasingSnapshot({
@@ -86,6 +77,7 @@ export async function POST(request: NextRequest) {
         asOfDate: requiredText(form, 'asOfDate'),
         domesticInventoryReflectedThrough: requiredText(form, 'domesticInventoryReflectedThrough'),
         purchasePlanConfirmedSince: requiredText(form, 'purchasePlanConfirmedSince'),
+        allowMissingReports: true,
       })
     } catch (error) {
       return NextResponse.json({
@@ -108,6 +100,7 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       requestedByUserId: user.id,
       snapshot,
+      reportKinds: classified.map((file) => file.kind),
     })
     await saveStoredEcountRawFiles(workspaceUserId, classified)
     revalidatePath('/purchasing/raw-data')

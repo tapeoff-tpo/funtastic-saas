@@ -175,6 +175,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   domesticInventoryReflectedThrough: string
   asOfDate?: string
   purchasePlanConfirmedSince?: string
+  allowMissingReports?: boolean
 }): Promise<EcountPurchasingSnapshot> {
   const reflectedThrough = normalizeDateOnly(input.domesticInventoryReflectedThrough)
   if (!reflectedThrough) {
@@ -199,9 +200,10 @@ export async function parseEcountPurchasingSnapshot(input: {
   }
 
   const missingKinds = REPORT_KINDS.filter((kind) => !reportByKind.has(kind))
-  if (missingKinds.length > 0) {
+  if (missingKinds.length > 0 && !input.allowMissingReports) {
     throw new Error(`필수 원본 파일이 없습니다: ${missingKinds.map(reportLabel).join(', ')}`)
   }
+  for (const kind of missingKinds) reportByKind.set(kind, emptyReport(kind))
 
   const purchaseRequest = reportByKind.get('purchaseRequest')!
   const purchasePlan = reportByKind.get('purchasePlan')!
@@ -532,6 +534,19 @@ function deduplicateCompletedRequests(items: EcountPurchaseCompletedItem[]) {
   return [...keyed.values(), ...unkeyed]
 }
 
+function emptyReport(kind: EcountReportKind): ParsedReport {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('empty')
+  const definition = REPORT_DEFINITIONS.find((item) => item.kind === kind)!
+  return {
+    kind,
+    fileName: '',
+    sheet,
+    headerRowNumber: 1,
+    columns: new Map(definition.requiredHeaders.map((header, index) => [header, index + 1])),
+  }
+}
+
 export async function classifyEcountPurchasingUpload(input: EcountPurchasingUpload) {
   const report = await loadEcountReport(input)
   return { kind: report.kind, fileName: report.fileName }
@@ -812,13 +827,29 @@ export async function syncEcountPurchasingSnapshot(input: {
   userId: string
   requestedByUserId: string
   snapshot: EcountPurchasingSnapshot
+  reportKinds?: EcountReportKind[]
 }) {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
 
+    const reportKinds = new Set(input.reportKinds ?? REPORT_KINDS)
+    const sourcesToReplace = input.reportKinds
+      ? [
+          ...(reportKinds.has('purchaseRequest') ? [ECOUNT_PENDING_REQUEST_SOURCE, ECOUNT_REQUEST_COMPLETED_SOURCE] : []),
+          ...(reportKinds.has('purchasePlan') ? [ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE] : []),
+          ...(reportKinds.has('purchaseHistory') ? [ECOUNT_PURCHASE_COMPLETED_SOURCE] : []),
+          ...(reportKinds.has('chinaInventory') ? [ECOUNT_CHINA_ARRIVED_SOURCE] : []),
+          ...(reportKinds.has('chinaOutbound') ? [ECOUNT_OUTBOUND_SOURCE, ECOUNT_OUTBOUND_COMPLETED_SOURCE] : []),
+        ]
+      : [...REPLACEABLE_ECOUNT_SOURCES]
+    const selectedPurchaseCompleted = input.snapshot.purchaseCompleted.filter((item) => (
+      (item.source === ECOUNT_REQUEST_COMPLETED_SOURCE && reportKinds.has('purchaseRequest'))
+      || (item.source === ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE && reportKinds.has('purchasePlan'))
+      || (item.source === ECOUNT_PURCHASE_COMPLETED_SOURCE && reportKinds.has('purchaseHistory'))
+    ))
     const snapshotManagedItems = [
-      ...input.snapshot.activeRequests,
-      ...input.snapshot.purchaseCompleted,
+      ...(reportKinds.has('purchaseRequest') ? input.snapshot.activeRequests : []),
+      ...selectedPurchaseCompleted,
     ]
     const activeCodes = [...new Set(snapshotManagedItems
       .map((item) => item.purchaseManagementCode)
@@ -852,7 +883,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        isReplaceableEcountSource(),
+        isReplaceableEcountSource(sourcesToReplace),
       ))
     if (replaceableRows.length > 0) {
       await tx.delete(purchaseRequestItems).where(inArray(
@@ -869,7 +900,7 @@ export async function syncEcountPurchasingSnapshot(input: {
     const now = new Date()
     const snapshotDate = new Date(`${input.snapshot.asOfDate}T00:00:00.000Z`)
 
-    const requestRows = input.snapshot.activeRequests.map((item) => ({
+    const requestRows = (reportKinds.has('purchaseRequest') ? input.snapshot.activeRequests : []).map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'purchased' as const,
@@ -891,7 +922,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const purchaseCompletedRows = input.snapshot.purchaseCompleted.map((item) => ({
+    const purchaseCompletedRows = selectedPurchaseCompleted.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'purchase_completed' as const,
@@ -925,7 +956,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const chinaArrivedRows = input.snapshot.chinaInventory.map((item) => ({
+    const chinaArrivedRows = (reportKinds.has('chinaInventory') ? input.snapshot.chinaInventory : []).map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'china_arrived' as const,
@@ -949,7 +980,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundRows = input.snapshot.outboundPending.map((item) => ({
+    const outboundRows = (reportKinds.has('chinaOutbound') ? input.snapshot.outboundPending : []).map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'outbound_requested' as const,
@@ -975,7 +1006,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundCompletedRows = input.snapshot.outboundCompleted.map((item) => ({
+    const outboundCompletedRows = (reportKinds.has('chinaOutbound') ? input.snapshot.outboundCompleted : []).map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'completed' as const,
@@ -1013,24 +1044,26 @@ export async function syncEcountPurchasingSnapshot(input: {
       await tx.insert(purchaseRequestItems).values(rows)
     }
 
-    await tx.delete(chinaWarehouseInventory).where(
-      eq(chinaWarehouseInventory.userId, input.userId),
-    )
+    if (reportKinds.has('chinaInventory')) {
+      await tx.delete(chinaWarehouseInventory).where(
+        eq(chinaWarehouseInventory.userId, input.userId),
+      )
 
-    for (const rows of chunks(input.snapshot.chinaInventory, 500)) {
-      await tx
-        .insert(chinaWarehouseInventory)
-        .values(rows.map((item) => ({
-          userId: input.userId,
-          sku: item.sku,
-          productName: item.productName,
-          optionKey: item.optionKey,
-          optionName: item.optionName,
-          warehouseQuantities: item.warehouseQuantities,
-          totalQuantity: item.quantity,
-          availableQuantity: item.quantity,
-          updatedAt: now,
-        })))
+      for (const rows of chunks(input.snapshot.chinaInventory, 500)) {
+        await tx
+          .insert(chinaWarehouseInventory)
+          .values(rows.map((item) => ({
+            userId: input.userId,
+            sku: item.sku,
+            productName: item.productName,
+            optionKey: item.optionKey,
+            optionName: item.optionName,
+            warehouseQuantities: item.warehouseQuantities,
+            totalQuantity: item.quantity,
+            availableQuantity: item.quantity,
+            updatedAt: now,
+          })))
+      }
     }
 
     return {
@@ -1040,8 +1073,8 @@ export async function syncEcountPurchasingSnapshot(input: {
       createdChinaArrivedRows: chinaArrivedRows.length,
       createdOutboundRows: outboundRows.length,
       createdOutboundCompletedRows: outboundCompletedRows.length,
-      syncedChinaInventoryRows: input.snapshot.chinaInventory.length,
-      chinaInventoryQuantity: sumQuantities(input.snapshot.chinaInventory),
+      syncedChinaInventoryRows: reportKinds.has('chinaInventory') ? input.snapshot.chinaInventory.length : 0,
+      chinaInventoryQuantity: reportKinds.has('chinaInventory') ? sumQuantities(input.snapshot.chinaInventory) : 0,
     }
   })
 }
@@ -1204,9 +1237,9 @@ function readRawDataSource(rawData: unknown) {
   return typeof source === 'string' ? source : ''
 }
 
-function isReplaceableEcountSource() {
+function isReplaceableEcountSource(sources: readonly string[] = REPLACEABLE_ECOUNT_SOURCES) {
   const sourceList = sql.join(
-    REPLACEABLE_ECOUNT_SOURCES.map((source) => sql`${source}`),
+    sources.map((source) => sql`${source}`),
     sql`, `,
   )
   return sql`COALESCE(${purchaseRequestItems.rawData}->>'source', '') IN (

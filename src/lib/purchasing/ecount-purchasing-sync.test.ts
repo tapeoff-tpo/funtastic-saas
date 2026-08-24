@@ -3,6 +3,28 @@ import { describe, expect, it } from 'vitest'
 import { parseEcountPurchasingSnapshot, type EcountPurchasingUpload } from './ecount-purchasing-sync'
 
 describe('parseEcountPurchasingSnapshot', () => {
+  it('parses a single report for a partial update without inventing other stages', async () => {
+    const chinaInventory = await makeUpload('중국재고만.xlsx', [
+      '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+    ], [
+      ['100001-0001', '부분 갱신 상품', '블루', '상품', 42, 42],
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files: [chinaInventory],
+      domesticInventoryReflectedThrough: '2026-08-24',
+      asOfDate: '2026-08-24',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaInventory).toEqual([
+      expect.objectContaining({ sku: '100001-0001', quantity: 42 }),
+    ])
+    expect(snapshot.activeRequests).toEqual([])
+    expect(snapshot.purchaseCompleted).toEqual([])
+    expect(snapshot.outboundPending).toEqual([])
+  })
+
   it('maps Ecount raw rows to the current purchasing stages from row 2 headers', async () => {
     const files = await Promise.all([
       makeUpload('발주 요청 현황.xlsx', [

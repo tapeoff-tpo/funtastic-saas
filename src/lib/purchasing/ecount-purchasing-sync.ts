@@ -123,6 +123,19 @@ export type EcountOutboundPendingItem = {
   supplierOrderNumber: string | null
   outboundManagementCode: string | null
   fallbackMatchKey: string
+  componentMatchKeys: string[]
+  outboundComponents: Array<{
+    matchKey: string
+    legacyMatchKey: string
+    sourceRowNumber: number
+    sourceDateNo: string
+    effectiveDate: string
+    quantity: number
+  }>
+  cumulativeOutboundQuantity: number
+  totalOutboundQuantity: number
+  purchasedQuantity: number | null
+  isFullyOutbound: boolean
 }
 
 export type EcountPurchasingSnapshot = {
@@ -245,7 +258,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   let activeRequests = readRows(purchaseRequest)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchaseRequest, '품목코드')))
     .filter((row) => valueAt(row, purchaseRequest, '진행상태') === '진행중')
-    .map((row) => {
+    .map<EcountPendingRequest | null>((row) => {
       const sku = valueAt(row, purchaseRequest, '품목코드')
       const purchaseManagementCode = valueAt(row, purchaseRequest, '구입관리코드')
       const requestedQuantity = positiveInteger(valueAt(row, purchaseRequest, '구매수량(EA)'))
@@ -299,9 +312,9 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountChinaInventoryItem => row !== null)
 
-  const chinaOutboundItems = readRows(chinaOutbound)
+  const rawChinaOutboundItems = readRows(chinaOutbound)
     .filter((row) => isPurchaseItemSku(valueAt(row, chinaOutbound, '품목코드')))
-    .map((row) => {
+    .map<EcountOutboundPendingItem | null>((row) => {
       const effectiveDate = parseDate(valueAt(row, chinaOutbound, '유효기간'))
       const quantity = positiveInteger(valueAt(row, chinaOutbound, '출고수량(EA)'))
       if (!effectiveDate || quantity === 0) return null
@@ -313,11 +326,12 @@ export async function parseEcountPurchasingSnapshot(input: {
       const supplierOrderNumber = isReliableSupplierOrderNumber(rawSupplierOrderNumber)
         ? rawSupplierOrderNumber
         : null
-      const fallbackMatchKey = supplierOrderNumber
+      const legacyMatchKey = supplierOrderNumber
         ? `supplier:${supplierOrderNumber}:${sku}`
-        : outboundManagementCode
-          ? `outbound:${outboundManagementCode}:${sku}`
-          : `row:${sourceDateNo}:${sku}:${row.number}`
+        : ''
+      const fallbackMatchKey = outboundManagementCode
+        ? `outbound:${outboundManagementCode}:${sku}`
+        : `row:${sourceDateNo}:${sku}:${row.number}`
 
       return {
         sourceFileName: chinaOutbound.fileName,
@@ -331,15 +345,22 @@ export async function parseEcountPurchasingSnapshot(input: {
         supplierOrderNumber,
         outboundManagementCode,
         fallbackMatchKey,
+        componentMatchKeys: [fallbackMatchKey],
+        outboundComponents: [{
+          matchKey: fallbackMatchKey,
+          legacyMatchKey,
+          sourceRowNumber: row.number,
+          sourceDateNo,
+          effectiveDate,
+          quantity,
+        }],
+        cumulativeOutboundQuantity: quantity,
+        totalOutboundQuantity: quantity,
+        purchasedQuantity: null,
+        isFullyOutbound: false,
       } satisfies EcountOutboundPendingItem
     })
     .filter((row): row is EcountOutboundPendingItem => row !== null)
-
-  // The effective date is the China outbound date. A row remains a Korea-arrival
-  // pipeline item, but moves from outbound-requested to China-outbound-completed
-  // as soon as that date is reached.
-  const outboundCompleted = chinaOutboundItems.filter((row) => row.effectiveDate <= asOfDate)
-  const outboundPending = chinaOutboundItems.filter((row) => row.effectiveDate > asOfDate)
 
   // Plans are the purchase-in-progress stage. Purchase history consumes plan
   // quantities that have already reached China. Identifiers improve matching,
@@ -462,12 +483,8 @@ export async function parseEcountPurchasingSnapshot(input: {
       }
     })
     .filter((row): row is EcountPurchaseCompletedItem => row !== null)
-  const latestPurchasePlans = keepLatestPurchaseCompletedBySku([
-    ...planItems,
-    ...unplannedCompletedRequests,
-  ])
   const purchaseCompletedFromPlan = reconcilePlanWithPurchaseHistory(
-    latestPurchasePlans,
+    [...planItems, ...unplannedCompletedRequests],
     historyItems,
   )
   // Purchase-history rows already represent quantities that reached China.
@@ -475,17 +492,31 @@ export async function parseEcountPurchasingSnapshot(input: {
   // must not consume the remaining purchase-plan quantity a second time.
   const purchaseCompleted = purchaseCompletedFromPlan
 
+  // Split shipments remain distinct by outbound date so date-based inventory
+  // reflection stays exact. Rows from the same supplier order + SKU + date are
+  // aggregated, while cumulative progress is calculated across every date.
+  const outboundCompleted = aggregateChinaOutboundItems(
+    rawChinaOutboundItems.filter((row) => row.effectiveDate <= asOfDate),
+    rawChinaOutboundItems,
+    historyItems,
+  )
+  const outboundPending = aggregateChinaOutboundItems(
+    rawChinaOutboundItems.filter((row) => row.effectiveDate > asOfDate),
+    rawChinaOutboundItems,
+    historyItems,
+  )
+
   const activeRequestsMatchedToPlan = activeRequests.filter((row) => planKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
   )).length
   const activeRequestsMatchedToPurchase = activeRequests.filter((row) => purchaseKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
   )).length
-  const outboundRowsWithSupplierOrder = chinaOutboundItems.filter((row) => row.supplierOrderNumber !== null)
+  const outboundRowsWithSupplierOrder = rawChinaOutboundItems.filter((row) => row.supplierOrderNumber !== null)
   const outboundRowsMatchedToPurchase = outboundRowsWithSupplierOrder.filter((row) => purchaseSupplierKeys.has(
     supplierKey(row.supplierOrderNumber, row.sku)!,
   )).length
-  const outboundRowsWithoutReliableSupplierOrder = chinaOutboundItems.length - outboundRowsWithSupplierOrder.length
+  const outboundRowsWithoutReliableSupplierOrder = rawChinaOutboundItems.length - outboundRowsWithSupplierOrder.length
 
   const warnings: string[] = []
   if (activeRequests.length === 0) warnings.push('진행중 발주요청이 없습니다.')
@@ -646,6 +677,94 @@ function reconcilePlanWithPurchaseHistory(
   })
 }
 
+function aggregateChinaOutboundItems(
+  selectedItems: EcountOutboundPendingItem[],
+  allItems: EcountOutboundPendingItem[],
+  historyItems: EcountPurchaseCompletedItem[],
+) {
+  const purchasedQuantityByOrder = new Map<string, number>()
+  for (const item of historyItems) {
+    const key = supplierKey(item.supplierOrderNumber, item.sku)
+    if (!key) continue
+    purchasedQuantityByOrder.set(key, (purchasedQuantityByOrder.get(key) ?? 0) + item.quantity)
+  }
+
+  const allItemsByOrder = new Map<string, EcountOutboundPendingItem[]>()
+  for (const item of allItems) {
+    const key = outboundOrderKey(item)
+    const rows = allItemsByOrder.get(key) ?? []
+    rows.push(item)
+    allItemsByOrder.set(key, rows)
+  }
+
+  const selectedGroups = new Map<string, EcountOutboundPendingItem[]>()
+  for (const item of selectedItems) {
+    const orderKey = outboundOrderKey(item)
+    const groupKey = `${orderKey}::${item.effectiveDate}`
+    const rows = selectedGroups.get(groupKey) ?? []
+    rows.push(item)
+    selectedGroups.set(groupKey, rows)
+  }
+
+  return [...selectedGroups.values()].map((items) => {
+    const orderedItems = [...items].sort((left, right) => left.sourceRowNumber - right.sourceRowNumber)
+    const latest = orderedItems[orderedItems.length - 1]
+    const orderKey = outboundOrderKey(latest)
+    const everyOrderItem = allItemsByOrder.get(orderKey) ?? orderedItems
+    const quantity = orderedItems.reduce((sum, item) => sum + item.quantity, 0)
+    const cumulativeOutboundQuantity = everyOrderItem
+      .filter((item) => item.effectiveDate <= latest.effectiveDate)
+      .reduce((sum, item) => sum + item.quantity, 0)
+    const totalOutboundQuantity = everyOrderItem.reduce((sum, item) => sum + item.quantity, 0)
+    const purchasedQuantity = latest.supplierOrderNumber
+      ? purchasedQuantityByOrder.get(supplierKey(latest.supplierOrderNumber, latest.sku)!) ?? null
+      : null
+    const outboundComponents = orderedItems.flatMap((item) => item.outboundComponents)
+    const componentMatchKeys = outboundComponents.map((component) => component.matchKey)
+
+    return {
+      ...latest,
+      quantity,
+      fallbackMatchKey: componentMatchKeys.length === 1
+        ? componentMatchKeys[0]
+        : `shipment-group:${latest.effectiveDate}:${orderKey}`,
+      componentMatchKeys,
+      outboundComponents,
+      cumulativeOutboundQuantity,
+      totalOutboundQuantity,
+      purchasedQuantity,
+      isFullyOutbound: purchasedQuantity !== null && cumulativeOutboundQuantity >= purchasedQuantity,
+    }
+  })
+}
+
+function outboundOrderKey(item: EcountOutboundPendingItem) {
+  return supplierKey(item.supplierOrderNumber, item.sku) ?? item.fallbackMatchKey
+}
+
+function removeReflectedOutboundComponents(
+  item: EcountOutboundPendingItem,
+  reflectedMatchKeys: Set<string>,
+): EcountOutboundPendingItem | null {
+  const outboundComponents = item.outboundComponents.filter((component) => (
+    !reflectedMatchKeys.has(component.matchKey)
+    && (!component.legacyMatchKey || !reflectedMatchKeys.has(component.legacyMatchKey))
+  ))
+  if (outboundComponents.length === 0) return null
+
+  const quantity = outboundComponents.reduce((sum, component) => sum + component.quantity, 0)
+  const componentMatchKeys = outboundComponents.map((component) => component.matchKey)
+  return {
+    ...item,
+    quantity,
+    fallbackMatchKey: componentMatchKeys.length === 1
+      ? componentMatchKeys[0]
+      : item.fallbackMatchKey,
+    componentMatchKeys,
+    outboundComponents,
+  }
+}
+
 function pipelineMatchScore(
   left: EcountPurchaseCompletedItem,
   right: EcountPurchaseCompletedItem,
@@ -688,23 +807,6 @@ function pipelineMatchScore(
   if (managementMatches) score += 80
   if (orderMatches) score += 100
   return score
-}
-
-function keepLatestPurchaseCompletedBySku(items: EcountPurchaseCompletedItem[]) {
-  const latestBySku = new Map<string, EcountPurchaseCompletedItem>()
-  for (const item of items) {
-    const current = latestBySku.get(item.sku)
-    if (!current || comparePurchaseRecency(item, current) > 0) {
-      latestBySku.set(item.sku, item)
-    }
-  }
-  return [...latestBySku.values()]
-}
-
-function comparePurchaseRecency(left: EcountPurchaseCompletedItem, right: EcountPurchaseCompletedItem) {
-  const dateComparison = (left.purchaseDate ?? '').localeCompare(right.purchaseDate ?? '')
-  if (dateComparison !== 0) return dateComparison
-  return left.sourceRowNumber - right.sourceRowNumber
 }
 
 export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnapshot) {
@@ -808,14 +910,17 @@ export async function syncEcountPurchasingSnapshot(input: {
       ? [
           ...(reportKinds.has('purchaseRequest') ? [ECOUNT_PENDING_REQUEST_SOURCE, ECOUNT_REQUEST_COMPLETED_SOURCE] : []),
           ...(reportKinds.has('purchasePlan') ? [ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE] : []),
-          ...(reportKinds.has('purchaseHistory') ? [ECOUNT_PURCHASE_COMPLETED_SOURCE] : []),
+          ...(reportKinds.has('purchaseHistory')
+            ? [ECOUNT_PURCHASE_COMPLETED_SOURCE, ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE]
+            : []),
           ...(reportKinds.has('chinaInventory') ? [ECOUNT_CHINA_ARRIVED_SOURCE] : []),
           ...(reportKinds.has('chinaOutbound') ? [ECOUNT_OUTBOUND_SOURCE, ECOUNT_OUTBOUND_COMPLETED_SOURCE] : []),
         ]
       : [...REPLACEABLE_ECOUNT_SOURCES]
     const selectedPurchaseCompleted = input.snapshot.purchaseCompleted.filter((item) => (
       (item.source === ECOUNT_REQUEST_COMPLETED_SOURCE && reportKinds.has('purchaseRequest'))
-      || (item.source === ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE && reportKinds.has('purchasePlan'))
+      || (item.source === ECOUNT_PURCHASE_PLAN_COMPLETED_SOURCE
+        && (reportKinds.has('purchasePlan') || reportKinds.has('purchaseHistory')))
       || (item.source === ECOUNT_PURCHASE_COMPLETED_SOURCE && reportKinds.has('purchaseHistory'))
     )).filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
       source: item.source,
@@ -977,13 +1082,20 @@ export async function syncEcountPurchasingSnapshot(input: {
         effectiveDate: item.effectiveDate,
         outboundManagementCode: item.outboundManagementCode,
         fallbackMatchKey: item.fallbackMatchKey,
+        componentMatchKeys: item.componentMatchKeys,
+        outboundComponents: item.outboundComponents,
+        cumulativeOutboundQuantity: item.cumulativeOutboundQuantity,
+        totalOutboundQuantity: item.totalOutboundQuantity,
+        purchasedQuantity: item.purchasedQuantity,
+        isFullyOutbound: item.isFullyOutbound,
         outboundRequestedQuantity: item.quantity,
         syncedByUserId: input.requestedByUserId,
         syncedAt: now.toISOString(),
       },
     }))
     const outboundCompletedRows = (reportKinds.has('chinaOutbound') ? input.snapshot.outboundCompleted : [])
-      .filter((item) => !reflectedOutboundMatchKeys.has(item.fallbackMatchKey))
+      .map((item) => removeReflectedOutboundComponents(item, reflectedOutboundMatchKeys))
+      .filter((item): item is EcountOutboundPendingItem => item !== null)
       .map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
@@ -1006,6 +1118,12 @@ export async function syncEcountPurchasingSnapshot(input: {
         effectiveDate: item.effectiveDate,
         outboundManagementCode: item.outboundManagementCode,
         fallbackMatchKey: item.fallbackMatchKey,
+        componentMatchKeys: item.componentMatchKeys,
+        outboundComponents: item.outboundComponents,
+        cumulativeOutboundQuantity: item.cumulativeOutboundQuantity,
+        totalOutboundQuantity: item.totalOutboundQuantity,
+        purchasedQuantity: item.purchasedQuantity,
+        isFullyOutbound: item.isFullyOutbound,
         outboundCompletedQuantity: item.quantity,
         syncedByUserId: input.requestedByUserId,
         syncedAt: now.toISOString(),

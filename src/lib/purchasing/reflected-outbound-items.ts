@@ -55,29 +55,34 @@ export async function reflectSelectedOutboundItems(input: {
       ))
 
     const reflected = rows.flatMap((row) => {
+      const components = outboundComponents(row.rawData)
+      if (components.length > 0) return [{ ...row, components }]
+
       const matchKey = typeof row.rawData.fallbackMatchKey === 'string'
         ? row.rawData.fallbackMatchKey.trim()
         : ''
-      return matchKey ? [{ ...row, matchKey }] : []
+      return matchKey ? [{ ...row, components: [{ matchKey, quantity: row.quantity }] }] : []
     })
     if (reflected.length !== rows.length) {
       throw new Error('선택 항목 중 재업로드 방지 식별키가 없는 건이 있습니다.')
     }
 
     for (const row of reflected) {
-      await tx.execute(sql`
-        INSERT INTO purchasing_reflected_outbound_items (
-          user_id, match_key, sku, quantity, reflected_by_user_id, reflected_at
-        ) VALUES (
-          ${input.userId}::uuid, ${row.matchKey}, ${row.sku}, ${row.quantity},
-          ${input.reflectedByUserId}::uuid, now()
-        )
-        ON CONFLICT (user_id, match_key) DO UPDATE SET
-          sku = EXCLUDED.sku,
-          quantity = EXCLUDED.quantity,
-          reflected_by_user_id = EXCLUDED.reflected_by_user_id,
-          reflected_at = now()
-      `)
+      for (const component of row.components) {
+        await tx.execute(sql`
+          INSERT INTO purchasing_reflected_outbound_items (
+            user_id, match_key, sku, quantity, reflected_by_user_id, reflected_at
+          ) VALUES (
+            ${input.userId}::uuid, ${component.matchKey}, ${row.sku}, ${component.quantity},
+            ${input.reflectedByUserId}::uuid, now()
+          )
+          ON CONFLICT (user_id, match_key) DO UPDATE SET
+            sku = EXCLUDED.sku,
+            quantity = EXCLUDED.quantity,
+            reflected_by_user_id = EXCLUDED.reflected_by_user_id,
+            reflected_at = now()
+        `)
+      }
     }
 
     if (reflected.length > 0) {
@@ -91,5 +96,17 @@ export async function reflectSelectedOutboundItems(input: {
       reflectedCount: reflected.length,
       reflectedQuantity: reflected.reduce((sum, row) => sum + row.quantity, 0),
     }
+  })
+}
+
+function outboundComponents(rawData: Record<string, unknown>) {
+  if (!Array.isArray(rawData.outboundComponents)) return []
+  return rawData.outboundComponents.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+    const component = value as Record<string, unknown>
+    const matchKey = typeof component.matchKey === 'string' ? component.matchKey.trim() : ''
+    const quantity = Number(component.quantity)
+    if (!matchKey || !Number.isFinite(quantity) || quantity <= 0) return []
+    return [{ matchKey, quantity: Math.trunc(quantity) }]
   })
 }

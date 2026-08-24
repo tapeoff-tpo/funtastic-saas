@@ -297,7 +297,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     }))
   })
 
-  it('keeps only the latest purchase-in-progress order for each sku', async () => {
+  it('keeps every distinct purchase-in-progress order for the same sku', async () => {
     const files = await Promise.all([
       makeUpload('purchase-plan.xlsx', [
         '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
@@ -318,13 +318,18 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.purchaseCompleted).toEqual([
       expect.objectContaining({
         sku: '110806-0001',
+        supplierOrderNumber: '5122655749206006728',
+        purchaseDate: '2026-07-02',
+      }),
+      expect.objectContaining({
+        sku: '110806-0001',
         supplierOrderNumber: '3315471351420009579',
         purchaseDate: '2026-08-04',
       }),
     ])
   })
 
-  it('does not leave an old delayed order when the latest order already arrived', async () => {
+  it('does not discard an unmatched older order just because a newer order arrived', async () => {
     const files = await Promise.all([
       makeUpload('purchase-request.xlsx', [
         '일자-No.', '품목코드', '품목명', '규격', '사전포장여부코드', '구매수량(EA)',
@@ -353,9 +358,55 @@ describe('parseEcountPurchasingSnapshot', () => {
       allowMissingReports: true,
     })
 
-    expect(snapshot.purchaseCompleted).not.toContainEqual(expect.objectContaining({
+    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining({
       sku: '111697-0001',
+      purchaseManagementCode: 'P-OLD',
+      quantity: 150,
     }))
+  })
+
+  it('aggregates split outbound rows per order, sku, and date and tracks cumulative completion', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260820-1', '100001-0001', '분리출고 상품', '', '', 100, '', '', 'P-1', '확인', '3310000000000000001'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+      ], [
+        ['100001-0001', '20260820-1', '분리출고 상품', '', 30, '2026-08-20', '3310000000000000001', 'OUT-1'],
+        ['100001-0001', '20260820-2', '분리출고 상품', '', 20, '2026-08-20', '3310000000000000001', 'OUT-2'],
+        ['100001-0001', '20260822-1', '분리출고 상품', '', 50, '2026-08-22', '3310000000000000001', 'OUT-3'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-24',
+      asOfDate: '2026-08-24',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.outboundCompleted).toHaveLength(2)
+    expect(snapshot.outboundCompleted[0]).toMatchObject({
+      effectiveDate: '2026-08-20',
+      quantity: 50,
+      cumulativeOutboundQuantity: 50,
+      totalOutboundQuantity: 100,
+      purchasedQuantity: 100,
+      isFullyOutbound: false,
+    })
+    expect(snapshot.outboundCompleted[0].componentMatchKeys).toHaveLength(2)
+    expect(snapshot.outboundCompleted[1]).toMatchObject({
+      effectiveDate: '2026-08-22',
+      quantity: 50,
+      cumulativeOutboundQuantity: 100,
+      totalOutboundQuantity: 100,
+      purchasedQuantity: 100,
+      isFullyOutbound: true,
+    })
   })
 })
 

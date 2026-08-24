@@ -475,6 +475,8 @@ export async function PurchasingOrdersView({
                     const rowNumber = (page - 1) * pageSize + index + 1
                     const outboundRequestedQuantity = getOutboundRequestedQuantity(item)
                     const stageQuantity = getStageQuantity(item, item.status, outboundRequestedQuantity)
+                    const cumulativeOutboundQuantity = numericRawDataValue(item.rawData, 'cumulativeOutboundQuantity')
+                    const purchasedQuantity = numericRawDataValue(item.rawData, 'purchasedQuantity')
                     const requestDateElapsedDays = item.requestDate ? daysSinceDateOnly(item.requestDate) : 0
                     const purchaseDateElapsedDays = item.outboundExpectedDate ? daysSinceDateOnly(item.outboundExpectedDate) : 0
                     const isPurchaseRequestOverdue = item.status === 'purchased'
@@ -559,6 +561,16 @@ export async function PurchasingOrdersView({
                             unitCostKrw: costs.unitCostKrw,
                           } : undefined}
                         />
+                        {(item.status === 'outbound_requested' || item.status === 'completed')
+                          && cumulativeOutboundQuantity !== null ? (
+                            <div className="mt-1 whitespace-nowrap text-[11px] text-muted-foreground">
+                              누적출고 {formatNumber(cumulativeOutboundQuantity)}
+                              {purchasedQuantity !== null ? ` / 구매 ${formatNumber(purchasedQuantity)}` : ''}
+                              {item.rawData.isFullyOutbound === true ? (
+                                <span className="ml-1 font-medium text-emerald-700">전량출고</span>
+                              ) : null}
+                            </div>
+                          ) : null}
                       </td>
                       {showCosts ? (
                         <>
@@ -890,6 +902,11 @@ function formatNumber(value: unknown) {
   const number = typeof value === 'number' ? value : Number(value)
   if (!Number.isFinite(number)) return '-'
   return number.toLocaleString('ko-KR', { maximumFractionDigits: 1 })
+}
+
+function numericRawDataValue(rawData: Record<string, unknown>, key: string) {
+  const value = Number(rawData[key])
+  return Number.isFinite(value) && value >= 0 ? value : null
 }
 
 function formatCost(value: number | null, maximumFractionDigits: number) {

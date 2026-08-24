@@ -42,7 +42,7 @@ const REPORT_KINDS = [
   'chinaOutbound',
 ] as const
 
-type EcountReportKind = (typeof REPORT_KINDS)[number]
+export type EcountReportKind = (typeof REPORT_KINDS)[number]
 type EcountPurchaseCompletedSource =
   | typeof ECOUNT_REQUEST_COMPLETED_SOURCE
   | typeof ECOUNT_PURCHASE_COMPLETED_SOURCE
@@ -530,6 +530,15 @@ function deduplicateCompletedRequests(items: EcountPurchaseCompletedItem[]) {
     if (!existing || item.sourceRowNumber > existing.sourceRowNumber) keyed.set(key, item)
   }
   return [...keyed.values(), ...unkeyed]
+}
+
+export async function classifyEcountPurchasingUpload(input: EcountPurchasingUpload) {
+  const report = await loadEcountReport(input)
+  return { kind: report.kind, fileName: report.fileName }
+}
+
+export function getEcountReportLabel(kind: EcountReportKind) {
+  return reportLabel(kind)
 }
 
 function pendingRequestMatchesProgressed(
@@ -1045,7 +1054,7 @@ async function loadEcountReport(input: EcountPurchasingUpload): Promise<ParsedRe
 
   const header = findReportHeader(sheet)
   if (!header) {
-    throw new Error(`${input.fileName}: 지원하는 Ecount 발주 원본 양식을 찾지 못했습니다.`)
+    throw new Error(`${input.fileName}: 지원하는 Ecount 발주 원본 양식을 찾지 못했습니다. ${describeHeaderProblem(sheet)}`)
   }
 
   return {
@@ -1150,6 +1159,24 @@ function isPurchaseItemSku(value: string) {
 
 function isReliableSupplierOrderNumber(value: string) {
   return /^[1-9]\d{8,}$/.test(value)
+}
+
+function describeHeaderProblem(sheet: ExcelJS.Worksheet) {
+  let closest: { kind: EcountReportKind; matched: number; missing: string[]; rowNumber: number } | null = null
+  for (let rowNumber = 1; rowNumber <= Math.min(sheet.rowCount, 20); rowNumber += 1) {
+    const headers = new Set<string>()
+    sheet.getRow(rowNumber).eachCell({ includeEmpty: true }, (cell) => {
+      const header = normalizeHeader(cellText(cell.value))
+      if (header) headers.add(header)
+    })
+    for (const definition of REPORT_DEFINITIONS) {
+      const missing = definition.requiredHeaders.filter((header) => !headers.has(header))
+      const matched = definition.requiredHeaders.length - missing.length
+      if (!closest || matched > closest.matched) closest = { kind: definition.kind, matched, missing, rowNumber }
+    }
+  }
+  if (!closest || closest.matched === 0) return '첫 20행에서 필요한 열 제목을 찾지 못했습니다.'
+  return `가장 가까운 형식: ${reportLabel(closest.kind)}(헤더 ${closest.rowNumber}행), 누락 열: ${closest.missing.join(', ')}`
 }
 
 function reliableSupplierOrderNumber(value: string) {

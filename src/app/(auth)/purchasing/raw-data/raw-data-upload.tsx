@@ -5,6 +5,7 @@ import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X
 import { Button } from '@/components/ui/button'
 
 type PreviewSection = { rows: number; quantity: number; samples: Array<{ sku: string; productName: string; quantity: number }> }
+type StoredFiles = Partial<Record<FileKey, { fileName: string; updatedAt: string }>>
 type SnapshotSummary = {
   asOfDate: string
   domesticInventoryReflectedThrough: string
@@ -27,14 +28,16 @@ const REQUIRED_FILES = [
 ] as const
 type FileKey = (typeof REQUIRED_FILES)[number]['key']
 
-export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today: string; inventoryUpdatedDate: string }) {
+export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles }) {
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
+  const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedFiles = REQUIRED_FILES.flatMap(({ key }) => files[key] ? [files[key]!] : [])
+  const readyCount = REQUIRED_FILES.filter(({ key }) => files[key] || storedFiles[key]).length
 
   function selectFile(key: FileKey, file?: File) {
     if (file && !/\.xlsx$/i.test(file.name)) {
@@ -54,8 +57,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today
   }
 
   function submit(mode: 'preview' | 'apply') {
-    if (selectedFiles.length !== 5) {
-      setError('필수 원본 파일 5개를 모두 선택해주세요.')
+    if (selectedFiles.length === 0) {
+      setError('변경할 파일을 하나 이상 선택해주세요.')
       return
     }
     if (mode === 'apply' && !preview) {
@@ -73,7 +76,16 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today
         form.set('purchasePlanConfirmedSince', '2026-07-01')
         for (const file of selectedFiles) form.append('files', file)
         const response = await fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
-        const body = await response.json().catch(() => ({})) as { error?: string; summary?: SnapshotSummary }
+        const responseText = await response.text()
+        let body: { error?: string; summary?: SnapshotSummary; storedFiles?: StoredFiles }
+        try {
+          body = responseText ? JSON.parse(responseText) : {}
+        } catch {
+          body = { error: response.status === 413
+            ? '업로드 용량이 서버 한도를 초과했습니다. 파일을 나누어 한 종류씩 올려주세요.'
+            : `서버가 정상 응답하지 않았습니다. (HTTP ${response.status})` }
+        }
+        if (body.storedFiles) setStoredFiles(body.storedFiles)
         if (!response.ok || !body.summary) {
           setError(body.error ?? '발주 로우데이터를 처리하지 못했습니다.')
           return
@@ -86,6 +98,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today
         }
         setPreview(body.summary)
         if (mode === 'apply') {
+          setFiles({})
           setMessage('발주 로우데이터 반영이 완료되었습니다. 이제 발주검토에서 추천계산을 다시 실행해주세요.')
         } else {
           setMessage('파일 종류를 자동으로 구분했습니다. 아래 내역을 확인한 뒤 최종 반영하세요.')
@@ -102,29 +115,30 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
-            <p className="mt-1 text-sm text-muted-foreground">각 항목에 해당 파일을 하나씩 넣으세요. 검증할 때 실제 파일 종류를 다시 확인합니다.</p>
+            <p className="mt-1 text-sm text-muted-foreground">처음에는 기준 파일 5종을 등록하고, 이후에는 변경된 파일만 넣으면 됩니다. 실제 종류는 검증할 때 자동 확인합니다.</p>
           </div>
-          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{selectedFiles.length} / 5 완료</span>
+          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 5 준비 · {selectedFiles.length}개 변경</span>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {REQUIRED_FILES.map(({ key, label, detail }, index) => {
             const file = files[key]
+            const stored = storedFiles[key]
             const recognized = preview?.files[key]
             const matches = !recognized || recognized === file?.name
             return (
               <label
                 key={key}
-                className={`relative flex min-h-28 cursor-pointer gap-3 rounded-lg border-2 border-dashed p-4 transition-colors hover:bg-muted/30 ${dragOver === key ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : file ? 'border-emerald-300 bg-emerald-50/50' : 'border-muted-foreground/25'}`}
+                className={`relative flex min-h-28 cursor-pointer gap-3 rounded-lg border-2 border-dashed p-4 transition-colors hover:bg-muted/30 ${dragOver === key ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : file ? 'border-emerald-300 bg-emerald-50/50' : stored ? 'border-sky-200 bg-sky-50/40' : 'border-muted-foreground/25'}`}
                 onDragEnter={(event) => { event.preventDefault(); setDragOver(key) }}
                 onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
                 onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(null) }}
                 onDrop={(event) => dropFile(event, key)}
               >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">{file ? <Check className="size-4 text-emerald-700" /> : index + 1}</span>
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">{file || stored ? <Check className={`size-4 ${file ? 'text-emerald-700' : 'text-sky-700'}`} /> : index + 1}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">{label}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
-                  <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : 'text-muted-foreground'}`}>{file?.name ?? '여기에 드래그하거나 클릭해서 .xlsx 선택'}</span>
+                  <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : stored ? 'text-sky-800' : 'text-muted-foreground'}`}>{file?.name ?? (stored ? `저장됨: ${stored.fileName}` : '여기에 드래그하거나 클릭해서 .xlsx 선택')}</span>
                   {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
                 </span>
                 {file ? <button type="button" aria-label={`${label} 파일 제거`} className="rounded p-1 hover:bg-background" onClick={(event) => { event.preventDefault(); selectFile(key) }}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 text-muted-foreground" />}
@@ -136,7 +150,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate }: { today
       </section>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" variant="outline" disabled={isPending} onClick={() => submit('preview')}>
+        <Button type="button" variant="outline" disabled={isPending || selectedFiles.length === 0} onClick={() => submit('preview')}>
           {isPending ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}미리보기·검증
         </Button>
         <Button type="button" disabled={isPending || !preview} onClick={() => submit('apply')}>

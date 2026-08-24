@@ -147,6 +147,7 @@ export const navSections: NavSection[] = [
     items: [
       { href: '/purchasing/purchases', label: '발주검토', icon: CreditCard },
       { href: '/purchasing/orders', label: '발주', icon: ClipboardList },
+      { href: '/purchasing/raw-data', label: '발주 로우데이터', icon: FileSpreadsheet },
       { href: '/outbound-reflection', label: '출고반영', icon: FileSpreadsheet },
       { href: '/purchasing/china-inventory', label: '중국재고', icon: Boxes },
       { href: '/inventory', label: '재고관리', icon: Warehouse },

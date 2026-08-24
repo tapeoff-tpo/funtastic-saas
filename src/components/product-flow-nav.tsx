@@ -8,6 +8,7 @@ const RELATED_WORK = [
   { href: '/inventory', label: '재고' },
   { href: '/purchasing/purchases', label: '발주검토' },
   { href: '/purchasing/orders', label: '발주·입고' },
+  { href: '/purchasing/raw-data', label: '발주 로우데이터' },
   { href: '/analytics/price-table', label: '판매가' },
   { href: '/operations/marketplace-registration', label: '상품등록' },
 ]

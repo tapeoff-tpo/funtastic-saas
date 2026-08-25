@@ -110,7 +110,7 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
         if (mode === 'view') {
           setSelectedId((current) => current && nextSummaries.some((summary) => summary.id === current)
             ? current
-            : nextSummaries[0]?.id ?? null)
+            : null)
         }
       } catch (error) {
         if (!controller.signal.aborted) toast.error(error instanceof Error ? error.message : '상품을 불러오지 못했습니다.')
@@ -186,7 +186,7 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           <ToolbarField label="상품 검색" className="xl:w-64">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·샘플번호·제품번호" className="pl-8" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" className="pl-8" />
             </div>
           </ToolbarField>
 
@@ -209,10 +209,12 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
                 className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 text-sm"
               >
                 {mode === 'create' && <option value="">새 상품 작성 중</option>}
-                {mode === 'view' && summaries.length === 0 && <option value="">등록된 상품 없음</option>}
+                {mode === 'view' && !selectedId && (
+                  <option value="">{listLoading ? '상품 불러오는 중...' : summaries.length > 0 ? '상품을 선택하세요' : '등록된 상품 없음'}</option>
+                )}
                 {summaries.map((summary) => (
                   <option key={summary.id} value={summary.id}>
-                    #{summary.productNumber} · {summary.productName} · {summary.stageName}
+                    {summary.sampleCode ? `${summary.sampleCode} · ` : ''}{summary.productName} · {summary.stageName}
                   </option>
                 ))}
               </select>
@@ -248,11 +250,11 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           layout={layout}
           onSaved={reloadItem}
         />
-      ) : (listLoading && !selectedId) || detailLoading ? (
+      ) : detailLoading ? (
         <div className="flex min-h-[420px] items-center justify-center rounded-xl border bg-card">
           <div className="text-center text-sm text-muted-foreground"><Loader2 className="mx-auto mb-2 h-6 w-6 animate-spin" />상품 정보를 불러오는 중입니다.</div>
         </div>
-      ) : item ? (
+      ) : item && selectedId ? (
         <ProductEditor
           key={`${item.id}:${item.updatedAt}`}
           item={item}
@@ -260,14 +262,7 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           layout={layout}
           onSaved={reloadItem}
         />
-      ) : (
-        <div className="flex min-h-[420px] flex-col items-center justify-center rounded-xl border border-dashed bg-card text-center">
-          <PackageSearch className="mb-3 h-10 w-10 text-muted-foreground/50" />
-          <h2 className="text-base font-semibold">표시할 상품이 없습니다.</h2>
-          <p className="mt-1 text-sm text-muted-foreground">필터를 바꾸거나 새 상품 등록을 시작해주세요.</p>
-          <Button className="mt-4" onClick={startNewProduct}><Plus />신상품 등록</Button>
-        </div>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -343,7 +338,7 @@ function ProductEditor({ item, stages, layout, onSaved }: {
         const failedUploads = uploadResults.filter((uploadResult) => uploadResult.status === 'rejected').length
         if (failedUploads > 0) toast.warning(`상품은 저장했지만 첨부파일 ${failedUploads}개를 업로드하지 못했습니다.`)
       }
-      toast.success(`신상품 #${result.productNumber}을 등록했습니다.`)
+      toast.success('신상품을 등록했습니다.')
       onSaved(result.id)
     })
   }
@@ -365,7 +360,7 @@ function ProductEditor({ item, stages, layout, onSaved }: {
       <EditorSection title="진행 상태" icon={Sparkles}>
         <div className={cn('grid gap-3', fieldGridClass)}>
           <Field label="현재 단계"><StageSelect value={values.stageId} onChange={(value) => setValue('stageId', value)} stages={stages} /></Field>
-          <Field label="샘플 가칭번호"><Input value={values.sampleCode} onChange={(event) => setValue('sampleCode', event.target.value)} placeholder="BH-브랜드_PH-플랫폼" /></Field>
+          <Field label="상품번호"><Input value={values.sampleCode} onChange={(event) => setValue('sampleCode', event.target.value)} placeholder="상품번호를 입력하세요" /></Field>
         </div>
         {item?.stageHistory && item.stageHistory.length > 0 && (
           <div className="mt-4 rounded-lg bg-muted/40 p-3">
@@ -468,8 +463,7 @@ function ProductEditor({ item, stages, layout, onSaved }: {
     <div className="space-y-4">
       <div className="sticky top-[92px] z-20 flex flex-col gap-3 rounded-xl border bg-background/95 p-4 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-violet-700">{item ? `제품 #${item.productNumber}` : '새 상품'}</p>
-          <h2 className="mt-0.5 truncate text-xl font-semibold">{item ? item.productName : '신상품 정보 등록'}</h2>
+          <h2 className="truncate text-xl font-semibold">{item ? item.productName : '신상품 정보 등록'}</h2>
           <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
             <CalendarDays className="h-3 w-3" />
             {item ? `최근 수정 ${formatDateTime(item.updatedAt)}` : '필요한 정보를 한 화면에서 입력한 뒤 저장하세요.'}

@@ -831,7 +831,7 @@ export async function createNewProduct(input: {
   values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const calculatedCostKrw = calculateCnyCostKrw({
+  const calculatedCostKrw = input.values.calculatedCostKrw ?? calculateCnyCostKrw({
     chinaUnitPriceCny: input.values.chinaUnitPriceCny,
     unitShippingCny: input.values.unitShippingCny,
     exchangeRateKrw: input.values.exchangeRateKrw,
@@ -923,7 +923,7 @@ export async function updateNewProduct(input: {
     `))
     if (!current) throw new Error('신상품을 찾을 수 없습니다.')
     const stage = await assertStage(tx, input.userId, input.values.stageId)
-    const calculatedCostKrw = calculateCnyCostKrw({
+    const calculatedCostKrw = input.values.calculatedCostKrw ?? calculateCnyCostKrw({
       chinaUnitPriceCny: input.values.chinaUnitPriceCny,
       unitShippingCny: input.values.unitShippingCny,
       exchangeRateKrw: input.values.exchangeRateKrw,

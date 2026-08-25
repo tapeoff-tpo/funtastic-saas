@@ -431,7 +431,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
       costKrw: normalizedNumber(values.estimatedCost) ?? normalizedNumber(values.calculatedCostKrw) ?? 0,
     })
     if (!calculation) {
-      toast.error('예상원가를 먼저 입력해주세요.')
+      toast.error('원가를 먼저 입력해주세요.')
       return
     }
     setValues((current) => ({ ...current, b2bPrice: String(calculation.b2bPrice), b2cPrice: String(calculation.b2cPrice) }))
@@ -530,7 +530,9 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
         <div className={cn('grid gap-3', fieldGridClass)}>
           <Field label="사방넷코드"><Input value={values.sabangnetCode} onChange={(event) => setValue('sabangnetCode', event.target.value)} placeholder="품목에 등록할 품목코드" /></Field>
           <Field label="구매참고사항"><TextArea value={values.purchaseReferenceNotes} onChange={(value) => setValue('purchaseReferenceNotes', value)} placeholder="MOQ, 구매 옵션, 공급처 전달사항" /></Field>
-          <Field label="이전원가 (원화)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
+          <Field label="중국원가 (위안화)"><MoneyInput value={values.chinaUnitPriceCny} onChange={(value) => setValue('chinaUnitPriceCny', value)} /></Field>
+          <Field label="원화원가 (₩)"><MoneyInput value={values.calculatedCostKrw} onChange={(value) => setValue('calculatedCostKrw', value)} /></Field>
+          <Field label="이전원가 (₩)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
           <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
         </div>
@@ -591,16 +593,13 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
             <div>
               <p className="text-sm font-semibold text-violet-900">펀타스틱 판매가 계산식</p>
-              <p className="text-xs text-violet-700">예상원가를 기준으로 도매·소매 판매가와 예상 마진을 계산합니다.</p>
+              <p className="text-xs text-violet-700">원가를 기준으로 도매·소매 판매가와 예상 마진을 계산합니다.</p>
             </div>
-            <div className="flex gap-2">
-              <a href="https://funtastic-calc.vercel.app/" target="_blank" rel="noreferrer"><Button type="button" size="sm" variant="outline">기존 계산기<ExternalLink /></Button></a>
-              <Button type="button" size="sm" onClick={applyAutomaticPrice}>자동 계산</Button>
-            </div>
+            <Button type="button" size="sm" onClick={applyAutomaticPrice}>자동 계산</Button>
           </div>
         </div>
         <div className={cn('mt-3 grid gap-3', fieldGridClass)}>
-          <Field label="예상원가 (₩)"><MoneyInput value={values.estimatedCost} onChange={setCost} /></Field>
+          <Field label="원가 (₩)"><MoneyInput value={values.estimatedCost} onChange={setCost} /></Field>
           <Field label="B2B 판매가·도매 (₩)"><MoneyInput value={values.b2bPrice} onChange={(value) => setValue('b2bPrice', value)} /></Field>
           <Field label="B2C 판매가·소매 (₩)"><MoneyInput value={values.b2cPrice} onChange={(value) => setValue('b2cPrice', value)} /></Field>
           <Field label="신고금액"><MoneyInput value={values.declaredValue} onChange={(value) => setValue('declaredValue', value)} /></Field>

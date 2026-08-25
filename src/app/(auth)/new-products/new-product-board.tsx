@@ -26,7 +26,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import type { CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculateSalesPrices } from '@/lib/new-products/price-calculator'
 import type {
   NewProductAttachment,
@@ -54,7 +54,6 @@ type Props = {
 const sectionLabels: Record<NewProductEditorSection, string> = {
   progress: '진행 상태',
   basic: '기본 상품 정보',
-  sourcing: '소싱 상품 등록',
   itemMaster: '품목 등록 정보',
   attachments: '이미지 및 품질표시 파일',
   notice: '상품정보고시',
@@ -386,25 +385,6 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
     }))
   }
 
-  function setCnyCostValue(
-    key: 'chinaUnitPriceCny' | 'unitShippingCny' | 'exchangeRateKrw',
-    value: string,
-  ) {
-    setValues((current) => {
-      const next = { ...current, [key]: value }
-      const calculatedCostKrw = calculateCnyCostKrw({
-        chinaUnitPriceCny: normalizedNumber(next.chinaUnitPriceCny),
-        unitShippingCny: normalizedNumber(next.unitShippingCny),
-        exchangeRateKrw: normalizedNumber(next.exchangeRateKrw),
-      })
-      const calculatedCostValue = valueString(calculatedCostKrw)
-      const estimatedCost = !current.estimatedCost || current.estimatedCost === current.calculatedCostKrw
-        ? calculatedCostValue
-        : current.estimatedCost
-      return { ...next, calculatedCostKrw: calculatedCostValue, estimatedCost }
-    })
-  }
-
   function applyAutomaticPrice() {
     const calculation = calculateSalesPrices({
       costKrw: normalizedNumber(values.estimatedCost) ?? normalizedNumber(values.calculatedCostKrw) ?? 0,
@@ -498,26 +478,6 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
           <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" /></Field>
           <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} /></Field>
           <Field label="히스토리 메모"><TextArea value={values.historyNotes} onChange={(value) => setValue('historyNotes', value)} placeholder="날짜 / 담당자 / 결정 내용" rows={4} /></Field>
-        </div>
-      </EditorSection>
-    ),
-    sourcing: (
-      <EditorSection title="소싱 상품 등록" icon={PackageSearch}>
-        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
-          기준 환율: 1 CNY = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })} KRW
-          {exchangeRate.date ? ` (${exchangeRate.date})` : ' (기준값)'} · 한국원화 = (중국위안화 + 개당배송비) × 적용 환율
-        </div>
-        <div className={cn('grid gap-3', fieldGridClass)}>
-          <Field label="옵션명"><Input value={values.productOption} onChange={(event) => setValue('productOption', event.target.value)} /></Field>
-          <Field label="중국원가 (위안화)"><MoneyInput value={values.chinaUnitPriceCny} onChange={(value) => setCnyCostValue('chinaUnitPriceCny', value)} /></Field>
-          <Field label="개당배송비 (CNY)"><MoneyInput value={values.unitShippingCny} onChange={(value) => setCnyCostValue('unitShippingCny', value)} /></Field>
-          <Field label="기준환율"><MoneyInput value={values.exchangeRateKrw} onChange={(value) => setCnyCostValue('exchangeRateKrw', value)} /></Field>
-          <Field label="원가 (원화·자동 계산)"><Input readOnly value={values.calculatedCostKrw ? won(Number(values.calculatedCostKrw)) : ''} placeholder="위안화와 배송비를 입력하세요" className="bg-muted/40" /></Field>
-          <Field label="국내 판매 링크"><UrlInput value={values.domesticSaleUrl} onChange={(value) => setValue('domesticSaleUrl', value)} /></Field>
-          <Field label="국내 판매가 (₩)"><MoneyInput value={values.domesticSalePrice} onChange={(value) => setValue('domesticSalePrice', value)} /></Field>
-          <Field label="상세페이지 URL"><UrlInput value={values.detailPageUrl} onChange={(value) => setValue('detailPageUrl', value)} /></Field>
-          <Field label="비고 1"><TextArea value={values.memo1} onChange={(value) => setValue('memo1', value)} /></Field>
-          <Field label="비고 2"><TextArea value={values.memo2} onChange={(value) => setValue('memo2', value)} /></Field>
         </div>
       </EditorSection>
     ),
@@ -629,8 +589,27 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
         <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full shrink-0 sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
       </div>
 
+      {visibleSections.length > 1 && (
+        <nav aria-label="상품 정보 항목 바로가기" className="rounded-xl border bg-card p-3 shadow-sm">
+          <p className="mb-2 text-xs font-semibold text-muted-foreground">항목 바로가기</p>
+          <div className="flex flex-wrap gap-2">
+            {visibleSections.map((section) => (
+              <Button
+                key={section}
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => document.getElementById(`new-product-section-${section}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              >
+                {sectionLabels[section]}
+              </Button>
+            ))}
+          </div>
+        </nav>
+      )}
+
       {visibleSections.length > 0
-        ? visibleSections.map((section) => <div key={section}>{sectionContent[section]}</div>)
+        ? visibleSections.map((section) => <div key={section} id={`new-product-section-${section}`} className="scroll-mt-4">{sectionContent[section]}</div>)
         : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
 
       <div className="flex justify-end rounded-xl border bg-card p-4 shadow-sm">

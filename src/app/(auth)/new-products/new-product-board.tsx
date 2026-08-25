@@ -5,8 +5,6 @@ import { useRouter } from 'next/navigation'
 import { Dialog } from '@base-ui/react/dialog'
 import {
   ArrowDown,
-  ArrowLeft,
-  ArrowRight,
   ArrowUp,
   CalendarDays,
   ExternalLink,
@@ -93,9 +91,15 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
   useEffect(() => {
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
+      if (!stageFilter) {
+        setSummaries([])
+        setTotal(0)
+        setListLoading(false)
+        return
+      }
       setListLoading(true)
       const params = new URLSearchParams()
-      if (stageFilter) params.set('stageId', stageFilter)
+      if (stageFilter !== 'all') params.set('stageId', stageFilter)
       if (query.trim()) params.set('query', query.trim())
       try {
         const response = await fetch(`/api/new-products/items?${params.toString()}`, {
@@ -139,8 +143,10 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
     return () => controller.abort()
   }, [dataRevision, mode, selectedId])
 
-  const selectedIndex = summaries.findIndex((summary) => summary.id === selectedId)
   const detailLoading = mode === 'view' && Boolean(selectedId) && item?.id !== selectedId
+  const selectedStageName = stageFilter === 'all'
+    ? '전체 상태'
+    : initialStages.find((stage) => stage.id === stageFilter)?.name ?? ''
 
   function selectProduct(id: string) {
     if (!id) return
@@ -158,6 +164,19 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
     setEditorRevision((current) => current + 1)
   }
 
+  function changeStageFilter(value: string) {
+    setStageFilter(value)
+    setMode('view')
+    setSelectedId(null)
+    setItem(null)
+  }
+
+  function closeEditor() {
+    setMode('view')
+    setSelectedId(null)
+    setItem(null)
+  }
+
   function reloadItem(id: string) {
     setMode('view')
     setSelectedId(id)
@@ -173,10 +192,11 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           <ToolbarField label="상태별 보기" className="xl:w-64">
             <select
               value={stageFilter}
-              onChange={(event) => setStageFilter(event.target.value)}
+              onChange={(event) => changeStageFilter(event.target.value)}
               className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
             >
-              <option value="">전체 상태 ({initialStages.reduce((sum, stage) => sum + stage.itemCount, 0)})</option>
+              <option value="">상태를 선택하세요</option>
+              <option value="all">전체 상태 ({initialStages.reduce((sum, stage) => sum + stage.itemCount, 0)})</option>
               {initialStages.map((stage, index) => (
                 <option key={stage.id} value={stage.id}>{index + 1}. {stage.name} ({stage.itemCount})</option>
               ))}
@@ -186,59 +206,19 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           <ToolbarField label="상품 검색" className="xl:w-64">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" className="pl-8" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" disabled={!stageFilter} className="pl-8" />
             </div>
           </ToolbarField>
 
-          <ToolbarField label={`상품 선택 · ${total.toLocaleString('ko-KR')}건`} className="min-w-0 flex-1">
-            <div className="flex gap-1">
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="이전 상품"
-                disabled={mode === 'create' || selectedIndex <= 0}
-                onClick={() => selectProduct(summaries[selectedIndex - 1]!.id)}
-              >
-                <ArrowLeft />
-              </Button>
-              <select
-                value={mode === 'create' ? '' : selectedId ?? ''}
-                onChange={(event) => selectProduct(event.target.value)}
-                disabled={listLoading || summaries.length === 0}
-                className="h-8 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 text-sm"
-              >
-                {mode === 'create' && <option value="">새 상품 작성 중</option>}
-                {mode === 'view' && !selectedId && (
-                  <option value="">{listLoading ? '상품 불러오는 중...' : summaries.length > 0 ? '상품을 선택하세요' : '등록된 상품 없음'}</option>
-                )}
-                {summaries.map((summary) => (
-                  <option key={summary.id} value={summary.id}>
-                    {summary.sampleCode ? `${summary.sampleCode} · ` : ''}{summary.productName} · {summary.stageName}
-                  </option>
-                ))}
-              </select>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="다음 상품"
-                disabled={mode === 'create' || selectedIndex < 0 || selectedIndex >= summaries.length - 1}
-                onClick={() => selectProduct(summaries[selectedIndex + 1]!.id)}
-              >
-                <ArrowRight />
-              </Button>
-            </div>
-          </ToolbarField>
-
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-1 flex-wrap justify-end gap-2">
+            {(mode === 'create' || selectedId) && <Button variant="outline" onClick={closeEditor}><PackageSearch />{mode === 'create' ? '등록 닫기' : '상품 목록'}</Button>}
             <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />
             <LayoutSettingsDialog layout={layout} onSaved={setLayout} />
             <Button onClick={startNewProduct}><Plus />신상품 등록</Button>
           </div>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          최근 수정순 최대 50개만 선택창에 표시됩니다. 오래된 상품은 이름이나 제품번호로 검색하면 바로 찾을 수 있습니다.
+          상태를 선택하면 해당 상품 목록이 표시됩니다. 목록은 최근 수정순 최대 50개까지 불러옵니다.
         </p>
       </section>
 
@@ -262,8 +242,65 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           layout={layout}
           onSaved={reloadItem}
         />
+      ) : stageFilter ? (
+        <ProductSummaryList
+          title={selectedStageName}
+          summaries={summaries}
+          total={total}
+          loading={listLoading}
+          onSelect={selectProduct}
+        />
       ) : null}
     </div>
+  )
+}
+
+function ProductSummaryList({ title, summaries, total, loading, onSelect }: {
+  title: string
+  summaries: NewProductSummary[]
+  total: number
+  loading: boolean
+  onSelect: (id: string) => void
+}) {
+  return (
+    <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <div>
+          <h2 className="text-sm font-semibold">{title} 상품</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
+        </div>
+      </div>
+      {loading ? (
+        <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />상품 목록을 불러오는 중입니다.</div>
+      ) : summaries.length > 0 ? (
+        <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
+          {summaries.map((summary) => (
+            <button
+              key={summary.id}
+              type="button"
+              onClick={() => onSelect(summary.id)}
+              className="rounded-lg border bg-background p-3 text-left transition hover:border-violet-300 hover:bg-violet-50/50 hover:shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold">{summary.productName}</p>
+                  <p className="mt-1 truncate text-xs text-muted-foreground">상품번호 {summary.sampleCode || '미입력'}</p>
+                </div>
+                <span className={cn('shrink-0 rounded-full px-2 py-1 text-[10px] font-medium', toneClasses[summary.stageTone])}>{summary.stageName}</span>
+              </div>
+              <p className="mt-3 text-[11px] text-muted-foreground">최근 수정 {formatDateTime(summary.updatedAt)}</p>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="flex min-h-48 flex-col items-center justify-center text-center">
+          <PackageSearch className="mb-2 h-8 w-8 text-muted-foreground/50" />
+          <p className="text-sm font-medium">해당 상태의 상품이 없습니다.</p>
+          <p className="mt-1 text-xs text-muted-foreground">검색어를 지우거나 다른 상태를 선택해주세요.</p>
+        </div>
+      )}
+      {!loading && total > summaries.length && <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">최근 수정된 {summaries.length}건만 표시 중입니다. 검색어로 오래된 상품을 찾을 수 있습니다.</p>}
+    </section>
   )
 }
 

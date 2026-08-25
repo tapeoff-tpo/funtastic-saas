@@ -189,6 +189,7 @@ function newProductValues(values: Record<string, unknown>): NewProductInput {
     packageManufacturer: nullableText(values.packageManufacturer, 100),
     packagePacking: nullableText(values.packagePacking, 100),
     sabangnetCode: nullableText(values.sabangnetCode, 100),
+    productKeywords: nullableText(values.productKeywords),
     purchaseReferenceNotes: nullableText(values.purchaseReferenceNotes),
     previousCostKrw: nullableInteger(values.previousCostKrw),
     b2bOptionSurcharge: nullableInteger(values.b2bOptionSurcharge),

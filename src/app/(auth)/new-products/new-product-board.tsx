@@ -537,6 +537,8 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <div className={cn('grid gap-3 md:grid-cols-2', fullWidthFieldClass)}>
             <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={3} resizable={false} className="h-[88px]" /></Field>
             <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={3} resizable={false} className="h-[88px]" /></Field>
+            <Field label="상품키워드"><TextArea value={values.productKeywords} onChange={(value) => setValue('productKeywords', value)} placeholder="검색·등록에 사용할 상품 키워드" rows={3} resizable={false} className="h-[88px]" /></Field>
+            <Field label="구매 참고사항"><TextArea value={values.purchaseReferenceNotes} onChange={(value) => setValue('purchaseReferenceNotes', value)} placeholder="MOQ, 구매 옵션, 공급처 전달사항" rows={3} resizable={false} className="h-[88px]" /></Field>
           </div>
         </div>
       </EditorSection>
@@ -661,7 +663,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
         </nav>
       )}
 
-      <fieldset disabled={Boolean(item) && !editing} className="space-y-4 border-0 p-0 disabled:opacity-80">
+      <fieldset disabled={Boolean(item) && !editing} className="space-y-4 border-0 p-0 [&_input:disabled]:!bg-transparent [&_input:disabled]:!text-foreground [&_input:disabled]:!opacity-100 [&_select:disabled]:!text-foreground [&_select:disabled]:!opacity-100 [&_textarea:disabled]:!text-foreground [&_textarea:disabled]:!opacity-100">
         {visibleSections.length > 0
           ? visibleSections.map((section) => <div key={section} id={`new-product-section-${section}`} className="scroll-mt-4">{sectionContent[section]}</div>)
           : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
@@ -929,7 +931,7 @@ function LayoutSettingsDialog({ layout, onSaved }: { layout: NewProductEditorLay
 function Field({ label, required, className, children }: { label: string; required?: boolean; className?: string; children: React.ReactNode }) {
   return (
     <label className={cn('block space-y-1.5', className)}>
-      <span className="text-xs font-medium text-muted-foreground">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>
+      <span className="text-xs font-medium text-foreground">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>
       {children}
     </label>
   )
@@ -1168,6 +1170,7 @@ function emptyEditorValues(stageId: string, exchangeRateKrw: number) {
     packageManufacturer: '',
     packagePacking: '',
     sabangnetCode: '',
+    productKeywords: '',
     purchaseReferenceNotes: '',
     previousCostKrw: '',
     b2bOptionSurcharge: '',
@@ -1224,6 +1227,7 @@ function editorValues(item: NewProductItem, defaultExchangeRate: number): Editor
     packageManufacturer: item.packageManufacturer ?? '',
     packagePacking: item.packagePacking ?? '',
     sabangnetCode: item.sabangnetCode ?? '',
+    productKeywords: item.productKeywords ?? '',
     purchaseReferenceNotes: item.purchaseReferenceNotes ?? '',
     previousCostKrw: valueString(item.previousCostKrw),
     b2bOptionSurcharge: valueString(item.b2bOptionSurcharge),

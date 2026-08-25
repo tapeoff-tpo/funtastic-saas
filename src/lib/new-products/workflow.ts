@@ -119,6 +119,7 @@ export type NewProductItem = {
   packageManufacturer: string | null
   packagePacking: string | null
   sabangnetCode: string | null
+  productKeywords: string | null
   purchaseReferenceNotes: string | null
   previousCostKrw: number | null
   b2bOptionSurcharge: number | null
@@ -177,6 +178,7 @@ export type NewProductInput = {
   packageManufacturer: string | null
   packagePacking: string | null
   sabangnetCode: string | null
+  productKeywords: string | null
   purchaseReferenceNotes: string | null
   previousCostKrw: number | null
   b2bOptionSurcharge: number | null
@@ -392,6 +394,7 @@ async function createNewProductWorkflowSchema() {
       ADD COLUMN IF NOT EXISTS memo_1 text,
       ADD COLUMN IF NOT EXISTS memo_2 text,
       ADD COLUMN IF NOT EXISTS sabangnet_code varchar(100),
+      ADD COLUMN IF NOT EXISTS product_keywords text,
       ADD COLUMN IF NOT EXISTS purchase_reference_notes text,
       ADD COLUMN IF NOT EXISTS previous_cost_krw integer,
       ADD COLUMN IF NOT EXISTS b2b_option_surcharge integer,
@@ -642,6 +645,7 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
       item.package_manufacturer AS "packageManufacturer",
       item.package_packing AS "packagePacking",
       item.sabangnet_code AS "sabangnetCode",
+      item.product_keywords AS "productKeywords",
       item.purchase_reference_notes AS "purchaseReferenceNotes",
       item.previous_cost_krw AS "previousCostKrw",
       item.b2b_option_surcharge AS "b2bOptionSurcharge",
@@ -755,6 +759,7 @@ export async function getNewProductWorkflow(userId: string) {
         item.package_packing AS "packagePacking",
         item.product_option AS "productOption",
         item.sabangnet_code AS "sabangnetCode",
+        item.product_keywords AS "productKeywords",
         item.purchase_reference_notes AS "purchaseReferenceNotes",
         item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
         item.unit_shipping_cny::float8 AS "unitShippingCny",
@@ -856,7 +861,7 @@ export async function createNewProduct(input: {
         package_info_url, package_progress_status, package_status, korean_manual_status,
         declared_value, b2b_price, b2c_price, carrier, b2b_shipping_fee, b2c_shipping_fee,
         quality_notice_status, package_box_design, package_manufacturer, package_packing,
-        sabangnet_code, purchase_reference_notes, previous_cost_krw,
+        sabangnet_code, product_keywords, purchase_reference_notes, previous_cost_krw,
         b2b_option_surcharge, b2c_option_surcharge,
         notice_material, notice_size, notice_manufacturer, notice_weight, notice_country,
         notice_capacity, notice_food_safety, notice_components, notice_special_notes,
@@ -877,7 +882,7 @@ export async function createNewProduct(input: {
         ${input.values.b2bShippingFee}, ${input.values.b2cShippingFee},
         ${input.values.qualityNoticeStatus}, ${input.values.packageBoxDesign},
         ${input.values.packageManufacturer}, ${input.values.packagePacking},
-        ${input.values.sabangnetCode}, ${input.values.purchaseReferenceNotes},
+        ${input.values.sabangnetCode}, ${input.values.productKeywords}, ${input.values.purchaseReferenceNotes},
         ${input.values.previousCostKrw},
         ${input.values.b2bOptionSurcharge}, ${input.values.b2cOptionSurcharge},
         ${input.values.noticeMaterial}, ${input.values.noticeSize}, ${input.values.noticeManufacturer},
@@ -968,6 +973,7 @@ export async function updateNewProduct(input: {
         package_manufacturer = ${input.values.packageManufacturer},
         package_packing = ${input.values.packagePacking},
         sabangnet_code = ${input.values.sabangnetCode},
+        product_keywords = ${input.values.productKeywords},
         purchase_reference_notes = ${input.values.purchaseReferenceNotes},
         previous_cost_krw = ${input.values.previousCostKrw},
         b2b_option_surcharge = ${input.values.b2bOptionSurcharge},

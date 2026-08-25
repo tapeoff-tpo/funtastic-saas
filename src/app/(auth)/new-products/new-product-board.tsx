@@ -576,9 +576,8 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="무게 (C)"><Input value={values.noticeWeight} onChange={(event) => setValue('noticeWeight', event.target.value)} placeholder="예: 20g" /></Field>
           <Field label="제조국"><Input value={values.noticeCountry} onChange={(event) => setValue('noticeCountry', event.target.value)} /></Field>
           <Field label="용량 (C)"><Input value={values.noticeCapacity} onChange={(event) => setValue('noticeCapacity', event.target.value)} /></Field>
-          <Field label="[식약처] 유리/도자기제품 필수확인 (C)"><TextArea value={values.noticeFoodSafety} onChange={(value) => setValue('noticeFoodSafety', value)} /></Field>
-          <Field label="구성품"><TextArea value={values.noticeComponents} onChange={(value) => setValue('noticeComponents', value)} /></Field>
-          <Field label="특이사항"><TextArea value={values.noticeSpecialNotes} onChange={(value) => setValue('noticeSpecialNotes', value)} /></Field>
+          <Field label="구성품"><TextArea value={values.noticeComponents} onChange={(value) => setValue('noticeComponents', value)} rows={3} resizable={false} className="h-[88px]" /></Field>
+          <Field label="특이사항"><TextArea value={values.noticeSpecialNotes} onChange={(value) => setValue('noticeSpecialNotes', value)} rows={3} resizable={false} className="h-[88px]" /></Field>
         </div>
       </EditorSection>
     ),
@@ -935,7 +934,7 @@ function LayoutSettingsDialog({ layout, onSaved }: { layout: NewProductEditorLay
 function Field({ label, required, className, children }: { label: string; required?: boolean; className?: string; children: React.ReactNode }) {
   return (
     <label className={cn('block space-y-1.5', className)}>
-      <span className="text-xs font-medium text-foreground">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>
+      <span className="flex min-h-8 items-end text-xs font-medium leading-4 text-foreground">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>
       {children}
     </label>
   )

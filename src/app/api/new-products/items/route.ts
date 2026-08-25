@@ -10,14 +10,13 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const url = new URL(request.url)
-  const stageId = url.searchParams.get('stageId')
-  if (stageId && !isUuid(stageId)) {
+  const stageIds = [...new Set(url.searchParams.getAll('stageId'))].slice(0, 40)
+  if (stageIds.some((stageId) => !isUuid(stageId))) {
     return NextResponse.json({ error: '진행 단계를 확인해주세요.' }, { status: 400 })
   }
   const result = await listNewProductSummaries({
     userId: workspaceUserId,
-    actorUserId: user.id,
-    stageId,
+    stageIds,
     query: url.searchParams.get('query'),
     limit: 50,
   })

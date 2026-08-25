@@ -122,7 +122,6 @@ export async function saveNewProductEditorLayoutAction(input: {
 function newProductValues(values: Record<string, unknown>): NewProductInput {
   return {
     stageId: text(values.stageId),
-    ownerOperatorId: null,
     productName: text(values.productName).trim().slice(0, 500),
     sampleCode: nullableText(values.sampleCode, 200),
     productOption: nullableText(values.productOption),

@@ -37,7 +37,7 @@ export default async function NewProductsPage() {
       <NewProductBoard
         initialStages={setup.stages}
         initialLayout={setup.editorLayout}
-        canManageSettings={setup.viewer.isMain}
+    canManageSettings={setup.viewer.isMain}
         exchangeRate={exchangeRate}
       />
     </div>

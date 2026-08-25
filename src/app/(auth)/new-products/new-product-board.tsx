@@ -82,7 +82,7 @@ const toneClasses: Record<NewProductStageTone, string> = {
 
 export function NewProductBoard({ initialStages, initialLayout, canManageSettings, exchangeRate }: Props) {
   const router = useRouter()
-  const [stageFilter, setStageFilter] = useState('')
+  const [selectedStageIds, setSelectedStageIds] = useState<string[]>([])
   const [query, setQuery] = useState('')
   const [summaries, setSummaries] = useState<NewProductSummary[]>([])
   const [total, setTotal] = useState(0)
@@ -97,7 +97,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   useEffect(() => {
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
-      if (!stageFilter) {
+      if (selectedStageIds.length === 0) {
         setSummaries([])
         setTotal(0)
         setListLoading(false)
@@ -105,7 +105,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
       }
       setListLoading(true)
       const params = new URLSearchParams()
-      if (stageFilter !== 'all') params.set('stageId', stageFilter)
+      selectedStageIds.forEach((stageId) => params.append('stageId', stageId))
       if (query.trim()) params.set('query', query.trim())
       try {
         const response = await fetch(`/api/new-products/items?${params.toString()}`, {
@@ -132,7 +132,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [dataRevision, mode, query, stageFilter])
+  }, [dataRevision, mode, query, selectedStageIds])
 
   useEffect(() => {
     if (mode !== 'view' || !selectedId) return
@@ -150,9 +150,11 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   }, [dataRevision, mode, selectedId])
 
   const detailLoading = mode === 'view' && Boolean(selectedId) && item?.id !== selectedId
-  const selectedStageName = stageFilter === 'all'
+  const selectedStageName = selectedStageIds.length === initialStages.length
     ? '전체 상태'
-    : initialStages.find((stage) => stage.id === stageFilter)?.name ?? ''
+    : selectedStageIds.length === 1
+      ? initialStages.find((stage) => stage.id === selectedStageIds[0])?.name ?? '선택 단계'
+      : `${selectedStageIds.length}개 단계`
 
   function selectProduct(id: string) {
     if (!id) return
@@ -162,7 +164,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   }
 
   function startNewProduct() {
-    setStageFilter('')
+    setSelectedStageIds([])
     setQuery('')
     setMode('create')
     setSelectedId(null)
@@ -170,8 +172,8 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
     setEditorRevision((current) => current + 1)
   }
 
-  function changeStageFilter(value: string) {
-    setStageFilter(value)
+  function changeStageFilter(stageIds: string[]) {
+    setSelectedStageIds(stageIds)
     setMode('view')
     setSelectedId(null)
     setItem(null)
@@ -193,26 +195,16 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
 
   return (
     <div className="space-y-4">
-      <section className="sticky top-0 z-30 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur">
+      <section className="rounded-xl border bg-background p-3 shadow-sm">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
           <ToolbarField label="상태별 보기" className="xl:w-64">
-            <select
-              value={stageFilter}
-              onChange={(event) => changeStageFilter(event.target.value)}
-              className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-            >
-              <option value="">상태를 선택하세요</option>
-              <option value="all">전체 상태 ({initialStages.reduce((sum, stage) => sum + stage.itemCount, 0)})</option>
-              {initialStages.map((stage, index) => (
-                <option key={stage.id} value={stage.id}>{index + 1}. {stage.name} ({stage.itemCount})</option>
-              ))}
-            </select>
+            <StageMultiSelect stages={initialStages} selectedIds={selectedStageIds} onChange={changeStageFilter} />
           </ToolbarField>
 
           <ToolbarField label="상품 검색" className="xl:w-64">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" disabled={!stageFilter} className="pl-8" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" disabled={selectedStageIds.length === 0} className="pl-8" />
             </div>
           </ToolbarField>
 
@@ -250,7 +242,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           exchangeRate={exchangeRate}
           onSaved={reloadItem}
         />
-      ) : stageFilter ? (
+      ) : selectedStageIds.length > 0 ? (
         <ProductSummaryList
           title={selectedStageName}
           summaries={summaries}
@@ -321,6 +313,52 @@ function ToolbarField({ label, className, children }: { label: string; className
   )
 }
 
+function StageMultiSelect({ stages, selectedIds, onChange }: {
+  stages: NewProductStage[]
+  selectedIds: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const allSelected = stages.length > 0 && selectedIds.length === stages.length
+  const summary = selectedIds.length === 0
+    ? '상태를 선택하세요'
+    : allSelected
+      ? '상태: 모두'
+      : `상태: ${selectedIds.length}개 선택`
+
+  function toggleStage(stageId: string) {
+    onChange(selectedIds.includes(stageId)
+      ? selectedIds.filter((id) => id !== stageId)
+      : stages.filter((stage) => selectedIds.includes(stage.id) || stage.id === stageId).map((stage) => stage.id))
+  }
+
+  return (
+    <details className="group relative">
+      <summary className="flex h-8 cursor-pointer list-none items-center justify-between rounded-lg border border-input bg-background px-2.5 text-sm marker:content-none">
+        <span className="truncate">{summary}</span>
+        <span className="ml-2 text-xs text-muted-foreground transition group-open:rotate-180">⌄</span>
+      </summary>
+      <div className="absolute left-0 top-full z-40 mt-1 max-h-80 w-[min(90vw,360px)] overflow-y-auto rounded-lg border bg-background p-2 shadow-xl">
+        <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-muted/60">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={() => onChange(allSelected ? [] : stages.map((stage) => stage.id))}
+          />
+          <span className="flex-1">전체 단계</span>
+          <span className="text-xs text-muted-foreground">{stages.reduce((sum, stage) => sum + stage.itemCount, 0)}</span>
+        </label>
+        <div className="my-1 border-t" />
+        {stages.map((stage, index) => (
+          <label key={stage.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted/60">
+            <input type="checkbox" checked={selectedIds.includes(stage.id)} onChange={() => toggleStage(stage.id)} />
+            <span className="min-w-0 flex-1 truncate">{index + 1}. {stage.name}</span>
+            <span className="text-xs text-muted-foreground">{stage.itemCount}</span>
+          </label>
+        ))}
+      </div>
+    </details>
+  )
+}
 function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
   item: NewProductItem | null
   stages: NewProductStage[]
@@ -580,7 +618,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
 
   return (
     <div className="space-y-4">
-      <div className="sticky top-[92px] z-20 flex flex-col gap-3 rounded-xl border bg-background/95 p-4 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-col gap-3 overflow-hidden rounded-xl border bg-background p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
           <h2 className="truncate text-xl font-semibold">{item ? item.productName : '신상품 정보 등록'}</h2>
           <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
@@ -588,15 +626,15 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
             {item ? `최근 수정 ${formatDateTime(item.updatedAt)}` : '필요한 정보를 한 화면에서 입력한 뒤 저장하세요.'}
           </p>
         </div>
-        <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
+        <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full shrink-0 sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
       </div>
 
       {visibleSections.length > 0
         ? visibleSections.map((section) => <div key={section}>{sectionContent[section]}</div>)
         : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
 
-      <div className="sticky bottom-0 flex justify-end border-t bg-background/95 py-3 backdrop-blur">
-        <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
+      <div className="flex justify-end rounded-xl border bg-card p-4 shadow-sm">
+        <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
       </div>
     </div>
   )

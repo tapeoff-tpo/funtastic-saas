@@ -140,7 +140,6 @@ export type NewProductItem = {
 
 export type NewProductInput = {
   stageId: string
-  ownerOperatorId: string | null
   sampleCode: string | null
   productName: string
   productOption: string | null
@@ -533,17 +532,16 @@ export async function getNewProductPageSetup(input: { userId: string; actorUserI
 
 export async function listNewProductSummaries(input: {
   userId: string
-  actorUserId: string
-  stageId?: string | null
+  stageIds?: string[] | null
   query?: string | null
-  ownerOperatorId?: string | null
   limit?: number
 }) {
   await ensureNewProductWorkflowTables(input.userId)
   const query = input.query?.trim().slice(0, 200) ?? ''
   const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)))
-  const stageCondition = input.stageId
-    ? sql`AND item.stage_id = ${input.stageId}::uuid`
+  const stageIds = [...new Set(input.stageIds ?? [])].slice(0, 40)
+  const stageCondition = stageIds.length > 0
+    ? sql`AND item.stage_id IN (${sql.join(stageIds.map((stageId) => sql`${stageId}::uuid`), sql`, `)})`
     : sql``
   const searchCondition = query
     ? sql`AND (
@@ -594,7 +592,7 @@ export async function listNewProductSummaries(input: {
   }
 }
 
-export async function getNewProductItem(input: { userId: string; actorUserId: string; itemId: string }) {
+export async function getNewProductItem(input: { userId: string; itemId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
   const result = await db.execute<NewProductItem>(sql`
     SELECT
@@ -848,7 +846,7 @@ export async function createNewProduct(input: {
     `))
     const [created] = resultRows<{ id: string }>(await tx.execute(sql`
       INSERT INTO new_product_workflow_items (
-        user_id, product_number, stage_id, owner_operator_id,
+        user_id, product_number, stage_id,
         sample_code, product_name, product_option,
         china_unit_price_cny, unit_shipping_cny, exchange_rate_krw, calculated_cost_krw,
         domestic_sale_url, domestic_sale_price, detail_page_url, memo_1, memo_2,
@@ -864,7 +862,7 @@ export async function createNewProduct(input: {
         notice_capacity, notice_food_safety, notice_components, notice_special_notes,
         created_by_user_id
       ) VALUES (
-        ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid, NULL::uuid,
+        ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid,
         ${input.values.sampleCode}, ${input.values.productName}, ${input.values.productOption},
         ${input.values.chinaUnitPriceCny}, ${input.values.unitShippingCny}, ${input.values.exchangeRateKrw}, ${calculatedCostKrw},
         ${input.values.domesticSaleUrl}, ${input.values.domesticSalePrice}, ${input.values.detailPageUrl}, ${input.values.memo1}, ${input.values.memo2},
@@ -933,7 +931,6 @@ export async function updateNewProduct(input: {
     await tx.execute(sql`
       UPDATE new_product_workflow_items SET
         stage_id = ${input.values.stageId}::uuid,
-        owner_operator_id = NULL,
         sample_code = ${input.values.sampleCode},
         product_name = ${input.values.productName},
         product_option = ${input.values.productOption},

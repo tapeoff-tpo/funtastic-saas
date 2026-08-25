@@ -124,6 +124,8 @@ export async function getPurchasingItems(input: {
       id: products.id,
       internalSku: products.internalSku,
       metadata: products.metadata,
+      purchasingStatus: products.purchasingStatus,
+      purchasingStatusNote: products.purchasingStatusNote,
       updatedAt: products.updatedAt,
     }).from(products).where(where).orderBy(orderBy)
       .limit(input.pageSize).offset((input.page - 1) * input.pageSize),
@@ -140,6 +142,8 @@ export async function getPurchasingItems(input: {
       data: normalizeEsaData(row.metadata?.esa009m),
       purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
       purchaseUrlVerification: purchaseUrlVerification(row.metadata),
+      purchasingStatus: row.purchasingStatus,
+      purchasingStatusNote: row.purchasingStatusNote,
       outgoingMetrics: metricsBySku?.get(row.internalSku) ?? emptyOutgoingMetrics(),
       updatedAt: row.updatedAt,
     })),
@@ -155,6 +159,8 @@ export async function getAllPurchasingItems(
     id: products.id,
     internalSku: products.internalSku,
     metadata: products.metadata,
+    purchasingStatus: products.purchasingStatus,
+    purchasingStatusNote: products.purchasingStatusNote,
     updatedAt: products.updatedAt,
   }).from(products)
     .where(and(...purchasingItemConditions(userId)))
@@ -169,6 +175,8 @@ export async function getAllPurchasingItems(
     data: normalizeEsaData(row.metadata?.esa009m),
     purchaseUrlVerificationStatus: purchaseUrlVerificationStatus(row.metadata),
     purchaseUrlVerification: purchaseUrlVerification(row.metadata),
+    purchasingStatus: row.purchasingStatus,
+    purchasingStatusNote: row.purchasingStatusNote,
     outgoingMetrics: metricsBySku?.get(row.internalSku) ?? emptyOutgoingMetrics(),
     updatedAt: row.updatedAt,
   }))

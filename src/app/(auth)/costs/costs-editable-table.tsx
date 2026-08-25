@@ -5,17 +5,24 @@ import { ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Pencil, Plus, S
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import {
+  isDiscontinuedPurchasingStatus,
+  PURCHASING_ITEM_STATUS_LABELS,
+} from '@/lib/purchasing/purchase-delay'
 
 export type CostEditableRow = {
   id: string
   data: Record<string, string | null>
   purchaseUrlVerificationStatus?: 'confirm_required' | null
+  purchasingStatus?: string | null
+  purchasingStatusNote?: string | null
   updatedAt: string
 }
 
 type TableColumn =
   | { type: 'data'; header: string }
   | { type: 'collapse'; group: 'warehouse' | 'extra'; label: string }
+  | { type: 'purchasingStatus' }
   | { type: 'updatedAt' }
   | { type: 'purchaseUrl' }
 
@@ -86,16 +93,21 @@ export function CostsEditableTable({
       columns.push({ type: 'data', header })
     }
 
+    columns.push({ type: 'purchasingStatus' })
     columns.push({ type: 'updatedAt' })
     columns.push({ type: 'purchaseUrl' })
     return columns
   }, [headers, openGroups.extra, openGroups.warehouse])
 
-  const selectedRows = useMemo(
-    () => rows.filter((row) => selectedIds.has(row.id)),
-    [rows, selectedIds],
+  const selectableRows = useMemo(
+    () => rows.filter((row) => !isDiscontinuedPurchasingStatus(row.purchasingStatus)),
+    [rows],
   )
-  const allRowsSelected = rows.length > 0 && rows.every((row) => selectedIds.has(row.id))
+  const selectedRows = useMemo(
+    () => selectableRows.filter((row) => selectedIds.has(row.id)),
+    [selectableRows, selectedIds],
+  )
+  const allRowsSelected = selectableRows.length > 0 && selectableRows.every((row) => selectedIds.has(row.id))
 
   useEffect(() => {
     onSelectionChange?.(selectedRows)
@@ -111,7 +123,7 @@ export function CostsEditableTable({
   }
 
   function toggleAllRows() {
-    setSelectedIds(allRowsSelected ? new Set() : new Set(rows.map((row) => row.id)))
+    setSelectedIds(allRowsSelected ? new Set() : new Set(selectableRows.map((row) => row.id)))
   }
 
   function openEdit(row: CostEditableRow) {
@@ -236,6 +248,25 @@ export function CostsEditableTable({
     )
   }
 
+  function renderPurchasingStatus(row: CostEditableRow) {
+    const status = row.purchasingStatus ?? 'active'
+    const label = status in PURCHASING_ITEM_STATUS_LABELS
+      ? PURCHASING_ITEM_STATUS_LABELS[status as keyof typeof PURCHASING_ITEM_STATUS_LABELS]
+      : status
+    const className = status === 'discontinued'
+      ? 'border-red-200 bg-red-50 text-red-700'
+      : status === 'active'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-amber-200 bg-amber-50 text-amber-800'
+
+    return (
+      <div className="min-w-[120px] space-y-1">
+        <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-medium ${className}`}>{label}</span>
+        {row.purchasingStatusNote ? <div className="max-w-[220px] truncate text-[11px] text-muted-foreground" title={row.purchasingStatusNote}>{row.purchasingStatusNote}</div> : null}
+      </div>
+    )
+  }
+
   const modalOpen = isCreating || editingRow
 
   return (
@@ -273,6 +304,9 @@ export function CostsEditableTable({
                 if (column.type === 'updatedAt') {
                   return <th key="updated-at" className="whitespace-nowrap px-3 py-2.5 text-left font-medium">{UPDATED_AT_HEADER}</th>
                 }
+                if (column.type === 'purchasingStatus') {
+                  return <th key="purchasing-status" className="w-[150px] px-3 py-2.5 text-left font-medium">발주 상태</th>
+                }
                 if (column.type === 'purchaseUrl') {
                   return <th key="purchase-url" className="w-[240px] px-3 py-2.5 text-left font-medium">{PURCHASE_URL_HEADER}</th>
                 }
@@ -304,11 +338,16 @@ export function CostsEditableTable({
                     onChange={() => toggleRowSelection(row.id)}
                     onClick={(event) => event.stopPropagation()}
                     aria-label={`${row.data[nameHeader] || row.data[codeHeader] || '품목'} 선택`}
-                    className="size-4 accent-foreground"
+                    disabled={isDiscontinuedPurchasingStatus(row.purchasingStatus)}
+                    title={isDiscontinuedPurchasingStatus(row.purchasingStatus) ? '단종 품목은 발주검토에 추가할 수 없습니다.' : undefined}
+                    className="size-4 accent-foreground disabled:cursor-not-allowed"
                   />
                 </td>
                 {tableColumns.map((column, index) => {
                   if (column.type === 'collapse') return <CollapsedCell key={`${row.id}-${column.group}-${index}`} />
+                  if (column.type === 'purchasingStatus') {
+                    return <td key={`${row.id}-purchasing-status`} className="px-3 py-2 align-top">{renderPurchasingStatus(row)}</td>
+                  }
                   if (column.type === 'updatedAt') {
                     return (
                       <td key={`${row.id}-updated-at`} className="whitespace-nowrap px-3 py-2 text-muted-foreground">
@@ -368,6 +407,12 @@ export function CostsEditableTable({
                   <Input value={draft[codeHeader] ?? ''} disabled className="font-mono text-xs" />
                 </label>
               ) : null}
+              {!isCreating && editingRow ? (
+                <div className="space-y-1">
+                  <span className="text-xs font-medium text-muted-foreground">발주 상태</span>
+                  <div>{renderPurchasingStatus(editingRow)}</div>
+                </div>
+              ) : null}
               {editableHeaders.map((header) => (
                 <label key={header} className="space-y-1">
                   <span className="text-xs font-medium text-muted-foreground">{header}</span>
@@ -386,7 +431,13 @@ export function CostsEditableTable({
               <div className="flex min-w-0 items-center gap-2">
                 {!isCreating ? (
                   <>
-                    <Button type="button" variant="outline" onClick={openPurchaseReview} disabled={isPending}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={openPurchaseReview}
+                      disabled={isPending || isDiscontinuedPurchasingStatus(editingRow?.purchasingStatus)}
+                      title={isDiscontinuedPurchasingStatus(editingRow?.purchasingStatus) ? '단종 품목은 발주검토에 추가할 수 없습니다.' : undefined}
+                    >
                       <ClipboardList />
                       발주검토로
                     </Button>

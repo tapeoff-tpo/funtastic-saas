@@ -8,7 +8,11 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { sumPurchaseCosts } from './purchase-costs'
-import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
+import {
+  PURCHASE_DELAY_TRACKING_START_DATE,
+  purchaseDelayReasonToItemStatus,
+  type PurchaseDelayReason,
+} from './purchase-delay'
 import { PURCHASE_URL_HEADER } from './items'
 import type { PurchaseRequestStatus } from './purchase-request-status'
 
@@ -166,6 +170,8 @@ export async function getPurchaseRequests(input: {
         unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
         unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
         purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
+        purchasingStatus: products.purchasingStatus,
+        purchasingStatusNote: products.purchasingStatusNote,
         chinaCurrentStock,
       })
       .from(purchaseRequestItems)
@@ -331,6 +337,9 @@ export async function updatePurchaseRequestPlanFields(input: {
   purchaseConfirmed?: boolean
   buyerCode?: string | null
   buyerName?: string | null
+  delayReason?: PurchaseDelayReason | null
+  delayNote?: string | null
+  applyDelayReasonToItem?: boolean
 }) {
   const requestedQuantity = normalizePurchaseRequestQuantity(input.requestedQuantity)
   const actualPurchaseQuantity = normalizeOptionalPurchaseRequestQuantity(input.actualPurchaseQuantity)
@@ -340,8 +349,9 @@ export async function updatePurchaseRequestPlanFields(input: {
   if (actualPurchaseQuantity === null) return null
   if (chinaReceivedQuantity === null) return null
   if (outboundRequestedQuantity === null) return null
+  const now = new Date()
   const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
-    updatedAt: new Date(),
+    updatedAt: now,
   }
   if (requestedQuantity !== undefined) values.requestedQuantity = requestedQuantity
   if (input.requestDate !== undefined) {
@@ -367,6 +377,15 @@ export async function updatePurchaseRequestPlanFields(input: {
     values.buyerName = PURCHASE_BUYERS[buyerCode]
   } else if (input.buyerName !== undefined) {
     values.buyerName = emptyToNull(input.buyerName)
+  }
+  if (input.delayReason !== undefined) {
+    values.delayReason = input.delayReason
+    values.delayRecordedAt = input.delayReason ? now : null
+    if (input.delayReason === null && input.delayNote === undefined) values.delayNote = null
+  }
+  if (input.delayNote !== undefined) {
+    values.delayNote = emptyToNull(input.delayNote)
+    if (input.delayReason === undefined) values.delayRecordedAt = values.delayNote ? now : null
   }
 
   return db.transaction(async (tx) => {
@@ -397,7 +416,41 @@ export async function updatePurchaseRequestPlanFields(input: {
       .where(and(eq(purchaseRequestItems.userId, input.userId), eq(purchaseRequestItems.id, input.id)))
       .returning({ id: purchaseRequestItems.id })
 
-    return row ?? null
+    if (!row) return null
+
+    let excludedRecommendationCount = 0
+    if (input.applyDelayReasonToItem && input.delayReason) {
+      const purchasingStatus = purchaseDelayReasonToItemStatus(input.delayReason)
+      await tx
+        .update(products)
+        .set({
+          purchasingStatus,
+          purchasingStatusNote: emptyToNull(input.delayNote),
+          purchasingStatusUpdatedAt: now,
+          updatedAt: now,
+        })
+        .where(and(
+          eq(products.userId, input.userId),
+          eq(products.internalSku, current.sku),
+        ))
+
+      if (purchasingStatus === 'discontinued') {
+        const hiddenRows = await tx
+          .update(purchaseRequestItems)
+          .set({ requestedQuantity: 0, updatedAt: now })
+          .where(and(
+            eq(purchaseRequestItems.userId, input.userId),
+            eq(purchaseRequestItems.sku, current.sku),
+            eq(purchaseRequestItems.status, 'requested'),
+            gt(purchaseRequestItems.requestedQuantity, 0),
+            sql`${purchaseRequestItems.rawData}->>'source' = 'auto_purchase_recommendation'`,
+          ))
+          .returning({ id: purchaseRequestItems.id })
+        excludedRecommendationCount = hiddenRows.length
+      }
+    }
+
+    return { ...row, excludedRecommendationCount }
   })
 }
 

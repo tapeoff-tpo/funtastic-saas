@@ -9,6 +9,7 @@ import {
 } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics } from './items'
+import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 
 type ProductGroupMoqRule = {
   productName: string
@@ -389,7 +390,12 @@ export async function generatePurchaseRecommendations(input: {
   }
 
   const canonicalProductRows = await db
-    .select({ sku: products.internalSku, productName: products.name, metadata: products.metadata })
+    .select({
+      sku: products.internalSku,
+      productName: products.name,
+      metadata: products.metadata,
+      purchasingStatus: products.purchasingStatus,
+    })
     .from(products)
     .where(and(
       eq(products.userId, input.userId),
@@ -397,7 +403,8 @@ export async function generatePurchaseRecommendations(input: {
     ))
   const excludedCanonicalProductSkus = new Set(canonicalProductRows
     .filter((row) => isExcludedPurchaseRecommendation(row.sku, row.productName)
-      || isDiscontinuedPurchaseProduct(row.metadata))
+      || isDiscontinuedPurchaseProduct(row.metadata)
+      || isDiscontinuedPurchasingStatus(row.purchasingStatus))
     .map((row) => row.sku))
   const recommendationInventoryRows = inventoryRows.filter(
     (row) => !isDomesticPurchaseProduct(row.productName) &&

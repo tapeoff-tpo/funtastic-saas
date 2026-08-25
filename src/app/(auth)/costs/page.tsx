@@ -36,6 +36,8 @@ export default async function CostsPage({
           id: item.id,
           data: item.data,
           purchaseUrlVerificationStatus: item.purchaseUrlVerificationStatus,
+          purchasingStatus: item.purchasingStatus,
+          purchasingStatusNote: item.purchasingStatusNote,
           updatedAt: item.updatedAt.toISOString(),
         }))}
         total={total}

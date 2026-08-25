@@ -741,6 +741,9 @@ export const purchaseRequestItems = pgTable(
     purchaseConfirmed: boolean('purchase_confirmed').notNull().default(false),
     chinaReceivedQuantity: integer('china_received_quantity'),
     chinaReceivedAt: timestamp('china_received_at', { withTimezone: true }),
+    delayReason: varchar('delay_reason', { length: 50 }),
+    delayNote: text('delay_note'),
+    delayRecordedAt: timestamp('delay_recorded_at', { withTimezone: true }),
 
     recommendationBasis: varchar('recommendation_basis', { length: 50 }),
     salesAverageWindowDays: integer('sales_average_window_days'),
@@ -875,6 +878,9 @@ export const products = pgTable(
     /** 재고관리 대상 여부. TRUE 인 상품만 재고관리 페이지에 노출/추적. (migration 023) */
     manageInventory: boolean('manage_inventory').notNull().default(false),
     status: productStatusEnum('status').notNull().default('draft'),
+    purchasingStatus: varchar('purchasing_status', { length: 50 }).notNull().default('active'),
+    purchasingStatusNote: text('purchasing_status_note'),
+    purchasingStatusUpdatedAt: timestamp('purchasing_status_updated_at', { withTimezone: true }),
     images: jsonb('images').$type<Array<{ url: string; sortOrder: number }>>(),
     metadata: jsonb('metadata').$type<Record<string, unknown>>(),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -887,6 +893,7 @@ export const products = pgTable(
   (table) => [
     uniqueIndex('products_user_sku').on(table.userId, table.internalSku),
     index('products_user_status').on(table.userId, table.status),
+    index('products_user_purchasing_status').on(table.userId, table.purchasingStatus),
   ],
 )
 

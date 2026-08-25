@@ -22,6 +22,12 @@ import {
   PURCHASE_REQUEST_STATUS_LABELS,
   type PurchaseRequestStatus,
 } from '@/lib/purchasing/purchase-request-status'
+import {
+  PURCHASE_DELAY_REASON_LABELS,
+  PURCHASE_DELAY_REASONS,
+  PURCHASING_ITEM_STATUS_LABELS,
+  type PurchaseDelayReason,
+} from '@/lib/purchasing/purchase-delay'
 
 type BulkSelectionContextValue = {
   ids: string[]
@@ -1097,6 +1103,111 @@ export function PurchasePlanFieldsV2({
         {message ?? '저장'}
       </Button>
     </form>
+  )
+}
+
+export function PurchaseDelayReasonField({
+  id,
+  delayReason,
+  delayNote,
+  purchasingStatus,
+  purchasingStatusNote,
+}: {
+  id: string
+  delayReason: string | null
+  delayNote: string | null
+  purchasingStatus: string | null
+  purchasingStatusNote: string | null
+}) {
+  const router = useRouter()
+  const [reason, setReason] = useState(delayReason ?? '')
+  const [note, setNote] = useState(delayNote ?? '')
+  const [applyToItem, setApplyToItem] = useState(true)
+  const [message, setMessage] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const statusLabel = purchasingStatus && purchasingStatus in PURCHASING_ITEM_STATUS_LABELS
+    ? PURCHASING_ITEM_STATUS_LABELS[purchasingStatus as keyof typeof PURCHASING_ITEM_STATUS_LABELS]
+    : null
+
+  function save() {
+    const nextReason = reason ? reason as PurchaseDelayReason : null
+    setMessage(null)
+    startTransition(async () => {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delayReason: nextReason,
+          delayNote: note.trim() || null,
+          applyDelayReasonToItem: Boolean(nextReason) && applyToItem,
+        }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setMessage(body.error ?? '지연 사유 저장에 실패했습니다.')
+        return
+      }
+
+      const excludedCount = Number(body.excludedRecommendationCount ?? 0)
+      setMessage(nextReason === 'discontinued' && excludedCount > 0
+        ? `저장됨 · 발주검토 ${excludedCount.toLocaleString('ko-KR')}건 제외`
+        : applyToItem && nextReason
+          ? '저장됨 · 품목 반영'
+          : '저장됨')
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="min-w-[330px] space-y-1.5">
+      <div className="grid grid-cols-[132px_minmax(0,1fr)] gap-1.5">
+        <select
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          disabled={isPending}
+          aria-label="지연 사유"
+          className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+        >
+          <option value="">사유 선택</option>
+          {PURCHASE_DELAY_REASONS.map((item) => (
+            <option key={item} value={item}>{PURCHASE_DELAY_REASON_LABELS[item]}</option>
+          ))}
+        </select>
+        <Input
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          disabled={isPending}
+          maxLength={2_000}
+          placeholder="상세 사유 / 새 구매처"
+          aria-label="지연 상세 사유"
+          className="h-7 text-xs"
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <label className="flex items-center gap-1 text-[11px] text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={applyToItem}
+            onChange={(event) => setApplyToItem(event.target.checked)}
+            disabled={isPending || !reason}
+            className="size-3.5"
+          />
+          품목에 반영
+        </label>
+        <Button type="button" size="sm" variant="outline" onClick={save} disabled={isPending} className="h-6 px-2 text-[11px]">
+          {isPending ? <Loader2 className="animate-spin" /> : <Save />}
+          저장
+        </Button>
+        {statusLabel ? (
+          <span className={purchasingStatus === 'discontinued'
+            ? 'text-[11px] font-medium text-destructive'
+            : 'text-[11px] text-muted-foreground'}>
+            품목: {statusLabel}{purchasingStatusNote ? ` · ${purchasingStatusNote}` : ''}
+          </span>
+        ) : null}
+      </div>
+      {message ? <div className={message === '저장됨' || message.startsWith('저장됨') ? 'text-[11px] text-emerald-700' : 'text-[11px] text-destructive'}>{message}</div> : null}
+    </div>
   )
 }
 

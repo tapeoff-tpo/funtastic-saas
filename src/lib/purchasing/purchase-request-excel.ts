@@ -7,7 +7,11 @@ import { products, purchaseRequestItems } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics } from './items'
 import { purchaseRequestWriteLockKey } from './purchase-request-create'
-import { PURCHASE_DELAY_TRACKING_START_DATE } from './purchase-delay'
+import {
+  PURCHASE_DELAY_REASON_LABELS,
+  PURCHASE_DELAY_TRACKING_START_DATE,
+  PURCHASING_ITEM_STATUS_LABELS,
+} from './purchase-delay'
 import {
   PURCHASE_REQUEST_STATUS_LABELS,
   PURCHASE_REQUEST_STATUSES,
@@ -45,6 +49,9 @@ export const PURCHASE_REQUEST_EXCEL_HEADERS = [
   '구매방법',
   '담당자코드',
   '담당자',
+  '지연사유',
+  '지연 상세',
+  '품목 발주상태',
   '메모',
 ] as const
 
@@ -115,6 +122,9 @@ export async function exportPurchaseRequestsExcel(input: {
       구매방법: row.purchaseMethod ?? '',
       담당자코드: row.buyerCode ?? '',
       담당자: row.buyerName ?? '',
+      지연사유: purchaseDelayReasonLabel(row.delayReason),
+      '지연 상세': row.delayNote ?? '',
+      '품목 발주상태': purchasingItemStatusLabel(row.purchasingStatus),
       메모: row.memo ?? '',
     })
   }
@@ -200,6 +210,8 @@ export async function importPurchaseRequestsExcel(input: {
       const status = parsePurchaseStatus(data.상태) ?? input.defaultStatus ?? 'requested'
       const outboundQuantity = optionalInteger(data.중국출고요청수량)
       const buyerCode = normalizeBuyerCode(data.담당자코드)
+      const hasDelayReasonColumn = columnByHeader.has('지연사유')
+      const hasDelayNoteColumn = columnByHeader.has('지연 상세')
       const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
         status,
         sku,
@@ -218,6 +230,8 @@ export async function importPurchaseRequestsExcel(input: {
         memo: emptyToNull(data.메모),
         updatedAt: new Date(),
       }
+      if (hasDelayReasonColumn) values.delayReason = parsePurchaseDelayReason(data.지연사유)
+      if (hasDelayNoteColumn) values.delayNote = emptyToNull(data['지연 상세'])
 
       if (id) {
         const [current] = await tx.select({
@@ -315,6 +329,7 @@ async function getPurchaseRequestRowsForExcel(input: {
     ...getTableColumns(purchaseRequestItems),
     unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
     unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+    purchasingStatus: products.purchasingStatus,
   }).from(purchaseRequestItems)
     .leftJoin(products, and(
       eq(products.userId, purchaseRequestItems.userId),
@@ -355,6 +370,23 @@ export function canonicalPurchaseRequestExcelHeader(value: string): PurchaseRequ
 
 function normalizeExcelHeader(value: string) {
   return value.trim().replace(/[\s_-]+/g, '').toLocaleLowerCase('ko-KR')
+}
+
+function purchaseDelayReasonLabel(value: string | null) {
+  if (!value || !(value in PURCHASE_DELAY_REASON_LABELS)) return value ?? ''
+  return PURCHASE_DELAY_REASON_LABELS[value as keyof typeof PURCHASE_DELAY_REASON_LABELS]
+}
+
+function purchasingItemStatusLabel(value: string | null) {
+  if (!value || !(value in PURCHASING_ITEM_STATUS_LABELS)) return value ?? ''
+  return PURCHASING_ITEM_STATUS_LABELS[value as keyof typeof PURCHASING_ITEM_STATUS_LABELS]
+}
+
+function parsePurchaseDelayReason(value: string) {
+  const normalized = value.trim()
+  if (!normalized) return null
+  const match = Object.entries(PURCHASE_DELAY_REASON_LABELS).find(([, label]) => label === normalized)
+  return match?.[0] ?? null
 }
 
 function readExcelRow(row: ExcelJS.Row, columnByHeader: Map<string, number>) {

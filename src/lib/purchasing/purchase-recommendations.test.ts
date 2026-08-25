@@ -11,6 +11,7 @@ import {
   isDiscontinuedPurchaseProduct,
   isExcludedPurchaseRecommendation,
 } from './purchase-recommendations'
+import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 
 describe('purchase minimum quantities', () => {
   it('applies a minimum of 10 and rounds up to 10-unit purchase quantities', () => {
@@ -45,6 +46,11 @@ describe('product-specific purchasing rules', () => {
   it('recognizes discontinued products imported from the purchasing workbook', () => {
     expect(isDiscontinuedPurchaseProduct({ purchasingOutgoingMetrics: { isDiscontinued: true } })).toBe(true)
     expect(isDiscontinuedPurchaseProduct({ purchasingOutgoingMetrics: { isDiscontinued: false } })).toBe(false)
+  })
+
+  it('recognizes discontinued status saved from a purchase delay', () => {
+    expect(isDiscontinuedPurchasingStatus('discontinued')).toBe(true)
+    expect(isDiscontinuedPurchasingStatus('active')).toBe(false)
   })
 })
 

@@ -7,6 +7,7 @@ import { useState, useTransition } from 'react'
 import { ClipboardList, WandSparkles, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { isDiscontinuedPurchasingStatus } from '@/lib/purchasing/purchase-delay'
 import { CostsEditableTable, type CostEditableRow } from './costs-editable-table'
 
 const DETAIL_PAGE_SELECTION_KEY = 'funtastic-detail-page-selection'
@@ -89,6 +90,10 @@ export function CostsPageClient({
   }
 
   function createPurchaseReview() {
+    if (selectedRows.some((row) => isDiscontinuedPurchasingStatus(row.purchasingStatus))) {
+      toast.error('단종 품목은 발주검토에 추가할 수 없습니다.')
+      return
+    }
     const items = selectedRows.map((row) => ({
       sku: row.data[codeHeader] ?? '',
       productName: row.data[nameHeader] ?? '',

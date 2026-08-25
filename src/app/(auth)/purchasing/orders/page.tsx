@@ -30,6 +30,7 @@ import {
   PurchaseBulkStatusButton,
   CompletedOutboundDateFilter,
   PurchaseBuyerField,
+  PurchaseDelayReasonField,
   PurchaseDeleteButton,
   PurchasePlanFieldsV2,
   PurchasePaginationControls,
@@ -178,7 +179,8 @@ export async function PurchasingOrdersView({
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (showPurchaseUrlColumn ? 1 : 0) +
-    (isRequestedStatus ? 0 : 2)
+    (isRequestedStatus ? 0 : 2) +
+    (overdueOnly ? 1 : 0)
   const listLabel = overdueOnly
     ? selectedStatus === 'purchased'
       ? '발주요청 지연'
@@ -506,6 +508,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
+                  {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />
                   </th>
@@ -654,6 +657,17 @@ export async function PurchasingOrdersView({
                           />
                         </td>
                       )}
+                      {overdueOnly ? (
+                        <td className="px-3 py-2 align-middle">
+                          <PurchaseDelayReasonField
+                            id={item.id}
+                            delayReason={item.delayReason}
+                            delayNote={item.delayNote}
+                            purchasingStatus={item.purchasingStatus}
+                            purchasingStatusNote={item.purchasingStatusNote}
+                          />
+                        </td>
+                      ) : null}
                       <td className="px-2 py-2 text-center align-middle">
                         <PurchaseBuyerField id={item.id} buyerCode={item.buyerCode ?? item.managerCode} />
                       </td>

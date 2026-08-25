@@ -16,6 +16,9 @@ describe('canonicalPurchaseRequestExcelHeader', () => {
     ['발주수량', '요청수량'],
     ['구매 수량', '요청수량'],
     ['주문수량', '요청수량'],
+    ['지연사유', '지연사유'],
+    ['지연 상세', '지연 상세'],
+    ['품목 발주상태', '품목 발주상태'],
   ])('%s 열을 %s 열로 인식한다', (input, expected) => {
     expect(canonicalPurchaseRequestExcelHeader(input)).toBe(expected)
   })

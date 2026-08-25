@@ -1,3 +1,4 @@
+import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -5,6 +6,7 @@ import {
   deletePurchaseRequestItem,
   updatePurchaseRequestPlanFields,
 } from '@/lib/purchasing/purchase-requests'
+import { PURCHASE_DELAY_REASONS } from '@/lib/purchasing/purchase-delay'
 import { createClient } from '@/lib/supabase/server'
 
 const bodySchema = z.object({
@@ -19,6 +21,9 @@ const bodySchema = z.object({
   purchaseConfirmed: z.boolean().optional(),
   buyerCode: z.enum(['1', '2', '3', '4', '5']).nullable().optional(),
   buyerName: z.string().max(100).nullable().optional(),
+  delayReason: z.enum(PURCHASE_DELAY_REASONS).nullable().optional(),
+  delayNote: z.string().trim().max(2_000).nullable().optional(),
+  applyDelayReasonToItem: z.boolean().optional(),
 })
 
 export async function PATCH(
@@ -42,7 +47,11 @@ export async function PATCH(
   })
 
   if (!row) return NextResponse.json({ error: '발주 항목을 찾을 수 없습니다.' }, { status: 404 })
-  return NextResponse.json({ id: row.id })
+  revalidatePath('/purchasing/overdue')
+  revalidatePath('/purchasing/purchases')
+  revalidatePath('/purchasing/orders')
+  revalidatePath('/costs')
+  return NextResponse.json({ id: row.id, excludedRecommendationCount: row.excludedRecommendationCount })
 }
 
 export async function DELETE(

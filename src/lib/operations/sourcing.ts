@@ -32,6 +32,14 @@ export type SourcingViewer = {
   operatorId: string | null
 }
 
+export const MANUAL_SOURCING_REVIEW_STATUS_LABELS = {
+  passed: '통과',
+  rejected: '탈락',
+  hold: '보류',
+} as const
+
+export type ManualSourcingReviewStatus = keyof typeof MANUAL_SOURCING_REVIEW_STATUS_LABELS
+
 function cleanText(value: string | null | undefined) {
   const text = String(value ?? '').trim()
   return text.length ? text : null
@@ -635,7 +643,7 @@ export type ManualSourcingItem = {
   detailPageUrl: string | null
   memo1: string | null
   memo2: string | null
-  status: string
+  status: ManualSourcingReviewStatus
   hasImageFile: boolean
   legacyImageUrl: string | null
   passedNewProductId: string | null
@@ -674,12 +682,13 @@ export type ManualSourcingInput = {
   memo1?: string | null
   memo2?: string | null
   ownerOperatorId?: string | null
+  reviewStatus?: ManualSourcingReviewStatus
 }
 
 export async function listManualSourcingItems(input: { userId: string; actorUserId: string }) {
   await ensureSourcingTables()
   const viewer = await getSourcingViewer(input)
-  return resultRows<ManualSourcingItem>(await db.execute(sql`
+  const items = resultRows<ManualSourcingItem>(await db.execute(sql`
     SELECT
       item.id,
       item.meeting_id AS "meetingId",
@@ -714,6 +723,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
     ORDER BY item.updated_at DESC, item.created_at DESC
     LIMIT 300
   `))
+  return items.map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status) }))
 }
 
 export async function listSourcingMeetings(input: { userId: string; actorUserId: string }): Promise<SourcingMeeting[]> {
@@ -770,7 +780,7 @@ export async function listSourcingMeetings(input: { userId: string; actorUserId:
           ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
           : sql`FALSE`})
     ORDER BY operator.position NULLS LAST, item.updated_at DESC, item.created_at DESC
-  `))
+  `)).map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status) }))
   const itemsByMeeting = new Map<string, ManualSourcingItem[]>()
   for (const item of items) {
     if (!item.meetingId) continue
@@ -902,7 +912,7 @@ export async function createManualSourcingItem(input: ManualSourcingInput & {
       ${values.productName}, ${values.productOption}, ${values.chinaPurchaseUrl},
       ${values.chinaUnitPriceCny}, ${values.unitShippingCny}, ${values.exchangeRateKrw}, ${values.calculatedCostKrw},
       ${values.domesticSaleUrl}, ${values.domesticSalePrice}, ${values.detailPageUrl}, ${values.memo1}, ${values.memo2},
-      'draft', '{}'::jsonb, now()
+      ${values.reviewStatus === 'passed' ? 'hold' : values.reviewStatus}, '{}'::jsonb, now()
     )
     RETURNING id
   `))
@@ -951,6 +961,7 @@ export async function updateManualSourcingItem(input: ManualSourcingInput & {
       detail_page_url = ${values.detailPageUrl},
       memo_1 = ${values.memo1},
       memo_2 = ${values.memo2},
+      status = ${values.reviewStatus === 'passed' ? 'hold' : values.reviewStatus},
       updated_at = now()
     WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
   `)
@@ -1100,7 +1111,16 @@ export async function passManualSourcingToNewProduct(input: {
       throw new Error('다른 등록자의 소싱 상품은 1차 통과 처리할 수 없습니다.')
     }
     if (!source.ownerOperatorId) throw new Error('담당 등록자를 먼저 지정해주세요.')
-    if (source.passedNewProductId) return { id: source.passedNewProductId, existing: true }
+    if (source.passedNewProductId) {
+      await tx.execute(sql`
+        UPDATE sourcing_items SET
+          status = 'passed',
+          passed_at = COALESCE(passed_at, now()),
+          updated_at = now()
+        WHERE id = ${source.id}::uuid AND user_id = ${input.userId}::uuid
+      `)
+      return { id: source.passedNewProductId, existing: true }
+    }
 
     const [stage] = resultRows<{ id: string }>(await tx.execute(sql`
       SELECT id
@@ -1181,6 +1201,7 @@ function normalizeManualSourcingInput(input: ManualSourcingInput) {
     detailPageUrl: cleanText(input.detailPageUrl),
     memo1: cleanText(input.memo1),
     memo2: cleanText(input.memo2),
+    reviewStatus: manualSourcingReviewStatus(input.reviewStatus),
   }
 }
 
@@ -1236,6 +1257,10 @@ function normalizedMeetingDate(value: string | null | undefined) {
 
 function sourcingMeetingStatus(value: unknown): SourcingMeeting['status'] {
   return value === 'closed' || value === 'archived' ? value : 'open'
+}
+
+function manualSourcingReviewStatus(value: unknown): ManualSourcingReviewStatus {
+  return value === 'passed' || value === 'rejected' || value === 'hold' ? value : 'hold'
 }
 
 function isUuid(value: string) {

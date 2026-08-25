@@ -5,15 +5,11 @@ import { useRouter } from 'next/navigation'
 import { Dialog } from '@base-ui/react/dialog'
 import {
   CalendarDays,
-  CheckCircle2,
   ChevronLeft,
-  ImageIcon,
   Loader2,
-  PackagePlus,
   Plus,
   Save,
   Trash2,
-  UploadCloud,
   Users,
   X,
 } from 'lucide-react'
@@ -22,11 +18,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
-import type { ManualSourcingItem, SourcingMeeting, SourcingOperator, SourcingViewer } from '@/lib/operations/sourcing'
+import type {
+  ManualSourcingItem,
+  ManualSourcingReviewStatus,
+  SourcingMeeting,
+  SourcingOperator,
+  SourcingViewer,
+} from '@/lib/operations/sourcing'
 import {
   createSourcingMeetingAction,
   deleteSourcingMeetingAction,
-  passManualSourcingAction,
   saveSourcingOperatorsAction,
   saveSourcingMeetingRowsAction,
   updateSourcingMeetingAction,
@@ -55,15 +56,19 @@ type DraftRow = {
   detailPageUrl: string
   memo1: string
   memo2: string
-  status: string
+  status: ManualSourcingReviewStatus
   passedNewProductId: string | null
-  hasImageFile: boolean
-  legacyImageUrl: string | null
 }
 
 type SheetOwner = {
   id: string | null
   displayName: string
+}
+
+const manualSourcingReviewStatusLabels: Record<ManualSourcingReviewStatus, string> = {
+  passed: '통과',
+  rejected: '탈락',
+  hold: '보류',
 }
 
 const meetingStatusClass: Record<SourcingMeeting['status'], string> = {
@@ -520,7 +525,6 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
   onChanged: () => void
 }) {
   const [rows, setRows] = useState<DraftRow[]>(() => sourceRows.map((item) => rowFromItem(item, exchangeRate)))
-  const [photos, setPhotos] = useState<Record<string, File>>({})
   const [pending, startTransition] = useTransition()
   const canAddRows = allowNewRows && Boolean(owner.id)
   const showOwnerColumn = canAssignOwner
@@ -537,11 +541,6 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
 
   function removeUnsavedRow(clientId: string) {
     setRows((currentRows) => currentRows.filter((row) => row.clientId !== clientId))
-    setPhotos((currentPhotos) => {
-      const remaining = { ...currentPhotos }
-      delete remaining[clientId]
-      return remaining
-    })
   }
 
   async function persistRows(targetRows: DraftRow[]) {
@@ -562,20 +561,12 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         memo1: row.memo1,
         memo2: row.memo2,
         ownerOperatorId: row.ownerOperatorId,
+        reviewStatus: row.status,
       })),
     })
     if (!result.success) throw new Error(result.error)
 
-    const ids = new Map(result.saved.map((saved) => [saved.clientId, saved.id]))
-    for (const row of targetRows) {
-      const file = photos[row.clientId]
-      if (!file) continue
-      const itemId = ids.get(row.clientId) ?? row.itemId
-      if (!itemId) continue
-      const uploaded = await uploadPhoto(itemId, file)
-      if (!uploaded.success) throw new Error(uploaded.error)
-    }
-    return ids
+    return new Map(result.saved.map((saved) => [saved.clientId, saved.id]))
   }
 
   function saveAll() {
@@ -587,7 +578,10 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
           return
         }
         await persistRows(rows)
-        toast.success(`${populatedRows.length}개 상품을 저장했습니다.`)
+        const passedCount = populatedRows.filter((row) => row.status === 'passed').length
+        toast.success(passedCount > 0
+          ? `${populatedRows.length}개 상품을 저장했고, 통과 ${passedCount}개는 신상품 진행관리 1단계에 자동 등록했습니다.`
+          : `${populatedRows.length}개 상품을 저장했습니다.`)
         onChanged()
       } catch (error) {
         toast.error(errorMessage(error))
@@ -595,18 +589,19 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
     })
   }
 
-  function passRow(row: DraftRow) {
+  function changeReviewStatus(row: DraftRow, status: ManualSourcingReviewStatus) {
+    const previousStatus = row.status
+    updateRow(row.clientId, { status })
     startTransition(async () => {
       try {
-        if (!row.productName.trim()) throw new Error('1차 통과할 상품명을 입력해 주세요.')
-        const ids = await persistRows([row])
-        const itemId = ids.get(row.clientId) ?? row.itemId
-        if (!itemId) throw new Error('소싱 상품 저장에 실패했습니다.')
-        const result = await passManualSourcingAction(itemId)
-        if (!result.success) throw new Error(result.error)
-        toast.success(result.existing ? '이미 신상품 진행관리 1단계에 등록된 상품입니다.' : '신상품 진행관리 1단계에 등록했습니다.')
+        if (!row.productName.trim()) throw new Error('진행여부를 정하려면 상품명을 먼저 입력해 주세요.')
+        await persistRows([{ ...row, status }])
+        toast.success(status === 'passed'
+          ? '통과 처리되어 신상품 진행관리 1단계에 자동 등록했습니다.'
+          : `진행여부를 ${manualSourcingReviewStatusLabels[status]}로 변경했습니다.`)
         onChanged()
       } catch (error) {
+        updateRow(row.clientId, { status: previousStatus })
         toast.error(errorMessage(error))
       }
     })
@@ -642,10 +637,9 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
       </div>
 
       <div className="overflow-x-auto">
-        <table className={cn('min-w-[2680px] table-fixed border-collapse text-sm', showOwnerColumn && 'min-w-[2840px]')}>
+        <table className={cn('min-w-[2520px] table-fixed border-collapse text-sm', showOwnerColumn && 'min-w-[2680px]')}>
           <colgroup>
             <col className="w-12" />
-            <col className="w-32" />
             <col className="w-56" />
             <col className="w-44" />
             <col className="w-64" />
@@ -665,7 +659,6 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
           <thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground">
             <tr>
               <TableHeader>순번</TableHeader>
-              <TableHeader>사진</TableHeader>
               <TableHeader required>상품명</TableHeader>
               <TableHeader>상품 옵션</TableHeader>
               <TableHeader>1688 URL</TableHeader>
@@ -679,7 +672,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
               <TableHeader>비고 1</TableHeader>
               <TableHeader>비고 2</TableHeader>
               {showOwnerColumn ? <TableHeader>등록자</TableHeader> : null}
-              <TableHeader>진행</TableHeader>
+              <TableHeader>진행여부</TableHeader>
               <TableHeader>정리</TableHeader>
             </tr>
           </thead>
@@ -693,15 +686,6 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
               return (
                 <tr key={row.clientId} className="border-t align-top hover:bg-muted/20">
                   <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
-                  <TableCell>
-                    <PhotoCell
-                      row={row}
-                      file={photos[row.clientId] ?? null}
-                      onChange={(file) => setPhotos((currentPhotos) => file
-                        ? { ...currentPhotos, [row.clientId]: file }
-                        : omitFile(currentPhotos, row.clientId))}
-                    />
-                  </TableCell>
                   <TableCell><AutoGrowTextarea value={row.productName} onChange={(value) => updateRow(row.clientId, { productName: value })} placeholder="상품명" /></TableCell>
                   <TableCell><AutoGrowTextarea value={row.productOption} onChange={(value) => updateRow(row.clientId, { productOption: value })} placeholder="옵션" /></TableCell>
                   <TableCell><AutoGrowTextarea value={row.chinaPurchaseUrl} onChange={(value) => updateRow(row.clientId, { chinaPurchaseUrl: value })} placeholder="https://detail.1688.com/..." /></TableCell>
@@ -723,14 +707,17 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
                     </TableCell>
                   ) : null}
                   <TableCell>
-                    {row.passedNewProductId || row.status === 'passed' ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700"><CheckCircle2 className="size-4" />1차 통과</span>
-                    ) : (
-                      <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => passRow(row)} disabled={pending}>
-                        <PackagePlus />
-                        1차 통과
-                      </Button>
-                    )}
+                    <div className="space-y-1.5">
+                      <select
+                        value={row.status}
+                        onChange={(event) => changeReviewStatus(row, event.target.value as ManualSourcingReviewStatus)}
+                        disabled={pending}
+                        className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {Object.entries(manualSourcingReviewStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                      {row.status === 'passed' && row.passedNewProductId ? <p className="text-[11px] text-emerald-700">신상품 1단계 등록됨</p> : null}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {!row.itemId ? (
@@ -743,7 +730,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
               )
             })}
             {rows.length === 0 ? (
-              <tr><td colSpan={showOwnerColumn ? 17 : 16} className="px-4 py-12 text-center text-sm text-muted-foreground">등록된 상품이 없습니다. {canAddRows ? '행 추가로 상품을 입력해 주세요.' : ''}</td></tr>
+              <tr><td colSpan={showOwnerColumn ? 16 : 15} className="px-4 py-12 text-center text-sm text-muted-foreground">등록된 상품이 없습니다. {canAddRows ? '행 추가로 상품을 입력해 주세요.' : ''}</td></tr>
             ) : null}
           </tbody>
         </table>
@@ -806,27 +793,6 @@ function AutoGrowTextarea({ value, onChange, placeholder }: {
   )
 }
 
-function PhotoCell({ row, file, onChange }: { row: DraftRow; file: File | null; onChange: (file: File | null) => void }) {
-  const ref = useRef<HTMLInputElement>(null)
-  const source = row.itemId && row.hasImageFile ? `/api/operations/sourcing/images/${row.itemId}` : row.legacyImageUrl
-  return (
-    <div className="space-y-2">
-      <div className="grid aspect-square w-24 place-items-center overflow-hidden rounded-md border bg-muted/30">
-        {source ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={source} alt="" className="h-full w-full object-cover" />
-        ) : <ImageIcon className="size-5 text-muted-foreground" />}
-      </div>
-      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => onChange(event.target.files?.[0] ?? null)} />
-      <Button type="button" variant="outline" size="xs" className="w-full" onClick={() => ref.current?.click()}>
-        <UploadCloud />
-        {file ? '사진 선택됨' : '사진 등록'}
-      </Button>
-      {file ? <p className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">{file.name}</p> : null}
-    </div>
-  )
-}
-
 function MeetingStatusBadge({ status }: { status: SourcingMeeting['status'] }) {
   const label = status === 'open' ? '진행 중' : status === 'closed' ? '마감' : '이전 데이터'
   return <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1', meetingStatusClass[status])}>{label}</span>
@@ -850,8 +816,6 @@ function rowFromItem(item: ManualSourcingItem, exchangeRate: number): DraftRow {
     memo2: item.memo2 ?? '',
     status: item.status,
     passedNewProductId: item.passedNewProductId,
-    hasImageFile: item.hasImageFile,
-    legacyImageUrl: item.legacyImageUrl,
   }
 }
 
@@ -871,20 +835,9 @@ function blankRow(exchangeRate: number, ownerOperatorId: string): DraftRow {
     detailPageUrl: '',
     memo1: '',
     memo2: '',
-    status: 'draft',
+    status: 'hold',
     passedNewProductId: null,
-    hasImageFile: false,
-    legacyImageUrl: null,
   }
-}
-
-async function uploadPhoto(itemId: string, file: File) {
-  const formData = new FormData()
-  formData.set('itemId', itemId)
-  formData.set('file', file)
-  const response = await fetch('/api/operations/sourcing/images', { method: 'POST', body: formData })
-  const result = await response.json().catch(() => ({}))
-  return response.ok ? { success: true as const } : { success: false as const, error: result.error || '사진 등록에 실패했습니다.' }
 }
 
 function meetingVersion(meeting: SourcingMeeting) {
@@ -928,12 +881,6 @@ function textNumber(value: number | null) {
 
 function won(value: number | null) {
   return value == null ? '-' : `₩ ${value.toLocaleString('ko-KR')}`
-}
-
-function omitFile(files: Record<string, File>, clientId: string) {
-  const remaining = { ...files }
-  delete remaining[clientId]
-  return remaining
 }
 
 function operatorDrafts(operators: SourcingOperator[]) {

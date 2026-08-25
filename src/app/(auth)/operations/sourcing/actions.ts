@@ -5,6 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   createSourcingMeeting,
   deleteSourcingMeeting,
+  type ManualSourcingReviewStatus,
   passManualSourcingToNewProduct,
   saveSourcingOperators,
   saveSourcingMeetingRows,
@@ -33,6 +34,7 @@ type SourcingRowValues = {
   memo1?: string
   memo2?: string
   ownerOperatorId?: string | null
+  reviewStatus?: ManualSourcingReviewStatus
 }
 
 async function actionUser() {
@@ -115,30 +117,24 @@ export async function saveSourcingMeetingRowsAction(input: {
 }) {
   try {
     const auth = await actionUser()
+    const rows = input.rows.slice(0, 100).map(rowValues)
     const result = await saveSourcingMeetingRows({
       userId: auth.workspaceUserId,
       requestedByUserId: auth.userId,
       meetingId: input.meetingId,
-      rows: input.rows.slice(0, 100).map(rowValues),
+      rows,
     })
+    const passedClientIds = new Set(rows.filter((row) => row.reviewStatus === 'passed').map((row) => row.clientId))
+    const automaticPasses = await Promise.all(result.saved
+      .filter((saved) => passedClientIds.has(saved.clientId))
+      .map((saved) => passManualSourcingToNewProduct({
+        userId: auth.workspaceUserId,
+        requestedByUserId: auth.userId,
+        itemId: saved.id,
+      })))
     revalidatePath('/operations/sourcing')
-    return { success: true as const, ...result }
-  } catch (error) {
-    return { success: false as const, error: message(error) }
-  }
-}
-
-export async function passManualSourcingAction(itemId: string) {
-  try {
-    const auth = await actionUser()
-    const result = await passManualSourcingToNewProduct({
-      userId: auth.workspaceUserId,
-      requestedByUserId: auth.userId,
-      itemId,
-    })
-    revalidatePath('/operations/sourcing')
-    revalidatePath('/new-products')
-    return { success: true as const, ...result }
+    if (automaticPasses.length > 0) revalidatePath('/new-products')
+    return { success: true as const, ...result, automaticPasses }
   } catch (error) {
     return { success: false as const, error: message(error) }
   }
@@ -160,6 +156,7 @@ function rowValues(values: SourcingRowValues) {
     memo1: nullableText(values.memo1),
     memo2: nullableText(values.memo2),
     ownerOperatorId: nullableText(values.ownerOperatorId, 100),
+    reviewStatus: values.reviewStatus,
   }
 }
 

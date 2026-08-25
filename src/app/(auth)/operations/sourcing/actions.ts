@@ -3,13 +3,22 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
-  createManualSourcingItem,
+  createSourcingMeeting,
   passManualSourcingToNewProduct,
-  updateManualSourcingItem,
+  saveSourcingMeetingRows,
+  updateSourcingMeeting,
 } from '@/lib/operations/sourcing'
 import { createClient } from '@/lib/supabase/server'
 
-type ManualSourcingValues = {
+type SourcingMeetingValues = {
+  meetingDate: string
+  title?: string
+  status?: 'open' | 'closed' | 'archived'
+}
+
+type SourcingRowValues = {
+  clientId: string
+  itemId?: string | null
   productName: string
   productOption?: string
   chinaPurchaseUrl?: string
@@ -31,34 +40,55 @@ async function actionUser() {
   return { userId: user.id, workspaceUserId: await getWorkspaceUserId(user.id) }
 }
 
-export async function createManualSourcingAction(values: ManualSourcingValues) {
+export async function createSourcingMeetingAction(values: SourcingMeetingValues) {
   try {
     const auth = await actionUser()
-    const result = await createManualSourcingItem({
+    const meeting = await createSourcingMeeting({
       userId: auth.workspaceUserId,
       requestedByUserId: auth.userId,
-      ...manualValues(values),
+      meetingDate: text(values.meetingDate),
+      title: nullableText(values.title, 300),
+      status: values.status,
     })
-    if ('error' in result) return { success: false as const, error: result.error }
     revalidatePath('/operations/sourcing')
-    return { success: true as const, id: result.id }
+    return { success: true as const, id: meeting.id }
   } catch (error) {
     return { success: false as const, error: message(error) }
   }
 }
 
-export async function updateManualSourcingAction(input: { itemId: string; values: ManualSourcingValues }) {
+export async function updateSourcingMeetingAction(input: { meetingId: string; values: SourcingMeetingValues }) {
   try {
     const auth = await actionUser()
-    const result = await updateManualSourcingItem({
+    await updateSourcingMeeting({
       userId: auth.workspaceUserId,
       requestedByUserId: auth.userId,
-      itemId: input.itemId,
-      ...manualValues(input.values),
+      meetingId: input.meetingId,
+      meetingDate: text(input.values.meetingDate),
+      title: nullableText(input.values.title, 300),
+      status: input.values.status,
     })
-    if ('error' in result) return { success: false as const, error: result.error }
     revalidatePath('/operations/sourcing')
-    return result
+    return { success: true as const }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
+}
+
+export async function saveSourcingMeetingRowsAction(input: {
+  meetingId: string
+  rows: SourcingRowValues[]
+}) {
+  try {
+    const auth = await actionUser()
+    const result = await saveSourcingMeetingRows({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+      meetingId: input.meetingId,
+      rows: input.rows.slice(0, 100).map(rowValues),
+    })
+    revalidatePath('/operations/sourcing')
+    return { success: true as const, ...result }
   } catch (error) {
     return { success: false as const, error: message(error) }
   }
@@ -80,8 +110,10 @@ export async function passManualSourcingAction(itemId: string) {
   }
 }
 
-function manualValues(values: ManualSourcingValues) {
+function rowValues(values: SourcingRowValues) {
   return {
+    clientId: text(values.clientId).slice(0, 100),
+    itemId: nullableText(values.itemId, 100),
     productName: text(values.productName),
     productOption: nullableText(values.productOption),
     chinaPurchaseUrl: nullableText(values.chinaPurchaseUrl),

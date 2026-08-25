@@ -63,6 +63,7 @@ export async function ensureSourcingTables() {
   await db.execute(sql`ALTER TABLE "sourcing_items" ADD COLUMN IF NOT EXISTS "raw_data" jsonb DEFAULT '{}'::jsonb`)
   await db.execute(sql`
     ALTER TABLE "sourcing_items"
+      ADD COLUMN IF NOT EXISTS "meeting_id" uuid,
       ADD COLUMN IF NOT EXISTS "owner_operator_id" uuid,
       ADD COLUMN IF NOT EXISTS "created_by_user_id" uuid,
       ADD COLUMN IF NOT EXISTS "product_option" text,
@@ -85,6 +86,55 @@ export async function ensureSourcingTables() {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "sourcing_items_user_status_idx" ON "sourcing_items" ("user_id", "status")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "sourcing_items_user_updated_idx" ON "sourcing_items" ("user_id", "updated_at")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "sourcing_items_workspace_owner_updated_idx" ON "sourcing_items" ("user_id", "owner_operator_id", "updated_at")`)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "sourcing_meetings" (
+      "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "user_id" uuid NOT NULL,
+      "meeting_date" date NOT NULL DEFAULT CURRENT_DATE,
+      "title" text NOT NULL,
+      "status" varchar(30) NOT NULL DEFAULT 'open',
+      "created_by_user_id" uuid,
+      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `)
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "sourcing_meetings_workspace_date_idx" ON "sourcing_meetings" ("user_id", "meeting_date" DESC, "created_at" DESC)`)
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS "sourcing_meetings_workspace_legacy_unique" ON "sourcing_meetings" ("user_id") WHERE "title" = '이전 수집 데이터'`)
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'sourcing_items_meeting_id_fkey'
+      ) THEN
+        ALTER TABLE "sourcing_items"
+          ADD CONSTRAINT sourcing_items_meeting_id_fkey
+          FOREIGN KEY (meeting_id)
+          REFERENCES "sourcing_meetings"(id)
+          ON DELETE SET NULL;
+      END IF;
+    END $$
+  `)
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS "sourcing_items_workspace_meeting_owner_updated_idx" ON "sourcing_items" ("user_id", "meeting_id", "owner_operator_id", "updated_at" DESC)`)
+  await db.execute(sql`
+    INSERT INTO sourcing_meetings (user_id, meeting_date, title, status)
+    SELECT item.user_id, COALESCE(MIN(item.created_at)::date, CURRENT_DATE), '이전 수집 데이터', 'archived'
+    FROM sourcing_items item
+    WHERE item.meeting_id IS NULL
+    GROUP BY item.user_id
+    ON CONFLICT DO NOTHING
+  `)
+  await db.execute(sql`
+    UPDATE sourcing_items item
+    SET meeting_id = meeting.id
+    FROM sourcing_meetings meeting
+    WHERE item.meeting_id IS NULL
+      AND meeting.user_id = item.user_id
+      AND meeting.title = '이전 수집 데이터'
+  `)
+  await db.execute(sql`ALTER TABLE "sourcing_meetings" ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`REVOKE ALL ON TABLE "sourcing_meetings" FROM anon, authenticated`)
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "sourcing_candidates" (
@@ -422,6 +472,7 @@ export async function promoteSourcingItemToPurchasingItem(input: {
 
 export type ManualSourcingItem = {
   id: string
+  meetingId: string | null
   ownerOperatorId: string | null
   ownerName: string | null
   productName: string
@@ -444,7 +495,25 @@ export type ManualSourcingItem = {
   updatedAt: string
 }
 
+export type SourcingMeeting = {
+  id: string
+  meetingDate: string
+  title: string
+  status: 'open' | 'closed' | 'archived'
+  createdByUserId: string | null
+  createdAt: string
+  updatedAt: string
+  items: ManualSourcingItem[]
+}
+
+export type SourcingMeetingInput = {
+  meetingDate: string
+  title?: string | null
+  status?: 'open' | 'closed' | 'archived'
+}
+
 export type ManualSourcingInput = {
+  meetingId?: string | null
   productName: string
   productOption?: string | null
   chinaPurchaseUrl?: string | null
@@ -466,6 +535,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
   return resultRows<ManualSourcingItem>(await db.execute(sql`
     SELECT
       item.id,
+      item.meeting_id AS "meetingId",
       item.owner_operator_id AS "ownerOperatorId",
       operator.display_name AS "ownerName",
       item.source_title AS "productName",
@@ -499,12 +569,128 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
   `))
 }
 
+export async function listSourcingMeetings(input: { userId: string; actorUserId: string }): Promise<SourcingMeeting[]> {
+  await ensureSourcingTables()
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer(input)
+  const meetings = resultRows<Omit<SourcingMeeting, 'items'>>(await db.execute(sql`
+    SELECT
+      meeting.id,
+      meeting.meeting_date::text AS "meetingDate",
+      meeting.title,
+      meeting.status,
+      meeting.created_by_user_id AS "createdByUserId",
+      meeting.created_at::text AS "createdAt",
+      meeting.updated_at::text AS "updatedAt"
+    FROM sourcing_meetings meeting
+    WHERE meeting.user_id = ${input.userId}::uuid
+    ORDER BY meeting.meeting_date DESC, meeting.created_at DESC
+    LIMIT 100
+  `))
+  if (meetings.length === 0) return []
+
+  const meetingIds = meetings.map((meeting) => meeting.id)
+  const items = resultRows<ManualSourcingItem>(await db.execute(sql`
+    SELECT
+      item.id,
+      item.meeting_id AS "meetingId",
+      item.owner_operator_id AS "ownerOperatorId",
+      operator.display_name AS "ownerName",
+      item.source_title AS "productName",
+      item.product_option AS "productOption",
+      item.source_url AS "chinaPurchaseUrl",
+      item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
+      item.unit_shipping_cny::float8 AS "unitShippingCny",
+      item.exchange_rate_krw::float8 AS "exchangeRateKrw",
+      item.calculated_cost_krw AS "calculatedCostKrw",
+      item.domestic_sale_url AS "domesticSaleUrl",
+      item.domestic_sale_price AS "domesticSalePrice",
+      item.detail_page_url AS "detailPageUrl",
+      item.memo_1 AS "memo1",
+      item.memo_2 AS "memo2",
+      item.status,
+      (item.image_file_data IS NOT NULL) AS "hasImageFile",
+      item.image_url AS "legacyImageUrl",
+      item.passed_new_product_id AS "passedNewProductId",
+      item.created_at::text AS "createdAt",
+      item.updated_at::text AS "updatedAt"
+    FROM sourcing_items item
+    LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
+    WHERE item.user_id = ${input.userId}::uuid
+      AND item.meeting_id IN (${sql.join(meetingIds.map((id) => sql`${id}::uuid`), sql`, `)})
+      AND (${viewer.isMain
+        ? sql`TRUE`
+        : viewer.operatorId
+          ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
+          : sql`FALSE`})
+    ORDER BY operator.position NULLS LAST, item.updated_at DESC, item.created_at DESC
+  `))
+  const itemsByMeeting = new Map<string, ManualSourcingItem[]>()
+  for (const item of items) {
+    if (!item.meetingId) continue
+    const list = itemsByMeeting.get(item.meetingId) ?? []
+    list.push(item)
+    itemsByMeeting.set(item.meetingId, list)
+  }
+  return meetings.map((meeting) => ({ ...meeting, status: sourcingMeetingStatus(meeting.status), items: itemsByMeeting.get(meeting.id) ?? [] }))
+}
+
+export async function createSourcingMeeting(input: SourcingMeetingInput & {
+  userId: string
+  requestedByUserId: string
+}) {
+  await ensureSourcingTables()
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!viewer.isMain && !viewer.operatorId) throw new Error('등록자로 설정된 계정만 소싱회의를 만들 수 있습니다.')
+  const meetingDate = normalizedMeetingDate(input.meetingDate)
+  if (!meetingDate) throw new Error('소싱회의 날짜를 확인해주세요.')
+  const title = cleanText(input.title)?.slice(0, 300) ?? formatSourcingMeetingTitle(meetingDate)
+  const status = sourcingMeetingStatus(input.status)
+  const [meeting] = resultRows<{ id: string }>(await db.execute(sql`
+    INSERT INTO sourcing_meetings (
+      user_id, meeting_date, title, status, created_by_user_id
+    ) VALUES (
+      ${input.userId}::uuid, ${meetingDate}::date, ${title}, ${status}, ${input.requestedByUserId}::uuid
+    )
+    RETURNING id
+  `))
+  if (!meeting) throw new Error('소싱회의를 만들지 못했습니다.')
+  return meeting
+}
+
+export async function updateSourcingMeeting(input: SourcingMeetingInput & {
+  userId: string
+  requestedByUserId: string
+  meetingId: string
+}) {
+  await ensureSourcingTables()
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!viewer.isMain) throw new Error('소싱회의 날짜와 제목은 메인만 수정할 수 있습니다.')
+  const meetingDate = normalizedMeetingDate(input.meetingDate)
+  if (!meetingDate) throw new Error('소싱회의 날짜를 확인해주세요.')
+  const title = cleanText(input.title)?.slice(0, 300) ?? formatSourcingMeetingTitle(meetingDate)
+  const result = await db.execute(sql`
+    UPDATE sourcing_meetings
+    SET meeting_date = ${meetingDate}::date,
+        title = ${title},
+        status = ${sourcingMeetingStatus(input.status)},
+        updated_at = now()
+    WHERE id = ${input.meetingId}::uuid
+      AND user_id = ${input.userId}::uuid
+    RETURNING id
+  `)
+  if (resultRows(result).length === 0) throw new Error('소싱회의를 찾을 수 없습니다.')
+}
+
 export async function createManualSourcingItem(input: ManualSourcingInput & {
   userId: string
   requestedByUserId: string
 }) {
   await ensureSourcingTables()
   await ensureNewProductWorkflowTables(input.userId)
+  const meetingId = await assertSourcingMeeting(input.userId, input.meetingId)
   const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const ownerOperatorId = await resolveManualOwner({
     userId: input.userId,
@@ -516,11 +702,11 @@ export async function createManualSourcingItem(input: ManualSourcingInput & {
 
   const [row] = resultRows<{ id: string }>(await db.execute(sql`
     INSERT INTO sourcing_items (
-      user_id, owner_operator_id, created_by_user_id, source_platform, source_title, product_option, source_url,
+      user_id, meeting_id, owner_operator_id, created_by_user_id, source_platform, source_title, product_option, source_url,
       china_unit_price_cny, unit_shipping_cny, exchange_rate_krw, calculated_cost_krw,
       domestic_sale_url, domestic_sale_price, detail_page_url, memo_1, memo_2, status, raw_data, updated_at
     ) VALUES (
-      ${input.userId}::uuid, ${ownerOperatorId}::uuid, ${input.requestedByUserId}::uuid, 'manual',
+      ${input.userId}::uuid, ${meetingId}::uuid, ${ownerOperatorId}::uuid, ${input.requestedByUserId}::uuid, 'manual',
       ${values.productName}, ${values.productOption}, ${values.chinaPurchaseUrl},
       ${values.chinaUnitPriceCny}, ${values.unitShippingCny}, ${values.exchangeRateKrw}, ${values.calculatedCostKrw},
       ${values.domesticSaleUrl}, ${values.domesticSalePrice}, ${values.detailPageUrl}, ${values.memo1}, ${values.memo2},
@@ -539,8 +725,8 @@ export async function updateManualSourcingItem(input: ManualSourcingInput & {
   await ensureSourcingTables()
   await ensureNewProductWorkflowTables(input.userId)
   const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
-  const [current] = resultRows<{ ownerOperatorId: string | null; passedNewProductId: string | null }>(await db.execute(sql`
-    SELECT owner_operator_id AS "ownerOperatorId", passed_new_product_id AS "passedNewProductId"
+  const [current] = resultRows<{ meetingId: string | null; ownerOperatorId: string | null; passedNewProductId: string | null }>(await db.execute(sql`
+    SELECT meeting_id AS "meetingId", owner_operator_id AS "ownerOperatorId", passed_new_product_id AS "passedNewProductId"
     FROM sourcing_items
     WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
     LIMIT 1
@@ -554,11 +740,13 @@ export async function updateManualSourcingItem(input: ManualSourcingInput & {
     ? await resolveManualOwner({ userId: input.userId, viewer, requestedOwnerOperatorId: input.ownerOperatorId ?? current.ownerOperatorId })
     : viewer.operatorId
   if (!ownerOperatorId) return { error: '담당 등록자를 먼저 지정해주세요.' as const }
+  const meetingId = await assertSourcingMeeting(input.userId, input.meetingId ?? current.meetingId)
 
   const values = normalizeManualSourcingInput(input)
   if (!values.productName) return { error: '상품명을 입력해 주세요.' as const }
   await db.execute(sql`
     UPDATE sourcing_items SET
+      meeting_id = ${meetingId}::uuid,
       owner_operator_id = ${ownerOperatorId}::uuid,
       source_title = ${values.productName},
       product_option = ${values.productOption},
@@ -576,6 +764,45 @@ export async function updateManualSourcingItem(input: ManualSourcingInput & {
     WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
   `)
   return { success: true as const, passedNewProductId: current.passedNewProductId }
+}
+
+export async function saveSourcingMeetingRows(input: {
+  userId: string
+  requestedByUserId: string
+  meetingId: string
+  rows: Array<ManualSourcingInput & { clientId: string; itemId?: string | null }>
+}) {
+  await ensureSourcingTables()
+  await assertSourcingMeeting(input.userId, input.meetingId)
+  const rows = input.rows.slice(0, 100)
+  const saved: Array<{ clientId: string; id: string }> = []
+  for (const row of rows) {
+    if (!row.productName.trim()) {
+      if (row.itemId) throw new Error('기존 상품의 상품명은 비워둘 수 없습니다.')
+      continue
+    }
+    if (row.itemId) {
+      const result = await updateManualSourcingItem({
+        ...row,
+        userId: input.userId,
+        requestedByUserId: input.requestedByUserId,
+        itemId: row.itemId,
+        meetingId: input.meetingId,
+      })
+      if ('error' in result) throw new Error(result.error)
+      saved.push({ clientId: row.clientId, id: row.itemId })
+      continue
+    }
+    const result = await createManualSourcingItem({
+      ...row,
+      userId: input.userId,
+      requestedByUserId: input.requestedByUserId,
+      meetingId: input.meetingId,
+    })
+    if ('error' in result) throw new Error(result.error)
+    saved.push({ clientId: row.clientId, id: result.id })
+  }
+  return { saved }
 }
 
 export async function addManualSourcingImage(input: {
@@ -790,8 +1017,40 @@ async function resolveManualOwner(input: {
   return operator.id
 }
 
+async function assertSourcingMeeting(userId: string, meetingId: string | null | undefined) {
+  if (!meetingId || !isUuid(meetingId)) throw new Error('소싱회의를 먼저 선택해주세요.')
+  const [meeting] = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT id
+    FROM sourcing_meetings
+    WHERE id = ${meetingId}::uuid
+      AND user_id = ${userId}::uuid
+    LIMIT 1
+  `))
+  if (!meeting) throw new Error('소싱회의를 찾을 수 없습니다.')
+  return meeting.id
+}
+
 function canWriteManualItem(viewer: NewProductViewer, ownerOperatorId: string | null) {
   return viewer.isMain || (Boolean(viewer.operatorId) && viewer.operatorId === ownerOperatorId)
+}
+
+export function formatSourcingMeetingTitle(meetingDate: string) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(meetingDate)
+  if (!matched) return '소싱회의'
+  return `${Number(matched[1])}년 ${Number(matched[2])}월 ${Number(matched[3])}일 소싱회의`
+}
+
+function normalizedMeetingDate(value: string | null | undefined) {
+  const date = String(value ?? '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null
+}
+
+function sourcingMeetingStatus(value: unknown): SourcingMeeting['status'] {
+  return value === 'closed' || value === 'archived' ? value : 'open'
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
 function decimal(value: number | null | undefined) {

@@ -1,38 +1,44 @@
 'use client'
 
-import { useMemo, useRef, useState, useTransition, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  CalendarDays,
   CheckCircle2,
-  ExternalLink,
+  ChevronLeft,
   ImageIcon,
   Loader2,
   PackagePlus,
   Plus,
   Save,
-  Search,
   UploadCloud,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import type { NewProductOperator, NewProductViewer } from '@/lib/new-products/workflow'
-import type { ManualSourcingItem } from '@/lib/operations/sourcing'
+import type { ManualSourcingItem, SourcingMeeting } from '@/lib/operations/sourcing'
 import {
-  createManualSourcingAction,
+  createSourcingMeetingAction,
   passManualSourcingAction,
-  updateManualSourcingAction,
+  saveSourcingMeetingRowsAction,
+  updateSourcingMeetingAction,
 } from './actions'
 
 type Props = {
-  items: ManualSourcingItem[]
+  meetings: SourcingMeeting[]
   operators: NewProductOperator[]
   viewer: NewProductViewer
   exchangeRate: CnyKrwReferenceRate
 }
 
-type SourcingValues = {
+type DraftRow = {
+  clientId: string
+  itemId: string | null
+  ownerOperatorId: string | null
   productName: string
   productOption: string
   chinaPurchaseUrl: string
@@ -44,398 +50,609 @@ type SourcingValues = {
   detailPageUrl: string
   memo1: string
   memo2: string
-  ownerOperatorId: string | null
+  status: string
+  passedNewProductId: string | null
+  hasImageFile: boolean
+  legacyImageUrl: string | null
 }
 
-const statusClass: Record<string, string> = {
-  draft: 'bg-amber-50 text-amber-800 ring-amber-200',
-  passed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  hold: 'bg-slate-100 text-slate-700 ring-slate-200',
+type SheetOwner = {
+  id: string | null
+  displayName: string
 }
 
-export function SourcingBoard({ items, operators, viewer, exchangeRate }: Props) {
+const meetingStatusClass: Record<SourcingMeeting['status'], string> = {
+  open: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  closed: 'bg-slate-100 text-slate-700 ring-slate-200',
+  archived: 'bg-amber-50 text-amber-800 ring-amber-200',
+}
+
+export function SourcingBoard({ meetings, operators, viewer, exchangeRate }: Props) {
+  const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null)
+  const [screen, setScreen] = useState<'list' | 'sheet'>('list')
+  const selectedMeeting = meetings.find((meeting) => meeting.id === selectedMeetingId) ?? null
+
+  function openMeeting(id: string) {
+    setSelectedMeetingId(id)
+    setScreen('sheet')
+  }
+
+  if (screen === 'sheet' && selectedMeeting) {
+    return (
+      <MeetingSheet
+        key={meetingVersion(selectedMeeting)}
+        meeting={selectedMeeting}
+        operators={operators}
+        viewer={viewer}
+        exchangeRate={exchangeRate}
+        onBack={() => setScreen('list')}
+      />
+    )
+  }
+
+  return (
+    <MeetingList
+      meetings={meetings}
+      canCreate={viewer.isMain || Boolean(viewer.operatorId)}
+      exchangeRate={exchangeRate}
+      onOpen={openMeeting}
+    />
+  )
+}
+
+function MeetingList({ meetings, canCreate, exchangeRate, onOpen }: {
+  meetings: SourcingMeeting[]
+  canCreate: boolean
+  exchangeRate: CnyKrwReferenceRate
+  onOpen: (id: string) => void
+}) {
   const router = useRouter()
-  const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null)
-  const [query, setQuery] = useState('')
-  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null
-  const filteredItems = useMemo(() => {
-    const keyword = query.trim().toLocaleLowerCase('ko')
-    if (!keyword) return items
-    return items.filter((item) => [item.productName, item.productOption, item.ownerName]
-      .some((value) => value?.toLocaleLowerCase('ko').includes(keyword)))
-  }, [items, query])
+  const [meetingDate, setMeetingDate] = useState(nextWednesday())
+  const [title, setTitle] = useState('')
+  const [pending, startTransition] = useTransition()
+  const totalRows = meetings.reduce((total, meeting) => total + meeting.items.length, 0)
 
-  const draftCount = items.filter((item) => item.status !== 'passed').length
-  const passedCount = items.filter((item) => item.status === 'passed').length
+  function createMeeting() {
+    startTransition(async () => {
+      const result = await createSourcingMeetingAction({ meetingDate, title })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('소싱회의를 만들었습니다.')
+      setTitle('')
+      onOpen(result.id)
+      router.refresh()
+    })
+  }
 
   return (
     <div className="space-y-4">
-      <section className="grid gap-3 sm:grid-cols-3">
-        <Metric label="전체 소싱" value={items.length} />
-        <Metric label="검토 중" value={draftCount} />
-        <Metric label="1차 통과" value={passedCount} />
-      </section>
-
-      <section className="rounded-lg border bg-card">
-        <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
+      <section className="border-b pb-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <h2 className="text-sm font-semibold">수동 소싱 상품 등록</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              자동 수집은 중지되어 있습니다. 1차 통과를 누르면 신상품 진행관리의 첫 단계에 바로 등록됩니다.
+            <p className="text-sm font-semibold">주간 소싱회의</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              회의 날짜를 먼저 만들고, 회의 안에서 등록자별로 여러 상품을 가로 표에 한 번에 입력합니다.
             </p>
           </div>
-          <div className="rounded-md border bg-muted/30 px-3 py-2 text-right">
-            <p className="text-xs text-muted-foreground">CNY 기준환율</p>
-            <p className="text-sm font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</p>
-            <p className="text-[11px] text-muted-foreground">
-              {exchangeRate.date ? exchangeRate.date + ' 기준' : '조회 실패 시 기본값'}
-            </p>
+          <div className="flex items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            <span className="text-muted-foreground">CNY 기준환율</span>
+            <span className="font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</span>
+            <span className="text-xs text-muted-foreground">{exchangeRate.date ? `${exchangeRate.date} 기준` : '기본값'}</span>
           </div>
         </div>
-        <CreateSourcingForm
+      </section>
+
+      {canCreate ? (
+        <section className="grid gap-3 rounded-lg border bg-card p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] lg:items-end">
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">소싱회의 날짜</span>
+            <Input type="date" value={meetingDate} onChange={(event) => setMeetingDate(event.target.value)} />
+          </label>
+          <label className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground">회의 이름 <span className="font-normal">(비우면 날짜로 자동 생성)</span></span>
+            <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={meetingTitle(meetingDate)} maxLength={300} />
+          </label>
+          <Button type="button" onClick={createMeeting} disabled={pending || !meetingDate}>
+            {pending ? <Loader2 className="animate-spin" /> : <CalendarDays />}
+            {pending ? '만드는 중...' : '소싱회의 만들기'}
+          </Button>
+        </section>
+      ) : (
+        <section className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+          소싱 등록자로 설정된 계정만 새 소싱회의를 만들 수 있습니다.
+        </section>
+      )}
+
+      <section className="overflow-hidden rounded-lg border bg-card">
+        <div className="flex flex-col gap-1 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">소싱회의 목록</h2>
+            <p className="mt-1 text-xs text-muted-foreground">날짜를 눌러 회의별 입력 시트를 엽니다.</p>
+          </div>
+          <p className="text-xs text-muted-foreground">{meetings.length}개 회의 · {totalRows.toLocaleString('ko-KR')}개 상품</p>
+        </div>
+        {meetings.length > 0 ? (
+          <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+            {meetings.map((meeting) => (
+              <button
+                key={meeting.id}
+                type="button"
+                onClick={() => onOpen(meeting.id)}
+                className="group flex min-h-32 flex-col items-start rounded-lg border bg-background p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <div className="flex w-full items-start justify-between gap-3">
+                  <span className="flex items-center gap-2 text-sm font-semibold">
+                    <CalendarDays className="size-4 text-primary" />
+                    {formatMeetingDate(meeting.meetingDate)}
+                  </span>
+                  <MeetingStatusBadge status={meeting.status} />
+                </div>
+                <strong className="mt-4 break-words text-base leading-6 group-hover:text-primary">{meeting.title}</strong>
+                <span className="mt-auto pt-4 text-xs text-muted-foreground">
+                  내게 보이는 상품 {meeting.items.length.toLocaleString('ko-KR')}개
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="grid min-h-64 place-items-center px-6 text-center text-sm text-muted-foreground">
+            아직 만든 소싱회의가 없습니다. 수요일 회의를 하나 만들고 상품을 추가해 주세요.
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+function MeetingSheet({ meeting, operators, viewer, exchangeRate, onBack }: {
+  meeting: SourcingMeeting
+  operators: NewProductOperator[]
+  viewer: NewProductViewer
+  exchangeRate: CnyKrwReferenceRate
+  onBack: () => void
+}) {
+  const router = useRouter()
+  const [meetingDate, setMeetingDate] = useState(meeting.meetingDate)
+  const [title, setTitle] = useState(meeting.title)
+  const [status, setStatus] = useState<SourcingMeeting['status']>(meeting.status)
+  const [pending, startTransition] = useTransition()
+  const currentOperator = operators.find((operator) => operator.id === viewer.operatorId) ?? null
+  const operatorSections = viewer.isMain
+    ? operators.map((operator) => ({ owner: { id: operator.id, displayName: operator.displayName }, items: meeting.items.filter((item) => item.ownerOperatorId === operator.id) }))
+    : currentOperator
+      ? [{ owner: { id: currentOperator.id, displayName: currentOperator.displayName }, items: meeting.items }]
+      : []
+  const unassignedItems = viewer.isMain ? meeting.items.filter((item) => !item.ownerOperatorId) : []
+
+  function saveMeetingDetails() {
+    startTransition(async () => {
+      const result = await updateSourcingMeetingAction({
+        meetingId: meeting.id,
+        values: { meetingDate, title, status },
+      })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('소싱회의 정보를 저장했습니다.')
+      router.refresh()
+    })
+  }
+
+  return (
+    <div className="space-y-4">
+      <header className="border-b pb-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <Button type="button" variant="ghost" size="sm" className="-ml-2" onClick={onBack}>
+              <ChevronLeft />
+              소싱회의 목록
+            </Button>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-semibold">{meeting.title}</h2>
+              <MeetingStatusBadge status={meeting.status} />
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {formatMeetingDate(meeting.meetingDate)} · {meeting.items.length.toLocaleString('ko-KR')}개 상품
+            </p>
+          </div>
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-right text-sm">
+            <p className="text-xs text-muted-foreground">이번 회의 기본 환율</p>
+            <p className="font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</p>
+          </div>
+        </div>
+
+        {viewer.isMain ? (
+          <div className="mt-4 grid gap-3 rounded-lg border bg-card p-3 lg:grid-cols-[170px_minmax(0,1fr)_130px_auto] lg:items-end">
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">회의 날짜</span>
+              <Input type="date" value={meetingDate} onChange={(event) => setMeetingDate(event.target.value)} />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">회의 이름</span>
+              <Input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={300} />
+            </label>
+            <label className="space-y-1.5">
+              <span className="text-xs font-medium text-muted-foreground">상태</span>
+              <select value={status} onChange={(event) => setStatus(event.target.value as SourcingMeeting['status'])} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                <option value="open">진행 중</option>
+                <option value="closed">마감</option>
+                <option value="archived">이전 데이터</option>
+              </select>
+            </label>
+            <Button type="button" onClick={saveMeetingDetails} disabled={pending || !meetingDate || !title.trim()}>
+              {pending ? <Loader2 className="animate-spin" /> : <Save />}
+              회의 저장
+            </Button>
+          </div>
+        ) : null}
+      </header>
+
+      {operatorSections.map((section) => (
+        <OwnerSheet
+          key={section.owner.id}
+          meetingId={meeting.id}
+          owner={section.owner}
+          rows={section.items}
           operators={operators}
           viewer={viewer}
           exchangeRate={exchangeRate.rate}
-          onCreated={(id) => {
-            setSelectedId(id)
-            router.refresh()
-          }}
+          onChanged={() => router.refresh()}
         />
-      </section>
+      ))}
 
-      <section className="overflow-hidden rounded-lg border bg-card">
-        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold">소싱 목록</h2>
-            <p className="mt-1 text-xs text-muted-foreground">담당 등록자별 데이터는 서로 덮어쓸 수 없습니다.</p>
-          </div>
-          <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
-            <Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-8 pl-8" placeholder="상품명 또는 등록자 검색" />
-          </div>
-        </div>
+      {unassignedItems.length > 0 ? (
+        <OwnerSheet
+          meetingId={meeting.id}
+          owner={{ id: null, displayName: '미지정 · 이전 수집 데이터' }}
+          rows={unassignedItems}
+          operators={operators}
+          viewer={viewer}
+          exchangeRate={exchangeRate.rate}
+          allowNewRows={false}
+          onChanged={() => router.refresh()}
+        />
+      ) : null}
 
-        <div className="grid min-h-[600px] xl:grid-cols-[minmax(620px,1fr)_560px]">
-          <div className="min-w-0 overflow-x-auto">
-            <div className="min-w-[760px]">
-              <div className="grid grid-cols-[64px_minmax(190px,1fr)_120px_110px_110px_100px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
-                <span>사진</span>
-                <span>상품</span>
-                <span>중국 원가</span>
-                <span>한국원화</span>
-                <span>등록자</span>
-                <span>상태</span>
-              </div>
-              {filteredItems.map((item) => {
-                const active = item.id === selected?.id
-                const imageSrc = imageSource(item)
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => setSelectedId(item.id)}
-                    className={'grid w-full grid-cols-[64px_minmax(190px,1fr)_120px_110px_110px_100px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/40 ' + (active ? 'bg-muted/60' : '')}
-                  >
-                    <span className="grid size-12 place-items-center overflow-hidden rounded border bg-muted/30">
-                      {imageSrc ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={imageSrc} alt="" className="h-full w-full object-cover" />
-                      ) : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block truncate font-semibold">{item.productName}</span>
-                      <span className="mt-1 block truncate text-xs text-muted-foreground">{item.productOption || '옵션 없음'}</span>
-                    </span>
-                    <span>¥ {money(item.chinaUnitPriceCny)}<span className="block text-xs text-muted-foreground">배송 ¥ {money(item.unitShippingCny)}</span></span>
-                    <span>{won(item.calculatedCostKrw)}</span>
-                    <span className="truncate">{item.ownerName || '미지정'}</span>
-                    <StatusBadge status={item.status} />
-                  </button>
-                )
-              })}
-              {filteredItems.length === 0 && (
-                <div className="px-4 py-20 text-center text-sm text-muted-foreground">표시할 소싱 상품이 없습니다.</div>
-              )}
-            </div>
-          </div>
-
-          <aside className="border-t xl:border-l xl:border-t-0">
-            {selected ? (
-              <SourcingDetail
-                key={selected.id + ':' + selected.updatedAt}
-                item={selected}
-                operators={operators}
-                viewer={viewer}
-                exchangeRate={exchangeRate.rate}
-                onChanged={() => router.refresh()}
-              />
-            ) : (
-              <div className="grid h-full min-h-[320px] place-items-center p-8 text-sm text-muted-foreground">소싱 상품을 선택해 주세요.</div>
-            )}
-          </aside>
-        </div>
-      </section>
+      {operatorSections.length === 0 && unassignedItems.length === 0 ? (
+        <section className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+          등록자가 아직 설정되지 않았습니다. 신상품 진행관리의 등록자 설정에서 담당자를 먼저 지정해 주세요.
+        </section>
+      ) : null}
     </div>
   )
 }
 
-function CreateSourcingForm({ operators, viewer, exchangeRate, onCreated }: {
+function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, viewer, exchangeRate, allowNewRows = true, onChanged }: {
+  meetingId: string
+  owner: SheetOwner
+  rows: ManualSourcingItem[]
   operators: NewProductOperator[]
   viewer: NewProductViewer
   exchangeRate: number
-  onCreated: (id: string) => void
-}) {
-  const [values, setValues] = useState<SourcingValues>(() => emptyValues(exchangeRate, viewer.operatorId))
-  const [photo, setPhoto] = useState<File | null>(null)
-  const [pending, startTransition] = useTransition()
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    startTransition(async () => {
-      const result = await createManualSourcingAction(values)
-      if (!result.success) {
-        toast.error(result.error)
-        return
-      }
-      if (photo) {
-        const uploaded = await uploadPhoto(result.id, photo)
-        if (!uploaded.success) {
-          toast.error(uploaded.error)
-          return
-        }
-      }
-      toast.success('소싱 상품을 등록했습니다.')
-      setValues(emptyValues(exchangeRate, viewer.operatorId))
-      setPhoto(null)
-      onCreated(result.id)
-    })
-  }
-
-  return (
-    <form onSubmit={submit} className="space-y-3 p-4">
-      <SourcingFields values={values} onChange={setValues} operators={operators} viewer={viewer} />
-      <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
-        <PhotoInput file={photo} onChange={setPhoto} />
-        <Button type="submit" disabled={pending}>
-          {pending ? <Loader2 className="animate-spin" /> : <Plus />}
-          {pending ? '등록 중...' : '수동 소싱 등록'}
-        </Button>
-      </div>
-    </form>
-  )
-}
-
-function SourcingDetail({ item, operators, viewer, exchangeRate, onChanged }: {
-  item: ManualSourcingItem
-  operators: NewProductOperator[]
-  viewer: NewProductViewer
-  exchangeRate: number
+  allowNewRows?: boolean
   onChanged: () => void
 }) {
-  const [values, setValues] = useState<SourcingValues>(() => itemValues(item, exchangeRate))
-  const [photo, setPhoto] = useState<File | null>(null)
+  const [rows, setRows] = useState<DraftRow[]>(() => sourceRows.map((item) => rowFromItem(item, exchangeRate)))
+  const [photos, setPhotos] = useState<Record<string, File>>({})
   const [pending, startTransition] = useTransition()
+  const canAddRows = allowNewRows && Boolean(owner.id)
+  const showOwnerColumn = viewer.isMain
 
-  function save() {
-    startTransition(async () => {
-      const result = await updateManualSourcingAction({ itemId: item.id, values })
-      if (!result.success) {
-        toast.error(result.error)
-        return
-      }
-      if (photo) {
-        const uploaded = await uploadPhoto(item.id, photo)
-        if (!uploaded.success) {
-          toast.error(uploaded.error)
-          return
-        }
-      }
-      toast.success('소싱 정보를 저장했습니다.')
-      onChanged()
+  function updateRow(clientId: string, patch: Partial<DraftRow>) {
+    setRows((currentRows) => currentRows.map((row) => row.clientId === clientId ? { ...row, ...patch } : row))
+  }
+
+  function appendRows(count: number) {
+    const ownerId = owner.id
+    if (!ownerId) return
+    setRows((currentRows) => [...currentRows, ...Array.from({ length: count }, () => blankRow(exchangeRate, ownerId))])
+  }
+
+  function removeUnsavedRow(clientId: string) {
+    setRows((currentRows) => currentRows.filter((row) => row.clientId !== clientId))
+    setPhotos((currentPhotos) => {
+      const remaining = { ...currentPhotos }
+      delete remaining[clientId]
+      return remaining
     })
   }
 
-  function pass() {
+  async function persistRows(targetRows: DraftRow[]) {
+    const result = await saveSourcingMeetingRowsAction({
+      meetingId,
+      rows: targetRows.map((row) => ({
+        clientId: row.clientId,
+        itemId: row.itemId,
+        productName: row.productName,
+        productOption: row.productOption,
+        chinaPurchaseUrl: row.chinaPurchaseUrl,
+        chinaUnitPriceCny: row.chinaUnitPriceCny,
+        unitShippingCny: row.unitShippingCny,
+        exchangeRateKrw: row.exchangeRateKrw,
+        domesticSaleUrl: row.domesticSaleUrl,
+        domesticSalePrice: row.domesticSalePrice,
+        detailPageUrl: row.detailPageUrl,
+        memo1: row.memo1,
+        memo2: row.memo2,
+        ownerOperatorId: row.ownerOperatorId,
+      })),
+    })
+    if (!result.success) throw new Error(result.error)
+
+    const ids = new Map(result.saved.map((saved) => [saved.clientId, saved.id]))
+    for (const row of targetRows) {
+      const file = photos[row.clientId]
+      if (!file) continue
+      const itemId = ids.get(row.clientId) ?? row.itemId
+      if (!itemId) continue
+      const uploaded = await uploadPhoto(itemId, file)
+      if (!uploaded.success) throw new Error(uploaded.error)
+    }
+    return ids
+  }
+
+  function saveAll() {
     startTransition(async () => {
-      const saved = await updateManualSourcingAction({ itemId: item.id, values })
-      if (!saved.success) {
-        toast.error(saved.error)
-        return
-      }
-      if (photo) {
-        const uploaded = await uploadPhoto(item.id, photo)
-        if (!uploaded.success) {
-          toast.error(uploaded.error)
+      try {
+        const populatedRows = rows.filter((row) => row.productName.trim())
+        if (populatedRows.length === 0) {
+          toast.message('상품명이 입력된 행부터 저장됩니다.')
           return
         }
+        await persistRows(rows)
+        toast.success(`${populatedRows.length}개 상품을 저장했습니다.`)
+        onChanged()
+      } catch (error) {
+        toast.error(errorMessage(error))
       }
-      const result = await passManualSourcingAction(item.id)
-      if (!result.success) {
-        toast.error(result.error)
-        return
-      }
-      toast.success(result.existing ? '이미 신상품 진행관리에 등록된 상품입니다.' : '신상품 진행관리 1단계에 등록했습니다.')
-      onChanged()
     })
   }
 
-  const imageSrc = imageSource(item)
+  function passRow(row: DraftRow) {
+    startTransition(async () => {
+      try {
+        if (!row.productName.trim()) throw new Error('1차 통과할 상품명을 입력해 주세요.')
+        const ids = await persistRows([row])
+        const itemId = ids.get(row.clientId) ?? row.itemId
+        if (!itemId) throw new Error('소싱 상품 저장에 실패했습니다.')
+        const result = await passManualSourcingAction(itemId)
+        if (!result.success) throw new Error(result.error)
+        toast.success(result.existing ? '이미 신상품 진행관리 1단계에 등록된 상품입니다.' : '신상품 진행관리 1단계에 등록했습니다.')
+        onChanged()
+      } catch (error) {
+        toast.error(errorMessage(error))
+      }
+    })
+  }
 
   return (
-    <div className="space-y-4 p-4">
-      <div className="flex items-start justify-between gap-3 border-b pb-3">
-        <div className="min-w-0">
-          <h2 className="truncate text-base font-semibold">{item.productName}</h2>
-          <p className="mt-1 text-xs text-muted-foreground">최근 수정 {dateText(item.updatedAt)}</p>
+    <section className="overflow-hidden rounded-lg border bg-card">
+      <div className="flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">{owner.displayName}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            이 표 안에서 여러 상품을 추가하고 한 번에 저장할 수 있습니다. 긴 텍스트는 셀 높이가 자동으로 늘어납니다.
+          </p>
         </div>
-        <StatusBadge status={item.status} />
+        <div className="flex flex-wrap items-center gap-2">
+          {canAddRows ? (
+            <>
+              <Button type="button" variant="outline" size="sm" onClick={() => appendRows(1)} disabled={pending}>
+                <Plus />
+                행 추가
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => appendRows(5)} disabled={pending}>
+                <Plus />
+                5행 추가
+              </Button>
+            </>
+          ) : null}
+          <Button type="button" size="sm" onClick={saveAll} disabled={pending || rows.length === 0}>
+            {pending ? <Loader2 className="animate-spin" /> : <Save />}
+            {pending ? '저장 중...' : '변경사항 저장'}
+          </Button>
+        </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-[100px_minmax(0,1fr)]">
-        <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border bg-muted/30">
-          {imageSrc ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageSrc} alt={item.productName} className="h-full w-full object-cover" />
-          ) : <ImageIcon className="h-7 w-7 text-muted-foreground" />}
-        </div>
-        <div className="space-y-2">
-          <PhotoInput file={photo} onChange={setPhoto} compact />
-          {item.passedNewProductId ? (
-            <p className="flex items-center gap-1 text-xs font-medium text-emerald-700"><CheckCircle2 className="h-4 w-4" />신상품 진행관리 1단계에 등록됨</p>
-          ) : (
-            <Button type="button" className="w-full" onClick={pass} disabled={pending}>
-              {pending ? <Loader2 className="animate-spin" /> : <PackagePlus />}
-              1차 통과 후 신상품 등록
-            </Button>
-          )}
-        </div>
+      <div className="overflow-x-auto">
+        <table className={cn('min-w-[2680px] table-fixed border-collapse text-sm', showOwnerColumn && 'min-w-[2840px]')}>
+          <colgroup>
+            <col className="w-12" />
+            <col className="w-32" />
+            <col className="w-56" />
+            <col className="w-44" />
+            <col className="w-64" />
+            <col className="w-28" />
+            <col className="w-30" />
+            <col className="w-28" />
+            <col className="w-32" />
+            <col className="w-64" />
+            <col className="w-32" />
+            <col className="w-64" />
+            <col className="w-56" />
+            <col className="w-56" />
+            {showOwnerColumn ? <col className="w-40" /> : null}
+            <col className="w-36" />
+            <col className="w-20" />
+          </colgroup>
+          <thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+            <tr>
+              <TableHeader>순번</TableHeader>
+              <TableHeader>사진</TableHeader>
+              <TableHeader required>상품명</TableHeader>
+              <TableHeader>상품 옵션</TableHeader>
+              <TableHeader>1688 URL</TableHeader>
+              <TableHeader>중국 위안화</TableHeader>
+              <TableHeader>개당 배송비</TableHeader>
+              <TableHeader>환율</TableHeader>
+              <TableHeader>한국원화</TableHeader>
+              <TableHeader>국내판매 링크</TableHeader>
+              <TableHeader>국내판매가</TableHeader>
+              <TableHeader>상세페이지 URL</TableHeader>
+              <TableHeader>비고 1</TableHeader>
+              <TableHeader>비고 2</TableHeader>
+              {showOwnerColumn ? <TableHeader>등록자</TableHeader> : null}
+              <TableHeader>진행</TableHeader>
+              <TableHeader>정리</TableHeader>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, index) => {
+              const calculatedCost = calculateCnyCostKrw({
+                chinaUnitPriceCny: numberValue(row.chinaUnitPriceCny),
+                unitShippingCny: numberValue(row.unitShippingCny),
+                exchangeRateKrw: numberValue(row.exchangeRateKrw),
+              })
+              return (
+                <tr key={row.clientId} className="border-t align-top hover:bg-muted/20">
+                  <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
+                  <TableCell>
+                    <PhotoCell
+                      row={row}
+                      file={photos[row.clientId] ?? null}
+                      onChange={(file) => setPhotos((currentPhotos) => file
+                        ? { ...currentPhotos, [row.clientId]: file }
+                        : omitFile(currentPhotos, row.clientId))}
+                    />
+                  </TableCell>
+                  <TableCell><AutoGrowTextarea value={row.productName} onChange={(value) => updateRow(row.clientId, { productName: value })} placeholder="상품명" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.productOption} onChange={(value) => updateRow(row.clientId, { productOption: value })} placeholder="옵션" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.chinaPurchaseUrl} onChange={(value) => updateRow(row.clientId, { chinaPurchaseUrl: value })} placeholder="https://detail.1688.com/..." /></TableCell>
+                  <TableCell><NumericCell value={row.chinaUnitPriceCny} onChange={(value) => updateRow(row.clientId, { chinaUnitPriceCny: value })} placeholder="¥" decimal /></TableCell>
+                  <TableCell><NumericCell value={row.unitShippingCny} onChange={(value) => updateRow(row.clientId, { unitShippingCny: value })} placeholder="¥" decimal /></TableCell>
+                  <TableCell><NumericCell value={row.exchangeRateKrw} onChange={(value) => updateRow(row.clientId, { exchangeRateKrw: value })} placeholder="원/¥" decimal /></TableCell>
+                  <TableCell><div className="min-h-8 rounded-md border bg-muted/40 px-2 py-1.5 text-right font-semibold">{won(calculatedCost)}</div></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.domesticSaleUrl} onChange={(value) => updateRow(row.clientId, { domesticSaleUrl: value })} placeholder="https://" /></TableCell>
+                  <TableCell><NumericCell value={row.domesticSalePrice} onChange={(value) => updateRow(row.clientId, { domesticSalePrice: value })} placeholder="원" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.detailPageUrl} onChange={(value) => updateRow(row.clientId, { detailPageUrl: value })} placeholder="상세페이지 참고 URL" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.memo1} onChange={(value) => updateRow(row.clientId, { memo1: value })} placeholder="비고" /></TableCell>
+                  <TableCell><AutoGrowTextarea value={row.memo2} onChange={(value) => updateRow(row.clientId, { memo2: value })} placeholder="비고" /></TableCell>
+                  {showOwnerColumn ? (
+                    <TableCell>
+                      <select value={row.ownerOperatorId ?? ''} onChange={(event) => updateRow(row.clientId, { ownerOperatorId: event.target.value || null })} className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                        <option value="">등록자 선택</option>
+                        {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.displayName}</option>)}
+                      </select>
+                    </TableCell>
+                  ) : null}
+                  <TableCell>
+                    {row.passedNewProductId || row.status === 'passed' ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700"><CheckCircle2 className="size-4" />1차 통과</span>
+                    ) : (
+                      <Button type="button" size="sm" variant="outline" className="w-full" onClick={() => passRow(row)} disabled={pending}>
+                        <PackagePlus />
+                        1차 통과
+                      </Button>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {!row.itemId ? (
+                      <Button type="button" variant="ghost" size="icon-sm" aria-label="빈 행 제거" onClick={() => removeUnsavedRow(row.clientId)} disabled={pending}>
+                        <X />
+                      </Button>
+                    ) : <span className="text-xs text-muted-foreground">저장됨</span>}
+                  </TableCell>
+                </tr>
+              )
+            })}
+            {rows.length === 0 ? (
+              <tr><td colSpan={showOwnerColumn ? 17 : 16} className="px-4 py-12 text-center text-sm text-muted-foreground">등록된 상품이 없습니다. {canAddRows ? '행 추가로 상품을 입력해 주세요.' : ''}</td></tr>
+            ) : null}
+          </tbody>
+        </table>
       </div>
-
-      <SourcingFields values={values} onChange={setValues} operators={operators} viewer={viewer} />
-
-      <div className="flex justify-end border-t pt-3">
-        <Button type="button" onClick={save} disabled={pending}>
-          {pending ? <Loader2 className="animate-spin" /> : <Save />}
-          {pending ? '저장 중...' : '변경사항 저장'}
-        </Button>
-      </div>
-    </div>
+    </section>
   )
 }
 
-function SourcingFields({ values, onChange, operators, viewer }: {
-  values: SourcingValues
-  onChange: (values: SourcingValues) => void
-  operators: NewProductOperator[]
-  viewer: NewProductViewer
+function TableHeader({ children, required = false }: { children: React.ReactNode; required?: boolean }) {
+  return <th scope="col" className="border-r px-2 py-2.5 align-bottom font-medium last:border-r-0">{children}{required ? <span className="ml-1 text-destructive">*</span> : null}</th>
+}
+
+function TableCell({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <td className={cn('border-r p-2 last:border-r-0', className)}>{children}</td>
+}
+
+function NumericCell({ value, onChange, placeholder, decimal = false }: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  decimal?: boolean
 }) {
-  const calculatedCostKrw = calculateCnyCostKrw({
-    chinaUnitPriceCny: numberValue(values.chinaUnitPriceCny),
-    unitShippingCny: numberValue(values.unitShippingCny),
-    exchangeRateKrw: numberValue(values.exchangeRateKrw),
-  })
+  return <Input value={value} onChange={(event) => onChange(event.target.value)} inputMode={decimal ? 'decimal' : 'numeric'} placeholder={placeholder} className="text-right" />
+}
 
-  function set<K extends keyof SourcingValues>(key: K, value: SourcingValues[K]) {
-    onChange({ ...values, [key]: value })
+function AutoGrowTextarea({ value, onChange, placeholder }: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+
+  function resize() {
+    const element = ref.current
+    if (!element) return
+    element.style.height = '0px'
+    element.style.height = `${Math.max(32, element.scrollHeight)}px`
   }
 
+  useEffect(() => {
+    const element = ref.current
+    if (!element) return
+    element.style.height = '0px'
+    element.style.height = `${Math.max(32, element.scrollHeight)}px`
+  }, [value])
+
   return (
-    <div className="grid gap-3 md:grid-cols-2">
-      <Field label="상품명" required><Input value={values.productName} onChange={(event) => set('productName', event.target.value)} /></Field>
-      <Field label="상품 옵션"><Input value={values.productOption} onChange={(event) => set('productOption', event.target.value)} /></Field>
-      <Field label="중국 위안화 (¥)"><Input value={values.chinaUnitPriceCny} onChange={(event) => set('chinaUnitPriceCny', event.target.value)} inputMode="decimal" placeholder="개당 상품가" /></Field>
-      <Field label="개당 배송비 (¥)"><Input value={values.unitShippingCny} onChange={(event) => set('unitShippingCny', event.target.value)} inputMode="decimal" placeholder="개당 중국 배송비" /></Field>
-      <Field label="적용 환율 (원/¥)"><Input value={values.exchangeRateKrw} onChange={(event) => set('exchangeRateKrw', event.target.value)} inputMode="decimal" /></Field>
-      <Field label="한국원화 (자동 계산)">
-        <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-semibold">{won(calculatedCostKrw)}</div>
-      </Field>
-      <Field label="중국 구매 링크"><LinkInput value={values.chinaPurchaseUrl} onChange={(value) => set('chinaPurchaseUrl', value)} /></Field>
-      <Field label="국내판매 링크"><LinkInput value={values.domesticSaleUrl} onChange={(value) => set('domesticSaleUrl', value)} /></Field>
-      <Field label="국내판매가 (₩)"><Input value={values.domesticSalePrice} onChange={(event) => set('domesticSalePrice', event.target.value)} inputMode="numeric" /></Field>
-      <Field label="상세페이지 URL"><LinkInput value={values.detailPageUrl} onChange={(value) => set('detailPageUrl', value)} /></Field>
-      {viewer.isMain ? (
-        <Field label="담당 등록자">
-          <select value={values.ownerOperatorId ?? ''} onChange={(event) => set('ownerOperatorId', event.target.value || null)} className="h-9 w-full rounded-md border bg-background px-3 text-sm">
-            <option value="">등록자 선택</option>
-            {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.displayName}</option>)}
-          </select>
-        </Field>
-      ) : null}
-      <Field label="비고 1"><textarea value={values.memo1} onChange={(event) => set('memo1', event.target.value)} rows={2} className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm" /></Field>
-      <Field label="비고 2"><textarea value={values.memo2} onChange={(event) => set('memo2', event.target.value)} rows={2} className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm" /></Field>
-    </div>
+    <textarea
+      ref={ref}
+      rows={1}
+      value={value}
+      onInput={resize}
+      onChange={(event) => {
+        onChange(event.target.value)
+        requestAnimationFrame(resize)
+      }}
+      placeholder={placeholder}
+      className="block min-h-8 w-full resize-y overflow-hidden rounded-md border border-input bg-background px-2 py-1.5 text-sm leading-5 break-words outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+    />
   )
 }
 
-function PhotoInput({ file, onChange, compact = false }: { file: File | null; onChange: (file: File | null) => void; compact?: boolean }) {
+function PhotoCell({ row, file, onChange }: { row: DraftRow; file: File | null; onChange: (file: File | null) => void }) {
   const ref = useRef<HTMLInputElement>(null)
+  const source = row.itemId && row.hasImageFile ? `/api/operations/sourcing/images/${row.itemId}` : row.legacyImageUrl
   return (
-    <div className={compact ? '' : 'min-w-0'}>
+    <div className="space-y-2">
+      <div className="grid aspect-square w-24 place-items-center overflow-hidden rounded-md border bg-muted/30">
+        {source ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={source} alt="" className="h-full w-full object-cover" />
+        ) : <ImageIcon className="size-5 text-muted-foreground" />}
+      </div>
       <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => onChange(event.target.files?.[0] ?? null)} />
-      <Button type="button" variant="outline" className={compact ? 'w-full' : ''} onClick={() => ref.current?.click()}>
+      <Button type="button" variant="outline" size="xs" className="w-full" onClick={() => ref.current?.click()}>
         <UploadCloud />
-        {file ? file.name : '사진 등록'}
+        {file ? '사진 선택됨' : '사진 등록'}
       </Button>
-      {!compact && <p className="mt-1 text-xs text-muted-foreground">대표 사진 1장, 최대 4MB</p>}
+      {file ? <p className="line-clamp-2 text-[11px] leading-4 text-muted-foreground">{file.name}</p> : null}
     </div>
   )
 }
 
-function LinkInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return (
-    <div className="flex gap-1">
-      <Input type="url" value={value} onChange={(event) => onChange(event.target.value)} placeholder="https://" />
-      {/^https?:\/\//.test(value) && (
-        <a href={value} target="_blank" rel="noreferrer">
-          <Button type="button" size="icon-sm" variant="outline" aria-label="링크 열기"><ExternalLink /></Button>
-        </a>
-      )}
-    </div>
-  )
+function MeetingStatusBadge({ status }: { status: SourcingMeeting['status'] }) {
+  const label = status === 'open' ? '진행 중' : status === 'closed' ? '마감' : '이전 데이터'
+  return <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1', meetingStatusClass[status])}>{label}</span>
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const label = status === 'passed' ? '1차 통과' : status === 'hold' ? '보류' : '작성 중'
-  return <span className={'inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1 ' + (statusClass[status] ?? statusClass.draft)}>{label}</span>
-}
-
-function Metric({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value.toLocaleString('ko-KR')}</p>
-    </div>
-  )
-}
-
-function Field({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
-  return (
-    <label className="block space-y-1.5">
-      <span className="text-xs font-medium text-muted-foreground">{label}{required ? <span className="ml-1 text-red-500">*</span> : null}</span>
-      {children}
-    </label>
-  )
-}
-
-function emptyValues(exchangeRate: number, ownerOperatorId: string | null): SourcingValues {
+function rowFromItem(item: ManualSourcingItem, exchangeRate: number): DraftRow {
   return {
-    productName: '',
-    productOption: '',
-    chinaPurchaseUrl: '',
-    chinaUnitPriceCny: '',
-    unitShippingCny: '',
-    exchangeRateKrw: String(exchangeRate),
-    domesticSaleUrl: '',
-    domesticSalePrice: '',
-    detailPageUrl: '',
-    memo1: '',
-    memo2: '',
-    ownerOperatorId,
-  }
-}
-
-function itemValues(item: ManualSourcingItem, exchangeRate: number): SourcingValues {
-  return {
+    clientId: item.id,
+    itemId: item.id,
+    ownerOperatorId: item.ownerOperatorId,
     productName: item.productName,
     productOption: item.productOption ?? '',
     chinaPurchaseUrl: item.chinaPurchaseUrl ?? '',
@@ -447,7 +664,33 @@ function itemValues(item: ManualSourcingItem, exchangeRate: number): SourcingVal
     detailPageUrl: item.detailPageUrl ?? '',
     memo1: item.memo1 ?? '',
     memo2: item.memo2 ?? '',
-    ownerOperatorId: item.ownerOperatorId,
+    status: item.status,
+    passedNewProductId: item.passedNewProductId,
+    hasImageFile: item.hasImageFile,
+    legacyImageUrl: item.legacyImageUrl,
+  }
+}
+
+function blankRow(exchangeRate: number, ownerOperatorId: string): DraftRow {
+  return {
+    clientId: crypto.randomUUID(),
+    itemId: null,
+    ownerOperatorId,
+    productName: '',
+    productOption: '',
+    chinaPurchaseUrl: '',
+    chinaUnitPriceCny: '',
+    unitShippingCny: '',
+    exchangeRateKrw: String(exchangeRate),
+    domesticSaleUrl: '',
+    domesticSalePrice: '',
+    detailPageUrl: '',
+    memo1: '',
+    memo2: '',
+    status: 'draft',
+    passedNewProductId: null,
+    hasImageFile: false,
+    legacyImageUrl: null,
   }
 }
 
@@ -460,8 +703,34 @@ async function uploadPhoto(itemId: string, file: File) {
   return response.ok ? { success: true as const } : { success: false as const, error: result.error || '사진 등록에 실패했습니다.' }
 }
 
-function imageSource(item: ManualSourcingItem) {
-  return item.hasImageFile ? '/api/operations/sourcing/images/' + item.id : item.legacyImageUrl
+function meetingVersion(meeting: SourcingMeeting) {
+  return `${meeting.id}:${meeting.updatedAt}:${meeting.items.map((item) => `${item.id}:${item.updatedAt}`).join('|')}`
+}
+
+function meetingTitle(meetingDate: string) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(meetingDate)
+  if (!matched) return '소싱회의'
+  return `${Number(matched[1])}년 ${Number(matched[2])}월 ${Number(matched[3])}일 소싱회의`
+}
+
+function nextWednesday() {
+  const today = new Date()
+  const date = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  date.setDate(date.getDate() + ((3 - date.getDay() + 7) % 7))
+  return localDateString(date)
+}
+
+function localDateString(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function formatMeetingDate(value: string) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!matched) return value
+  return `${Number(matched[1])}년 ${Number(matched[2])}월 ${Number(matched[3])}일`
 }
 
 function numberValue(value: string) {
@@ -473,15 +742,16 @@ function textNumber(value: number | null) {
   return value == null ? '' : String(value)
 }
 
-function money(value: number | null) {
-  return value == null ? '-' : value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
-}
-
 function won(value: number | null) {
-  return value == null ? '-' : '₩ ' + value.toLocaleString('ko-KR')
+  return value == null ? '-' : `₩ ${value.toLocaleString('ko-KR')}`
 }
 
-function dateText(value: string) {
-  const date = new Date(value)
-  return Number.isNaN(date.valueOf()) ? '-' : new Intl.DateTimeFormat('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
+function omitFile(files: Record<string, File>, clientId: string) {
+  const remaining = { ...files }
+  delete remaining[clientId]
+  return remaining
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : '처리 중 오류가 발생했습니다.'
 }

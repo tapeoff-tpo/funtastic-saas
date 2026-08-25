@@ -1496,11 +1496,29 @@ export const dealEvents = pgTable(
   ],
 )
 
+export const sourcingMeetings = pgTable(
+  'sourcing_meetings',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    meetingDate: date('meeting_date').notNull(),
+    title: text('title').notNull(),
+    status: varchar('status', { length: 30 }).notNull().default('open'),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('sourcing_meetings_workspace_date_idx').on(table.userId, table.meetingDate, table.createdAt),
+  ],
+)
+
 export const sourcingItems = pgTable(
   'sourcing_items',
   {
     id: uuid('id').defaultRandom().primaryKey(),
     userId: uuid('user_id').notNull(),
+    meetingId: uuid('meeting_id').references(() => sourcingMeetings.id, { onDelete: 'set null' }),
     ownerOperatorId: uuid('owner_operator_id'),
     createdByUserId: uuid('created_by_user_id'),
     sourcePlatform: varchar('source_platform', { length: 30 }).notNull().default('coupang'),

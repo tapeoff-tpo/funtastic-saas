@@ -6,7 +6,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { getNewProductViewer, listNewProductOperators } from '@/lib/new-products/workflow'
-import { listManualSourcingItems } from '@/lib/operations/sourcing'
+import { listSourcingMeetings } from '@/lib/operations/sourcing'
 import { SourcingBoard } from './sourcing-board'
 
 export const dynamic = 'force-dynamic'
@@ -20,8 +20,8 @@ export default async function SourcingPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [items, operators, viewer, exchangeRate] = await Promise.all([
-    listManualSourcingItems({ userId: workspaceUserId, actorUserId: user.id }),
+  const [meetings, operators, viewer, exchangeRate] = await Promise.all([
+    listSourcingMeetings({ userId: workspaceUserId, actorUserId: user.id }),
     listNewProductOperators(workspaceUserId),
     getNewProductViewer({ userId: workspaceUserId, actorUserId: user.id }),
     getLatestCnyKrwReferenceRate(),
@@ -35,14 +35,14 @@ export default async function SourcingPage() {
           소싱
         </h1>
         <p className="text-sm text-muted-foreground">
-          자동 수집 없이 상품을 직접 등록하고, 1차 통과한 상품은 신상품 진행관리로 보냅니다.
+          수요일 소싱회의를 날짜별로 만들고, 등록자별 입력 시트에서 여러 상품을 한 번에 관리합니다.
         </p>
       </header>
 
       <ProductFlowNav />
 
       <SourcingBoard
-        items={items}
+        meetings={meetings}
         operators={operators.filter((operator) => operator.isActive)}
         viewer={viewer}
         exchangeRate={exchangeRate}

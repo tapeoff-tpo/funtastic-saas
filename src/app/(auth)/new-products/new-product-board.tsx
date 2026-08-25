@@ -534,11 +534,15 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="이전원가 (₩)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
           <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
-          <div className={cn('grid gap-3 md:grid-cols-2', fullWidthFieldClass)}>
-            <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={3} resizable={false} className="h-[88px]" /></Field>
-            <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={3} resizable={false} className="h-[88px]" /></Field>
-            <Field label="상품키워드"><TextArea value={values.productKeywords} onChange={(value) => setValue('productKeywords', value)} placeholder="검색·등록에 사용할 상품 키워드" rows={3} resizable={false} className="h-[88px]" /></Field>
-            <Field label="구매 참고사항"><TextArea value={values.purchaseReferenceNotes} onChange={(value) => setValue('purchaseReferenceNotes', value)} placeholder="MOQ, 구매 옵션, 공급처 전달사항" rows={3} resizable={false} className="h-[88px]" /></Field>
+          <div className={cn('space-y-5', fullWidthFieldClass)}>
+            <MemoGroup title="핵심 메모">
+              <MemoField editing={editing} label="필수 체크 사항" value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" />
+              <MemoField editing={editing} label="비고" value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} />
+            </MemoGroup>
+            <MemoGroup title="추가 정보">
+              <MemoField editing={editing} label="상품키워드" value={values.productKeywords} onChange={(value) => setValue('productKeywords', value)} placeholder="검색·등록에 사용할 상품 키워드" />
+              <MemoField editing={editing} label="구매 참고사항" value={values.purchaseReferenceNotes} onChange={(value) => setValue('purchaseReferenceNotes', value)} placeholder="MOQ, 구매 옵션, 공급처 전달사항" />
+            </MemoGroup>
           </div>
         </div>
       </EditorSection>
@@ -663,7 +667,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
         </nav>
       )}
 
-      <fieldset disabled={Boolean(item) && !editing} className="space-y-4 border-0 p-0 [&_input:disabled]:!bg-transparent [&_input:disabled]:!text-foreground [&_input:disabled]:!opacity-100 [&_select:disabled]:!text-foreground [&_select:disabled]:!opacity-100 [&_textarea:disabled]:!text-foreground [&_textarea:disabled]:!opacity-100">
+      <fieldset disabled={Boolean(item) && !editing} className="space-y-4 border-0 p-0 [&_input:disabled]:!border-transparent [&_input:disabled]:!bg-transparent [&_input:disabled]:!px-0 [&_input:disabled]:!text-foreground [&_input:disabled]:!opacity-100 [&_input:disabled]:shadow-none [&_input:disabled]::placeholder:!text-transparent [&_select:disabled]:!border-transparent [&_select:disabled]:!bg-transparent [&_select:disabled]:!px-0 [&_select:disabled]:!text-foreground [&_select:disabled]:!opacity-100 [&_textarea:disabled]:!border-transparent [&_textarea:disabled]:!bg-transparent [&_textarea:disabled]:!px-0 [&_textarea:disabled]:!text-foreground [&_textarea:disabled]:!opacity-100 [&_textarea:disabled]:shadow-none">
         {visibleSections.length > 0
           ? visibleSections.map((section) => <div key={section} id={`new-product-section-${section}`} className="scroll-mt-4">{sectionContent[section]}</div>)
           : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
@@ -934,6 +938,31 @@ function Field({ label, required, className, children }: { label: string; requir
       <span className="text-xs font-medium text-foreground">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>
       {children}
     </label>
+  )
+}
+
+function MemoGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-semibold text-foreground">{title}</p>
+      <div className="grid gap-3 md:grid-cols-2">{children}</div>
+    </div>
+  )
+}
+
+function MemoField({ editing, label, value, onChange, placeholder }: {
+  editing: boolean
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+}) {
+  return (
+    <Field label={label}>
+      {editing
+        ? <TextArea value={value} onChange={onChange} placeholder={placeholder} rows={3} resizable={false} className="h-[88px]" />
+        : <p className={cn('min-h-6 whitespace-pre-wrap break-words py-1 text-sm text-foreground', !value.trim() && 'text-muted-foreground')}>{value.trim() || '등록된 내용 없음'}</p>}
+    </Field>
   )
 }
 

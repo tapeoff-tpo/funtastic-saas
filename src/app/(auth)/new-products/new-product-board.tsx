@@ -161,6 +161,9 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
   const selectedStageName = stageFilter === 'all'
     ? '전체 상태'
     : initialStages.find((stage) => stage.id === stageFilter)?.name ?? ''
+  const workspaceTabs = viewer.isMain
+    ? operators
+    : operators.filter((operator) => operator.id === viewer.operatorId)
 
   function selectProduct(id: string) {
     if (!id) return
@@ -185,6 +188,16 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
     setItem(null)
   }
 
+  function changeWorkspace(ownerOperatorId: string | null) {
+    if (!viewer.isMain && ownerOperatorId !== viewer.operatorId) return
+    setActiveOwnerId(ownerOperatorId)
+    setStageFilter('')
+    setQuery('')
+    setMode('view')
+    setSelectedId(null)
+    setItem(null)
+  }
+
   function closeEditor() {
     setMode('view')
     setSelectedId(null)
@@ -202,23 +215,42 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
   return (
     <div className="space-y-4">
       <section className="sticky top-0 z-30 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur">
+        <nav role="tablist" aria-label="신상품 등록자 작업공간" className="-mx-3 -mt-3 mb-3 flex min-h-12 overflow-x-auto border-b px-3">
+          {viewer.isMain && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeOwnerId === null}
+              onClick={() => changeWorkspace(null)}
+              className={cn(
+                'flex shrink-0 items-center gap-2 border-b-2 px-4 text-sm font-medium transition-colors',
+                activeOwnerId === null ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              Main Form
+              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">main</span>
+            </button>
+          )}
+          {workspaceTabs.map((operator) => (
+            <button
+              key={operator.id}
+              type="button"
+              role="tab"
+              aria-selected={activeOwnerId === operator.id}
+              onClick={() => changeWorkspace(operator.id)}
+              className={cn(
+                'shrink-0 border-b-2 px-4 text-sm font-medium transition-colors',
+                activeOwnerId === operator.id ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {operator.displayName}
+            </button>
+          ))}
+          {!viewer.isMain && workspaceTabs.length === 0 && (
+            <span className="flex items-center px-4 text-sm text-muted-foreground">등록자 미설정</span>
+          )}
+        </nav>
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
-          <ToolbarField label="작업 공간" className="xl:w-52">
-            {viewer.isMain ? (
-              <select
-                value={activeOwnerId ?? ''}
-                onChange={(event) => setActiveOwnerId(event.target.value || null)}
-                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-              >
-                <option value="">메인 · 전체 등록자</option>
-                {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.displayName}</option>)}
-              </select>
-            ) : (
-              <div className="flex h-8 items-center rounded-lg border bg-muted/30 px-2.5 text-sm font-medium">
-                {operators.find((operator) => operator.id === viewer.operatorId)?.displayName ?? '등록자 미설정'}
-              </div>
-            )}
-          </ToolbarField>
           <ToolbarField label="상태별 보기" className="xl:w-64">
             <select
               value={stageFilter}

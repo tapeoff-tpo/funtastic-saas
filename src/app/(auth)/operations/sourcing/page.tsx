@@ -4,7 +4,9 @@ import { Search } from 'lucide-react'
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { listSourcingBoard, SOURCING_STATUS_LABELS } from '@/lib/operations/sourcing'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import { getNewProductViewer, listNewProductOperators } from '@/lib/new-products/workflow'
+import { listManualSourcingItems } from '@/lib/operations/sourcing'
 import { SourcingBoard } from './sourcing-board'
 
 export const dynamic = 'force-dynamic'
@@ -18,7 +20,12 @@ export default async function SourcingPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const items = await listSourcingBoard(workspaceUserId)
+  const [items, operators, viewer, exchangeRate] = await Promise.all([
+    listManualSourcingItems({ userId: workspaceUserId, actorUserId: user.id }),
+    listNewProductOperators(workspaceUserId),
+    getNewProductViewer({ userId: workspaceUserId, actorUserId: user.id }),
+    getLatestCnyKrwReferenceRate(),
+  ])
 
   return (
     <div className="space-y-4">
@@ -28,45 +35,17 @@ export default async function SourcingPage() {
           소싱
         </h1>
         <p className="text-sm text-muted-foreground">
-          쿠팡에서 확인한 상품과 1688 후보를 내부 검토용으로 기록합니다.
+          자동 수집 없이 상품을 직접 등록하고, 1차 통과한 상품은 신상품 진행관리로 보냅니다.
         </p>
       </header>
 
       <ProductFlowNav />
 
       <SourcingBoard
-        items={items.map((item) => ({
-          id: item.id,
-          sourcePlatform: item.sourcePlatform,
-          sourceTitle: item.sourceTitle,
-          sourceUrl: item.sourceUrl,
-          imageUrl: item.imageUrl,
-          category: item.category,
-          sourceRank: item.sourceRank,
-          sourcePrice: item.sourcePrice,
-          keyword: item.keyword,
-          status: item.status,
-          selected1688Url: item.selected1688Url,
-          selectedAt: item.selectedAt?.toISOString() ?? null,
-          memo: item.memo,
-          createdAt: item.createdAt.toISOString(),
-          updatedAt: item.updatedAt.toISOString(),
-          candidates: item.candidates.map((candidate) => ({
-            id: candidate.id,
-            itemId: candidate.itemId,
-            platform: candidate.platform,
-            title: candidate.title,
-            candidateUrl: candidate.candidateUrl,
-            imageUrl: candidate.imageUrl,
-            priceText: candidate.priceText,
-            supplierName: candidate.supplierName,
-            matchScore: candidate.matchScore,
-            isSelected: candidate.isSelected,
-            memo: candidate.memo,
-            createdAt: candidate.createdAt.toISOString(),
-          })),
-        }))}
-        statusLabels={SOURCING_STATUS_LABELS}
+        items={items}
+        operators={operators.filter((operator) => operator.isActive)}
+        viewer={viewer}
+        exchangeRate={exchangeRate}
       />
     </div>
   )

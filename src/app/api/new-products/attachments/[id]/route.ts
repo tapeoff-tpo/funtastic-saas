@@ -30,7 +30,11 @@ export async function DELETE(_request: Request, context: AttachmentRouteContext)
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const { id } = await context.params
-  const deleted = await deleteNewProductAttachment({ userId: workspaceUserId, attachmentId: id })
+  const deleted = await deleteNewProductAttachment({
+    userId: workspaceUserId,
+    requestedByUserId: user.id,
+    attachmentId: id,
+  })
   if (!deleted) return NextResponse.json({ error: '삭제할 파일을 찾을 수 없습니다.' }, { status: 404 })
   return NextResponse.json({ success: true })
 }

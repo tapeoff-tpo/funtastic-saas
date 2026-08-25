@@ -3,113 +3,121 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
-  addSourcingCandidate,
-  createSourcingItem,
-  promoteSourcingItemToPurchasingItem,
-  selectSourcingCandidate,
-  updateSourcingItemStatus,
+  createManualSourcingItem,
+  passManualSourcingToNewProduct,
+  updateManualSourcingItem,
 } from '@/lib/operations/sourcing'
 import { createClient } from '@/lib/supabase/server'
 
-async function getWorkspaceIdForAction() {
+type ManualSourcingValues = {
+  productName: string
+  productOption?: string
+  chinaPurchaseUrl?: string
+  chinaUnitPriceCny?: string
+  unitShippingCny?: string
+  exchangeRateKrw?: string
+  domesticSaleUrl?: string
+  domesticSalePrice?: string
+  detailPageUrl?: string
+  memo1?: string
+  memo2?: string
+  ownerOperatorId?: string | null
+}
+
+async function actionUser() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return null
-  return getWorkspaceUserId(user.id)
+  if (!user) throw new Error('로그인이 필요합니다.')
+  return { userId: user.id, workspaceUserId: await getWorkspaceUserId(user.id) }
 }
 
-function numberValue(formData: FormData, key: string) {
-  const raw = String(formData.get(key) ?? '').replace(/,/g, '').trim()
-  if (!raw) return null
-  const value = Number(raw)
-  return Number.isFinite(value) ? value : null
+export async function createManualSourcingAction(values: ManualSourcingValues) {
+  try {
+    const auth = await actionUser()
+    const result = await createManualSourcingItem({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+      ...manualValues(values),
+    })
+    if ('error' in result) return { success: false as const, error: result.error }
+    revalidatePath('/operations/sourcing')
+    return { success: true as const, id: result.id }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
 }
 
-export async function createSourcingItemAction(formData: FormData) {
-  const userId = await getWorkspaceIdForAction()
-  if (!userId) return { error: '로그인이 필요합니다.' }
-
-  const result = await createSourcingItem({
-    userId,
-    sourceTitle: String(formData.get('sourceTitle') ?? ''),
-    sourceUrl: String(formData.get('sourceUrl') ?? ''),
-    imageUrl: String(formData.get('imageUrl') ?? ''),
-    category: String(formData.get('category') ?? ''),
-    sourceRank: numberValue(formData, 'sourceRank'),
-    sourcePrice: numberValue(formData, 'sourcePrice'),
-    keyword: String(formData.get('keyword') ?? ''),
-    memo: String(formData.get('memo') ?? ''),
-  })
-  revalidatePath('/operations/sourcing')
-  return result
+export async function updateManualSourcingAction(input: { itemId: string; values: ManualSourcingValues }) {
+  try {
+    const auth = await actionUser()
+    const result = await updateManualSourcingItem({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+      itemId: input.itemId,
+      ...manualValues(input.values),
+    })
+    if ('error' in result) return { success: false as const, error: result.error }
+    revalidatePath('/operations/sourcing')
+    return result
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
 }
 
-export async function updateSourcingItemStatusAction(formData: FormData) {
-  const userId = await getWorkspaceIdForAction()
-  if (!userId) return
-
-  await updateSourcingItemStatus({
-    userId,
-    itemId: String(formData.get('itemId') ?? ''),
-    status: String(formData.get('status') ?? ''),
-  })
-  revalidatePath('/operations/sourcing')
+export async function passManualSourcingAction(itemId: string) {
+  try {
+    const auth = await actionUser()
+    const result = await passManualSourcingToNewProduct({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+      itemId,
+    })
+    revalidatePath('/operations/sourcing')
+    revalidatePath('/new-products')
+    return { success: true as const, ...result }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
 }
 
-export async function addSourcingCandidateAction(formData: FormData) {
-  const userId = await getWorkspaceIdForAction()
-  if (!userId) return { error: '로그인이 필요합니다.' }
-
-  const result = await addSourcingCandidate({
-    userId,
-    itemId: String(formData.get('itemId') ?? ''),
-    title: String(formData.get('title') ?? ''),
-    candidateUrl: String(formData.get('candidateUrl') ?? ''),
-    imageUrl: String(formData.get('imageUrl') ?? ''),
-    priceText: String(formData.get('priceText') ?? ''),
-    supplierName: String(formData.get('supplierName') ?? ''),
-    matchScore: numberValue(formData, 'matchScore'),
-    memo: String(formData.get('memo') ?? ''),
-  })
-  revalidatePath('/operations/sourcing')
-  return result
+function manualValues(values: ManualSourcingValues) {
+  return {
+    productName: text(values.productName),
+    productOption: nullableText(values.productOption),
+    chinaPurchaseUrl: nullableText(values.chinaPurchaseUrl),
+    chinaUnitPriceCny: nullableNumber(values.chinaUnitPriceCny),
+    unitShippingCny: nullableNumber(values.unitShippingCny),
+    exchangeRateKrw: nullableNumber(values.exchangeRateKrw),
+    domesticSaleUrl: nullableText(values.domesticSaleUrl),
+    domesticSalePrice: nullableInteger(values.domesticSalePrice),
+    detailPageUrl: nullableText(values.detailPageUrl),
+    memo1: nullableText(values.memo1),
+    memo2: nullableText(values.memo2),
+    ownerOperatorId: nullableText(values.ownerOperatorId, 100),
+  }
 }
 
-export async function selectSourcingCandidateAction(formData: FormData) {
-  const userId = await getWorkspaceIdForAction()
-  if (!userId) return
-
-  await selectSourcingCandidate({
-    userId,
-    itemId: String(formData.get('itemId') ?? ''),
-    candidateId: String(formData.get('candidateId') ?? ''),
-  })
-  revalidatePath('/operations/sourcing')
+function text(value: unknown) {
+  return typeof value === 'string' ? value : value == null ? '' : String(value)
 }
 
-export async function promoteSourcingItemToPurchasingItemAction(formData: FormData) {
-  const userId = await getWorkspaceIdForAction()
-  if (!userId) return { error: '로그인이 필요합니다.' }
+function nullableText(value: unknown, maxLength = 20_000) {
+  const normalized = text(value).trim()
+  return normalized ? normalized.slice(0, maxLength) : null
+}
 
-  const result = await promoteSourcingItemToPurchasingItem({
-    userId,
-    itemId: String(formData.get('itemId') ?? ''),
-    sku: String(formData.get('sku') ?? ''),
-    name: String(formData.get('name') ?? ''),
-    optionName: String(formData.get('optionName') ?? ''),
-    data: {
-      '한국창고기준 위치': String(formData.get('warehouseLocation') ?? ''),
-      '영문명': String(formData.get('englishName') ?? ''),
-      'HS CODE': String(formData.get('hsCode') ?? ''),
-      '재질': String(formData.get('material') ?? ''),
-      '제품크기': String(formData.get('size') ?? ''),
-      '제조사': String(formData.get('manufacturer') ?? ''),
-      '제조국': String(formData.get('country') ?? ''),
-      'works 신규 원가': String(formData.get('costPrice') ?? ''),
-      '구매 URL': String(formData.get('purchaseUrl') ?? ''),
-    },
-  })
-  revalidatePath('/operations/sourcing')
-  revalidatePath('/costs')
-  return result
+function nullableNumber(value: unknown) {
+  const normalized = text(value).replace(/,/g, '').trim()
+  if (!normalized) return null
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function nullableInteger(value: unknown) {
+  const parsed = nullableNumber(value)
+  return parsed == null ? null : Math.round(parsed)
+}
+
+function message(error: unknown) {
+  return error instanceof Error ? error.message : '처리 중 오류가 발생했습니다.'
 }

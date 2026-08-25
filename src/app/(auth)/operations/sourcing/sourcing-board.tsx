@@ -1,723 +1,487 @@
 'use client'
 
-import { type CSSProperties, FormEvent, useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { useMemo, useRef, useState, useTransition, type FormEvent, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, ExternalLink, Image as ImageIcon, Link2, PackagePlus, Plus, Search, Star, X } from 'lucide-react'
+import {
+  CheckCircle2,
+  ExternalLink,
+  ImageIcon,
+  Loader2,
+  PackagePlus,
+  Plus,
+  Save,
+  Search,
+  UploadCloud,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { cn } from '@/lib/utils'
+import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import type { NewProductOperator, NewProductViewer } from '@/lib/new-products/workflow'
+import type { ManualSourcingItem } from '@/lib/operations/sourcing'
 import {
-  addSourcingCandidateAction,
-  createSourcingItemAction,
-  promoteSourcingItemToPurchasingItemAction,
-  selectSourcingCandidateAction,
-  updateSourcingItemStatusAction,
+  createManualSourcingAction,
+  passManualSourcingAction,
+  updateManualSourcingAction,
 } from './actions'
 
-type SourcingCandidateRow = {
-  id: string
-  itemId: string
-  platform: string
-  title: string | null
-  candidateUrl: string
-  imageUrl: string | null
-  priceText: string | null
-  supplierName: string | null
-  matchScore: number | null
-  isSelected: boolean
-  memo: string | null
-  createdAt: string
-}
-
-type SourcingItemRow = {
-  id: string
-  sourcePlatform: string
-  sourceTitle: string
-  sourceUrl: string | null
-  imageUrl: string | null
-  category: string | null
-  sourceRank: number | null
-  sourcePrice: number | null
-  keyword: string | null
-  status: string
-  selected1688Url: string | null
-  selectedAt: string | null
-  memo: string | null
-  createdAt: string
-  updatedAt: string
-  candidates: SourcingCandidateRow[]
-}
-
 type Props = {
-  items: SourcingItemRow[]
-  statusLabels: Record<string, string>
+  items: ManualSourcingItem[]
+  operators: NewProductOperator[]
+  viewer: NewProductViewer
+  exchangeRate: CnyKrwReferenceRate
 }
 
-type CoupangCapturePayload = {
-  captureId?: string
-  sourceTitle: string
-  sourceUrl?: string | null
-  imageUrl?: string | null
-  category?: string | null
-  sourceRank?: number | null
-  sourcePrice?: number | null
-  keyword?: string | null
-  memo?: string | null
+type SourcingValues = {
+  productName: string
+  productOption: string
+  chinaPurchaseUrl: string
+  chinaUnitPriceCny: string
+  unitShippingCny: string
+  exchangeRateKrw: string
+  domesticSaleUrl: string
+  domesticSalePrice: string
+  detailPageUrl: string
+  memo1: string
+  memo2: string
+  ownerOperatorId: string | null
 }
 
-type SourcingSearchCandidatePayload = {
-  title?: string | null
-  candidateUrl: string
-  imageUrl?: string | null
-  priceText?: string | null
-  supplierName?: string | null
-  matchScore?: number | null
+const statusClass: Record<string, string> = {
+  draft: 'bg-amber-50 text-amber-800 ring-amber-200',
+  passed: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+  hold: 'bg-slate-100 text-slate-700 ring-slate-200',
 }
 
-const PAGE_SOURCE = 'funtastic-saas'
-const EXTENSION_SOURCE = 'funtastic-coupang-sourcing-extension'
-
-const STATUS_TONE: Record<string, string> = {
-  captured: 'bg-slate-50 text-slate-700 ring-slate-200',
-  searching: 'bg-blue-50 text-blue-700 ring-blue-200',
-  candidate_review: 'bg-amber-50 text-amber-800 ring-amber-200',
-  selected: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-  ignored: 'bg-zinc-100 text-zinc-600 ring-zinc-200',
-}
-
-function won(value: number | null) {
-  return value == null || value === 0 ? '-' : `${value.toLocaleString('ko-KR')}원`
-}
-
-function dateText(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '-'
-  return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`
-}
-
-function compactUrl(value: string | null) {
-  if (!value) return '-'
-  try {
-    const url = new URL(value)
-    return url.hostname.replace(/^www\./, '')
-  } catch {
-    return 'URL'
-  }
-}
-
-function imageBackground(url: string | null): CSSProperties | undefined {
-  return url ? { backgroundImage: `url(${JSON.stringify(url)})` } : undefined
-}
-
-function StatusBadge({ status, labels }: { status: string; labels: Record<string, string> }) {
-  return (
-    <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1', STATUS_TONE[status] ?? STATUS_TONE.captured)}>
-      {labels[status] ?? status}
-    </span>
-  )
-}
-
-export function SourcingBoard({ items, statusLabels }: Props) {
+export function SourcingBoard({ items, operators, viewer, exchangeRate }: Props) {
   const router = useRouter()
   const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null)
-  const [statusFilter, setStatusFilter] = useState('all')
   const [query, setQuery] = useState('')
-  const [extensionConnected, setExtensionConnected] = useState(false)
-  const [supports1688Search, setSupports1688Search] = useState(false)
-  const [searching1688Id, setSearching1688Id] = useState<string | null>(null)
-  const [promoteOpen, setPromoteOpen] = useState(false)
-  const [isPromoting, startPromoting] = useTransition()
-  const processedCaptureIds = useRef<Set<string>>(new Set())
-  const searchTimeoutRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
-
-  useEffect(() => {
-    function clearSearchTimeout() {
-      if (!searchTimeoutRef.current) return
-      window.clearTimeout(searchTimeoutRef.current)
-      searchTimeoutRef.current = null
-    }
-
-    async function saveCapture(capture: CoupangCapturePayload) {
-      const captureId = capture.captureId || `${capture.sourceUrl || ''}|${capture.sourceTitle}`
-      if (!capture.sourceTitle || processedCaptureIds.current.has(captureId)) return
-      processedCaptureIds.current.add(captureId)
-
-      try {
-        const response = await fetch('/api/operations/sourcing/capture', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            sourceTitle: capture.sourceTitle,
-            sourceUrl: capture.sourceUrl || null,
-            imageUrl: capture.imageUrl || null,
-            category: capture.category || null,
-            sourceRank: capture.sourceRank ?? null,
-            sourcePrice: capture.sourcePrice ?? null,
-            keyword: capture.keyword || null,
-            memo: capture.memo || null,
-          }),
-        })
-        const result = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(result.error || '쿠팡 상품을 저장하지 못했습니다.')
-
-        window.postMessage({
-          source: PAGE_SOURCE,
-          type: 'FUNTASTIC_COUPANG_CAPTURE_SAVED',
-          captureId,
-          itemId: result.id,
-        }, window.location.origin)
-        toast.success(result.updated ? '쿠팡 소싱 상품을 갱신했습니다.' : '쿠팡 소싱 상품을 저장했습니다.')
-        router.refresh()
-      } catch (error) {
-        processedCaptureIds.current.delete(captureId)
-        toast.error(error instanceof Error ? error.message : '쿠팡 상품 저장에 실패했습니다.')
-      }
-    }
-
-    async function save1688Candidates(message: {
-      searchId?: string
-      itemId?: string
-      candidates?: SourcingSearchCandidatePayload[]
-    }) {
-      if (!message.itemId || !Array.isArray(message.candidates) || message.candidates.length === 0) return
-      try {
-        const response = await fetch('/api/operations/sourcing/candidates', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            itemId: message.itemId,
-            candidates: message.candidates,
-          }),
-        })
-        const result = await response.json().catch(() => ({}))
-        if (!response.ok) throw new Error(result.error || '1688 후보를 저장하지 못했습니다.')
-
-        window.postMessage({
-          source: PAGE_SOURCE,
-          type: 'FUNTASTIC_1688_SOURCING_CANDIDATES_SAVED',
-          searchId: message.searchId,
-          itemId: message.itemId,
-          saved: result.saved || 0,
-        }, window.location.origin)
-        setSearching1688Id((current) => current === message.itemId ? null : current)
-        toast.success(`1688 후보 ${result.saved || 0}개를 저장했습니다.`)
-        router.refresh()
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : '1688 후보 저장에 실패했습니다.')
-      }
-    }
-
-    function handleMessage(event: MessageEvent) {
-      if (event.source !== window || event.origin !== window.location.origin) return
-      const message = event.data
-      if (!message || message.source !== EXTENSION_SOURCE || typeof message.type !== 'string') return
-
-      if (message.type === 'FUNTASTIC_COUPANG_PONG') {
-        setExtensionConnected(true)
-        setSupports1688Search(Boolean(message.features?.image1688Search))
-        if (Number(message.pendingCount) > 0) {
-          window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_GET_PENDING' }, window.location.origin)
-        }
-        return
-      }
-
-      if (message.type === 'FUNTASTIC_COUPANG_CAPTURED' && message.capture) {
-        setExtensionConnected(true)
-        void saveCapture(message.capture)
-        return
-      }
-
-      if (message.type === 'FUNTASTIC_COUPANG_PENDING' && Array.isArray(message.captures)) {
-        setExtensionConnected(true)
-        for (const capture of message.captures) void saveCapture(capture)
-        return
-      }
-
-      if (message.type === 'FUNTASTIC_COUPANG_ERROR') {
-        toast.error(message.message || '쿠팡 소싱 확장프로그램 오류가 발생했습니다.')
-        return
-      }
-
-      if (message.type === 'FUNTASTIC_1688_SOURCING_ACK') {
-        clearSearchTimeout()
-        setExtensionConnected(true)
-        toast.success('1688 이미지검색을 열었습니다.')
-        return
-      }
-
-      if (message.type === 'FUNTASTIC_1688_SOURCING_CANDIDATES') {
-        setExtensionConnected(true)
-        void save1688Candidates(message)
-        return
-      }
-
-      if (message.type === 'FUNTASTIC_1688_SOURCING_ERROR') {
-        clearSearchTimeout()
-        setSearching1688Id(null)
-        toast.error(message.message || '1688 이미지검색을 시작하지 못했습니다.')
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_PING' }, window.location.origin)
-    window.setTimeout(() => {
-      window.postMessage({ source: PAGE_SOURCE, type: 'FUNTASTIC_COUPANG_GET_PENDING' }, window.location.origin)
-    }, 500)
-
-    return () => {
-      clearSearchTimeout()
-      window.removeEventListener('message', handleMessage)
-    }
-  }, [router])
-
+  const selected = items.find((item) => item.id === selectedId) ?? items[0] ?? null
   const filteredItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    return items.filter((item) => {
-      if (statusFilter !== 'all' && item.status !== statusFilter) return false
-      if (!normalizedQuery) return true
-      return [
-        item.sourceTitle,
-        item.keyword,
-        item.category,
-        item.memo,
-        item.selected1688Url,
-      ].some((value) => String(value ?? '').toLowerCase().includes(normalizedQuery))
-    })
-  }, [items, query, statusFilter])
+    const keyword = query.trim().toLocaleLowerCase('ko')
+    if (!keyword) return items
+    return items.filter((item) => [item.productName, item.productOption, item.ownerName]
+      .some((value) => value?.toLocaleLowerCase('ko').includes(keyword)))
+  }, [items, query])
 
-  const selected = items.find((item) => item.id === selectedId) ?? filteredItems[0] ?? items[0] ?? null
-  const selectedCandidate = selected?.candidates.find((candidate) => candidate.isSelected) ?? null
-  const stats = useMemo(() => ({
-    total: items.length,
-    review: items.filter((item) => item.status === 'candidate_review').length,
-    selected: items.filter((item) => item.status === 'selected').length,
-    missing: items.filter((item) => item.candidates.length === 0).length,
-  }), [items])
-
-  async function createItem(formData: FormData) {
-    await createSourcingItemAction(formData)
-  }
-
-  async function addCandidate(formData: FormData) {
-    await addSourcingCandidateAction(formData)
-  }
-
-  function promoteToItem(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    startPromoting(async () => {
-      const result = await promoteSourcingItemToPurchasingItemAction(form)
-      if ('error' in result) {
-        toast.error(result.error)
-        return
-      }
-      toast.success(result.existing ? '이미 연결된 품목으로 이동합니다.' : '품목을 생성했습니다.')
-      router.push(`/costs?search=${encodeURIComponent(result.sku)}`)
-    })
-  }
-
-  function start1688ImageSearch(item: SourcingItemRow) {
-    if (!item.imageUrl) {
-      toast.error('이미지 URL이 있어야 1688 이미지검색을 시작할 수 있습니다.')
-      return
-    }
-    if (!extensionConnected) {
-      toast.error('쿠팡 소싱 확장프로그램을 새로고침한 뒤 다시 시도해 주세요.')
-      return
-    }
-    if (!supports1688Search) {
-      toast.error('확장프로그램을 최신 버전으로 새로고침해야 1688 이미지검색을 쓸 수 있습니다.')
-      return
-    }
-
-    const searchId = `1688:${item.id}:${Date.now()}`
-    setSearching1688Id(item.id)
-    if (searchTimeoutRef.current) window.clearTimeout(searchTimeoutRef.current)
-    searchTimeoutRef.current = window.setTimeout(() => {
-      setSearching1688Id((current) => current === item.id ? null : current)
-      toast.error('1688 이미지검색이 시작되지 않았습니다. 확장프로그램을 새로고침해 주세요.')
-    }, 8_000)
-    window.postMessage({
-      source: PAGE_SOURCE,
-      type: 'FUNTASTIC_1688_SOURCING_START',
-      searchId,
-      item: {
-        id: item.id,
-        sourceTitle: item.sourceTitle,
-        sourceUrl: item.sourceUrl,
-        imageUrl: item.imageUrl,
-        keyword: item.keyword,
-      },
-    }, window.location.origin)
-  }
+  const draftCount = items.filter((item) => item.status !== 'passed').length
+  const passedCount = items.filter((item) => item.status === 'passed').length
 
   return (
     <div className="space-y-4">
-      <section className="overflow-hidden rounded-md border bg-background">
-        <div className="grid gap-3 border-b px-4 py-3 lg:grid-cols-[minmax(0,1fr)_520px] lg:items-end">
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <Metric label="전체" value={stats.total} />
-            <Metric label="후보 검토" value={stats.review} />
-            <Metric label="소싱 확정" value={stats.selected} />
-            <Metric label="후보 없음" value={stats.missing} />
+      <section className="grid gap-3 sm:grid-cols-3">
+        <Metric label="전체 소싱" value={items.length} />
+        <Metric label="검토 중" value={draftCount} />
+        <Metric label="1차 통과" value={passedCount} />
+      </section>
+
+      <section className="rounded-lg border bg-card">
+        <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">수동 소싱 상품 등록</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              자동 수집은 중지되어 있습니다. 1차 통과를 누르면 신상품 진행관리의 첫 단계에 바로 등록됩니다.
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-            <div className="relative min-w-60 flex-1 lg:max-w-72">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="상품명, 키워드, URL"
-                className="pl-8"
-              />
-            </div>
-            <select
-              value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
-              className="h-8 rounded-lg border bg-background px-2.5 text-sm"
-              aria-label="상태 필터"
-            >
-              <option value="all">전체 상태</option>
-              {Object.entries(statusLabels).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
-              ))}
-            </select>
-            <span className={cn(
-              'inline-flex h-8 items-center rounded-full px-3 text-xs font-medium ring-1',
-              extensionConnected
-                ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                : 'bg-muted text-muted-foreground ring-border',
-            )}>
-              쿠팡 확장 {extensionConnected ? '연결됨' : '대기'}
-            </span>
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-right">
+            <p className="text-xs text-muted-foreground">CNY 기준환율</p>
+            <p className="text-sm font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</p>
+            <p className="text-[11px] text-muted-foreground">
+              {exchangeRate.date ? exchangeRate.date + ' 기준' : '조회 실패 시 기본값'}
+            </p>
+          </div>
+        </div>
+        <CreateSourcingForm
+          operators={operators}
+          viewer={viewer}
+          exchangeRate={exchangeRate.rate}
+          onCreated={(id) => {
+            setSelectedId(id)
+            router.refresh()
+          }}
+        />
+      </section>
+
+      <section className="overflow-hidden rounded-lg border bg-card">
+        <div className="flex flex-col gap-3 border-b p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold">소싱 목록</h2>
+            <p className="mt-1 text-xs text-muted-foreground">담당 등록자별 데이터는 서로 덮어쓸 수 없습니다.</p>
+          </div>
+          <div className="relative w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-2 h-4 w-4 text-muted-foreground" />
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-8 pl-8" placeholder="상품명 또는 등록자 검색" />
           </div>
         </div>
 
-        <form action={createItem} className="grid gap-3 border-b bg-muted/20 px-4 py-3 xl:grid-cols-[1.2fr_1fr_1fr_90px_110px_120px_auto]">
-          <Input required name="sourceTitle" placeholder="쿠팡 상품명" />
-          <Input name="sourceUrl" placeholder="쿠팡 URL" />
-          <Input name="imageUrl" placeholder="이미지 URL" />
-          <Input name="sourceRank" inputMode="numeric" placeholder="랭킹" />
-          <Input name="sourcePrice" inputMode="numeric" placeholder="가격" />
-          <Input name="keyword" placeholder="키워드" />
-          <Button type="submit" className="h-8">
-            <Plus className="h-4 w-4" />
-            추가
-          </Button>
-          <Input name="category" placeholder="카테고리" className="xl:col-span-2" />
-          <Input name="memo" placeholder="메모" className="xl:col-span-5" />
-        </form>
-
-        <div className="grid min-h-[560px] xl:grid-cols-[minmax(660px,1fr)_520px]">
+        <div className="grid min-h-[600px] xl:grid-cols-[minmax(620px,1fr)_560px]">
           <div className="min-w-0 overflow-x-auto">
-            <div className="min-w-[860px]">
-              <div className="grid grid-cols-[52px_minmax(260px,1fr)_90px_90px_90px_110px_100px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
-                <span>No.</span>
-                <span>쿠팡 상품</span>
-                <span>랭킹</span>
-                <span>가격</span>
-                <span>후보</span>
+            <div className="min-w-[760px]">
+              <div className="grid grid-cols-[64px_minmax(190px,1fr)_120px_110px_110px_100px] gap-3 border-b bg-muted/30 px-4 py-2 text-xs font-medium text-muted-foreground">
+                <span>사진</span>
+                <span>상품</span>
+                <span>중국 원가</span>
+                <span>한국원화</span>
+                <span>등록자</span>
                 <span>상태</span>
-                <span>기록일</span>
               </div>
-              {filteredItems.map((item, index) => {
-                const active = selected?.id === item.id
+              {filteredItems.map((item) => {
+                const active = item.id === selected?.id
+                const imageSrc = imageSource(item)
                 return (
                   <button
                     key={item.id}
                     type="button"
                     onClick={() => setSelectedId(item.id)}
-                    className={cn(
-                      'grid w-full grid-cols-[52px_minmax(260px,1fr)_90px_90px_90px_110px_100px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/40',
-                      active && 'bg-muted/60',
-                    )}
+                    className={'grid w-full grid-cols-[64px_minmax(190px,1fr)_120px_110px_110px_100px] items-center gap-3 border-b px-4 py-3 text-left text-sm hover:bg-muted/40 ' + (active ? 'bg-muted/60' : '')}
                   >
-                    <span className="text-xs text-muted-foreground">{index + 1}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate font-semibold">{item.sourceTitle}</span>
-                      <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-                        <span className="truncate">{item.keyword || item.category || '-'}</span>
-                        {item.sourceUrl ? <ExternalLink className="h-3.5 w-3.5 shrink-0" /> : null}
-                      </span>
+                    <span className="grid size-12 place-items-center overflow-hidden rounded border bg-muted/30">
+                      {imageSrc ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={imageSrc} alt="" className="h-full w-full object-cover" />
+                      ) : <ImageIcon className="h-5 w-5 text-muted-foreground" />}
                     </span>
-                    <span>{item.sourceRank ? `${item.sourceRank}위` : '-'}</span>
-                    <span>{won(item.sourcePrice)}</span>
-                    <span>{item.candidates.length}개</span>
-                    <StatusBadge status={item.status} labels={statusLabels} />
-                    <span className="text-xs text-muted-foreground">{dateText(item.createdAt)}</span>
+                    <span className="min-w-0">
+                      <span className="block truncate font-semibold">{item.productName}</span>
+                      <span className="mt-1 block truncate text-xs text-muted-foreground">{item.productOption || '옵션 없음'}</span>
+                    </span>
+                    <span>¥ {money(item.chinaUnitPriceCny)}<span className="block text-xs text-muted-foreground">배송 ¥ {money(item.unitShippingCny)}</span></span>
+                    <span>{won(item.calculatedCostKrw)}</span>
+                    <span className="truncate">{item.ownerName || '미지정'}</span>
+                    <StatusBadge status={item.status} />
                   </button>
                 )
               })}
-              {!filteredItems.length ? (
-                <div className="px-4 py-16 text-center text-sm text-muted-foreground">표시할 소싱 상품이 없습니다.</div>
-              ) : null}
+              {filteredItems.length === 0 && (
+                <div className="px-4 py-20 text-center text-sm text-muted-foreground">표시할 소싱 상품이 없습니다.</div>
+              )}
             </div>
           </div>
 
-          <aside className="border-t bg-background xl:border-l xl:border-t-0">
+          <aside className="border-t xl:border-l xl:border-t-0">
             {selected ? (
-              <div className="flex h-full flex-col">
-                <div className="border-b p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h2 className="truncate text-base font-semibold">{selected.sourceTitle}</h2>
-                      <p className="mt-1 truncate text-xs text-muted-foreground">
-                        {selected.keyword || selected.category || '쿠팡'} · {won(selected.sourcePrice)}
-                      </p>
-                    </div>
-                    <StatusBadge status={selected.status} labels={statusLabels} />
-                  </div>
-                  <div className="mt-3 grid grid-cols-[96px_minmax(0,1fr)] gap-3">
-                    <div className="grid aspect-square place-items-center overflow-hidden rounded-md border bg-muted/30">
-                      {selected.imageUrl ? (
-                        <div className="h-full w-full bg-cover bg-center" style={imageBackground(selected.imageUrl)} />
-                      ) : (
-                        <ImageIcon className="h-7 w-7 text-muted-foreground" />
-                      )}
-                    </div>
-                    <div className="min-w-0 space-y-2 text-sm">
-                      <LinkRow label="쿠팡" href={selected.sourceUrl} />
-                      <LinkRow label="1688" href={selected.selected1688Url} />
-                      {selected.memo ? <p className="line-clamp-2 text-xs text-muted-foreground">{selected.memo}</p> : null}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 w-full justify-center"
-                        onClick={() => start1688ImageSearch(selected)}
-                        disabled={!selected.imageUrl || searching1688Id === selected.id}
-                      >
-                        <Search className="h-4 w-4" />
-                        {searching1688Id === selected.id ? '1688 검색중' : '1688 이미지검색'}
-                      </Button>
-                      <Button
-                        type="button"
-                        className="h-8 w-full justify-center"
-                        onClick={() => setPromoteOpen(true)}
-                        disabled={!selected.selected1688Url}
-                        title={selected.selected1688Url ? '확정한 1688 정보를 품목으로 생성합니다.' : '1688 후보를 확정한 뒤 품목으로 등록할 수 있습니다.'}
-                      >
-                        <PackagePlus className="h-4 w-4" />
-                        품목으로 등록
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3 border-b p-4">
-                  <form action={updateSourcingItemStatusAction} className="flex items-end gap-2">
-                    <input type="hidden" name="itemId" value={selected.id} />
-                    <label className="min-w-0 flex-1 space-y-1">
-                      <span className="text-xs font-medium text-muted-foreground">상태</span>
-                      <select name="status" defaultValue={selected.status} className="h-8 w-full rounded-lg border bg-background px-2.5 text-sm">
-                        {Object.entries(statusLabels).map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <Button type="submit" variant="outline">변경</Button>
-                  </form>
-
-                  <form action={addCandidate} className="grid gap-2">
-                    <input type="hidden" name="itemId" value={selected.id} />
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_110px]">
-                      <Input required name="candidateUrl" placeholder="1688 후보 URL" />
-                      <Input name="priceText" placeholder="가격" />
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px]">
-                      <Input name="title" placeholder="1688 상품명" />
-                      <Input name="supplierName" placeholder="공급처" />
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_90px_auto]">
-                      <Input name="imageUrl" placeholder="후보 이미지 URL" />
-                      <Input name="matchScore" inputMode="numeric" placeholder="점수" />
-                      <Button type="submit">
-                        <Plus className="h-4 w-4" />
-                        후보 추가
-                      </Button>
-                    </div>
-                    <Input name="memo" placeholder="후보 메모" />
-                  </form>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto p-4">
-                  <h3 className="text-sm font-semibold">1688 후보 {selected.candidates.length}개</h3>
-                  <div className="mt-3 space-y-2">
-                    {selected.candidates.map((candidate) => (
-                      <div key={candidate.id} className={cn('rounded-md border p-3', candidate.isSelected && 'border-emerald-300 bg-emerald-50/60')}>
-                        <div className="flex items-start gap-3">
-                          <div className="grid size-16 shrink-0 place-items-center overflow-hidden rounded border bg-background">
-                            {candidate.imageUrl ? (
-                              <div className="h-full w-full bg-cover bg-center" style={imageBackground(candidate.imageUrl)} />
-                            ) : (
-                              <ImageIcon className="h-5 w-5 text-muted-foreground" />
-                            )}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <p className="truncate text-sm font-semibold">{candidate.title || compactUrl(candidate.candidateUrl)}</p>
-                                <p className="mt-1 truncate text-xs text-muted-foreground">
-                                  {candidate.supplierName || '1688'} · {candidate.priceText || '-'}
-                                </p>
-                              </div>
-                              {candidate.isSelected ? (
-                                <span className="inline-flex h-6 items-center gap-1 rounded-full bg-emerald-100 px-2 text-xs font-medium text-emerald-700">
-                                  <Star className="h-3.5 w-3.5 fill-emerald-600" />
-                                  확정
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
-                              <a
-                                href={candidate.candidateUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-medium hover:bg-muted"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                                열기
-                              </a>
-                              {!candidate.isSelected ? (
-                                <form action={selectSourcingCandidateAction}>
-                                  <input type="hidden" name="itemId" value={selected.id} />
-                                  <input type="hidden" name="candidateId" value={candidate.id} />
-                                  <Button type="submit" size="sm">
-                                    <Check className="h-3.5 w-3.5" />
-                                    확정
-                                  </Button>
-                                </form>
-                              ) : null}
-                              {candidate.matchScore != null ? <span className="text-xs text-muted-foreground">점수 {candidate.matchScore}</span> : null}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                    {!selected.candidates.length ? (
-                      <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
-                        1688 후보가 없습니다.
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                {selectedCandidate ? (
-                  <div className="border-t bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-                    확정 URL: <span className="font-medium text-foreground">{compactUrl(selectedCandidate.candidateUrl)}</span>
-                  </div>
-                ) : null}
-              </div>
+              <SourcingDetail
+                key={selected.id + ':' + selected.updatedAt}
+                item={selected}
+                operators={operators}
+                viewer={viewer}
+                exchangeRate={exchangeRate.rate}
+                onChanged={() => router.refresh()}
+              />
             ) : (
-              <div className="grid h-full place-items-center p-8 text-sm text-muted-foreground">소싱 상품을 선택해 주세요.</div>
+              <div className="grid h-full min-h-[320px] place-items-center p-8 text-sm text-muted-foreground">소싱 상품을 선택해 주세요.</div>
             )}
           </aside>
         </div>
       </section>
-
-      {promoteOpen && selected ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4" role="dialog" aria-modal="true" aria-labelledby="promote-item-title">
-          <form onSubmit={promoteToItem} className="w-full max-w-lg rounded-md border bg-background shadow-xl">
-            <input type="hidden" name="itemId" value={selected.id} />
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <div>
-                <h2 id="promote-item-title" className="text-base font-semibold">품목으로 등록</h2>
-                <p className="mt-1 text-xs text-muted-foreground">확정한 1688 URL과 대표 이미지를 품목에 연결합니다.</p>
-              </div>
-              <Button type="button" variant="ghost" size="icon-sm" onClick={() => setPromoteOpen(false)} disabled={isPromoting} aria-label="닫기">
-                <X />
-              </Button>
-            </div>
-            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">품목코드</span>
-                <Input name="sku" required maxLength={100} autoFocus placeholder="예: 112345-0001" />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">규격/옵션</span>
-                <Input name="optionName" maxLength={200} placeholder="선택 사항" />
-              </label>
-              <label className="space-y-1.5 sm:col-span-2">
-                <span className="text-xs font-medium text-muted-foreground">품목명</span>
-                <Input name="name" required maxLength={500} defaultValue={selected.sourceTitle} />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">창고 위치</span>
-                <Input name="warehouseLocation" maxLength={200} placeholder="예: 1창고 A-01" />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">영문명</span>
-                <Input name="englishName" maxLength={500} />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">HS CODE</span>
-                <Input name="hsCode" maxLength={100} />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">재질</span>
-                <Input name="material" maxLength={300} />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">제품 크기</span>
-                <Input name="size" maxLength={300} />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">제조사</span>
-                <Input name="manufacturer" maxLength={300} />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">제조국</span>
-                <Input name="country" maxLength={300} />
-              </label>
-              <label className="space-y-1.5">
-                <span className="text-xs font-medium text-muted-foreground">works 신규 원가</span>
-                <Input name="costPrice" inputMode="numeric" placeholder="원 단위" />
-              </label>
-              <label className="space-y-1.5 sm:col-span-2 lg:col-span-3">
-                <span className="text-xs font-medium text-muted-foreground">구매 URL</span>
-                <Input name="purchaseUrl" type="url" defaultValue={selected.selected1688Url ?? ''} />
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 border-t px-4 py-3">
-              <Button type="button" variant="outline" onClick={() => setPromoteOpen(false)} disabled={isPromoting}>취소</Button>
-              <Button type="submit" disabled={isPromoting}>
-                <PackagePlus />
-                {isPromoting ? '등록 중...' : '품목 생성'}
-              </Button>
-            </div>
-          </form>
-        </div>
-      ) : null}
     </div>
   )
+}
+
+function CreateSourcingForm({ operators, viewer, exchangeRate, onCreated }: {
+  operators: NewProductOperator[]
+  viewer: NewProductViewer
+  exchangeRate: number
+  onCreated: (id: string) => void
+}) {
+  const [values, setValues] = useState<SourcingValues>(() => emptyValues(exchangeRate, viewer.operatorId))
+  const [photo, setPhoto] = useState<File | null>(null)
+  const [pending, startTransition] = useTransition()
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    startTransition(async () => {
+      const result = await createManualSourcingAction(values)
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      if (photo) {
+        const uploaded = await uploadPhoto(result.id, photo)
+        if (!uploaded.success) {
+          toast.error(uploaded.error)
+          return
+        }
+      }
+      toast.success('소싱 상품을 등록했습니다.')
+      setValues(emptyValues(exchangeRate, viewer.operatorId))
+      setPhoto(null)
+      onCreated(result.id)
+    })
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3 p-4">
+      <SourcingFields values={values} onChange={setValues} operators={operators} viewer={viewer} />
+      <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
+        <PhotoInput file={photo} onChange={setPhoto} />
+        <Button type="submit" disabled={pending}>
+          {pending ? <Loader2 className="animate-spin" /> : <Plus />}
+          {pending ? '등록 중...' : '수동 소싱 등록'}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+function SourcingDetail({ item, operators, viewer, exchangeRate, onChanged }: {
+  item: ManualSourcingItem
+  operators: NewProductOperator[]
+  viewer: NewProductViewer
+  exchangeRate: number
+  onChanged: () => void
+}) {
+  const [values, setValues] = useState<SourcingValues>(() => itemValues(item, exchangeRate))
+  const [photo, setPhoto] = useState<File | null>(null)
+  const [pending, startTransition] = useTransition()
+
+  function save() {
+    startTransition(async () => {
+      const result = await updateManualSourcingAction({ itemId: item.id, values })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      if (photo) {
+        const uploaded = await uploadPhoto(item.id, photo)
+        if (!uploaded.success) {
+          toast.error(uploaded.error)
+          return
+        }
+      }
+      toast.success('소싱 정보를 저장했습니다.')
+      onChanged()
+    })
+  }
+
+  function pass() {
+    startTransition(async () => {
+      const saved = await updateManualSourcingAction({ itemId: item.id, values })
+      if (!saved.success) {
+        toast.error(saved.error)
+        return
+      }
+      if (photo) {
+        const uploaded = await uploadPhoto(item.id, photo)
+        if (!uploaded.success) {
+          toast.error(uploaded.error)
+          return
+        }
+      }
+      const result = await passManualSourcingAction(item.id)
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(result.existing ? '이미 신상품 진행관리에 등록된 상품입니다.' : '신상품 진행관리 1단계에 등록했습니다.')
+      onChanged()
+    })
+  }
+
+  const imageSrc = imageSource(item)
+
+  return (
+    <div className="space-y-4 p-4">
+      <div className="flex items-start justify-between gap-3 border-b pb-3">
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold">{item.productName}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">최근 수정 {dateText(item.updatedAt)}</p>
+        </div>
+        <StatusBadge status={item.status} />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-[100px_minmax(0,1fr)]">
+        <div className="grid aspect-square place-items-center overflow-hidden rounded-lg border bg-muted/30">
+          {imageSrc ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageSrc} alt={item.productName} className="h-full w-full object-cover" />
+          ) : <ImageIcon className="h-7 w-7 text-muted-foreground" />}
+        </div>
+        <div className="space-y-2">
+          <PhotoInput file={photo} onChange={setPhoto} compact />
+          {item.passedNewProductId ? (
+            <p className="flex items-center gap-1 text-xs font-medium text-emerald-700"><CheckCircle2 className="h-4 w-4" />신상품 진행관리 1단계에 등록됨</p>
+          ) : (
+            <Button type="button" className="w-full" onClick={pass} disabled={pending}>
+              {pending ? <Loader2 className="animate-spin" /> : <PackagePlus />}
+              1차 통과 후 신상품 등록
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <SourcingFields values={values} onChange={setValues} operators={operators} viewer={viewer} />
+
+      <div className="flex justify-end border-t pt-3">
+        <Button type="button" onClick={save} disabled={pending}>
+          {pending ? <Loader2 className="animate-spin" /> : <Save />}
+          {pending ? '저장 중...' : '변경사항 저장'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function SourcingFields({ values, onChange, operators, viewer }: {
+  values: SourcingValues
+  onChange: (values: SourcingValues) => void
+  operators: NewProductOperator[]
+  viewer: NewProductViewer
+}) {
+  const calculatedCostKrw = calculateCnyCostKrw({
+    chinaUnitPriceCny: numberValue(values.chinaUnitPriceCny),
+    unitShippingCny: numberValue(values.unitShippingCny),
+    exchangeRateKrw: numberValue(values.exchangeRateKrw),
+  })
+
+  function set<K extends keyof SourcingValues>(key: K, value: SourcingValues[K]) {
+    onChange({ ...values, [key]: value })
+  }
+
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      <Field label="상품명" required><Input value={values.productName} onChange={(event) => set('productName', event.target.value)} /></Field>
+      <Field label="상품 옵션"><Input value={values.productOption} onChange={(event) => set('productOption', event.target.value)} /></Field>
+      <Field label="중국 위안화 (¥)"><Input value={values.chinaUnitPriceCny} onChange={(event) => set('chinaUnitPriceCny', event.target.value)} inputMode="decimal" placeholder="개당 상품가" /></Field>
+      <Field label="개당 배송비 (¥)"><Input value={values.unitShippingCny} onChange={(event) => set('unitShippingCny', event.target.value)} inputMode="decimal" placeholder="개당 중국 배송비" /></Field>
+      <Field label="적용 환율 (원/¥)"><Input value={values.exchangeRateKrw} onChange={(event) => set('exchangeRateKrw', event.target.value)} inputMode="decimal" /></Field>
+      <Field label="한국원화 (자동 계산)">
+        <div className="flex h-9 items-center rounded-md border bg-muted/30 px-3 text-sm font-semibold">{won(calculatedCostKrw)}</div>
+      </Field>
+      <Field label="중국 구매 링크"><LinkInput value={values.chinaPurchaseUrl} onChange={(value) => set('chinaPurchaseUrl', value)} /></Field>
+      <Field label="국내판매 링크"><LinkInput value={values.domesticSaleUrl} onChange={(value) => set('domesticSaleUrl', value)} /></Field>
+      <Field label="국내판매가 (₩)"><Input value={values.domesticSalePrice} onChange={(event) => set('domesticSalePrice', event.target.value)} inputMode="numeric" /></Field>
+      <Field label="상세페이지 URL"><LinkInput value={values.detailPageUrl} onChange={(value) => set('detailPageUrl', value)} /></Field>
+      {viewer.isMain ? (
+        <Field label="담당 등록자">
+          <select value={values.ownerOperatorId ?? ''} onChange={(event) => set('ownerOperatorId', event.target.value || null)} className="h-9 w-full rounded-md border bg-background px-3 text-sm">
+            <option value="">등록자 선택</option>
+            {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.displayName}</option>)}
+          </select>
+        </Field>
+      ) : null}
+      <Field label="비고 1"><textarea value={values.memo1} onChange={(event) => set('memo1', event.target.value)} rows={2} className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm" /></Field>
+      <Field label="비고 2"><textarea value={values.memo2} onChange={(event) => set('memo2', event.target.value)} rows={2} className="w-full resize-y rounded-md border bg-background px-3 py-2 text-sm" /></Field>
+    </div>
+  )
+}
+
+function PhotoInput({ file, onChange, compact = false }: { file: File | null; onChange: (file: File | null) => void; compact?: boolean }) {
+  const ref = useRef<HTMLInputElement>(null)
+  return (
+    <div className={compact ? '' : 'min-w-0'}>
+      <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" onChange={(event) => onChange(event.target.files?.[0] ?? null)} />
+      <Button type="button" variant="outline" className={compact ? 'w-full' : ''} onClick={() => ref.current?.click()}>
+        <UploadCloud />
+        {file ? file.name : '사진 등록'}
+      </Button>
+      {!compact && <p className="mt-1 text-xs text-muted-foreground">대표 사진 1장, 최대 4MB</p>}
+    </div>
+  )
+}
+
+function LinkInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="flex gap-1">
+      <Input type="url" value={value} onChange={(event) => onChange(event.target.value)} placeholder="https://" />
+      {/^https?:\/\//.test(value) && (
+        <a href={value} target="_blank" rel="noreferrer">
+          <Button type="button" size="icon-sm" variant="outline" aria-label="링크 열기"><ExternalLink /></Button>
+        </a>
+      )}
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const label = status === 'passed' ? '1차 통과' : status === 'hold' ? '보류' : '작성 중'
+  return <span className={'inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1 ' + (statusClass[status] ?? statusClass.draft)}>{label}</span>
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border bg-background px-3 py-2">
+    <div className="rounded-lg border bg-card p-4">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value.toLocaleString('ko-KR')}</p>
+      <p className="mt-1 text-2xl font-semibold">{value.toLocaleString('ko-KR')}</p>
     </div>
   )
 }
 
-function LinkRow({ label, href }: { label: string; href: string | null }) {
+function Field({ label, required, children }: { label: string; required?: boolean; children: ReactNode }) {
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <span className="w-10 shrink-0 text-xs font-medium text-muted-foreground">{label}</span>
-      {href ? (
-        <a
-          href={href}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex min-w-0 items-center gap-1 text-xs font-medium hover:underline"
-        >
-          <Link2 className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{compactUrl(href)}</span>
-        </a>
-      ) : (
-        <span className="text-xs text-muted-foreground">-</span>
-      )}
-    </div>
+    <label className="block space-y-1.5">
+      <span className="text-xs font-medium text-muted-foreground">{label}{required ? <span className="ml-1 text-red-500">*</span> : null}</span>
+      {children}
+    </label>
   )
+}
+
+function emptyValues(exchangeRate: number, ownerOperatorId: string | null): SourcingValues {
+  return {
+    productName: '',
+    productOption: '',
+    chinaPurchaseUrl: '',
+    chinaUnitPriceCny: '',
+    unitShippingCny: '',
+    exchangeRateKrw: String(exchangeRate),
+    domesticSaleUrl: '',
+    domesticSalePrice: '',
+    detailPageUrl: '',
+    memo1: '',
+    memo2: '',
+    ownerOperatorId,
+  }
+}
+
+function itemValues(item: ManualSourcingItem, exchangeRate: number): SourcingValues {
+  return {
+    productName: item.productName,
+    productOption: item.productOption ?? '',
+    chinaPurchaseUrl: item.chinaPurchaseUrl ?? '',
+    chinaUnitPriceCny: textNumber(item.chinaUnitPriceCny),
+    unitShippingCny: textNumber(item.unitShippingCny),
+    exchangeRateKrw: textNumber(item.exchangeRateKrw) || String(exchangeRate),
+    domesticSaleUrl: item.domesticSaleUrl ?? '',
+    domesticSalePrice: textNumber(item.domesticSalePrice),
+    detailPageUrl: item.detailPageUrl ?? '',
+    memo1: item.memo1 ?? '',
+    memo2: item.memo2 ?? '',
+    ownerOperatorId: item.ownerOperatorId,
+  }
+}
+
+async function uploadPhoto(itemId: string, file: File) {
+  const formData = new FormData()
+  formData.set('itemId', itemId)
+  formData.set('file', file)
+  const response = await fetch('/api/operations/sourcing/images', { method: 'POST', body: formData })
+  const result = await response.json().catch(() => ({}))
+  return response.ok ? { success: true as const } : { success: false as const, error: result.error || '사진 등록에 실패했습니다.' }
+}
+
+function imageSource(item: ManualSourcingItem) {
+  return item.hasImageFile ? '/api/operations/sourcing/images/' + item.id : item.legacyImageUrl
+}
+
+function numberValue(value: string) {
+  const parsed = Number(value.replace(/,/g, '').trim())
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function textNumber(value: number | null) {
+  return value == null ? '' : String(value)
+}
+
+function money(value: number | null) {
+  return value == null ? '-' : value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
+}
+
+function won(value: number | null) {
+  return value == null ? '-' : '₩ ' + value.toLocaleString('ko-KR')
+}
+
+function dateText(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.valueOf()) ? '-' : new Intl.DateTimeFormat('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
 }

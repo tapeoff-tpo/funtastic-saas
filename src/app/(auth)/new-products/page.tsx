@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
-import { getWorkspaceUserId, listAdmins } from '@/lib/admin-accounts/queries'
+import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { getNewProductPageSetup } from '@/lib/new-products/workflow'
@@ -18,10 +18,9 @@ export default async function NewProductsPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [setup, exchangeRate, accounts] = await Promise.all([
+  const [setup, exchangeRate] = await Promise.all([
     getNewProductPageSetup({ userId: workspaceUserId, actorUserId: user.id }),
     getLatestCnyKrwReferenceRate(),
-    listAdmins(),
   ])
 
   return (
@@ -38,15 +37,8 @@ export default async function NewProductsPage() {
       <NewProductBoard
         initialStages={setup.stages}
         initialLayout={setup.editorLayout}
-        operators={setup.operators.filter((operator) => operator.isActive)}
-        viewer={setup.viewer}
+        canManageSettings={setup.viewer.isMain}
         exchangeRate={exchangeRate}
-        availableMembers={accounts
-          .filter((account) => !account.deactivatedAt)
-          .map((account) => ({
-            id: account.id,
-            displayName: account.displayName?.trim() || account.email,
-          }))}
       />
     </div>
   )

@@ -4,8 +4,7 @@ import { Search } from 'lucide-react'
 import { getWorkspaceUserId, listAdmins } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
-import { getNewProductViewer, listNewProductOperators } from '@/lib/new-products/workflow'
-import { listSourcingMeetings } from '@/lib/operations/sourcing'
+import { getSourcingViewer, listSourcingMeetings, listSourcingOperators } from '@/lib/operations/sourcing'
 import { SourcingBoard } from './sourcing-board'
 
 export const dynamic = 'force-dynamic'
@@ -21,8 +20,8 @@ export default async function SourcingPage() {
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const [meetings, operators, viewer, exchangeRate, accounts] = await Promise.all([
     listSourcingMeetings({ userId: workspaceUserId, actorUserId: user.id }),
-    listNewProductOperators(workspaceUserId),
-    getNewProductViewer({ userId: workspaceUserId, actorUserId: user.id }),
+    listSourcingOperators(workspaceUserId),
+    getSourcingViewer({ userId: workspaceUserId, actorUserId: user.id }),
     getLatestCnyKrwReferenceRate(),
     listAdmins(),
   ])
@@ -41,7 +40,7 @@ export default async function SourcingPage() {
 
       <SourcingBoard
         meetings={meetings}
-        operators={operators.filter((operator) => operator.isActive)}
+        operators={operators}
         viewer={viewer}
         exchangeRate={exchangeRate}
         availableMembers={accounts

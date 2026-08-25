@@ -2,11 +2,11 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { saveNewProductOperators } from '@/lib/new-products/workflow'
 import {
   createSourcingMeeting,
   deleteSourcingMeeting,
   passManualSourcingToNewProduct,
+  saveSourcingOperators,
   saveSourcingMeetingRows,
   updateSourcingMeeting,
 } from '@/lib/operations/sourcing'
@@ -97,13 +97,12 @@ export async function saveSourcingOperatorsAction(input: {
 }) {
   try {
     const auth = await actionUser()
-    await saveNewProductOperators({
+    await saveSourcingOperators({
       userId: auth.workspaceUserId,
       actorUserId: auth.userId,
       operators: input.operators,
     })
     revalidatePath('/operations/sourcing')
-    revalidatePath('/new-products')
     return { success: true as const }
   } catch (error) {
     return { success: false as const, error: message(error) }

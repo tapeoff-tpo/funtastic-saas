@@ -492,36 +492,12 @@ export async function getNewProductViewer(input: { userId: string; actorUserId: 
   await ensureNewProductWorkflowTables(input.userId)
   const profile = await getProfile(input.actorUserId)
   const isMain = profile?.role === 'super_admin' && !profile.deactivatedAt
-
-  const operators = await listNewProductOperators(input.userId)
-  if (operators.length === 0) {
-    const defaultName = profile?.displayName?.trim() || profile?.email?.trim() || '등록자 1'
-    await db.execute(sql`
-      INSERT INTO new_product_workflow_operators (user_id, member_user_id, display_name, position)
-      VALUES (${input.userId}::uuid, ${input.actorUserId}::uuid, ${defaultName.slice(0, 100)}, 1)
-      ON CONFLICT DO NOTHING
-    `)
-  }
-
-  const [operator] = resultRows<{ id: string }>(await db.execute(sql`
-    SELECT id
-    FROM new_product_workflow_operators
-    WHERE user_id = ${input.userId}::uuid
-      AND member_user_id = ${input.actorUserId}::uuid
-      AND is_active = TRUE
-    LIMIT 1
-  `))
-  return { isMain, operatorId: operator?.id ?? null }
+  return { isMain, operatorId: null }
 }
 
 export async function getNewProductPageSetup(input: { userId: string; actorUserId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
   const viewer = await getNewProductViewer(input)
-  const itemAccessCondition = viewer.isMain
-    ? sql`TRUE`
-    : viewer.operatorId
-      ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
-      : sql`FALSE`
   const [stageResult, preferenceResult] = await Promise.all([
     db.execute<NewProductStage>(sql`
       SELECT
@@ -534,7 +510,6 @@ export async function getNewProductPageSetup(input: { userId: string; actorUserI
       LEFT JOIN new_product_workflow_items item
         ON item.user_id = stage.user_id
           AND item.stage_id = stage.id
-          AND (${itemAccessCondition})
       WHERE stage.user_id = ${input.userId}::uuid
       GROUP BY stage.id
       ORDER BY stage.position, stage.created_at
@@ -552,7 +527,6 @@ export async function getNewProductPageSetup(input: { userId: string; actorUserI
       tone: validTone(stage.tone),
     })),
     editorLayout: normalizeNewProductEditorLayout(preference?.editorLayout),
-    operators: await listNewProductOperators(input.userId),
     viewer,
   }
 }
@@ -566,16 +540,8 @@ export async function listNewProductSummaries(input: {
   limit?: number
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.actorUserId })
   const query = input.query?.trim().slice(0, 200) ?? ''
   const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)))
-  const ownerCondition = viewer.isMain
-    ? input.ownerOperatorId
-      ? sql`AND item.owner_operator_id = ${input.ownerOperatorId}::uuid`
-      : sql``
-    : viewer.operatorId
-      ? sql`AND item.owner_operator_id = ${viewer.operatorId}::uuid`
-      : sql`AND FALSE`
   const stageCondition = input.stageId
     ? sql`AND item.stage_id = ${input.stageId}::uuid`
     : sql``
@@ -605,7 +571,6 @@ export async function listNewProductSummaries(input: {
       JOIN new_product_workflow_stages stage ON stage.id = item.stage_id
       LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
       WHERE item.user_id = ${input.userId}::uuid
-      ${ownerCondition}
       ${stageCondition}
       ${searchCondition}
       ORDER BY item.updated_at DESC, item.product_number DESC
@@ -615,7 +580,6 @@ export async function listNewProductSummaries(input: {
       SELECT COUNT(*)::int AS count
       FROM new_product_workflow_items item
       WHERE item.user_id = ${input.userId}::uuid
-      ${ownerCondition}
       ${stageCondition}
       ${searchCondition}
     `),
@@ -632,12 +596,6 @@ export async function listNewProductSummaries(input: {
 
 export async function getNewProductItem(input: { userId: string; actorUserId: string; itemId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.actorUserId })
-  const ownerCondition = viewer.isMain
-    ? sql`TRUE`
-    : viewer.operatorId
-      ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
-      : sql`FALSE`
   const result = await db.execute<NewProductItem>(sql`
     SELECT
       item.id,
@@ -735,7 +693,6 @@ export async function getNewProductItem(input: { userId: string; actorUserId: st
     LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
     WHERE item.user_id = ${input.userId}::uuid
       AND item.id = ${input.itemId}::uuid
-      AND (${ownerCondition})
   `)
   const [item] = resultRows<NewProductItem>(result)
   if (!item) return null
@@ -875,12 +832,6 @@ export async function createNewProduct(input: {
   values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
-  const ownerOperatorId = await resolveWritableOwner({
-    userId: input.userId,
-    viewer,
-    requestedOwnerOperatorId: input.values.ownerOperatorId,
-  })
   const calculatedCostKrw = calculateCnyCostKrw({
     chinaUnitPriceCny: input.values.chinaUnitPriceCny,
     unitShippingCny: input.values.unitShippingCny,
@@ -913,7 +864,7 @@ export async function createNewProduct(input: {
         notice_capacity, notice_food_safety, notice_components, notice_special_notes,
         created_by_user_id
       ) VALUES (
-        ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid, ${ownerOperatorId}::uuid,
+        ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid, NULL::uuid,
         ${input.values.sampleCode}, ${input.values.productName}, ${input.values.productOption},
         ${input.values.chinaUnitPriceCny}, ${input.values.unitShippingCny}, ${input.values.exchangeRateKrw}, ${calculatedCostKrw},
         ${input.values.domesticSaleUrl}, ${input.values.domesticSalePrice}, ${input.values.detailPageUrl}, ${input.values.memo1}, ${input.values.memo2},
@@ -964,23 +915,14 @@ export async function updateNewProduct(input: {
   values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   return db.transaction(async (tx) => {
-    const [current] = resultRows<{ stageId: string; ownerOperatorId: string | null }>(await tx.execute(sql`
-      SELECT stage_id AS "stageId", owner_operator_id AS "ownerOperatorId"
+    const [current] = resultRows<{ stageId: string }>(await tx.execute(sql`
+      SELECT stage_id AS "stageId"
       FROM new_product_workflow_items
       WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
       FOR UPDATE
     `))
     if (!current) throw new Error('신상품을 찾을 수 없습니다.')
-    if (!canWriteItem(viewer, current.ownerOperatorId)) {
-      throw new Error('다른 등록자의 상품은 수정할 수 없습니다.')
-    }
-    const ownerOperatorId = viewer.isMain
-      ? input.values.ownerOperatorId ?? current.ownerOperatorId
-      : viewer.operatorId
-    if (!ownerOperatorId) throw new Error('담당 등록자를 먼저 지정해주세요.')
-    await assertOperator(tx, input.userId, ownerOperatorId)
     const stage = await assertStage(tx, input.userId, input.values.stageId)
     const calculatedCostKrw = calculateCnyCostKrw({
       chinaUnitPriceCny: input.values.chinaUnitPriceCny,
@@ -991,7 +933,7 @@ export async function updateNewProduct(input: {
     await tx.execute(sql`
       UPDATE new_product_workflow_items SET
         stage_id = ${input.values.stageId}::uuid,
-        owner_operator_id = ${ownerOperatorId}::uuid,
+        owner_operator_id = NULL,
         sample_code = ${input.values.sampleCode},
         product_name = ${input.values.productName},
         product_option = ${input.values.productOption},
@@ -1073,22 +1015,19 @@ export async function moveNewProducts(input: {
   note?: string | null
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const itemIds = [...new Set(input.itemIds)].slice(0, 500)
   if (itemIds.length === 0) return { moved: 0 }
 
   return db.transaction(async (tx) => {
     const stage = await assertStage(tx, input.userId, input.stageId)
-    const currentRows = resultRows<{ id: string; stageId: string; ownerOperatorId: string | null }>(await tx.execute(sql`
-      SELECT id, stage_id AS "stageId", owner_operator_id AS "ownerOperatorId"
+    const currentRows = resultRows<{ id: string; stageId: string }>(await tx.execute(sql`
+      SELECT id, stage_id AS "stageId"
       FROM new_product_workflow_items
       WHERE user_id = ${input.userId}::uuid
         AND id IN (${sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `)})
       FOR UPDATE
     `))
-    if (currentRows.length !== itemIds.length || currentRows.some((item) => !canWriteItem(viewer, item.ownerOperatorId))) {
-      throw new Error('다른 등록자의 상품은 이동할 수 없습니다.')
-    }
+    if (currentRows.length !== itemIds.length) throw new Error('이동할 신상품을 찾을 수 없습니다.')
     const syncResults: ItemMasterSyncResult[] = []
     for (const item of currentRows) {
       if (item.stageId !== input.stageId) {
@@ -1239,15 +1178,13 @@ export async function addNewProductAttachment(input: {
   fileBuffer: ArrayBuffer
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
-  const [item] = resultRows<{ ownerOperatorId: string | null }>(await db.execute(sql`
-    SELECT owner_operator_id AS "ownerOperatorId"
+  const [item] = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT id
     FROM new_product_workflow_items
     WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
     LIMIT 1
   `))
   if (!item) throw new Error('첨부할 신상품을 찾을 수 없습니다.')
-  if (!canWriteItem(viewer, item.ownerOperatorId)) throw new Error('다른 등록자의 상품에는 사진을 추가할 수 없습니다.')
   const base64 = Buffer.from(input.fileBuffer).toString('base64')
   const [created] = resultRows<{ id: string }>(await db.execute(sql`
     INSERT INTO new_product_workflow_attachments (
@@ -1270,7 +1207,6 @@ export async function addNewProductAttachment(input: {
 
 export async function getNewProductAttachment(input: { userId: string; requestedByUserId: string; attachmentId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const [attachment] = resultRows<{
     fileName: string
     contentType: string
@@ -1284,20 +1220,14 @@ export async function getNewProductAttachment(input: { userId: string; requested
     JOIN new_product_workflow_items item ON item.id = attachment.item_id
     WHERE attachment.id = ${input.attachmentId}::uuid
       AND attachment.user_id = ${input.userId}::uuid
-      AND (${viewer.isMain
-        ? sql`TRUE`
-        : viewer.operatorId
-          ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
-          : sql`FALSE`})
   `))
   return attachment ?? null
 }
 
 export async function deleteNewProductAttachment(input: { userId: string; requestedByUserId: string; attachmentId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
-  const [attachment] = resultRows<{ ownerOperatorId: string | null }>(await db.execute(sql`
-    SELECT item.owner_operator_id AS "ownerOperatorId"
+  const [attachment] = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT attachment.id
     FROM new_product_workflow_attachments attachment
     JOIN new_product_workflow_items item ON item.id = attachment.item_id
     WHERE attachment.id = ${input.attachmentId}::uuid
@@ -1305,9 +1235,6 @@ export async function deleteNewProductAttachment(input: { userId: string; reques
     LIMIT 1
   `))
   if (!attachment) return false
-  if (!canWriteItem(viewer, attachment.ownerOperatorId)) {
-    throw new Error('다른 등록자의 사진은 삭제할 수 없습니다.')
-  }
   const result = await db.execute(sql`
     DELETE FROM new_product_workflow_attachments
     WHERE id = ${input.attachmentId}::uuid AND user_id = ${input.userId}::uuid
@@ -1424,47 +1351,6 @@ async function syncNewProductToItemMaster(
     RETURNING id
   `))
   return { status: existing ? 'updated' : 'created', productId: product!.id }
-}
-
-async function assertOperator(
-  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
-  userId: string,
-  operatorId: string,
-) {
-  const result = await tx.execute(sql`
-    SELECT id
-    FROM new_product_workflow_operators
-    WHERE id = ${operatorId}::uuid
-      AND user_id = ${userId}::uuid
-      AND is_active = TRUE
-  `)
-  if (resultRows(result).length === 0) throw new Error('담당 등록자를 찾을 수 없습니다.')
-}
-
-async function resolveWritableOwner(input: {
-  userId: string
-  viewer: NewProductViewer
-  requestedOwnerOperatorId: string | null
-}) {
-  const operatorId = input.viewer.isMain
-    ? input.requestedOwnerOperatorId ?? input.viewer.operatorId
-    : input.viewer.operatorId
-  if (!operatorId) throw new Error('등록자로 설정된 계정만 신상품을 추가할 수 있습니다.')
-
-  const [operator] = resultRows<{ id: string }>(await db.execute(sql`
-    SELECT id
-    FROM new_product_workflow_operators
-    WHERE id = ${operatorId}::uuid
-      AND user_id = ${input.userId}::uuid
-      AND is_active = TRUE
-    LIMIT 1
-  `))
-  if (!operator) throw new Error('담당 등록자를 찾을 수 없습니다.')
-  return operator.id
-}
-
-function canWriteItem(viewer: NewProductViewer, ownerOperatorId: string | null) {
-  return viewer.isMain || (Boolean(viewer.operatorId) && viewer.operatorId === ownerOperatorId)
 }
 
 async function insertStageHistory(

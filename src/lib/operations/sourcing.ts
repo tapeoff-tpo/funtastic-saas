@@ -1,8 +1,9 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { getProfile } from '@/lib/admin-accounts/queries'
 import { products, sourcingCandidates, sourcingItems } from '@/lib/db/schema'
 import { calculateCnyCostKrw } from '@/lib/new-products/cny-cost'
-import { ensureNewProductWorkflowTables, getNewProductViewer, type NewProductViewer } from '@/lib/new-products/workflow'
+import { ensureNewProductWorkflowTables } from '@/lib/new-products/workflow'
 import { ESA009M_HEADERS } from '@/lib/purchasing/items'
 
 export const SOURCING_STATUS_LABELS: Record<string, string> = {
@@ -18,6 +19,19 @@ export const SOURCING_STATUS_LABELS: Record<string, string> = {
 
 export const SOURCING_STATUS_OPTIONS = Object.keys(SOURCING_STATUS_LABELS)
 
+export type SourcingOperator = {
+  id: string
+  memberUserId: string
+  displayName: string
+  position: number
+  isActive: boolean
+}
+
+export type SourcingViewer = {
+  isMain: boolean
+  operatorId: string | null
+}
+
 function cleanText(value: string | null | undefined) {
   const text = String(value ?? '').trim()
   return text.length ? text : null
@@ -29,6 +43,44 @@ function cleanNumber(value: number | null | undefined) {
 }
 
 export async function ensureSourcingTables() {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS sourcing_operators (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id uuid NOT NULL,
+      member_user_id uuid NOT NULL,
+      display_name varchar(100) NOT NULL,
+      position integer NOT NULL,
+      is_active boolean NOT NULL DEFAULT true,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      CONSTRAINT sourcing_operators_workspace_member_unique UNIQUE (user_id, member_user_id)
+    )
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS sourcing_operators_workspace_active_idx
+    ON sourcing_operators(user_id, is_active, position)
+  `)
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS sourcing_operators_workspace_active_position_unique
+    ON sourcing_operators(user_id, position)
+    WHERE is_active = TRUE
+  `)
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF to_regclass('public.new_product_workflow_operators') IS NOT NULL THEN
+        INSERT INTO sourcing_operators (
+          id, user_id, member_user_id, display_name, position, is_active, created_at, updated_at
+        )
+        SELECT
+          id, user_id, member_user_id, display_name, position, is_active, created_at, updated_at
+        FROM new_product_workflow_operators
+        ON CONFLICT (id) DO NOTHING;
+      END IF;
+    END $$
+  `)
+  await db.execute(sql`ALTER TABLE sourcing_operators ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`REVOKE ALL ON TABLE sourcing_operators FROM anon, authenticated`)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "sourcing_items" (
       "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -164,6 +216,91 @@ export async function ensureSourcingTables() {
   await db.execute(sql`ALTER TABLE "sourcing_candidates" ADD COLUMN IF NOT EXISTS "raw_data" jsonb DEFAULT '{}'::jsonb`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "sourcing_candidates_item_created_idx" ON "sourcing_candidates" ("item_id", "created_at")`)
   await db.execute(sql`CREATE INDEX IF NOT EXISTS "sourcing_candidates_user_created_idx" ON "sourcing_candidates" ("user_id", "created_at")`)
+}
+
+export async function listSourcingOperators(userId: string): Promise<SourcingOperator[]> {
+  await ensureSourcingTables()
+  return resultRows<SourcingOperator>(await db.execute(sql`
+    SELECT
+      id,
+      member_user_id AS "memberUserId",
+      display_name AS "displayName",
+      position,
+      is_active AS "isActive"
+    FROM sourcing_operators
+    WHERE user_id = ${userId}::uuid
+      AND is_active = TRUE
+    ORDER BY position, created_at
+  `))
+}
+
+export async function getSourcingViewer(input: { userId: string; actorUserId: string }): Promise<SourcingViewer> {
+  await ensureSourcingTables()
+  const profile = await getProfile(input.actorUserId)
+  const isMain = profile?.role === 'super_admin' && !profile.deactivatedAt
+  if (isMain) return { isMain: true, operatorId: null }
+
+  const [operator] = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT id
+    FROM sourcing_operators
+    WHERE user_id = ${input.userId}::uuid
+      AND member_user_id = ${input.actorUserId}::uuid
+      AND is_active = TRUE
+    LIMIT 1
+  `))
+  return { isMain: false, operatorId: operator?.id ?? null }
+}
+
+export async function saveSourcingOperators(input: {
+  userId: string
+  actorUserId: string
+  operators: Array<{ memberUserId: string; displayName: string }>
+}) {
+  await ensureSourcingTables()
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.actorUserId })
+  if (!viewer.isMain) throw new Error('소싱 등록자 설정은 메인만 변경할 수 있습니다.')
+
+  const operators = input.operators
+    .map((operator) => ({
+      memberUserId: operator.memberUserId.trim(),
+      displayName: operator.displayName.trim().slice(0, 100),
+    }))
+    .filter((operator) => operator.memberUserId && operator.displayName)
+  if (operators.length === 0) throw new Error('소싱 등록자를 1명 이상 설정해주세요.')
+  if (new Set(operators.map((operator) => operator.memberUserId)).size !== operators.length) {
+    throw new Error('같은 계정을 소싱 등록자에 중복으로 지정할 수 없습니다.')
+  }
+
+  const memberRows = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT id
+    FROM user_profiles
+    WHERE id IN (${sql.join(operators.map((operator) => sql`${operator.memberUserId}::uuid`), sql`, `)})
+      AND deactivated_at IS NULL
+  `))
+  if (memberRows.length !== operators.length) throw new Error('활성 계정만 소싱 등록자로 지정할 수 있습니다.')
+
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`sourcing-operators:${input.userId}`}))`)
+    await tx.execute(sql`
+      UPDATE sourcing_operators
+      SET is_active = FALSE, updated_at = now()
+      WHERE user_id = ${input.userId}::uuid
+    `)
+    for (const [index, operator] of operators.entries()) {
+      await tx.execute(sql`
+        INSERT INTO sourcing_operators (
+          user_id, member_user_id, display_name, position, is_active, updated_at
+        ) VALUES (
+          ${input.userId}::uuid, ${operator.memberUserId}::uuid, ${operator.displayName}, ${index + 1}, TRUE, now()
+        )
+        ON CONFLICT (user_id, member_user_id) DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          position = EXCLUDED.position,
+          is_active = TRUE,
+          updated_at = now()
+      `)
+    }
+  })
 }
 
 export async function listSourcingBoard(userId: string) {
@@ -530,8 +667,7 @@ export type ManualSourcingInput = {
 
 export async function listManualSourcingItems(input: { userId: string; actorUserId: string }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer(input)
+  const viewer = await getSourcingViewer(input)
   return resultRows<ManualSourcingItem>(await db.execute(sql`
     SELECT
       item.id,
@@ -557,7 +693,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
       item.created_at::text AS "createdAt",
       item.updated_at::text AS "updatedAt"
     FROM sourcing_items item
-    LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
+    LEFT JOIN sourcing_operators operator ON operator.id = item.owner_operator_id
     WHERE item.user_id = ${input.userId}::uuid
       AND (${viewer.isMain
         ? sql`TRUE`
@@ -571,8 +707,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
 
 export async function listSourcingMeetings(input: { userId: string; actorUserId: string }): Promise<SourcingMeeting[]> {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer(input)
+  const viewer = await getSourcingViewer(input)
   const meetings = resultRows<Omit<SourcingMeeting, 'items'>>(await db.execute(sql`
     SELECT
       meeting.id,
@@ -615,7 +750,7 @@ export async function listSourcingMeetings(input: { userId: string; actorUserId:
       item.created_at::text AS "createdAt",
       item.updated_at::text AS "updatedAt"
     FROM sourcing_items item
-    LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
+    LEFT JOIN sourcing_operators operator ON operator.id = item.owner_operator_id
     WHERE item.user_id = ${input.userId}::uuid
       AND item.meeting_id IN (${sql.join(meetingIds.map((id) => sql`${id}::uuid`), sql`, `)})
       AND (${viewer.isMain
@@ -640,8 +775,7 @@ export async function createSourcingMeeting(input: SourcingMeetingInput & {
   requestedByUserId: string
 }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   if (!viewer.isMain && !viewer.operatorId) throw new Error('등록자로 설정된 계정만 소싱회의를 만들 수 있습니다.')
   const meetingDate = normalizedMeetingDate(input.meetingDate)
   if (!meetingDate) throw new Error('소싱회의 날짜를 확인해주세요.')
@@ -665,8 +799,7 @@ export async function updateSourcingMeeting(input: SourcingMeetingInput & {
   meetingId: string
 }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   if (!viewer.isMain) throw new Error('소싱회의 날짜와 제목은 메인만 수정할 수 있습니다.')
   const meetingDate = normalizedMeetingDate(input.meetingDate)
   if (!meetingDate) throw new Error('소싱회의 날짜를 확인해주세요.')
@@ -690,8 +823,7 @@ export async function deleteSourcingMeeting(input: {
   meetingId: string
 }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   if (!viewer.isMain) throw new Error('소싱회의 삭제는 메인만 할 수 있습니다.')
   if (!isUuid(input.meetingId)) throw new Error('소싱회의를 찾을 수 없습니다.')
 
@@ -739,9 +871,8 @@ export async function createManualSourcingItem(input: ManualSourcingInput & {
   requestedByUserId: string
 }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
   const meetingId = await assertSourcingMeeting(input.userId, input.meetingId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const ownerOperatorId = await resolveManualOwner({
     userId: input.userId,
     viewer,
@@ -773,8 +904,7 @@ export async function updateManualSourcingItem(input: ManualSourcingInput & {
   itemId: string
 }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const [current] = resultRows<{ meetingId: string | null; ownerOperatorId: string | null; passedNewProductId: string | null }>(await db.execute(sql`
     SELECT meeting_id AS "meetingId", owner_operator_id AS "ownerOperatorId", passed_new_product_id AS "passedNewProductId"
     FROM sourcing_items
@@ -864,8 +994,7 @@ export async function addManualSourcingImage(input: {
   fileBuffer: ArrayBuffer
 }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const [item] = resultRows<{ ownerOperatorId: string | null }>(await db.execute(sql`
     SELECT owner_operator_id AS "ownerOperatorId"
     FROM sourcing_items
@@ -889,8 +1018,7 @@ export async function addManualSourcingImage(input: {
 
 export async function getManualSourcingImage(input: { userId: string; actorUserId: string; itemId: string }) {
   await ensureSourcingTables()
-  await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.actorUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.actorUserId })
   const [image] = resultRows<{ fileName: string; contentType: string; fileDataBase64: string }>(await db.execute(sql`
     SELECT
       image_file_name AS "fileName",
@@ -916,7 +1044,7 @@ export async function passManualSourcingToNewProduct(input: {
 }) {
   await ensureSourcingTables()
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
 
   return db.transaction(async (tx) => {
     const [source] = resultRows<{
@@ -986,7 +1114,7 @@ export async function passManualSourcingToNewProduct(input: {
         domestic_sale_url, domestic_sale_price, detail_page_url, memo_1, memo_2,
         estimated_cost, created_by_user_id
       ) VALUES (
-        ${input.userId}::uuid, ${nextNumber}, ${stage.id}::uuid, ${source.ownerOperatorId}::uuid, ${source.id}::uuid,
+        ${input.userId}::uuid, ${nextNumber}, ${stage.id}::uuid, NULL::uuid, ${source.id}::uuid,
         ${source.productName}, ${source.productOption}, ${source.chinaPurchaseUrl},
         ${source.chinaUnitPriceCny}, ${source.unitShippingCny}, ${source.exchangeRateKrw}, ${source.calculatedCostKrw},
         ${source.domesticSaleUrl}, ${source.domesticSalePrice}, ${source.detailPageUrl}, ${source.memo1}, ${source.memo2},
@@ -1047,7 +1175,7 @@ function normalizeManualSourcingInput(input: ManualSourcingInput) {
 
 async function resolveManualOwner(input: {
   userId: string
-  viewer: NewProductViewer
+  viewer: SourcingViewer
   requestedOwnerOperatorId: string | null
 }) {
   const ownerOperatorId = input.viewer.isMain
@@ -1057,7 +1185,7 @@ async function resolveManualOwner(input: {
 
   const [operator] = resultRows<{ id: string }>(await db.execute(sql`
     SELECT id
-    FROM new_product_workflow_operators
+    FROM sourcing_operators
     WHERE id = ${ownerOperatorId}::uuid
       AND user_id = ${input.userId}::uuid
       AND is_active = TRUE
@@ -1080,7 +1208,7 @@ async function assertSourcingMeeting(userId: string, meetingId: string | null | 
   return meeting.id
 }
 
-function canWriteManualItem(viewer: NewProductViewer, ownerOperatorId: string | null) {
+function canWriteManualItem(viewer: SourcingViewer, ownerOperatorId: string | null) {
   return viewer.isMain || (Boolean(viewer.operatorId) && viewer.operatorId === ownerOperatorId)
 }
 

@@ -21,7 +21,6 @@ import {
   Sparkles,
   Trash2,
   UploadCloud,
-  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -34,16 +33,13 @@ import type {
   NewProductEditorLayout,
   NewProductEditorSection,
   NewProductItem,
-  NewProductOperator,
   NewProductStage,
   NewProductStageTone,
   NewProductSummary,
-  NewProductViewer,
 } from '@/lib/new-products/workflow'
 import {
   createNewProductAction,
   saveNewProductEditorLayoutAction,
-  saveNewProductOperatorsAction,
   saveNewProductStagesAction,
   updateNewProductAction,
 } from './actions'
@@ -51,10 +47,8 @@ import {
 type Props = {
   initialStages: NewProductStage[]
   initialLayout: NewProductEditorLayout
-  operators: NewProductOperator[]
-  viewer: NewProductViewer
+  canManageSettings: boolean
   exchangeRate: CnyKrwReferenceRate
-  availableMembers: Array<{ id: string; displayName: string }>
 }
 
 const sectionLabels: Record<NewProductEditorSection, string> = {
@@ -86,7 +80,7 @@ const toneClasses: Record<NewProductStageTone, string> = {
   red: 'bg-red-100 text-red-700',
 }
 
-export function NewProductBoard({ initialStages, initialLayout, operators, viewer, exchangeRate, availableMembers }: Props) {
+export function NewProductBoard({ initialStages, initialLayout, canManageSettings, exchangeRate }: Props) {
   const router = useRouter()
   const [stageFilter, setStageFilter] = useState('')
   const [query, setQuery] = useState('')
@@ -224,9 +218,8 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
 
           <div className="flex flex-1 flex-wrap justify-end gap-2">
             {(mode === 'create' || selectedId) && <Button variant="outline" onClick={closeEditor}><PackageSearch />{mode === 'create' ? '등록 닫기' : '상품 목록'}</Button>}
-            {viewer.isMain && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
-            {viewer.isMain && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}
-            {viewer.isMain && <OperatorSettingsDialog operators={operators} availableMembers={availableMembers} onSaved={() => router.refresh()} />}
+            {canManageSettings && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
+            {canManageSettings && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}
             <Button onClick={startNewProduct}><Plus />신상품 등록</Button>
           </div>
         </div>
@@ -241,8 +234,6 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
           item={null}
           stages={initialStages}
           layout={layout}
-          operators={operators}
-          viewer={viewer}
           exchangeRate={exchangeRate}
           onSaved={reloadItem}
         />
@@ -256,8 +247,6 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
           item={item}
           stages={initialStages}
           layout={layout}
-          operators={operators}
-          viewer={viewer}
           exchangeRate={exchangeRate}
           onSaved={reloadItem}
         />
@@ -307,7 +296,7 @@ function ProductSummaryList({ title, summaries, total, loading, onSelect }: {
                 </div>
                 <span className={cn('shrink-0 rounded-full px-2 py-1 text-[10px] font-medium', toneClasses[summary.stageTone])}>{summary.stageName}</span>
               </div>
-              <p className="mt-3 text-[11px] text-muted-foreground">등록자 {summary.ownerName ?? '미지정'} · 최근 수정 {formatDateTime(summary.updatedAt)}</p>
+              <p className="mt-3 text-[11px] text-muted-foreground">최근 수정 {formatDateTime(summary.updatedAt)}</p>
             </button>
           ))}
         </div>
@@ -332,18 +321,16 @@ function ToolbarField({ label, className, children }: { label: string; className
   )
 }
 
-function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, onSaved }: {
+function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
   item: NewProductItem | null
   stages: NewProductStage[]
   layout: NewProductEditorLayout
-  operators: NewProductOperator[]
-  viewer: NewProductViewer
   exchangeRate: CnyKrwReferenceRate
   onSaved: (id: string) => void
 }) {
   const [values, setValues] = useState(() => item
     ? editorValues(item, exchangeRate.rate)
-    : emptyEditorValues(stages[0]?.id ?? '', exchangeRate.rate, viewer.operatorId ?? operators[0]?.id ?? ''))
+    : emptyEditorValues(stages[0]?.id ?? '', exchangeRate.rate))
   const [pendingAttachments, setPendingAttachments] = useState<Partial<Record<NewProductAttachment['kind'], File[]>>>({})
   const [pending, startTransition] = useTransition()
 
@@ -442,7 +429,6 @@ function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, 
       <EditorSection title="진행 상태" icon={Sparkles}>
         <div className={cn('grid gap-3', fieldGridClass)}>
           <Field label="현재 단계"><StageSelect value={values.stageId} onChange={(value) => setValue('stageId', value)} stages={stages} /></Field>
-          {viewer.isMain && <Field label="담당 등록자"><OperatorSelect value={values.ownerOperatorId} onChange={(value) => setValue('ownerOperatorId', value)} operators={operators} /></Field>}
           <Field label="상품번호"><Input value={values.sampleCode} onChange={(event) => setValue('sampleCode', event.target.value)} placeholder="상품번호를 입력하세요" /></Field>
         </div>
         {item?.stageHistory && item.stageHistory.length > 0 && (
@@ -695,76 +681,6 @@ function StageSettingsDialog({ stages, onSaved }: { stages: NewProductStage[]; o
   )
 }
 
-function OperatorSettingsDialog({ operators, availableMembers, onSaved }: {
-  operators: NewProductOperator[]
-  availableMembers: Array<{ id: string; displayName: string }>
-  onSaved: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [pending, startTransition] = useTransition()
-  const [drafts, setDrafts] = useState(() => operatorDrafts(operators))
-
-  function setDialogOpen(next: boolean) {
-    setOpen(next)
-    if (next) setDrafts(operatorDrafts(operators))
-  }
-
-  function save() {
-    startTransition(async () => {
-      const result = await saveNewProductOperatorsAction({ operators: drafts })
-      if (!result.success) {
-        toast.error(result.error)
-        return
-      }
-      toast.success('등록자 작업공간을 저장했습니다.')
-      setOpen(false)
-      onSaved()
-    })
-  }
-
-  return (
-    <Dialog.Root open={open} onOpenChange={setDialogOpen}>
-      <Dialog.Trigger render={(props) => <Button {...props} variant="outline"><Users />등록자 설정</Button>} />
-      <Dialog.Portal>
-        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px]" />
-        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[min(94vw,680px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl bg-background shadow-2xl">
-          <div className="border-b p-5">
-            <Dialog.Title className="text-lg font-semibold">등록자 작업공간 설정</Dialog.Title>
-            <Dialog.Description className="mt-1 text-sm text-muted-foreground">1~5명까지 지정할 수 있습니다. 메인은 전체 상품을 관리하고, 등록자는 본인에게 지정된 상품만 수정합니다.</Dialog.Description>
-          </div>
-          <div className="flex-1 space-y-2 overflow-y-auto p-4">
-            {drafts.map((draft, index) => (
-              <div key={`${draft.memberUserId}-${index}`} className="grid gap-2 rounded-lg border bg-muted/20 p-3 md:grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
-                <span className="text-xs font-semibold text-muted-foreground">등록자 {index + 1}</span>
-                <select
-                  value={draft.memberUserId}
-                  onChange={(event) => {
-                    const member = availableMembers.find((entry) => entry.id === event.target.value)
-                    setDrafts((current) => current.map((entry, entryIndex) => entryIndex === index
-                      ? { memberUserId: event.target.value, displayName: member?.displayName ?? entry.displayName }
-                      : entry))
-                  }}
-                  className="h-8 min-w-0 rounded-lg border bg-background px-2 text-sm"
-                >
-                  <option value="">계정 선택</option>
-                  {availableMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}
-                </select>
-                <Input value={draft.displayName} onChange={(event) => setDrafts((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, displayName: event.target.value } : entry))} placeholder="화면에 표시할 이름" />
-                <Button type="button" variant="ghost" size="icon-sm" disabled={drafts.length <= 1} aria-label="등록자 제거" onClick={() => setDrafts((current) => current.filter((_, entryIndex) => entryIndex !== index))}><Trash2 /></Button>
-              </div>
-            ))}
-            {drafts.length < 5 && <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setDrafts((current) => [...current, { memberUserId: '', displayName: '' }])}><Plus />등록자 추가</Button>}
-          </div>
-          <div className="flex justify-end gap-2 border-t p-4">
-            <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline">취소</Button>} />
-            <Button onClick={save} disabled={pending}>{pending && <Loader2 className="animate-spin" />}등록자 저장</Button>
-          </div>
-        </Dialog.Popup>
-      </Dialog.Portal>
-    </Dialog.Root>
-  )
-}
-
 function LayoutSettingsDialog({ layout, onSaved }: { layout: NewProductEditorLayout; onSaved: (layout: NewProductEditorLayout) => void }) {
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -866,15 +782,6 @@ function StageSelect({ value, onChange, stages }: { value: string; onChange: (va
   return (
     <select value={value} onChange={(event) => onChange(event.target.value)} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30">
       {stages.map((stage, index) => <option key={stage.id} value={stage.id}>{index + 1}. {stage.name}</option>)}
-    </select>
-  )
-}
-
-function OperatorSelect({ value, onChange, operators }: { value: string; onChange: (value: string) => void; operators: NewProductOperator[] }) {
-  return (
-    <select value={value} onChange={(event) => onChange(event.target.value)} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30">
-      <option value="">담당 등록자 선택</option>
-      {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.displayName}</option>)}
     </select>
   )
 }
@@ -1064,16 +971,9 @@ function attachmentValidationError(file: File, isPdf: boolean) {
 
 type EditorValues = ReturnType<typeof emptyEditorValues>
 
-function operatorDrafts(operators: NewProductOperator[]) {
-  return operators.length > 0
-    ? operators.map((operator) => ({ memberUserId: operator.memberUserId, displayName: operator.displayName }))
-    : [{ memberUserId: '', displayName: '' }]
-}
-
-function emptyEditorValues(stageId: string, exchangeRateKrw: number, ownerOperatorId: string) {
+function emptyEditorValues(stageId: string, exchangeRateKrw: number) {
   return {
     stageId,
-    ownerOperatorId,
     sampleCode: '',
     productName: '',
     productOption: '',
@@ -1130,7 +1030,6 @@ function emptyEditorValues(stageId: string, exchangeRateKrw: number, ownerOperat
 function editorValues(item: NewProductItem, defaultExchangeRate: number): EditorValues {
   return {
     stageId: item.stageId,
-    ownerOperatorId: item.ownerOperatorId ?? '',
     sampleCode: item.sampleCode ?? '',
     productName: item.productName,
     productOption: item.productOption ?? '',

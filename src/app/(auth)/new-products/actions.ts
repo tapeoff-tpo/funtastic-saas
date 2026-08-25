@@ -7,7 +7,6 @@ import {
   createNewProduct,
   moveNewProducts,
   saveNewProductEditorLayout,
-  saveNewProductOperators,
   saveNewProductStages,
   updateNewProduct,
   type NewProductEditorLayout,
@@ -120,28 +119,10 @@ export async function saveNewProductEditorLayoutAction(input: {
   }
 }
 
-export async function saveNewProductOperatorsAction(input: {
-  operators: Array<{ memberUserId: string; displayName: string }>
-}) {
-  try {
-    const auth = await actionUser()
-    await saveNewProductOperators({
-      userId: auth.workspaceUserId,
-      actorUserId: auth.userId,
-      operators: input.operators,
-    })
-    revalidatePath('/new-products')
-    revalidatePath('/operations/sourcing')
-    return { success: true as const }
-  } catch (error) {
-    return { success: false as const, error: message(error) }
-  }
-}
-
 function newProductValues(values: Record<string, unknown>): NewProductInput {
   return {
     stageId: text(values.stageId),
-    ownerOperatorId: nullableText(values.ownerOperatorId, 100),
+    ownerOperatorId: null,
     productName: text(values.productName).trim().slice(0, 500),
     sampleCode: nullableText(values.sampleCode, 200),
     productOption: nullableText(values.productOption),

@@ -22,8 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
-import type { NewProductOperator, NewProductViewer } from '@/lib/new-products/workflow'
-import type { ManualSourcingItem, SourcingMeeting } from '@/lib/operations/sourcing'
+import type { ManualSourcingItem, SourcingMeeting, SourcingOperator, SourcingViewer } from '@/lib/operations/sourcing'
 import {
   createSourcingMeetingAction,
   deleteSourcingMeetingAction,
@@ -35,8 +34,8 @@ import {
 
 type Props = {
   meetings: SourcingMeeting[]
-  operators: NewProductOperator[]
-  viewer: NewProductViewer
+  operators: SourcingOperator[]
+  viewer: SourcingViewer
   exchangeRate: CnyKrwReferenceRate
   availableMembers: Array<{ id: string; displayName: string }>
 }
@@ -76,44 +75,98 @@ const meetingStatusClass: Record<SourcingMeeting['status'], string> = {
 export function SourcingBoard({ meetings, operators, viewer, exchangeRate, availableMembers }: Props) {
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null)
   const [screen, setScreen] = useState<'list' | 'sheet'>('list')
+  const [activeOwnerId, setActiveOwnerId] = useState<string | null>(() => viewer.isMain ? null : viewer.operatorId)
   const selectedMeeting = meetings.find((meeting) => meeting.id === selectedMeetingId) ?? null
+  const selectedOwnerId = viewer.isMain
+    ? operators.some((operator) => operator.id === activeOwnerId) ? activeOwnerId : null
+    : viewer.operatorId
 
   function openMeeting(id: string) {
     setSelectedMeetingId(id)
     setScreen('sheet')
   }
 
-  if (screen === 'sheet' && selectedMeeting) {
-    return (
-      <MeetingSheet
-        key={meetingVersion(selectedMeeting)}
-        meeting={selectedMeeting}
+  return (
+    <div className="space-y-4">
+      <SourcingWorkspaceTabs
         operators={operators}
         viewer={viewer}
-        exchangeRate={exchangeRate}
-        onBack={() => setScreen('list')}
+        activeOwnerId={selectedOwnerId}
+        onChange={setActiveOwnerId}
       />
-    )
-  }
-
-  return (
-    <MeetingList
-      meetings={meetings}
-      canCreate={viewer.isMain || Boolean(viewer.operatorId)}
-      canManage={viewer.isMain}
-      operators={operators}
-      availableMembers={availableMembers}
-      exchangeRate={exchangeRate}
-      onOpen={openMeeting}
-    />
+      {screen === 'sheet' && selectedMeeting ? (
+        <MeetingSheet
+          key={`${meetingVersion(selectedMeeting)}:${selectedOwnerId ?? 'main'}`}
+          meeting={selectedMeeting}
+          operators={operators}
+          viewer={viewer}
+          activeOwnerId={selectedOwnerId}
+          exchangeRate={exchangeRate}
+          onBack={() => setScreen('list')}
+        />
+      ) : (
+        <MeetingList
+          meetings={meetings}
+          canCreate={viewer.isMain || Boolean(viewer.operatorId)}
+          canManage={viewer.isMain}
+          operators={operators}
+          activeOwnerId={selectedOwnerId}
+          availableMembers={availableMembers}
+          exchangeRate={exchangeRate}
+          onOpen={openMeeting}
+        />
+      )}
+    </div>
   )
 }
 
-function MeetingList({ meetings, canCreate, canManage, operators, availableMembers, exchangeRate, onOpen }: {
+function SourcingWorkspaceTabs({ operators, viewer, activeOwnerId, onChange }: {
+  operators: SourcingOperator[]
+  viewer: SourcingViewer
+  activeOwnerId: string | null
+  onChange: (ownerId: string | null) => void
+}) {
+  const visibleOperators = viewer.isMain
+    ? operators
+    : operators.filter((operator) => operator.id === viewer.operatorId)
+
+  return (
+    <nav aria-label="소싱 등록자 작업공간" className="overflow-x-auto border-b">
+      <div role="tablist" className="flex min-w-max items-end gap-1">
+        {viewer.isMain ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!activeOwnerId}
+            onClick={() => onChange(null)}
+            className={cn('border-b-2 px-4 py-2.5 text-sm transition-colors', !activeOwnerId ? 'border-primary font-semibold text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+          >
+            메인
+          </button>
+        ) : null}
+        {visibleOperators.map((operator) => (
+          <button
+            key={operator.id}
+            type="button"
+            role="tab"
+            aria-selected={activeOwnerId === operator.id}
+            onClick={() => onChange(operator.id)}
+            className={cn('border-b-2 px-4 py-2.5 text-sm transition-colors', activeOwnerId === operator.id ? 'border-primary font-semibold text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+          >
+            {operator.displayName}
+          </button>
+        ))}
+      </div>
+    </nav>
+  )
+}
+
+function MeetingList({ meetings, canCreate, canManage, operators, activeOwnerId, availableMembers, exchangeRate, onOpen }: {
   meetings: SourcingMeeting[]
   canCreate: boolean
   canManage: boolean
-  operators: NewProductOperator[]
+  operators: SourcingOperator[]
+  activeOwnerId: string | null
   availableMembers: Array<{ id: string; displayName: string }>
   exchangeRate: CnyKrwReferenceRate
   onOpen: (id: string) => void
@@ -122,7 +175,10 @@ function MeetingList({ meetings, canCreate, canManage, operators, availableMembe
   const [meetingDate, setMeetingDate] = useState(nextWednesday())
   const [title, setTitle] = useState('')
   const [pending, startTransition] = useTransition()
-  const totalRows = meetings.reduce((total, meeting) => total + meeting.items.length, 0)
+  const visibleItemCount = (meeting: SourcingMeeting) => activeOwnerId
+    ? meeting.items.filter((item) => item.ownerOperatorId === activeOwnerId).length
+    : meeting.items.length
+  const totalRows = meetings.reduce((total, meeting) => total + visibleItemCount(meeting), 0)
 
   function createMeeting() {
     startTransition(async () => {
@@ -223,7 +279,7 @@ function MeetingList({ meetings, canCreate, canManage, operators, availableMembe
                   </div>
                   <strong className="mt-4 break-words text-base leading-6 group-hover:text-primary">{meeting.title}</strong>
                   <span className="mt-auto pt-4 text-xs text-muted-foreground">
-                    내게 보이는 상품 {meeting.items.length.toLocaleString('ko-KR')}개
+                    {activeOwnerId ? '이 등록자 상품' : '전체 상품'} {visibleItemCount(meeting).toLocaleString('ko-KR')}개
                   </span>
                 </button>
                 {canManage ? (
@@ -254,7 +310,7 @@ function MeetingList({ meetings, canCreate, canManage, operators, availableMembe
 }
 
 function SourcingOperatorSettingsDialog({ operators, availableMembers, onSaved }: {
-  operators: NewProductOperator[]
+  operators: SourcingOperator[]
   availableMembers: Array<{ id: string; displayName: string }>
   onSaved: () => void
 }) {
@@ -289,7 +345,7 @@ function SourcingOperatorSettingsDialog({ operators, availableMembers, onSaved }
           <div className="border-b p-5">
             <Dialog.Title className="text-lg font-semibold">소싱 등록자 설정</Dialog.Title>
             <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-              1~5명까지 지정할 수 있습니다. 메인은 전체를 관리하고, 등록자는 자기 시트의 상품만 수정합니다. 이 설정은 신상품 진행관리에도 함께 적용됩니다.
+              인원 제한 없이 추가할 수 있습니다. 메인은 전체를 관리하고, 등록자는 자기 탭의 상품만 등록·수정할 수 있습니다.
             </Dialog.Description>
           </div>
           <div className="flex-1 space-y-2 overflow-y-auto p-4">
@@ -313,7 +369,7 @@ function SourcingOperatorSettingsDialog({ operators, availableMembers, onSaved }
                 <Button type="button" variant="ghost" size="icon-sm" disabled={drafts.length <= 1} aria-label="등록자 제거" title="등록자 제거" onClick={() => setDrafts((current) => current.filter((_, entryIndex) => entryIndex !== index))}><Trash2 /></Button>
               </div>
             ))}
-            {drafts.length < 5 ? <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setDrafts((current) => [...current, { memberUserId: '', displayName: '' }])}><Plus />등록자 추가</Button> : null}
+            <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setDrafts((current) => [...current, { memberUserId: '', displayName: '' }])}><Plus />등록자 추가</Button>
             {availableMembers.length < 2 ? <p className="px-1 text-xs text-muted-foreground">추가할 사람이 목록에 없다면 먼저 해당 직원의 계정을 만들어 주세요.</p> : null}
           </div>
           <div className="flex justify-end gap-2 border-t p-4">
@@ -326,10 +382,11 @@ function SourcingOperatorSettingsDialog({ operators, availableMembers, onSaved }
   )
 }
 
-function MeetingSheet({ meeting, operators, viewer, exchangeRate, onBack }: {
+function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate, onBack }: {
   meeting: SourcingMeeting
-  operators: NewProductOperator[]
-  viewer: NewProductViewer
+  operators: SourcingOperator[]
+  viewer: SourcingViewer
+  activeOwnerId: string | null
   exchangeRate: CnyKrwReferenceRate
   onBack: () => void
 }) {
@@ -338,13 +395,20 @@ function MeetingSheet({ meeting, operators, viewer, exchangeRate, onBack }: {
   const [title, setTitle] = useState(meeting.title)
   const [status, setStatus] = useState<SourcingMeeting['status']>(meeting.status)
   const [pending, startTransition] = useTransition()
-  const currentOperator = operators.find((operator) => operator.id === viewer.operatorId) ?? null
-  const operatorSections = viewer.isMain
+  const selectedOwnerId = viewer.isMain ? activeOwnerId : viewer.operatorId
+  const selectedOperator = operators.find((operator) => operator.id === selectedOwnerId) ?? null
+  const showAllOperators = viewer.isMain && !selectedOwnerId
+  const operatorSections = showAllOperators
     ? operators.map((operator) => ({ owner: { id: operator.id, displayName: operator.displayName }, items: meeting.items.filter((item) => item.ownerOperatorId === operator.id) }))
-    : currentOperator
-      ? [{ owner: { id: currentOperator.id, displayName: currentOperator.displayName }, items: meeting.items }]
+    : selectedOperator
+      ? [{ owner: { id: selectedOperator.id, displayName: selectedOperator.displayName }, items: meeting.items.filter((item) => item.ownerOperatorId === selectedOperator.id) }]
       : []
-  const unassignedItems = viewer.isMain ? meeting.items.filter((item) => !item.ownerOperatorId) : []
+  const unassignedItems = showAllOperators ? meeting.items.filter((item) => !item.ownerOperatorId) : []
+  const visibleItemCount = showAllOperators
+    ? meeting.items.length
+    : selectedOwnerId
+      ? meeting.items.filter((item) => item.ownerOperatorId === selectedOwnerId).length
+      : 0
 
   function saveMeetingDetails() {
     startTransition(async () => {
@@ -375,7 +439,7 @@ function MeetingSheet({ meeting, operators, viewer, exchangeRate, onBack }: {
               <MeetingStatusBadge status={meeting.status} />
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              {formatMeetingDate(meeting.meetingDate)} · {meeting.items.length.toLocaleString('ko-KR')}개 상품
+              {formatMeetingDate(meeting.meetingDate)} · {visibleItemCount.toLocaleString('ko-KR')}개 상품
             </p>
           </div>
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-right text-sm">
@@ -417,7 +481,7 @@ function MeetingSheet({ meeting, operators, viewer, exchangeRate, onBack }: {
           owner={section.owner}
           rows={section.items}
           operators={operators}
-          viewer={viewer}
+          canAssignOwner={showAllOperators}
           exchangeRate={exchangeRate.rate}
           onChanged={() => router.refresh()}
         />
@@ -429,7 +493,7 @@ function MeetingSheet({ meeting, operators, viewer, exchangeRate, onBack }: {
           owner={{ id: null, displayName: '미지정 · 이전 수집 데이터' }}
           rows={unassignedItems}
           operators={operators}
-          viewer={viewer}
+          canAssignOwner
           exchangeRate={exchangeRate.rate}
           allowNewRows={false}
           onChanged={() => router.refresh()}
@@ -438,19 +502,19 @@ function MeetingSheet({ meeting, operators, viewer, exchangeRate, onBack }: {
 
       {operatorSections.length === 0 && unassignedItems.length === 0 ? (
         <section className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-          등록자가 아직 설정되지 않았습니다. 신상품 진행관리의 등록자 설정에서 담당자를 먼저 지정해 주세요.
+          소싱 등록자가 아직 설정되지 않았습니다. 메인 탭의 등록자 설정에서 담당자를 먼저 지정해 주세요.
         </section>
       ) : null}
     </div>
   )
 }
 
-function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, viewer, exchangeRate, allowNewRows = true, onChanged }: {
+function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOwner = false, exchangeRate, allowNewRows = true, onChanged }: {
   meetingId: string
   owner: SheetOwner
   rows: ManualSourcingItem[]
-  operators: NewProductOperator[]
-  viewer: NewProductViewer
+  operators: SourcingOperator[]
+  canAssignOwner?: boolean
   exchangeRate: number
   allowNewRows?: boolean
   onChanged: () => void
@@ -459,7 +523,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, viewer, exc
   const [photos, setPhotos] = useState<Record<string, File>>({})
   const [pending, startTransition] = useTransition()
   const canAddRows = allowNewRows && Boolean(owner.id)
-  const showOwnerColumn = viewer.isMain
+  const showOwnerColumn = canAssignOwner
 
   function updateRow(clientId: string, patch: Partial<DraftRow>) {
     setRows((currentRows) => currentRows.map((row) => row.clientId === clientId ? { ...row, ...patch } : row))
@@ -872,7 +936,7 @@ function omitFile(files: Record<string, File>, clientId: string) {
   return remaining
 }
 
-function operatorDrafts(operators: NewProductOperator[]) {
+function operatorDrafts(operators: SourcingOperator[]) {
   return operators.length > 0
     ? operators.map((operator) => ({ memberUserId: operator.memberUserId, displayName: operator.displayName }))
     : [{ memberUserId: '', displayName: '' }]

@@ -481,6 +481,11 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     : layout.columns === 3
       ? 'md:grid-cols-2 2xl:grid-cols-3'
       : 'md:grid-cols-2'
+  const fullWidthFieldClass = layout.columns === 1
+    ? ''
+    : layout.columns === 3
+      ? 'md:col-span-2 2xl:col-span-3'
+      : 'md:col-span-2'
 
   const sectionContent: Record<NewProductEditorSection, React.ReactNode> = {
     progress: (
@@ -516,15 +521,13 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="판매예정일"><Input type="date" value={values.plannedSaleDate} onChange={(event) => setValue('plannedSaleDate', event.target.value)} /></Field>
           <Field label="상세페이지 완료예정일"><Input type="date" value={values.detailPageDueDate} onChange={(event) => setValue('detailPageDueDate', event.target.value)} /></Field>
           <Field label="사방넷코드"><Input value={values.sabangnetCode} onChange={(event) => setValue('sabangnetCode', event.target.value)} placeholder="품목에 등록할 품목코드" /></Field>
-          <Field label="구매참고사항"><TextArea value={values.purchaseReferenceNotes} onChange={(value) => setValue('purchaseReferenceNotes', value)} placeholder="MOQ, 구매 옵션, 공급처 전달사항" rows={1} /></Field>
           <Field label="중국원가 (위안화)"><MoneyInput value={values.chinaUnitPriceCny} onChange={(value) => setValue('chinaUnitPriceCny', value)} /></Field>
           <Field label="원화원가 (₩)"><MoneyInput value={values.calculatedCostKrw} onChange={(value) => setValue('calculatedCostKrw', value)} /></Field>
           <Field label="이전원가 (₩)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
           <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
-          <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" /></Field>
-          <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} /></Field>
-          <Field label="히스토리 메모"><TextArea value={values.historyNotes} onChange={(value) => setValue('historyNotes', value)} placeholder="날짜 / 담당자 / 결정 내용" rows={4} /></Field>
+          <Field label="필수 체크 사항" className={fullWidthFieldClass}><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={4} /></Field>
+          <Field label="비고" className={fullWidthFieldClass}><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={4} /></Field>
         </div>
       </EditorSection>
     ),
@@ -901,9 +904,9 @@ function LayoutSettingsDialog({ layout, onSaved }: { layout: NewProductEditorLay
   )
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+function Field({ label, required, className, children }: { label: string; required?: boolean; className?: string; children: React.ReactNode }) {
   return (
-    <label className="block space-y-1.5">
+    <label className={cn('block space-y-1.5', className)}>
       <span className="text-xs font-medium text-muted-foreground">{label}{required && <span className="ml-1 text-red-500">*</span>}</span>
       {children}
     </label>

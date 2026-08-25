@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { Search } from 'lucide-react'
 import { ProductFlowNav } from '@/components/product-flow-nav'
-import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getWorkspaceUserId, listAdmins } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { getNewProductViewer, listNewProductOperators } from '@/lib/new-products/workflow'
@@ -20,11 +20,12 @@ export default async function SourcingPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [meetings, operators, viewer, exchangeRate] = await Promise.all([
+  const [meetings, operators, viewer, exchangeRate, accounts] = await Promise.all([
     listSourcingMeetings({ userId: workspaceUserId, actorUserId: user.id }),
     listNewProductOperators(workspaceUserId),
     getNewProductViewer({ userId: workspaceUserId, actorUserId: user.id }),
     getLatestCnyKrwReferenceRate(),
+    listAdmins(),
   ])
 
   return (
@@ -46,6 +47,12 @@ export default async function SourcingPage() {
         operators={operators.filter((operator) => operator.isActive)}
         viewer={viewer}
         exchangeRate={exchangeRate}
+        availableMembers={accounts
+          .filter((account) => !account.deactivatedAt)
+          .map((account) => ({
+            id: account.id,
+            displayName: account.displayName?.trim() || account.email,
+          }))}
       />
     </div>
   )

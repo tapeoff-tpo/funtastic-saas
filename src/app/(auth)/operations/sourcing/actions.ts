@@ -2,8 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { saveNewProductOperators } from '@/lib/new-products/workflow'
 import {
   createSourcingMeeting,
+  deleteSourcingMeeting,
   passManualSourcingToNewProduct,
   saveSourcingMeetingRows,
   updateSourcingMeeting,
@@ -69,6 +71,39 @@ export async function updateSourcingMeetingAction(input: { meetingId: string; va
       status: input.values.status,
     })
     revalidatePath('/operations/sourcing')
+    return { success: true as const }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
+}
+
+export async function deleteSourcingMeetingAction(meetingId: string) {
+  try {
+    const auth = await actionUser()
+    const result = await deleteSourcingMeeting({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+      meetingId: text(meetingId),
+    })
+    revalidatePath('/operations/sourcing')
+    return { success: true as const, ...result }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
+}
+
+export async function saveSourcingOperatorsAction(input: {
+  operators: Array<{ memberUserId: string; displayName: string }>
+}) {
+  try {
+    const auth = await actionUser()
+    await saveNewProductOperators({
+      userId: auth.workspaceUserId,
+      actorUserId: auth.userId,
+      operators: input.operators,
+    })
+    revalidatePath('/operations/sourcing')
+    revalidatePath('/new-products')
     return { success: true as const }
   } catch (error) {
     return { success: false as const, error: message(error) }

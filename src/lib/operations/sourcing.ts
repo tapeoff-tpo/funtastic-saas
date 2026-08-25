@@ -684,6 +684,56 @@ export async function updateSourcingMeeting(input: SourcingMeetingInput & {
   if (resultRows(result).length === 0) throw new Error('소싱회의를 찾을 수 없습니다.')
 }
 
+export async function deleteSourcingMeeting(input: {
+  userId: string
+  requestedByUserId: string
+  meetingId: string
+}) {
+  await ensureSourcingTables()
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!viewer.isMain) throw new Error('소싱회의 삭제는 메인만 할 수 있습니다.')
+  if (!isUuid(input.meetingId)) throw new Error('소싱회의를 찾을 수 없습니다.')
+
+  return db.transaction(async (tx) => {
+    const [meeting] = resultRows<{ id: string }>(await tx.execute(sql`
+      SELECT id
+      FROM sourcing_meetings
+      WHERE id = ${input.meetingId}::uuid
+        AND user_id = ${input.userId}::uuid
+      FOR UPDATE
+    `))
+    if (!meeting) throw new Error('소싱회의를 찾을 수 없습니다.')
+
+    const items = resultRows<{ id: string; passedNewProductId: string | null; status: string }>(await tx.execute(sql`
+      SELECT
+        id,
+        passed_new_product_id AS "passedNewProductId",
+        status
+      FROM sourcing_items
+      WHERE user_id = ${input.userId}::uuid
+        AND meeting_id = ${meeting.id}::uuid
+      FOR UPDATE
+    `))
+    const passedCount = items.filter((item) => item.passedNewProductId || item.status === 'passed').length
+    if (passedCount > 0) {
+      throw new Error(`1차 통과로 신상품 진행관리에 연결된 상품이 ${passedCount}개 있어 이 회의는 삭제할 수 없습니다.`)
+    }
+
+    await tx.execute(sql`
+      DELETE FROM sourcing_items
+      WHERE user_id = ${input.userId}::uuid
+        AND meeting_id = ${meeting.id}::uuid
+    `)
+    await tx.execute(sql`
+      DELETE FROM sourcing_meetings
+      WHERE id = ${meeting.id}::uuid
+        AND user_id = ${input.userId}::uuid
+    `)
+    return { deletedItems: items.length }
+  })
+}
+
 export async function createManualSourcingItem(input: ManualSourcingInput & {
   userId: string
   requestedByUserId: string

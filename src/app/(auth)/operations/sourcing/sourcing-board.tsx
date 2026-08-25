@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { Dialog } from '@base-ui/react/dialog'
 import {
   CalendarDays,
   CheckCircle2,
@@ -11,7 +12,9 @@ import {
   PackagePlus,
   Plus,
   Save,
+  Trash2,
   UploadCloud,
+  Users,
   X,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -23,7 +26,9 @@ import type { NewProductOperator, NewProductViewer } from '@/lib/new-products/wo
 import type { ManualSourcingItem, SourcingMeeting } from '@/lib/operations/sourcing'
 import {
   createSourcingMeetingAction,
+  deleteSourcingMeetingAction,
   passManualSourcingAction,
+  saveSourcingOperatorsAction,
   saveSourcingMeetingRowsAction,
   updateSourcingMeetingAction,
 } from './actions'
@@ -33,6 +38,7 @@ type Props = {
   operators: NewProductOperator[]
   viewer: NewProductViewer
   exchangeRate: CnyKrwReferenceRate
+  availableMembers: Array<{ id: string; displayName: string }>
 }
 
 type DraftRow = {
@@ -67,7 +73,7 @@ const meetingStatusClass: Record<SourcingMeeting['status'], string> = {
   archived: 'bg-amber-50 text-amber-800 ring-amber-200',
 }
 
-export function SourcingBoard({ meetings, operators, viewer, exchangeRate }: Props) {
+export function SourcingBoard({ meetings, operators, viewer, exchangeRate, availableMembers }: Props) {
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null)
   const [screen, setScreen] = useState<'list' | 'sheet'>('list')
   const selectedMeeting = meetings.find((meeting) => meeting.id === selectedMeetingId) ?? null
@@ -94,15 +100,21 @@ export function SourcingBoard({ meetings, operators, viewer, exchangeRate }: Pro
     <MeetingList
       meetings={meetings}
       canCreate={viewer.isMain || Boolean(viewer.operatorId)}
+      canManage={viewer.isMain}
+      operators={operators}
+      availableMembers={availableMembers}
       exchangeRate={exchangeRate}
       onOpen={openMeeting}
     />
   )
 }
 
-function MeetingList({ meetings, canCreate, exchangeRate, onOpen }: {
+function MeetingList({ meetings, canCreate, canManage, operators, availableMembers, exchangeRate, onOpen }: {
   meetings: SourcingMeeting[]
   canCreate: boolean
+  canManage: boolean
+  operators: NewProductOperator[]
+  availableMembers: Array<{ id: string; displayName: string }>
   exchangeRate: CnyKrwReferenceRate
   onOpen: (id: string) => void
 }) {
@@ -126,6 +138,23 @@ function MeetingList({ meetings, canCreate, exchangeRate, onOpen }: {
     })
   }
 
+  function deleteMeeting(meeting: SourcingMeeting) {
+    const message = meeting.items.length > 0
+      ? `이 소싱회의와 포함된 ${meeting.items.length}개 상품을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`
+      : '이 소싱회의를 삭제할까요? 이 작업은 되돌릴 수 없습니다.'
+    if (!window.confirm(message)) return
+
+    startTransition(async () => {
+      const result = await deleteSourcingMeetingAction(meeting.id)
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(`소싱회의를 삭제했습니다.${result.deletedItems ? ` 상품 ${result.deletedItems}개도 함께 삭제했습니다.` : ''}`)
+      router.refresh()
+    })
+  }
+
   return (
     <div className="space-y-4">
       <section className="border-b pb-4">
@@ -136,10 +165,13 @@ function MeetingList({ meetings, canCreate, exchangeRate, onOpen }: {
               회의 날짜를 먼저 만들고, 회의 안에서 등록자별로 여러 상품을 가로 표에 한 번에 입력합니다.
             </p>
           </div>
-          <div className="flex items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">CNY 기준환율</span>
-            <span className="font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</span>
-            <span className="text-xs text-muted-foreground">{exchangeRate.date ? `${exchangeRate.date} 기준` : '기본값'}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <span className="text-muted-foreground">CNY 기준환율</span>
+              <span className="font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</span>
+              <span className="text-xs text-muted-foreground">{exchangeRate.date ? `${exchangeRate.date} 기준` : '기본값'}</span>
+            </div>
+            {canManage ? <SourcingOperatorSettingsDialog operators={operators} availableMembers={availableMembers} onSaved={() => router.refresh()} /> : null}
           </div>
         </div>
       </section>
@@ -176,24 +208,39 @@ function MeetingList({ meetings, canCreate, exchangeRate, onOpen }: {
         {meetings.length > 0 ? (
           <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
             {meetings.map((meeting) => (
-              <button
-                key={meeting.id}
-                type="button"
-                onClick={() => onOpen(meeting.id)}
-                className="group flex min-h-32 flex-col items-start rounded-lg border bg-background p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <div className="flex w-full items-start justify-between gap-3">
-                  <span className="flex items-center gap-2 text-sm font-semibold">
-                    <CalendarDays className="size-4 text-primary" />
-                    {formatMeetingDate(meeting.meetingDate)}
+              <div key={meeting.id} className="group relative">
+                <button
+                  type="button"
+                  onClick={() => onOpen(meeting.id)}
+                  className="flex min-h-32 w-full flex-col items-start rounded-lg border bg-background p-4 text-left transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <div className="flex w-full items-start justify-between gap-3 pr-8">
+                    <span className="flex items-center gap-2 text-sm font-semibold">
+                      <CalendarDays className="size-4 text-primary" />
+                      {formatMeetingDate(meeting.meetingDate)}
+                    </span>
+                    <MeetingStatusBadge status={meeting.status} />
+                  </div>
+                  <strong className="mt-4 break-words text-base leading-6 group-hover:text-primary">{meeting.title}</strong>
+                  <span className="mt-auto pt-4 text-xs text-muted-foreground">
+                    내게 보이는 상품 {meeting.items.length.toLocaleString('ko-KR')}개
                   </span>
-                  <MeetingStatusBadge status={meeting.status} />
-                </div>
-                <strong className="mt-4 break-words text-base leading-6 group-hover:text-primary">{meeting.title}</strong>
-                <span className="mt-auto pt-4 text-xs text-muted-foreground">
-                  내게 보이는 상품 {meeting.items.length.toLocaleString('ko-KR')}개
-                </span>
-              </button>
+                </button>
+                {canManage ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="absolute right-2 top-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    aria-label={`${meeting.title} 삭제`}
+                    title="소싱회의 삭제"
+                    disabled={pending}
+                    onClick={() => deleteMeeting(meeting)}
+                  >
+                    <Trash2 />
+                  </Button>
+                ) : null}
+              </div>
             ))}
           </div>
         ) : (
@@ -203,6 +250,79 @@ function MeetingList({ meetings, canCreate, exchangeRate, onOpen }: {
         )}
       </section>
     </div>
+  )
+}
+
+function SourcingOperatorSettingsDialog({ operators, availableMembers, onSaved }: {
+  operators: NewProductOperator[]
+  availableMembers: Array<{ id: string; displayName: string }>
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pending, startTransition] = useTransition()
+  const [drafts, setDrafts] = useState(() => operatorDrafts(operators))
+
+  function setDialogOpen(next: boolean) {
+    setOpen(next)
+    if (next) setDrafts(operatorDrafts(operators))
+  }
+
+  function save() {
+    startTransition(async () => {
+      const result = await saveSourcingOperatorsAction({ operators: drafts })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('등록자 작업공간을 저장했습니다.')
+      setOpen(false)
+      onSaved()
+    })
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={setDialogOpen}>
+      <Dialog.Trigger render={(props) => <Button {...props} type="button" variant="outline"><Users />등록자 설정</Button>} />
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px]" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[min(94vw,680px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl bg-background shadow-2xl">
+          <div className="border-b p-5">
+            <Dialog.Title className="text-lg font-semibold">소싱 등록자 설정</Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm text-muted-foreground">
+              1~5명까지 지정할 수 있습니다. 메인은 전체를 관리하고, 등록자는 자기 시트의 상품만 수정합니다. 이 설정은 신상품 진행관리에도 함께 적용됩니다.
+            </Dialog.Description>
+          </div>
+          <div className="flex-1 space-y-2 overflow-y-auto p-4">
+            {drafts.map((draft, index) => (
+              <div key={`${draft.memberUserId}-${index}`} className="grid gap-2 rounded-lg border bg-muted/20 p-3 md:grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+                <span className="text-xs font-semibold text-muted-foreground">등록자 {index + 1}</span>
+                <select
+                  value={draft.memberUserId}
+                  onChange={(event) => {
+                    const member = availableMembers.find((entry) => entry.id === event.target.value)
+                    setDrafts((current) => current.map((entry, entryIndex) => entryIndex === index
+                      ? { memberUserId: event.target.value, displayName: member?.displayName ?? entry.displayName }
+                      : entry))
+                  }}
+                  className="h-8 min-w-0 rounded-lg border bg-background px-2 text-sm"
+                >
+                  <option value="">계정 선택</option>
+                  {availableMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}
+                </select>
+                <Input value={draft.displayName} onChange={(event) => setDrafts((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, displayName: event.target.value } : entry))} placeholder="화면에 표시할 이름" />
+                <Button type="button" variant="ghost" size="icon-sm" disabled={drafts.length <= 1} aria-label="등록자 제거" title="등록자 제거" onClick={() => setDrafts((current) => current.filter((_, entryIndex) => entryIndex !== index))}><Trash2 /></Button>
+              </div>
+            ))}
+            {drafts.length < 5 ? <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setDrafts((current) => [...current, { memberUserId: '', displayName: '' }])}><Plus />등록자 추가</Button> : null}
+            {availableMembers.length < 2 ? <p className="px-1 text-xs text-muted-foreground">추가할 사람이 목록에 없다면 먼저 해당 직원의 계정을 만들어 주세요.</p> : null}
+          </div>
+          <div className="flex justify-end gap-2 border-t p-4">
+            <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline">취소</Button>} />
+            <Button type="button" onClick={save} disabled={pending}>{pending ? <Loader2 className="animate-spin" /> : null}등록자 저장</Button>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 
@@ -750,6 +870,12 @@ function omitFile(files: Record<string, File>, clientId: string) {
   const remaining = { ...files }
   delete remaining[clientId]
   return remaining
+}
+
+function operatorDrafts(operators: NewProductOperator[]) {
+  return operators.length > 0
+    ? operators.map((operator) => ({ memberUserId: operator.memberUserId, displayName: operator.displayName }))
+    : [{ memberUserId: '', displayName: '' }]
 }
 
 function errorMessage(error: unknown) {

@@ -42,7 +42,18 @@ function cleanNumber(value: number | null | undefined) {
   return Math.max(0, Math.trunc(value))
 }
 
+let ensureSourcingTablesPromise: Promise<void> | null = null
+
 export async function ensureSourcingTables() {
+  if (ensureSourcingTablesPromise) return ensureSourcingTablesPromise
+  ensureSourcingTablesPromise = createSourcingTables().catch((error) => {
+    ensureSourcingTablesPromise = null
+    throw error
+  })
+  return ensureSourcingTablesPromise
+}
+
+async function createSourcingTables() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS sourcing_operators (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

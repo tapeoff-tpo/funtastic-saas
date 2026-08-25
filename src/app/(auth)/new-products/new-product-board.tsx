@@ -21,24 +21,29 @@ import {
   Sparkles,
   Trash2,
   UploadCloud,
+  Users,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculateSalesPrices } from '@/lib/new-products/price-calculator'
 import type {
   NewProductAttachment,
   NewProductEditorLayout,
   NewProductEditorSection,
   NewProductItem,
+  NewProductOperator,
   NewProductStage,
   NewProductStageTone,
   NewProductSummary,
+  NewProductViewer,
 } from '@/lib/new-products/workflow'
 import {
   createNewProductAction,
   saveNewProductEditorLayoutAction,
+  saveNewProductOperatorsAction,
   saveNewProductStagesAction,
   updateNewProductAction,
 } from './actions'
@@ -46,11 +51,16 @@ import {
 type Props = {
   initialStages: NewProductStage[]
   initialLayout: NewProductEditorLayout
+  operators: NewProductOperator[]
+  viewer: NewProductViewer
+  exchangeRate: CnyKrwReferenceRate
+  availableMembers: Array<{ id: string; displayName: string }>
 }
 
 const sectionLabels: Record<NewProductEditorSection, string> = {
   progress: '진행 상태',
   basic: '기본 상품 정보',
+  sourcing: '소싱 상품 등록',
   attachments: '이미지 및 품질표시 파일',
   package: '패키지·등록 준비',
   pricing: '원가 및 판매가 계산',
@@ -74,7 +84,7 @@ const toneClasses: Record<NewProductStageTone, string> = {
   red: 'bg-red-100 text-red-700',
 }
 
-export function NewProductBoard({ initialStages, initialLayout }: Props) {
+export function NewProductBoard({ initialStages, initialLayout, operators, viewer, exchangeRate, availableMembers }: Props) {
   const router = useRouter()
   const [stageFilter, setStageFilter] = useState('')
   const [query, setQuery] = useState('')
@@ -87,6 +97,7 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
   const [dataRevision, setDataRevision] = useState(0)
   const [listLoading, setListLoading] = useState(true)
   const [layout, setLayout] = useState(initialLayout)
+  const [activeOwnerId, setActiveOwnerId] = useState<string | null>(viewer.isMain ? null : viewer.operatorId)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -101,6 +112,7 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
       const params = new URLSearchParams()
       if (stageFilter !== 'all') params.set('stageId', stageFilter)
       if (query.trim()) params.set('query', query.trim())
+      if (activeOwnerId) params.set('ownerOperatorId', activeOwnerId)
       try {
         const response = await fetch(`/api/new-products/items?${params.toString()}`, {
           signal: controller.signal,
@@ -126,7 +138,7 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [dataRevision, mode, query, stageFilter])
+  }, [activeOwnerId, dataRevision, mode, query, stageFilter])
 
   useEffect(() => {
     if (mode !== 'view' || !selectedId) return
@@ -189,6 +201,22 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
     <div className="space-y-4">
       <section className="sticky top-0 z-30 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
+          <ToolbarField label="작업 공간" className="xl:w-52">
+            {viewer.isMain ? (
+              <select
+                value={activeOwnerId ?? ''}
+                onChange={(event) => setActiveOwnerId(event.target.value || null)}
+                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+              >
+                <option value="">메인 · 전체 등록자</option>
+                {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.displayName}</option>)}
+              </select>
+            ) : (
+              <div className="flex h-8 items-center rounded-lg border bg-muted/30 px-2.5 text-sm font-medium">
+                {operators.find((operator) => operator.id === viewer.operatorId)?.displayName ?? '등록자 미설정'}
+              </div>
+            )}
+          </ToolbarField>
           <ToolbarField label="상태별 보기" className="xl:w-64">
             <select
               value={stageFilter}
@@ -212,8 +240,9 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
 
           <div className="flex flex-1 flex-wrap justify-end gap-2">
             {(mode === 'create' || selectedId) && <Button variant="outline" onClick={closeEditor}><PackageSearch />{mode === 'create' ? '등록 닫기' : '상품 목록'}</Button>}
-            <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />
-            <LayoutSettingsDialog layout={layout} onSaved={setLayout} />
+            {viewer.isMain && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
+            {viewer.isMain && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}
+            {viewer.isMain && <OperatorSettingsDialog operators={operators} availableMembers={availableMembers} onSaved={() => router.refresh()} />}
             <Button onClick={startNewProduct}><Plus />신상품 등록</Button>
           </div>
         </div>
@@ -228,6 +257,9 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           item={null}
           stages={initialStages}
           layout={layout}
+          operators={operators}
+          viewer={viewer}
+          exchangeRate={exchangeRate}
           onSaved={reloadItem}
         />
       ) : detailLoading ? (
@@ -240,6 +272,9 @@ export function NewProductBoard({ initialStages, initialLayout }: Props) {
           item={item}
           stages={initialStages}
           layout={layout}
+          operators={operators}
+          viewer={viewer}
+          exchangeRate={exchangeRate}
           onSaved={reloadItem}
         />
       ) : stageFilter ? (
@@ -288,7 +323,7 @@ function ProductSummaryList({ title, summaries, total, loading, onSelect }: {
                 </div>
                 <span className={cn('shrink-0 rounded-full px-2 py-1 text-[10px] font-medium', toneClasses[summary.stageTone])}>{summary.stageName}</span>
               </div>
-              <p className="mt-3 text-[11px] text-muted-foreground">최근 수정 {formatDateTime(summary.updatedAt)}</p>
+              <p className="mt-3 text-[11px] text-muted-foreground">등록자 {summary.ownerName ?? '미지정'} · 최근 수정 {formatDateTime(summary.updatedAt)}</p>
             </button>
           ))}
         </div>
@@ -313,13 +348,18 @@ function ToolbarField({ label, className, children }: { label: string; className
   )
 }
 
-function ProductEditor({ item, stages, layout, onSaved }: {
+function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, onSaved }: {
   item: NewProductItem | null
   stages: NewProductStage[]
   layout: NewProductEditorLayout
+  operators: NewProductOperator[]
+  viewer: NewProductViewer
+  exchangeRate: CnyKrwReferenceRate
   onSaved: (id: string) => void
 }) {
-  const [values, setValues] = useState(() => item ? editorValues(item) : emptyEditorValues(stages[0]?.id ?? ''))
+  const [values, setValues] = useState(() => item
+    ? editorValues(item, exchangeRate.rate)
+    : emptyEditorValues(stages[0]?.id ?? '', exchangeRate.rate, viewer.operatorId ?? operators[0]?.id ?? ''))
   const [pendingAttachments, setPendingAttachments] = useState<Partial<Record<NewProductAttachment['kind'], File[]>>>({})
   const [pending, startTransition] = useTransition()
 
@@ -335,6 +375,25 @@ function ProductEditor({ item, stages, layout, onSaved }: {
       b2bPrice: calculation ? String(calculation.b2bPrice) : '',
       b2cPrice: calculation ? String(calculation.b2cPrice) : '',
     }))
+  }
+
+  function setCnyCostValue(
+    key: 'chinaUnitPriceCny' | 'unitShippingCny' | 'exchangeRateKrw',
+    value: string,
+  ) {
+    setValues((current) => {
+      const next = { ...current, [key]: value }
+      const calculatedCostKrw = calculateCnyCostKrw({
+        chinaUnitPriceCny: normalizedNumber(next.chinaUnitPriceCny),
+        unitShippingCny: normalizedNumber(next.unitShippingCny),
+        exchangeRateKrw: normalizedNumber(next.exchangeRateKrw),
+      })
+      const calculatedCostValue = valueString(calculatedCostKrw)
+      const estimatedCost = !current.estimatedCost || current.estimatedCost === current.calculatedCostKrw
+        ? calculatedCostValue
+        : current.estimatedCost
+      return { ...next, calculatedCostKrw: calculatedCostValue, estimatedCost }
+    })
   }
 
   function applyAutomaticPrice() {
@@ -397,6 +456,7 @@ function ProductEditor({ item, stages, layout, onSaved }: {
       <EditorSection title="진행 상태" icon={Sparkles}>
         <div className={cn('grid gap-3', fieldGridClass)}>
           <Field label="현재 단계"><StageSelect value={values.stageId} onChange={(value) => setValue('stageId', value)} stages={stages} /></Field>
+          {viewer.isMain && <Field label="담당 등록자"><OperatorSelect value={values.ownerOperatorId} onChange={(value) => setValue('ownerOperatorId', value)} operators={operators} /></Field>}
           <Field label="상품번호"><Input value={values.sampleCode} onChange={(event) => setValue('sampleCode', event.target.value)} placeholder="상품번호를 입력하세요" /></Field>
         </div>
         {item?.stageHistory && item.stageHistory.length > 0 && (
@@ -417,17 +477,37 @@ function ProductEditor({ item, stages, layout, onSaved }: {
     basic: (
       <EditorSection title="기본 상품 정보" icon={PencilLine}>
         <div className={cn('grid gap-3', fieldGridClass)}>
-          <Field label="제품명" required><Input value={values.productName} onChange={(event) => setValue('productName', event.target.value)} placeholder="상품명을 입력하세요" /></Field>
+          <Field label="상품명" required><Input value={values.productName} onChange={(event) => setValue('productName', event.target.value)} placeholder="상품명을 입력하세요" /></Field>
           <Field label="등록 상품명"><Input value={values.registeredProductName} onChange={(event) => setValue('registeredProductName', event.target.value)} /></Field>
           <Field label="제품 영문명"><Input value={values.englishName} onChange={(event) => setValue('englishName', event.target.value)} /></Field>
           <Field label="중국사용 항목"><Input value={values.chinaItemName} onChange={(event) => setValue('chinaItemName', event.target.value)} /></Field>
-          <Field label="구매·소싱 URL"><UrlInput value={values.sourceUrl} onChange={(value) => setValue('sourceUrl', value)} /></Field>
+          <Field label="중국 구매 링크"><UrlInput value={values.sourceUrl} onChange={(value) => setValue('sourceUrl', value)} /></Field>
           <Field label="패키지 정보 URL"><UrlInput value={values.packageInfoUrl} onChange={(value) => setValue('packageInfoUrl', value)} /></Field>
           <Field label="판매예정일"><Input type="date" value={values.plannedSaleDate} onChange={(event) => setValue('plannedSaleDate', event.target.value)} /></Field>
           <Field label="상세페이지 완료예정일"><Input type="date" value={values.detailPageDueDate} onChange={(event) => setValue('detailPageDueDate', event.target.value)} /></Field>
           <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" /></Field>
           <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} /></Field>
           <Field label="히스토리 메모"><TextArea value={values.historyNotes} onChange={(value) => setValue('historyNotes', value)} placeholder="날짜 / 담당자 / 결정 내용" rows={4} /></Field>
+        </div>
+      </EditorSection>
+    ),
+    sourcing: (
+      <EditorSection title="소싱 상품 등록" icon={PackageSearch}>
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs text-amber-900">
+          기준 환율: 1 CNY = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })} KRW
+          {exchangeRate.date ? ` (${exchangeRate.date})` : ' (기준값)'} · 한국원화 = (중국위안화 + 개당배송비) × 적용 환율
+        </div>
+        <div className={cn('grid gap-3', fieldGridClass)}>
+          <Field label="상품 옵션"><Input value={values.productOption} onChange={(event) => setValue('productOption', event.target.value)} /></Field>
+          <Field label="중국위안화 (CNY)"><MoneyInput value={values.chinaUnitPriceCny} onChange={(value) => setCnyCostValue('chinaUnitPriceCny', value)} /></Field>
+          <Field label="개당배송비 (CNY)"><MoneyInput value={values.unitShippingCny} onChange={(value) => setCnyCostValue('unitShippingCny', value)} /></Field>
+          <Field label="적용 환율 (KRW/CNY)"><MoneyInput value={values.exchangeRateKrw} onChange={(value) => setCnyCostValue('exchangeRateKrw', value)} /></Field>
+          <Field label="한국원화 (자동 계산)"><Input readOnly value={values.calculatedCostKrw ? won(Number(values.calculatedCostKrw)) : ''} placeholder="위안화와 배송비를 입력하세요" className="bg-muted/40" /></Field>
+          <Field label="국내 판매 링크"><UrlInput value={values.domesticSaleUrl} onChange={(value) => setValue('domesticSaleUrl', value)} /></Field>
+          <Field label="국내 판매가 (₩)"><MoneyInput value={values.domesticSalePrice} onChange={(value) => setValue('domesticSalePrice', value)} /></Field>
+          <Field label="상세페이지 URL"><UrlInput value={values.detailPageUrl} onChange={(value) => setValue('detailPageUrl', value)} /></Field>
+          <Field label="비고 1"><TextArea value={values.memo1} onChange={(value) => setValue('memo1', value)} /></Field>
+          <Field label="비고 2"><TextArea value={values.memo2} onChange={(value) => setValue('memo2', value)} /></Field>
         </div>
       </EditorSection>
     ),
@@ -599,6 +679,76 @@ function StageSettingsDialog({ stages, onSaved }: { stages: NewProductStage[]; o
   )
 }
 
+function OperatorSettingsDialog({ operators, availableMembers, onSaved }: {
+  operators: NewProductOperator[]
+  availableMembers: Array<{ id: string; displayName: string }>
+  onSaved: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [pending, startTransition] = useTransition()
+  const [drafts, setDrafts] = useState(() => operatorDrafts(operators))
+
+  function setDialogOpen(next: boolean) {
+    setOpen(next)
+    if (next) setDrafts(operatorDrafts(operators))
+  }
+
+  function save() {
+    startTransition(async () => {
+      const result = await saveNewProductOperatorsAction({ operators: drafts })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('등록자 작업공간을 저장했습니다.')
+      setOpen(false)
+      onSaved()
+    })
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={setDialogOpen}>
+      <Dialog.Trigger render={(props) => <Button {...props} variant="outline"><Users />등록자 설정</Button>} />
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px]" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[min(94vw,680px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl bg-background shadow-2xl">
+          <div className="border-b p-5">
+            <Dialog.Title className="text-lg font-semibold">등록자 작업공간 설정</Dialog.Title>
+            <Dialog.Description className="mt-1 text-sm text-muted-foreground">1~5명까지 지정할 수 있습니다. 메인은 전체 상품을 관리하고, 등록자는 본인에게 지정된 상품만 수정합니다.</Dialog.Description>
+          </div>
+          <div className="flex-1 space-y-2 overflow-y-auto p-4">
+            {drafts.map((draft, index) => (
+              <div key={`${draft.memberUserId}-${index}`} className="grid gap-2 rounded-lg border bg-muted/20 p-3 md:grid-cols-[88px_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+                <span className="text-xs font-semibold text-muted-foreground">등록자 {index + 1}</span>
+                <select
+                  value={draft.memberUserId}
+                  onChange={(event) => {
+                    const member = availableMembers.find((entry) => entry.id === event.target.value)
+                    setDrafts((current) => current.map((entry, entryIndex) => entryIndex === index
+                      ? { memberUserId: event.target.value, displayName: member?.displayName ?? entry.displayName }
+                      : entry))
+                  }}
+                  className="h-8 min-w-0 rounded-lg border bg-background px-2 text-sm"
+                >
+                  <option value="">계정 선택</option>
+                  {availableMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}
+                </select>
+                <Input value={draft.displayName} onChange={(event) => setDrafts((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, displayName: event.target.value } : entry))} placeholder="화면에 표시할 이름" />
+                <Button type="button" variant="ghost" size="icon-sm" disabled={drafts.length <= 1} aria-label="등록자 제거" onClick={() => setDrafts((current) => current.filter((_, entryIndex) => entryIndex !== index))}><Trash2 /></Button>
+              </div>
+            ))}
+            {drafts.length < 5 && <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setDrafts((current) => [...current, { memberUserId: '', displayName: '' }])}><Plus />등록자 추가</Button>}
+          </div>
+          <div className="flex justify-end gap-2 border-t p-4">
+            <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline">취소</Button>} />
+            <Button onClick={save} disabled={pending}>{pending && <Loader2 className="animate-spin" />}등록자 저장</Button>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
 function LayoutSettingsDialog({ layout, onSaved }: { layout: NewProductEditorLayout; onSaved: (layout: NewProductEditorLayout) => void }) {
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -700,6 +850,15 @@ function StageSelect({ value, onChange, stages }: { value: string; onChange: (va
   return (
     <select value={value} onChange={(event) => onChange(event.target.value)} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30">
       {stages.map((stage, index) => <option key={stage.id} value={stage.id}>{index + 1}. {stage.name}</option>)}
+    </select>
+  )
+}
+
+function OperatorSelect({ value, onChange, operators }: { value: string; onChange: (value: string) => void; operators: NewProductOperator[] }) {
+  return (
+    <select value={value} onChange={(event) => onChange(event.target.value)} className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm outline-none focus:border-ring focus:ring-2 focus:ring-ring/30">
+      <option value="">담당 등록자 선택</option>
+      {operators.map((operator) => <option key={operator.id} value={operator.id}>{operator.displayName}</option>)}
     </select>
   )
 }
@@ -870,11 +1029,28 @@ function attachmentValidationError(file: File, isPdf: boolean) {
 
 type EditorValues = ReturnType<typeof emptyEditorValues>
 
-function emptyEditorValues(stageId: string) {
+function operatorDrafts(operators: NewProductOperator[]) {
+  return operators.length > 0
+    ? operators.map((operator) => ({ memberUserId: operator.memberUserId, displayName: operator.displayName }))
+    : [{ memberUserId: '', displayName: '' }]
+}
+
+function emptyEditorValues(stageId: string, exchangeRateKrw: number, ownerOperatorId: string) {
   return {
     stageId,
+    ownerOperatorId,
     sampleCode: '',
     productName: '',
+    productOption: '',
+    chinaUnitPriceCny: '',
+    unitShippingCny: '',
+    exchangeRateKrw: String(exchangeRateKrw),
+    calculatedCostKrw: '',
+    domesticSaleUrl: '',
+    domesticSalePrice: '',
+    detailPageUrl: '',
+    memo1: '',
+    memo2: '',
     englishName: '',
     sourceUrl: '',
     requiredChecks: '',
@@ -902,11 +1078,22 @@ function emptyEditorValues(stageId: string) {
   }
 }
 
-function editorValues(item: NewProductItem): EditorValues {
+function editorValues(item: NewProductItem, defaultExchangeRate: number): EditorValues {
   return {
     stageId: item.stageId,
+    ownerOperatorId: item.ownerOperatorId ?? '',
     sampleCode: item.sampleCode ?? '',
     productName: item.productName,
+    productOption: item.productOption ?? '',
+    chinaUnitPriceCny: valueString(item.chinaUnitPriceCny),
+    unitShippingCny: valueString(item.unitShippingCny),
+    exchangeRateKrw: valueString(item.exchangeRateKrw ?? defaultExchangeRate),
+    calculatedCostKrw: valueString(item.calculatedCostKrw),
+    domesticSaleUrl: item.domesticSaleUrl ?? '',
+    domesticSalePrice: valueString(item.domesticSalePrice),
+    detailPageUrl: item.detailPageUrl ?? '',
+    memo1: item.memo1 ?? '',
+    memo2: item.memo2 ?? '',
     englishName: item.englishName ?? '',
     sourceUrl: item.sourceUrl ?? '',
     requiredChecks: item.requiredChecks ?? '',

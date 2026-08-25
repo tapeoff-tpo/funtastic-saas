@@ -1,8 +1,9 @@
 import type { Metadata } from 'next'
 import { redirect } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
-import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getWorkspaceUserId, listAdmins } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { getNewProductPageSetup } from '@/lib/new-products/workflow'
 import { NewProductBoard } from './new-product-board'
 
@@ -17,7 +18,11 @@ export default async function NewProductsPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const setup = await getNewProductPageSetup(workspaceUserId)
+  const [setup, exchangeRate, accounts] = await Promise.all([
+    getNewProductPageSetup({ userId: workspaceUserId, actorUserId: user.id }),
+    getLatestCnyKrwReferenceRate(),
+    listAdmins(),
+  ])
 
   return (
     <div className="space-y-4">
@@ -30,7 +35,19 @@ export default async function NewProductsPage() {
           1차 통과부터 등록 완료까지, 상품별 정보와 샘플·품질표시 자료를 한곳에서 관리합니다.
         </p>
       </header>
-      <NewProductBoard initialStages={setup.stages} initialLayout={setup.editorLayout} />
+      <NewProductBoard
+        initialStages={setup.stages}
+        initialLayout={setup.editorLayout}
+        operators={setup.operators.filter((operator) => operator.isActive)}
+        viewer={setup.viewer}
+        exchangeRate={exchangeRate}
+        availableMembers={accounts
+          .filter((account) => !account.deactivatedAt)
+          .map((account) => ({
+            id: account.id,
+            displayName: account.displayName?.trim() || account.email,
+          }))}
+      />
     </div>
   )
 }

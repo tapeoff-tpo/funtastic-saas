@@ -15,7 +15,7 @@ export async function GET(_request: Request, context: ItemRouteContext) {
     return NextResponse.json({ error: '상품 번호를 확인해주세요.' }, { status: 400 })
   }
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const item = await getNewProductItem({ userId: workspaceUserId, itemId: id })
+  const item = await getNewProductItem({ userId: workspaceUserId, actorUserId: user.id, itemId: id })
   if (!item) return NextResponse.json({ error: '상품을 찾을 수 없습니다.' }, { status: 404 })
   return NextResponse.json({ item }, { headers: { 'Cache-Control': 'private, no-store' } })
 }

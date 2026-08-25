@@ -7,6 +7,7 @@ import {
   createNewProduct,
   moveNewProducts,
   saveNewProductEditorLayout,
+  saveNewProductOperators,
   saveNewProductStages,
   updateNewProduct,
   type NewProductEditorLayout,
@@ -87,7 +88,11 @@ export async function saveNewProductStagesAction(input: {
 }) {
   try {
     const auth = await actionUser()
-    await saveNewProductStages({ userId: auth.workspaceUserId, stages: input.stages })
+    await saveNewProductStages({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+      stages: input.stages,
+    })
     revalidatePath('/new-products')
     return { success: true as const }
   } catch (error) {
@@ -102,6 +107,7 @@ export async function saveNewProductEditorLayoutAction(input: {
     const auth = await actionUser()
     const layout = await saveNewProductEditorLayout({
       userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
       layout: input.layout,
     })
     revalidatePath('/new-products')
@@ -111,11 +117,40 @@ export async function saveNewProductEditorLayoutAction(input: {
   }
 }
 
+export async function saveNewProductOperatorsAction(input: {
+  operators: Array<{ memberUserId: string; displayName: string }>
+}) {
+  try {
+    const auth = await actionUser()
+    await saveNewProductOperators({
+      userId: auth.workspaceUserId,
+      actorUserId: auth.userId,
+      operators: input.operators,
+    })
+    revalidatePath('/new-products')
+    revalidatePath('/operations/sourcing')
+    return { success: true as const }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
+}
+
 function newProductValues(values: Record<string, unknown>): NewProductInput {
   return {
     stageId: text(values.stageId),
+    ownerOperatorId: nullableText(values.ownerOperatorId, 100),
     productName: text(values.productName).trim().slice(0, 500),
     sampleCode: nullableText(values.sampleCode, 200),
+    productOption: nullableText(values.productOption),
+    chinaUnitPriceCny: nullableNumber(values.chinaUnitPriceCny),
+    unitShippingCny: nullableNumber(values.unitShippingCny),
+    exchangeRateKrw: nullableNumber(values.exchangeRateKrw),
+    calculatedCostKrw: nullableInteger(values.calculatedCostKrw),
+    domesticSaleUrl: nullableText(values.domesticSaleUrl),
+    domesticSalePrice: nullableInteger(values.domesticSalePrice),
+    detailPageUrl: nullableText(values.detailPageUrl),
+    memo1: nullableText(values.memo1),
+    memo2: nullableText(values.memo2),
     englishName: nullableText(values.englishName),
     sourceUrl: nullableText(values.sourceUrl),
     requiredChecks: nullableText(values.requiredChecks),

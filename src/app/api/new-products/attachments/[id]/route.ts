@@ -12,7 +12,11 @@ export async function GET(_request: Request, context: AttachmentRouteContext) {
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const { id } = await context.params
-  const attachment = await getNewProductAttachment({ userId: workspaceUserId, attachmentId: id })
+  const attachment = await getNewProductAttachment({
+    userId: workspaceUserId,
+    requestedByUserId: user.id,
+    attachmentId: id,
+  })
   if (!attachment) return NextResponse.json({ error: '파일을 찾을 수 없습니다.' }, { status: 404 })
 
   return new NextResponse(Buffer.from(attachment.fileDataBase64, 'base64'), {

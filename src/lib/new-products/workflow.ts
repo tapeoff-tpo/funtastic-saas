@@ -1,5 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
+import { getProfile } from '@/lib/admin-accounts/queries'
+import { calculateCnyCostKrw } from './cny-cost'
 
 export const DEFAULT_NEW_PRODUCT_STAGES = [
   { name: '1차 통과 상품 등록', tone: 'blue' },
@@ -34,6 +36,19 @@ export type NewProductStage = {
   itemCount: number
 }
 
+export type NewProductOperator = {
+  id: string
+  memberUserId: string
+  displayName: string
+  position: number
+  isActive: boolean
+}
+
+export type NewProductViewer = {
+  isMain: boolean
+  operatorId: string | null
+}
+
 export type NewProductAttachment = {
   id: string
   kind: 'product_image' | 'sample_china_image' | 'final_sample_image' | 'quality_pdf'
@@ -58,8 +73,21 @@ export type NewProductItem = {
   stageName: string
   stagePosition: number
   stageTone: NewProductStageTone
+  ownerOperatorId: string | null
+  ownerName: string | null
+  sourcingItemId: string | null
   sampleCode: string | null
   productName: string
+  productOption: string | null
+  chinaUnitPriceCny: number | null
+  unitShippingCny: number | null
+  exchangeRateKrw: number | null
+  calculatedCostKrw: number | null
+  domesticSaleUrl: string | null
+  domesticSalePrice: number | null
+  detailPageUrl: string | null
+  memo1: string | null
+  memo2: string | null
   englishName: string | null
   sourceUrl: string | null
   requiredChecks: string | null
@@ -92,8 +120,19 @@ export type NewProductItem = {
 
 export type NewProductInput = {
   stageId: string
+  ownerOperatorId: string | null
   sampleCode: string | null
   productName: string
+  productOption: string | null
+  chinaUnitPriceCny: number | null
+  unitShippingCny: number | null
+  exchangeRateKrw: number | null
+  calculatedCostKrw: number | null
+  domesticSaleUrl: string | null
+  domesticSalePrice: number | null
+  detailPageUrl: string | null
+  memo1: string | null
+  memo2: string | null
   englishName: string | null
   sourceUrl: string | null
   requiredChecks: string | null
@@ -126,6 +165,8 @@ export type NewProductSummary = {
   stageId: string
   stageName: string
   stageTone: NewProductStageTone
+  ownerOperatorId: string | null
+  ownerName: string | null
   productName: string
   sampleCode: string | null
   updatedAt: string
@@ -134,6 +175,7 @@ export type NewProductSummary = {
 export const NEW_PRODUCT_EDITOR_SECTIONS = [
   'progress',
   'basic',
+  'sourcing',
   'attachments',
   'package',
   'pricing',
@@ -210,13 +252,53 @@ async function createNewProductWorkflowSchema() {
     ON new_product_workflow_stages(user_id, position)
   `)
   await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS new_product_workflow_operators (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id uuid NOT NULL,
+      member_user_id uuid NOT NULL,
+      display_name varchar(100) NOT NULL,
+      position integer NOT NULL,
+      is_active boolean NOT NULL DEFAULT true,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      updated_at timestamptz NOT NULL DEFAULT now(),
+      UNIQUE(user_id, member_user_id),
+      CHECK (position BETWEEN 1 AND 5)
+    )
+  `)
+  await db.execute(sql`
+    ALTER TABLE new_product_workflow_operators
+      DROP CONSTRAINT IF EXISTS new_product_workflow_operators_user_id_position_key,
+      DROP CONSTRAINT IF EXISTS new_product_workflow_operators_workspace_position_unique
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS new_product_workflow_operators_workspace_active_idx
+    ON new_product_workflow_operators(user_id, is_active, position)
+  `)
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS new_product_workflow_operators_workspace_active_position_unique
+    ON new_product_workflow_operators(user_id, position)
+    WHERE is_active = TRUE
+  `)
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_items (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id uuid NOT NULL,
       product_number integer NOT NULL,
       stage_id uuid NOT NULL REFERENCES new_product_workflow_stages(id),
+      owner_operator_id uuid,
+      sourcing_item_id uuid,
       sample_code varchar(200),
       product_name text NOT NULL,
+      product_option text,
+      china_unit_price_cny numeric(14, 2),
+      unit_shipping_cny numeric(14, 2),
+      exchange_rate_krw numeric(14, 4),
+      calculated_cost_krw integer,
+      domestic_sale_url text,
+      domestic_sale_price integer,
+      detail_page_url text,
+      memo_1 text,
+      memo_2 text,
       english_name text,
       source_url text,
       required_checks text,
@@ -255,6 +337,30 @@ async function createNewProductWorkflowSchema() {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS new_product_workflow_items_user_updated_idx
     ON new_product_workflow_items(user_id, updated_at DESC)
+  `)
+  await db.execute(sql`
+    ALTER TABLE new_product_workflow_items
+      ADD COLUMN IF NOT EXISTS owner_operator_id uuid,
+      ADD COLUMN IF NOT EXISTS sourcing_item_id uuid,
+      ADD COLUMN IF NOT EXISTS product_option text,
+      ADD COLUMN IF NOT EXISTS china_unit_price_cny numeric(14, 2),
+      ADD COLUMN IF NOT EXISTS unit_shipping_cny numeric(14, 2),
+      ADD COLUMN IF NOT EXISTS exchange_rate_krw numeric(14, 4),
+      ADD COLUMN IF NOT EXISTS calculated_cost_krw integer,
+      ADD COLUMN IF NOT EXISTS domestic_sale_url text,
+      ADD COLUMN IF NOT EXISTS domestic_sale_price integer,
+      ADD COLUMN IF NOT EXISTS detail_page_url text,
+      ADD COLUMN IF NOT EXISTS memo_1 text,
+      ADD COLUMN IF NOT EXISTS memo_2 text
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS new_product_workflow_items_workspace_owner_updated_idx
+    ON new_product_workflow_items(user_id, owner_operator_id, updated_at DESC)
+  `)
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS new_product_workflow_items_workspace_sourcing_unique
+    ON new_product_workflow_items(user_id, sourcing_item_id)
+    WHERE sourcing_item_id IS NOT NULL
   `)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_stage_history (
@@ -299,14 +405,63 @@ async function createNewProductWorkflowSchema() {
     )
   `)
   await db.execute(sql`ALTER TABLE new_product_workflow_stages ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`ALTER TABLE new_product_workflow_operators ENABLE ROW LEVEL SECURITY`)
   await db.execute(sql`ALTER TABLE new_product_workflow_items ENABLE ROW LEVEL SECURITY`)
   await db.execute(sql`ALTER TABLE new_product_workflow_stage_history ENABLE ROW LEVEL SECURITY`)
   await db.execute(sql`ALTER TABLE new_product_workflow_attachments ENABLE ROW LEVEL SECURITY`)
   await db.execute(sql`ALTER TABLE new_product_workflow_preferences ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`REVOKE ALL ON TABLE new_product_workflow_operators FROM anon, authenticated`)
 }
 
-export async function getNewProductPageSetup(userId: string) {
+export async function listNewProductOperators(userId: string): Promise<NewProductOperator[]> {
   await ensureNewProductWorkflowTables(userId)
+  return resultRows<NewProductOperator>(await db.execute(sql`
+    SELECT
+      id,
+      member_user_id AS "memberUserId",
+      display_name AS "displayName",
+      position,
+      is_active AS "isActive"
+    FROM new_product_workflow_operators
+    WHERE user_id = ${userId}::uuid
+    ORDER BY position, created_at
+  `))
+}
+
+export async function getNewProductViewer(input: { userId: string; actorUserId: string }): Promise<NewProductViewer> {
+  await ensureNewProductWorkflowTables(input.userId)
+  const profile = await getProfile(input.actorUserId)
+  const isMain = profile?.role === 'super_admin' && !profile.deactivatedAt
+
+  const operators = await listNewProductOperators(input.userId)
+  if (operators.length === 0) {
+    const defaultName = profile?.displayName?.trim() || profile?.email?.trim() || '등록자 1'
+    await db.execute(sql`
+      INSERT INTO new_product_workflow_operators (user_id, member_user_id, display_name, position)
+      VALUES (${input.userId}::uuid, ${input.actorUserId}::uuid, ${defaultName.slice(0, 100)}, 1)
+      ON CONFLICT DO NOTHING
+    `)
+  }
+
+  const [operator] = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT id
+    FROM new_product_workflow_operators
+    WHERE user_id = ${input.userId}::uuid
+      AND member_user_id = ${input.actorUserId}::uuid
+      AND is_active = TRUE
+    LIMIT 1
+  `))
+  return { isMain, operatorId: operator?.id ?? null }
+}
+
+export async function getNewProductPageSetup(input: { userId: string; actorUserId: string }) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer(input)
+  const itemAccessCondition = viewer.isMain
+    ? sql`TRUE`
+    : viewer.operatorId
+      ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
+      : sql`FALSE`
   const [stageResult, preferenceResult] = await Promise.all([
     db.execute<NewProductStage>(sql`
       SELECT
@@ -317,15 +472,17 @@ export async function getNewProductPageSetup(userId: string) {
         COUNT(item.id)::int AS "itemCount"
       FROM new_product_workflow_stages stage
       LEFT JOIN new_product_workflow_items item
-        ON item.user_id = stage.user_id AND item.stage_id = stage.id
-      WHERE stage.user_id = ${userId}::uuid
+        ON item.user_id = stage.user_id
+          AND item.stage_id = stage.id
+          AND (${itemAccessCondition})
+      WHERE stage.user_id = ${input.userId}::uuid
       GROUP BY stage.id
       ORDER BY stage.position, stage.created_at
     `),
     db.execute<{ editorLayout: unknown }>(sql`
       SELECT editor_layout AS "editorLayout"
       FROM new_product_workflow_preferences
-      WHERE user_id = ${userId}::uuid
+      WHERE user_id = ${input.userId}::uuid
     `),
   ])
   const [preference] = resultRows<{ editorLayout: unknown }>(preferenceResult)
@@ -335,18 +492,30 @@ export async function getNewProductPageSetup(userId: string) {
       tone: validTone(stage.tone),
     })),
     editorLayout: normalizeNewProductEditorLayout(preference?.editorLayout),
+    operators: await listNewProductOperators(input.userId),
+    viewer,
   }
 }
 
 export async function listNewProductSummaries(input: {
   userId: string
+  actorUserId: string
   stageId?: string | null
   query?: string | null
+  ownerOperatorId?: string | null
   limit?: number
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.actorUserId })
   const query = input.query?.trim().slice(0, 200) ?? ''
   const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)))
+  const ownerCondition = viewer.isMain
+    ? input.ownerOperatorId
+      ? sql`AND item.owner_operator_id = ${input.ownerOperatorId}::uuid`
+      : sql``
+    : viewer.operatorId
+      ? sql`AND item.owner_operator_id = ${viewer.operatorId}::uuid`
+      : sql`AND FALSE`
   const stageCondition = input.stageId
     ? sql`AND item.stage_id = ${input.stageId}::uuid`
     : sql``
@@ -367,12 +536,16 @@ export async function listNewProductSummaries(input: {
         item.stage_id AS "stageId",
         stage.name AS "stageName",
         stage.tone AS "stageTone",
+        item.owner_operator_id AS "ownerOperatorId",
+        operator.display_name AS "ownerName",
         item.product_name AS "productName",
         item.sample_code AS "sampleCode",
         item.updated_at::text AS "updatedAt"
       FROM new_product_workflow_items item
       JOIN new_product_workflow_stages stage ON stage.id = item.stage_id
+      LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
       WHERE item.user_id = ${input.userId}::uuid
+      ${ownerCondition}
       ${stageCondition}
       ${searchCondition}
       ORDER BY item.updated_at DESC, item.product_number DESC
@@ -382,6 +555,7 @@ export async function listNewProductSummaries(input: {
       SELECT COUNT(*)::int AS count
       FROM new_product_workflow_items item
       WHERE item.user_id = ${input.userId}::uuid
+      ${ownerCondition}
       ${stageCondition}
       ${searchCondition}
     `),
@@ -396,8 +570,14 @@ export async function listNewProductSummaries(input: {
   }
 }
 
-export async function getNewProductItem(input: { userId: string; itemId: string }) {
+export async function getNewProductItem(input: { userId: string; actorUserId: string; itemId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.actorUserId })
+  const ownerCondition = viewer.isMain
+    ? sql`TRUE`
+    : viewer.operatorId
+      ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
+      : sql`FALSE`
   const result = await db.execute<NewProductItem>(sql`
     SELECT
       item.id,
@@ -406,8 +586,21 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
       stage.name AS "stageName",
       stage.position AS "stagePosition",
       stage.tone AS "stageTone",
+      item.owner_operator_id AS "ownerOperatorId",
+      operator.display_name AS "ownerName",
+      item.sourcing_item_id AS "sourcingItemId",
       item.sample_code AS "sampleCode",
       item.product_name AS "productName",
+      item.product_option AS "productOption",
+      item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
+      item.unit_shipping_cny::float8 AS "unitShippingCny",
+      item.exchange_rate_krw::float8 AS "exchangeRateKrw",
+      item.calculated_cost_krw AS "calculatedCostKrw",
+      item.domestic_sale_url AS "domesticSaleUrl",
+      item.domestic_sale_price AS "domesticSalePrice",
+      item.detail_page_url AS "detailPageUrl",
+      item.memo_1 AS "memo1",
+      item.memo_2 AS "memo2",
       item.english_name AS "englishName",
       item.source_url AS "sourceUrl",
       item.required_checks AS "requiredChecks",
@@ -465,8 +658,10 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
       ), '[]'::jsonb) AS "stageHistory"
     FROM new_product_workflow_items item
     JOIN new_product_workflow_stages stage ON stage.id = item.stage_id
+    LEFT JOIN new_product_workflow_operators operator ON operator.id = item.owner_operator_id
     WHERE item.user_id = ${input.userId}::uuid
       AND item.id = ${input.itemId}::uuid
+      AND (${ownerCondition})
   `)
   const [item] = resultRows<NewProductItem>(result)
   if (!item) return null
@@ -587,6 +782,18 @@ export async function createNewProduct(input: {
   values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const ownerOperatorId = await resolveWritableOwner({
+    userId: input.userId,
+    viewer,
+    requestedOwnerOperatorId: input.values.ownerOperatorId,
+  })
+  const calculatedCostKrw = calculateCnyCostKrw({
+    chinaUnitPriceCny: input.values.chinaUnitPriceCny,
+    unitShippingCny: input.values.unitShippingCny,
+    exchangeRateKrw: input.values.exchangeRateKrw,
+  })
+  const estimatedCost = input.values.estimatedCost ?? calculatedCostKrw
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
     await assertStage(tx, input.userId, input.values.stageId)
@@ -597,7 +804,11 @@ export async function createNewProduct(input: {
     `))
     const [created] = resultRows<{ id: string }>(await tx.execute(sql`
       INSERT INTO new_product_workflow_items (
-        user_id, product_number, stage_id, sample_code, product_name, english_name,
+        user_id, product_number, stage_id, owner_operator_id,
+        sample_code, product_name, product_option,
+        china_unit_price_cny, unit_shipping_cny, exchange_rate_krw, calculated_cost_krw,
+        domestic_sale_url, domestic_sale_price, detail_page_url, memo_1, memo_2,
+        english_name,
         source_url, required_checks, estimated_cost, history_notes, reference_notes,
         china_item_name, planned_sale_date, detail_page_due_date, registered_product_name,
         package_info_url, package_progress_status, package_status, korean_manual_status,
@@ -605,9 +816,12 @@ export async function createNewProduct(input: {
         quality_notice_status, package_box_design, package_manufacturer, package_packing,
         created_by_user_id
       ) VALUES (
-        ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid,
-        ${input.values.sampleCode}, ${input.values.productName}, ${input.values.englishName},
-        ${input.values.sourceUrl}, ${input.values.requiredChecks}, ${input.values.estimatedCost},
+        ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid, ${ownerOperatorId}::uuid,
+        ${input.values.sampleCode}, ${input.values.productName}, ${input.values.productOption},
+        ${input.values.chinaUnitPriceCny}, ${input.values.unitShippingCny}, ${input.values.exchangeRateKrw}, ${calculatedCostKrw},
+        ${input.values.domesticSaleUrl}, ${input.values.domesticSalePrice}, ${input.values.detailPageUrl}, ${input.values.memo1}, ${input.values.memo2},
+        ${input.values.englishName},
+        ${input.values.sourceUrl}, ${input.values.requiredChecks}, ${estimatedCost},
         ${input.values.historyNotes}, ${input.values.referenceNotes}, ${input.values.chinaItemName},
         ${input.values.plannedSaleDate}::date, ${input.values.detailPageDueDate}::date,
         ${input.values.registeredProductName}, ${input.values.packageInfoUrl},
@@ -640,21 +854,46 @@ export async function updateNewProduct(input: {
   values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   await db.transaction(async (tx) => {
-    const [current] = resultRows<{ stageId: string }>(await tx.execute(sql`
-      SELECT stage_id AS "stageId"
+    const [current] = resultRows<{ stageId: string; ownerOperatorId: string | null }>(await tx.execute(sql`
+      SELECT stage_id AS "stageId", owner_operator_id AS "ownerOperatorId"
       FROM new_product_workflow_items
       WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
       FOR UPDATE
     `))
     if (!current) throw new Error('신상품을 찾을 수 없습니다.')
+    if (!canWriteItem(viewer, current.ownerOperatorId)) {
+      throw new Error('다른 등록자의 상품은 수정할 수 없습니다.')
+    }
+    const ownerOperatorId = viewer.isMain
+      ? input.values.ownerOperatorId ?? current.ownerOperatorId
+      : viewer.operatorId
+    if (!ownerOperatorId) throw new Error('담당 등록자를 먼저 지정해주세요.')
+    await assertOperator(tx, input.userId, ownerOperatorId)
     await assertStage(tx, input.userId, input.values.stageId)
+    const calculatedCostKrw = calculateCnyCostKrw({
+      chinaUnitPriceCny: input.values.chinaUnitPriceCny,
+      unitShippingCny: input.values.unitShippingCny,
+      exchangeRateKrw: input.values.exchangeRateKrw,
+    })
 
     await tx.execute(sql`
       UPDATE new_product_workflow_items SET
         stage_id = ${input.values.stageId}::uuid,
+        owner_operator_id = ${ownerOperatorId}::uuid,
         sample_code = ${input.values.sampleCode},
         product_name = ${input.values.productName},
+        product_option = ${input.values.productOption},
+        china_unit_price_cny = ${input.values.chinaUnitPriceCny},
+        unit_shipping_cny = ${input.values.unitShippingCny},
+        exchange_rate_krw = ${input.values.exchangeRateKrw},
+        calculated_cost_krw = ${calculatedCostKrw},
+        domestic_sale_url = ${input.values.domesticSaleUrl},
+        domestic_sale_price = ${input.values.domesticSalePrice},
+        detail_page_url = ${input.values.detailPageUrl},
+        memo_1 = ${input.values.memo1},
+        memo_2 = ${input.values.memo2},
         english_name = ${input.values.englishName},
         source_url = ${input.values.sourceUrl},
         required_checks = ${input.values.requiredChecks},
@@ -704,18 +943,22 @@ export async function moveNewProducts(input: {
   note?: string | null
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const itemIds = [...new Set(input.itemIds)].slice(0, 500)
   if (itemIds.length === 0) return { moved: 0 }
 
   return db.transaction(async (tx) => {
     await assertStage(tx, input.userId, input.stageId)
-    const currentRows = resultRows<{ id: string; stageId: string }>(await tx.execute(sql`
-      SELECT id, stage_id AS "stageId"
+    const currentRows = resultRows<{ id: string; stageId: string; ownerOperatorId: string | null }>(await tx.execute(sql`
+      SELECT id, stage_id AS "stageId", owner_operator_id AS "ownerOperatorId"
       FROM new_product_workflow_items
       WHERE user_id = ${input.userId}::uuid
         AND id IN (${sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `)})
       FOR UPDATE
     `))
+    if (currentRows.length !== itemIds.length || currentRows.some((item) => !canWriteItem(viewer, item.ownerOperatorId))) {
+      throw new Error('다른 등록자의 상품은 이동할 수 없습니다.')
+    }
     for (const item of currentRows) {
       if (item.stageId === input.stageId) continue
       await tx.execute(sql`
@@ -738,9 +981,12 @@ export async function moveNewProducts(input: {
 
 export async function saveNewProductStages(input: {
   userId: string
+  requestedByUserId: string
   stages: Array<{ id?: string; name: string; tone: string }>
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!viewer.isMain) throw new Error('단계 설정은 메인만 변경할 수 있습니다.')
   if (input.stages.length < 1 || input.stages.length > 40) throw new Error('단계는 1~40개로 설정해주세요.')
   const stages = input.stages.map((stage) => ({
     id: stage.id?.trim() || null,
@@ -772,9 +1018,12 @@ export async function saveNewProductStages(input: {
 
 export async function saveNewProductEditorLayout(input: {
   userId: string
+  requestedByUserId: string
   layout: NewProductEditorLayout
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!viewer.isMain) throw new Error('레이아웃 설정은 메인만 변경할 수 있습니다.')
   const layout = normalizeNewProductEditorLayout(input.layout)
   await db.execute(sql`
     INSERT INTO new_product_workflow_preferences (user_id, editor_layout, updated_at)
@@ -784,6 +1033,59 @@ export async function saveNewProductEditorLayout(input: {
       updated_at = now()
   `)
   return layout
+}
+
+export async function saveNewProductOperators(input: {
+  userId: string
+  actorUserId: string
+  operators: Array<{ memberUserId: string; displayName: string }>
+}) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.actorUserId })
+  if (!viewer.isMain) throw new Error('등록자 설정은 메인만 변경할 수 있습니다.')
+
+  const operators = input.operators
+    .map((operator) => ({
+      memberUserId: operator.memberUserId.trim(),
+      displayName: operator.displayName.trim().slice(0, 100),
+    }))
+    .filter((operator) => operator.memberUserId && operator.displayName)
+    .slice(0, 5)
+  if (operators.length === 0) throw new Error('등록자를 1명 이상 설정해주세요.')
+  if (new Set(operators.map((operator) => operator.memberUserId)).size !== operators.length) {
+    throw new Error('같은 계정을 등록자에 중복으로 지정할 수 없습니다.')
+  }
+
+  const memberRows = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT id
+    FROM user_profiles
+    WHERE id IN (${sql.join(operators.map((operator) => sql`${operator.memberUserId}::uuid`), sql`, `)})
+      AND deactivated_at IS NULL
+  `))
+  if (memberRows.length !== operators.length) throw new Error('활성 계정만 등록자로 지정할 수 있습니다.')
+
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-operators:${input.userId}`}))`)
+    await tx.execute(sql`
+      UPDATE new_product_workflow_operators
+      SET is_active = FALSE, updated_at = now()
+      WHERE user_id = ${input.userId}::uuid
+    `)
+    for (const [index, operator] of operators.entries()) {
+      await tx.execute(sql`
+        INSERT INTO new_product_workflow_operators (
+          user_id, member_user_id, display_name, position, is_active, updated_at
+        ) VALUES (
+          ${input.userId}::uuid, ${operator.memberUserId}::uuid, ${operator.displayName}, ${index + 1}, TRUE, now()
+        )
+        ON CONFLICT (user_id, member_user_id) DO UPDATE SET
+          display_name = EXCLUDED.display_name,
+          position = EXCLUDED.position,
+          is_active = TRUE,
+          updated_at = now()
+      `)
+    }
+  })
 }
 
 export async function addNewProductAttachment(input: {
@@ -796,6 +1098,15 @@ export async function addNewProductAttachment(input: {
   fileBuffer: ArrayBuffer
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const [item] = resultRows<{ ownerOperatorId: string | null }>(await db.execute(sql`
+    SELECT owner_operator_id AS "ownerOperatorId"
+    FROM new_product_workflow_items
+    WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
+    LIMIT 1
+  `))
+  if (!item) throw new Error('첨부할 신상품을 찾을 수 없습니다.')
+  if (!canWriteItem(viewer, item.ownerOperatorId)) throw new Error('다른 등록자의 상품에는 사진을 추가할 수 없습니다.')
   const base64 = Buffer.from(input.fileBuffer).toString('base64')
   const [created] = resultRows<{ id: string }>(await db.execute(sql`
     INSERT INTO new_product_workflow_attachments (
@@ -816,8 +1127,9 @@ export async function addNewProductAttachment(input: {
   return created
 }
 
-export async function getNewProductAttachment(input: { userId: string; attachmentId: string }) {
+export async function getNewProductAttachment(input: { userId: string; requestedByUserId: string; attachmentId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
   const [attachment] = resultRows<{
     fileName: string
     contentType: string
@@ -828,14 +1140,33 @@ export async function getNewProductAttachment(input: { userId: string; attachmen
       attachment.content_type AS "contentType",
       encode(attachment.file_data, 'base64') AS "fileDataBase64"
     FROM new_product_workflow_attachments attachment
+    JOIN new_product_workflow_items item ON item.id = attachment.item_id
     WHERE attachment.id = ${input.attachmentId}::uuid
       AND attachment.user_id = ${input.userId}::uuid
+      AND (${viewer.isMain
+        ? sql`TRUE`
+        : viewer.operatorId
+          ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
+          : sql`FALSE`})
   `))
   return attachment ?? null
 }
 
-export async function deleteNewProductAttachment(input: { userId: string; attachmentId: string }) {
+export async function deleteNewProductAttachment(input: { userId: string; requestedByUserId: string; attachmentId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  const [attachment] = resultRows<{ ownerOperatorId: string | null }>(await db.execute(sql`
+    SELECT item.owner_operator_id AS "ownerOperatorId"
+    FROM new_product_workflow_attachments attachment
+    JOIN new_product_workflow_items item ON item.id = attachment.item_id
+    WHERE attachment.id = ${input.attachmentId}::uuid
+      AND attachment.user_id = ${input.userId}::uuid
+    LIMIT 1
+  `))
+  if (!attachment) return false
+  if (!canWriteItem(viewer, attachment.ownerOperatorId)) {
+    throw new Error('다른 등록자의 사진은 삭제할 수 없습니다.')
+  }
   const result = await db.execute(sql`
     DELETE FROM new_product_workflow_attachments
     WHERE id = ${input.attachmentId}::uuid AND user_id = ${input.userId}::uuid
@@ -850,6 +1181,47 @@ async function assertStage(tx: Parameters<Parameters<typeof db.transaction>[0]>[
     WHERE id = ${stageId}::uuid AND user_id = ${userId}::uuid
   `)
   if (resultRows(result).length === 0) throw new Error('선택한 단계를 찾을 수 없습니다.')
+}
+
+async function assertOperator(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  userId: string,
+  operatorId: string,
+) {
+  const result = await tx.execute(sql`
+    SELECT id
+    FROM new_product_workflow_operators
+    WHERE id = ${operatorId}::uuid
+      AND user_id = ${userId}::uuid
+      AND is_active = TRUE
+  `)
+  if (resultRows(result).length === 0) throw new Error('담당 등록자를 찾을 수 없습니다.')
+}
+
+async function resolveWritableOwner(input: {
+  userId: string
+  viewer: NewProductViewer
+  requestedOwnerOperatorId: string | null
+}) {
+  const operatorId = input.viewer.isMain
+    ? input.requestedOwnerOperatorId ?? input.viewer.operatorId
+    : input.viewer.operatorId
+  if (!operatorId) throw new Error('등록자로 설정된 계정만 신상품을 추가할 수 있습니다.')
+
+  const [operator] = resultRows<{ id: string }>(await db.execute(sql`
+    SELECT id
+    FROM new_product_workflow_operators
+    WHERE id = ${operatorId}::uuid
+      AND user_id = ${input.userId}::uuid
+      AND is_active = TRUE
+    LIMIT 1
+  `))
+  if (!operator) throw new Error('담당 등록자를 찾을 수 없습니다.')
+  return operator.id
+}
+
+function canWriteItem(viewer: NewProductViewer, ownerOperatorId: string | null) {
+  return viewer.isMain || (Boolean(viewer.operatorId) && viewer.operatorId === ownerOperatorId)
 }
 
 async function insertStageHistory(

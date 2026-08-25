@@ -4,11 +4,11 @@ import { normalizeNewProductEditorLayout } from './workflow'
 describe('normalizeNewProductEditorLayout', () => {
   it('keeps a custom section order, visibility, and column count', () => {
     expect(normalizeNewProductEditorLayout({
-      sectionOrder: ['pricing', 'basic', 'progress', 'package', 'attachments'],
+      sectionOrder: ['pricing', 'basic', 'progress', 'package', 'attachments', 'sourcing'],
       hiddenSections: ['package', 'basic'],
       columns: 3,
     })).toEqual({
-      sectionOrder: ['pricing', 'basic', 'progress', 'package', 'attachments'],
+      sectionOrder: ['pricing', 'basic', 'progress', 'package', 'attachments', 'sourcing'],
       hiddenSections: ['package'],
       columns: 3,
     })
@@ -20,7 +20,7 @@ describe('normalizeNewProductEditorLayout', () => {
       hiddenSections: ['unknown', 'pricing', 'pricing'],
       columns: 9,
     })).toEqual({
-      sectionOrder: ['basic', 'progress', 'attachments', 'package', 'pricing'],
+      sectionOrder: ['basic', 'progress', 'sourcing', 'attachments', 'package', 'pricing'],
       hiddenSections: ['pricing'],
       columns: 2,
     })

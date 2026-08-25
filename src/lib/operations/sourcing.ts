@@ -610,8 +610,10 @@ export async function addManualSourcingImage(input: {
   `)
 }
 
-export async function getManualSourcingImage(input: { userId: string; itemId: string }) {
+export async function getManualSourcingImage(input: { userId: string; actorUserId: string; itemId: string }) {
   await ensureSourcingTables()
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.actorUserId })
   const [image] = resultRows<{ fileName: string; contentType: string; fileDataBase64: string }>(await db.execute(sql`
     SELECT
       image_file_name AS "fileName",
@@ -621,6 +623,11 @@ export async function getManualSourcingImage(input: { userId: string; itemId: st
     WHERE id = ${input.itemId}::uuid
       AND user_id = ${input.userId}::uuid
       AND image_file_data IS NOT NULL
+      AND (${viewer.isMain
+        ? sql`TRUE`
+        : viewer.operatorId
+          ? sql`owner_operator_id = ${viewer.operatorId}::uuid`
+          : sql`FALSE`})
   `))
   return image ?? null
 }

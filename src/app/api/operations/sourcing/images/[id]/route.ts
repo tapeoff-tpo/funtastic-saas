@@ -13,6 +13,7 @@ export async function GET(_request: Request, context: RouteContext) {
   const { id } = await context.params
   const image = await getManualSourcingImage({
     userId: await getWorkspaceUserId(user.id),
+    actorUserId: user.id,
     itemId: id,
   })
   if (!image) return NextResponse.json({ error: '사진을 찾을 수 없습니다.' }, { status: 404 })

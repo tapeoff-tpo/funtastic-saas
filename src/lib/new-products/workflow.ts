@@ -214,7 +214,6 @@ export type NewProductSummary = {
 export const NEW_PRODUCT_EDITOR_SECTIONS = [
   'progress',
   'basic',
-  'itemMaster',
   'attachments',
   'notice',
   'package',

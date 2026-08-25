@@ -526,8 +526,10 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="이전원가 (₩)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
           <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
-          <Field label="필수 체크 사항" className={fullWidthFieldClass}><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={4} /></Field>
-          <Field label="비고" className={fullWidthFieldClass}><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={4} /></Field>
+          <div className={cn('grid gap-3 md:grid-cols-2', fullWidthFieldClass)}>
+            <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={2} /></Field>
+            <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={2} /></Field>
+          </div>
         </div>
       </EditorSection>
     ),

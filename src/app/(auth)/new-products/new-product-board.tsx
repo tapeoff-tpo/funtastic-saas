@@ -39,6 +39,7 @@ import type {
 } from '@/lib/new-products/workflow'
 import {
   createNewProductAction,
+  deleteNewProductAction,
   saveNewProductEditorLayoutAction,
   saveNewProductStagesAction,
   updateNewProductAction,
@@ -192,6 +193,14 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
     router.refresh()
   }
 
+  function handleDeleted() {
+    setMode('view')
+    setSelectedId(null)
+    setItem(null)
+    setDataRevision((current) => current + 1)
+    router.refresh()
+  }
+
   return (
     <div className="space-y-4">
       <section className="rounded-xl border bg-background p-3 shadow-sm">
@@ -227,6 +236,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           layout={layout}
           exchangeRate={exchangeRate}
           onSaved={reloadItem}
+          onDeleted={handleDeleted}
         />
       ) : detailLoading ? (
         <div className="flex min-h-[420px] items-center justify-center rounded-xl border bg-card">
@@ -240,6 +250,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           layout={layout}
           exchangeRate={exchangeRate}
           onSaved={reloadItem}
+          onDeleted={handleDeleted}
         />
       ) : selectedStageIds.length > 0 ? (
         <ProductSummaryList
@@ -358,12 +369,13 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
     </details>
   )
 }
-function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
+function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted }: {
   item: NewProductItem | null
   stages: NewProductStage[]
   layout: NewProductEditorLayout
   exchangeRate: CnyKrwReferenceRate
   onSaved: (id: string) => void
+  onDeleted: () => void
 }) {
   const [values, setValues] = useState(() => item
     ? editorValues(item, exchangeRate.rate)
@@ -586,7 +598,10 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
             {item ? `최근 수정 ${formatDateTime(item.updatedAt)}` : '필요한 정보를 한 화면에서 입력한 뒤 저장하세요.'}
           </p>
         </div>
-        <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full shrink-0 sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
+        <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
+          {item && <DeleteProductDialog item={item} onDeleted={onDeleted} />}
+          <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full shrink-0 sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
+        </div>
       </div>
 
       {visibleSections.length > 1 && (
@@ -616,6 +631,47 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved }: {
         <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
       </div>
     </div>
+  )
+}
+
+function DeleteProductDialog({ item, onDeleted }: { item: NewProductItem; onDeleted: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [pending, startTransition] = useTransition()
+
+  function remove() {
+    startTransition(async () => {
+      const result = await deleteNewProductAction({ itemId: item.id })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success('신상품을 삭제했습니다.')
+      setOpen(false)
+      onDeleted()
+    })
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger render={(props) => <Button {...props} type="button" size="lg" variant="destructive"><Trash2 />상품 삭제</Button>} />
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px]" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,480px)] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-background shadow-2xl">
+          <div className="p-5">
+            <Dialog.Title className="text-lg font-semibold">이 상품을 정말 삭제할까요?</Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-muted-foreground">
+              <strong className="text-foreground">{item.productName}</strong> 상품과 첨부파일, 단계 변경 이력이 함께 삭제됩니다. 삭제 후에는 복구할 수 없습니다.
+            </Dialog.Description>
+          </div>
+          <div className="flex justify-end gap-2 border-t p-4">
+            <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline" disabled={pending}>취소</Button>} />
+            <Button type="button" variant="destructive" onClick={remove} disabled={pending}>
+              {pending && <Loader2 className="animate-spin" />}정말 삭제
+            </Button>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

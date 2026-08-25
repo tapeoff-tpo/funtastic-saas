@@ -5,6 +5,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import {
   createNewProduct,
+  deleteNewProduct,
   moveNewProducts,
   saveNewProductEditorLayout,
   saveNewProductStages,
@@ -58,6 +59,21 @@ export async function updateNewProductAction(input: {
     revalidatePath('/new-products')
     revalidatePath('/costs')
     return { success: true as const, itemMasterSync }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
+}
+
+export async function deleteNewProductAction(input: { itemId: string }) {
+  try {
+    const auth = await actionUser()
+    const deleted = await deleteNewProduct({
+      userId: auth.workspaceUserId,
+      itemId: input.itemId,
+    })
+    if (!deleted) return { success: false as const, error: '삭제할 신상품을 찾을 수 없습니다.' }
+    revalidatePath('/new-products')
+    return { success: true as const }
   } catch (error) {
     return { success: false as const, error: message(error) }
   }

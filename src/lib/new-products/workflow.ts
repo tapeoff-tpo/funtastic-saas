@@ -1003,6 +1003,17 @@ export async function updateNewProduct(input: {
   })
 }
 
+export async function deleteNewProduct(input: { userId: string; itemId: string }) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const result = await db.execute(sql`
+    DELETE FROM new_product_workflow_items
+    WHERE id = ${input.itemId}::uuid
+      AND user_id = ${input.userId}::uuid
+    RETURNING id
+  `)
+  return resultRows(result).length > 0
+}
+
 export async function moveNewProducts(input: {
   userId: string
   requestedByUserId: string

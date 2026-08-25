@@ -410,6 +410,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     : emptyEditorValues(stages[0]?.id ?? '', exchangeRate.rate))
   const [pendingAttachments, setPendingAttachments] = useState<Partial<Record<NewProductAttachment['kind'], File[]>>>({})
   const [pending, startTransition] = useTransition()
+  const [editing, setEditing] = useState(item === null)
 
   function setValue<K extends keyof EditorValues>(key: K, value: EditorValues[K]) {
     setValues((current) => ({ ...current, [key]: value }))
@@ -470,6 +471,13 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     })
   }
 
+  function cancelEditing() {
+    if (!item) return
+    setValues(editorValues(item, exchangeRate.rate))
+    setPendingAttachments({})
+    setEditing(false)
+  }
+
   const calculation = calculateSalesPrices({
     costKrw: normalizedNumber(values.estimatedCost) ?? normalizedNumber(values.calculatedCostKrw) ?? 0,
     b2bPriceOverride: normalizedNumber(values.b2bPrice),
@@ -527,8 +535,8 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
           <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
           <div className={cn('grid gap-3 md:grid-cols-2', fullWidthFieldClass)}>
-            <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={2} resizable={false} /></Field>
-            <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={2} resizable={false} /></Field>
+            <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={3} resizable={false} className="h-[88px]" /></Field>
+            <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={3} resizable={false} className="h-[88px]" /></Field>
           </div>
         </div>
       </EditorSection>
@@ -622,8 +630,15 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           </p>
         </div>
         <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row">
-          {item && <DeleteProductDialog item={item} onDeleted={onDeleted} />}
-          <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full shrink-0 sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
+          {item && !editing && <DeleteProductDialog item={item} onDeleted={onDeleted} />}
+          {item && !editing ? (
+            <Button type="button" size="lg" onClick={() => setEditing(true)}><PencilLine />수정</Button>
+          ) : (
+            <>
+              {item && <Button type="button" size="lg" variant="outline" onClick={cancelEditing} disabled={pending}>수정 취소</Button>}
+              <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full shrink-0 sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -646,13 +661,18 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
         </nav>
       )}
 
-      {visibleSections.length > 0
-        ? visibleSections.map((section) => <div key={section} id={`new-product-section-${section}`} className="scroll-mt-4">{sectionContent[section]}</div>)
-        : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
+      <fieldset disabled={Boolean(item) && !editing} className="space-y-4 border-0 p-0 disabled:opacity-80">
+        {visibleSections.length > 0
+          ? visibleSections.map((section) => <div key={section} id={`new-product-section-${section}`} className="scroll-mt-4">{sectionContent[section]}</div>)
+          : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
+      </fieldset>
 
-      <div className="flex justify-end rounded-xl border bg-card p-4 shadow-sm">
-        <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
-      </div>
+      {editing && (
+        <div className="flex flex-col justify-end gap-2 rounded-xl border bg-card p-4 shadow-sm sm:flex-row">
+          {item && <Button type="button" size="lg" variant="outline" onClick={cancelEditing} disabled={pending}>수정 취소</Button>}
+          <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
+        </div>
+      )}
     </div>
   )
 }
@@ -944,8 +964,8 @@ function UrlInput({ value, onChange }: { value: string; onChange: (value: string
   )
 }
 
-function TextArea({ value, onChange, placeholder, rows = 3, resizable = true }: { value: string; onChange: (value: string) => void; placeholder?: string; rows?: number; resizable?: boolean }) {
-  return <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} rows={rows} className={cn('w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30', resizable ? 'resize-y' : 'resize-none', rows === 1 && 'h-8 resize-none py-1')} />
+function TextArea({ value, onChange, placeholder, rows = 3, resizable = true, className }: { value: string; onChange: (value: string) => void; placeholder?: string; rows?: number; resizable?: boolean; className?: string }) {
+  return <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} rows={rows} className={cn('w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30', resizable ? 'resize-y' : 'resize-none', rows === 1 && 'h-8 resize-none py-1', className)} />
 }
 
 function MoneyInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {

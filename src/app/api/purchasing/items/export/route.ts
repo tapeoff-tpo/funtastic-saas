@@ -75,7 +75,7 @@ function parseHeaders(value: string | null): Esa009mHeader[] {
   const selected = requested.filter((header): header is Esa009mHeader => (
     ESA009M_HEADERS.includes(header as Esa009mHeader)
   ))
-  const withCode = selected.includes('품목코드') ? selected : ['품목코드', ...selected]
+  const withCode: Esa009mHeader[] = selected.includes('품목코드') ? selected : ['품목코드', ...selected]
   return Array.from(new Set(withCode))
 }
 

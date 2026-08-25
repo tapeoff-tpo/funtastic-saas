@@ -31,7 +31,7 @@ const UPDATED_AT_HEADER = '최근 반영일'
 const WAREHOUSE_GROUP = {
   label: '창고/상품정보',
   start: '한국창고기준 위치',
-  end: '용량',
+  end: '특이사항',
 }
 const EXTRA_GROUP = {
   label: '구분/반영',

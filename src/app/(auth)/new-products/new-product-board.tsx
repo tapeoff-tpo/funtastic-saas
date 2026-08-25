@@ -61,7 +61,9 @@ const sectionLabels: Record<NewProductEditorSection, string> = {
   progress: '진행 상태',
   basic: '기본 상품 정보',
   sourcing: '소싱 상품 등록',
+  itemMaster: '품목 등록 정보',
   attachments: '이미지 및 품질표시 파일',
+  notice: '상품정보고시',
   package: '패키지·등록 준비',
   pricing: '원가 및 판매가 계산',
 }
@@ -397,7 +399,9 @@ function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, 
   }
 
   function applyAutomaticPrice() {
-    const calculation = calculateSalesPrices({ costKrw: normalizedNumber(values.estimatedCost) ?? 0 })
+    const calculation = calculateSalesPrices({
+      costKrw: normalizedNumber(values.estimatedCost) ?? normalizedNumber(values.calculatedCostKrw) ?? 0,
+    })
     if (!calculation) {
       toast.error('예상원가를 먼저 입력해주세요.')
       return
@@ -414,7 +418,7 @@ function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, 
           toast.error(result.error)
           return
         }
-        toast.success('신상품 정보를 저장했습니다.')
+        showItemMasterSaveToast(result.itemMasterSync.status, false)
         onSaved(item.id)
         return
       }
@@ -434,13 +438,13 @@ function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, 
         const failedUploads = uploadResults.filter((uploadResult) => uploadResult.status === 'rejected').length
         if (failedUploads > 0) toast.warning(`상품은 저장했지만 첨부파일 ${failedUploads}개를 업로드하지 못했습니다.`)
       }
-      toast.success('신상품을 등록했습니다.')
+      showItemMasterSaveToast(result.itemMasterSync.status, true)
       onSaved(result.id)
     })
   }
 
   const calculation = calculateSalesPrices({
-    costKrw: normalizedNumber(values.estimatedCost) ?? 0,
+    costKrw: normalizedNumber(values.estimatedCost) ?? normalizedNumber(values.calculatedCostKrw) ?? 0,
     b2bPriceOverride: normalizedNumber(values.b2bPrice),
     b2cPriceOverride: normalizedNumber(values.b2cPrice),
   })
@@ -498,16 +502,30 @@ function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, 
           {exchangeRate.date ? ` (${exchangeRate.date})` : ' (기준값)'} · 한국원화 = (중국위안화 + 개당배송비) × 적용 환율
         </div>
         <div className={cn('grid gap-3', fieldGridClass)}>
-          <Field label="상품 옵션"><Input value={values.productOption} onChange={(event) => setValue('productOption', event.target.value)} /></Field>
-          <Field label="중국위안화 (CNY)"><MoneyInput value={values.chinaUnitPriceCny} onChange={(value) => setCnyCostValue('chinaUnitPriceCny', value)} /></Field>
+          <Field label="옵션명"><Input value={values.productOption} onChange={(event) => setValue('productOption', event.target.value)} /></Field>
+          <Field label="중국원가 (위안화)"><MoneyInput value={values.chinaUnitPriceCny} onChange={(value) => setCnyCostValue('chinaUnitPriceCny', value)} /></Field>
           <Field label="개당배송비 (CNY)"><MoneyInput value={values.unitShippingCny} onChange={(value) => setCnyCostValue('unitShippingCny', value)} /></Field>
-          <Field label="적용 환율 (KRW/CNY)"><MoneyInput value={values.exchangeRateKrw} onChange={(value) => setCnyCostValue('exchangeRateKrw', value)} /></Field>
-          <Field label="한국원화 (자동 계산)"><Input readOnly value={values.calculatedCostKrw ? won(Number(values.calculatedCostKrw)) : ''} placeholder="위안화와 배송비를 입력하세요" className="bg-muted/40" /></Field>
+          <Field label="기준환율"><MoneyInput value={values.exchangeRateKrw} onChange={(value) => setCnyCostValue('exchangeRateKrw', value)} /></Field>
+          <Field label="원가 (원화·자동 계산)"><Input readOnly value={values.calculatedCostKrw ? won(Number(values.calculatedCostKrw)) : ''} placeholder="위안화와 배송비를 입력하세요" className="bg-muted/40" /></Field>
           <Field label="국내 판매 링크"><UrlInput value={values.domesticSaleUrl} onChange={(value) => setValue('domesticSaleUrl', value)} /></Field>
           <Field label="국내 판매가 (₩)"><MoneyInput value={values.domesticSalePrice} onChange={(value) => setValue('domesticSalePrice', value)} /></Field>
           <Field label="상세페이지 URL"><UrlInput value={values.detailPageUrl} onChange={(value) => setValue('detailPageUrl', value)} /></Field>
           <Field label="비고 1"><TextArea value={values.memo1} onChange={(value) => setValue('memo1', value)} /></Field>
           <Field label="비고 2"><TextArea value={values.memo2} onChange={(value) => setValue('memo2', value)} /></Field>
+        </div>
+      </EditorSection>
+    ),
+    itemMaster: (
+      <EditorSection title="품목 등록 정보" icon={PackageSearch}>
+        <div className="mb-3 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-2 text-xs text-emerald-800">
+          5단계 이상으로 저장하면 사방넷코드를 품목코드로 사용해 품목에 자동으로 추가하거나 갱신합니다.
+        </div>
+        <div className={cn('grid gap-3', fieldGridClass)}>
+          <Field label="사방넷코드"><Input value={values.sabangnetCode} onChange={(event) => setValue('sabangnetCode', event.target.value)} placeholder="품목에 등록할 품목코드" /></Field>
+          <Field label="구매참고사항"><TextArea value={values.purchaseReferenceNotes} onChange={(value) => setValue('purchaseReferenceNotes', value)} placeholder="MOQ, 구매 옵션, 공급처 전달사항" /></Field>
+          <Field label="이전원가 (원화)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
+          <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
+          <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
         </div>
       </EditorSection>
     ),
@@ -527,6 +545,22 @@ function ProductEditor({ item, stages, layout, operators, viewer, exchangeRate, 
               onChanged={() => item && onSaved(item.id)}
             />
           ))}
+        </div>
+      </EditorSection>
+    ),
+    notice: (
+      <EditorSection title="상품정보고시" icon={FileText}>
+        <p className="mb-3 text-xs text-muted-foreground">5단계 이상 저장 시 아래 정보가 품목의 상품정보고시 입력칸에도 함께 반영됩니다.</p>
+        <div className={cn('grid gap-3', fieldGridClass)}>
+          <Field label="재질 (C)"><Input value={values.noticeMaterial} onChange={(event) => setValue('noticeMaterial', event.target.value)} /></Field>
+          <Field label="제품 크기 (C)"><Input value={values.noticeSize} onChange={(event) => setValue('noticeSize', event.target.value)} placeholder="예: 5.5 × 5.5cm" /></Field>
+          <Field label="제조사 (C)"><Input value={values.noticeManufacturer} onChange={(event) => setValue('noticeManufacturer', event.target.value)} /></Field>
+          <Field label="무게 (C)"><Input value={values.noticeWeight} onChange={(event) => setValue('noticeWeight', event.target.value)} placeholder="예: 20g" /></Field>
+          <Field label="제조국"><Input value={values.noticeCountry} onChange={(event) => setValue('noticeCountry', event.target.value)} /></Field>
+          <Field label="용량 (C)"><Input value={values.noticeCapacity} onChange={(event) => setValue('noticeCapacity', event.target.value)} /></Field>
+          <Field label="[식약처] 유리/도자기제품 필수확인 (C)"><TextArea value={values.noticeFoodSafety} onChange={(value) => setValue('noticeFoodSafety', value)} /></Field>
+          <Field label="구성품"><TextArea value={values.noticeComponents} onChange={(value) => setValue('noticeComponents', value)} /></Field>
+          <Field label="특이사항"><TextArea value={values.noticeSpecialNotes} onChange={(value) => setValue('noticeSpecialNotes', value)} /></Field>
         </div>
       </EditorSection>
     ),
@@ -1008,6 +1042,25 @@ const attachmentKinds: Array<{ kind: NewProductAttachment['kind']; label: string
   { kind: 'quality_pdf', label: '품질표시 등록 PDF' },
 ]
 
+function showItemMasterSaveToast(
+  status: 'not_required' | 'pending_code' | 'created' | 'updated',
+  created: boolean,
+) {
+  if (status === 'pending_code') {
+    toast.warning('신상품은 저장했습니다. 5단계 이상은 사방넷코드를 입력하면 품목에 자동 반영됩니다.')
+    return
+  }
+  if (status === 'created') {
+    toast.success('신상품 정보를 저장하고 품목에 새로 추가했습니다.')
+    return
+  }
+  if (status === 'updated') {
+    toast.success('신상품 정보와 기존 품목 정보를 함께 갱신했습니다.')
+    return
+  }
+  toast.success(created ? '신상품을 등록했습니다.' : '신상품 정보를 저장했습니다.')
+}
+
 async function uploadAttachmentFile(itemId: string, kind: NewProductAttachment['kind'], file: File) {
   const formData = new FormData()
   formData.set('itemId', itemId)
@@ -1075,6 +1128,20 @@ function emptyEditorValues(stageId: string, exchangeRateKrw: number, ownerOperat
     packageBoxDesign: '',
     packageManufacturer: '',
     packagePacking: '',
+    sabangnetCode: '',
+    purchaseReferenceNotes: '',
+    previousCostKrw: '',
+    b2bOptionSurcharge: '',
+    b2cOptionSurcharge: '',
+    noticeMaterial: '',
+    noticeSize: '',
+    noticeManufacturer: '',
+    noticeWeight: '',
+    noticeCountry: '',
+    noticeCapacity: '',
+    noticeFoodSafety: '',
+    noticeComponents: '',
+    noticeSpecialNotes: '',
   }
 }
 
@@ -1118,6 +1185,20 @@ function editorValues(item: NewProductItem, defaultExchangeRate: number): Editor
     packageBoxDesign: item.packageBoxDesign ?? '',
     packageManufacturer: item.packageManufacturer ?? '',
     packagePacking: item.packagePacking ?? '',
+    sabangnetCode: item.sabangnetCode ?? '',
+    purchaseReferenceNotes: item.purchaseReferenceNotes ?? '',
+    previousCostKrw: valueString(item.previousCostKrw),
+    b2bOptionSurcharge: valueString(item.b2bOptionSurcharge),
+    b2cOptionSurcharge: valueString(item.b2cOptionSurcharge),
+    noticeMaterial: item.noticeMaterial ?? '',
+    noticeSize: item.noticeSize ?? '',
+    noticeManufacturer: item.noticeManufacturer ?? '',
+    noticeWeight: item.noticeWeight ?? '',
+    noticeCountry: item.noticeCountry ?? '',
+    noticeCapacity: item.noticeCapacity ?? '',
+    noticeFoodSafety: item.noticeFoodSafety ?? '',
+    noticeComponents: item.noticeComponents ?? '',
+    noticeSpecialNotes: item.noticeSpecialNotes ?? '',
   }
 }
 

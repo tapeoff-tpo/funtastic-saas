@@ -34,6 +34,7 @@ export async function createNewProductAction(input: {
       values,
     })
     revalidatePath('/new-products')
+    revalidatePath('/costs')
     return { success: true as const, ...created }
   } catch (error) {
     return { success: false as const, error: message(error) }
@@ -49,14 +50,15 @@ export async function updateNewProductAction(input: {
     const values = newProductValues(input.values)
     if (!values.productName) return { success: false as const, error: '제품명을 입력해주세요.' }
     if (!values.stageId) return { success: false as const, error: '진행 단계를 선택해주세요.' }
-    await updateNewProduct({
+    const itemMasterSync = await updateNewProduct({
       userId: auth.workspaceUserId,
       requestedByUserId: auth.userId,
       itemId: input.itemId,
       values,
     })
     revalidatePath('/new-products')
-    return { success: true as const }
+    revalidatePath('/costs')
+    return { success: true as const, itemMasterSync }
   } catch (error) {
     return { success: false as const, error: message(error) }
   }
@@ -77,6 +79,7 @@ export async function moveNewProductsAction(input: {
       note: nullableText(input.note),
     })
     revalidatePath('/new-products')
+    revalidatePath('/costs')
     return { success: true as const, ...result }
   } catch (error) {
     return { success: false as const, error: message(error) }
@@ -175,6 +178,20 @@ function newProductValues(values: Record<string, unknown>): NewProductInput {
     packageBoxDesign: nullableText(values.packageBoxDesign, 100),
     packageManufacturer: nullableText(values.packageManufacturer, 100),
     packagePacking: nullableText(values.packagePacking, 100),
+    sabangnetCode: nullableText(values.sabangnetCode, 100),
+    purchaseReferenceNotes: nullableText(values.purchaseReferenceNotes),
+    previousCostKrw: nullableInteger(values.previousCostKrw),
+    b2bOptionSurcharge: nullableInteger(values.b2bOptionSurcharge),
+    b2cOptionSurcharge: nullableInteger(values.b2cOptionSurcharge),
+    noticeMaterial: nullableText(values.noticeMaterial),
+    noticeSize: nullableText(values.noticeSize),
+    noticeManufacturer: nullableText(values.noticeManufacturer),
+    noticeWeight: nullableText(values.noticeWeight),
+    noticeCountry: nullableText(values.noticeCountry),
+    noticeCapacity: nullableText(values.noticeCapacity),
+    noticeFoodSafety: nullableText(values.noticeFoodSafety),
+    noticeComponents: nullableText(values.noticeComponents),
+    noticeSpecialNotes: nullableText(values.noticeSpecialNotes),
   }
 }
 

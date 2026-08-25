@@ -2,13 +2,19 @@ import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { getProfile } from '@/lib/admin-accounts/queries'
 import { calculateCnyCostKrw } from './cny-cost'
+import {
+  buildNewProductItemMasterData,
+  shouldSyncNewProductToItemMaster,
+  type NewProductItemMasterStage,
+  type NewProductItemMasterValues,
+} from './item-master-sync'
 
 export const DEFAULT_NEW_PRODUCT_STAGES = [
   { name: '1차 통과 상품 등록', tone: 'blue' },
   { name: '샘플 구매', tone: 'violet' },
   { name: '샘플 국내 도착·최종 미팅', tone: 'cyan' },
-  { name: '상품정보고시 제작', tone: 'amber' },
   { name: '사방넷 상품등록', tone: 'orange' },
+  { name: '상품정보고시 제작', tone: 'amber' },
   { name: '상품 구매 대기', tone: 'indigo' },
   { name: '상품 입고 대기', tone: 'purple' },
   { name: '원가 입력', tone: 'rose' },
@@ -112,6 +118,20 @@ export type NewProductItem = {
   packageBoxDesign: string | null
   packageManufacturer: string | null
   packagePacking: string | null
+  sabangnetCode: string | null
+  purchaseReferenceNotes: string | null
+  previousCostKrw: number | null
+  b2bOptionSurcharge: number | null
+  b2cOptionSurcharge: number | null
+  noticeMaterial: string | null
+  noticeSize: string | null
+  noticeManufacturer: string | null
+  noticeWeight: string | null
+  noticeCountry: string | null
+  noticeCapacity: string | null
+  noticeFoodSafety: string | null
+  noticeComponents: string | null
+  noticeSpecialNotes: string | null
   attachments: NewProductAttachment[]
   stageHistory: NewProductStageHistory[]
   createdAt: string
@@ -157,6 +177,25 @@ export type NewProductInput = {
   packageBoxDesign: string | null
   packageManufacturer: string | null
   packagePacking: string | null
+  sabangnetCode: string | null
+  purchaseReferenceNotes: string | null
+  previousCostKrw: number | null
+  b2bOptionSurcharge: number | null
+  b2cOptionSurcharge: number | null
+  noticeMaterial: string | null
+  noticeSize: string | null
+  noticeManufacturer: string | null
+  noticeWeight: string | null
+  noticeCountry: string | null
+  noticeCapacity: string | null
+  noticeFoodSafety: string | null
+  noticeComponents: string | null
+  noticeSpecialNotes: string | null
+}
+
+export type ItemMasterSyncResult = {
+  status: 'not_required' | 'pending_code' | 'created' | 'updated'
+  productId?: string
 }
 
 export type NewProductSummary = {
@@ -176,7 +215,9 @@ export const NEW_PRODUCT_EDITOR_SECTIONS = [
   'progress',
   'basic',
   'sourcing',
+  'itemMaster',
   'attachments',
+  'notice',
   'package',
   'pricing',
 ] as const
@@ -351,7 +392,21 @@ async function createNewProductWorkflowSchema() {
       ADD COLUMN IF NOT EXISTS domestic_sale_price integer,
       ADD COLUMN IF NOT EXISTS detail_page_url text,
       ADD COLUMN IF NOT EXISTS memo_1 text,
-      ADD COLUMN IF NOT EXISTS memo_2 text
+      ADD COLUMN IF NOT EXISTS memo_2 text,
+      ADD COLUMN IF NOT EXISTS sabangnet_code varchar(100),
+      ADD COLUMN IF NOT EXISTS purchase_reference_notes text,
+      ADD COLUMN IF NOT EXISTS previous_cost_krw integer,
+      ADD COLUMN IF NOT EXISTS b2b_option_surcharge integer,
+      ADD COLUMN IF NOT EXISTS b2c_option_surcharge integer,
+      ADD COLUMN IF NOT EXISTS notice_material text,
+      ADD COLUMN IF NOT EXISTS notice_size text,
+      ADD COLUMN IF NOT EXISTS notice_manufacturer text,
+      ADD COLUMN IF NOT EXISTS notice_weight text,
+      ADD COLUMN IF NOT EXISTS notice_country text,
+      ADD COLUMN IF NOT EXISTS notice_capacity text,
+      ADD COLUMN IF NOT EXISTS notice_food_safety text,
+      ADD COLUMN IF NOT EXISTS notice_components text,
+      ADD COLUMN IF NOT EXISTS notice_special_notes text
   `)
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS new_product_workflow_items_workspace_owner_updated_idx
@@ -361,6 +416,11 @@ async function createNewProductWorkflowSchema() {
     CREATE UNIQUE INDEX IF NOT EXISTS new_product_workflow_items_workspace_sourcing_unique
     ON new_product_workflow_items(user_id, sourcing_item_id)
     WHERE sourcing_item_id IS NOT NULL
+  `)
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS new_product_workflow_items_workspace_sabangnet_idx
+    ON new_product_workflow_items(user_id, sabangnet_code)
+    WHERE sabangnet_code IS NOT NULL
   `)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_stage_history (
@@ -625,6 +685,20 @@ export async function getNewProductItem(input: { userId: string; actorUserId: st
       item.package_box_design AS "packageBoxDesign",
       item.package_manufacturer AS "packageManufacturer",
       item.package_packing AS "packagePacking",
+      item.sabangnet_code AS "sabangnetCode",
+      item.purchase_reference_notes AS "purchaseReferenceNotes",
+      item.previous_cost_krw AS "previousCostKrw",
+      item.b2b_option_surcharge AS "b2bOptionSurcharge",
+      item.b2c_option_surcharge AS "b2cOptionSurcharge",
+      item.notice_material AS "noticeMaterial",
+      item.notice_size AS "noticeSize",
+      item.notice_manufacturer AS "noticeManufacturer",
+      item.notice_weight AS "noticeWeight",
+      item.notice_country AS "noticeCountry",
+      item.notice_capacity AS "noticeCapacity",
+      item.notice_food_safety AS "noticeFoodSafety",
+      item.notice_components AS "noticeComponents",
+      item.notice_special_notes AS "noticeSpecialNotes",
       item.created_at::text AS "createdAt",
       item.updated_at::text AS "updatedAt",
       COALESCE((
@@ -724,6 +798,25 @@ export async function getNewProductWorkflow(userId: string) {
         item.package_box_design AS "packageBoxDesign",
         item.package_manufacturer AS "packageManufacturer",
         item.package_packing AS "packagePacking",
+        item.product_option AS "productOption",
+        item.sabangnet_code AS "sabangnetCode",
+        item.purchase_reference_notes AS "purchaseReferenceNotes",
+        item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
+        item.unit_shipping_cny::float8 AS "unitShippingCny",
+        item.calculated_cost_krw AS "calculatedCostKrw",
+        item.previous_cost_krw AS "previousCostKrw",
+        item.exchange_rate_krw::float8 AS "exchangeRateKrw",
+        item.b2b_option_surcharge AS "b2bOptionSurcharge",
+        item.b2c_option_surcharge AS "b2cOptionSurcharge",
+        item.notice_material AS "noticeMaterial",
+        item.notice_size AS "noticeSize",
+        item.notice_manufacturer AS "noticeManufacturer",
+        item.notice_weight AS "noticeWeight",
+        item.notice_country AS "noticeCountry",
+        item.notice_capacity AS "noticeCapacity",
+        item.notice_food_safety AS "noticeFoodSafety",
+        item.notice_components AS "noticeComponents",
+        item.notice_special_notes AS "noticeSpecialNotes",
         item.created_at::text AS "createdAt",
         item.updated_at::text AS "updatedAt",
         COALESCE((
@@ -796,7 +889,7 @@ export async function createNewProduct(input: {
   const estimatedCost = input.values.estimatedCost ?? calculatedCostKrw
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
-    await assertStage(tx, input.userId, input.values.stageId)
+    const stage = await assertStage(tx, input.userId, input.values.stageId)
     const [{ nextNumber } = { nextNumber: 1 }] = resultRows<{ nextNumber: number }>(await tx.execute(sql`
       SELECT COALESCE(MAX(product_number), 0)::int + 1 AS "nextNumber"
       FROM new_product_workflow_items
@@ -814,6 +907,10 @@ export async function createNewProduct(input: {
         package_info_url, package_progress_status, package_status, korean_manual_status,
         declared_value, b2b_price, b2c_price, carrier, b2b_shipping_fee, b2c_shipping_fee,
         quality_notice_status, package_box_design, package_manufacturer, package_packing,
+        sabangnet_code, purchase_reference_notes, previous_cost_krw,
+        b2b_option_surcharge, b2c_option_surcharge,
+        notice_material, notice_size, notice_manufacturer, notice_weight, notice_country,
+        notice_capacity, notice_food_safety, notice_components, notice_special_notes,
         created_by_user_id
       ) VALUES (
         ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid, ${ownerOperatorId}::uuid,
@@ -831,6 +928,13 @@ export async function createNewProduct(input: {
         ${input.values.b2bShippingFee}, ${input.values.b2cShippingFee},
         ${input.values.qualityNoticeStatus}, ${input.values.packageBoxDesign},
         ${input.values.packageManufacturer}, ${input.values.packagePacking},
+        ${input.values.sabangnetCode}, ${input.values.purchaseReferenceNotes},
+        ${input.values.previousCostKrw},
+        ${input.values.b2bOptionSurcharge}, ${input.values.b2cOptionSurcharge},
+        ${input.values.noticeMaterial}, ${input.values.noticeSize}, ${input.values.noticeManufacturer},
+        ${input.values.noticeWeight}, ${input.values.noticeCountry}, ${input.values.noticeCapacity},
+        ${input.values.noticeFoodSafety}, ${input.values.noticeComponents},
+        ${input.values.noticeSpecialNotes},
         ${input.requestedByUserId}::uuid
       )
       RETURNING id
@@ -843,7 +947,13 @@ export async function createNewProduct(input: {
         '신상품 등록', ${input.requestedByUserId}::uuid
       )
     `)
-    return { id: created!.id, productNumber: nextNumber }
+    const itemMasterSync = await syncNewProductToItemMaster(tx, {
+      userId: input.userId,
+      itemId: created!.id,
+      stage,
+      values: { ...input.values, calculatedCostKrw },
+    })
+    return { id: created!.id, productNumber: nextNumber, itemMasterSync }
   })
 }
 
@@ -855,7 +965,7 @@ export async function updateNewProduct(input: {
 }) {
   await ensureNewProductWorkflowTables(input.userId)
   const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const [current] = resultRows<{ stageId: string; ownerOperatorId: string | null }>(await tx.execute(sql`
       SELECT stage_id AS "stageId", owner_operator_id AS "ownerOperatorId"
       FROM new_product_workflow_items
@@ -871,7 +981,7 @@ export async function updateNewProduct(input: {
       : viewer.operatorId
     if (!ownerOperatorId) throw new Error('담당 등록자를 먼저 지정해주세요.')
     await assertOperator(tx, input.userId, ownerOperatorId)
-    await assertStage(tx, input.userId, input.values.stageId)
+    const stage = await assertStage(tx, input.userId, input.values.stageId)
     const calculatedCostKrw = calculateCnyCostKrw({
       chinaUnitPriceCny: input.values.chinaUnitPriceCny,
       unitShippingCny: input.values.unitShippingCny,
@@ -918,6 +1028,20 @@ export async function updateNewProduct(input: {
         package_box_design = ${input.values.packageBoxDesign},
         package_manufacturer = ${input.values.packageManufacturer},
         package_packing = ${input.values.packagePacking},
+        sabangnet_code = ${input.values.sabangnetCode},
+        purchase_reference_notes = ${input.values.purchaseReferenceNotes},
+        previous_cost_krw = ${input.values.previousCostKrw},
+        b2b_option_surcharge = ${input.values.b2bOptionSurcharge},
+        b2c_option_surcharge = ${input.values.b2cOptionSurcharge},
+        notice_material = ${input.values.noticeMaterial},
+        notice_size = ${input.values.noticeSize},
+        notice_manufacturer = ${input.values.noticeManufacturer},
+        notice_weight = ${input.values.noticeWeight},
+        notice_country = ${input.values.noticeCountry},
+        notice_capacity = ${input.values.noticeCapacity},
+        notice_food_safety = ${input.values.noticeFoodSafety},
+        notice_components = ${input.values.noticeComponents},
+        notice_special_notes = ${input.values.noticeSpecialNotes},
         updated_at = now()
       WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
     `)
@@ -932,6 +1056,12 @@ export async function updateNewProduct(input: {
         note: '상품 상세에서 단계 변경',
       })
     }
+    return syncNewProductToItemMaster(tx, {
+      userId: input.userId,
+      itemId: input.itemId,
+      stage,
+      values: { ...input.values, calculatedCostKrw },
+    })
   })
 }
 
@@ -948,7 +1078,7 @@ export async function moveNewProducts(input: {
   if (itemIds.length === 0) return { moved: 0 }
 
   return db.transaction(async (tx) => {
-    await assertStage(tx, input.userId, input.stageId)
+    const stage = await assertStage(tx, input.userId, input.stageId)
     const currentRows = resultRows<{ id: string; stageId: string; ownerOperatorId: string | null }>(await tx.execute(sql`
       SELECT id, stage_id AS "stageId", owner_operator_id AS "ownerOperatorId"
       FROM new_product_workflow_items
@@ -959,23 +1089,34 @@ export async function moveNewProducts(input: {
     if (currentRows.length !== itemIds.length || currentRows.some((item) => !canWriteItem(viewer, item.ownerOperatorId))) {
       throw new Error('다른 등록자의 상품은 이동할 수 없습니다.')
     }
+    const syncResults: ItemMasterSyncResult[] = []
     for (const item of currentRows) {
-      if (item.stageId === input.stageId) continue
-      await tx.execute(sql`
-        UPDATE new_product_workflow_items
-        SET stage_id = ${input.stageId}::uuid, updated_at = now()
-        WHERE id = ${item.id}::uuid AND user_id = ${input.userId}::uuid
-      `)
-      await insertStageHistory(tx, {
+      if (item.stageId !== input.stageId) {
+        await tx.execute(sql`
+          UPDATE new_product_workflow_items
+          SET stage_id = ${input.stageId}::uuid, updated_at = now()
+          WHERE id = ${item.id}::uuid AND user_id = ${input.userId}::uuid
+        `)
+        await insertStageHistory(tx, {
+          userId: input.userId,
+          requestedByUserId: input.requestedByUserId,
+          itemId: item.id,
+          fromStageId: item.stageId,
+          toStageId: input.stageId,
+          note: input.note ?? (currentRows.length > 1 ? '일괄 단계 변경' : '목록에서 단계 변경'),
+        })
+      }
+      syncResults.push(await syncStoredNewProductToItemMaster(tx, {
         userId: input.userId,
-        requestedByUserId: input.requestedByUserId,
         itemId: item.id,
-        fromStageId: item.stageId,
-        toStageId: input.stageId,
-        note: input.note ?? (currentRows.length > 1 ? '일괄 단계 변경' : '목록에서 단계 변경'),
-      })
+        stage,
+      }))
     }
-    return { moved: currentRows.filter((item) => item.stageId !== input.stageId).length }
+    return {
+      moved: currentRows.filter((item) => item.stageId !== input.stageId).length,
+      itemMasterSynced: syncResults.filter((result) => result.status === 'created' || result.status === 'updated').length,
+      itemMasterPendingCodes: syncResults.filter((result) => result.status === 'pending_code').length,
+    }
   })
 }
 
@@ -1175,12 +1316,114 @@ export async function deleteNewProductAttachment(input: { userId: string; reques
   return resultRows(result).length > 0
 }
 
-async function assertStage(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], userId: string, stageId: string) {
+type WorkflowTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
+
+async function assertStage(tx: WorkflowTransaction, userId: string, stageId: string) {
   const result = await tx.execute(sql`
-    SELECT id FROM new_product_workflow_stages
-    WHERE id = ${stageId}::uuid AND user_id = ${userId}::uuid
+    SELECT
+      stage.id,
+      stage.name,
+      stage.position,
+      COALESCE((
+        SELECT MIN(notice_stage.position)::int
+        FROM new_product_workflow_stages notice_stage
+        WHERE notice_stage.user_id = stage.user_id
+          AND notice_stage.name ILIKE '%상품정보고시%'
+      ), 5) AS "itemMasterStartPosition"
+    FROM new_product_workflow_stages stage
+    WHERE stage.id = ${stageId}::uuid AND stage.user_id = ${userId}::uuid
   `)
-  if (resultRows(result).length === 0) throw new Error('선택한 단계를 찾을 수 없습니다.')
+  const [stage] = resultRows<{
+    id: string
+    name: string
+    position: number
+    itemMasterStartPosition: number
+  }>(result)
+  if (!stage) throw new Error('선택한 단계를 찾을 수 없습니다.')
+  return stage
+}
+
+async function syncStoredNewProductToItemMaster(
+  tx: WorkflowTransaction,
+  input: { userId: string; itemId: string; stage: NewProductItemMasterStage },
+) {
+  const [values] = resultRows<NewProductItemMasterValues>(await tx.execute(sql`
+    SELECT
+      product_name AS "productName",
+      registered_product_name AS "registeredProductName",
+      english_name AS "englishName",
+      source_url AS "sourceUrl",
+      product_option AS "productOption",
+      sabangnet_code AS "sabangnetCode",
+      purchase_reference_notes AS "purchaseReferenceNotes",
+      china_unit_price_cny::float8 AS "chinaUnitPriceCny",
+      calculated_cost_krw AS "calculatedCostKrw",
+      previous_cost_krw AS "previousCostKrw",
+      exchange_rate_krw::float8 AS "exchangeRateKrw",
+      b2b_option_surcharge AS "b2bOptionSurcharge",
+      b2c_option_surcharge AS "b2cOptionSurcharge",
+      b2b_price AS "b2bPrice",
+      b2c_price AS "b2cPrice",
+      notice_material AS "noticeMaterial",
+      notice_size AS "noticeSize",
+      notice_manufacturer AS "noticeManufacturer",
+      notice_weight AS "noticeWeight",
+      notice_country AS "noticeCountry",
+      notice_capacity AS "noticeCapacity",
+      notice_food_safety AS "noticeFoodSafety",
+      notice_components AS "noticeComponents",
+      notice_special_notes AS "noticeSpecialNotes"
+    FROM new_product_workflow_items
+    WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
+  `))
+  if (!values) throw new Error('품목에 반영할 신상품을 찾을 수 없습니다.')
+  return syncNewProductToItemMaster(tx, { ...input, values })
+}
+
+async function syncNewProductToItemMaster(
+  tx: WorkflowTransaction,
+  input: {
+    userId: string
+    itemId: string
+    stage: NewProductItemMasterStage
+    values: NewProductItemMasterValues
+  },
+): Promise<ItemMasterSyncResult> {
+  if (!shouldSyncNewProductToItemMaster(input.stage)) return { status: 'not_required' }
+  const code = input.values.sabangnetCode?.trim()
+  if (!code) return { status: 'pending_code' }
+
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-item-master:${input.userId}:${code}`}))`)
+  const [existing] = resultRows<{ id: string }>(await tx.execute(sql`
+    SELECT id FROM products
+    WHERE user_id = ${input.userId}::uuid AND internal_sku = ${code}
+  `))
+  const itemData = buildNewProductItemMasterData(input.values)
+  const itemName = input.values.registeredProductName?.trim() || input.values.productName.trim()
+  const basePrice = input.values.b2cPrice ?? input.values.b2bPrice ?? 0
+  const metadata = {
+    esa009m: itemData,
+    newProductWorkflow: { itemId: input.itemId, syncedAt: new Date().toISOString() },
+  }
+  const [product] = resultRows<{ id: string }>(await tx.execute(sql`
+    INSERT INTO products (
+      user_id, internal_sku, name, base_price, cost_price, status, metadata, updated_at
+    ) VALUES (
+      ${input.userId}::uuid, ${code}, ${itemName}, ${basePrice}, ${input.values.calculatedCostKrw},
+      'draft', ${JSON.stringify(metadata)}::jsonb, now()
+    )
+    ON CONFLICT (user_id, internal_sku) DO UPDATE SET
+      name = EXCLUDED.name,
+      base_price = CASE WHEN EXCLUDED.base_price > 0 THEN EXCLUDED.base_price ELSE products.base_price END,
+      cost_price = COALESCE(EXCLUDED.cost_price, products.cost_price),
+      metadata = COALESCE(products.metadata, '{}'::jsonb) || jsonb_build_object(
+        'esa009m', COALESCE(products.metadata -> 'esa009m', '{}'::jsonb) || (EXCLUDED.metadata -> 'esa009m'),
+        'newProductWorkflow', EXCLUDED.metadata -> 'newProductWorkflow'
+      ),
+      updated_at = now()
+    RETURNING id
+  `))
+  return { status: existing ? 'updated' : 'created', productId: product!.id }
 }
 
 async function assertOperator(

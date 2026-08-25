@@ -33,6 +33,7 @@ import {
   ChevronRight,
   CalendarDays,
   PanelsTopLeft,
+  Sparkles,
 } from 'lucide-react'
 import { signOut } from '@/app/(auth)/actions'
 import { useNavState } from './nav-state'
@@ -137,6 +138,7 @@ export const navSections: NavSection[] = [
     id: 'product-preparation',
     title: '상품 준비',
     items: [
+      { href: '/new-products', label: '신상품 진행관리', icon: Sparkles },
       { href: '/operations/sourcing', label: '소싱', icon: Search },
       { href: '/costs', label: '품목', icon: Package },
     ],

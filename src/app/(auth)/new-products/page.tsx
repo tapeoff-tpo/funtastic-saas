@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { Sparkles } from 'lucide-react'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
-import { getNewProductWorkflow } from '@/lib/new-products/workflow'
+import { getNewProductPageSetup } from '@/lib/new-products/workflow'
 import { NewProductBoard } from './new-product-board'
 
 export const dynamic = 'force-dynamic'
@@ -17,7 +17,7 @@ export default async function NewProductsPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const workflow = await getNewProductWorkflow(workspaceUserId)
+  const setup = await getNewProductPageSetup(workspaceUserId)
 
   return (
     <div className="space-y-4">
@@ -30,7 +30,7 @@ export default async function NewProductsPage() {
           1차 통과부터 등록 완료까지, 상품별 정보와 샘플·품질표시 자료를 한곳에서 관리합니다.
         </p>
       </header>
-      <NewProductBoard initialStages={workflow.stages} initialItems={workflow.items} />
+      <NewProductBoard initialStages={setup.stages} initialLayout={setup.editorLayout} />
     </div>
   )
 }

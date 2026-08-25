@@ -6,8 +6,10 @@ import { getCurrentUser } from '@/lib/auth/current-user'
 import {
   createNewProduct,
   moveNewProducts,
+  saveNewProductEditorLayout,
   saveNewProductStages,
   updateNewProduct,
+  type NewProductEditorLayout,
   type NewProductInput,
 } from '@/lib/new-products/workflow'
 
@@ -18,20 +20,17 @@ async function actionUser() {
 }
 
 export async function createNewProductAction(input: {
-  productName: string
-  sampleCode?: string | null
-  stageId: string
+  values: Record<string, unknown>
 }) {
   try {
     const auth = await actionUser()
-    const productName = input.productName.trim()
-    if (!productName) return { success: false as const, error: '제품명을 입력해주세요.' }
+    const values = newProductValues(input.values)
+    if (!values.productName) return { success: false as const, error: '제품명을 입력해주세요.' }
+    if (!values.stageId) return { success: false as const, error: '진행 단계를 선택해주세요.' }
     const created = await createNewProduct({
       userId: auth.workspaceUserId,
       requestedByUserId: auth.userId,
-      productName: productName.slice(0, 500),
-      sampleCode: nullableText(input.sampleCode, 200),
-      stageId: input.stageId,
+      values,
     })
     revalidatePath('/new-products')
     return { success: true as const, ...created }
@@ -46,40 +45,9 @@ export async function updateNewProductAction(input: {
 }) {
   try {
     const auth = await actionUser()
-    const productName = text(input.values.productName).trim()
-    const stageId = text(input.values.stageId)
-    if (!productName) return { success: false as const, error: '제품명을 입력해주세요.' }
-    if (!stageId) return { success: false as const, error: '진행 단계를 선택해주세요.' }
-
-    const values: NewProductInput = {
-      stageId,
-      productName: productName.slice(0, 500),
-      sampleCode: nullableText(input.values.sampleCode, 200),
-      englishName: nullableText(input.values.englishName),
-      sourceUrl: nullableText(input.values.sourceUrl),
-      requiredChecks: nullableText(input.values.requiredChecks),
-      estimatedCost: nullableNumber(input.values.estimatedCost),
-      historyNotes: nullableText(input.values.historyNotes),
-      referenceNotes: nullableText(input.values.referenceNotes),
-      chinaItemName: nullableText(input.values.chinaItemName),
-      plannedSaleDate: nullableDate(input.values.plannedSaleDate),
-      detailPageDueDate: nullableDate(input.values.detailPageDueDate),
-      registeredProductName: nullableText(input.values.registeredProductName),
-      packageInfoUrl: nullableText(input.values.packageInfoUrl),
-      packageProgressStatus: nullableText(input.values.packageProgressStatus, 100),
-      packageStatus: nullableText(input.values.packageStatus, 100),
-      koreanManualStatus: nullableText(input.values.koreanManualStatus, 100),
-      declaredValue: nullableNumber(input.values.declaredValue),
-      b2bPrice: nullableInteger(input.values.b2bPrice),
-      b2cPrice: nullableInteger(input.values.b2cPrice),
-      carrier: nullableText(input.values.carrier, 100),
-      b2bShippingFee: nullableInteger(input.values.b2bShippingFee),
-      b2cShippingFee: nullableInteger(input.values.b2cShippingFee),
-      qualityNoticeStatus: nullableText(input.values.qualityNoticeStatus, 100),
-      packageBoxDesign: nullableText(input.values.packageBoxDesign, 100),
-      packageManufacturer: nullableText(input.values.packageManufacturer, 100),
-      packagePacking: nullableText(input.values.packagePacking, 100),
-    }
+    const values = newProductValues(input.values)
+    if (!values.productName) return { success: false as const, error: '제품명을 입력해주세요.' }
+    if (!values.stageId) return { success: false as const, error: '진행 단계를 선택해주세요.' }
     await updateNewProduct({
       userId: auth.workspaceUserId,
       requestedByUserId: auth.userId,
@@ -124,6 +92,54 @@ export async function saveNewProductStagesAction(input: {
     return { success: true as const }
   } catch (error) {
     return { success: false as const, error: message(error) }
+  }
+}
+
+export async function saveNewProductEditorLayoutAction(input: {
+  layout: NewProductEditorLayout
+}) {
+  try {
+    const auth = await actionUser()
+    const layout = await saveNewProductEditorLayout({
+      userId: auth.workspaceUserId,
+      layout: input.layout,
+    })
+    revalidatePath('/new-products')
+    return { success: true as const, layout }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
+}
+
+function newProductValues(values: Record<string, unknown>): NewProductInput {
+  return {
+    stageId: text(values.stageId),
+    productName: text(values.productName).trim().slice(0, 500),
+    sampleCode: nullableText(values.sampleCode, 200),
+    englishName: nullableText(values.englishName),
+    sourceUrl: nullableText(values.sourceUrl),
+    requiredChecks: nullableText(values.requiredChecks),
+    estimatedCost: nullableNumber(values.estimatedCost),
+    historyNotes: nullableText(values.historyNotes),
+    referenceNotes: nullableText(values.referenceNotes),
+    chinaItemName: nullableText(values.chinaItemName),
+    plannedSaleDate: nullableDate(values.plannedSaleDate),
+    detailPageDueDate: nullableDate(values.detailPageDueDate),
+    registeredProductName: nullableText(values.registeredProductName),
+    packageInfoUrl: nullableText(values.packageInfoUrl),
+    packageProgressStatus: nullableText(values.packageProgressStatus, 100),
+    packageStatus: nullableText(values.packageStatus, 100),
+    koreanManualStatus: nullableText(values.koreanManualStatus, 100),
+    declaredValue: nullableNumber(values.declaredValue),
+    b2bPrice: nullableInteger(values.b2bPrice),
+    b2cPrice: nullableInteger(values.b2cPrice),
+    carrier: nullableText(values.carrier, 100),
+    b2bShippingFee: nullableInteger(values.b2bShippingFee),
+    b2cShippingFee: nullableInteger(values.b2cShippingFee),
+    qualityNoticeStatus: nullableText(values.qualityNoticeStatus, 100),
+    packageBoxDesign: nullableText(values.packageBoxDesign, 100),
+    packageManufacturer: nullableText(values.packageManufacturer, 100),
+    packagePacking: nullableText(values.packagePacking, 100),
   }
 }
 

@@ -120,7 +120,80 @@ export type NewProductInput = {
   packagePacking: string | null
 }
 
+export type NewProductSummary = {
+  id: string
+  productNumber: number
+  stageId: string
+  stageName: string
+  stageTone: NewProductStageTone
+  productName: string
+  sampleCode: string | null
+  updatedAt: string
+}
+
+export const NEW_PRODUCT_EDITOR_SECTIONS = [
+  'progress',
+  'basic',
+  'attachments',
+  'package',
+  'pricing',
+] as const
+
+export type NewProductEditorSection = (typeof NEW_PRODUCT_EDITOR_SECTIONS)[number]
+
+export type NewProductEditorLayout = {
+  sectionOrder: NewProductEditorSection[]
+  hiddenSections: NewProductEditorSection[]
+  columns: 1 | 2 | 3
+}
+
+export const DEFAULT_NEW_PRODUCT_EDITOR_LAYOUT: NewProductEditorLayout = {
+  sectionOrder: [...NEW_PRODUCT_EDITOR_SECTIONS],
+  hiddenSections: [],
+  columns: 2,
+}
+
+let ensureSchemaPromise: Promise<void> | null = null
+const ensureWorkspacePromises = new Map<string, Promise<void>>()
+
 export async function ensureNewProductWorkflowTables(userId: string) {
+  await ensureNewProductWorkflowSchema()
+  const existingPromise = ensureWorkspacePromises.get(userId)
+  if (existingPromise) return existingPromise
+
+  const workspacePromise = db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-default-stages:${userId}`}))`)
+    const [{ count } = { count: 0 }] = resultRows<{ count: number }>(await tx.execute(sql`
+      SELECT COUNT(*)::int AS count
+      FROM new_product_workflow_stages
+      WHERE user_id = ${userId}::uuid
+    `))
+    if (count === 0) {
+      for (const [index, stage] of DEFAULT_NEW_PRODUCT_STAGES.entries()) {
+        await tx.execute(sql`
+          INSERT INTO new_product_workflow_stages (user_id, name, position, tone)
+          VALUES (${userId}::uuid, ${stage.name}, ${index + 1}, ${stage.tone})
+        `)
+      }
+    }
+  }).then(() => undefined).catch((error) => {
+    ensureWorkspacePromises.delete(userId)
+    throw error
+  })
+  ensureWorkspacePromises.set(userId, workspacePromise)
+  return workspacePromise
+}
+
+function ensureNewProductWorkflowSchema() {
+  if (ensureSchemaPromise) return ensureSchemaPromise
+  ensureSchemaPromise = createNewProductWorkflowSchema().catch((error) => {
+    ensureSchemaPromise = null
+    throw error
+  })
+  return ensureSchemaPromise
+}
+
+async function createNewProductWorkflowSchema() {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_stages (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -180,6 +253,10 @@ export async function ensureNewProductWorkflowTables(userId: string) {
     ON new_product_workflow_items(user_id, stage_id, updated_at DESC)
   `)
   await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS new_product_workflow_items_user_updated_idx
+    ON new_product_workflow_items(user_id, updated_at DESC)
+  `)
+  await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_stage_history (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       user_id uuid NOT NULL,
@@ -214,23 +291,191 @@ export async function ensureNewProductWorkflowTables(userId: string) {
     CREATE INDEX IF NOT EXISTS new_product_workflow_attachments_item_kind_idx
     ON new_product_workflow_attachments(item_id, kind, created_at)
   `)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS new_product_workflow_preferences (
+      user_id uuid PRIMARY KEY,
+      editor_layout jsonb NOT NULL DEFAULT '{}'::jsonb,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )
+  `)
+  await db.execute(sql`ALTER TABLE new_product_workflow_stages ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`ALTER TABLE new_product_workflow_items ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`ALTER TABLE new_product_workflow_stage_history ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`ALTER TABLE new_product_workflow_attachments ENABLE ROW LEVEL SECURITY`)
+  await db.execute(sql`ALTER TABLE new_product_workflow_preferences ENABLE ROW LEVEL SECURITY`)
+}
 
-  await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-default-stages:${userId}`}))`)
-    const [{ count } = { count: 0 }] = resultRows<{ count: number }>(await tx.execute(sql`
-      SELECT COUNT(*)::int AS count
-      FROM new_product_workflow_stages
+export async function getNewProductPageSetup(userId: string) {
+  await ensureNewProductWorkflowTables(userId)
+  const [stageResult, preferenceResult] = await Promise.all([
+    db.execute<NewProductStage>(sql`
+      SELECT
+        stage.id,
+        stage.name,
+        stage.position,
+        stage.tone,
+        COUNT(item.id)::int AS "itemCount"
+      FROM new_product_workflow_stages stage
+      LEFT JOIN new_product_workflow_items item
+        ON item.user_id = stage.user_id AND item.stage_id = stage.id
+      WHERE stage.user_id = ${userId}::uuid
+      GROUP BY stage.id
+      ORDER BY stage.position, stage.created_at
+    `),
+    db.execute<{ editorLayout: unknown }>(sql`
+      SELECT editor_layout AS "editorLayout"
+      FROM new_product_workflow_preferences
       WHERE user_id = ${userId}::uuid
-    `))
-    if (count === 0) {
-      for (const [index, stage] of DEFAULT_NEW_PRODUCT_STAGES.entries()) {
-        await tx.execute(sql`
-          INSERT INTO new_product_workflow_stages (user_id, name, position, tone)
-          VALUES (${userId}::uuid, ${stage.name}, ${index + 1}, ${stage.tone})
-        `)
-      }
-    }
-  })
+    `),
+  ])
+  const [preference] = resultRows<{ editorLayout: unknown }>(preferenceResult)
+  return {
+    stages: resultRows<NewProductStage>(stageResult).map((stage) => ({
+      ...stage,
+      tone: validTone(stage.tone),
+    })),
+    editorLayout: normalizeNewProductEditorLayout(preference?.editorLayout),
+  }
+}
+
+export async function listNewProductSummaries(input: {
+  userId: string
+  stageId?: string | null
+  query?: string | null
+  limit?: number
+}) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const query = input.query?.trim().slice(0, 200) ?? ''
+  const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)))
+  const stageCondition = input.stageId
+    ? sql`AND item.stage_id = ${input.stageId}::uuid`
+    : sql``
+  const searchCondition = query
+    ? sql`AND (
+        item.product_name ILIKE ${`%${query}%`}
+        OR COALESCE(item.sample_code, '') ILIKE ${`%${query}%`}
+        OR COALESCE(item.registered_product_name, '') ILIKE ${`%${query}%`}
+        OR item.product_number::text ILIKE ${`%${query}%`}
+      )`
+    : sql``
+
+  const [summaryResult, countResult] = await Promise.all([
+    db.execute<NewProductSummary>(sql`
+      SELECT
+        item.id,
+        item.product_number AS "productNumber",
+        item.stage_id AS "stageId",
+        stage.name AS "stageName",
+        stage.tone AS "stageTone",
+        item.product_name AS "productName",
+        item.sample_code AS "sampleCode",
+        item.updated_at::text AS "updatedAt"
+      FROM new_product_workflow_items item
+      JOIN new_product_workflow_stages stage ON stage.id = item.stage_id
+      WHERE item.user_id = ${input.userId}::uuid
+      ${stageCondition}
+      ${searchCondition}
+      ORDER BY item.updated_at DESC, item.product_number DESC
+      LIMIT ${limit}
+    `),
+    db.execute<{ count: number }>(sql`
+      SELECT COUNT(*)::int AS count
+      FROM new_product_workflow_items item
+      WHERE item.user_id = ${input.userId}::uuid
+      ${stageCondition}
+      ${searchCondition}
+    `),
+  ])
+  const [{ count } = { count: 0 }] = resultRows<{ count: number }>(countResult)
+  return {
+    summaries: resultRows<NewProductSummary>(summaryResult).map((item) => ({
+      ...item,
+      stageTone: validTone(item.stageTone),
+    })),
+    total: count,
+  }
+}
+
+export async function getNewProductItem(input: { userId: string; itemId: string }) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const result = await db.execute<NewProductItem>(sql`
+    SELECT
+      item.id,
+      item.product_number AS "productNumber",
+      item.stage_id AS "stageId",
+      stage.name AS "stageName",
+      stage.position AS "stagePosition",
+      stage.tone AS "stageTone",
+      item.sample_code AS "sampleCode",
+      item.product_name AS "productName",
+      item.english_name AS "englishName",
+      item.source_url AS "sourceUrl",
+      item.required_checks AS "requiredChecks",
+      item.estimated_cost::float8 AS "estimatedCost",
+      item.history_notes AS "historyNotes",
+      item.reference_notes AS "referenceNotes",
+      item.china_item_name AS "chinaItemName",
+      item.planned_sale_date::text AS "plannedSaleDate",
+      item.detail_page_due_date::text AS "detailPageDueDate",
+      item.registered_product_name AS "registeredProductName",
+      item.package_info_url AS "packageInfoUrl",
+      item.package_progress_status AS "packageProgressStatus",
+      item.package_status AS "packageStatus",
+      item.korean_manual_status AS "koreanManualStatus",
+      item.declared_value::float8 AS "declaredValue",
+      item.b2b_price AS "b2bPrice",
+      item.b2c_price AS "b2cPrice",
+      item.carrier,
+      item.b2b_shipping_fee AS "b2bShippingFee",
+      item.b2c_shipping_fee AS "b2cShippingFee",
+      item.quality_notice_status AS "qualityNoticeStatus",
+      item.package_box_design AS "packageBoxDesign",
+      item.package_manufacturer AS "packageManufacturer",
+      item.package_packing AS "packagePacking",
+      item.created_at::text AS "createdAt",
+      item.updated_at::text AS "updatedAt",
+      COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+          'id', attachment.id,
+          'kind', attachment.kind,
+          'fileName', attachment.file_name,
+          'contentType', attachment.content_type,
+          'fileSize', attachment.file_size,
+          'createdAt', attachment.created_at::text
+        ) ORDER BY attachment.created_at)
+        FROM new_product_workflow_attachments attachment
+        WHERE attachment.item_id = item.id
+      ), '[]'::jsonb) AS attachments,
+      COALESCE((
+        SELECT jsonb_agg(history_row ORDER BY history_row."changedAt" DESC)
+        FROM (
+          SELECT
+            history.id,
+            from_stage.name AS "fromStageName",
+            to_stage.name AS "toStageName",
+            history.note,
+            history.changed_at::text AS "changedAt"
+          FROM new_product_workflow_stage_history history
+          LEFT JOIN new_product_workflow_stages from_stage ON from_stage.id = history.from_stage_id
+          JOIN new_product_workflow_stages to_stage ON to_stage.id = history.to_stage_id
+          WHERE history.item_id = item.id
+          ORDER BY history.changed_at DESC
+          LIMIT 20
+        ) history_row
+      ), '[]'::jsonb) AS "stageHistory"
+    FROM new_product_workflow_items item
+    JOIN new_product_workflow_stages stage ON stage.id = item.stage_id
+    WHERE item.user_id = ${input.userId}::uuid
+      AND item.id = ${input.itemId}::uuid
+  `)
+  const [item] = resultRows<NewProductItem>(result)
+  if (!item) return null
+  return {
+    ...item,
+    stageTone: validTone(item.stageTone),
+    attachments: jsonArray<NewProductAttachment>(item.attachments),
+    stageHistory: jsonArray<NewProductStageHistory>(item.stageHistory),
+  }
 }
 
 export async function getNewProductWorkflow(userId: string) {
@@ -339,14 +584,12 @@ export async function getNewProductWorkflow(userId: string) {
 export async function createNewProduct(input: {
   userId: string
   requestedByUserId: string
-  stageId: string
-  productName: string
-  sampleCode: string | null
+  values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
-    await assertStage(tx, input.userId, input.stageId)
+    await assertStage(tx, input.userId, input.values.stageId)
     const [{ nextNumber } = { nextNumber: 1 }] = resultRows<{ nextNumber: number }>(await tx.execute(sql`
       SELECT COALESCE(MAX(product_number), 0)::int + 1 AS "nextNumber"
       FROM new_product_workflow_items
@@ -354,10 +597,27 @@ export async function createNewProduct(input: {
     `))
     const [created] = resultRows<{ id: string }>(await tx.execute(sql`
       INSERT INTO new_product_workflow_items (
-        user_id, product_number, stage_id, product_name, sample_code, created_by_user_id
+        user_id, product_number, stage_id, sample_code, product_name, english_name,
+        source_url, required_checks, estimated_cost, history_notes, reference_notes,
+        china_item_name, planned_sale_date, detail_page_due_date, registered_product_name,
+        package_info_url, package_progress_status, package_status, korean_manual_status,
+        declared_value, b2b_price, b2c_price, carrier, b2b_shipping_fee, b2c_shipping_fee,
+        quality_notice_status, package_box_design, package_manufacturer, package_packing,
+        created_by_user_id
       ) VALUES (
-        ${input.userId}::uuid, ${nextNumber}, ${input.stageId}::uuid,
-        ${input.productName}, ${input.sampleCode}, ${input.requestedByUserId}::uuid
+        ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid,
+        ${input.values.sampleCode}, ${input.values.productName}, ${input.values.englishName},
+        ${input.values.sourceUrl}, ${input.values.requiredChecks}, ${input.values.estimatedCost},
+        ${input.values.historyNotes}, ${input.values.referenceNotes}, ${input.values.chinaItemName},
+        ${input.values.plannedSaleDate}::date, ${input.values.detailPageDueDate}::date,
+        ${input.values.registeredProductName}, ${input.values.packageInfoUrl},
+        ${input.values.packageProgressStatus}, ${input.values.packageStatus},
+        ${input.values.koreanManualStatus}, ${input.values.declaredValue},
+        ${input.values.b2bPrice}, ${input.values.b2cPrice}, ${input.values.carrier},
+        ${input.values.b2bShippingFee}, ${input.values.b2cShippingFee},
+        ${input.values.qualityNoticeStatus}, ${input.values.packageBoxDesign},
+        ${input.values.packageManufacturer}, ${input.values.packagePacking},
+        ${input.requestedByUserId}::uuid
       )
       RETURNING id
     `))
@@ -365,7 +625,7 @@ export async function createNewProduct(input: {
       INSERT INTO new_product_workflow_stage_history (
         user_id, item_id, to_stage_id, note, changed_by_user_id
       ) VALUES (
-        ${input.userId}::uuid, ${created!.id}::uuid, ${input.stageId}::uuid,
+        ${input.userId}::uuid, ${created!.id}::uuid, ${input.values.stageId}::uuid,
         '신상품 등록', ${input.requestedByUserId}::uuid
       )
     `)
@@ -510,6 +770,22 @@ export async function saveNewProductStages(input: {
   })
 }
 
+export async function saveNewProductEditorLayout(input: {
+  userId: string
+  layout: NewProductEditorLayout
+}) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const layout = normalizeNewProductEditorLayout(input.layout)
+  await db.execute(sql`
+    INSERT INTO new_product_workflow_preferences (user_id, editor_layout, updated_at)
+    VALUES (${input.userId}::uuid, ${JSON.stringify(layout)}::jsonb, now())
+    ON CONFLICT (user_id) DO UPDATE SET
+      editor_layout = EXCLUDED.editor_layout,
+      updated_at = now()
+  `)
+  return layout
+}
+
 export async function addNewProductAttachment(input: {
   userId: string
   requestedByUserId: string
@@ -601,6 +877,26 @@ function validTone(value: unknown): NewProductStageTone {
   return NEW_PRODUCT_STAGE_TONES.includes(value as NewProductStageTone)
     ? value as NewProductStageTone
     : 'slate'
+}
+
+export function normalizeNewProductEditorLayout(value: unknown): NewProductEditorLayout {
+  const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const requestedOrder = Array.isArray(raw.sectionOrder)
+    ? raw.sectionOrder.filter((section): section is NewProductEditorSection => (
+        NEW_PRODUCT_EDITOR_SECTIONS.includes(section as NewProductEditorSection)
+      ))
+    : []
+  const sectionOrder = [
+    ...new Set(requestedOrder),
+    ...NEW_PRODUCT_EDITOR_SECTIONS.filter((section) => !requestedOrder.includes(section)),
+  ]
+  const hiddenSections = Array.isArray(raw.hiddenSections)
+    ? [...new Set(raw.hiddenSections.filter((section): section is NewProductEditorSection => (
+        NEW_PRODUCT_EDITOR_SECTIONS.includes(section as NewProductEditorSection) && section !== 'basic'
+      )))]
+    : []
+  const columns = raw.columns === 1 || raw.columns === 3 ? raw.columns : 2
+  return { sectionOrder, hiddenSections, columns }
 }
 
 function jsonArray<T>(value: unknown): T[] {

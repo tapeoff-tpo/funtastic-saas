@@ -399,9 +399,11 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
   const [meetingDate, setMeetingDate] = useState(meeting.meetingDate)
   const [title, setTitle] = useState(meeting.title)
   const [status, setStatus] = useState<SourcingMeeting['status']>(meeting.status)
+  const [isEditing, setIsEditing] = useState(false)
   const [pending, startTransition] = useTransition()
   const selectedOwnerId = viewer.isMain ? activeOwnerId : viewer.operatorId
   const selectedOperator = operators.find((operator) => operator.id === selectedOwnerId) ?? null
+  const canEdit = viewer.isMain || Boolean(viewer.operatorId)
   const showAllOperators = viewer.isMain && !selectedOwnerId
   const operatorSections = showAllOperators
     ? operators.map((operator) => ({ owner: { id: operator.id, displayName: operator.displayName }, items: meeting.items.filter((item) => item.ownerOperatorId === operator.id) }))
@@ -426,8 +428,18 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
         return
       }
       toast.success('소싱회의 정보를 저장했습니다.')
+      setIsEditing(false)
       router.refresh()
     })
+  }
+
+  function toggleEditing() {
+    if (isEditing) {
+      setMeetingDate(meeting.meetingDate)
+      setTitle(meeting.title)
+      setStatus(meeting.status)
+    }
+    setIsEditing((current) => !current)
   }
 
   return (
@@ -447,13 +459,16 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
               {formatMeetingDate(meeting.meetingDate)} · {visibleItemCount.toLocaleString('ko-KR')}개 상품
             </p>
           </div>
-          <div className="rounded-md border bg-muted/30 px-3 py-2 text-right text-sm">
-            <p className="text-xs text-muted-foreground">이번 회의 기본 환율</p>
-            <p className="font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</p>
+          <div className="flex flex-wrap items-start justify-end gap-2">
+            {canEdit ? <Button type="button" variant={isEditing ? 'outline' : 'default'} onClick={toggleEditing}>{isEditing ? '수정 취소' : '수정'}</Button> : null}
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-right text-sm">
+              <p className="text-xs text-muted-foreground">이번 회의 기본 환율</p>
+              <p className="font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</p>
+            </div>
           </div>
         </div>
 
-        {viewer.isMain ? (
+        {viewer.isMain && isEditing ? (
           <div className="mt-4 grid gap-3 rounded-lg border bg-card p-3 lg:grid-cols-[170px_minmax(0,1fr)_130px_auto] lg:items-end">
             <label className="space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">회의 날짜</span>
@@ -481,12 +496,13 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
 
       {operatorSections.map((section) => (
         <OwnerSheet
-          key={section.owner.id}
+          key={`${section.owner.id}:${isEditing ? 'edit' : 'view'}`}
           meetingId={meeting.id}
           owner={section.owner}
           rows={section.items}
           operators={operators}
           canAssignOwner={showAllOperators}
+          isEditing={isEditing}
           exchangeRate={exchangeRate.rate}
           onChanged={() => router.refresh()}
         />
@@ -494,11 +510,13 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
 
       {unassignedItems.length > 0 ? (
         <OwnerSheet
+          key={`unassigned:${isEditing ? 'edit' : 'view'}`}
           meetingId={meeting.id}
           owner={{ id: null, displayName: '미지정 · 이전 수집 데이터' }}
           rows={unassignedItems}
           operators={operators}
           canAssignOwner
+          isEditing={isEditing}
           exchangeRate={exchangeRate.rate}
           allowNewRows={false}
           onChanged={() => router.refresh()}
@@ -514,19 +532,20 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
   )
 }
 
-function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOwner = false, exchangeRate, allowNewRows = true, onChanged }: {
+function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOwner = false, isEditing, exchangeRate, allowNewRows = true, onChanged }: {
   meetingId: string
   owner: SheetOwner
   rows: ManualSourcingItem[]
   operators: SourcingOperator[]
   canAssignOwner?: boolean
+  isEditing: boolean
   exchangeRate: number
   allowNewRows?: boolean
   onChanged: () => void
 }) {
   const [rows, setRows] = useState<DraftRow[]>(() => sourceRows.map((item) => rowFromItem(item, exchangeRate)))
   const [pending, startTransition] = useTransition()
-  const canAddRows = allowNewRows && Boolean(owner.id)
+  const canAddRows = isEditing && allowNewRows && Boolean(owner.id)
   const showOwnerColumn = canAssignOwner
 
   function updateRow(clientId: string, patch: Partial<DraftRow>) {
@@ -605,6 +624,10 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         toast.error(errorMessage(error))
       }
     })
+  }
+
+  if (!isEditing) {
+    return <ReadOnlyOwnerSheet owner={owner} rows={sourceRows} showOwnerColumn={showOwnerColumn} />
   }
 
   return (
@@ -736,6 +759,112 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         </table>
       </div>
     </section>
+  )
+}
+
+function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
+  owner: SheetOwner
+  rows: ManualSourcingItem[]
+  showOwnerColumn: boolean
+}) {
+  return (
+    <section className="overflow-hidden rounded-lg border bg-card">
+      <div className="flex items-center justify-between border-b px-4 py-3">
+        <h3 className="text-sm font-semibold">{owner.displayName}</h3>
+        <span className="text-xs text-muted-foreground">{rows.length.toLocaleString('ko-KR')}개 상품</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className={cn('min-w-[2360px] table-fixed border-collapse text-sm', showOwnerColumn && 'min-w-[2520px]')}>
+          <colgroup>
+            <col className="w-12" />
+            <col className="w-56" />
+            <col className="w-44" />
+            <col className="w-64" />
+            <col className="w-28" />
+            <col className="w-30" />
+            <col className="w-28" />
+            <col className="w-32" />
+            <col className="w-64" />
+            <col className="w-32" />
+            <col className="w-64" />
+            <col className="w-56" />
+            <col className="w-56" />
+            {showOwnerColumn ? <col className="w-40" /> : null}
+            <col className="w-36" />
+          </colgroup>
+          <thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground">
+            <tr>
+              <TableHeader>순번</TableHeader>
+              <TableHeader>상품명</TableHeader>
+              <TableHeader>상품 옵션</TableHeader>
+              <TableHeader>1688 URL</TableHeader>
+              <TableHeader>중국 위안화</TableHeader>
+              <TableHeader>개당 배송비</TableHeader>
+              <TableHeader>환율</TableHeader>
+              <TableHeader>한국원화</TableHeader>
+              <TableHeader>국내판매 링크</TableHeader>
+              <TableHeader>국내판매가</TableHeader>
+              <TableHeader>상세페이지 URL</TableHeader>
+              <TableHeader>비고 1</TableHeader>
+              <TableHeader>비고 2</TableHeader>
+              {showOwnerColumn ? <TableHeader>등록자</TableHeader> : null}
+              <TableHeader>진행여부</TableHeader>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((item, index) => (
+              <tr key={item.id} className="border-t align-top hover:bg-muted/20">
+                <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
+                <TableCell><ReadOnlyText value={item.productName} /></TableCell>
+                <TableCell><ReadOnlyText value={item.productOption} /></TableCell>
+                <TableCell><ReadOnlyLink value={item.chinaPurchaseUrl} /></TableCell>
+                <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.chinaUnitPriceCny)} /></TableCell>
+                <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.unitShippingCny)} /></TableCell>
+                <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.exchangeRateKrw)} /></TableCell>
+                <TableCell className="text-right font-semibold tabular-nums"><ReadOnlyText value={won(item.calculatedCostKrw)} /></TableCell>
+                <TableCell><ReadOnlyLink value={item.domesticSaleUrl} /></TableCell>
+                <TableCell className="text-right tabular-nums"><ReadOnlyText value={won(item.domesticSalePrice)} /></TableCell>
+                <TableCell><ReadOnlyLink value={item.detailPageUrl} /></TableCell>
+                <TableCell><ReadOnlyText value={item.memo1} /></TableCell>
+                <TableCell><ReadOnlyText value={item.memo2} /></TableCell>
+                {showOwnerColumn ? <TableCell><ReadOnlyText value={item.ownerName} /></TableCell> : null}
+                <TableCell><ReviewStatusBadge status={item.status} passedNewProductId={item.passedNewProductId} /></TableCell>
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr><td colSpan={showOwnerColumn ? 15 : 14} className="px-4 py-12 text-center text-sm text-muted-foreground">등록된 상품이 없습니다.</td></tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function ReadOnlyText({ value }: { value: string | null | undefined }) {
+  return value ? <span className="block whitespace-pre-wrap break-words leading-5">{value}</span> : <span className="text-muted-foreground">-</span>
+}
+
+function ReadOnlyLink({ value }: { value: string | null | undefined }) {
+  const href = externalUrl(value)
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" className="block break-all leading-5 text-primary underline underline-offset-2 hover:text-primary/80">
+      {value}
+    </a>
+  ) : <ReadOnlyText value={value} />
+}
+
+function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourcingReviewStatus; passedNewProductId: string | null }) {
+  const className = status === 'passed'
+    ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+    : status === 'rejected'
+      ? 'bg-rose-50 text-rose-700 ring-rose-200'
+      : 'bg-amber-50 text-amber-800 ring-amber-200'
+  return (
+    <div className="space-y-1">
+      <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1', className)}>{manualSourcingReviewStatusLabels[status]}</span>
+      {status === 'passed' && passedNewProductId ? <p className="text-[11px] text-emerald-700">신상품 1단계 등록됨</p> : null}
+    </div>
   )
 }
 
@@ -881,6 +1010,21 @@ function textNumber(value: number | null) {
 
 function won(value: number | null) {
   return value == null ? '-' : `₩ ${value.toLocaleString('ko-KR')}`
+}
+
+function decimalText(value: number | null) {
+  return value == null ? '-' : value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
+}
+
+function externalUrl(value: string | null | undefined) {
+  const text = value?.trim()
+  if (!text) return null
+  try {
+    const url = new URL(/^https?:\/\//i.test(text) ? text : `https://${text}`)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  } catch {
+    return null
+  }
 }
 
 function operatorDrafts(operators: SourcingOperator[]) {

@@ -14,16 +14,11 @@ export async function GET(request: Request) {
   if (stageId && !isUuid(stageId)) {
     return NextResponse.json({ error: '진행 단계를 확인해주세요.' }, { status: 400 })
   }
-  const ownerOperatorId = url.searchParams.get('ownerOperatorId')
-  if (ownerOperatorId && !isUuid(ownerOperatorId)) {
-    return NextResponse.json({ error: '등록자 정보를 확인해주세요.' }, { status: 400 })
-  }
   const result = await listNewProductSummaries({
     userId: workspaceUserId,
     actorUserId: user.id,
     stageId,
     query: url.searchParams.get('query'),
-    ownerOperatorId,
     limit: 50,
   })
   return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } })

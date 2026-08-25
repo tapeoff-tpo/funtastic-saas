@@ -99,7 +99,6 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
   const [dataRevision, setDataRevision] = useState(0)
   const [listLoading, setListLoading] = useState(true)
   const [layout, setLayout] = useState(initialLayout)
-  const [activeOwnerId, setActiveOwnerId] = useState<string | null>(viewer.isMain ? null : viewer.operatorId)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -114,7 +113,6 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
       const params = new URLSearchParams()
       if (stageFilter !== 'all') params.set('stageId', stageFilter)
       if (query.trim()) params.set('query', query.trim())
-      if (activeOwnerId) params.set('ownerOperatorId', activeOwnerId)
       try {
         const response = await fetch(`/api/new-products/items?${params.toString()}`, {
           signal: controller.signal,
@@ -140,7 +138,7 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [activeOwnerId, dataRevision, mode, query, stageFilter])
+  }, [dataRevision, mode, query, stageFilter])
 
   useEffect(() => {
     if (mode !== 'view' || !selectedId) return
@@ -161,9 +159,6 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
   const selectedStageName = stageFilter === 'all'
     ? '전체 상태'
     : initialStages.find((stage) => stage.id === stageFilter)?.name ?? ''
-  const workspaceTabs = viewer.isMain
-    ? operators
-    : operators.filter((operator) => operator.id === viewer.operatorId)
 
   function selectProduct(id: string) {
     if (!id) return
@@ -188,16 +183,6 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
     setItem(null)
   }
 
-  function changeWorkspace(ownerOperatorId: string | null) {
-    if (!viewer.isMain && ownerOperatorId !== viewer.operatorId) return
-    setActiveOwnerId(ownerOperatorId)
-    setStageFilter('')
-    setQuery('')
-    setMode('view')
-    setSelectedId(null)
-    setItem(null)
-  }
-
   function closeEditor() {
     setMode('view')
     setSelectedId(null)
@@ -215,41 +200,6 @@ export function NewProductBoard({ initialStages, initialLayout, operators, viewe
   return (
     <div className="space-y-4">
       <section className="sticky top-0 z-30 rounded-xl border bg-background/95 p-3 shadow-sm backdrop-blur">
-        <nav role="tablist" aria-label="신상품 등록자 작업공간" className="-mx-3 -mt-3 mb-3 flex min-h-12 overflow-x-auto border-b px-3">
-          {viewer.isMain && (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeOwnerId === null}
-              onClick={() => changeWorkspace(null)}
-              className={cn(
-                'flex shrink-0 items-center gap-2 border-b-2 px-4 text-sm font-medium transition-colors',
-                activeOwnerId === null ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              Main Form
-              <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">main</span>
-            </button>
-          )}
-          {workspaceTabs.map((operator) => (
-            <button
-              key={operator.id}
-              type="button"
-              role="tab"
-              aria-selected={activeOwnerId === operator.id}
-              onClick={() => changeWorkspace(operator.id)}
-              className={cn(
-                'shrink-0 border-b-2 px-4 text-sm font-medium transition-colors',
-                activeOwnerId === operator.id ? 'border-foreground text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {operator.displayName}
-            </button>
-          ))}
-          {!viewer.isMain && workspaceTabs.length === 0 && (
-            <span className="flex items-center px-4 text-sm text-muted-foreground">등록자 미설정</span>
-          )}
-        </nav>
         <div className="flex flex-col gap-3 xl:flex-row xl:items-end">
           <ToolbarField label="상태별 보기" className="xl:w-64">
             <select

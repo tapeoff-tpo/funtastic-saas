@@ -527,8 +527,8 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
           <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
           <div className={cn('grid gap-3 md:grid-cols-2', fullWidthFieldClass)}>
-            <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={2} /></Field>
-            <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={2} /></Field>
+            <Field label="필수 체크 사항"><TextArea value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" rows={2} resizable={false} /></Field>
+            <Field label="비고"><TextArea value={values.referenceNotes} onChange={(value) => setValue('referenceNotes', value)} rows={2} resizable={false} /></Field>
           </div>
         </div>
       </EditorSection>
@@ -944,8 +944,8 @@ function UrlInput({ value, onChange }: { value: string; onChange: (value: string
   )
 }
 
-function TextArea({ value, onChange, placeholder, rows = 3 }: { value: string; onChange: (value: string) => void; placeholder?: string; rows?: number }) {
-  return <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} rows={rows} className={cn('w-full resize-y rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30', rows === 1 && 'h-8 resize-none py-1')} />
+function TextArea({ value, onChange, placeholder, rows = 3, resizable = true }: { value: string; onChange: (value: string) => void; placeholder?: string; rows?: number; resizable?: boolean }) {
+  return <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} rows={rows} className={cn('w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30', resizable ? 'resize-y' : 'resize-none', rows === 1 && 'h-8 resize-none py-1')} />
 }
 
 function MoneyInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {

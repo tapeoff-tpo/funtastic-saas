@@ -599,7 +599,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         await persistRows(rows)
         const passedCount = populatedRows.filter((row) => row.status === 'passed').length
         toast.success(passedCount > 0
-          ? `${populatedRows.length}개 상품을 저장했고, 통과 ${passedCount}개는 신상품 진행관리 1단계에 자동 등록했습니다.`
+          ? `${populatedRows.length}개 상품을 저장했고, 통과 ${passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
           : `${populatedRows.length}개 상품을 저장했습니다.`)
         onChanged()
       } catch (error) {
@@ -616,7 +616,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         if (!row.productName.trim()) throw new Error('진행여부를 정하려면 상품명을 먼저 입력해 주세요.')
         await persistRows([{ ...row, status }])
         toast.success(status === 'passed'
-          ? '통과 처리되어 신상품 진행관리 1단계에 자동 등록했습니다.'
+          ? '통과 처리되어 상품관리 1단계에 자동 등록했습니다.'
           : `진행여부를 ${manualSourcingReviewStatusLabels[status]}로 변경했습니다.`)
         onChanged()
       } catch (error) {

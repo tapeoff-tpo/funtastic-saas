@@ -870,7 +870,7 @@ export async function deleteSourcingMeeting(input: {
     `))
     const passedCount = items.filter((item) => item.passedNewProductId || item.status === 'passed').length
     if (passedCount > 0) {
-      throw new Error(`1차 통과로 신상품 진행관리에 연결된 상품이 ${passedCount}개 있어 이 회의는 삭제할 수 없습니다.`)
+      throw new Error(`1차 통과로 상품관리에 연결된 상품이 ${passedCount}개 있어 이 회의는 삭제할 수 없습니다.`)
     }
 
     await tx.execute(sql`

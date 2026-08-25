@@ -40,6 +40,7 @@ import type {
 import {
   createNewProductAction,
   deleteNewProductAction,
+  deleteNewProductsAction,
   saveNewProductEditorLayoutAction,
   saveNewProductStagesAction,
   updateNewProductAction,
@@ -259,38 +260,62 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           total={total}
           loading={listLoading}
           onSelect={selectProduct}
+          onDeleted={handleDeleted}
         />
       ) : null}
     </div>
   )
 }
 
-function ProductSummaryList({ title, summaries, total, loading, onSelect }: {
+function ProductSummaryList({ title, summaries, total, loading, onSelect, onDeleted }: {
   title: string
   summaries: NewProductSummary[]
   total: number
   loading: boolean
   onSelect: (id: string) => void
+  onDeleted: () => void
 }) {
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const visibleSelectedIds = summaries.filter((summary) => selectedIds.includes(summary.id)).map((summary) => summary.id)
+  const allVisibleSelected = summaries.length > 0 && visibleSelectedIds.length === summaries.length
+
+  function toggle(id: string) {
+    setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])
+  }
+
   return (
     <section className="overflow-hidden rounded-xl border bg-card shadow-sm">
-      <div className="flex items-center justify-between border-b px-4 py-3">
+      <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold">{title} 상품</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
         </div>
+        {summaries.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? [] : summaries.map((summary) => summary.id))} />
+              현재 목록 전체 선택
+            </label>
+            <BulkDeleteProductsDialog
+              itemIds={visibleSelectedIds}
+              onDeleted={() => {
+                setSelectedIds([])
+                onDeleted()
+              }}
+            />
+          </div>
+        )}
       </div>
       {loading ? (
         <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />상품 목록을 불러오는 중입니다.</div>
       ) : summaries.length > 0 ? (
         <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
           {summaries.map((summary) => (
-            <button
-              key={summary.id}
-              type="button"
-              onClick={() => onSelect(summary.id)}
-              className="rounded-lg border bg-background p-3 text-left transition hover:border-violet-300 hover:bg-violet-50/50 hover:shadow-sm"
-            >
+            <div key={summary.id} className={cn('relative rounded-lg border bg-background transition hover:border-violet-300 hover:bg-violet-50/50 hover:shadow-sm', selectedIds.includes(summary.id) && 'border-violet-400 ring-1 ring-violet-200')}>
+              <label className="absolute left-3 top-3 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-background/90 shadow-sm" aria-label={`${summary.productName} 선택`}>
+                <input type="checkbox" checked={selectedIds.includes(summary.id)} onChange={() => toggle(summary.id)} />
+              </label>
+              <button type="button" onClick={() => onSelect(summary.id)} className="w-full p-3 pl-12 text-left">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold">{summary.productName}</p>
@@ -298,8 +323,12 @@ function ProductSummaryList({ title, summaries, total, loading, onSelect }: {
                 </div>
                 <span className={cn('shrink-0 rounded-full px-2 py-1 text-[10px] font-medium', toneClasses[summary.stageTone])}>{summary.stageName}</span>
               </div>
-              <p className="mt-3 text-[11px] text-muted-foreground">최근 수정 {formatDateTime(summary.updatedAt)}</p>
-            </button>
+                <div className="mt-3 space-y-0.5 text-[11px] text-muted-foreground">
+                  <p>최초 등록 {formatDateTime(summary.createdAt)}</p>
+                  <p>최근 수정 {formatDateTime(summary.updatedAt)}</p>
+                </div>
+              </button>
+            </div>
           ))}
         </div>
       ) : (
@@ -631,6 +660,47 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
         <Button onClick={save} disabled={pending || !values.productName.trim()} size="lg" className="w-full sm:w-auto"><Save />{pending ? '저장 중...' : item ? '변경사항 저장' : '신상품 저장'}</Button>
       </div>
     </div>
+  )
+}
+
+function BulkDeleteProductsDialog({ itemIds, onDeleted }: { itemIds: string[]; onDeleted: () => void }) {
+  const [open, setOpen] = useState(false)
+  const [pending, startTransition] = useTransition()
+
+  function remove() {
+    startTransition(async () => {
+      const result = await deleteNewProductsAction({ itemIds })
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      toast.success(`신상품 ${result.deleted.toLocaleString('ko-KR')}개를 삭제했습니다.`)
+      setOpen(false)
+      onDeleted()
+    })
+  }
+
+  return (
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <Dialog.Trigger render={(props) => <Button {...props} type="button" size="sm" variant="destructive" disabled={itemIds.length === 0}><Trash2 />선택 삭제 ({itemIds.length})</Button>} />
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px]" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(92vw,480px)] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-background shadow-2xl">
+          <div className="p-5">
+            <Dialog.Title className="text-lg font-semibold">선택한 상품을 모두 삭제할까요?</Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm text-muted-foreground">
+              선택한 <strong className="text-foreground">{itemIds.length.toLocaleString('ko-KR')}개 상품</strong>과 각 상품의 첨부파일, 단계 변경 이력이 함께 삭제됩니다. 삭제 후에는 복구할 수 없습니다.
+            </Dialog.Description>
+          </div>
+          <div className="flex justify-end gap-2 border-t p-4">
+            <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline" disabled={pending}>취소</Button>} />
+            <Button type="button" variant="destructive" onClick={remove} disabled={pending}>
+              {pending && <Loader2 className="animate-spin" />}정말 {itemIds.length.toLocaleString('ko-KR')}개 삭제
+            </Button>
+          </div>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

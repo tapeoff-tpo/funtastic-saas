@@ -207,6 +207,7 @@ export type NewProductSummary = {
   ownerName: string | null
   productName: string
   sampleCode: string | null
+  createdAt: string
   updatedAt: string
 }
 
@@ -563,6 +564,7 @@ export async function listNewProductSummaries(input: {
         operator.display_name AS "ownerName",
         item.product_name AS "productName",
         item.sample_code AS "sampleCode",
+        item.created_at::text AS "createdAt",
         item.updated_at::text AS "updatedAt"
       FROM new_product_workflow_items item
       JOIN new_product_workflow_stages stage ON stage.id = item.stage_id
@@ -1004,14 +1006,21 @@ export async function updateNewProduct(input: {
 }
 
 export async function deleteNewProduct(input: { userId: string; itemId: string }) {
+  const result = await deleteNewProducts({ userId: input.userId, itemIds: [input.itemId] })
+  return result.deleted === 1
+}
+
+export async function deleteNewProducts(input: { userId: string; itemIds: string[] }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const itemIds = [...new Set(input.itemIds)].slice(0, 500)
+  if (itemIds.length === 0) return { deleted: 0 }
   const result = await db.execute(sql`
     DELETE FROM new_product_workflow_items
-    WHERE id = ${input.itemId}::uuid
-      AND user_id = ${input.userId}::uuid
+    WHERE user_id = ${input.userId}::uuid
+      AND id IN (${sql.join(itemIds.map((id) => sql`${id}::uuid`), sql`, `)})
     RETURNING id
   `)
-  return resultRows(result).length > 0
+  return { deleted: resultRows(result).length }
 }
 
 export async function moveNewProducts(input: {

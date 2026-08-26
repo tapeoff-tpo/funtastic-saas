@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronsRight } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ArrowUp, ChevronsRight } from 'lucide-react'
 import { Sidebar } from './sidebar'
 import { TabBar } from './tab-bar'
 import { NavStateProvider } from './nav-state'
@@ -14,6 +14,8 @@ interface AppShellProps {
 const STORAGE_KEY = 'funtastic-sidebar-collapsed'
 
 export function AppShell({ children }: AppShellProps) {
+  const mainRef = useRef<HTMLElement>(null)
+  const [showScrollTop, setShowScrollTop] = useState(false)
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(STORAGE_KEY) === 'true'
@@ -51,10 +53,26 @@ export function AppShell({ children }: AppShellProps) {
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <TabBar />
-          <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-gray-50 p-6">
+          <main
+            ref={mainRef}
+            onScroll={(event) => setShowScrollTop(event.currentTarget.scrollTop > 300)}
+            className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-gray-50 p-6"
+          >
             <PurchasingLanguageSwitcher />
             {children}
           </main>
+          {showScrollTop ? (
+            <button
+              type="button"
+              onClick={() => mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' })}
+              aria-label="맨 위로 이동"
+              title="맨 위로"
+              className="fixed bottom-6 right-6 z-40 inline-flex h-11 items-center gap-1.5 rounded-full bg-gray-900 px-4 text-sm font-semibold text-white shadow-lg transition hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2"
+            >
+              <ArrowUp className="h-4 w-4" />
+              맨 위로
+            </button>
+          ) : null}
         </div>
       </div>
     </NavStateProvider>

@@ -836,15 +836,17 @@ function ReadOnlyText({ value }: { value: string | null | undefined }) {
 function ReadOnlyLink({ value, label }: { value: string | null | undefined; label: string }) {
   const href = externalUrl(value)
   return href ? (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      title={value ?? undefined}
-      className="inline-flex h-7 max-w-full items-center rounded-md border border-primary/20 bg-primary/5 px-2 font-medium text-primary hover:bg-primary/10"
-    >
-      <span className="truncate">{label}</span>
-    </a>
+    <div className="flex justify-center">
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        title={value ?? undefined}
+        className="inline-flex h-7 max-w-full items-center rounded-md border border-primary/20 bg-primary/5 px-2 font-medium text-primary hover:bg-primary/10"
+      >
+        <span className="truncate">{label}</span>
+      </a>
+    </div>
   ) : <ReadOnlyText value={value} />
 }
 

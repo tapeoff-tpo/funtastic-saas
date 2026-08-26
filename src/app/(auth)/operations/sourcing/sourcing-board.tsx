@@ -805,14 +805,14 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
                 <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
                 <TableCell><ReadOnlyText value={item.productName} /></TableCell>
                 <TableCell><ReadOnlyText value={item.productOption} /></TableCell>
-                <TableCell><ReadOnlyLink value={item.chinaPurchaseUrl} /></TableCell>
+                <TableCell><ReadOnlyLink value={item.chinaPurchaseUrl} label="1688 링크" /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.chinaUnitPriceCny)} /></TableCell>
                 <TableCell><ReadOnlyShippingCost item={item} /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.exchangeRateKrw)} /></TableCell>
                 <TableCell className="text-right font-semibold tabular-nums"><ReadOnlyText value={won(item.calculatedCostKrw)} /></TableCell>
-                <TableCell><ReadOnlyLink value={item.domesticSaleUrl} /></TableCell>
+                <TableCell><ReadOnlyLink value={item.domesticSaleUrl} label="판매 링크" /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={won(item.domesticSalePrice)} /></TableCell>
-                <TableCell><ReadOnlyLink value={item.detailPageUrl} /></TableCell>
+                <TableCell><ReadOnlyLink value={item.detailPageUrl} label="상세 링크" /></TableCell>
                 <TableCell><ReadOnlyText value={item.memo1} /></TableCell>
                 <TableCell><ReadOnlyText value={item.memo2} /></TableCell>
                 {showOwnerColumn ? <TableCell><ReadOnlyText value={item.ownerName} /></TableCell> : null}
@@ -833,11 +833,17 @@ function ReadOnlyText({ value }: { value: string | null | undefined }) {
   return value ? <span className="block whitespace-pre-wrap break-words leading-5">{value}</span> : <span className="text-muted-foreground">-</span>
 }
 
-function ReadOnlyLink({ value }: { value: string | null | undefined }) {
+function ReadOnlyLink({ value, label }: { value: string | null | undefined; label: string }) {
   const href = externalUrl(value)
   return href ? (
-    <a href={href} target="_blank" rel="noreferrer" className="block break-all leading-5 text-primary underline underline-offset-2 hover:text-primary/80">
-      {value}
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={value ?? undefined}
+      className="inline-flex h-7 max-w-full items-center rounded-md border border-primary/20 bg-primary/5 px-2 font-medium text-primary hover:bg-primary/10"
+    >
+      <span className="truncate">{label}</span>
     </a>
   ) : <ReadOnlyText value={value} />
 }

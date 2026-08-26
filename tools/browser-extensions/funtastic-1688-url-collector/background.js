@@ -107,17 +107,6 @@ async function handleMessage(message, sender) {
     return startDetailImagesRun(message, sender.tab.id)
   }
 
-  if (message.type === 'FUNTASTIC_1688_PRICE_LOOKUP_START') {
-    if (!sender.tab?.id || !isSaasUrl(sender.tab.url)) {
-      return { ok: false, error: 'SaaS 소싱 화면에서 시작해주세요.' }
-    }
-    const [run, verificationRun, detailImagesRun] = await Promise.all([getRun(), getVerificationRun(), getDetailImagesRun()])
-    if (run || verificationRun || detailImagesRun) {
-      return { ok: false, error: '진행 중인 다른 1688 작업이 있습니다.' }
-    }
-    return lookup1688OptionPrice(message)
-  }
-
   if (message.type === 'FUNTASTIC_1688_CANCEL') {
     const run = await getRun()
     if (!run || (message.runId && message.runId !== run.runId)) return { ok: true }
@@ -701,107 +690,6 @@ async function startDetailImagesRun(message, sourceTabId) {
   const latestTab = await chrome.tabs.get(collectorTab.id).catch(() => null)
   if (latestTab?.status === 'complete') void collectDetailImagesFromTab(collectorTab.id)
   return { ok: true }
-}
-
-async function lookup1688OptionPrice(message) {
-  const url = canonicalOfferUrl(message.url)
-  const option = typeof message.option === 'string' ? message.option.trim().slice(0, 500) : ''
-  if (!url) return { ok: false, error: '올바른 1688 상품 URL이 아닙니다.' }
-
-  const tab = await chrome.tabs.create({ url, active: false })
-  if (!tab.id) return { ok: false, error: '1688 상품 페이지를 열지 못했습니다.' }
-  try {
-    await waitForTabComplete(tab.id, 45_000)
-    const [execution] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: collect1688OptionPriceInPage,
-      args: [option],
-    })
-    const result = execution?.result
-    if (!result || typeof result !== 'object') return { ok: false, error: '1688 가격 정보를 읽지 못했습니다.' }
-    if (typeof result.price === 'number' && Number.isFinite(result.price) && result.price > 0) {
-      return { ok: true, price: result.price, matchedOption: result.matchedOption || null, message: result.message || null }
-    }
-    return { ok: false, error: result.error || '선택한 옵션의 가격을 찾지 못했습니다.' }
-  } finally {
-    await chrome.tabs.remove(tab.id).catch(() => {})
-  }
-}
-
-function waitForTabComplete(tabId, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const finish = (error) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      chrome.tabs.onUpdated.removeListener(onUpdated)
-      if (error) reject(error)
-      else resolve()
-    }
-    const onUpdated = (updatedTabId, changeInfo) => {
-      if (updatedTabId === tabId && changeInfo.status === 'complete') finish()
-    }
-    const timeout = setTimeout(() => finish(new Error('1688 상품 페이지 응답 시간이 초과되었습니다.')), timeoutMs)
-    chrome.tabs.onUpdated.addListener(onUpdated)
-    chrome.tabs.get(tabId).then((current) => {
-      if (current.status === 'complete') finish()
-    }).catch(() => finish(new Error('1688 상품 페이지가 닫혔습니다.')))
-  })
-}
-
-async function collect1688OptionPriceInPage(optionText) {
-  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-  const normalize = (value) => String(value || '').toLowerCase().replace(/[\s\-_/·,，()[\]{}]+/g, '')
-  const priceValues = (value) => {
-    const results = []
-    const text = String(value || '').replace(/,/g, '')
-    const regex = /(?:¥|￥|RMB|CNY|价格|批发价|单价)?\s*(\d{1,7}(?:\.\d{1,2})?)/gi
-    for (const match of text.matchAll(regex)) {
-      const price = Number(match[1])
-      if (Number.isFinite(price) && price > 0 && price <= 1_000_000) results.push(price)
-    }
-    return results
-  }
-  const pageText = () => (document.body?.innerText || document.documentElement?.innerText || '').replace(/\s+/g, ' ')
-
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const text = pageText()
-    if (/请登录|登录后|账号登录|扫码登录/i.test(text)) return { error: '1688 로그인이 필요합니다.' }
-    if (/访问过于频繁|安全验证|请完成验证|滑动验证|验证码/i.test(text)) return { error: '1688 보안 확인이 필요합니다.' }
-    if (/商品不存在|商品已下架|您查看的商品不存在/i.test(text)) return { error: '1688에서 상품 없음 또는 판매중지로 표시됩니다.' }
-
-    const normalizedOption = normalize(optionText)
-    if (normalizedOption) {
-      const candidates = Array.from(document.querySelectorAll('body *')).filter((element) => {
-        const ownText = (element.textContent || '').trim()
-        return ownText.length > 0 && ownText.length <= 300 && normalize(ownText).includes(normalizedOption)
-      }).slice(0, 80)
-      for (const candidate of candidates) {
-        let node = candidate
-        for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
-          const prices = priceValues(node.textContent)
-          if (prices.length === 1) return { price: prices[0], matchedOption: optionText }
-        }
-      }
-    }
-
-    const selectors = [
-      '[class*="price"]', '[class*="Price"]', '[data-testid*="price"]',
-      '[class*="sku"] [class*="value"]', '[class*="offer"] [class*="price"]',
-    ]
-    const visiblePrices = []
-    for (const element of document.querySelectorAll(selectors.join(','))) {
-      const style = getComputedStyle(element)
-      if (style.display === 'none' || style.visibility === 'hidden') continue
-      visiblePrices.push(...priceValues(element.textContent))
-    }
-    const unique = Array.from(new Set(visiblePrices)).filter((price) => price >= 0.01).sort((a, b) => a - b)
-    if (!normalizedOption && unique.length === 1) return { price: unique[0], matchedOption: null }
-    if (normalizedOption && unique.length === 1) return { price: unique[0], matchedOption: optionText, message: '단일 판매가를 적용했습니다.' }
-    if (attempt < 7) await delay(800)
-  }
-  return { error: optionText ? `옵션 “${optionText}”의 단일 가격을 찾지 못했습니다.` : '단일 판매가를 찾지 못했습니다.' }
 }
 
 async function collectDetailImagesFromTab(tabId) {

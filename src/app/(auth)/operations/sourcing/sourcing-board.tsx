@@ -813,8 +813,8 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
                 <TableCell><ReadOnlyLink value={item.domesticSaleUrl} label="판매 링크" /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={won(item.domesticSalePrice)} /></TableCell>
                 <TableCell><ReadOnlyLink value={item.detailPageUrl} label="상세 링크" /></TableCell>
-                <TableCell><ReadOnlyText value={item.memo1} /></TableCell>
-                <TableCell><ReadOnlyText value={item.memo2} /></TableCell>
+                <TableCell><ReadOnlyLink value={item.memo1} label="비고 링크" /></TableCell>
+                <TableCell><ReadOnlyLink value={item.memo2} label="비고 링크" /></TableCell>
                 {showOwnerColumn ? <TableCell><ReadOnlyText value={item.ownerName} /></TableCell> : null}
                 <TableCell><ReviewStatusBadge status={item.status} passedNewProductId={item.passedNewProductId} /></TableCell>
               </tr>

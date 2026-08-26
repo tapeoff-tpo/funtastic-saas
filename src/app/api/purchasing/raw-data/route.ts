@@ -14,6 +14,7 @@ import {
 } from '@/lib/purchasing/ecount-purchasing-sync'
 import {
   getStoredEcountRawFiles,
+  mergeEcountRawFiles,
   saveStoredEcountRawFiles,
   summarizeStoredEcountRawFiles,
   type StoredEcountRawFile,
@@ -68,8 +69,16 @@ export async function POST(request: NextRequest) {
     }
 
     const stored = await getStoredEcountRawFiles(workspaceUserId)
+    let accumulated: StoredEcountRawFile[]
+    try {
+      accumulated = await mergeEcountRawFiles(stored, classified)
+    } catch (error) {
+      return NextResponse.json({
+        error: error instanceof Error ? `기존 누적 원본과 새 파일을 합치지 못했습니다: ${error.message}` : '기존 누적 원본과 새 파일을 합치지 못했습니다.',
+      }, { status: 400 })
+    }
     const combined = new Map<EcountReportKind, StoredEcountRawFile>(stored.map((file) => [file.kind, file]))
-    for (const file of classified) combined.set(file.kind, file)
+    for (const file of accumulated) combined.set(file.kind, file)
     let snapshot
     try {
       snapshot = await parseEcountPurchasingSnapshot({
@@ -102,7 +111,7 @@ export async function POST(request: NextRequest) {
       snapshot,
       reportKinds: classified.map((file) => file.kind),
     })
-    await saveStoredEcountRawFiles(workspaceUserId, classified)
+    await saveStoredEcountRawFiles(workspaceUserId, accumulated)
     await Promise.all(classified.map((file) => recordDataRefresh({
       userId: workspaceUserId,
       source: `purchasing_raw:${file.kind}`,

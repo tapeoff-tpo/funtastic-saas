@@ -64,6 +64,12 @@ export type EcountPurchasingUpload = {
   fileBuffer: ArrayBuffer
 }
 
+export type EcountPurchasingRawFileRows = {
+  kind: EcountReportKind
+  headers: string[]
+  rows: Array<Record<string, string>>
+}
+
 export type EcountPendingRequest = {
   sourceFileName: string
   sourceRowNumber: number
@@ -587,6 +593,27 @@ function emptyReport(kind: EcountReportKind): ParsedReport {
 export async function classifyEcountPurchasingUpload(input: EcountPurchasingUpload) {
   const report = await loadEcountReport(input)
   return { kind: report.kind, fileName: report.fileName }
+}
+
+/**
+ * Reads only real item rows from an Ecount report so historical files can be
+ * accumulated without carrying forward subtotal and print-footer rows.
+ */
+export async function readEcountPurchasingRawFileRows(
+  input: EcountPurchasingUpload,
+): Promise<EcountPurchasingRawFileRows> {
+  const report = await loadEcountReport(input)
+  const headers = [...report.columns.entries()]
+    .sort(([, leftColumn], [, rightColumn]) => leftColumn - rightColumn)
+    .map(([header]) => header)
+  const rows = readRows(report)
+    .filter(({ row }) => valueAt({ row }, report, '품목코드') !== '')
+    .map(({ row }) => Object.fromEntries(headers.map((header) => [
+      header,
+      valueAt({ row }, report, header),
+    ])))
+
+  return { kind: report.kind, headers, rows }
 }
 
 export function getEcountReportLabel(kind: EcountReportKind) {

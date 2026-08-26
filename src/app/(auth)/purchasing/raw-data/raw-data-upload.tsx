@@ -35,12 +35,12 @@ type SnapshotSummary = {
 }
 
 const REQUIRED_FILES = [
-  { key: 'purchaseRequest', label: '발주요청현황', detail: '아직 구매되지 않은 구매요청 건' },
-  { key: 'purchasePlan', label: '발주계획현황', detail: '구매중으로 넘어간 발주계획 건' },
-  { key: 'purchaseHistory', label: '구매현황', detail: '구매되어 중국창고에 도착한 건' },
-  { key: 'chinaInventory', label: '중국재고현황', detail: '현재 중국창고에 보유한 재고' },
-  { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건' },
-  { key: 'domesticInventory', label: '국내재고현황', detail: '재고관리에 반영할 국내 창고 현재고' },
+  { key: 'purchaseRequest', label: '발주요청현황', detail: '아직 구매되지 않은 구매요청 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
+  { key: 'purchasePlan', label: '발주계획현황', detail: '구매중으로 넘어간 발주계획 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
+  { key: 'purchaseHistory', label: '구매현황', detail: '구매되어 중국창고에 도착한 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
+  { key: 'chinaInventory', label: '중국재고현황', detail: '현재 중국창고에 보유한 재고', uploadRule: '현재 전체본 · 중국창고 재고 전체' },
+  { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
+  { key: 'domesticInventory', label: '국내재고현황', detail: '재고관리에 반영할 국내 창고 현재고', uploadRule: '현재 전체본 · 국내 창고 재고 전체' },
 ] as const
 type FileKey = (typeof REQUIRED_FILES)[number]['key']
 
@@ -152,12 +152,12 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
-            <p className="mt-1 text-sm text-muted-foreground">변경할 파일만 넣으면 됩니다. 국내재고 파일은 최종 반영 시 재고관리에 바로 적용됩니다.</p>
+            <p className="mt-1 text-sm text-muted-foreground">이력 파일은 마지막 반영분 이후만 넣으면 서버 누적본에 합쳐집니다. 중국·국내재고는 전체 최신본을 넣으세요.</p>
           </div>
           <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 6 준비 · {selectedFiles.length}개 변경</span>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {REQUIRED_FILES.map(({ key, label, detail }, index) => {
+          {REQUIRED_FILES.map(({ key, label, detail, uploadRule }, index) => {
             const file = files[key]
             const stored = storedFiles[key]
             const recognized = preview?.files[key]
@@ -176,6 +176,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">{label}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
+                  <span className="mt-1 block text-xs font-medium text-sky-800">{uploadRule}</span>
                   <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : stored ? 'text-sky-800' : 'text-muted-foreground'}`}>{file?.name ?? (stored ? `저장됨: ${stored.fileName}` : '여기에 드래그하거나 클릭해서 .xlsx 선택')}</span>
                   {!file && stored ? <span className="mt-1 block text-xs text-muted-foreground">마지막 등록: {formatKstTimestamp(stored.updatedAt)}</span> : null}
                   {key === 'domesticInventory' && !file ? <span className="mt-1 block text-xs text-muted-foreground">마지막 반영: {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span> : null}
@@ -217,8 +218,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
       <section className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <p>
-          최종 반영은 선택한 파일만 새 파일로 교체하고, 연관된 발주 단계는 저장된 나머지 파일과 함께 다시 계산합니다.
-          미리보기만으로는 파일이 저장되거나 데이터가 반영되지 않습니다. 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
+          발주요청·발주계획·구매현황·중국출고는 새 기간만 올려도 기존 누적 이력에 합쳐지며, 같은 건은 새 파일 값으로 갱신됩니다.
+          수정 가능성이 있는 최근 7일은 함께 올리면 더 정확합니다. 중국·국내재고는 반드시 전체 최신본을 올리세요. 미리보기만으로는 저장·반영되지 않으며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
         </p>
       </section>
     </div>

@@ -1,6 +1,11 @@
+import ExcelJS from 'exceljs'
 import { sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
-import type { EcountPurchasingUpload, EcountReportKind } from './ecount-purchasing-sync'
+import {
+  readEcountPurchasingRawFileRows,
+  type EcountPurchasingUpload,
+  type EcountReportKind,
+} from './ecount-purchasing-sync'
 
 export type StoredEcountRawFile = EcountPurchasingUpload & {
   kind: EcountReportKind
@@ -19,6 +24,48 @@ const KINDS: EcountReportKind[] = [
   'chinaInventory',
   'chinaOutbound',
 ]
+
+const INCREMENTAL_HISTORY_KINDS: EcountReportKind[] = [
+  'purchaseRequest',
+  'purchasePlan',
+  'purchaseHistory',
+  'chinaOutbound',
+]
+
+export function isIncrementalEcountRawFile(kind: EcountReportKind) {
+  return INCREMENTAL_HISTORY_KINDS.includes(kind)
+}
+
+/**
+ * Keeps the historical purchasing reports server-side. New files can therefore
+ * contain only the new period, while overlap rows refresh existing records.
+ */
+export async function mergeEcountRawFiles(
+  storedFiles: StoredEcountRawFile[],
+  incomingFiles: StoredEcountRawFile[],
+): Promise<StoredEcountRawFile[]> {
+  const storedByKind = new Map(storedFiles.map((file) => [file.kind, file]))
+  return Promise.all(incomingFiles.map(async (incoming) => {
+    const stored = storedByKind.get(incoming.kind)
+    if (!stored || !isIncrementalEcountRawFile(incoming.kind)) return incoming
+
+    const [existingReport, incomingReport] = await Promise.all([
+      readEcountPurchasingRawFileRows(stored),
+      readEcountPurchasingRawFileRows(incoming),
+    ])
+    if (existingReport.kind !== incoming.kind || incomingReport.kind !== incoming.kind) return incoming
+
+    const headers = mergeHeaders(existingReport.headers, incomingReport.headers)
+    const rowsByIdentity = new Map<string, Record<string, string>>()
+    for (const row of existingReport.rows) rowsByIdentity.set(rawRowIdentity(incoming.kind, row), row)
+    for (const row of incomingReport.rows) rowsByIdentity.set(rawRowIdentity(incoming.kind, row), row)
+
+    return {
+      ...incoming,
+      fileBuffer: await buildWorkbookBuffer(headers, [...rowsByIdentity.values()]),
+    }
+  }))
+}
 
 async function ensureTable() {
   await db.execute(sql`
@@ -97,4 +144,44 @@ export function summarizeStoredEcountRawFiles(files: StoredEcountRawFile[]): Sto
     fileName: file.fileName,
     updatedAt: file.updatedAt,
   }])) as Partial<Record<EcountReportKind, { fileName: string; updatedAt: string }>>
+}
+
+function mergeHeaders(existing: string[], incoming: string[]) {
+  const headers = [...existing]
+  const seen = new Set(headers)
+  for (const header of incoming) {
+    if (!seen.has(header)) {
+      headers.push(header)
+      seen.add(header)
+    }
+  }
+  return headers
+}
+
+function rawRowIdentity(kind: EcountReportKind, row: Record<string, string>) {
+  const value = (header: string) => row[header]?.trim() ?? ''
+  const sku = value('품목코드')
+  const dateNo = value('일자-No.')
+  const option = value('규격')
+
+  if (kind === 'chinaOutbound') {
+    const outboundCode = value('출고관리코드')
+    if (outboundCode && sku) return `${kind}:outbound:${outboundCode}:${sku}:${option}`
+    return `${kind}:row:${[dateNo, sku, option, value('주문서번호'), value('유효기간'), value('출고수량(EA)')].join('\u001f')}`
+  }
+
+  if (kind === 'purchaseHistory') {
+    return `${kind}:row:${[dateNo, sku, option, value('구입관리코드'), value('발주서-no'), value('주문서번호 (C)')].join('\u001f')}`
+  }
+
+  return `${kind}:row:${[dateNo, sku, option, value('구입관리코드')].join('\u001f')}`
+}
+
+async function buildWorkbookBuffer(headers: string[], rows: Array<Record<string, string>>): Promise<ArrayBuffer> {
+  const workbook = new ExcelJS.Workbook()
+  const sheet = workbook.addWorksheet('누적 원본')
+  sheet.addRow(headers)
+  for (const row of rows) sheet.addRow(headers.map((header) => row[header] ?? ''))
+  const buffer = Buffer.from(await workbook.xlsx.writeBuffer() as unknown as Uint8Array)
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer
 }

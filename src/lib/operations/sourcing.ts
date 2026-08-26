@@ -720,7 +720,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
         : viewer.operatorId
           ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
           : sql`FALSE`})
-    ORDER BY item.updated_at DESC, item.created_at DESC
+    ORDER BY item.created_at ASC, item.id ASC
     LIMIT 300
   `))
   return items.map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status) }))
@@ -779,7 +779,7 @@ export async function listSourcingMeetings(input: { userId: string; actorUserId:
         : viewer.operatorId
           ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
           : sql`FALSE`})
-    ORDER BY operator.position NULLS LAST, item.updated_at DESC, item.created_at DESC
+    ORDER BY operator.position NULLS LAST, item.created_at ASC, item.id ASC
   `)).map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status) }))
   const itemsByMeeting = new Map<string, ManualSourcingItem[]>()
   for (const item of items) {

@@ -659,25 +659,25 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className={cn('min-w-[2520px] table-fixed border-collapse text-sm', showOwnerColumn && 'min-w-[2680px]')}>
+      <div className="w-full overflow-hidden">
+        <table className="w-full table-fixed border-collapse text-xs">
           <colgroup>
-            <col className="w-12" />
-            <col className="w-56" />
-            <col className="w-44" />
-            <col className="w-64" />
-            <col className="w-28" />
-            <col className="w-30" />
-            <col className="w-28" />
-            <col className="w-32" />
-            <col className="w-64" />
-            <col className="w-32" />
-            <col className="w-64" />
-            <col className="w-56" />
-            <col className="w-56" />
-            {showOwnerColumn ? <col className="w-40" /> : null}
-            <col className="w-36" />
-            <col className="w-20" />
+            <col className="w-[3%]" />
+            <col className="w-[10%]" />
+            <col className="w-[6%]" />
+            <col className="w-[9%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[6%]" />
+            <col className="w-[8%]" />
+            <col className="w-[5%]" />
+            <col className="w-[8%]" />
+            <col className="w-[6%]" />
+            <col className="w-[6%]" />
+            {showOwnerColumn ? <col className="w-[7%]" /> : null}
+            <col className="w-[7%]" />
+            <col className="w-[3%]" />
           </colgroup>
           <thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground">
             <tr>
@@ -773,24 +773,24 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
         <h3 className="text-sm font-semibold">{owner.displayName}</h3>
         <span className="text-xs text-muted-foreground">{rows.length.toLocaleString('ko-KR')}개 상품</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className={cn('min-w-[2360px] table-fixed border-collapse text-sm', showOwnerColumn && 'min-w-[2520px]')}>
+      <div className="w-full overflow-hidden">
+        <table className="w-full table-fixed border-collapse text-xs">
           <colgroup>
-            <col className="w-12" />
-            <col className="w-56" />
-            <col className="w-44" />
-            <col className="w-64" />
-            <col className="w-28" />
-            <col className="w-30" />
-            <col className="w-28" />
-            <col className="w-32" />
-            <col className="w-64" />
-            <col className="w-32" />
-            <col className="w-64" />
-            <col className="w-56" />
-            <col className="w-56" />
-            {showOwnerColumn ? <col className="w-40" /> : null}
-            <col className="w-36" />
+            <col className="w-[3%]" />
+            <col className="w-[11%]" />
+            <col className="w-[7%]" />
+            <col className="w-[10%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[7%]" />
+            <col className="w-[9%]" />
+            <col className="w-[6%]" />
+            <col className="w-[9%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            {showOwnerColumn ? <col className="w-[7%]" /> : null}
+            <col className="w-[7%]" />
           </colgroup>
           <thead className="bg-muted/40 text-left text-xs font-medium text-muted-foreground">
             <tr>
@@ -869,11 +869,11 @@ function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourc
 }
 
 function TableHeader({ children, required = false }: { children: React.ReactNode; required?: boolean }) {
-  return <th scope="col" className="border-r px-2 py-2.5 align-bottom font-medium last:border-r-0">{children}{required ? <span className="ml-1 text-destructive">*</span> : null}</th>
+  return <th scope="col" className="break-keep border-r px-1 py-2 align-bottom font-medium leading-4 last:border-r-0">{children}{required ? <span className="ml-0.5 text-destructive">*</span> : null}</th>
 }
 
 function TableCell({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn('border-r p-2 last:border-r-0', className)}>{children}</td>
+  return <td className={cn('min-w-0 border-r p-1 align-top last:border-r-0', className)}>{children}</td>
 }
 
 function NumericCell({ value, onChange, placeholder, decimal = false }: {
@@ -882,7 +882,7 @@ function NumericCell({ value, onChange, placeholder, decimal = false }: {
   placeholder: string
   decimal?: boolean
 }) {
-  return <Input value={value} onChange={(event) => onChange(event.target.value)} inputMode={decimal ? 'decimal' : 'numeric'} placeholder={placeholder} className="text-right" />
+  return <Input value={value} onChange={(event) => onChange(event.target.value)} inputMode={decimal ? 'decimal' : 'numeric'} placeholder={placeholder} className="px-1 text-right text-xs" />
 }
 
 function AutoGrowTextarea({ value, onChange, placeholder }: {
@@ -917,7 +917,7 @@ function AutoGrowTextarea({ value, onChange, placeholder }: {
         requestAnimationFrame(resize)
       }}
       placeholder={placeholder}
-      className="block min-h-8 w-full resize-y overflow-hidden rounded-md border border-input bg-background px-2 py-1.5 text-sm leading-5 break-words outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+      className="block min-h-8 w-full resize-y overflow-hidden rounded-md border border-input bg-background px-1.5 py-1.5 text-xs leading-5 break-words outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
     />
   )
 }

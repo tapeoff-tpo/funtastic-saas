@@ -614,24 +614,6 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
     })
   }
 
-  function changeReviewStatus(row: DraftRow, status: ManualSourcingReviewStatus) {
-    const previousStatus = row.status
-    updateRow(row.clientId, { status })
-    startTransition(async () => {
-      try {
-        if (!row.productName.trim()) throw new Error('진행여부를 정하려면 상품명을 먼저 입력해 주세요.')
-        await persistRows([{ ...row, status }])
-        toast.success(status === 'passed'
-          ? '통과 처리되어 상품관리 1단계에 자동 등록했습니다.'
-          : `진행여부를 ${manualSourcingReviewStatusLabels[status]}로 변경했습니다.`)
-        onChanged()
-      } catch (error) {
-        updateRow(row.clientId, { status: previousStatus })
-        toast.error(errorMessage(error))
-      }
-    })
-  }
-
   if (!isEditing) {
     return <ReadOnlyOwnerSheet owner={owner} rows={sourceRows} showOwnerColumn={showOwnerColumn} />
   }
@@ -739,7 +721,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
                     <div className="space-y-1.5">
                       <select
                         value={row.status}
-                        onChange={(event) => changeReviewStatus(row, event.target.value as ManualSourcingReviewStatus)}
+                        onChange={(event) => updateRow(row.clientId, { status: event.target.value as ManualSourcingReviewStatus })}
                         disabled={pending}
                         className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                       >

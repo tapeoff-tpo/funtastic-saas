@@ -33,6 +33,7 @@ export type SourcingViewer = {
 }
 
 export const MANUAL_SOURCING_REVIEW_STATUS_LABELS = {
+  pending: '진행 전',
   passed: '통과',
   rejected: '탈락',
   hold: '보류',
@@ -1286,7 +1287,7 @@ function sourcingMeetingStatus(value: unknown): SourcingMeeting['status'] {
 }
 
 function manualSourcingReviewStatus(value: unknown): ManualSourcingReviewStatus {
-  return value === 'passed' || value === 'rejected' || value === 'hold' ? value : 'hold'
+  return value === 'pending' || value === 'passed' || value === 'rejected' || value === 'hold' ? value : 'pending'
 }
 
 function manualShippingChargeType(value: unknown): ManualShippingChargeType {

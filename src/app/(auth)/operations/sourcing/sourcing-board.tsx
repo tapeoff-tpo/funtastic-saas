@@ -69,6 +69,7 @@ type SheetOwner = {
 }
 
 const manualSourcingReviewStatusLabels: Record<ManualSourcingReviewStatus, string> = {
+  pending: '진행 전',
   passed: '통과',
   rejected: '탈락',
   hold: '보류',
@@ -603,11 +604,16 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         }
         let rowsToSave = rows
         let automaticPriceCount = 0
+        let priceExtensionUnavailable = false
         const priceFailures: string[] = []
         const priceTargets = populatedRows.filter((row) => !row.chinaUnitPriceCny.trim() && row.chinaPurchaseUrl.trim())
+        if (priceTargets.length > 0) toast.message(`1688 가격 ${priceTargets.length}건을 조회합니다.`)
         for (const target of priceTargets) {
           const result = await lookup1688Price(target.chinaPurchaseUrl, target.productOption)
-          if (result.status === 'unavailable') break
+          if (result.status === 'unavailable') {
+            priceExtensionUnavailable = true
+            break
+          }
           if (result.status === 'failed') {
             priceFailures.push(`${target.productName}: ${result.message}`)
             continue
@@ -624,6 +630,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
           ? `${populatedRows.length}개 상품을 저장했고, 통과 ${passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
           : `${populatedRows.length}개 상품을 저장했습니다.`)
         if (automaticPriceCount > 0) toast.success(`1688 위안화 가격 ${automaticPriceCount}건을 자동 입력했습니다.`)
+        if (priceExtensionUnavailable) toast.warning('상품은 저장했지만 1688 확장 프로그램 1.4.0이 연결되지 않아 가격 자동조회를 건너뛰었습니다. 확장을 다시 로드하고 SaaS 탭을 새로고침해 주세요.')
         if (priceFailures.length > 0) toast.warning(`가격을 자동 입력하지 못한 상품 ${priceFailures.length}건: ${priceFailures.slice(0, 3).join(' / ')}`)
         onChanged()
       } catch (error) {
@@ -883,7 +890,9 @@ function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourc
     ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
     : status === 'rejected'
       ? 'bg-rose-50 text-rose-700 ring-rose-200'
-      : 'bg-amber-50 text-amber-800 ring-amber-200'
+      : status === 'hold'
+        ? 'bg-amber-50 text-amber-800 ring-amber-200'
+        : 'bg-slate-100 text-slate-700 ring-slate-200'
   return (
     <div className="space-y-1">
       <span className={cn('inline-flex h-6 items-center rounded-full px-2 text-xs font-medium ring-1', className)}>{manualSourcingReviewStatusLabels[status]}</span>
@@ -1102,7 +1111,7 @@ function blankRow(exchangeRate: number, ownerOperatorId: string): DraftRow {
     detailPageUrl: '',
     memo1: '',
     memo2: '',
-    status: 'hold',
+    status: 'pending',
     passedNewProductId: null,
   }
 }

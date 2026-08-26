@@ -6,6 +6,7 @@ import {
   createSourcingMeeting,
   deleteSourcingMeeting,
   type ManualSourcingReviewStatus,
+  type ManualShippingChargeType,
   passManualSourcingToNewProduct,
   saveSourcingOperators,
   saveSourcingMeetingRows,
@@ -27,6 +28,8 @@ type SourcingRowValues = {
   chinaPurchaseUrl?: string
   chinaUnitPriceCny?: string
   unitShippingCny?: string
+  shippingChargeType?: ManualShippingChargeType
+  shippingBundleQuantity?: string
   exchangeRateKrw?: string
   domesticSaleUrl?: string
   domesticSalePrice?: string
@@ -149,6 +152,8 @@ function rowValues(values: SourcingRowValues) {
     chinaPurchaseUrl: nullableText(values.chinaPurchaseUrl),
     chinaUnitPriceCny: nullableNumber(values.chinaUnitPriceCny),
     unitShippingCny: nullableNumber(values.unitShippingCny),
+    shippingChargeType: values.shippingChargeType,
+    shippingBundleQuantity: nullableInteger(values.shippingBundleQuantity),
     exchangeRateKrw: nullableNumber(values.exchangeRateKrw),
     domesticSaleUrl: nullableText(values.domesticSaleUrl),
     domesticSalePrice: nullableInteger(values.domesticSalePrice),

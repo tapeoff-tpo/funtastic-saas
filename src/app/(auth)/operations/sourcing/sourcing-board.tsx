@@ -21,6 +21,7 @@ import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-product
 import type {
   ManualSourcingItem,
   ManualSourcingReviewStatus,
+  ManualShippingChargeType,
   SourcingMeeting,
   SourcingOperator,
   SourcingViewer,
@@ -50,6 +51,8 @@ type DraftRow = {
   chinaPurchaseUrl: string
   chinaUnitPriceCny: string
   unitShippingCny: string
+  shippingChargeType: ManualShippingChargeType
+  shippingBundleQuantity: string
   exchangeRateKrw: string
   domesticSaleUrl: string
   domesticSalePrice: string
@@ -573,6 +576,8 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         chinaPurchaseUrl: row.chinaPurchaseUrl,
         chinaUnitPriceCny: row.chinaUnitPriceCny,
         unitShippingCny: row.unitShippingCny,
+        shippingChargeType: row.shippingChargeType,
+        shippingBundleQuantity: row.shippingBundleQuantity,
         exchangeRateKrw: row.exchangeRateKrw,
         domesticSaleUrl: row.domesticSaleUrl,
         domesticSalePrice: row.domesticSalePrice,
@@ -685,8 +690,8 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
             <col className="w-[10%]" />
             <col className="w-[6%]" />
             <col className="w-[9%]" />
-            <col className="w-[5%]" />
-            <col className="w-[5%]" />
+            <col className="w-[6%]" />
+            <col className="w-[10%]" />
             <col className="w-[5%]" />
             <col className="w-[6%]" />
             <col className="w-[8%]" />
@@ -705,7 +710,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
               <TableHeader>상품 옵션</TableHeader>
               <TableHeader>1688 URL</TableHeader>
               <TableHeader>중국 위안화</TableHeader>
-              <TableHeader>개당 배송비</TableHeader>
+              <TableHeader>배송비 기준</TableHeader>
               <TableHeader>환율</TableHeader>
               <TableHeader>한국원화</TableHeader>
               <TableHeader>국내판매 링크</TableHeader>
@@ -722,7 +727,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
             {rows.map((row, index) => {
               const calculatedCost = calculateCnyCostKrw({
                 chinaUnitPriceCny: numberValue(row.chinaUnitPriceCny),
-                unitShippingCny: numberValue(row.unitShippingCny),
+                unitShippingCny: effectiveUnitShippingCny(row),
                 exchangeRateKrw: numberValue(row.exchangeRateKrw),
               })
               return (
@@ -732,7 +737,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
                   <TableCell><AutoGrowTextarea value={row.productOption} onChange={(value) => updateRow(row.clientId, { productOption: value })} placeholder="옵션" /></TableCell>
                   <TableCell><AutoGrowTextarea value={row.chinaPurchaseUrl} onChange={(value) => updateRow(row.clientId, { chinaPurchaseUrl: value })} placeholder="https://detail.1688.com/..." /></TableCell>
                   <TableCell><NumericCell value={row.chinaUnitPriceCny} onChange={(value) => updateRow(row.clientId, { chinaUnitPriceCny: value })} placeholder="¥" decimal /></TableCell>
-                  <TableCell><NumericCell value={row.unitShippingCny} onChange={(value) => updateRow(row.clientId, { unitShippingCny: value })} placeholder="¥" decimal /></TableCell>
+                  <TableCell><ShippingCostCell row={row} onChange={(patch) => updateRow(row.clientId, patch)} /></TableCell>
                   <TableCell><NumericCell value={row.exchangeRateKrw} onChange={(value) => updateRow(row.clientId, { exchangeRateKrw: value })} placeholder="원/¥" decimal /></TableCell>
                   <TableCell><div className="min-h-8 rounded-md border bg-muted/40 px-2 py-1.5 text-right font-semibold">{won(calculatedCost)}</div></TableCell>
                   <TableCell><AutoGrowTextarea value={row.domesticSaleUrl} onChange={(value) => updateRow(row.clientId, { domesticSaleUrl: value })} placeholder="https://" /></TableCell>
@@ -800,7 +805,7 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
             <col className="w-[7%]" />
             <col className="w-[10%]" />
             <col className="w-[5%]" />
-            <col className="w-[5%]" />
+            <col className="w-[10%]" />
             <col className="w-[5%]" />
             <col className="w-[7%]" />
             <col className="w-[9%]" />
@@ -818,7 +823,7 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
               <TableHeader>상품 옵션</TableHeader>
               <TableHeader>1688 URL</TableHeader>
               <TableHeader>중국 위안화</TableHeader>
-              <TableHeader>개당 배송비</TableHeader>
+              <TableHeader>배송비 기준</TableHeader>
               <TableHeader>환율</TableHeader>
               <TableHeader>한국원화</TableHeader>
               <TableHeader>국내판매 링크</TableHeader>
@@ -838,7 +843,7 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
                 <TableCell><ReadOnlyText value={item.productOption} /></TableCell>
                 <TableCell><ReadOnlyLink value={item.chinaPurchaseUrl} /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.chinaUnitPriceCny)} /></TableCell>
-                <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.unitShippingCny)} /></TableCell>
+                <TableCell><ReadOnlyShippingCost item={item} /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.exchangeRateKrw)} /></TableCell>
                 <TableCell className="text-right font-semibold tabular-nums"><ReadOnlyText value={won(item.calculatedCostKrw)} /></TableCell>
                 <TableCell><ReadOnlyLink value={item.domesticSaleUrl} /></TableCell>
@@ -963,6 +968,57 @@ function NumericCell({ value, onChange, placeholder, decimal = false }: {
   return <Input value={value} onChange={(event) => onChange(event.target.value)} inputMode={decimal ? 'decimal' : 'numeric'} placeholder={placeholder} className="px-1 text-right text-xs" />
 }
 
+function ShippingCostCell({ row, onChange }: { row: DraftRow; onChange: (patch: Partial<DraftRow>) => void }) {
+  const effective = effectiveUnitShippingCny(row)
+  return (
+    <div className="space-y-1 rounded-md border border-violet-200 bg-violet-50/40 p-1">
+      <select
+        value={row.shippingChargeType}
+        onChange={(event) => onChange({ shippingChargeType: event.target.value as ManualShippingChargeType })}
+        className="h-7 w-full rounded-md border border-input bg-background px-1 text-xs"
+      >
+        <option value="unit">개당</option>
+        <option value="bundle">묶음당</option>
+        <option value="free">무료</option>
+      </select>
+      {row.shippingChargeType === 'unit' ? (
+        <NumericCell value={row.unitShippingCny} onChange={(value) => onChange({ unitShippingCny: value })} placeholder="개당 ¥" decimal />
+      ) : null}
+      {row.shippingChargeType === 'bundle' ? (
+        <div className="grid grid-cols-2 gap-1">
+          <label><span className="block text-[9px] text-muted-foreground">묶음 수량</span><NumericCell value={row.shippingBundleQuantity} onChange={(value) => onChange({ shippingBundleQuantity: value })} placeholder="개" /></label>
+          <label><span className="block text-[9px] text-muted-foreground">총배송비</span><NumericCell value={row.unitShippingCny} onChange={(value) => onChange({ unitShippingCny: value })} placeholder="¥" decimal /></label>
+        </div>
+      ) : null}
+      <p className="border-t border-dashed border-violet-200 pt-1 text-right text-[10px] font-semibold text-violet-700">
+        개당 {effective == null ? '-' : `¥${decimalText(effective)}`}
+      </p>
+    </div>
+  )
+}
+
+function ReadOnlyShippingCost({ item }: { item: ManualSourcingItem }) {
+  const effective = effectiveUnitShippingCny({
+    shippingChargeType: item.shippingChargeType,
+    shippingBundleQuantity: textNumber(item.shippingBundleQuantity),
+    unitShippingCny: textNumber(item.unitShippingCny),
+  })
+  const basis = item.shippingChargeType === 'free'
+    ? '무료'
+    : item.shippingChargeType === 'bundle'
+      ? `${item.shippingBundleQuantity?.toLocaleString('ko-KR') ?? '-'}개당 ¥${decimalText(item.unitShippingCny)}`
+      : `개당 ¥${decimalText(item.unitShippingCny)}`
+  return <div><p className="font-medium">{basis}</p>{item.shippingChargeType === 'bundle' ? <p className="text-[10px] text-violet-700">환산 개당 {effective == null ? '-' : `¥${decimalText(effective)}`}</p> : null}</div>
+}
+
+function effectiveUnitShippingCny(row: Pick<DraftRow, 'shippingChargeType' | 'shippingBundleQuantity' | 'unitShippingCny'>) {
+  if (row.shippingChargeType === 'free') return 0
+  const fee = numberValue(row.unitShippingCny)
+  if (row.shippingChargeType === 'unit') return fee
+  const quantity = numberValue(row.shippingBundleQuantity)
+  return fee != null && quantity != null && quantity > 0 ? fee / quantity : null
+}
+
 function AutoGrowTextarea({ value, onChange, placeholder }: {
   value: string
   onChange: (value: string) => void
@@ -1015,6 +1071,8 @@ function rowFromItem(item: ManualSourcingItem, exchangeRate: number): DraftRow {
     chinaPurchaseUrl: item.chinaPurchaseUrl ?? '',
     chinaUnitPriceCny: textNumber(item.chinaUnitPriceCny),
     unitShippingCny: textNumber(item.unitShippingCny),
+    shippingChargeType: item.shippingChargeType,
+    shippingBundleQuantity: textNumber(item.shippingBundleQuantity),
     exchangeRateKrw: textNumber(item.exchangeRateKrw) || String(exchangeRate),
     domesticSaleUrl: item.domesticSaleUrl ?? '',
     domesticSalePrice: textNumber(item.domesticSalePrice),
@@ -1036,6 +1094,8 @@ function blankRow(exchangeRate: number, ownerOperatorId: string): DraftRow {
     chinaPurchaseUrl: '',
     chinaUnitPriceCny: '',
     unitShippingCny: '',
+    shippingChargeType: 'unit',
+    shippingBundleQuantity: '',
     exchangeRateKrw: String(exchangeRate),
     domesticSaleUrl: '',
     domesticSalePrice: '',

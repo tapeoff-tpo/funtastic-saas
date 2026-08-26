@@ -140,6 +140,8 @@ async function createSourcingTables() {
       ADD COLUMN IF NOT EXISTS "product_option" text,
       ADD COLUMN IF NOT EXISTS "china_unit_price_cny" numeric(14, 2),
       ADD COLUMN IF NOT EXISTS "unit_shipping_cny" numeric(14, 2),
+      ADD COLUMN IF NOT EXISTS "shipping_charge_type" varchar(20) NOT NULL DEFAULT 'unit',
+      ADD COLUMN IF NOT EXISTS "shipping_bundle_quantity" integer,
       ADD COLUMN IF NOT EXISTS "exchange_rate_krw" numeric(14, 4),
       ADD COLUMN IF NOT EXISTS "calculated_cost_krw" integer,
       ADD COLUMN IF NOT EXISTS "domestic_sale_url" text,
@@ -636,6 +638,8 @@ export type ManualSourcingItem = {
   chinaPurchaseUrl: string | null
   chinaUnitPriceCny: number | null
   unitShippingCny: number | null
+  shippingChargeType: ManualShippingChargeType
+  shippingBundleQuantity: number | null
   exchangeRateKrw: number | null
   calculatedCostKrw: number | null
   domesticSaleUrl: string | null
@@ -650,6 +654,8 @@ export type ManualSourcingItem = {
   createdAt: string
   updatedAt: string
 }
+
+export type ManualShippingChargeType = 'unit' | 'bundle' | 'free'
 
 export type SourcingMeeting = {
   id: string
@@ -675,6 +681,8 @@ export type ManualSourcingInput = {
   chinaPurchaseUrl?: string | null
   chinaUnitPriceCny?: number | null
   unitShippingCny?: number | null
+  shippingChargeType?: ManualShippingChargeType
+  shippingBundleQuantity?: number | null
   exchangeRateKrw?: number | null
   domesticSaleUrl?: string | null
   domesticSalePrice?: number | null
@@ -699,6 +707,8 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
       item.source_url AS "chinaPurchaseUrl",
       item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
       item.unit_shipping_cny::float8 AS "unitShippingCny",
+      item.shipping_charge_type AS "shippingChargeType",
+      item.shipping_bundle_quantity AS "shippingBundleQuantity",
       item.exchange_rate_krw::float8 AS "exchangeRateKrw",
       item.calculated_cost_krw AS "calculatedCostKrw",
       item.domestic_sale_url AS "domesticSaleUrl",
@@ -723,7 +733,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
     ORDER BY item.created_at ASC, item.id ASC
     LIMIT 300
   `))
-  return items.map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status) }))
+  return items.map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status), shippingChargeType: manualShippingChargeType(item.shippingChargeType) }))
 }
 
 export async function listSourcingMeetings(input: { userId: string; actorUserId: string }): Promise<SourcingMeeting[]> {
@@ -757,6 +767,8 @@ export async function listSourcingMeetings(input: { userId: string; actorUserId:
       item.source_url AS "chinaPurchaseUrl",
       item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
       item.unit_shipping_cny::float8 AS "unitShippingCny",
+      item.shipping_charge_type AS "shippingChargeType",
+      item.shipping_bundle_quantity AS "shippingBundleQuantity",
       item.exchange_rate_krw::float8 AS "exchangeRateKrw",
       item.calculated_cost_krw AS "calculatedCostKrw",
       item.domestic_sale_url AS "domesticSaleUrl",
@@ -780,7 +792,7 @@ export async function listSourcingMeetings(input: { userId: string; actorUserId:
           ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
           : sql`FALSE`})
     ORDER BY operator.position NULLS LAST, item.created_at ASC, item.id ASC
-  `)).map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status) }))
+  `)).map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status), shippingChargeType: manualShippingChargeType(item.shippingChargeType) }))
   const itemsByMeeting = new Map<string, ManualSourcingItem[]>()
   for (const item of items) {
     if (!item.meetingId) continue
@@ -905,12 +917,12 @@ export async function createManualSourcingItem(input: ManualSourcingInput & {
   const [row] = resultRows<{ id: string }>(await db.execute(sql`
     INSERT INTO sourcing_items (
       user_id, meeting_id, owner_operator_id, created_by_user_id, source_platform, source_title, product_option, source_url,
-      china_unit_price_cny, unit_shipping_cny, exchange_rate_krw, calculated_cost_krw,
+      china_unit_price_cny, unit_shipping_cny, shipping_charge_type, shipping_bundle_quantity, exchange_rate_krw, calculated_cost_krw,
       domestic_sale_url, domestic_sale_price, detail_page_url, memo_1, memo_2, status, raw_data, updated_at
     ) VALUES (
       ${input.userId}::uuid, ${meetingId}::uuid, ${ownerOperatorId}::uuid, ${input.requestedByUserId}::uuid, 'manual',
       ${values.productName}, ${values.productOption}, ${values.chinaPurchaseUrl},
-      ${values.chinaUnitPriceCny}, ${values.unitShippingCny}, ${values.exchangeRateKrw}, ${values.calculatedCostKrw},
+      ${values.chinaUnitPriceCny}, ${values.unitShippingCny}, ${values.shippingChargeType}, ${values.shippingBundleQuantity}, ${values.exchangeRateKrw}, ${values.calculatedCostKrw},
       ${values.domesticSaleUrl}, ${values.domesticSalePrice}, ${values.detailPageUrl}, ${values.memo1}, ${values.memo2},
       ${values.reviewStatus === 'passed' ? 'hold' : values.reviewStatus}, '{}'::jsonb, now()
     )
@@ -954,6 +966,8 @@ export async function updateManualSourcingItem(input: ManualSourcingInput & {
       source_url = ${values.chinaPurchaseUrl},
       china_unit_price_cny = ${values.chinaUnitPriceCny},
       unit_shipping_cny = ${values.unitShippingCny},
+      shipping_charge_type = ${values.shippingChargeType},
+      shipping_bundle_quantity = ${values.shippingBundleQuantity},
       exchange_rate_krw = ${values.exchangeRateKrw},
       calculated_cost_krw = ${values.calculatedCostKrw},
       domestic_sale_url = ${values.domesticSaleUrl},
@@ -1186,7 +1200,17 @@ export async function passManualSourcingToNewProduct(input: {
 
 function normalizeManualSourcingInput(input: ManualSourcingInput) {
   const chinaUnitPriceCny = decimal(input.chinaUnitPriceCny)
-  const unitShippingCny = decimal(input.unitShippingCny)
+  const shippingChargeType = manualShippingChargeType(input.shippingChargeType)
+  const enteredShippingCny = decimal(input.unitShippingCny)
+  const unitShippingCny = shippingChargeType === 'free' ? 0 : enteredShippingCny
+  const shippingBundleQuantity = shippingChargeType === 'bundle' ? positiveWholeNumber(input.shippingBundleQuantity) : null
+  if (shippingChargeType === 'bundle' && !shippingBundleQuantity) throw new Error('묶음 배송비의 묶음 수량을 입력해 주세요.')
+  if (shippingChargeType === 'bundle' && unitShippingCny == null) throw new Error('묶음 배송비의 총배송비를 입력해 주세요.')
+  const effectiveUnitShippingCny = shippingChargeType === 'free'
+    ? 0
+    : shippingChargeType === 'bundle'
+      ? shippingBundleQuantity && unitShippingCny != null ? unitShippingCny / shippingBundleQuantity : null
+      : unitShippingCny
   const exchangeRateKrw = decimal(input.exchangeRateKrw)
   return {
     productName: cleanText(input.productName),
@@ -1194,8 +1218,10 @@ function normalizeManualSourcingInput(input: ManualSourcingInput) {
     chinaPurchaseUrl: cleanText(input.chinaPurchaseUrl),
     chinaUnitPriceCny,
     unitShippingCny,
+    shippingChargeType,
+    shippingBundleQuantity,
     exchangeRateKrw,
-    calculatedCostKrw: calculateCnyCostKrw({ chinaUnitPriceCny, unitShippingCny, exchangeRateKrw }),
+    calculatedCostKrw: calculateCnyCostKrw({ chinaUnitPriceCny, unitShippingCny: effectiveUnitShippingCny, exchangeRateKrw }),
     domesticSaleUrl: cleanText(input.domesticSaleUrl),
     domesticSalePrice: wholeNumber(input.domesticSalePrice),
     detailPageUrl: cleanText(input.detailPageUrl),
@@ -1261,6 +1287,15 @@ function sourcingMeetingStatus(value: unknown): SourcingMeeting['status'] {
 
 function manualSourcingReviewStatus(value: unknown): ManualSourcingReviewStatus {
   return value === 'passed' || value === 'rejected' || value === 'hold' ? value : 'hold'
+}
+
+function manualShippingChargeType(value: unknown): ManualShippingChargeType {
+  return value === 'bundle' || value === 'free' ? value : 'unit'
+}
+
+function positiveWholeNumber(value: unknown) {
+  const parsed = wholeNumber(value)
+  return parsed != null && parsed > 0 ? parsed : null
 }
 
 function isUuid(value: string) {

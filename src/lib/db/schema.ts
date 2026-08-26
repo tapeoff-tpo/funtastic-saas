@@ -1536,6 +1536,8 @@ export const sourcingItems = pgTable(
     })('image_file_data'),
     chinaUnitPriceCny: numeric('china_unit_price_cny', { precision: 14, scale: 2 }),
     unitShippingCny: numeric('unit_shipping_cny', { precision: 14, scale: 2 }),
+    shippingChargeType: varchar('shipping_charge_type', { length: 20 }).notNull().default('unit'),
+    shippingBundleQuantity: integer('shipping_bundle_quantity'),
     exchangeRateKrw: numeric('exchange_rate_krw', { precision: 14, scale: 4 }),
     calculatedCostKrw: integer('calculated_cost_krw'),
     domesticSaleUrl: text('domestic_sale_url'),

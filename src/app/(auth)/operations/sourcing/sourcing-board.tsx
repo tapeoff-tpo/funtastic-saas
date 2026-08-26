@@ -596,11 +596,30 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
           toast.message('상품명이 입력된 행부터 저장됩니다.')
           return
         }
-        await persistRows(rows)
+        let rowsToSave = rows
+        let automaticPriceCount = 0
+        const priceFailures: string[] = []
+        const priceTargets = populatedRows.filter((row) => !row.chinaUnitPriceCny.trim() && row.chinaPurchaseUrl.trim())
+        for (const target of priceTargets) {
+          const result = await lookup1688Price(target.chinaPurchaseUrl, target.productOption)
+          if (result.status === 'unavailable') break
+          if (result.status === 'failed') {
+            priceFailures.push(`${target.productName}: ${result.message}`)
+            continue
+          }
+          automaticPriceCount += 1
+          rowsToSave = rowsToSave.map((row) => row.clientId === target.clientId
+            ? { ...row, chinaUnitPriceCny: String(result.price) }
+            : row)
+          setRows(rowsToSave)
+        }
+        await persistRows(rowsToSave)
         const passedCount = populatedRows.filter((row) => row.status === 'passed').length
         toast.success(passedCount > 0
           ? `${populatedRows.length}개 상품을 저장했고, 통과 ${passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
           : `${populatedRows.length}개 상품을 저장했습니다.`)
+        if (automaticPriceCount > 0) toast.success(`1688 위안화 가격 ${automaticPriceCount}건을 자동 입력했습니다.`)
+        if (priceFailures.length > 0) toast.warning(`가격을 자동 입력하지 못한 상품 ${priceFailures.length}건: ${priceFailures.slice(0, 3).join(' / ')}`)
         onChanged()
       } catch (error) {
         toast.error(errorMessage(error))
@@ -870,6 +889,65 @@ function ReviewStatusBadge({ status, passedNewProductId }: { status: ManualSourc
 
 function TableHeader({ children, required = false }: { children: React.ReactNode; required?: boolean }) {
   return <th scope="col" className="break-keep border-r px-1 py-2 align-bottom font-medium leading-4 last:border-r-0">{children}{required ? <span className="ml-0.5 text-destructive">*</span> : null}</th>
+}
+
+const SAAS_MESSAGE_SOURCE = 'funtastic-saas'
+const EXTENSION_MESSAGE_SOURCE = 'funtastic-1688-extension'
+
+type PriceLookupResult =
+  | { status: 'success'; price: number }
+  | { status: 'failed'; message: string }
+  | { status: 'unavailable' }
+
+function lookup1688Price(url: string, option: string): Promise<PriceLookupResult> {
+  const requestId = crypto.randomUUID()
+  return new Promise((resolve) => {
+    let acknowledged = false
+    let finished = false
+    const finish = (result: PriceLookupResult) => {
+      if (finished) return
+      finished = true
+      clearTimeout(ackTimer)
+      clearTimeout(resultTimer)
+      window.removeEventListener('message', receive)
+      resolve(result)
+    }
+    const receive = (event: MessageEvent) => {
+      if (event.source !== window || event.origin !== window.location.origin) return
+      const message = event.data
+      if (!message || message.source !== EXTENSION_MESSAGE_SOURCE || message.requestId !== requestId) return
+      if (message.type === 'FUNTASTIC_1688_PRICE_LOOKUP_ACK') {
+        acknowledged = true
+        return
+      }
+      if (message.type === 'FUNTASTIC_1688_PRICE_LOOKUP_RESULT') {
+        const price = Number(message.price)
+        finish(Number.isFinite(price) && price > 0
+          ? { status: 'success', price }
+          : { status: 'failed', message: message.message || '가격을 찾지 못했습니다.' })
+        return
+      }
+      if (message.type === 'FUNTASTIC_1688_PRICE_LOOKUP_ERROR') {
+        finish({ status: 'failed', message: message.message || '가격 조회에 실패했습니다.' })
+      }
+    }
+    window.addEventListener('message', receive)
+    const ackTimer = window.setTimeout(() => {
+      if (!acknowledged) finish({ status: 'unavailable' })
+    }, 800)
+    const resultTimer = window.setTimeout(() => {
+      finish(acknowledged
+        ? { status: 'failed', message: '1688 가격 조회 응답 시간이 초과되었습니다.' }
+        : { status: 'unavailable' })
+    }, 55_000)
+    window.postMessage({
+      source: SAAS_MESSAGE_SOURCE,
+      type: 'FUNTASTIC_1688_PRICE_LOOKUP_START',
+      requestId,
+      url,
+      option,
+    }, window.location.origin)
+  })
 }
 
 function TableCell({ children, className }: { children: React.ReactNode; className?: string }) {

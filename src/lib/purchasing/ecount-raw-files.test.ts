@@ -1,6 +1,10 @@
 import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
-import { readEcountPurchasingRawFileRows, type EcountPurchasingUpload } from './ecount-purchasing-sync'
+import {
+  parseEcountPurchasingSnapshot,
+  readEcountPurchasingRawFileRows,
+  type EcountPurchasingUpload,
+} from './ecount-purchasing-sync'
 import { mergeEcountRawFiles, type StoredEcountRawFile } from './ecount-raw-files'
 
 describe('mergeEcountRawFiles', () => {
@@ -59,6 +63,25 @@ describe('mergeEcountRawFiles', () => {
       expect.objectContaining({ '품목코드': '100002-0001', '합계': '20' }),
     ])
   })
+
+  it('keeps orderless outbound items on the same stable key after an incremental merge', async () => {
+    const headers = ['품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드']
+    const first = await makeUpload('중국출고-기존.xlsx', headers, [
+      ['100001-0001', '20260820-1', '첫 상품', '옵션', 10, '2026-08-20', '', ''],
+    ])
+    const next = await makeUpload('중국출고-추가.xlsx', headers, [
+      ['100002-0001', '20260821-1', '새 상품', '옵션', 20, '2026-08-21', '', ''],
+    ])
+    const initialSnapshot = await parseOutboundSnapshot(first)
+    const initialKey = initialSnapshot.outboundCompleted[0]?.outboundComponents[0]?.matchKey
+
+    const [merged] = await mergeEcountRawFiles([stored('chinaOutbound', first)], [stored('chinaOutbound', next)])
+    const mergedSnapshot = await parseOutboundSnapshot(merged)
+    const mergedItem = mergedSnapshot.outboundCompleted.find((item) => item.sku === '100001-0001')
+
+    expect(initialKey).toMatch(/^outbound-row:/)
+    expect(mergedItem?.outboundComponents[0]?.matchKey).toBe(initialKey)
+  })
 })
 
 const purchaseHistoryHeaders = [
@@ -82,4 +105,13 @@ async function makeUpload(
   for (const row of rows) sheet.addRow(row)
   const buffer = await workbook.xlsx.writeBuffer()
   return { fileName, fileBuffer: buffer as ArrayBuffer }
+}
+
+function parseOutboundSnapshot(file: EcountPurchasingUpload) {
+  return parseEcountPurchasingSnapshot({
+    files: [file],
+    asOfDate: '2026-08-24',
+    domesticInventoryReflectedThrough: '2026-08-24',
+    allowMissingReports: true,
+  })
 }

@@ -1,4 +1,5 @@
 import ExcelJS from 'exceljs'
+import { createHash } from 'node:crypto'
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
@@ -133,6 +134,7 @@ export type EcountOutboundPendingItem = {
   outboundComponents: Array<{
     matchKey: string
     legacyMatchKey: string
+    legacyMatchKeys?: string[]
     sourceRowNumber: number
     sourceDateNo: string
     effectiveDate: string
@@ -318,9 +320,10 @@ export async function parseEcountPurchasingSnapshot(input: {
     })
     .filter((row): row is EcountChinaInventoryItem => row !== null)
 
-  const rawChinaOutboundItems = readRows(chinaOutbound)
-    .filter((row) => isPurchaseItemSku(valueAt(row, chinaOutbound, '품목코드')))
-    .map<EcountOutboundPendingItem | null>((row) => {
+  const rawChinaOutboundItems = assignStableOutboundFallbackKeys(
+    readRows(chinaOutbound)
+      .filter((row) => isPurchaseItemSku(valueAt(row, chinaOutbound, '품목코드')))
+      .map<EcountOutboundPendingItem | null>((row) => {
       const effectiveDate = parseDate(valueAt(row, chinaOutbound, '유효기간'))
       const quantity = positiveInteger(valueAt(row, chinaOutbound, '출고수량(EA)'))
       if (!effectiveDate || quantity === 0) return null
@@ -332,12 +335,14 @@ export async function parseEcountPurchasingSnapshot(input: {
       const supplierOrderNumber = isReliableSupplierOrderNumber(rawSupplierOrderNumber)
         ? rawSupplierOrderNumber
         : null
-      const legacyMatchKey = supplierOrderNumber
+      const supplierLegacyMatchKey = supplierOrderNumber
         ? `supplier:${supplierOrderNumber}:${sku}`
         : ''
+      const rowLegacyMatchKey = `row:${sourceDateNo}:${sku}:${row.number}`
       const fallbackMatchKey = outboundManagementCode
         ? `outbound:${outboundManagementCode}:${sku}`
-        : `row:${sourceDateNo}:${sku}:${row.number}`
+        : rowLegacyMatchKey
+      const legacyMatchKeys = [rowLegacyMatchKey, supplierLegacyMatchKey].filter(Boolean)
 
       return {
         sourceFileName: chinaOutbound.fileName,
@@ -354,7 +359,8 @@ export async function parseEcountPurchasingSnapshot(input: {
         componentMatchKeys: [fallbackMatchKey],
         outboundComponents: [{
           matchKey: fallbackMatchKey,
-          legacyMatchKey,
+          legacyMatchKey: legacyMatchKeys[0] ?? '',
+          legacyMatchKeys,
           sourceRowNumber: row.number,
           sourceDateNo,
           effectiveDate,
@@ -365,8 +371,9 @@ export async function parseEcountPurchasingSnapshot(input: {
         purchasedQuantity: null,
         isFullyOutbound: false,
       } satisfies EcountOutboundPendingItem
-    })
-    .filter((row): row is EcountOutboundPendingItem => row !== null)
+      })
+      .filter((row): row is EcountOutboundPendingItem => row !== null),
+  )
 
   // Plans are the purchase-in-progress stage. Purchase history consumes plan
   // quantities that have already reached China. Identifiers improve matching,
@@ -560,6 +567,42 @@ export async function parseEcountPurchasingSnapshot(input: {
     },
     warnings,
   }
+}
+
+function assignStableOutboundFallbackKeys(items: EcountOutboundPendingItem[]) {
+  const occurrences = new Map<string, number>()
+  return items.map((item) => {
+    if (item.outboundManagementCode) return item
+
+    // Ecount row numbers change when users export only a new date range.
+    const identity = [
+      item.sourceDateNo.replace(/\s+/g, ''),
+      item.sku,
+      (item.optionName ?? '').replace(/\s+/g, ' '),
+      item.effectiveDate,
+      item.quantity,
+    ].join('\u001f')
+    const occurrence = (occurrences.get(identity) ?? 0) + 1
+    occurrences.set(identity, occurrence)
+    const matchKey = `outbound-row:${createHash('sha256').update(`${identity}\u001f${occurrence}`).digest('hex')}`
+    const component = item.outboundComponents[0]
+    const legacyMatchKeys = [...new Set([
+      item.fallbackMatchKey,
+      ...outboundComponentLegacyMatchKeys(component),
+    ].filter(Boolean))]
+
+    return {
+      ...item,
+      fallbackMatchKey: matchKey,
+      componentMatchKeys: [matchKey],
+      outboundComponents: [{
+        ...component,
+        matchKey,
+        legacyMatchKey: legacyMatchKeys[0] ?? '',
+        legacyMatchKeys,
+      }],
+    }
+  })
 }
 
 function deduplicateCompletedRequests(items: EcountPurchaseCompletedItem[]) {
@@ -775,7 +818,7 @@ function removeReflectedOutboundComponents(
 ): EcountOutboundPendingItem | null {
   const outboundComponents = item.outboundComponents.filter((component) => (
     !reflectedMatchKeys.has(component.matchKey)
-    && (!component.legacyMatchKey || !reflectedMatchKeys.has(component.legacyMatchKey))
+    && outboundComponentLegacyMatchKeys(component).every((key) => !reflectedMatchKeys.has(key))
   ))
   if (outboundComponents.length === 0) return null
 
@@ -790,6 +833,14 @@ function removeReflectedOutboundComponents(
     componentMatchKeys,
     outboundComponents,
   }
+}
+
+function outboundComponentLegacyMatchKeys(component: EcountOutboundPendingItem['outboundComponents'][number] | undefined) {
+  if (!component) return []
+  return [...new Set([
+    component.legacyMatchKey,
+    ...(Array.isArray(component.legacyMatchKeys) ? component.legacyMatchKeys : []),
+  ].filter((key): key is string => typeof key === 'string' && key.length > 0))]
 }
 
 function pipelineMatchScore(

@@ -636,6 +636,7 @@ export type ManualSourcingItem = {
   ownerName: string | null
   productName: string
   productOption: string | null
+  options: ManualSourcingOption[]
   chinaPurchaseUrl: string | null
   chinaUnitPriceCny: number | null
   unitShippingCny: number | null
@@ -654,6 +655,11 @@ export type ManualSourcingItem = {
   passedNewProductId: string | null
   createdAt: string
   updatedAt: string
+}
+
+export type ManualSourcingOption = {
+  name: string
+  chinaUnitPriceCny: number | null
 }
 
 export type ManualShippingChargeType = 'unit' | 'bundle' | 'free'
@@ -679,6 +685,7 @@ export type ManualSourcingInput = {
   meetingId?: string | null
   productName: string
   productOption?: string | null
+  options?: ManualSourcingOption[]
   chinaPurchaseUrl?: string | null
   chinaUnitPriceCny?: number | null
   unitShippingCny?: number | null
@@ -705,6 +712,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
       operator.display_name AS "ownerName",
       item.source_title AS "productName",
       item.product_option AS "productOption",
+      COALESCE(item.raw_data->'manualOptions', '[]'::jsonb) AS options,
       item.source_url AS "chinaPurchaseUrl",
       item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
       item.unit_shipping_cny::float8 AS "unitShippingCny",
@@ -734,7 +742,7 @@ export async function listManualSourcingItems(input: { userId: string; actorUser
     ORDER BY item.created_at ASC, item.id ASC
     LIMIT 300
   `))
-  return items.map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status), shippingChargeType: manualShippingChargeType(item.shippingChargeType) }))
+  return items.map((item) => ({ ...item, options: manualSourcingOptions(item.options, item.productOption, item.chinaUnitPriceCny), status: manualSourcingReviewStatus(item.status), shippingChargeType: manualShippingChargeType(item.shippingChargeType) }))
 }
 
 export async function listSourcingMeetings(input: { userId: string; actorUserId: string }): Promise<SourcingMeeting[]> {
@@ -765,6 +773,7 @@ export async function listSourcingMeetings(input: { userId: string; actorUserId:
       operator.display_name AS "ownerName",
       item.source_title AS "productName",
       item.product_option AS "productOption",
+      COALESCE(item.raw_data->'manualOptions', '[]'::jsonb) AS options,
       item.source_url AS "chinaPurchaseUrl",
       item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
       item.unit_shipping_cny::float8 AS "unitShippingCny",
@@ -793,7 +802,7 @@ export async function listSourcingMeetings(input: { userId: string; actorUserId:
           ? sql`item.owner_operator_id = ${viewer.operatorId}::uuid`
           : sql`FALSE`})
     ORDER BY operator.position NULLS LAST, item.created_at ASC, item.id ASC
-  `)).map((item) => ({ ...item, status: manualSourcingReviewStatus(item.status), shippingChargeType: manualShippingChargeType(item.shippingChargeType) }))
+  `)).map((item) => ({ ...item, options: manualSourcingOptions(item.options, item.productOption, item.chinaUnitPriceCny), status: manualSourcingReviewStatus(item.status), shippingChargeType: manualShippingChargeType(item.shippingChargeType) }))
   const itemsByMeeting = new Map<string, ManualSourcingItem[]>()
   for (const item of items) {
     if (!item.meetingId) continue
@@ -925,7 +934,8 @@ export async function createManualSourcingItem(input: ManualSourcingInput & {
       ${values.productName}, ${values.productOption}, ${values.chinaPurchaseUrl},
       ${values.chinaUnitPriceCny}, ${values.unitShippingCny}, ${values.shippingChargeType}, ${values.shippingBundleQuantity}, ${values.exchangeRateKrw}, ${values.calculatedCostKrw},
       ${values.domesticSaleUrl}, ${values.domesticSalePrice}, ${values.detailPageUrl}, ${values.memo1}, ${values.memo2},
-      ${values.reviewStatus === 'passed' ? 'hold' : values.reviewStatus}, '{}'::jsonb, now()
+      ${values.reviewStatus === 'passed' ? 'hold' : values.reviewStatus},
+      jsonb_build_object('manualOptions', ${JSON.stringify(values.options)}::jsonb), now()
     )
     RETURNING id
   `))
@@ -976,6 +986,7 @@ export async function updateManualSourcingItem(input: ManualSourcingInput & {
       detail_page_url = ${values.detailPageUrl},
       memo_1 = ${values.memo1},
       memo_2 = ${values.memo2},
+      raw_data = jsonb_set(COALESCE(raw_data, '{}'::jsonb), '{manualOptions}', ${JSON.stringify(values.options)}::jsonb, true),
       status = ${values.reviewStatus === 'passed' ? 'hold' : values.reviewStatus},
       updated_at = now()
     WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
@@ -1200,7 +1211,8 @@ export async function passManualSourcingToNewProduct(input: {
 }
 
 function normalizeManualSourcingInput(input: ManualSourcingInput) {
-  const chinaUnitPriceCny = decimal(input.chinaUnitPriceCny)
+  const options = manualSourcingOptions(input.options, input.productOption, input.chinaUnitPriceCny)
+  const chinaUnitPriceCny = options[0]?.chinaUnitPriceCny ?? decimal(input.chinaUnitPriceCny)
   const shippingChargeType = manualShippingChargeType(input.shippingChargeType)
   const enteredShippingCny = decimal(input.unitShippingCny)
   const unitShippingCny = shippingChargeType === 'free' ? 0 : enteredShippingCny
@@ -1215,7 +1227,8 @@ function normalizeManualSourcingInput(input: ManualSourcingInput) {
   const exchangeRateKrw = decimal(input.exchangeRateKrw)
   return {
     productName: cleanText(input.productName),
-    productOption: cleanText(input.productOption),
+    productOption: cleanText(options[0]?.name) ?? cleanText(input.productOption),
+    options,
     chinaPurchaseUrl: cleanText(input.chinaPurchaseUrl),
     chinaUnitPriceCny,
     unitShippingCny,
@@ -1288,6 +1301,48 @@ function sourcingMeetingStatus(value: unknown): SourcingMeeting['status'] {
 
 function manualSourcingReviewStatus(value: unknown): ManualSourcingReviewStatus {
   return value === 'pending' || value === 'passed' || value === 'rejected' || value === 'hold' ? value : 'pending'
+}
+
+export async function deleteManualSourcingItem(input: {
+  userId: string
+  requestedByUserId: string
+  itemId: string
+}) {
+  await ensureSourcingTables()
+  const viewer = await getSourcingViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!isUuid(input.itemId)) throw new Error('소싱 상품을 찾을 수 없습니다.')
+  const [item] = resultRows<{ ownerOperatorId: string | null }>(await db.execute(sql`
+    SELECT owner_operator_id AS "ownerOperatorId"
+    FROM sourcing_items
+    WHERE id = ${input.itemId}::uuid
+      AND user_id = ${input.userId}::uuid
+      AND source_platform = 'manual'
+    LIMIT 1
+  `))
+  if (!item) throw new Error('소싱 상품을 찾을 수 없습니다.')
+  if (!canWriteManualItem(viewer, item.ownerOperatorId)) throw new Error('다른 등록자의 소싱 상품은 삭제할 수 없습니다.')
+  await db.execute(sql`
+    DELETE FROM sourcing_items
+    WHERE id = ${input.itemId}::uuid
+      AND user_id = ${input.userId}::uuid
+      AND source_platform = 'manual'
+  `)
+  return { success: true as const }
+}
+
+function manualSourcingOptions(value: unknown, legacyName?: string | null, legacyPrice?: number | null): ManualSourcingOption[] {
+  const options = Array.isArray(value) ? value.slice(0, 30).flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return []
+    const candidate = entry as { name?: unknown; chinaUnitPriceCny?: unknown }
+    const name = cleanText(typeof candidate.name === 'string' ? candidate.name : null)
+    const parsedPrice = Number(candidate.chinaUnitPriceCny)
+    const chinaUnitPriceCny = decimal(Number.isFinite(parsedPrice) ? parsedPrice : null)
+    return name || chinaUnitPriceCny != null ? [{ name: name ?? '', chinaUnitPriceCny }] : []
+  }) : []
+  if (options.length > 0) return options
+  const name = cleanText(legacyName)
+  const price = decimal(legacyPrice)
+  return name || price != null ? [{ name: name ?? '', chinaUnitPriceCny: price }] : []
 }
 
 function manualShippingChargeType(value: unknown): ManualShippingChargeType {

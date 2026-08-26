@@ -28,6 +28,7 @@ import type {
 } from '@/lib/operations/sourcing'
 import {
   createSourcingMeetingAction,
+  deleteManualSourcingItemAction,
   deleteSourcingMeetingAction,
   saveSourcingOperatorsAction,
   saveSourcingMeetingRowsAction,
@@ -48,6 +49,7 @@ type DraftRow = {
   ownerOperatorId: string | null
   productName: string
   productOption: string
+  options: DraftOption[]
   chinaPurchaseUrl: string
   chinaUnitPriceCny: string
   unitShippingCny: string
@@ -61,6 +63,12 @@ type DraftRow = {
   memo2: string
   status: ManualSourcingReviewStatus
   passedNewProductId: string | null
+}
+
+type DraftOption = {
+  clientId: string
+  name: string
+  chinaUnitPriceCny: string
 }
 
 type SheetOwner = {
@@ -556,6 +564,33 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
     setRows((currentRows) => currentRows.map((row) => row.clientId === clientId ? { ...row, ...patch } : row))
   }
 
+  function addOption(row: DraftRow) {
+    updateRow(row.clientId, { options: [...row.options, blankOption()] })
+  }
+
+  function updateOption(row: DraftRow, optionId: string, patch: Partial<DraftOption>) {
+    updateRow(row.clientId, { options: row.options.map((option) => option.clientId === optionId ? { ...option, ...patch } : option) })
+  }
+
+  function removeOption(row: DraftRow, optionId: string) {
+    const options = row.options.filter((option) => option.clientId !== optionId)
+    updateRow(row.clientId, { options: options.length > 0 ? options : [blankOption()] })
+  }
+
+  function deleteSavedRow(row: DraftRow) {
+    if (!row.itemId || !window.confirm(`'${row.productName}' 상품을 정말 삭제할까요?`)) return
+    startTransition(async () => {
+      const result = await deleteManualSourcingItemAction(row.itemId!)
+      if (!result.success) {
+        toast.error(result.error)
+        return
+      }
+      setRows((currentRows) => currentRows.filter((candidate) => candidate.clientId !== row.clientId))
+      toast.success('소싱 상품을 삭제했습니다.')
+      onChanged()
+    })
+  }
+
   function appendRows(count: number) {
     const ownerId = owner.id
     if (!ownerId) return
@@ -574,6 +609,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         itemId: row.itemId,
         productName: row.productName,
         productOption: row.productOption,
+        options: row.options.map((option) => ({ name: option.name, chinaUnitPriceCny: option.chinaUnitPriceCny })),
         chinaPurchaseUrl: row.chinaPurchaseUrl,
         chinaUnitPriceCny: row.chinaUnitPriceCny,
         unitShippingCny: row.unitShippingCny,
@@ -690,7 +726,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
           <tbody>
             {rows.map((row, index) => {
               const calculatedCost = calculateCnyCostKrw({
-                chinaUnitPriceCny: numberValue(row.chinaUnitPriceCny),
+                chinaUnitPriceCny: numberValue(row.options[0]?.chinaUnitPriceCny ?? row.chinaUnitPriceCny),
                 unitShippingCny: effectiveUnitShippingCny(row),
                 exchangeRateKrw: numberValue(row.exchangeRateKrw),
               })
@@ -698,9 +734,23 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
                 <tr key={row.clientId} className="border-t align-top hover:bg-muted/20">
                   <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
                   <TableCell><AutoGrowTextarea value={row.productName} onChange={(value) => updateRow(row.clientId, { productName: value })} placeholder="상품명" /></TableCell>
-                  <TableCell><AutoGrowTextarea value={row.productOption} onChange={(value) => updateRow(row.clientId, { productOption: value })} placeholder="옵션" /></TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      {row.options.map((option) => (
+                        <div key={option.clientId} className="flex gap-1">
+                          <AutoGrowTextarea value={option.name} onChange={(value) => updateOption(row, option.clientId, { name: value })} placeholder="옵션" />
+                          {row.options.length > 1 ? <Button type="button" variant="ghost" size="icon-sm" aria-label="옵션 삭제" onClick={() => removeOption(row, option.clientId)}><X /></Button> : null}
+                        </div>
+                      ))}
+                      <Button type="button" variant="outline" size="sm" className="h-7 w-full" onClick={() => addOption(row)}><Plus />옵션 추가</Button>
+                    </div>
+                  </TableCell>
                   <TableCell><AutoGrowTextarea value={row.chinaPurchaseUrl} onChange={(value) => updateRow(row.clientId, { chinaPurchaseUrl: value })} placeholder="https://detail.1688.com/..." /></TableCell>
-                  <TableCell><NumericCell value={row.chinaUnitPriceCny} onChange={(value) => updateRow(row.clientId, { chinaUnitPriceCny: value })} placeholder="¥" decimal /></TableCell>
+                  <TableCell>
+                    <div className="space-y-1">
+                      {row.options.map((option) => <NumericCell key={option.clientId} value={option.chinaUnitPriceCny} onChange={(value) => updateOption(row, option.clientId, { chinaUnitPriceCny: value })} placeholder="¥" decimal />)}
+                    </div>
+                  </TableCell>
                   <TableCell><ShippingCostCell row={row} onChange={(patch) => updateRow(row.clientId, patch)} /></TableCell>
                   <TableCell><NumericCell value={row.exchangeRateKrw} onChange={(value) => updateRow(row.clientId, { exchangeRateKrw: value })} placeholder="원/¥" decimal /></TableCell>
                   <TableCell><div className="min-h-8 rounded-md border bg-muted/40 px-2 py-1.5 text-right font-semibold">{won(calculatedCost)}</div></TableCell>
@@ -735,7 +785,11 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
                       <Button type="button" variant="ghost" size="icon-sm" aria-label="빈 행 제거" onClick={() => removeUnsavedRow(row.clientId)} disabled={pending}>
                         <X />
                       </Button>
-                    ) : <span className="text-xs text-muted-foreground">저장됨</span>}
+                    ) : (
+                      <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" aria-label="상품 삭제" onClick={() => deleteSavedRow(row)} disabled={pending}>
+                        <Trash2 />
+                      </Button>
+                    )}
                   </TableCell>
                 </tr>
               )
@@ -804,17 +858,17 @@ function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
               <tr key={item.id} className="border-t align-top hover:bg-muted/20">
                 <TableCell className="text-center text-xs text-muted-foreground">{index + 1}</TableCell>
                 <TableCell><ReadOnlyText value={item.productName} /></TableCell>
-                <TableCell><ReadOnlyText value={item.productOption} /></TableCell>
-                <TableCell><ReadOnlyLink value={item.chinaPurchaseUrl} label="1688 링크" /></TableCell>
-                <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.chinaUnitPriceCny)} /></TableCell>
+                <TableCell><div className="space-y-1">{item.options.length > 0 ? item.options.map((option, optionIndex) => <ReadOnlyText key={optionIndex} value={option.name} />) : <ReadOnlyText value={item.productOption} />}</div></TableCell>
+                <TableCell className="align-middle"><ReadOnlyLink value={item.chinaPurchaseUrl} label="1688 링크" /></TableCell>
+                <TableCell className="text-right tabular-nums"><div className="space-y-1">{item.options.length > 0 ? item.options.map((option, optionIndex) => <ReadOnlyText key={optionIndex} value={decimalText(option.chinaUnitPriceCny)} />) : <ReadOnlyText value={decimalText(item.chinaUnitPriceCny)} />}</div></TableCell>
                 <TableCell><ReadOnlyShippingCost item={item} /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={decimalText(item.exchangeRateKrw)} /></TableCell>
                 <TableCell className="text-right font-semibold tabular-nums"><ReadOnlyText value={won(item.calculatedCostKrw)} /></TableCell>
-                <TableCell><ReadOnlyLink value={item.domesticSaleUrl} label="판매 링크" /></TableCell>
+                <TableCell className="align-middle"><ReadOnlyLink value={item.domesticSaleUrl} label="판매 링크" /></TableCell>
                 <TableCell className="text-right tabular-nums"><ReadOnlyText value={won(item.domesticSalePrice)} /></TableCell>
-                <TableCell><ReadOnlyLink value={item.detailPageUrl} label="상세 링크" /></TableCell>
-                <TableCell><ReadOnlyLink value={item.memo1} label="비고 링크" /></TableCell>
-                <TableCell><ReadOnlyLink value={item.memo2} label="비고 링크" /></TableCell>
+                <TableCell className="align-middle"><ReadOnlyLink value={item.detailPageUrl} label="상세 링크" /></TableCell>
+                <TableCell className="align-middle"><ReadOnlyLink value={item.memo1} label="비고 링크" /></TableCell>
+                <TableCell className="align-middle"><ReadOnlyLink value={item.memo2} label="비고 링크" /></TableCell>
                 {showOwnerColumn ? <TableCell><ReadOnlyText value={item.ownerName} /></TableCell> : null}
                 <TableCell><ReviewStatusBadge status={item.status} passedNewProductId={item.passedNewProductId} /></TableCell>
               </tr>
@@ -983,6 +1037,9 @@ function rowFromItem(item: ManualSourcingItem, exchangeRate: number): DraftRow {
     ownerOperatorId: item.ownerOperatorId,
     productName: item.productName,
     productOption: item.productOption ?? '',
+    options: item.options.length > 0
+      ? item.options.map((option) => ({ clientId: crypto.randomUUID(), name: option.name, chinaUnitPriceCny: textNumber(option.chinaUnitPriceCny) }))
+      : [blankOption(item.productOption ?? '', textNumber(item.chinaUnitPriceCny))],
     chinaPurchaseUrl: item.chinaPurchaseUrl ?? '',
     chinaUnitPriceCny: textNumber(item.chinaUnitPriceCny),
     unitShippingCny: textNumber(item.unitShippingCny),
@@ -1006,6 +1063,7 @@ function blankRow(exchangeRate: number, ownerOperatorId: string): DraftRow {
     ownerOperatorId,
     productName: '',
     productOption: '',
+    options: [blankOption()],
     chinaPurchaseUrl: '',
     chinaUnitPriceCny: '',
     unitShippingCny: '',
@@ -1020,6 +1078,10 @@ function blankRow(exchangeRate: number, ownerOperatorId: string): DraftRow {
     status: 'pending',
     passedNewProductId: null,
   }
+}
+
+function blankOption(name = '', chinaUnitPriceCny = ''): DraftOption {
+  return { clientId: crypto.randomUUID(), name, chinaUnitPriceCny }
 }
 
 function meetingVersion(meeting: SourcingMeeting) {

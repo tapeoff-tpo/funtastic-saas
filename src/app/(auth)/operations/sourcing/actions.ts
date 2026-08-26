@@ -4,8 +4,10 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   createSourcingMeeting,
+  deleteManualSourcingItem,
   deleteSourcingMeeting,
   type ManualSourcingReviewStatus,
+  type ManualSourcingOption,
   type ManualShippingChargeType,
   passManualSourcingToNewProduct,
   saveSourcingOperators,
@@ -25,6 +27,7 @@ type SourcingRowValues = {
   itemId?: string | null
   productName: string
   productOption?: string
+  options?: Array<{ name?: string; chinaUnitPriceCny?: string }>
   chinaPurchaseUrl?: string
   chinaUnitPriceCny?: string
   unitShippingCny?: string
@@ -97,6 +100,21 @@ export async function deleteSourcingMeetingAction(meetingId: string) {
   }
 }
 
+export async function deleteManualSourcingItemAction(itemId: string) {
+  try {
+    const auth = await actionUser()
+    await deleteManualSourcingItem({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+      itemId: text(itemId),
+    })
+    revalidatePath('/operations/sourcing')
+    return { success: true as const }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
+}
+
 export async function saveSourcingOperatorsAction(input: {
   operators: Array<{ memberUserId: string; displayName: string }>
 }) {
@@ -149,6 +167,10 @@ function rowValues(values: SourcingRowValues) {
     itemId: nullableText(values.itemId, 100),
     productName: text(values.productName),
     productOption: nullableText(values.productOption),
+    options: (values.options ?? []).slice(0, 30).map((option): ManualSourcingOption => ({
+      name: text(option.name).trim().slice(0, 2_000),
+      chinaUnitPriceCny: nullableNumber(option.chinaUnitPriceCny),
+    })),
     chinaPurchaseUrl: nullableText(values.chinaPurchaseUrl),
     chinaUnitPriceCny: nullableNumber(values.chinaUnitPriceCny),
     unitShippingCny: nullableNumber(values.unitShippingCny),

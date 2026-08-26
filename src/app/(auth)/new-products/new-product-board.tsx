@@ -483,7 +483,10 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     b2bPriceOverride: normalizedNumber(values.b2bPrice),
     b2cPriceOverride: normalizedNumber(values.b2cPrice),
   })
-  const visibleSections = layout.sectionOrder.filter((section) => !layout.hiddenSections.includes(section))
+  const configuredSections = layout.sectionOrder.filter((section) => !layout.hiddenSections.includes(section))
+  const visibleSections = item && configuredSections.includes('attachments')
+    ? ['attachments' as const, ...configuredSections.filter((section) => section !== 'attachments')]
+    : configuredSections
   const fieldGridClass = layout.columns === 1
     ? 'grid-cols-1'
     : layout.columns === 3
@@ -502,19 +505,6 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="현재 단계"><StageSelect value={values.stageId} onChange={(value) => setValue('stageId', value)} stages={stages} /></Field>
           <Field label="상품번호"><Input value={values.sampleCode} onChange={(event) => setValue('sampleCode', event.target.value)} placeholder="상품번호를 입력하세요" /></Field>
         </div>
-        {item?.stageHistory && item.stageHistory.length > 0 && (
-          <div className="mt-4 rounded-lg bg-muted/40 p-3">
-            <p className="mb-2 text-xs font-semibold">최근 단계 변경</p>
-            <div className="grid gap-2 lg:grid-cols-2">
-              {item.stageHistory.slice(0, 6).map((history) => (
-                <div key={history.id} className="flex items-start justify-between gap-3 text-xs">
-                  <span className="min-w-0"><span className="text-muted-foreground">{history.fromStageName ? `${history.fromStageName} → ` : ''}</span><strong>{history.toStageName}</strong>{history.note && <span className="ml-1 text-muted-foreground">· {history.note}</span>}</span>
-                  <time className="shrink-0 text-muted-foreground">{shortDate(history.changedAt)}</time>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </EditorSection>
     ),
     basic: (
@@ -671,6 +661,19 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           ? visibleSections.map((section) => <div key={section} id={`new-product-section-${section}`} className="scroll-mt-4">{sectionContent[section]}</div>)
           : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
       </fieldset>
+
+      {item?.stageHistory && item.stageHistory.length > 0 && (
+        <EditorSection title="최근 단계 변경 로그" icon={Sparkles}>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {item.stageHistory.slice(0, 6).map((history) => (
+              <div key={history.id} className="flex items-start justify-between gap-3 text-xs">
+                <span className="min-w-0"><span className="text-muted-foreground">{history.fromStageName ? `${history.fromStageName} → ` : ''}</span><strong>{history.toStageName}</strong>{history.note && <span className="ml-1 text-muted-foreground">· {history.note}</span>}</span>
+                <time className="shrink-0 text-muted-foreground">{shortDate(history.changedAt)}</time>
+              </div>
+            ))}
+          </div>
+        </EditorSection>
+      )}
 
       {editing && (
         <div className="flex flex-col justify-end gap-2 rounded-xl border bg-card p-4 shadow-sm sm:flex-row">
@@ -989,7 +992,11 @@ function UrlInput({ value, onChange }: { value: string; onChange: (value: string
   return (
     <div className="flex gap-1">
       <Input type="url" value={value} onChange={(event) => onChange(event.target.value)} placeholder="https://" />
-      {/^https?:\/\//.test(value) && <a href={value} target="_blank" rel="noreferrer"><Button type="button" size="icon" variant="outline" aria-label="링크 열기"><ExternalLink /></Button></a>}
+      {/^https?:\/\//.test(value) && (
+        <a href={value} target="_blank" rel="noreferrer" aria-label="링크 열기" title="링크 열기" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border bg-background text-foreground hover:bg-muted">
+          <ExternalLink className="h-4 w-4" />
+        </a>
+      )}
     </div>
   )
 }

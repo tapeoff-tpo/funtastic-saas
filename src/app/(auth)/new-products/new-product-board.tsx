@@ -549,7 +549,11 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
               label={label}
               attachments={item?.attachments ?? []}
               pendingFiles={pendingAttachments[kind] ?? []}
-              onPendingFilesChange={(files) => setPendingAttachments((current) => ({ ...current, [kind]: files }))}
+              onPendingFilesChange={(update) => setPendingAttachments((current) => {
+                const currentFiles = current[kind] ?? []
+                const files = typeof update === 'function' ? update(currentFiles) : update
+                return { ...current, [kind]: files }
+              })}
               onChanged={() => item && onSaved(item.id)}
             />
           ))}
@@ -1025,7 +1029,7 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
   label: string
   attachments: NewProductAttachment[]
   pendingFiles: File[]
-  onPendingFilesChange: (files: File[]) => void
+  onPendingFilesChange: (update: React.SetStateAction<File[]>) => void
   onChanged: () => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -1033,28 +1037,52 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
   const files = attachments.filter((attachment) => attachment.kind === kind)
   const isPdf = kind === 'quality_pdf'
 
-  async function upload(file?: File) {
-    if (!file) return
-    const validationError = attachmentValidationError(file, isPdf)
-    if (validationError) {
-      toast.error(validationError)
-      return
+  async function upload(selectedFiles?: FileList | File[]) {
+    const filesToUpload = selectedFiles ? Array.from(selectedFiles) : []
+    if (filesToUpload.length === 0) return
+
+    const validFiles: File[] = []
+    const invalidFiles: Array<{ file: File; error: string }> = []
+    for (const file of filesToUpload) {
+      const validationError = attachmentValidationError(file, isPdf)
+      if (validationError) invalidFiles.push({ file, error: validationError })
+      else validFiles.push(file)
     }
+    if (invalidFiles.length > 0) {
+      toast.error(`${invalidFiles.length}개 파일을 제외했습니다. ${invalidFiles[0].error}`)
+    }
+    if (inputRef.current) inputRef.current.value = ''
+    if (validFiles.length === 0) return
+
     if (!itemId) {
-      onPendingFilesChange([...pendingFiles, file])
-      if (inputRef.current) inputRef.current.value = ''
+      onPendingFilesChange((currentFiles) => [...currentFiles, ...validFiles])
+      toast.success(`${validFiles.length}개 파일을 저장 대기 목록에 추가했습니다.`)
       return
     }
+
     setUploading(true)
+    let uploadedCount = 0
+    const failedUploads: Array<{ file: File; error: unknown }> = []
     try {
-      await uploadAttachmentFile(itemId, kind, file)
-      toast.success(`${file.name} 업로드 완료`)
-      onChanged()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '업로드에 실패했습니다.')
+      for (const file of validFiles) {
+        try {
+          await uploadAttachmentFile(itemId, kind, file)
+          uploadedCount += 1
+        } catch (error) {
+          failedUploads.push({ file, error })
+        }
+      }
     } finally {
       setUploading(false)
       if (inputRef.current) inputRef.current.value = ''
+    }
+    if (uploadedCount > 0) {
+      toast.success(`${uploadedCount}개 파일 업로드 완료`)
+      onChanged()
+    }
+    if (failedUploads.length > 0) {
+      const firstError = failedUploads[0].error
+      toast.error(`${failedUploads.length}개 파일 업로드에 실패했습니다. ${firstError instanceof Error ? firstError.message : ''}`.trim())
     }
   }
 
@@ -1078,13 +1106,13 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
         onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files[0]) }}
+        onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files) }}
         className="flex w-full flex-col items-center justify-center rounded-lg border border-dashed py-4 text-xs text-muted-foreground transition hover:border-violet-400 hover:bg-violet-50/50 disabled:cursor-not-allowed"
       >
         {uploading ? <Loader2 className="mb-1 h-5 w-5 animate-spin" /> : <UploadCloud className="mb-1 h-5 w-5" />}
-        {uploading ? '업로드 중...' : `${isPdf ? 'PDF' : '이미지'}를 끌어놓거나 클릭`}
+        {uploading ? '업로드 중...' : isPdf ? 'PDF를 끌어놓거나 클릭' : '이미지를 여러 장 끌어놓거나 클릭'}
       </button>
-      <input ref={inputRef} type="file" accept={isPdf ? 'application/pdf' : 'image/jpeg,image/png,image/webp,image/gif'} className="hidden" onChange={(event) => void upload(event.target.files?.[0])} />
+      <input ref={inputRef} type="file" accept={isPdf ? 'application/pdf' : 'image/jpeg,image/png,image/webp,image/gif'} multiple={!isPdf} className="hidden" onChange={(event) => void upload(event.target.files)} />
       {files.length > 0 && (
         <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-3">
           {files.map((attachment) => (
@@ -1108,12 +1136,12 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
             <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center gap-2 rounded-md bg-violet-50 px-2 py-1.5 text-xs text-violet-800">
               {isPdf ? <FileText className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
               <span className="min-w-0 flex-1 truncate">{file.name}</span>
-              <button type="button" aria-label="대기 파일 제거" onClick={() => onPendingFilesChange(pendingFiles.filter((_, fileIndex) => fileIndex !== index))}><Trash2 className="h-3.5 w-3.5" /></button>
+              <button type="button" aria-label="대기 파일 제거" onClick={() => onPendingFilesChange((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index))}><Trash2 className="h-3.5 w-3.5" /></button>
             </div>
           ))}
         </div>
       )}
-      <p className="mt-2 text-[10px] text-muted-foreground">파일당 최대 4MB</p>
+      <p className="mt-2 text-[10px] text-muted-foreground">파일당 최대 4MB{!isPdf && ' · 여러 장 선택 가능'}</p>
     </div>
   )
 }

@@ -298,6 +298,44 @@ describe('parseEcountPurchasingSnapshot', () => {
     }))
   })
 
+  it('matches orderless outbound rows by purchase management code and sku', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260820-1', '101920-0001', '거품수세미', '2개입', '', 400, '', '', 'P-1', '확인', ''],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['101920-0001', '20260821-1', '거품수세미', '2개입', 400, '2026-08-21', 'P-1', '', 'OUT-1'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-21',
+      asOfDate: '2026-08-21',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.outboundCompleted).toEqual([
+      expect.objectContaining({
+        sku: '101920-0001',
+        purchaseManagementCode: 'P-1',
+        purchasedQuantity: 400,
+        isFullyOutbound: true,
+      }),
+    ])
+    expect(snapshot.validation).toMatchObject({
+      outboundRowsWithSupplierOrder: 0,
+      outboundRowsMatchedToPurchase: 1,
+      outboundRowsWithoutReliableSupplierOrder: 1,
+    })
+  })
+
   it('matches the same supplier order and sku even when option labels differ', async () => {
     const files = await Promise.all([
       makeUpload('purchase-plan.xlsx', [

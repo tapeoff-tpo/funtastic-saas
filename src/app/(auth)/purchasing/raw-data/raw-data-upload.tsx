@@ -39,7 +39,7 @@ const REQUIRED_FILES = [
   { key: 'purchasePlan', label: '발주계획현황', detail: '구매중으로 넘어간 발주계획 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'purchaseHistory', label: '구매현황', detail: '구매되어 중국창고에 도착한 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'chinaInventory', label: '중국재고현황', detail: '현재 중국창고에 보유한 재고', uploadRule: '현재 전체본 · 중국창고 재고 전체' },
-  { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
+  { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건 · 구입관리코드 포함 시 주문서번호 없는 건도 연결', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'domesticInventory', label: '국내재고현황', detail: '재고관리에 반영할 국내 창고 현재고', uploadRule: '현재 전체본 · 국내 창고 재고 전체' },
 ] as const
 type FileKey = (typeof REQUIRED_FILES)[number]['key']
@@ -219,7 +219,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <p>
           발주요청·발주계획·구매현황·중국출고는 새 기간만 올려도 기존 누적 이력에 합쳐지며, 같은 건은 새 파일 값으로 갱신됩니다.
-          수정 가능성이 있는 최근 7일은 함께 올리면 더 정확합니다. 중국·국내재고는 반드시 전체 최신본을 올리세요. 미리보기만으로는 저장·반영되지 않으며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
+          수정 가능성이 있는 최근 7일은 함께 올리면 더 정확합니다. 중국출고에는 구입관리코드 열을 함께 넣으면 주문서번호 없는 건도 구매현황과 정확히 연결합니다. 중국·국내재고는 반드시 전체 최신본을 올리세요. 미리보기만으로는 저장·반영되지 않으며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
         </p>
       </section>
     </div>

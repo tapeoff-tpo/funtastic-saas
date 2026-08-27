@@ -127,6 +127,7 @@ export type EcountOutboundPendingItem = {
   productName: string
   optionName: string | null
   quantity: number
+  purchaseManagementCode: string | null
   supplierOrderNumber: string | null
   outboundManagementCode: string | null
   fallbackMatchKey: string
@@ -330,6 +331,7 @@ export async function parseEcountPurchasingSnapshot(input: {
 
       const sku = valueAt(row, chinaOutbound, '품목코드')
       const sourceDateNo = valueAt(row, chinaOutbound, '일자-No.')
+      const purchaseManagementCode = emptyToNull(valueAt(row, chinaOutbound, '구입관리코드'))
       const outboundManagementCode = emptyToNull(valueAt(row, chinaOutbound, '출고관리코드'))
       const rawSupplierOrderNumber = valueAt(row, chinaOutbound, '주문서번호')
       const supplierOrderNumber = isReliableSupplierOrderNumber(rawSupplierOrderNumber)
@@ -353,6 +355,7 @@ export async function parseEcountPurchasingSnapshot(input: {
         productName: valueAt(row, chinaOutbound, '품목명'),
         optionName: emptyToNull(valueAt(row, chinaOutbound, '규격')),
         quantity,
+        purchaseManagementCode,
         supplierOrderNumber,
         outboundManagementCode,
         fallbackMatchKey,
@@ -526,19 +529,27 @@ export async function parseEcountPurchasingSnapshot(input: {
     purchaseKey(row.purchaseManagementCode, row.sku)!,
   )).length
   const outboundRowsWithSupplierOrder = rawChinaOutboundItems.filter((row) => row.supplierOrderNumber !== null)
-  const outboundRowsMatchedToPurchase = outboundRowsWithSupplierOrder.filter((row) => purchaseSupplierKeys.has(
-    supplierKey(row.supplierOrderNumber, row.sku)!,
-  )).length
+  const outboundRowsWithPurchaseReference = rawChinaOutboundItems.filter((row) => (
+    row.purchaseManagementCode !== null || row.supplierOrderNumber !== null
+  ))
+  const outboundRowsMatchedToPurchase = outboundRowsWithPurchaseReference.filter((row) => {
+    const managementKey = row.purchaseManagementCode
+      ? purchaseKey(row.purchaseManagementCode, row.sku)
+      : null
+    if (managementKey) return purchaseKeys.has(managementKey)
+    return purchaseSupplierKeys.has(supplierKey(row.supplierOrderNumber, row.sku)!)
+  }).length
   const outboundRowsWithoutReliableSupplierOrder = rawChinaOutboundItems.length - outboundRowsWithSupplierOrder.length
+  const outboundRowsWithoutPurchaseReference = rawChinaOutboundItems.length - outboundRowsWithPurchaseReference.length
 
   const warnings: string[] = []
   if (activeRequests.length === 0) warnings.push('진행중 발주요청이 없습니다.')
   if (chinaInventoryItems.length === 0) warnings.push('중국창고 재고가 0건입니다.')
-  if (outboundRowsWithoutReliableSupplierOrder > 0) {
-    warnings.push(`중국출고 ${outboundRowsWithoutReliableSupplierOrder.toLocaleString('ko-KR')}건은 주문서번호가 없어 출고관리코드 또는 행 기준 보조키로 보관합니다.`)
+  if (outboundRowsWithoutPurchaseReference > 0) {
+    warnings.push(`중국출고 ${outboundRowsWithoutPurchaseReference.toLocaleString('ko-KR')}건은 주문서번호와 구입관리코드가 없어 출고관리코드 또는 행 기준 보조키로 보관합니다.`)
   }
-  if (outboundRowsWithSupplierOrder.length !== outboundRowsMatchedToPurchase) {
-    warnings.push(`중국출고 주문서번호 대조 ${outboundRowsMatchedToPurchase.toLocaleString('ko-KR')}/${outboundRowsWithSupplierOrder.length.toLocaleString('ko-KR')}건이 구매현황과 일치합니다.`)
+  if (outboundRowsWithPurchaseReference.length !== outboundRowsMatchedToPurchase) {
+    warnings.push(`중국출고 구매 대조 ${outboundRowsMatchedToPurchase.toLocaleString('ko-KR')}/${outboundRowsWithPurchaseReference.length.toLocaleString('ko-KR')}건이 구매현황과 일치합니다.`)
   }
 
   return {
@@ -581,6 +592,7 @@ function assignStableOutboundFallbackKeys(items: EcountOutboundPendingItem[]) {
       (item.optionName ?? '').replace(/\s+/g, ' '),
       item.effectiveDate,
       item.quantity,
+      ...(item.purchaseManagementCode ? [item.purchaseManagementCode] : []),
     ].join('\u001f')
     const occurrence = (occurrences.get(identity) ?? 0) + 1
     occurrences.set(identity, occurrence)
@@ -752,11 +764,25 @@ function aggregateChinaOutboundItems(
   allItems: EcountOutboundPendingItem[],
   historyItems: EcountPurchaseCompletedItem[],
 ) {
-  const purchasedQuantityByOrder = new Map<string, number>()
+  const purchasedQuantityByManagementCode = new Map<string, number>()
+  const purchasedQuantityBySupplierOrder = new Map<string, number>()
   for (const item of historyItems) {
-    const key = supplierKey(item.supplierOrderNumber, item.sku)
-    if (!key) continue
-    purchasedQuantityByOrder.set(key, (purchasedQuantityByOrder.get(key) ?? 0) + item.quantity)
+    const managementKey = item.purchaseManagementCode
+      ? purchaseKey(item.purchaseManagementCode, item.sku)
+      : null
+    if (managementKey) {
+      purchasedQuantityByManagementCode.set(
+        managementKey,
+        (purchasedQuantityByManagementCode.get(managementKey) ?? 0) + item.quantity,
+      )
+    }
+    const supplierOrderKey = supplierKey(item.supplierOrderNumber, item.sku)
+    if (supplierOrderKey) {
+      purchasedQuantityBySupplierOrder.set(
+        supplierOrderKey,
+        (purchasedQuantityBySupplierOrder.get(supplierOrderKey) ?? 0) + item.quantity,
+      )
+    }
   }
 
   const allItemsByOrder = new Map<string, EcountOutboundPendingItem[]>()
@@ -786,9 +812,11 @@ function aggregateChinaOutboundItems(
       .filter((item) => item.effectiveDate <= latest.effectiveDate)
       .reduce((sum, item) => sum + item.quantity, 0)
     const totalOutboundQuantity = everyOrderItem.reduce((sum, item) => sum + item.quantity, 0)
-    const purchasedQuantity = latest.supplierOrderNumber
-      ? purchasedQuantityByOrder.get(supplierKey(latest.supplierOrderNumber, latest.sku)!) ?? null
-      : null
+    const purchasedQuantity = latest.purchaseManagementCode
+      ? purchasedQuantityByManagementCode.get(purchaseKey(latest.purchaseManagementCode, latest.sku)!) ?? null
+      : latest.supplierOrderNumber
+        ? purchasedQuantityBySupplierOrder.get(supplierKey(latest.supplierOrderNumber, latest.sku)!) ?? null
+        : null
     const outboundComponents = orderedItems.flatMap((item) => item.outboundComponents)
     const componentMatchKeys = outboundComponents.map((component) => component.matchKey)
 
@@ -809,7 +837,9 @@ function aggregateChinaOutboundItems(
 }
 
 function outboundOrderKey(item: EcountOutboundPendingItem) {
-  return supplierKey(item.supplierOrderNumber, item.sku) ?? item.fallbackMatchKey
+  return (item.purchaseManagementCode
+    ? purchaseKey(item.purchaseManagementCode, item.sku)
+    : null) ?? supplierKey(item.supplierOrderNumber, item.sku) ?? item.fallbackMatchKey
 }
 
 function removeReflectedOutboundComponents(
@@ -1140,6 +1170,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       requestedQuantity: item.quantity,
       actualPurchaseQuantity: item.quantity,
       chinaReceivedQuantity: item.quantity,
+      purchaseManagementCode: item.purchaseManagementCode,
       supplierOrderNumber: item.supplierOrderNumber,
       outboundExpectedDate: item.effectiveDate,
       rawData: {
@@ -1148,6 +1179,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         sourceRowNumber: item.sourceRowNumber,
         sourceDateNo: item.sourceDateNo,
         effectiveDate: item.effectiveDate,
+        purchaseManagementCode: item.purchaseManagementCode,
         outboundManagementCode: item.outboundManagementCode,
         fallbackMatchKey: item.fallbackMatchKey,
         componentMatchKeys: item.componentMatchKeys,
@@ -1175,6 +1207,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       requestedQuantity: item.quantity,
       actualPurchaseQuantity: item.quantity,
       chinaReceivedQuantity: item.quantity,
+      purchaseManagementCode: item.purchaseManagementCode,
       supplierOrderNumber: item.supplierOrderNumber,
       outboundExpectedDate: item.effectiveDate,
       purchaseConfirmed: true,
@@ -1184,6 +1217,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         sourceRowNumber: item.sourceRowNumber,
         sourceDateNo: item.sourceDateNo,
         effectiveDate: item.effectiveDate,
+        purchaseManagementCode: item.purchaseManagementCode,
         outboundManagementCode: item.outboundManagementCode,
         fallbackMatchKey: item.fallbackMatchKey,
         componentMatchKeys: item.componentMatchKeys,

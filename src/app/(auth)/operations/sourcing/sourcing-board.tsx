@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useTransition } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog } from '@base-ui/react/dialog'
 import {
@@ -9,6 +9,7 @@ import {
   Loader2,
   Plus,
   Save,
+  Search,
   Trash2,
   Users,
   X,
@@ -18,6 +19,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { calculateCnyCostKrw, type CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import {
+  searchSourcingItems,
+  SOURCING_SEARCH_RESULT_LIMIT,
+  sourcingOptionSummary,
+} from '@/lib/operations/sourcing-search'
 import type {
   ManualSourcingItem,
   ManualSourcingReviewStatus,
@@ -191,11 +197,18 @@ function MeetingList({ meetings, canCreate, canManage, operators, activeOwnerId,
   const router = useRouter()
   const [meetingDate, setMeetingDate] = useState(nextWednesday())
   const [title, setTitle] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
   const [pending, startTransition] = useTransition()
   const visibleItemCount = (meeting: SourcingMeeting) => activeOwnerId
     ? meeting.items.filter((item) => item.ownerOperatorId === activeOwnerId).length
     : meeting.items.length
   const totalRows = meetings.reduce((total, meeting) => total + visibleItemCount(meeting), 0)
+  const isSearching = searchQuery.trim().length > 0
+  const searchResults = useMemo(
+    () => searchSourcingItems(meetings, searchQuery, activeOwnerId),
+    [activeOwnerId, meetings, searchQuery],
+  )
+  const visibleSearchResults = searchResults.slice(0, SOURCING_SEARCH_RESULT_LIMIT)
 
   function createMeeting() {
     startTransition(async () => {
@@ -270,15 +283,90 @@ function MeetingList({ meetings, canCreate, canManage, operators, activeOwnerId,
         </section>
       )}
 
+      <section className="rounded-lg border bg-card p-4">
+        <label htmlFor="sourcing-product-search" className="text-sm font-semibold">상품 검색</label>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {activeOwnerId ? '현재 등록자 상품에서' : '전체 등록자 상품에서'} 상품명, 옵션, URL, 비고를 한꺼번에 찾습니다.
+        </p>
+        <div className="relative mt-3 max-w-3xl">
+          <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="sourcing-product-search"
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="상품명 · 옵션 · URL · 비고 검색"
+            autoComplete="off"
+            className="pl-9 pr-10"
+          />
+          {isSearching ? (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              aria-label="상품 검색어 지우기"
+              className="absolute right-2 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="size-4" />
+            </button>
+          ) : null}
+        </div>
+      </section>
+
       <section className="overflow-hidden rounded-lg border bg-card">
         <div className="flex flex-col gap-1 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-sm font-semibold">소싱회의 목록</h2>
-            <p className="mt-1 text-xs text-muted-foreground">날짜를 눌러 회의별 입력 시트를 엽니다.</p>
+            <h2 className="text-sm font-semibold">{isSearching ? '상품 검색 결과' : '소싱회의 목록'}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {isSearching ? '상품을 누르면 해당 상품이 들어 있는 소싱회의를 엽니다.' : '날짜를 눌러 회의별 입력 시트를 엽니다.'}
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">{meetings.length}개 회의 · {totalRows.toLocaleString('ko-KR')}개 상품</p>
+          <p className="text-xs text-muted-foreground" aria-live="polite">
+            {isSearching
+              ? `${searchResults.length.toLocaleString('ko-KR')}개 상품 검색됨`
+              : `${meetings.length}개 회의 · ${totalRows.toLocaleString('ko-KR')}개 상품`}
+          </p>
         </div>
-        {meetings.length > 0 ? (
+        {isSearching && searchResults.length > 0 ? (
+          <div className="divide-y">
+            {visibleSearchResults.map(({ meeting, item }) => {
+              const optionSummary = sourcingOptionSummary(item)
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => onOpen(meeting.id)}
+                  className="grid w-full gap-3 px-4 py-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+                >
+                  <div className="min-w-0">
+                    <strong className="block truncate text-sm text-foreground">{item.productName}</strong>
+                    <p className="mt-1 truncate text-xs text-muted-foreground">
+                      {optionSummary || '옵션 없음'}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground md:justify-end">
+                    <span className="max-w-56 truncate font-medium text-foreground">{meeting.title}</span>
+                    <span>{formatMeetingDate(meeting.meetingDate)}</span>
+                    <span>{item.ownerName || '담당자 미지정'}</span>
+                    <ReviewStatusBadge status={item.status} passedNewProductId={item.passedNewProductId} />
+                  </div>
+                </button>
+              )
+            })}
+            {searchResults.length > SOURCING_SEARCH_RESULT_LIMIT ? (
+              <p className="px-4 py-3 text-center text-xs text-muted-foreground">
+                결과가 많아 최근 {SOURCING_SEARCH_RESULT_LIMIT.toLocaleString('ko-KR')}개까지만 표시합니다. 검색어를 더 입력해 주세요.
+              </p>
+            ) : null}
+          </div>
+        ) : isSearching ? (
+          <div className="grid min-h-48 place-items-center px-6 text-center">
+            <div>
+              <Search className="mx-auto size-6 text-muted-foreground/60" />
+              <p className="mt-3 text-sm font-medium">검색된 상품이 없습니다.</p>
+              <p className="mt-1 text-xs text-muted-foreground">상품명이나 옵션 일부만 입력해 다시 찾아보세요.</p>
+            </div>
+          </div>
+        ) : meetings.length > 0 ? (
           <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
             {meetings.map((meeting) => (
               <div key={meeting.id} className="group relative">

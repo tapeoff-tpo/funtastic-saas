@@ -80,27 +80,64 @@ describe('stable monthly outgoing', () => {
     })
   })
 
-  it('raises the effective demand when normal sales increase', () => {
+  it('keeps the three-month average as the demand basis for established products', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 70,
       threeMonthAverageOutgoing: 50,
     })).toEqual({
-      effectiveMonthlyOutgoing: 70,
+      effectiveMonthlyOutgoing: 50,
       baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: false,
       salesTrend: 'increasing',
     })
   })
 
-  it('reduces demand conservatively when sales fall', () => {
+  it('does not reduce established-product demand when current-month sales fall', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 20,
       threeMonthAverageOutgoing: 50,
     })).toEqual({
-      effectiveMonthlyOutgoing: 35,
+      effectiveMonthlyOutgoing: 50,
       baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: false,
       salesTrend: 'decreasing',
+    })
+  })
+
+  it('uses current-month outgoing as the main demand basis below a five-unit average', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 2,
+      threeMonthAverageOutgoing: 4,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 2,
+      baselineMonthlyOutgoing: 4,
+      salesAnomalyDetected: false,
+      salesTrend: 'steady',
+    })
+  })
+
+  it('switches to the three-month average at exactly five units', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 2,
+      threeMonthAverageOutgoing: 5,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 5,
+      baselineMonthlyOutgoing: 5,
+      salesAnomalyDetected: false,
+      salesTrend: 'decreasing',
+    })
+  })
+
+  it('uses current-month outgoing for a new product even when its average is at least five', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 18,
+      threeMonthAverageOutgoing: 12,
+      isNewProduct: true,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 18,
+      baselineMonthlyOutgoing: 12,
+      salesAnomalyDetected: false,
+      salesTrend: 'new_product',
     })
   })
 

@@ -35,6 +35,7 @@ const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
 
 const DEFAULT_PURCHASE_MINIMUM_QUANTITY = 10
 const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
+const CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD = 5
 const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set(['109055-0001'])
 
 export function isExcludedPurchaseRecommendation(sku: string, productName?: string | null) {
@@ -110,24 +111,27 @@ export function applyPurchaseMinimumQuantity(recommendedQuantity: number) {
 export function calculateStableMonthlyOutgoing(input: {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
+  isNewProduct?: boolean
 }) {
   const currentMonthOutgoing = Math.max(0, finiteNumber(input.currentMonthOutgoing))
   const threeMonthAverageOutgoing = Math.max(0, finiteNumber(input.threeMonthAverageOutgoing))
   const baselineMonthlyOutgoing = threeMonthAverageOutgoing
-  const salesAnomalyDetected = baselineMonthlyOutgoing > 0
+  const prioritizeCurrentMonth = input.isNewProduct === true
+    || baselineMonthlyOutgoing < CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD
+  const salesAnomalyDetected = !prioritizeCurrentMonth
     && currentMonthOutgoing >= baselineMonthlyOutgoing * 2
     && currentMonthOutgoing - baselineMonthlyOutgoing >= 20
-  const salesTrend = calculatePurchaseSalesTrend({
-    currentMonthOutgoing,
-    threeMonthAverageOutgoing: baselineMonthlyOutgoing,
-  })
-  const effectiveMonthlyOutgoing = salesAnomalyDetected
+  const salesTrend = input.isNewProduct === true
+    ? 'new_product' as const
+    : calculatePurchaseSalesTrend({
+        currentMonthOutgoing,
+        threeMonthAverageOutgoing: baselineMonthlyOutgoing,
+      })
+  const effectiveMonthlyOutgoing = prioritizeCurrentMonth
+    ? currentMonthOutgoing
+    : salesAnomalyDetected
     ? baselineMonthlyOutgoing
-    : salesTrend === 'increasing' || salesTrend === 'new_product'
-      ? currentMonthOutgoing
-      : salesTrend === 'decreasing'
-        ? (baselineMonthlyOutgoing + currentMonthOutgoing) / 2
-        : baselineMonthlyOutgoing
+    : baselineMonthlyOutgoing
 
   return {
     effectiveMonthlyOutgoing: roundToOneDecimal(effectiveMonthlyOutgoing),
@@ -430,19 +434,21 @@ export async function generatePurchaseRecommendations(input: {
     const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
     const currentMonthOutgoing = outgoingMetrics?.currentMonthOutgoing ?? 0
     const averageMonthlyOutgoing = outgoingMetrics?.threeMonthAverageOutgoing ?? 0
+    const productCosts = productCostsBySku.get(row.sku)
+    const isNewProduct = isNewProductForPurchaseRecommendation(productCosts?.metadata, productCosts?.createdAt, now)
     const stableOutgoing = calculateStableMonthlyOutgoing({
       currentMonthOutgoing,
       threeMonthAverageOutgoing: averageMonthlyOutgoing,
+      isNewProduct,
     })
     const previousThreeMonthOutgoing = averageMonthlyOutgoing * 3
     const calculation = calculatePurchaseRecommendationWithSpikeGuard({
-      averageMonthlyOutgoing,
+      averageMonthlyOutgoing: stableOutgoing.effectiveMonthlyOutgoing,
       effectiveMonthlyOutgoing: stableOutgoing.effectiveMonthlyOutgoing,
       currentMonthOutgoing,
       availableStock: row.availableStock,
       targetStockMonths,
     })
-    const productCosts = productCostsBySku.get(row.sku)
     const costs = calculatePurchaseCosts({
       requestedQuantity: 1,
       unitCostYuan: productCosts?.unitCostYuan,
@@ -458,7 +464,7 @@ export async function generatePurchaseRecommendations(input: {
       calculation,
       unitCostYuan: costs.unitCostYuan,
       unitCostKrw: costs.unitCostKrw,
-      isNewProduct: isNewProductForPurchaseRecommendation(productCosts?.metadata, productCosts?.createdAt, now),
+      isNewProduct,
     })
   })
   const salesAnomalyCount = assessedRows.filter((item) => item.salesAnomalyDetected).length

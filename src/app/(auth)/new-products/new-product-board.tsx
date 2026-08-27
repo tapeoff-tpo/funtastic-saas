@@ -1037,39 +1037,45 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
   const files = attachments.filter((attachment) => attachment.kind === kind)
   const isPdf = kind === 'quality_pdf'
 
-  async function upload(selectedFiles?: FileList | File[]) {
+  async function upload(selectedFiles?: FileList | File[] | null) {
     const filesToUpload = selectedFiles ? Array.from(selectedFiles) : []
     if (filesToUpload.length === 0) return
 
-    const validFiles: File[] = []
-    const invalidFiles: Array<{ file: File; error: string }> = []
-    for (const file of filesToUpload) {
-      const validationError = attachmentValidationError(file, isPdf)
-      if (validationError) invalidFiles.push({ file, error: validationError })
-      else validFiles.push(file)
-    }
-    if (invalidFiles.length > 0) {
-      toast.error(`${invalidFiles.length}개 파일을 제외했습니다. ${invalidFiles[0].error}`)
-    }
-    if (inputRef.current) inputRef.current.value = ''
-    if (validFiles.length === 0) return
-
-    if (!itemId) {
-      onPendingFilesChange((currentFiles) => [...currentFiles, ...validFiles])
-      toast.success(`${validFiles.length}개 파일을 저장 대기 목록에 추가했습니다.`)
-      return
-    }
-
     setUploading(true)
+    const validFiles: File[] = []
+    const invalidFiles: string[] = []
+    let optimizedImageCount = 0
     let uploadedCount = 0
-    const failedUploads: Array<{ file: File; error: unknown }> = []
+    const failedUploads: unknown[] = []
+    let optimizationLabel = ''
     try {
+      for (const file of filesToUpload) {
+        try {
+          const preparedFile = await prepareAttachmentFile(file, isPdf)
+          validFiles.push(preparedFile.file)
+          if (preparedFile.optimized) optimizedImageCount += 1
+        } catch (error) {
+          invalidFiles.push(error instanceof Error ? error.message : '파일을 준비하지 못했습니다.')
+        }
+      }
+      if (invalidFiles.length > 0) {
+        toast.error(`${invalidFiles.length}개 파일을 제외했습니다. ${invalidFiles[0]}`)
+      }
+      if (validFiles.length === 0) return
+
+      optimizationLabel = optimizedImageCount > 0 ? ` · 이미지 ${optimizedImageCount}개 용량 자동 최적화` : ''
+      if (!itemId) {
+        onPendingFilesChange((currentFiles) => [...currentFiles, ...validFiles])
+        toast.success(`${validFiles.length}개 파일을 저장 대기 목록에 추가했습니다.${optimizationLabel}`)
+        return
+      }
+
       for (const file of validFiles) {
         try {
           await uploadAttachmentFile(itemId, kind, file)
           uploadedCount += 1
         } catch (error) {
-          failedUploads.push({ file, error })
+          failedUploads.push(error)
         }
       }
     } finally {
@@ -1077,11 +1083,11 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
       if (inputRef.current) inputRef.current.value = ''
     }
     if (uploadedCount > 0) {
-      toast.success(`${uploadedCount}개 파일 업로드 완료`)
+      toast.success(`${uploadedCount}개 파일 업로드 완료${optimizationLabel}`)
       onChanged()
     }
     if (failedUploads.length > 0) {
-      const firstError = failedUploads[0].error
+      const firstError = failedUploads[0]
       toast.error(`${failedUploads.length}개 파일 업로드에 실패했습니다. ${firstError instanceof Error ? firstError.message : ''}`.trim())
     }
   }
@@ -1110,7 +1116,7 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
         className="flex w-full flex-col items-center justify-center rounded-lg border border-dashed py-4 text-xs text-muted-foreground transition hover:border-violet-400 hover:bg-violet-50/50 disabled:cursor-not-allowed"
       >
         {uploading ? <Loader2 className="mb-1 h-5 w-5 animate-spin" /> : <UploadCloud className="mb-1 h-5 w-5" />}
-        {uploading ? '업로드 중...' : isPdf ? 'PDF를 끌어놓거나 클릭' : '이미지를 여러 장 끌어놓거나 클릭'}
+        {uploading ? '파일 처리 중...' : isPdf ? 'PDF를 끌어놓거나 클릭' : '이미지를 여러 장 끌어놓거나 클릭'}
       </button>
       <input ref={inputRef} type="file" accept={isPdf ? 'application/pdf' : 'image/jpeg,image/png,image/webp,image/gif'} multiple={!isPdf} className="hidden" onChange={(event) => void upload(event.target.files)} />
       {files.length > 0 && (
@@ -1141,7 +1147,7 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
           ))}
         </div>
       )}
-      <p className="mt-2 text-[10px] text-muted-foreground">파일당 최대 4MB{!isPdf && ' · 여러 장 선택 가능'}</p>
+      <p className="mt-2 text-[10px] text-muted-foreground">저장 파일당 최대 4MB{!isPdf && ' · 원본 25MB까지 자동 최적화 · 여러 장 선택 가능'}</p>
     </div>
   )
 }
@@ -1182,12 +1188,104 @@ async function uploadAttachmentFile(itemId: string, kind: NewProductAttachment['
   if (!response.ok) throw new Error(result.error || '업로드에 실패했습니다.')
 }
 
-function attachmentValidationError(file: File, isPdf: boolean) {
-  if (file.size <= 0 || file.size > 4 * 1024 * 1024) return '파일은 4MB 이하만 업로드할 수 있습니다.'
-  if (isPdf && file.type !== 'application/pdf') return '품질표시 파일은 PDF만 가능합니다.'
-  if (!isPdf && !['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
-    return '이미지는 JPG, PNG, WEBP, GIF만 가능합니다.'
+const maxAttachmentFileSize = 4 * 1024 * 1024
+const maxSourceImageFileSize = 25 * 1024 * 1024
+const targetImageFileSize = 3.5 * 1024 * 1024
+const maxImageSide = 2400
+const minImageSide = 960
+const imageMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+
+type PreparedAttachmentFile = {
+  file: File
+  optimized: boolean
+}
+
+async function prepareAttachmentFile(file: File, isPdf: boolean): Promise<PreparedAttachmentFile> {
+  const typeError = attachmentTypeValidationError(file, isPdf)
+  if (typeError) throw new Error(typeError)
+  if (file.size <= 0) throw new Error('빈 파일은 업로드할 수 없습니다.')
+  if (isPdf || file.type === 'image/gif') {
+    const validationError = attachmentValidationError(file, isPdf)
+    if (validationError) throw new Error(validationError)
+    return { file, optimized: false }
   }
+  if (file.size > maxSourceImageFileSize) {
+    throw new Error('이미지 원본은 25MB 이하만 자동 최적화할 수 있습니다.')
+  }
+
+  try {
+    const preparedFile = await optimizeImageAttachment(file)
+    const validationError = attachmentValidationError(preparedFile.file, false)
+    if (validationError) throw new Error(validationError)
+    return preparedFile
+  } catch (error) {
+    if (file.size <= maxAttachmentFileSize) return { file, optimized: false }
+    throw error
+  }
+}
+
+async function optimizeImageAttachment(file: File): Promise<PreparedAttachmentFile> {
+  const bitmap = await createImageBitmap(file)
+  try {
+    if (file.size <= targetImageFileSize && bitmap.width <= maxImageSide && bitmap.height <= maxImageSide) {
+      return { file, optimized: false }
+    }
+
+    const ratio = Math.min(maxImageSide / bitmap.width, maxImageSide / bitmap.height, 1)
+    let width = Math.max(Math.round(bitmap.width * ratio), 1)
+    let height = Math.max(Math.round(bitmap.height * ratio), 1)
+    let smallestFile = file
+    for (let resizeAttempt = 0; resizeAttempt < 4; resizeAttempt += 1) {
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('이미지 최적화를 시작하지 못했습니다.')
+      context.drawImage(bitmap, 0, 0, width, height)
+
+      for (const quality of [0.86, 0.78, 0.7]) {
+        const blob = await canvasToBlob(canvas, quality)
+        const compressedFile = fileFromImageBlob(file, blob)
+        if (compressedFile.size < smallestFile.size) smallestFile = compressedFile
+        if (compressedFile.size <= targetImageFileSize) {
+          return { file: smallestFile, optimized: smallestFile !== file }
+        }
+      }
+
+      if (Math.max(width, height) <= minImageSide) break
+      width = Math.max(Math.round(width * 0.8), 1)
+      height = Math.max(Math.round(height * 0.8), 1)
+    }
+    return { file: smallestFile, optimized: smallestFile !== file }
+  } finally {
+    bitmap.close()
+  }
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob)
+      else reject(new Error('이미지 최적화에 실패했습니다.'))
+    }, 'image/webp', quality)
+  })
+}
+
+function fileFromImageBlob(file: File, blob: Blob) {
+  const type = blob.type || 'image/webp'
+  const extension = type === 'image/png' ? 'png' : type === 'image/jpeg' ? 'jpg' : 'webp'
+  const baseName = file.name.replace(/\.[^.]+$/, '') || `image-${Date.now()}`
+  return new File([blob], `${baseName}.${extension}`, { type, lastModified: file.lastModified })
+}
+
+function attachmentValidationError(file: File, isPdf: boolean) {
+  if (file.size <= 0 || file.size > maxAttachmentFileSize) return '파일은 4MB 이하만 업로드할 수 있습니다.'
+  return attachmentTypeValidationError(file, isPdf)
+}
+
+function attachmentTypeValidationError(file: File, isPdf: boolean) {
+  if (isPdf && file.type !== 'application/pdf') return '품질표시 파일은 PDF만 가능합니다.'
+  if (!isPdf && !imageMimeTypes.has(file.type)) return '이미지는 JPG, PNG, WEBP, GIF만 가능합니다.'
   return null
 }
 

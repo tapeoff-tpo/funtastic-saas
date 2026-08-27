@@ -1034,8 +1034,13 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<string[]>([])
   const files = attachments.filter((attachment) => attachment.kind === kind)
   const isPdf = kind === 'quality_pdf'
+  const selectedAttachments = files.filter((attachment) => selectedAttachmentIds.includes(attachment.id))
+  const allAttachmentsSelected = files.length > 0 && selectedAttachments.length === files.length
+  const busy = uploading || deleting
 
   async function upload(selectedFiles?: FileList | File[] | null) {
     const filesToUpload = selectedFiles ? Array.from(selectedFiles) : []
@@ -1092,16 +1097,49 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
     }
   }
 
+  function toggleAttachment(id: string) {
+    setSelectedAttachmentIds((current) => current.includes(id)
+      ? current.filter((attachmentId) => attachmentId !== id)
+      : [...current, id])
+  }
+
+  function toggleAllAttachments() {
+    setSelectedAttachmentIds(allAttachmentsSelected ? [] : files.map((attachment) => attachment.id))
+  }
+
   async function remove(attachment: NewProductAttachment) {
-    if (!window.confirm(`“${attachment.fileName}” 파일을 정말 삭제할까요?`)) return
-    const response = await fetch(`/api/new-products/attachments/${attachment.id}`, { method: 'DELETE' })
-    const result = await response.json() as { success?: boolean; error?: string }
-    if (!response.ok) {
-      toast.error(result.error || '파일 삭제에 실패했습니다.')
-      return
+    if (busy || !window.confirm(`“${attachment.fileName}” 파일을 정말 삭제할까요?`)) return
+    await removeAttachments([attachment])
+  }
+
+  async function removeSelected() {
+    if (busy || selectedAttachments.length === 0) return
+    if (!window.confirm(`선택한 ${selectedAttachments.length}개 파일을 정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return
+    await removeAttachments(selectedAttachments)
+  }
+
+  async function removeAttachments(attachmentsToRemove: NewProductAttachment[]) {
+    setDeleting(true)
+    let results: PromiseSettledResult<void>[] = []
+    try {
+      results = await Promise.allSettled(attachmentsToRemove.map((attachment) => deleteAttachmentFile(attachment.id)))
+    } finally {
+      setDeleting(false)
     }
-    toast.success('파일을 삭제했습니다.')
-    onChanged()
+
+    const deletedAttachments = attachmentsToRemove.filter((_, index) => results[index]?.status === 'fulfilled')
+    const failedCount = results.filter((result) => result.status === 'rejected').length
+    if (deletedAttachments.length > 0) {
+      const deletedIds = new Set(deletedAttachments.map((attachment) => attachment.id))
+      setSelectedAttachmentIds((current) => current.filter((id) => !deletedIds.has(id)))
+      toast.success(deletedAttachments.length === 1 ? '파일을 삭제했습니다.' : `${deletedAttachments.length}개 파일을 삭제했습니다.`)
+      onChanged()
+    }
+    if (failedCount > 0) {
+      const firstFailure = results.find((result) => result.status === 'rejected')
+      const error = firstFailure && firstFailure.status === 'rejected' ? firstFailure.reason : null
+      toast.error(`${failedCount}개 파일 삭제에 실패했습니다. ${error instanceof Error ? error.message : ''}`.trim())
+    }
   }
 
   return (
@@ -1109,31 +1147,50 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
       <p className="mb-2 text-xs font-semibold">{label}</p>
       <button
         type="button"
-        disabled={uploading}
+        disabled={busy}
         onClick={() => inputRef.current?.click()}
         onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => { event.preventDefault(); void upload(event.dataTransfer.files) }}
+        onDrop={(event) => { event.preventDefault(); if (!busy) void upload(event.dataTransfer.files) }}
         className="flex w-full flex-col items-center justify-center rounded-lg border border-dashed py-4 text-xs text-muted-foreground transition hover:border-violet-400 hover:bg-violet-50/50 disabled:cursor-not-allowed"
       >
-        {uploading ? <Loader2 className="mb-1 h-5 w-5 animate-spin" /> : <UploadCloud className="mb-1 h-5 w-5" />}
-        {uploading ? '파일 처리 중...' : isPdf ? 'PDF를 끌어놓거나 클릭' : '이미지를 여러 장 끌어놓거나 클릭'}
+        {busy ? <Loader2 className="mb-1 h-5 w-5 animate-spin" /> : <UploadCloud className="mb-1 h-5 w-5" />}
+        {uploading ? '파일 처리 중...' : deleting ? '파일 삭제 중...' : isPdf ? 'PDF를 끌어놓거나 클릭' : '이미지를 여러 장 끌어놓거나 클릭'}
       </button>
       <input ref={inputRef} type="file" accept={isPdf ? 'application/pdf' : 'image/jpeg,image/png,image/webp,image/gif'} multiple={!isPdf} className="hidden" onChange={(event) => void upload(event.target.files)} />
       {files.length > 0 && (
-        <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-3">
-          {files.map((attachment) => (
-            <div key={attachment.id} className="group relative overflow-hidden rounded-md border bg-muted/20">
-              <a href={`/api/new-products/attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="block">
-                {isPdf ? (
-                  <div className="flex h-20 flex-col items-center justify-center px-2"><FileText className="h-6 w-6 text-red-500" /><span className="mt-1 line-clamp-1 max-w-full text-[10px]">{attachment.fileName}</span></div>
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={`/api/new-products/attachments/${attachment.id}`} alt={attachment.fileName} className="h-24 w-full object-cover" />
-                )}
-              </a>
-              <button type="button" aria-label="첨부 삭제" onClick={() => void remove(attachment)} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition group-hover:opacity-100"><Trash2 className="h-3 w-3" /></button>
+        <div className="mt-2 space-y-2">
+          {files.length > 1 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-xs">
+              <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
+                <input type="checkbox" checked={allAttachmentsSelected} onChange={toggleAllAttachments} disabled={busy} className="size-3.5 accent-foreground" />
+                전체 선택
+              </label>
+              <Button type="button" size="sm" variant="destructive" onClick={() => void removeSelected()} disabled={busy || selectedAttachments.length === 0} className="h-7 px-2 text-xs">
+                <Trash2 className="h-3.5 w-3.5" />
+                선택 삭제 ({selectedAttachments.length})
+              </Button>
             </div>
-          ))}
+          ) : null}
+          <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
+            {files.map((attachment) => (
+              <div key={attachment.id} className={cn('group relative overflow-hidden rounded-md border bg-muted/20', selectedAttachmentIds.includes(attachment.id) && 'border-violet-500 ring-1 ring-violet-200')}>
+                {files.length > 1 ? (
+                  <label className="absolute left-1 top-1 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-background/90 shadow-sm" title="삭제할 파일 선택">
+                    <input type="checkbox" checked={selectedAttachmentIds.includes(attachment.id)} onChange={() => toggleAttachment(attachment.id)} disabled={busy} aria-label={`${attachment.fileName} 선택`} className="size-3.5 accent-foreground" />
+                  </label>
+                ) : null}
+                <a href={`/api/new-products/attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="block">
+                  {isPdf ? (
+                    <div className="flex h-20 flex-col items-center justify-center px-2"><FileText className="h-6 w-6 text-red-500" /><span className="mt-1 line-clamp-1 max-w-full text-[10px]">{attachment.fileName}</span></div>
+                  ) : (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={`/api/new-products/attachments/${attachment.id}`} alt={attachment.fileName} className="h-24 w-full object-cover" />
+                  )}
+                </a>
+                <button type="button" aria-label="첨부 삭제" disabled={busy} onClick={() => void remove(attachment)} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition group-hover:opacity-100 disabled:cursor-not-allowed"><Trash2 className="h-3 w-3" /></button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
       {pendingFiles.length > 0 && (
@@ -1186,6 +1243,12 @@ async function uploadAttachmentFile(itemId: string, kind: NewProductAttachment['
   const response = await fetch('/api/new-products/attachments', { method: 'POST', body: formData })
   const result = await response.json() as { success?: boolean; error?: string }
   if (!response.ok) throw new Error(result.error || '업로드에 실패했습니다.')
+}
+
+async function deleteAttachmentFile(attachmentId: string) {
+  const response = await fetch(`/api/new-products/attachments/${attachmentId}`, { method: 'DELETE' })
+  const result = await response.json() as { success?: boolean; error?: string }
+  if (!response.ok) throw new Error(result.error || '파일 삭제에 실패했습니다.')
 }
 
 const maxAttachmentFileSize = 4 * 1024 * 1024

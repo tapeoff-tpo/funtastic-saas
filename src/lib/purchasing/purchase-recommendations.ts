@@ -36,6 +36,14 @@ const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
 const DEFAULT_PURCHASE_MINIMUM_QUANTITY = 10
 const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
 const CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD = 5
+const SUMMER_SEASON_REDUCTION_START = '08-15'
+const SUMMER_SEASON_DEMAND_MULTIPLIER = 0.25
+const SUMMER_SEASONAL_PRODUCT_KEYWORDS = [
+  '자외선차단 루즈핏 쿨토시',
+  '핸드폰 미니팬',
+  '빙수기 얼음틀',
+  'LUX 아쿠아슈즈',
+] as const
 const EXCLUDED_PURCHASE_RECOMMENDATION_SKUS = new Set(['109055-0001'])
 
 export function isExcludedPurchaseRecommendation(sku: string, productName?: string | null) {
@@ -106,6 +114,15 @@ export function applyPurchaseMinimumQuantity(recommendedQuantity: number) {
     DEFAULT_PURCHASE_MINIMUM_QUANTITY,
     roundUpToUnit(normalizedQuantity, DEFAULT_PURCHASE_ROUNDING_UNIT),
   )
+}
+
+export function getSeasonalPurchaseDemandMultiplier(productName: string, now: Date) {
+  const monthDay = formatSeoulDate(now).slice(5)
+  const isSummerOffSeason = monthDay >= SUMMER_SEASON_REDUCTION_START
+  const isSummerSeasonalProduct = SUMMER_SEASONAL_PRODUCT_KEYWORDS.some((keyword) => productName.includes(keyword))
+  return isSummerOffSeason && isSummerSeasonalProduct
+    ? SUMMER_SEASON_DEMAND_MULTIPLIER
+    : 1
 }
 
 export function calculateStableMonthlyOutgoing(input: {
@@ -436,11 +453,18 @@ export async function generatePurchaseRecommendations(input: {
     const averageMonthlyOutgoing = outgoingMetrics?.threeMonthAverageOutgoing ?? 0
     const productCosts = productCostsBySku.get(row.sku)
     const isNewProduct = isNewProductForPurchaseRecommendation(productCosts?.metadata, productCosts?.createdAt, now)
-    const stableOutgoing = calculateStableMonthlyOutgoing({
+    const stableOutgoingBeforeSeason = calculateStableMonthlyOutgoing({
       currentMonthOutgoing,
       threeMonthAverageOutgoing: averageMonthlyOutgoing,
       isNewProduct,
     })
+    const seasonalDemandMultiplier = getSeasonalPurchaseDemandMultiplier(row.productName, now)
+    const stableOutgoing = {
+      ...stableOutgoingBeforeSeason,
+      effectiveMonthlyOutgoing: roundToOneDecimal(
+        stableOutgoingBeforeSeason.effectiveMonthlyOutgoing * seasonalDemandMultiplier,
+      ),
+    }
     const previousThreeMonthOutgoing = averageMonthlyOutgoing * 3
     const calculation = calculatePurchaseRecommendationWithSpikeGuard({
       averageMonthlyOutgoing: stableOutgoing.effectiveMonthlyOutgoing,
@@ -465,6 +489,7 @@ export async function generatePurchaseRecommendations(input: {
       unitCostYuan: costs.unitCostYuan,
       unitCostKrw: costs.unitCostKrw,
       isNewProduct,
+      seasonalDemandMultiplier,
     })
   })
   const salesAnomalyCount = assessedRows.filter((item) => item.salesAnomalyDetected).length
@@ -681,6 +706,7 @@ function buildAssessedPurchaseRow(input: {
   unitCostYuan: number | null
   unitCostKrw: number | null
   isNewProduct: boolean
+  seasonalDemandMultiplier: number
 }) {
   return {
     row: input.row,
@@ -692,6 +718,7 @@ function buildAssessedPurchaseRow(input: {
     unitCostYuan: input.unitCostYuan,
     unitCostKrw: input.unitCostKrw,
     isNewProduct: input.isNewProduct,
+    seasonalDemandMultiplier: input.seasonalDemandMultiplier,
     sku: input.row.sku,
     recommendedQuantity: input.calculation.recommendedQuantity,
     stockCoverageMonths: input.calculation.stockCoverageMonths,
@@ -737,6 +764,7 @@ function buildAutoRecommendationRawData(input: {
     budgetKrw: input.budgetKrw,
     averageMonthlyOutgoing: input.item.averageMonthlyOutgoing,
     effectiveMonthlyOutgoing: input.item.effectiveMonthlyOutgoing,
+    seasonalDemandMultiplier: input.item.seasonalDemandMultiplier,
     baselineMonthlyOutgoing: input.item.baselineMonthlyOutgoing,
     previousThreeMonthOutgoing: input.item.previousThreeMonthOutgoing,
     currentMonthOutgoing: input.item.currentMonthOutgoing,

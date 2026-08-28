@@ -838,6 +838,10 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
   const anomalyNote = rawData.salesAnomalyDetected === true
     ? `급증 제외 적용평균 ${formatNumber(rawData.effectiveMonthlyOutgoing)}`
     : null
+  const seasonalDemandMultiplier = Number(rawData.seasonalDemandMultiplier)
+  const seasonalNote = Number.isFinite(seasonalDemandMultiplier) && seasonalDemandMultiplier < 1
+    ? `여름 시즌 감산 ${formatNumber(seasonalDemandMultiplier * 100)}%`
+    : null
   const moqAdjustedQuantity = Number(rawData.moqAdjustedQuantity ?? rawData.baseRecommendedQuantity)
   const budgetNote = moqAdjustedQuantity > Number(rawData.allocatedQuantity)
     ? `예산 조정 ${formatNumber(moqAdjustedQuantity)} → ${formatNumber(rawData.allocatedQuantity)}`
@@ -867,7 +871,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {stockNote || pipelineNote || moqNote || anomalyNote || budgetNote || trendNote || stateNote ? (
+      {stockNote || pipelineNote || moqNote || anomalyNote || seasonalNote || budgetNote || trendNote || stateNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
           {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}
           {stateNote ? <span className="text-emerald-700">{stateNote}</span> : null}
@@ -875,6 +879,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
           {pipelineNote ? <span className="text-slate-700">{pipelineNote}</span> : null}
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
           {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}
+          {seasonalNote ? <span className="text-sky-700">{seasonalNote}</span> : null}
           {budgetNote ? <span className="text-blue-700">{budgetNote}</span> : null}
         </div>
       ) : null}

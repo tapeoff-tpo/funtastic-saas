@@ -4,6 +4,7 @@ import {
   allocatePurchaseBudget,
   calculatePurchaseRecommendationWithSpikeGuard,
   calculatePurchaseSalesTrend,
+  getSeasonalPurchaseDemandMultiplier,
   calculateStableMonthlyOutgoing,
   formatSeoulDate,
   getProductGroupMoqRule,
@@ -158,6 +159,29 @@ describe('stable monthly outgoing', () => {
       salesAnomalyDetected: false,
       salesTrend: 'new_product',
     })
+  })
+})
+
+describe('seasonal purchase demand reduction', () => {
+  it('reduces known summer products from August 15 onward', () => {
+    expect(getSeasonalPurchaseDemandMultiplier(
+      '수니 자외선차단 루즈핏 쿨토시_펀타스틱',
+      new Date('2026-08-15T00:00:00+09:00'),
+    )).toBe(0.25)
+  })
+
+  it('does not reduce summer products before the off-season starts', () => {
+    expect(getSeasonalPurchaseDemandMultiplier(
+      '글라손 핸드폰 미니팬',
+      new Date('2026-08-14T23:59:59+09:00'),
+    )).toBe(1)
+  })
+
+  it('does not reduce non-seasonal products', () => {
+    expect(getSeasonalPurchaseDemandMultiplier(
+      '생활살림 거품수세미_펀타스틱',
+      new Date('2026-08-27T12:00:00+09:00'),
+    )).toBe(1)
   })
 })
 

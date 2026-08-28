@@ -150,6 +150,39 @@ describe('resolveOutgoingMetrics', () => {
       },
     }, calculated)).toEqual(calculated)
   })
+
+  it('keeps a saved M테이포프 bulk-average adjustment for purchase recommendation reasons', () => {
+    const result = resolveOutgoingMetrics({
+      purchasingOutgoingMetrics: {
+        threeMonthAverageOutgoing: 39,
+        specialBulkOutgoingAdjustment: {
+          specialMall: 'M테이포프(대량)',
+          policy: 'one_month_excluded_repeat_half',
+          sourceMonths: ['26년8월', '26년7월', '26년6월'],
+          rawThreeMonthAverageOutgoing: 139,
+          specialBulkQuantity: 300,
+          specialBulkMonthCount: 1,
+          specialBulkIncludedQuantity: 0,
+          specialBulkExcludedQuantity: 300,
+          adjustedThreeMonthAverageOutgoing: 39,
+        },
+      },
+    }, {
+      currentMonthOutgoing: 44,
+      threeMonthAverageOutgoing: 10,
+    })
+
+    expect(result).toMatchObject({
+      currentMonthOutgoing: 44,
+      threeMonthAverageOutgoing: 39,
+      specialBulkOutgoingAdjustment: {
+        specialMall: 'M테이포프(대량)',
+        specialBulkQuantity: 300,
+        specialBulkMonthCount: 1,
+        specialBulkIncludedQuantity: 0,
+      },
+    })
+  })
 })
 
 describe('getOutgoingMetricWindows', () => {

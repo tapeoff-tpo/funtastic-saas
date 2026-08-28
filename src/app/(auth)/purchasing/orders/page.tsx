@@ -858,6 +858,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
       `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
     : null
+  const specialBulkOutgoingNote = specialBulkOutgoingText(rawData.specialBulkOutgoingAdjustment)
   const trendNote = recommendationTrendText(rawData.salesTrend, rawData.effectiveMonthlyOutgoing)
   const stateNote = rawData.recommendationState === 'new_product_first_sale'
     ? '신규상품 첫 판매 감지'
@@ -871,7 +872,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
       <Metric label="당월 출고" value={formatNumber(rawData.currentMonthOutgoing)} />
       <Metric label="3개월평균" value={formatNumber(rawData.averageMonthlyOutgoing)} />
       <Metric label="목표수량" value={formatNumber(rawData.targetStockQuantity)} />
-      {stockNote || pipelineNote || moqNote || anomalyNote || seasonalNote || budgetNote || trendNote || stateNote ? (
+      {stockNote || pipelineNote || moqNote || anomalyNote || seasonalNote || budgetNote || specialBulkOutgoingNote || trendNote || stateNote ? (
         <div className="col-span-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 text-[11px] font-medium">
           {trendNote ? <span className={trendNote.className}>{trendNote.label}</span> : null}
           {stateNote ? <span className="text-emerald-700">{stateNote}</span> : null}
@@ -880,6 +881,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
           {moqNote ? <span className="text-violet-700">{moqNote}</span> : null}
           {anomalyNote ? <span className="text-amber-700">{anomalyNote}</span> : null}
           {seasonalNote ? <span className="text-sky-700">{seasonalNote}</span> : null}
+          {specialBulkOutgoingNote ? <span className="text-fuchsia-700">{specialBulkOutgoingNote}</span> : null}
           {budgetNote ? <span className="text-blue-700">{budgetNote}</span> : null}
         </div>
       ) : null}
@@ -897,6 +899,26 @@ function recommendationTrendText(value: unknown, effectiveMonthlyOutgoing?: unkn
   if (value === 'decreasing') return { label: '판매 감소 · 발주량 하향 반영', className: 'text-amber-700' }
   if (value === 'new_product') return { label: '신규상품 판매 발생', className: 'text-emerald-700' }
   return value === 'steady' ? { label: '판매 유지', className: 'text-slate-700' } : null
+}
+
+function specialBulkOutgoingText(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const adjustment = value as Record<string, unknown>
+  const specialMall = typeof adjustment.specialMall === 'string' ? adjustment.specialMall.trim() : ''
+  const specialBulkQuantity = Number(adjustment.specialBulkQuantity)
+  const specialBulkMonthCount = Number(adjustment.specialBulkMonthCount)
+  const specialBulkIncludedQuantity = Number(adjustment.specialBulkIncludedQuantity)
+  if (
+    !specialMall
+    || !Number.isFinite(specialBulkQuantity)
+    || specialBulkQuantity <= 0
+    || !Number.isFinite(specialBulkMonthCount)
+    || !Number.isFinite(specialBulkIncludedQuantity)
+  ) return null
+
+  return specialBulkIncludedQuantity <= 0
+    ? `${specialMall} ${formatNumber(specialBulkQuantity)}개 · ${formatNumber(specialBulkMonthCount)}개월성 → 평균 제외`
+    : `${specialMall} ${formatNumber(specialBulkQuantity)}개 · ${formatNumber(specialBulkMonthCount)}개월 반복 → ${formatNumber(specialBulkIncludedQuantity)}개 반영`
 }
 
 function Metric({ label, value }: { label: string; value: string }) {

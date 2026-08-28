@@ -59,6 +59,8 @@ async function main() {
           sku: row.internalSku,
           metrics: {
             threeMonthAverageOutgoing: row.threeMonthAverageOutgoing,
+            rawThreeMonthAverageOutgoing: row.rawThreeMonthAverageOutgoing,
+            specialBulkOutgoingAdjustment: row.specialBulkOutgoingAdjustment,
             isDiscontinued: row.isDiscontinued,
             source: 'monthly-sales-calculator',
             sourceSheet: 'first-sheet',

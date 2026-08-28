@@ -8,7 +8,7 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { calculatePurchaseCosts } from './purchase-costs'
-import { getSkuOutgoingMetrics } from './items'
+import { getSkuOutgoingMetrics, type PurchasingSpecialBulkOutgoingAdjustment } from './items'
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 
 type ProductGroupMoqRule = {
@@ -457,6 +457,7 @@ export async function generatePurchaseRecommendations(input: {
     const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
     const currentMonthOutgoing = outgoingMetrics?.currentMonthOutgoing ?? 0
     const averageMonthlyOutgoing = outgoingMetrics?.threeMonthAverageOutgoing ?? 0
+    const specialBulkOutgoingAdjustment = outgoingMetrics?.specialBulkOutgoingAdjustment ?? null
     const productCosts = productCostsBySku.get(row.sku)
     const isNewProduct = isNewProductForPurchaseRecommendation(productCosts?.metadata, productCosts?.createdAt, now)
     const stableOutgoingBeforeSeason = calculateStableMonthlyOutgoing({
@@ -490,6 +491,7 @@ export async function generatePurchaseRecommendations(input: {
       previousThreeMonthOutgoing,
       averageMonthlyOutgoing,
       currentMonthOutgoing,
+      specialBulkOutgoingAdjustment,
       stableOutgoing,
       calculation,
       unitCostYuan: costs.unitCostYuan,
@@ -707,6 +709,7 @@ function buildAssessedPurchaseRow(input: {
   previousThreeMonthOutgoing: number
   averageMonthlyOutgoing: number
   currentMonthOutgoing: number
+  specialBulkOutgoingAdjustment: PurchasingSpecialBulkOutgoingAdjustment | null
   stableOutgoing: ReturnType<typeof calculateStableMonthlyOutgoing>
   calculation: SpikeGuardPurchaseRecommendationCalculation
   unitCostYuan: number | null
@@ -719,6 +722,7 @@ function buildAssessedPurchaseRow(input: {
     previousThreeMonthOutgoing: input.previousThreeMonthOutgoing,
     averageMonthlyOutgoing: input.averageMonthlyOutgoing,
     currentMonthOutgoing: input.currentMonthOutgoing,
+    specialBulkOutgoingAdjustment: input.specialBulkOutgoingAdjustment,
     ...input.stableOutgoing,
     calculation: input.calculation,
     unitCostYuan: input.unitCostYuan,
@@ -774,6 +778,7 @@ function buildAutoRecommendationRawData(input: {
     baselineMonthlyOutgoing: input.item.baselineMonthlyOutgoing,
     previousThreeMonthOutgoing: input.item.previousThreeMonthOutgoing,
     currentMonthOutgoing: input.item.currentMonthOutgoing,
+    specialBulkOutgoingAdjustment: input.item.specialBulkOutgoingAdjustment,
     salesAnomalyDetected: input.item.salesAnomalyDetected,
     salesTrend: input.item.salesTrend,
     domesticAvailableStock: input.item.row.domesticAvailableStock,

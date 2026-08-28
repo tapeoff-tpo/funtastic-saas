@@ -43,9 +43,21 @@ export const ESA009M_HEADERS = [
 export type Esa009mHeader = (typeof ESA009M_HEADERS)[number]
 export type Esa009mData = Record<Esa009mHeader, string | null>
 export type PurchasingItemSortDirection = 'asc' | 'desc'
+export type PurchasingSpecialBulkOutgoingAdjustment = {
+  specialMall: string
+  policy: string
+  sourceMonths: string[]
+  rawThreeMonthAverageOutgoing: number
+  specialBulkQuantity: number
+  specialBulkMonthCount: number
+  specialBulkIncludedQuantity: number
+  specialBulkExcludedQuantity: number
+  adjustedThreeMonthAverageOutgoing: number
+}
 export type PurchasingItemOutgoingMetrics = {
   currentMonthOutgoing: number
   threeMonthAverageOutgoing: number
+  specialBulkOutgoingAdjustment?: PurchasingSpecialBulkOutgoingAdjustment | null
 }
 export type PurchaseUrlVerificationStatus = 'confirm_required' | null
 export type PurchaseUrlVerification = {
@@ -548,9 +560,53 @@ export function resolveOutgoingMetrics(
   ) {
     return calculated
   }
+  const specialBulkOutgoingAdjustment = parseSpecialBulkOutgoingAdjustment(values.specialBulkOutgoingAdjustment)
   return {
     currentMonthOutgoing: calculated.currentMonthOutgoing,
     threeMonthAverageOutgoing: cleanOutgoingNumber(threeMonthAverageOutgoing),
+    ...(specialBulkOutgoingAdjustment
+      ? { specialBulkOutgoingAdjustment }
+      : {}),
+  }
+}
+
+function parseSpecialBulkOutgoingAdjustment(value: unknown): PurchasingSpecialBulkOutgoingAdjustment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const adjustment = value as Record<string, unknown>
+  const specialMall = typeof adjustment.specialMall === 'string' ? adjustment.specialMall.trim() : ''
+  const policy = typeof adjustment.policy === 'string' ? adjustment.policy.trim() : ''
+  const sourceMonths = Array.isArray(adjustment.sourceMonths)
+    ? adjustment.sourceMonths.filter((month): month is string => typeof month === 'string' && month.trim().length > 0)
+    : []
+  const rawThreeMonthAverageOutgoing = Number(adjustment.rawThreeMonthAverageOutgoing)
+  const specialBulkQuantity = Number(adjustment.specialBulkQuantity)
+  const specialBulkMonthCount = Number(adjustment.specialBulkMonthCount)
+  const specialBulkIncludedQuantity = Number(adjustment.specialBulkIncludedQuantity)
+  const specialBulkExcludedQuantity = Number(adjustment.specialBulkExcludedQuantity)
+  const adjustedThreeMonthAverageOutgoing = Number(adjustment.adjustedThreeMonthAverageOutgoing)
+
+  if (
+    !specialMall
+    || !policy
+    || sourceMonths.length === 0
+    || !Number.isFinite(rawThreeMonthAverageOutgoing)
+    || !Number.isFinite(specialBulkQuantity)
+    || !Number.isFinite(specialBulkMonthCount)
+    || !Number.isFinite(specialBulkIncludedQuantity)
+    || !Number.isFinite(specialBulkExcludedQuantity)
+    || !Number.isFinite(adjustedThreeMonthAverageOutgoing)
+  ) return null
+
+  return {
+    specialMall,
+    policy,
+    sourceMonths,
+    rawThreeMonthAverageOutgoing: cleanOutgoingNumber(rawThreeMonthAverageOutgoing),
+    specialBulkQuantity: cleanOutgoingNumber(specialBulkQuantity),
+    specialBulkMonthCount: Math.max(0, Math.trunc(specialBulkMonthCount)),
+    specialBulkIncludedQuantity: cleanOutgoingNumber(specialBulkIncludedQuantity),
+    specialBulkExcludedQuantity: cleanOutgoingNumber(specialBulkExcludedQuantity),
+    adjustedThreeMonthAverageOutgoing: cleanOutgoingNumber(adjustedThreeMonthAverageOutgoing),
   }
 }
 

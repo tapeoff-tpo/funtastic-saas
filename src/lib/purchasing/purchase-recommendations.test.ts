@@ -81,15 +81,39 @@ describe('stable monthly outgoing', () => {
     })
   })
 
-  it('keeps the three-month average as the demand basis for established products', () => {
+  it('blends the average and current-month sales for an established product with a clear upward trend', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 70,
       threeMonthAverageOutgoing: 50,
     })).toEqual({
-      effectiveMonthlyOutgoing: 50,
+      effectiveMonthlyOutgoing: 58,
       baselineMonthlyOutgoing: 50,
       salesAnomalyDetected: false,
       salesTrend: 'increasing',
+    })
+  })
+
+  it('uses the 60/40 trend basis for a 33.3-average item that reaches 43 this month', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 43,
+      threeMonthAverageOutgoing: 33.3,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 37.2,
+      baselineMonthlyOutgoing: 33.3,
+      salesAnomalyDetected: false,
+      salesTrend: 'increasing',
+    })
+  })
+
+  it('does not raise the demand basis when the current-month increase is below the trend threshold', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 39,
+      threeMonthAverageOutgoing: 33.3,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 33.3,
+      baselineMonthlyOutgoing: 33.3,
+      salesAnomalyDetected: false,
+      salesTrend: 'steady',
     })
   })
 

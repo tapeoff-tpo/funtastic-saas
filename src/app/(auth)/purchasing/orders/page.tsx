@@ -858,7 +858,7 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
     ? `MOQ 제품 · 최소 ${formatNumber(rawData.moqMinimumOrderQuantity)}개 · ` +
       `보정 ${formatNumber(rawData.baseRecommendedQuantity)} → ${formatNumber(moqAdjustedQuantity)}`
     : null
-  const trendNote = recommendationTrendText(rawData.salesTrend)
+  const trendNote = recommendationTrendText(rawData.salesTrend, rawData.effectiveMonthlyOutgoing)
   const stateNote = rawData.recommendationState === 'new_product_first_sale'
     ? '신규상품 첫 판매 감지'
     : rawData.recommendationState === 'monitoring'
@@ -887,8 +887,13 @@ function RecommendationBasisGrid({ rawData }: { rawData: Record<string, unknown>
   )
 }
 
-function recommendationTrendText(value: unknown) {
-  if (value === 'increasing') return { label: '판매 증가 · 발주량 상향 반영', className: 'text-blue-700' }
+function recommendationTrendText(value: unknown, effectiveMonthlyOutgoing?: unknown) {
+  if (value === 'increasing') {
+    return {
+      label: `판매 증가 · 평균 60% + 당월 40% (${formatNumber(effectiveMonthlyOutgoing)})`,
+      className: 'text-blue-700',
+    }
+  }
   if (value === 'decreasing') return { label: '판매 감소 · 발주량 하향 반영', className: 'text-amber-700' }
   if (value === 'new_product') return { label: '신규상품 판매 발생', className: 'text-emerald-700' }
   return value === 'steady' ? { label: '판매 유지', className: 'text-slate-700' } : null

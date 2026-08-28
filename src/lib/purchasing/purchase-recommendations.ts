@@ -36,6 +36,8 @@ const DOMESTIC_PURCHASE_PRODUCT_KEYWORDS = [
 const DEFAULT_PURCHASE_MINIMUM_QUANTITY = 10
 const DEFAULT_PURCHASE_ROUNDING_UNIT = 10
 const CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD = 5
+const INCREASING_TREND_AVERAGE_WEIGHT = 0.6
+const INCREASING_TREND_CURRENT_MONTH_WEIGHT = 0.4
 const SUMMER_SEASON_REDUCTION_START = '08-15'
 const SUMMER_SEASON_DEMAND_MULTIPLIER = 0.25
 const SUMMER_SEASONAL_PRODUCT_KEYWORDS = [
@@ -144,11 +146,15 @@ export function calculateStableMonthlyOutgoing(input: {
         currentMonthOutgoing,
         threeMonthAverageOutgoing: baselineMonthlyOutgoing,
       })
+  const increasingTrendDetected = !prioritizeCurrentMonth
+    && !salesAnomalyDetected
+    && salesTrend === 'increasing'
   const effectiveMonthlyOutgoing = prioritizeCurrentMonth
     ? currentMonthOutgoing
-    : salesAnomalyDetected
-    ? baselineMonthlyOutgoing
-    : baselineMonthlyOutgoing
+    : increasingTrendDetected
+      ? baselineMonthlyOutgoing * INCREASING_TREND_AVERAGE_WEIGHT
+        + currentMonthOutgoing * INCREASING_TREND_CURRENT_MONTH_WEIGHT
+      : baselineMonthlyOutgoing
 
   return {
     effectiveMonthlyOutgoing: roundToOneDecimal(effectiveMonthlyOutgoing),

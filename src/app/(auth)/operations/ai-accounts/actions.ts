@@ -12,9 +12,11 @@ import {
   deleteAiAccountUserCandidate,
   deleteAiAccountUserCandidates,
   readAiAccountPassword,
+  readAiAccountLoginInfo,
   updateAiAccount,
   updateAiAccountAvailability,
   updateAiAccountLimits,
+  updateAiAccountLoginInfo,
   updateAiAccountOperationalState,
 } from '@/lib/operations/ai-accounts'
 import { createClient } from '@/lib/supabase/server'
@@ -33,6 +35,9 @@ export async function createAiAccountAction(
     userId: await getWorkspaceUserId(user.id),
     name,
     email,
+    loginMethod: String(formData.get('loginMethod') ?? ''),
+    loginId: String(formData.get('loginId') ?? ''),
+    loginPassword: String(formData.get('loginPassword') ?? ''),
     secondaryEmail: String(formData.get('secondaryEmail') ?? ''),
     password: String(formData.get('password') ?? ''),
     notes: String(formData.get('notes') ?? ''),
@@ -200,6 +205,28 @@ export async function readAiAccountPasswordAction(accountId: string) {
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
   return readAiAccountPassword({ userId, accountId })
+}
+
+export async function readAiAccountLoginInfoAction(accountId: string) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+  return readAiAccountLoginInfo({ userId, accountId })
+}
+
+export async function updateAiAccountLoginInfoAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+  const result = await updateAiAccountLoginInfo({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
+    loginMethod: String(formData.get('loginMethod') ?? ''),
+    loginId: String(formData.get('loginId') ?? ''),
+    loginPassword: String(formData.get('loginPassword') ?? ''),
+    gptId: String(formData.get('gptId') ?? ''),
+    gptPassword: String(formData.get('gptPassword') ?? ''),
+  })
+  if (!('error' in result)) revalidatePath('/operations/ai-accounts')
+  return result
 }
 
 export async function deleteAiAccountAction(formData: FormData) {

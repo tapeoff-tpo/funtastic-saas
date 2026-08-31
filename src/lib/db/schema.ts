@@ -1290,6 +1290,8 @@ export const gptAccounts = pgTable(
       name: varchar('name', { length: 100 }).notNull(),
       email: varchar('email', { length: 255 }),
       secondaryEmail: varchar('secondary_email', { length: 255 }),
+      loginMethod: varchar('login_method', { length: 50 }),
+      loginId: varchar('login_id', { length: 255 }),
       renewalDueOn: date('renewal_due_on'),
       status: varchar('status', { length: 30 }).notNull().default('in_use'),
     currentUserName: varchar('current_user_name', { length: 100 }),

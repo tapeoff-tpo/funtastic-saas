@@ -6,7 +6,6 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import {
   AI_ACCOUNT_STATUS_LABELS,
-  listAiAccountMessages,
   listAiAccounts,
   listAiAccountUserCandidates,
 } from '@/lib/operations/ai-accounts'
@@ -22,9 +21,8 @@ export default async function AiAccountsPage() {
   if (!user) redirect('/login')
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [accounts, messages, userCandidates] = await Promise.all([
+  const [accounts, userCandidates] = await Promise.all([
     listAiAccounts(workspaceUserId),
-    listAiAccountMessages(workspaceUserId),
     listAiAccountUserCandidates(workspaceUserId),
   ])
   const mappedUsers = userCandidates.map((candidate) => ({
@@ -49,25 +47,17 @@ export default async function AiAccountsPage() {
           id: account.id,
           name: account.name,
           email: account.email,
-          secondaryEmail: account.secondaryEmail,
+          loginMethod: account.loginMethod,
+          loginId: account.loginId || account.secondaryEmail,
           status: account.status,
           currentUserName: account.currentUserName,
           dailyLimit: account.dailyLimit,
           dailyResetTime: account.dailyResetTime,
           weeklyLimit: account.weeklyLimit,
           weeklyResetAt: account.weeklyResetAt?.toISOString() ?? null,
-          notes: account.notes,
           renewalDueOn: account.renewalDueOn,
           resetAvailableCount: account.resetAvailableCount,
           sharedUse: account.sharedUse,
-        }))}
-        messages={messages.map((message) => ({
-          id: message.id,
-          accountId: message.accountId,
-          authorName: message.authorName,
-          eventType: message.eventType,
-          message: message.message,
-          createdAt: message.createdAt.toISOString(),
         }))}
         userCandidates={mappedUsers}
         statusLabels={AI_ACCOUNT_STATUS_LABELS}

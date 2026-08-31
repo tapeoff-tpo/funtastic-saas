@@ -4,6 +4,7 @@ import { gptAccountMessages, gptAccounts, gptAccountUsers } from '@/lib/db/schem
 import { deleteCredential, readCredential, storeCredential } from '@/lib/supabase/admin'
 
 const aiAccountCredentialScope = (accountId: string) => `ai-account-${accountId}`
+const aiAccountLoginPasswordKey = 'login_password'
 
 export const DEFAULT_AI_ACCOUNTS = [
   { name: '한상철', email: 'tapeoff@naver.com' },
@@ -211,6 +212,9 @@ export async function createAiAccount(input: {
   userId: string
   name: string
   email?: string | null
+  loginMethod?: string | null
+  loginId?: string | null
+  loginPassword?: string | null
   secondaryEmail?: string | null
   password?: string | null
   notes?: string | null
@@ -221,6 +225,9 @@ export async function createAiAccount(input: {
   await seedDefaultAiAccounts(input.userId)
   const name = input.name.trim()
   const email = input.email?.trim() || null
+  const loginMethod = input.loginMethod?.trim() || null
+  const loginId = input.loginId?.trim() || null
+  const loginPassword = input.loginPassword?.trim() || null
   const secondaryEmail = input.secondaryEmail?.trim() || null
   const password = input.password?.trim() || null
   const notes = input.notes?.trim() || null
@@ -237,6 +244,8 @@ export async function createAiAccount(input: {
       userId: input.userId,
       name,
       email,
+      loginMethod,
+      loginId,
       secondaryEmail,
       notes,
       renewalDueOn,
@@ -258,6 +267,15 @@ export async function createAiAccount(input: {
       await db.delete(gptAccounts)
         .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, row.id)))
       return { error: '비밀번호를 안전하게 저장하지 못했습니다. 다시 시도해주세요.' as const }
+    }
+  }
+  if (loginPassword) {
+    try {
+      await storeCredential(aiAccountCredentialScope(row.id), input.userId, aiAccountLoginPasswordKey, loginPassword)
+    } catch {
+      await db.delete(gptAccounts)
+        .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, row.id)))
+      return { error: '로그인 비밀번호를 안전하게 저장하지 못했습니다. 다시 시도해주세요.' as const }
     }
   }
   await db.insert(gptAccountMessages).values({
@@ -343,6 +361,82 @@ export async function readAiAccountPassword(input: {
   }
 }
 
+export async function readAiAccountLoginInfo(input: {
+  userId: string
+  accountId: string
+}) {
+  await ensureAiAccountTables()
+  const [account] = await db.select({
+    email: gptAccounts.email,
+    loginMethod: gptAccounts.loginMethod,
+    loginId: gptAccounts.loginId,
+    secondaryEmail: gptAccounts.secondaryEmail,
+  })
+    .from(gptAccounts)
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .limit(1)
+  if (!account) return { error: '계정을 찾을 수 없습니다.' as const }
+
+  try {
+    const [gptPassword, loginPassword] = await Promise.all([
+      readCredential(aiAccountCredentialScope(input.accountId), input.userId, 'password'),
+      readCredential(aiAccountCredentialScope(input.accountId), input.userId, aiAccountLoginPasswordKey),
+    ])
+    return {
+      gptId: account.email || '',
+      gptPassword: gptPassword || '',
+      loginMethod: account.loginMethod || '',
+      loginId: account.loginId || account.secondaryEmail || '',
+      loginPassword: loginPassword || '',
+    }
+  } catch {
+    return { error: '로그인 정보를 불러오지 못했습니다.' as const }
+  }
+}
+
+export async function updateAiAccountLoginInfo(input: {
+  userId: string
+  accountId: string
+  loginMethod?: string | null
+  loginId?: string | null
+  loginPassword?: string | null
+  gptId?: string | null
+  gptPassword?: string | null
+}) {
+  await ensureAiAccountTables()
+  const loginMethod = input.loginMethod?.trim() || null
+  const loginId = input.loginId?.trim() || null
+  const gptId = input.gptId?.trim() || null
+  const [row] = await db.update(gptAccounts)
+    .set({
+      loginMethod,
+      loginId,
+      email: gptId,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .returning({ id: gptAccounts.id })
+  if (!row) return { error: '계정을 찾을 수 없습니다.' as const }
+
+  try {
+    if (input.loginPassword?.trim()) {
+      await storeCredential(aiAccountCredentialScope(input.accountId), input.userId, aiAccountLoginPasswordKey, input.loginPassword.trim())
+    }
+    if (input.gptPassword?.trim()) {
+      await storeCredential(aiAccountCredentialScope(input.accountId), input.userId, 'password', input.gptPassword.trim())
+    }
+  } catch {
+    return { error: '비밀번호를 안전하게 저장하지 못했습니다. 다시 시도해주세요.' as const }
+  }
+  await db.insert(gptAccountMessages).values({
+    userId: input.userId,
+    accountId: input.accountId,
+    eventType: 'login_info_updated',
+    message: '로그인 정보를 수정했습니다.',
+  })
+  return { success: true }
+}
+
 export async function updateAiAccountAvailability(input: {
   userId: string
   accountId: string
@@ -402,7 +496,10 @@ export async function deleteAiAccount(input: {
 
   if (!row) return { error: '계정을 찾을 수 없습니다.' as const }
   try {
-    await deleteCredential(aiAccountCredentialScope(input.accountId), input.userId, 'password')
+    await Promise.all([
+      deleteCredential(aiAccountCredentialScope(input.accountId), input.userId, 'password'),
+      deleteCredential(aiAccountCredentialScope(input.accountId), input.userId, aiAccountLoginPasswordKey),
+    ])
   } catch {
     // Accounts created before password storage do not have a Vault secret.
   }

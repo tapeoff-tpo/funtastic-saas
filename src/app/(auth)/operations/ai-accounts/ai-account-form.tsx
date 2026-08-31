@@ -47,9 +47,21 @@ export function AiAccountForm({ userCandidates }: Props) {
             <Dialog.Description className="mt-1 text-sm text-muted-foreground">로그인 정보와 계정별 안내사항을 등록합니다.</Dialog.Description>
             <form ref={accountFormRef} action={createAccount} className="mt-4 space-y-3">
               <label className="block space-y-1"><Label>계정 이름</Label><Input name="name" placeholder="예: 한상철" required /></label>
-              <label className="block space-y-1"><Label>아이디</Label><Input name="email" placeholder="메일주소 또는 전화번호" autoComplete="username" /></label>
-              <label className="block space-y-1"><Label>비밀번호</Label><Input name="password" type="password" placeholder="계정 비밀번호" autoComplete="new-password" /></label>
-              <label className="block space-y-1"><Label>추가 메일</Label><Input name="secondaryEmail" placeholder="복구용 또는 추가 메일" /></label>
+              <label className="block space-y-1">
+                <Label>로그인 방식</Label>
+                <select name="loginMethod" defaultValue="" className="h-9 w-full rounded-md border bg-background px-3 text-sm">
+                  <option value="">선택 안 함</option>
+                  <option value="피클">피클</option>
+                  <option value="지메일">지메일</option>
+                  <option value="네이버">네이버</option>
+                  <option value="카카오">카카오</option>
+                  <option value="기타">기타</option>
+                </select>
+              </label>
+              <label className="block space-y-1"><Label>로그인 아이디</Label><Input name="loginId" placeholder="간편 로그인 계정" autoComplete="username" /></label>
+              <label className="block space-y-1"><Label>로그인 비밀번호</Label><Input name="loginPassword" type="password" placeholder="간편 로그인 비밀번호" autoComplete="new-password" /></label>
+              <label className="block space-y-1"><Label>GPT 아이디</Label><Input name="email" placeholder="GPT 계정 아이디" autoComplete="username" /></label>
+              <label className="block space-y-1"><Label>GPT 비밀번호</Label><Input name="password" type="password" placeholder="GPT 계정 비밀번호" autoComplete="new-password" /></label>
               <label className="block space-y-1"><Label>갱신 예정일</Label><Input name="renewalDueOn" type="date" /></label>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block space-y-1">

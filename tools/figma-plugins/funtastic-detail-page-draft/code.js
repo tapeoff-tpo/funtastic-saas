@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.13'
+const PLUGIN_VERSION = '1.2.14'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1039,10 +1039,10 @@ async function buildDessertBearFromReference(job, images, target) {
 function genericPointCopy(product) {
   const text = `${product.name} ${product.option} ${product.material}`.toLowerCase()
   if (product.sku === '110336-0001' || /뼈다귀.*수세미|수세미.*뼈다귀/.test(text)) return [
-    ['잘록한 가운데를 편안하게 쥐어요', '뼈다귀 모양의 가운데 부분이 손에 자연스럽게 잡혀 설거지할 때 움직이기 편해요.'],
-    ['촘촘한 수세미 결로 꼼꼼하게', '풍성한 섬유 조직이 그릇에 남은 음식물과 기름기를 닦아내는 데 도움을 줘요.'],
-    ['유연하게 닿아 굴곡진 곳까지', '부드럽게 휘어지는 소재라 접시 가장자리와 굴곡진 부분도 구석구석 닦기 좋아요.'],
-    ['사용 후에는 걸어서 깔끔하게', '걸이끈으로 통풍이 잘되는 곳에 걸어두면 싱크대 주변을 간결하게 정리할 수 있어요.'],
+    ['손에 착 감기는 뼈다귀 그립', '가운데가 잘록한 뼈다귀 모양이라 젖은 상태에서도 손에 안정적으로 잡혀요.'],
+    ['식물성 수세미 결로 개운하게', '촘촘하고 탄탄한 작물 수세미의 결이 그릇과 조리도구의 잔여물을 꼼꼼하게 닦아줘요.'],
+    ['양끝의 넓은 면으로 빠르게', '도톰하고 넓은 양끝 면이 세척할 곳에 고르게 닿아 넓은 그릇도 효율적으로 닦을 수 있어요.'],
+    ['헹군 뒤 걸어두면 산뜻하게', '사용 후 물로 충분히 헹군 다음 걸이끈에 걸어두면 물 빠짐과 보관이 한결 간편해요.'],
   ]
   if (/키링|인형|플러시|곰|베어/.test(text)) return [
     ['한눈에 반하는 포인트', '작지만 또렷한 디테일로 매일 드는 가방의 분위기를 바꿔줘요.'],

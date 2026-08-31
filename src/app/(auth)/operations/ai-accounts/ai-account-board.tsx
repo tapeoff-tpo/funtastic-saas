@@ -74,6 +74,13 @@ function weeklyResetTime(value: string | null) {
   }).format(new Date(value))
 }
 
+function normalizeTimeInput(value: string) {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length === 3) return `0${digits.slice(0, 1)}:${digits.slice(1)}`
+  if (digits.length === 4) return `${digits.slice(0, 2)}:${digits.slice(2)}`
+  return value
+}
+
 function nextWeeklyResetAt(day: string, time: string) {
   if (!/^\d$/.test(day) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return null
   const current = new Date()
@@ -107,8 +114,8 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
   const loginAccount = accounts.find((account) => account.id === loginAccountId) || null
 
   function saveInlineLimits(account: AiAccountRow, formData: FormData) {
-    const dailyResetTime = String(formData.get('dailyResetTime') || '').trim()
-    const weeklyResetAt = nextWeeklyResetAt(String(formData.get('weeklyResetDay') || ''), String(formData.get('weeklyResetTime') || ''))
+    const dailyResetTime = normalizeTimeInput(String(formData.get('dailyResetTime') || '').trim())
+    const weeklyResetAt = nextWeeklyResetAt(String(formData.get('weeklyResetDay') || ''), normalizeTimeInput(String(formData.get('weeklyResetTime') || '').trim()))
     setInlineLimits((current) => ({ ...current, [account.id]: {
       dailyLimit: null,
       dailyResetTime: dailyResetTime || null,
@@ -184,8 +191,8 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
                   </form>
                   <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="grid grid-cols-[20px_minmax(0,1fr)_20px_minmax(0,1fr)_32px] items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
                     <input type="hidden" name="accountId" value={account.id} />
-                    <span className="text-xs font-medium text-muted-foreground">일</span><Input name="dailyResetTime" type="text" inputMode="numeric" pattern="^([01]\\d|2[0-3]):[0-5]\\d$" placeholder="00:00" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" />
-                    <span className="text-xs font-medium text-muted-foreground">주</span><input type="hidden" name="weeklyResetDay" value={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt) || currentWeeklyResetDay()} /><Input name="weeklyResetTime" type="text" inputMode="numeric" pattern="^([01]\\d|2[0-3]):[0-5]\\d$" placeholder="00:00" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
+                    <span className="text-xs font-medium text-muted-foreground">일</span><Input name="dailyResetTime" type="text" inputMode="numeric" placeholder="00:00" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} onBlur={(event) => { event.currentTarget.value = normalizeTimeInput(event.currentTarget.value) }} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" />
+                    <span className="text-xs font-medium text-muted-foreground">주</span><input type="hidden" name="weeklyResetDay" value={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt) || currentWeeklyResetDay()} /><Input name="weeklyResetTime" type="text" inputMode="numeric" placeholder="00:00" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} onBlur={(event) => { event.currentTarget.value = normalizeTimeInput(event.currentTarget.value) }} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
                     {limitErrors[account.id] ? <p className="col-span-5 text-xs text-destructive">{limitErrors[account.id]}</p> : null}
                   </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents">

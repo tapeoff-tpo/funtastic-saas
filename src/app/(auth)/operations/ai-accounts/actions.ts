@@ -133,7 +133,15 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
   const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') ?? '').trim()
   const weeklyResetDayValue = String(formData.get('weeklyResetDay') ?? '').trim()
   const weeklyResetDay = Number(weeklyResetDayValue)
-  const weeklyResetTime = String(formData.get('weeklyResetTime') ?? '').trim()
+  const normalizeTime = (value: string) => {
+    const trimmed = value.trim()
+    const digits = trimmed.replace(/\D/g, '')
+    if (digits.length === 3) return `0${digits.slice(0, 1)}:${digits.slice(1)}`
+    if (digits.length === 4) return `${digits.slice(0, 2)}:${digits.slice(2)}`
+    return trimmed
+  }
+  const dailyResetTime = normalizeTime(String(formData.get('dailyResetTime') ?? ''))
+  const weeklyResetTime = normalizeTime(String(formData.get('weeklyResetTime') ?? ''))
   let weeklyResetAt: Date | null = null
   if (/^[0-6]$/.test(weeklyResetDayValue) && /^([01]\d|2[0-3]):[0-5]\d$/.test(weeklyResetTime)) {
     const now = new Date()
@@ -150,7 +158,7 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
     userId,
     accountId: String(formData.get('accountId') ?? ''),
     dailyRemainingPercent: String(formData.get('dailyRemainingPercent') ?? '').trim(),
-    dailyResetTime: String(formData.get('dailyResetTime') ?? '').trim(),
+    dailyResetTime,
     weeklyRemainingPercent,
     weeklyResetAt,
   })

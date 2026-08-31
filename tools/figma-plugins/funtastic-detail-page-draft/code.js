@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.32'
+const PLUGIN_VERSION = '1.2.33'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1377,6 +1377,19 @@ async function findOrCreateGenericTarget(job) {
   return target
 }
 
+async function updateBoneLoofahSizeOnly(target) {
+  const current = target.children.find((node) => node.name.startsWith('05 SIZE INFO'))
+  if (!current) return null
+  const index = target.children.indexOf(current)
+  const replacement = await makeBoneLoofahSize(`${SERVER_URL}/detail-page-assets/bone-loofah-cutout-v4.png`)
+  target.insertChild(index, replacement)
+  current.remove()
+  target.setPluginData('funtastic-last-targeted-update', `size-info:${new Date().toISOString()}`)
+  figma.currentPage.selection = [replacement]
+  figma.viewport.scrollAndZoomIntoView([replacement])
+  return target
+}
+
 async function buildGenericDraft(job) {
   const generatedImages = GENERATED_ASSETS_BY_SKU[job.product.sku] || []
   if (!generatedImages.length) throw new Error('자료보완 필요: 제품 충실 AI 생성 이미지가 준비되지 않았습니다.')
@@ -1389,6 +1402,10 @@ async function buildGenericDraft(job) {
   if (!page || page.type !== 'PAGE') throw new Error('상세페이지를 배치할 Figma 페이지를 찾지 못했습니다.')
   await figma.setCurrentPageAsync(page)
   if (isDessertBearKeyring(job.product)) return buildDessertBearFromReference(job, images, target)
+  if (job.product.sku === '110336-0001' && target.children.length) {
+    const updated = await updateBoneLoofahSizeOnly(target)
+    if (updated) return updated
+  }
   const scratch = figma.createFrame()
   scratch.name = `AUTO QA BUILD · ${job.product.sku}`
   scratch.resize(860, 100); scratch.layoutMode = 'VERTICAL'; scratch.primaryAxisSizingMode = 'AUTO'; scratch.counterAxisSizingMode = 'FIXED'; scratch.itemSpacing = 0

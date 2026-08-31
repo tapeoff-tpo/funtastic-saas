@@ -55,7 +55,6 @@ export default async function AiAccountsPage() {
           dailyResetTime: account.dailyResetTime,
           weeklyLimit: account.weeklyLimit,
           weeklyResetAt: account.weeklyResetAt?.toISOString() ?? null,
-          renewalDueOn: account.renewalDueOn,
           resetAvailableCount: account.resetAvailableCount,
           sharedUse: account.sharedUse,
         }))}

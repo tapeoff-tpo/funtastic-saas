@@ -131,11 +131,20 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
   if (!userId) return { error: '로그인이 필요합니다.' }
 
   const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') ?? '').trim()
-  const weeklyResetValue = String(formData.get('weeklyResetAt') ?? '').trim()
-  const parsedWeeklyResetAt = weeklyResetValue ? new Date(`${weeklyResetValue}:00+09:00`) : null
-  const weeklyResetAt = parsedWeeklyResetAt && !Number.isNaN(parsedWeeklyResetAt.getTime())
-    ? parsedWeeklyResetAt
-    : null
+  const weeklyResetDayValue = String(formData.get('weeklyResetDay') ?? '').trim()
+  const weeklyResetDay = Number(weeklyResetDayValue)
+  const weeklyResetTime = String(formData.get('weeklyResetTime') ?? '').trim()
+  let weeklyResetAt: Date | null = null
+  if (/^[0-6]$/.test(weeklyResetDayValue) && /^([01]\d|2[0-3]):[0-5]\d$/.test(weeklyResetTime)) {
+    const now = new Date()
+    const dateParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(dateParts.find((item) => item.type === type)?.value)
+    const currentDay = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(now))
+    const [hours, minutes] = weeklyResetTime.split(':').map(Number)
+    const offsetDays = (weeklyResetDay - currentDay + 7) % 7
+    weeklyResetAt = new Date(Date.UTC(part('year'), part('month') - 1, part('day') + offsetDays, hours - 9, minutes))
+    if (offsetDays === 0 && weeklyResetAt <= now) weeklyResetAt.setUTCDate(weeklyResetAt.getUTCDate() + 7)
+  }
 
   const result = await updateAiAccountLimits({
     userId,

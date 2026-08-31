@@ -62,7 +62,6 @@ export function AiAccountForm({ userCandidates }: Props) {
               <label className="block space-y-1"><Label>로그인 비밀번호</Label><Input name="loginPassword" type="password" placeholder="간편 로그인 비밀번호" autoComplete="new-password" /></label>
               <label className="block space-y-1"><Label>GPT 아이디</Label><Input name="email" placeholder="GPT 계정 아이디" autoComplete="username" /></label>
               <label className="block space-y-1"><Label>GPT 비밀번호</Label><Input name="password" type="password" placeholder="GPT 계정 비밀번호" autoComplete="new-password" /></label>
-              <label className="block space-y-1"><Label>갱신 예정일</Label><Input name="renewalDueOn" type="date" /></label>
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block space-y-1">
                   <Label>초기화 가능</Label>

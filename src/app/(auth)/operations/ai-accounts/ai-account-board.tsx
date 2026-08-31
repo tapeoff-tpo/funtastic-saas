@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
-  bulkUpdateAiAccountRenewalAction,
   readAiAccountLoginInfoAction,
   updateAiAccountAvailabilityAction,
   updateAiAccountLimitsAction,
@@ -27,7 +26,6 @@ type AiAccountRow = {
   dailyResetTime: string | null
   weeklyLimit: string | null
   weeklyResetAt: string | null
-  renewalDueOn: string | null
   resetAvailableCount: number
   sharedUse: boolean
 }
@@ -61,17 +59,34 @@ function limitPercent(value: string | null) {
   return value?.match(/(\d{1,3})\s*%/)?.[1] || ''
 }
 
-function toDateTimeLocal(value: string | null) {
+function weeklyResetDay(value: string | null) {
+  if (!value) return ''
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(new Date(value))
+  return String(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday))
+}
+
+function weeklyResetTime(value: string | null) {
   if (!value) return ''
   return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
-  }).format(new Date(value)).replace(' ', 'T')
+    timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).format(new Date(value))
+}
+
+function nextWeeklyResetAt(day: string, time: string) {
+  if (!/^\d$/.test(day) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return null
+  const current = new Date()
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(current)
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value)
+  const currentDay = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(current))
+  const [hours, minutes] = time.split(':').map(Number)
+  const offsetDays = (Number(day) - currentDay + 7) % 7
+  const next = new Date(Date.UTC(part('year'), part('month') - 1, part('day') + offsetDays, hours - 9, minutes))
+  if (offsetDays === 0 && next <= current) next.setUTCDate(next.getUTCDate() + 7)
+  return next.toISOString()
 }
 
 export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props) {
-  const [bulkRenewalDueOn, setBulkRenewalDueOn] = useState('')
-  const [bulkMessage, setBulkMessage] = useState('')
-  const [pending, startTransition] = useTransition()
+  const [, startTransition] = useTransition()
   const [inlineLimits, setInlineLimits] = useState<Record<string, { dailyLimit: string | null; dailyResetTime: string | null; weeklyLimit: string | null; weeklyResetAt: string | null }>>({})
   const [savingLimitIds, setSavingLimitIds] = useState<string[]>([])
   const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
@@ -89,27 +104,16 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
   const resetAvailableTotal = accounts.reduce((total, account) => total + account.resetAvailableCount, 0)
   const loginAccount = accounts.find((account) => account.id === loginAccountId) || null
 
-  function applyBulkRenewal(renewalDueOn: string) {
-    setBulkRenewalDueOn(renewalDueOn)
-    if (!accounts.length || !renewalDueOn) return
-    setBulkMessage('')
-    startTransition(async () => {
-      const result = await bulkUpdateAiAccountRenewalAction({ accountIds: accounts.map((account) => account.id), renewalDueOn })
-      if ('error' in result) return setBulkMessage(result.error || '갱신 예정일을 변경하지 못했습니다.')
-      setBulkMessage(`${result.count}개 계정의 갱신 예정일을 변경하고 사용자/상태를 초기화했습니다.`)
-    })
-  }
-
   function saveInlineLimits(account: AiAccountRow, formData: FormData) {
     const dailyRemainingPercent = String(formData.get('dailyRemainingPercent') || '').trim()
     const dailyResetTime = String(formData.get('dailyResetTime') || '').trim()
     const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') || '').trim()
-    const weeklyResetAt = String(formData.get('weeklyResetAt') || '').trim()
+    const weeklyResetAt = nextWeeklyResetAt(String(formData.get('weeklyResetDay') || ''), String(formData.get('weeklyResetTime') || ''))
     setInlineLimits((current) => ({ ...current, [account.id]: {
       dailyLimit: dailyRemainingPercent ? `잔여 ${dailyRemainingPercent}%` : null,
       dailyResetTime: dailyResetTime || null,
       weeklyLimit: weeklyRemainingPercent ? `잔여 ${weeklyRemainingPercent}%` : null,
-      weeklyResetAt: weeklyResetAt ? new Date(`${weeklyResetAt}:00+09:00`).toISOString() : null,
+      weeklyResetAt,
     } }))
     setLimitErrors((current) => ({ ...current, [account.id]: '' }))
     setSavingLimitIds((current) => [...current, account.id])
@@ -154,20 +158,10 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
           <p className="text-xs text-muted-foreground">총 {accounts.length}개 · 공유 사용 {sharedAccountCount}개 · 초기화 가능 {resetAvailableTotal}개</p>
         </div>
       </div>
-      <div className="border-b bg-muted/20 p-3">
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="space-y-1">
-            <span className="block text-xs font-medium text-muted-foreground">전체 계정 갱신 예정일</span>
-            <Input type="date" value={bulkRenewalDueOn} onChange={(event) => applyBulkRenewal(event.target.value)} disabled={pending || accounts.length === 0} className="h-9 w-40 bg-background" />
-          </label>
-          <p className="pb-2 text-xs text-muted-foreground">갱신 예정일을 선택하면 {accounts.length}개 계정의 사용자와 상태도 초기화됩니다.</p>
-        </div>
-        {bulkMessage ? <p className="mt-2 text-xs text-muted-foreground">{bulkMessage}</p> : null}
-      </div>
       <div className="overflow-x-auto">
         <div className="min-w-[1120px]">
-          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(150px,1.1fr)_minmax(360px,2.8fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2">
-            <div>계정명</div><div>상태</div><div>사용자</div><div>갱신 예정일</div><div>일/주 사용 한도 및 초기화</div><div>초기화</div><div>공유 사용</div>
+          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2">
+            <div>계정명</div><div>상태</div><div>사용자</div><div>일/주 사용 한도 및 초기화</div><div>초기화</div><div>공유 사용</div>
           </div>
           <div className="divide-y">
             {sortedAccounts.map((account) => {
@@ -175,7 +169,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
               const candidateNames = userCandidates.map((candidate) => candidate.name)
               const inline = inlineLimits[account.id]
               return (
-                <div key={account.id} className={cn('grid w-full gap-3 px-3 py-3 md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(150px,1.1fr)_minmax(360px,2.8fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2', account.sharedUse && 'bg-emerald-50/50')}>
+                <div key={account.id} className={cn('grid w-full gap-3 px-3 py-3 md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2', account.sharedUse && 'bg-emerald-50/50')}>
                   <button type="button" onClick={() => openLoginInfo(account.id)} className="truncate whitespace-nowrap text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" title={`${account.name} 로그인 정보 열기`}>{account.name}</button>
                   <form action={updateAiAccountOperationalStateAction} className="contents">
                     <input type="hidden" name="accountId" value={account.id} /><input type="hidden" name="changedField" value="" />
@@ -187,12 +181,11 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
                       {account.currentUserName && !candidateNames.includes(account.currentUserName) ? <option value={account.currentUserName}>{account.currentUserName}</option> : null}
                       {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
                     </select>
-                    <Input name="renewalDueOn" type="date" defaultValue={account.renewalDueOn || ''} onChange={(event) => { const form = event.currentTarget.form; const field = form?.elements.namedItem('changedField'); if (field instanceof HTMLInputElement) field.value = 'renewalDueOn'; form?.requestSubmit() }} aria-label={`${account.name} 갱신 예정일`} className="h-9 w-full bg-background px-2 text-xs" />
                   </form>
                   <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="space-y-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
                     <input type="hidden" name="accountId" value={account.id} />
                     <div className="grid grid-cols-[20px_64px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">일</span><div className="relative"><Input name="dailyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(inline?.dailyLimit ?? account.dailyLimit)} aria-label={`${account.name} 일 사용 잔여율`} className="h-8 px-2 pr-5 text-xs" /><span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span></div><Input name="dailyResetTime" type="time" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-1.5 text-xs" /></div>
-                    <div className="grid grid-cols-[20px_64px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">주</span><div className="relative"><Input name="weeklyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(inline?.weeklyLimit ?? account.weeklyLimit)} aria-label={`${account.name} 주간 사용 잔여율`} className="h-8 px-2 pr-5 text-xs" /><span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span></div><div className="flex min-w-0 items-center gap-1.5"><Input name="weeklyResetAt" type="datetime-local" defaultValue={toDateTimeLocal(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 일시`} className="h-8 min-w-0 flex-1 px-1.5 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 한도 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button></div></div>
+                    <div className="grid grid-cols-[20px_64px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">주</span><div className="relative"><Input name="weeklyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(inline?.weeklyLimit ?? account.weeklyLimit)} aria-label={`${account.name} 주간 사용 잔여율`} className="h-8 px-2 pr-5 text-xs" /><span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span></div><div className="flex min-w-0 items-center gap-1.5"><select name="weeklyResetDay" defaultValue={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 요일`} className="h-8 w-20 rounded-md border bg-background px-2 text-xs"><option value="">요일</option><option value="0">일</option><option value="1">월</option><option value="2">화</option><option value="3">수</option><option value="4">목</option><option value="5">금</option><option value="6">토</option></select><Input name="weeklyResetTime" type="time" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 flex-1 px-1.5 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 한도 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button></div></div>
                     {limitErrors[account.id] ? <p className="text-xs text-destructive">{limitErrors[account.id]}</p> : null}
                   </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents">

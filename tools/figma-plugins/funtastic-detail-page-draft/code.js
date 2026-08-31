@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.21'
+const PLUGIN_VERSION = '1.2.22'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1042,10 +1042,10 @@ async function buildDessertBearFromReference(job, images, target) {
 function genericPointCopy(product) {
   const text = `${product.name} ${product.option} ${product.material}`.toLowerCase()
   if (product.sku === '110336-0001' || /뼈다귀.*수세미|수세미.*뼈다귀/.test(text)) return [
-    ['세제와 만나 거품이 풍성하게', '촘촘한 작물 수세미 결 사이로 세제가 고르게 퍼져 풍성한 거품 세척을 도와줘요.'],
-    ['우리 집 식기를 한 번에 깨끗하게', '일반 그릇은 물론 매일 사용하는 강아지 밥그릇까지 꼼꼼하게 닦아보세요.'],
-    ['잘록한 뼈다귀 쉐입, 손에 쏙', '가운데가 잘록해 손에 안정적으로 잡히고, 둥근 양끝이 그릇의 굴곡을 따라 부드럽게 닿아요.'],
-    ['씻고 걸어두면 보관까지 산뜻하게', '사용 후 깨끗이 헹군 다음 걸이끈에 걸어두면 물 빠짐과 싱크대 정리가 간편해요.'],
+    ['물에 적시면 도톰하고 부드럽게', '마른 상태보다 물에 충분히 적셨을 때 한층 도톰하고 유연해져 편안하게 사용할 수 있어요.'],
+    ['풍성한 거품으로 기름기까지 개운하게', '세제가 섬유 사이로 고르게 퍼져 거품이 풍성하게 일어나고, 그릇에 남은 기름기 세척을 도와줘요.'],
+    ['고밀도 압축 섬유로 탄탄하게', '촘촘하게 압축된 수세미 섬유가 쉽게 흐트러지지 않아 일상 설거지에 안정적으로 사용할 수 있어요.'],
+    ['부드럽게 휘고 빠르게 말라요', '유연한 수세미 면이 컵과 그릇의 굴곡을 따라 닿고, 사용 후에는 걸이끈에 걸어 간편하게 말릴 수 있어요.'],
   ]
   if (/키링|인형|플러시|곰|베어/.test(text)) return [
     ['한눈에 반하는 포인트', '작지만 또렷한 디테일로 매일 드는 가방의 분위기를 바꿔줘요.'],
@@ -1074,7 +1074,7 @@ async function makeGenericCover(job, images) {
     const section = makeSection('00 COVER / BONE LOOFAH EDITORIAL', 1220, COLORS.paper)
     const hero = await makeImage(`${SERVER_URL}/detail-page-assets/bone-loofah-cover-editorial-v1.png`, 760, 880, 'COVER / BONE LOOFAH HERO')
     hero.x = 50; hero.y = 50; hero.cornerRadius = 32; section.appendChild(hero)
-    appendText(section, 'BONE SHAPED NATURAL LOOFAH SCRUBBER', 50, 988, 760, 16, 'Bold', COLORS.amber)
+    appendText(section, 'BONE SHAPED LOOFAH SCRUBBER', 50, 988, 760, 16, 'Bold', COLORS.amber)
     appendText(section, job.product.name, 50, 1038, 760, 48, 'Bold', COLORS.ink)
     return section
   }
@@ -1134,6 +1134,57 @@ async function makeGenericPoint(index, point, imageUrl) {
   const image = await makeImage(imageUrl, 760, 650, `CHECK POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
   image.x = 50; image.y = 360; image.cornerRadius = index === 3 ? 325 : 28
   section.appendChild(image)
+  return section
+}
+
+function makeBoneLoofahIntro() {
+  const section = makeSection('INTRO / REFERENCE-INSPIRED SUMMARY', 1180, { r: 0.68, g: 0.62, b: 0.56 })
+  appendText(section, '뼈다귀 수세미가\n처음이라면?', 50, 72, 760, 48, 'Bold', COLORS.paper).textAlignHorizontal = 'CENTER'
+  appendText(section, '물에 적셔 부드럽게 만든 뒤 세제를 묻혀 사용해보세요.', 50, 210, 760, 19, 'Regular', COLORS.paper).textAlignHorizontal = 'CENTER'
+  const cards = [
+    ['도톰한 사용감', '물에 적시면\n한층 부드럽게'],
+    ['풍성한 거품', '세제가 고르게\n퍼지는 섬유 결'],
+    ['탄탄한 조직', '촘촘한\n압축형 섬유'],
+    ['빠른 건조', '걸이끈으로\n간편한 보관'],
+  ]
+  cards.forEach((card, index) => {
+    const box = figma.createFrame()
+    box.resize(355, 300); box.x = 50 + (index % 2) * 405; box.y = 330 + Math.floor(index / 2) * 350
+    box.cornerRadius = 24; box.fills = [{ type: 'SOLID', color: COLORS.paper }]
+    section.appendChild(box)
+    appendText(box, card[0], 28, 42, 299, 24, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
+    appendText(box, card[1], 28, 118, 299, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  })
+  return section
+}
+
+async function makeBoneLoofahPoint(index, point, imageUrl) {
+  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / O-HEN REFERENCE`, 1080, COLORS.paper)
+  appendText(section, 'Point', 50, 52, 760, 26, 'Regular', { r: 0.86, g: 0.7, b: 0.42 }).textAlignHorizontal = 'CENTER'
+  appendText(section, String(index).padStart(2, '0'), 50, 96, 760, 18, 'Bold', COLORS.muted).textAlignHorizontal = 'CENTER'
+  appendText(section, point[0], 50, 152, 760, 40, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
+  appendText(section, point[1], 90, 228, 680, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  const image = await makeImage(imageUrl, 760, 650, `POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
+  image.x = 50; image.y = 360; image.cornerRadius = 0
+  section.appendChild(image)
+  return section
+}
+
+function makeBoneLoofahCare() {
+  const section = makeSection('HOW TO CARE / BONE LOOFAH', 880, { r: 0.68, g: 0.62, b: 0.56 })
+  appendText(section, 'How to care', 50, 58, 760, 28, 'Regular', { r: 0.95, g: 0.83, b: 0.62 }).textAlignHorizontal = 'CENTER'
+  appendText(section, '올바르게 사용하고 관리해요', 50, 118, 760, 36, 'Bold', COLORS.paper).textAlignHorizontal = 'CENTER'
+  const tips = [
+    '처음 사용할 때는 미지근한 물에 5~10분 정도 충분히 적셔주세요.',
+    '사용 후에는 남아 있는 세제와 이물질을 깨끗하게 헹궈주세요.',
+    '걸이끈을 이용해 통풍이 잘되는 곳에서 완전히 말려주세요.',
+    '오염이나 마모 상태를 확인하고 필요할 때 새 제품으로 교체해주세요.',
+  ]
+  tips.forEach((tip, index) => {
+    const box = figma.createFrame(); box.resize(760, 116); box.x = 50; box.y = 230 + index * 142
+    box.cornerRadius = 8; box.fills = [{ type: 'SOLID', color: COLORS.paper }]; section.appendChild(box)
+    appendText(box, tip, 30, 30, 700, 17, index === 0 ? 'Bold' : 'Regular', COLORS.ink).textAlignHorizontal = 'CENTER'
+  })
   return section
 }
 
@@ -1242,14 +1293,18 @@ async function buildGenericDraft(job) {
   try {
     scratch.appendChild(await makeGenericCover(job, images))
     scratch.appendChild(await makeGenericOptions(job, images))
+    if (job.product.sku === '110336-0001') scratch.appendChild(makeBoneLoofahIntro())
     const points = genericPointCopy(job.product)
     for (let index = 0; index < points.length; index += 1) {
       const mainImage = job.product.sku === '110336-0001' ? generatedImages[index * 2] : images[(index + 2) % images.length]
       const supportImage = job.product.sku === '110336-0001' ? generatedImages[index * 2 + 1] : generatedImages[index]
-      scratch.appendChild(await makeGenericPoint(index + 1, points[index], mainImage))
+      scratch.appendChild(job.product.sku === '110336-0001'
+        ? await makeBoneLoofahPoint(index + 1, points[index], mainImage)
+        : await makeGenericPoint(index + 1, points[index], mainImage))
       if (supportImage) scratch.appendChild(await makeGenericAiScene(supportImage))
     }
     if (job.product.sku !== '110336-0001') scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
+    if (job.product.sku === '110336-0001') scratch.appendChild(makeBoneLoofahCare())
     const sizeImage = job.product.sku === '110336-0001'
       ? `${SERVER_URL}/detail-page-assets/bone-loofah-cutout-v4.png`
       : images[0]

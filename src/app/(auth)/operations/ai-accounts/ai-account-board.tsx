@@ -77,6 +77,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
   const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
   const [loginAccountId, setLoginAccountId] = useState<string | null>(null)
   const [loginInfo, setLoginInfo] = useState<LoginInfo | null>(null)
+  const [loginInfoCache, setLoginInfoCache] = useState<Record<string, LoginInfo>>({})
   const [loginLoading, setLoginLoading] = useState(false)
   const [showPasswords, setShowPasswords] = useState(false)
   const [loginError, setLoginError] = useState('')
@@ -120,14 +121,28 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
   }
 
   async function openLoginInfo(accountId: string) {
+    const account = accounts.find((candidate) => candidate.id === accountId)
+    if (!account) return
+    const cachedInfo = loginInfoCache[accountId]
     setLoginAccountId(accountId)
-    setLoginInfo(null)
+    setLoginInfo(cachedInfo || {
+      loginMethod: account.loginMethod || '',
+      loginId: account.loginId || '',
+      loginPassword: '',
+      gptId: account.email || '',
+      gptPassword: '',
+    })
     setLoginError('')
     setShowPasswords(false)
+    if (cachedInfo) {
+      setLoginLoading(false)
+      return
+    }
     setLoginLoading(true)
     const result = await readAiAccountLoginInfoAction(accountId)
     setLoginLoading(false)
     if ('error' in result) return setLoginError(result.error || '로그인 정보를 불러오지 못했습니다.')
+    setLoginInfoCache((current) => ({ ...current, [accountId]: result }))
     setLoginInfo(result)
   }
 
@@ -197,7 +212,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
           <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(560px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-background p-5 shadow-xl">
             <Dialog.Title className="text-base font-semibold">{loginAccount?.name || '계정'} 로그인 정보</Dialog.Title>
             <Dialog.Description className="mt-1 text-sm text-muted-foreground">간편 로그인과 GPT 계정 정보를 분리해 관리합니다.</Dialog.Description>
-            {loginLoading ? <p className="py-8 text-center text-sm text-muted-foreground">로그인 정보를 불러오는 중입니다.</p> : null}
+            {loginLoading ? <p className="mt-2 text-xs text-muted-foreground">저장된 비밀번호를 불러오는 중입니다.</p> : null}
             {loginError ? <p className="mt-4 text-sm text-destructive">{loginError}</p> : null}
             {loginAccount && loginInfo ? <form key={`${loginAccount.id}-${loginInfo.loginPassword}-${loginInfo.gptPassword}`} action={updateAiAccountLoginInfoAction} className="mt-5 space-y-4">
               <input type="hidden" name="accountId" value={loginAccount.id} />

@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.15'
+const PLUGIN_VERSION = '1.2.16'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -11,8 +11,8 @@ const GENERATED_ASSETS_BY_SKU = {
   '110336-0001': [
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-dishsoap-v2.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-petbowl-v2.png`,
-    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-curvewash-v2.png`,
-    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-drain-v2.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-curvewash-v3.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-drain-v3.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-texture-v1.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-flex-v1.png`,
   ],

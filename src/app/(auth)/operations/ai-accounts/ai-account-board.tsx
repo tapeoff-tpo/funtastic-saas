@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { Eye, EyeOff, Save } from 'lucide-react'
+import { Eye, EyeOff, KeyRound, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
@@ -160,8 +160,8 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
       </div>
       <div className="overflow-x-auto">
         <div className="min-w-[1120px]">
-          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2">
-            <div>계정명</div><div>상태</div><div>사용자</div><div>일/주 초기화 시각</div><div>초기화</div><div>공유 사용</div>
+          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)_42px] md:items-center md:gap-2">
+            <div>계정명</div><div>상태</div><div>사용자</div><div>일/주 초기화 시각</div><div>초기화</div><div>공유 사용</div><div className="sr-only">로그인 정보</div>
           </div>
           <div className="divide-y">
             {sortedAccounts.map((account) => {
@@ -169,7 +169,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
               const candidateNames = userCandidates.map((candidate) => candidate.name)
               const inline = inlineLimits[account.id]
               return (
-                <div key={account.id} className={cn('grid w-full gap-3 px-3 py-3 md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2', account.sharedUse && 'bg-emerald-50/50')}>
+                <div key={account.id} className={cn('grid w-full gap-3 px-3 py-3 md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)_42px] md:items-center md:gap-2', account.sharedUse && 'bg-emerald-50/50')}>
                   <button type="button" onClick={() => openLoginInfo(account.id)} className="truncate whitespace-nowrap text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" title={`${account.name} 로그인 정보 열기`}>{account.name}</button>
                   <form action={updateAiAccountOperationalStateAction} className="contents">
                     <input type="hidden" name="accountId" value={account.id} /><input type="hidden" name="changedField" value="" />
@@ -182,17 +182,18 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
                       {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
                     </select>
                   </form>
-                  <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="space-y-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
+                  <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="grid grid-cols-[20px_minmax(0,1fr)_20px_minmax(0,1fr)_32px] items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
                     <input type="hidden" name="accountId" value={account.id} />
-                    <div className="grid grid-cols-[20px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">일</span><Input name="dailyResetTime" type="time" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-1.5 text-xs" /></div>
-                    <div className="grid grid-cols-[20px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">주</span><div className="flex min-w-0 items-center gap-1.5"><input type="hidden" name="weeklyResetDay" value={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt) || currentWeeklyResetDay()} /><Input name="weeklyResetTime" type="time" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 flex-1 px-1.5 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button></div></div>
-                    {limitErrors[account.id] ? <p className="text-xs text-destructive">{limitErrors[account.id]}</p> : null}
+                    <span className="text-xs font-medium text-muted-foreground">일</span><Input name="dailyResetTime" type="text" inputMode="numeric" pattern="^([01]\\d|2[0-3]):[0-5]\\d$" placeholder="00:00" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" />
+                    <span className="text-xs font-medium text-muted-foreground">주</span><input type="hidden" name="weeklyResetDay" value={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt) || currentWeeklyResetDay()} /><Input name="weeklyResetTime" type="text" inputMode="numeric" pattern="^([01]\\d|2[0-3]):[0-5]\\d$" placeholder="00:00" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
+                    {limitErrors[account.id] ? <p className="col-span-5 text-xs text-destructive">{limitErrors[account.id]}</p> : null}
                   </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents">
                     <input type="hidden" name="accountId" value={account.id} /><input type="hidden" name="changedField" value="" />
                     <select name="resetAvailableCount" defaultValue={String(account.resetAvailableCount)} onChange={(event) => { const form = event.currentTarget.form; const field = form?.elements.namedItem('changedField'); if (field instanceof HTMLInputElement) field.value = 'resetAvailableCount'; form?.requestSubmit() }} aria-label={`${account.name} 초기화 가능 수`} className="h-9 w-full rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}개</option>)}</select>
                     <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-2 text-xs font-medium"><input type="checkbox" name="sharedUse" value="true" defaultChecked={account.sharedUse} disabled={account.sharedUse} onChange={(event) => { const form = event.currentTarget.form; const field = form?.elements.namedItem('changedField'); if (field instanceof HTMLInputElement) field.value = 'sharedUse'; form?.requestSubmit() }} className="h-4 w-4" />{account.sharedUse ? '고정됨' : '사용 중'}</label>
                   </form>
+                  <Button type="button" variant="outline" size="icon" className="h-9 w-9" title={`${account.name} 로그인 정보`} onClick={() => openLoginInfo(account.id)}><KeyRound className="h-4 w-4" /></Button>
                 </div>
               )
             })}

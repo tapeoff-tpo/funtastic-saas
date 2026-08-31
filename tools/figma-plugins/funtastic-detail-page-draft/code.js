@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.28'
+const PLUGIN_VERSION = '1.2.29'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1173,22 +1173,33 @@ function makeBoneLoofahIntro() {
   return section
 }
 
-async function makeBoneLoofahPoint(index, point, imageUrl) {
-  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / MINIMAL EDITORIAL`, 1130, COLORS.paper)
-  const pointLabel = appendText(section, `POINT ${String(index).padStart(2, '0')}`, 64, 58, 720, 20, 'Bold', { r: 0.67, g: 0.43, b: 0.25 })
+async function makeBoneLoofahPoint(index, point, imageUrl, supportImageUrl) {
+  const sectionColors = [
+    { r: 0.95, g: 0.9, b: 0.83 },
+    { r: 0.91, g: 0.93, b: 0.88 },
+    { r: 0.94, g: 0.89, b: 0.86 },
+    { r: 0.91, g: 0.9, b: 0.86 },
+  ]
+  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / CARD NEWS`, 1740, sectionColors[(index - 1) % sectionColors.length])
+  const card = figma.createFrame()
+  card.resize(780, 1640)
+  card.x = 40; card.y = 50; card.cornerRadius = 34; card.clipsContent = true
+  card.fills = [{ type: 'SOLID', color: COLORS.paper }]
+  section.appendChild(card)
+  const pointLabel = appendText(card, `POINT ${String(index).padStart(2, '0')}`, 52, 54, 676, 20, 'Bold', { r: 0.67, g: 0.43, b: 0.25 })
   pointLabel.letterSpacing = { value: 10, unit: 'PERCENT' }
-  const pointTitle = appendText(section, point[0], 64, 112, 720, 52, 'Bold', COLORS.ink)
+  const pointTitle = appendText(card, point[0], 52, 108, 676, 50, 'Bold', COLORS.ink)
   pointTitle.lineHeight = { value: 125, unit: 'PERCENT' }
-  const pointBody = appendText(section, point[1], 64, 260, 720, 28, 'Semi Bold', { r: 0.29, g: 0.27, b: 0.25 })
+  const pointBody = appendText(card, point[1], 52, 252, 676, 27, 'Semi Bold', { r: 0.29, g: 0.27, b: 0.25 })
   pointBody.lineHeight = { value: 145, unit: 'PERCENT' }
-  const divider = figma.createRectangle()
-  divider.resize(732, 1)
-  divider.x = 64; divider.y = 400
-  divider.fills = [{ type: 'SOLID', color: { r: 0.86, g: 0.82, b: 0.77 } }]
-  section.appendChild(divider)
-  const image = await makeImage(imageUrl, 860, 650, `POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
-  image.x = 0; image.y = 480; image.cornerRadius = 0
-  section.appendChild(image)
+  const image = await makeImage(imageUrl, 676, 570, `POINT ${String(index).padStart(2, '0')} / MAIN IMAGE`)
+  image.x = 52; image.y = 410; image.cornerRadius = 24
+  card.appendChild(image)
+  const supportLabel = appendText(card, 'USE SCENE', 52, 1026, 676, 17, 'Bold', { r: 0.67, g: 0.43, b: 0.25 })
+  supportLabel.letterSpacing = { value: 10, unit: 'PERCENT' }
+  const support = await makeImage(supportImageUrl, 676, 500, `POINT ${String(index).padStart(2, '0')} / SUPPORT IMAGE`)
+  support.x = 52; support.y = 1082; support.cornerRadius = 24
+  card.appendChild(support)
   return section
 }
 
@@ -1364,9 +1375,9 @@ async function buildGenericDraft(job) {
       const mainImage = job.product.sku === '110336-0001' ? generatedImages[index * 2] : images[(index + 2) % images.length]
       const supportImage = job.product.sku === '110336-0001' ? generatedImages[index * 2 + 1] : generatedImages[index]
       scratch.appendChild(job.product.sku === '110336-0001'
-        ? await makeBoneLoofahPoint(index + 1, points[index], mainImage)
+        ? await makeBoneLoofahPoint(index + 1, points[index], mainImage, supportImage)
         : await makeGenericPoint(index + 1, points[index], mainImage))
-      if (supportImage) scratch.appendChild(await makeGenericAiScene(supportImage))
+      if (supportImage && job.product.sku !== '110336-0001') scratch.appendChild(await makeGenericAiScene(supportImage))
     }
     if (job.product.sku !== '110336-0001') scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
     if (job.product.sku === '110336-0001') scratch.appendChild(makeBoneLoofahCare())

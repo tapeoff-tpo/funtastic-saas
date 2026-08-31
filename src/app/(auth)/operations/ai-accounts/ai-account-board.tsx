@@ -51,13 +51,13 @@ type Props = {
 }
 
 function statusClassName(status: string) {
-  if (status === 'weekly_limit_reached') return 'border-red-200 bg-red-50 text-red-700'
+  if (status === 'daily_limit_reached' || status === 'weekly_limit_reached') return 'border-red-200 bg-red-50 text-red-700'
   if (status === 'in_use') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   return 'border-slate-200 bg-slate-50 text-slate-600'
 }
 
 function normalizeStatus(status: string) {
-  if (status === 'weekly_limit_reached' || status === 'in_use' || status === 'unselected') return status
+  if (status === 'daily_limit_reached' || status === 'weekly_limit_reached' || status === 'in_use' || status === 'unselected') return status
   return 'unselected'
 }
 
@@ -88,16 +88,6 @@ function toDateTimeLocal(value: string | null) {
   }).format(new Date(value)).replace(' ', 'T')
 }
 
-function usageLimitNotice(account: AiAccountRow) {
-  const daily = account.dailyLimit
-    ? `일 ${account.dailyLimit} · ${account.dailyResetTime ? `매일 ${account.dailyResetTime} 초기화` : '초기화 시각 미설정'}`
-    : '일 사용 한도 미설정'
-  const weekly = account.weeklyLimit
-    ? `주 ${account.weeklyLimit} · ${account.weeklyResetAt ? `${formatDateTime(account.weeklyResetAt)} 초기화` : '초기화 일시 미설정'}`
-    : '주간 사용 한도 미설정'
-  return { daily, weekly }
-}
-
 export function AiAccountBoard({
   accounts,
   messages,
@@ -113,6 +103,14 @@ export function AiAccountBoard({
   const [bulkRenewalDueOn, setBulkRenewalDueOn] = useState('')
   const [bulkMessage, setBulkMessage] = useState('')
   const [bulkPending, startBulkTransition] = useTransition()
+  const [inlineLimits, setInlineLimits] = useState<Record<string, {
+    dailyLimit: string | null
+    dailyResetTime: string | null
+    weeklyLimit: string | null
+    weeklyResetAt: string | null
+  }>>({})
+  const [savingLimitIds, setSavingLimitIds] = useState<string[]>([])
+  const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
   const selectedAccount = accounts.find((account) => account.id === selectedAccountId) || accounts[0] || null
   const messagesByAccount = useMemo(() => {
     return messages.reduce<Record<string, AiAccountMessage[]>>((acc, message) => {
@@ -134,13 +132,6 @@ export function AiAccountBoard({
   const selectedDisplayLabel = selectedAccount
     ? statusLabels[selectedDisplayStatus]
     : '선택 안 함'
-
-  async function copyAccountId(account: AiAccountRow) {
-    if (!account.email) return
-    await navigator.clipboard.writeText(account.email)
-    setCopiedId(account.id)
-    window.setTimeout(() => setCopiedId((current) => current === account.id ? null : current), 1200)
-  }
 
   function selectAccount(accountId: string) {
     setSelectedAccountId(accountId)
@@ -191,6 +182,31 @@ export function AiAccountBoard({
     })
   }
 
+  function saveInlineLimits(account: AiAccountRow, formData: FormData) {
+    const dailyRemainingPercent = String(formData.get('dailyRemainingPercent') || '').trim()
+    const dailyResetTime = String(formData.get('dailyResetTime') || '').trim()
+    const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') || '').trim()
+    const weeklyResetAt = String(formData.get('weeklyResetAt') || '').trim()
+    setInlineLimits((current) => ({
+      ...current,
+      [account.id]: {
+        dailyLimit: dailyRemainingPercent ? `잔여 ${dailyRemainingPercent}%` : null,
+        dailyResetTime: dailyResetTime || null,
+        weeklyLimit: weeklyRemainingPercent ? `잔여 ${weeklyRemainingPercent}%` : null,
+        weeklyResetAt: weeklyResetAt ? new Date(`${weeklyResetAt}:00+09:00`).toISOString() : null,
+      },
+    }))
+    setLimitErrors((current) => ({ ...current, [account.id]: '' }))
+    setSavingLimitIds((current) => [...current, account.id])
+    startBulkTransition(async () => {
+      const result = await updateAiAccountLimitsAction(formData)
+      setSavingLimitIds((current) => current.filter((id) => id !== account.id))
+      if ('error' in result) {
+        setLimitErrors((current) => ({ ...current, [account.id]: result.error || '한도를 저장하지 못했습니다.' }))
+      }
+    })
+  }
+
   return (
     <section className="rounded-md border bg-background">
       <div className="flex items-center justify-between border-b px-4 py-3">
@@ -200,7 +216,7 @@ export function AiAccountBoard({
         </div>
       </div>
 
-      <div className="grid gap-0 xl:grid-cols-[minmax(960px,1fr)_minmax(400px,1fr)]">
+      <div className="grid gap-0 xl:grid-cols-[minmax(950px,1fr)_minmax(400px,1fr)]">
         <div className="min-w-0 border-b xl:border-b-0 xl:border-r">
           <div className="border-b bg-muted/20 p-3">
             <div className="flex flex-wrap items-end gap-2">
@@ -220,14 +236,13 @@ export function AiAccountBoard({
           </div>
 
           <div className="overflow-x-auto">
-            <div className="min-w-[960px]">
-              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[72px_minmax(100px,1fr)_94px_90px_180px_132px_62px_74px] md:items-center md:gap-2">
+            <div className="min-w-[950px]">
+              <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[72px_94px_90px_300px_132px_62px_74px] md:items-center md:gap-2">
                 <div>계정명</div>
-                <div>계정아이디</div>
                 <div>상태</div>
                 <div>사용자</div>
-                <div>사용 한도 / 초기화</div>
                 <div>갱신 예정일</div>
+                <div>일/주 사용 한도 및 초기화</div>
                 <div>초기화</div>
                 <div>공유 사용</div>
               </div>
@@ -237,7 +252,6 @@ export function AiAccountBoard({
               const isSelected = selectedAccount?.id === account.id
               const displayStatus = normalizeStatus(account.status)
               const candidateNames = userCandidates.map((candidate) => candidate.name)
-              const usageNotice = usageLimitNotice(account)
               return (
                 <div
                   key={account.id}
@@ -245,7 +259,7 @@ export function AiAccountBoard({
                   tabIndex={0}
                   className={cn(
                     'cursor-pointer',
-                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[72px_minmax(100px,1fr)_94px_90px_180px_132px_62px_74px] md:items-center md:gap-2',
+                    'grid w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/50 md:grid-cols-[72px_94px_90px_300px_132px_62px_74px] md:items-center md:gap-2',
                     account.sharedUse && 'bg-emerald-50/50',
                     isSelected && 'bg-muted',
                   )}
@@ -260,36 +274,6 @@ export function AiAccountBoard({
                   <div className="min-w-0">
                     <p className="truncate whitespace-nowrap text-sm font-semibold" title={account.name}>{account.name}</p>
                     <p className="text-xs text-muted-foreground md:hidden">계정명</p>
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-medium">{account.email || '-'}</span>
-                      {account.email ? (
-                        <span
-                          role="button"
-                          tabIndex={0}
-                          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background hover:bg-muted"
-                          title="계정 아이디 복사"
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            copyAccountId(account)
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              copyAccountId(account)
-                            }
-                          }}
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground md:hidden">
-                      {copiedId === account.id ? '복사됨' : '계정아이디'}
-                    </p>
-                    {copiedId === account.id ? <p className="mt-1 hidden text-xs text-emerald-700 md:block">복사됨</p> : null}
                   </div>
                   <form action={updateAiAccountOperationalStateAction} className="contents" onClick={(event) => event.stopPropagation()}>
                     <input type="hidden" name="accountId" value={account.id} />
@@ -340,10 +324,35 @@ export function AiAccountBoard({
                       />
                     </div>
                   </form>
-                  <div className="space-y-1 text-xs text-muted-foreground">
-                    <p className="truncate" title={usageNotice.daily}>{usageNotice.daily}</p>
-                    <p className="truncate" title={usageNotice.weekly}>{usageNotice.weekly}</p>
-                  </div>
+                  <form
+                    key={`${account.id}-${inlineLimits[account.id]?.dailyLimit || ''}-${inlineLimits[account.id]?.dailyResetTime || ''}-${inlineLimits[account.id]?.weeklyLimit || ''}-${inlineLimits[account.id]?.weeklyResetAt || ''}`}
+                    className="grid grid-cols-[auto_58px_84px] items-center gap-1.5"
+                    onClick={(event) => event.stopPropagation()}
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      saveInlineLimits(account, new FormData(event.currentTarget))
+                    }}
+                  >
+                    <input type="hidden" name="accountId" value={account.id} />
+                    <span className="text-xs font-medium text-muted-foreground">일</span>
+                    <div className="relative">
+                      <Input name="dailyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(inlineLimits[account.id]?.dailyLimit ?? account.dailyLimit)} aria-label={`${account.name} 일 사용 잔여율`} className="h-8 px-2 pr-5 text-xs" />
+                      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
+                    </div>
+                    <Input name="dailyResetTime" type="time" defaultValue={inlineLimits[account.id]?.dailyResetTime ?? account.dailyResetTime ?? ''} aria-label={`${account.name} 일 초기화 시각`} className="h-8 px-1.5 text-xs" />
+                    <span className="text-xs font-medium text-muted-foreground">주</span>
+                    <div className="relative">
+                      <Input name="weeklyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(inlineLimits[account.id]?.weeklyLimit ?? account.weeklyLimit)} aria-label={`${account.name} 주간 사용 잔여율`} className="h-8 px-2 pr-5 text-xs" />
+                      <span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Input name="weeklyResetAt" type="datetime-local" defaultValue={toDateTimeLocal(inlineLimits[account.id]?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 일시`} className="h-8 min-w-0 px-1.5 text-xs" />
+                      <Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 한도 저장`} disabled={savingLimitIds.includes(account.id)}>
+                        <Save className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                    {limitErrors[account.id] ? <p className="col-span-3 text-xs text-destructive">{limitErrors[account.id]}</p> : null}
+                  </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents" onClick={(event) => event.stopPropagation()}>
                     <input type="hidden" name="accountId" value={account.id} />
                     <input type="hidden" name="changedField" value="" />
@@ -449,41 +458,6 @@ export function AiAccountBoard({
                   </div>
                 </form>
               </div>
-
-              <form key={`limits-${selectedAccount.id}`} action={updateAiAccountLimitsAction} className="rounded-md border bg-background p-3">
-                <input type="hidden" name="accountId" value={selectedAccount.id} />
-                <div className="mb-3">
-                  <h3 className="text-sm font-semibold">사용 한도 및 초기화</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">잔여 사용량과 다음 초기화 시점을 계정별로 기록합니다.</p>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">일 사용 잔여율</span>
-                    <div className="relative">
-                      <Input name="dailyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(selectedAccount.dailyLimit)} placeholder="잔여" className="h-9 pr-7" />
-                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
-                    </div>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">일 초기화 시각</span>
-                    <Input name="dailyResetTime" type="time" defaultValue={selectedAccount.dailyResetTime || ''} className="h-9" />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">주간 사용 잔여율</span>
-                    <div className="relative">
-                      <Input name="weeklyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(selectedAccount.weeklyLimit)} placeholder="잔여" className="h-9 pr-7" />
-                      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
-                    </div>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-xs font-medium text-muted-foreground">주간 초기화 일시</span>
-                    <Input name="weeklyResetAt" type="datetime-local" defaultValue={toDateTimeLocal(selectedAccount.weeklyResetAt)} className="h-9" />
-                  </label>
-                </div>
-                <div className="mt-3 flex justify-end">
-                  <Button type="submit" className="h-9"><Save className="h-4 w-4" />한도 저장</Button>
-                </div>
-              </form>
 
               <form action={addAiAccountMessageAction} className="rounded-md border bg-background p-3">
                 <input type="hidden" name="accountId" value={selectedAccount.id} />

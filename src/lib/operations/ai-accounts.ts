@@ -17,6 +17,7 @@ export const DEFAULT_AI_ACCOUNTS = [
 export const AI_ACCOUNT_STATUS_LABELS: Record<string, string> = {
   unselected: '선택 안 함',
   in_use: '사용 중',
+  daily_limit_reached: '일 소진',
   weekly_limit_reached: '주간 소진',
 }
 
@@ -440,7 +441,7 @@ export async function updateAiAccountOperationalState(input: {
   const changedField = input.changedField?.trim() || ''
   let nextStatus = status
   let nextCurrentUserName = currentUserName
-  if (changedField === 'currentUserName' && status !== 'weekly_limit_reached') {
+  if (changedField === 'currentUserName' && status !== 'daily_limit_reached' && status !== 'weekly_limit_reached') {
     nextStatus = currentUserName ? 'in_use' : 'unselected'
   }
   if (changedField === 'status' && status === 'unselected') nextCurrentUserName = null

@@ -123,7 +123,7 @@ export async function bulkUpdateAiAccountOperationalStateAction(input: {
 
 export async function updateAiAccountLimitsAction(formData: FormData) {
   const userId = await getWorkspaceIdForAction()
-  if (!userId) return
+  if (!userId) return { error: '로그인이 필요합니다.' }
 
   const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') ?? '').trim()
   const weeklyResetValue = String(formData.get('weeklyResetAt') ?? '').trim()
@@ -132,7 +132,7 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
     ? parsedWeeklyResetAt
     : null
 
-  await updateAiAccountLimits({
+  const result = await updateAiAccountLimits({
     userId,
     accountId: String(formData.get('accountId') ?? ''),
     dailyRemainingPercent: String(formData.get('dailyRemainingPercent') ?? '').trim(),
@@ -140,7 +140,8 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
     weeklyRemainingPercent,
     weeklyResetAt,
   })
-  revalidatePath('/operations/ai-accounts')
+  if (!('error' in result)) revalidatePath('/operations/ai-accounts')
+  return result
 }
 
 export async function addAiAccountUserCandidateAction(formData: FormData) {

@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.25'
+const PLUGIN_VERSION = '1.2.26'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -38,6 +38,12 @@ const COLORS = {
   coral: { r: 0.9, g: 0.28, b: 0.21 },
   peach: { r: 0.99, g: 0.92, b: 0.86 },
   lavender: { r: 0.92, g: 0.91, b: 0.98 },
+}
+
+const FONT_BY_STYLE = {
+  Regular: { family: 'Inter', style: 'Regular' },
+  'Semi Bold': { family: 'Inter', style: 'Semi Bold' },
+  Bold: { family: 'Inter', style: 'Bold' },
 }
 
 const REQUIRED_CAUTIONS = [
@@ -266,16 +272,19 @@ function errorMessage(error) {
 }
 
 async function loadFonts() {
-  await Promise.all([
-    figma.loadFontAsync({ family: 'Inter', style: 'Regular' }),
-    figma.loadFontAsync({ family: 'Inter', style: 'Semi Bold' }),
-    figma.loadFontAsync({ family: 'Inter', style: 'Bold' }),
-  ])
+  const available = await figma.listAvailableFontsAsync()
+  const family = ['Pretendard', 'Noto Sans KR', 'Inter'].find((candidate) => available.some((font) => font.fontName.family === candidate)) || 'Inter'
+  for (const style of Object.keys(FONT_BY_STYLE)) {
+    const exact = available.find((font) => font.fontName.family === family && font.fontName.style === style)
+    const fallback = available.find((font) => font.fontName.family === family)
+    FONT_BY_STYLE[style] = exact?.fontName || fallback?.fontName || FONT_BY_STYLE[style]
+  }
+  await Promise.all(Object.values(FONT_BY_STYLE).map((font) => figma.loadFontAsync(font)))
 }
 
 function makeText(value, size, style = 'Regular', color = COLORS.ink, width = 760) {
   const node = figma.createText()
-  node.fontName = { family: 'Inter', style }
+  node.fontName = FONT_BY_STYLE[style] || FONT_BY_STYLE.Regular
   node.fontSize = size
   node.characters = String(value)
   node.fills = [{ type: 'SOLID', color }]
@@ -1166,15 +1175,23 @@ function makeBoneLoofahIntro() {
 
 async function makeBoneLoofahPoint(index, point, imageUrl) {
   const section = makeSection(`POINT ${String(index).padStart(2, '0')} / O-HEN REFERENCE`, 1130, COLORS.paper)
-  const pointLabel = appendText(section, `POINT ${String(index).padStart(2, '0')}`, 50, 56, 760, 20, 'Bold', { r: 0.72, g: 0.48, b: 0.29 })
-  pointLabel.textAlignHorizontal = 'CENTER'
+  const header = figma.createFrame()
+  header.resize(860, 390)
+  header.fills = [{ type: 'SOLID', color: index % 2 ? { r: 0.24, g: 0.13, b: 0.08 } : { r: 0.49, g: 0.28, b: 0.16 } }]
+  section.appendChild(header)
+  const accent = figma.createRectangle()
+  accent.resize(64, 7)
+  accent.x = 64; accent.y = 62; accent.cornerRadius = 4
+  accent.fills = [{ type: 'SOLID', color: { r: 0.95, g: 0.69, b: 0.34 } }]
+  header.appendChild(accent)
+  const pointLabel = appendText(header, `POINT ${String(index).padStart(2, '0')}`, 64, 92, 720, 21, 'Bold', { r: 0.95, g: 0.76, b: 0.48 })
   pointLabel.letterSpacing = { value: 10, unit: 'PERCENT' }
-  appendText(section, point[0], 60, 126, 740, 43, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-  const pointBody = appendText(section, point[1], 95, 246, 670, 22, 'Regular', { r: 0.32, g: 0.29, b: 0.26 })
-  pointBody.textAlignHorizontal = 'CENTER'
+  const pointTitle = appendText(header, point[0], 64, 142, 720, 45, 'Bold', COLORS.paper)
+  pointTitle.lineHeight = { value: 125, unit: 'PERCENT' }
+  const pointBody = appendText(header, point[1], 64, 270, 720, 23, 'Regular', { r: 0.96, g: 0.9, b: 0.82 })
   pointBody.lineHeight = { value: 150, unit: 'PERCENT' }
   const image = await makeImage(imageUrl, 760, 650, `POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
-  image.x = 50; image.y = 430; image.cornerRadius = 0
+  image.x = 50; image.y = 430; image.cornerRadius = 28
   section.appendChild(image)
   return section
 }

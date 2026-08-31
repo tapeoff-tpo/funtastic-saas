@@ -150,8 +150,8 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
         {bulkMessage ? <p className="mt-2 text-xs text-muted-foreground">{bulkMessage}</p> : null}
       </div>
       <div className="overflow-x-auto">
-        <div className="min-w-[950px]">
-          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[110px_94px_100px_132px_300px_62px_74px] md:items-center md:gap-2">
+        <div className="min-w-[1120px]">
+          <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(150px,1.1fr)_minmax(360px,2.8fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2">
             <div>계정명</div><div>상태</div><div>사용자</div><div>갱신 예정일</div><div>일/주 사용 한도 및 초기화</div><div>초기화</div><div>공유 사용</div>
           </div>
           <div className="divide-y">
@@ -160,7 +160,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
               const candidateNames = userCandidates.map((candidate) => candidate.name)
               const inline = inlineLimits[account.id]
               return (
-                <div key={account.id} className={cn('grid w-full gap-3 px-3 py-3 md:grid-cols-[110px_94px_100px_132px_300px_62px_74px] md:items-center md:gap-2', account.sharedUse && 'bg-emerald-50/50')}>
+                <div key={account.id} className={cn('grid w-full gap-3 px-3 py-3 md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(150px,1.1fr)_minmax(360px,2.8fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2', account.sharedUse && 'bg-emerald-50/50')}>
                   <button type="button" onClick={() => openLoginInfo(account.id)} className="truncate whitespace-nowrap text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" title={`${account.name} 로그인 정보 열기`}>{account.name}</button>
                   <form action={updateAiAccountOperationalStateAction} className="contents">
                     <input type="hidden" name="accountId" value={account.id} /><input type="hidden" name="changedField" value="" />

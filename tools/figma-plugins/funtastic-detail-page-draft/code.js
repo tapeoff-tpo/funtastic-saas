@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.17'
+const PLUGIN_VERSION = '1.2.18'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1135,13 +1135,10 @@ async function makeGenericPoint(index, point, imageUrl) {
   return section
 }
 
-async function makeGenericAiScene(product, imageUrl) {
-  const section = makeSection('05 AI LIFESTYLE / PRODUCT-FAITHFUL', 1300, COLORS.sky)
-  makeLabel(section, 'AI LIFESTYLE', 50, 54, 154, COLORS.navy)
-  appendText(section, `${product.name}\n실사용 장면으로 확인해보세요`, 50, 120, 760, 40, 'Bold', COLORS.ink)
-  appendText(section, '1688 원본의 형태와 옵션을 기준으로 구성한 연출 이미지입니다.', 50, 232, 760, 18, 'Regular', COLORS.muted)
-  const image = await makeImage(imageUrl, 760, 900, 'AI GENERATED / PRODUCT-FAITHFUL LIFESTYLE')
-  image.x = 50; image.y = 330; image.cornerRadius = 28
+async function makeGenericAiScene(imageUrl) {
+  const section = makeSection('USP SUPPORT IMAGE', 1000, COLORS.paper)
+  const image = await makeImage(imageUrl, 760, 900, 'USP / SUPPORT IMAGE')
+  image.x = 50; image.y = 50; image.cornerRadius = 28
   section.appendChild(image)
   return section
 }
@@ -1246,7 +1243,7 @@ async function buildGenericDraft(job) {
     const points = genericPointCopy(job.product)
     for (let index = 0; index < points.length; index += 1) {
       scratch.appendChild(await makeGenericPoint(index + 1, points[index], images[(index + 2) % images.length]))
-      if (generatedImages[index]) scratch.appendChild(await makeGenericAiScene(job.product, generatedImages[index]))
+      if (generatedImages[index]) scratch.appendChild(await makeGenericAiScene(generatedImages[index]))
     }
     scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
     scratch.appendChild(await makeGenericSize(job.product, images[0]))

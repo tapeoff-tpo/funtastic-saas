@@ -56,22 +56,13 @@ function normalizeStatus(status: string) {
   return 'unselected'
 }
 
-function weeklyResetDay(value: string | null) {
-  if (!value) return ''
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(new Date(value))
-  return String(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday))
-}
-
-function currentWeeklyResetDay() {
-  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(new Date())
-  return String(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday))
-}
-
 function weeklyResetTime(value: string | null) {
   if (!value) return ''
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).format(new Date(value))
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date(value))
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || ''
+  return `${part('month')}월 ${part('day')}일 ${part('hour')}:${part('minute')}`
 }
 
 function normalizeTimeInput(value: string) {
@@ -81,16 +72,29 @@ function normalizeTimeInput(value: string) {
   return value
 }
 
-function nextWeeklyResetAt(day: string, time: string) {
-  if (!/^\d$/.test(day) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return null
+function normalizeWeeklyResetInput(value: string) {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length !== 8) return value
+  return `${digits.slice(0, 2)}월 ${digits.slice(2, 4)}일 ${digits.slice(4, 6)}:${digits.slice(6)}`
+}
+
+function nextWeeklyResetAt(value: string) {
+  const digits = value.replace(/\D/g, '')
+  if (digits.length !== 8) return null
+  const month = Number(digits.slice(0, 2))
+  const day = Number(digits.slice(2, 4))
+  const hours = Number(digits.slice(4, 6))
+  const minutes = Number(digits.slice(6))
+  if (month < 1 || month > 12 || day < 1 || day > 31 || hours > 23 || minutes > 59) return null
   const current = new Date()
   const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(current)
   const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value)
-  const currentDay = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(current))
-  const [hours, minutes] = time.split(':').map(Number)
-  const offsetDays = (Number(day) - currentDay + 7) % 7
-  const next = new Date(Date.UTC(part('year'), part('month') - 1, part('day') + offsetDays, hours - 9, minutes))
-  if (offsetDays === 0 && next <= current) next.setUTCDate(next.getUTCDate() + 7)
+  const createDate = (year: number) => new Date(Date.UTC(year, month - 1, day, hours - 9, minutes))
+  let next = createDate(part('year'))
+  const dateParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit' }).formatToParts(next)
+  const resultPart = (type: Intl.DateTimeFormatPartTypes) => Number(dateParts.find((item) => item.type === type)?.value)
+  if (resultPart('month') !== month || resultPart('day') !== day) return null
+  if (next <= current) next = createDate(part('year') + 1)
   return next.toISOString()
 }
 
@@ -115,7 +119,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
 
   function saveInlineLimits(account: AiAccountRow, formData: FormData) {
     const dailyResetTime = normalizeTimeInput(String(formData.get('dailyResetTime') || '').trim())
-    const weeklyResetAt = nextWeeklyResetAt(String(formData.get('weeklyResetDay') || ''), normalizeTimeInput(String(formData.get('weeklyResetTime') || '').trim()))
+    const weeklyResetAt = nextWeeklyResetAt(normalizeWeeklyResetInput(String(formData.get('weeklyResetTime') || '').trim()))
     setInlineLimits((current) => ({ ...current, [account.id]: {
       dailyLimit: null,
       dailyResetTime: dailyResetTime || null,
@@ -168,7 +172,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
       <div className="overflow-x-auto">
         <div className="min-w-[1120px]">
           <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)_42px] md:items-center md:gap-2">
-            <div>계정명</div><div>상태</div><div>사용자</div><div>일/주 초기화 시각</div><div>초기화</div><div>공유 사용</div><div className="sr-only">로그인 정보</div>
+            <div>계정명</div><div>상태</div><div>사용자</div><div>일간/주간 초기화 시각</div><div>초기화</div><div>공유 사용</div><div className="sr-only">로그인 정보</div>
           </div>
           <div className="divide-y">
             {sortedAccounts.map((account) => {
@@ -189,10 +193,10 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
                       {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
                     </select>
                   </form>
-                  <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="grid grid-cols-[20px_minmax(0,1fr)_20px_minmax(0,1fr)_32px] items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
+                  <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="grid grid-cols-[34px_minmax(0,1fr)_34px_minmax(0,1fr)_32px] items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
                     <input type="hidden" name="accountId" value={account.id} />
-                    <span className="text-xs font-medium text-muted-foreground">일</span><Input name="dailyResetTime" type="text" inputMode="numeric" placeholder="00:00" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} onBlur={(event) => { event.currentTarget.value = normalizeTimeInput(event.currentTarget.value) }} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" />
-                    <span className="text-xs font-medium text-muted-foreground">주</span><input type="hidden" name="weeklyResetDay" value={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt) || currentWeeklyResetDay()} /><Input name="weeklyResetTime" type="text" inputMode="numeric" placeholder="00:00" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} onBlur={(event) => { event.currentTarget.value = normalizeTimeInput(event.currentTarget.value) }} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
+                    <span className="text-xs font-medium text-muted-foreground">일간</span><Input name="dailyResetTime" type="text" inputMode="numeric" placeholder="00:00" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} onBlur={(event) => { event.currentTarget.value = normalizeTimeInput(event.currentTarget.value) }} aria-label={`${account.name} 일간 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" />
+                    <span className="text-xs font-medium text-muted-foreground">주간</span><Input name="weeklyResetTime" type="text" inputMode="numeric" placeholder="MMDDHHMM" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} onBlur={(event) => { event.currentTarget.value = normalizeWeeklyResetInput(event.currentTarget.value) }} aria-label={`${account.name} 주간 초기화 일시`} className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
                     {limitErrors[account.id] ? <p className="col-span-5 text-xs text-destructive">{limitErrors[account.id]}</p> : null}
                   </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents">

@@ -131,8 +131,6 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
   if (!userId) return { error: '로그인이 필요합니다.' }
 
   const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') ?? '').trim()
-  const weeklyResetDayValue = String(formData.get('weeklyResetDay') ?? '').trim()
-  const weeklyResetDay = Number(weeklyResetDayValue)
   const normalizeTime = (value: string) => {
     const trimmed = value.trim()
     const digits = trimmed.replace(/\D/g, '')
@@ -141,17 +139,25 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
     return trimmed
   }
   const dailyResetTime = normalizeTime(String(formData.get('dailyResetTime') ?? ''))
-  const weeklyResetTime = normalizeTime(String(formData.get('weeklyResetTime') ?? ''))
+  const weeklyResetValue = String(formData.get('weeklyResetTime') ?? '').trim()
+  const weeklyDigits = weeklyResetValue.replace(/\D/g, '')
   let weeklyResetAt: Date | null = null
-  if (/^[0-6]$/.test(weeklyResetDayValue) && /^([01]\d|2[0-3]):[0-5]\d$/.test(weeklyResetTime)) {
+  if (weeklyDigits) {
+    if (!/^\d{8}$/.test(weeklyDigits)) return { error: '주간 초기화는 MMDDHHMM 형식으로 입력해주세요.' }
+    const month = Number(weeklyDigits.slice(0, 2))
+    const day = Number(weeklyDigits.slice(2, 4))
+    const hours = Number(weeklyDigits.slice(4, 6))
+    const minutes = Number(weeklyDigits.slice(6))
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hours > 23 || minutes > 59) return { error: '주간 초기화 일시를 확인해주세요.' }
     const now = new Date()
     const dateParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
     const part = (type: Intl.DateTimeFormatPartTypes) => Number(dateParts.find((item) => item.type === type)?.value)
-    const currentDay = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(now))
-    const [hours, minutes] = weeklyResetTime.split(':').map(Number)
-    const offsetDays = (weeklyResetDay - currentDay + 7) % 7
-    weeklyResetAt = new Date(Date.UTC(part('year'), part('month') - 1, part('day') + offsetDays, hours - 9, minutes))
-    if (offsetDays === 0 && weeklyResetAt <= now) weeklyResetAt.setUTCDate(weeklyResetAt.getUTCDate() + 7)
+    const createDate = (year: number) => new Date(Date.UTC(year, month - 1, day, hours - 9, minutes))
+    weeklyResetAt = createDate(part('year'))
+    const normalizedParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit' }).formatToParts(weeklyResetAt)
+    const normalizedPart = (type: Intl.DateTimeFormatPartTypes) => Number(normalizedParts.find((item) => item.type === type)?.value)
+    if (normalizedPart('month') !== month || normalizedPart('day') !== day) return { error: '주간 초기화 날짜를 확인해주세요.' }
+    if (weeklyResetAt <= now) weeklyResetAt = createDate(part('year') + 1)
   }
 
   const result = await updateAiAccountLimits({

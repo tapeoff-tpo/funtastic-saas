@@ -793,3 +793,28 @@ export async function resetAiAccountRuntimeState(input: {
   })
   return { success: true }
 }
+
+export async function bulkResetAiAccountRuntimeState(input: { userId: string }) {
+  await ensureAiAccountTables()
+  const rows = await db.update(gptAccounts)
+    .set({
+      status: 'unselected',
+      currentUserName: null,
+      dailyLimit: null,
+      dailyResetTime: null,
+      weeklyLimit: null,
+      weeklyResetAt: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(gptAccounts.userId, input.userId))
+    .returning({ id: gptAccounts.id })
+  if (!rows.length) return { error: '초기화할 계정이 없습니다.' as const }
+
+  await db.insert(gptAccountMessages).values(rows.map((row) => ({
+    userId: input.userId,
+    accountId: row.id,
+    eventType: 'account_runtime_bulk_reset',
+    message: '일괄 초기화: 상태, 사용자, 일간/주간 초기화 시각을 초기화했습니다.',
+  })))
+  return { success: true, count: rows.length }
+}

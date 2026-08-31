@@ -56,13 +56,14 @@ function normalizeStatus(status: string) {
   return 'unselected'
 }
 
-function limitPercent(value: string | null) {
-  return value?.match(/(\d{1,3})\s*%/)?.[1] || ''
-}
-
 function weeklyResetDay(value: string | null) {
   if (!value) return ''
   const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(new Date(value))
+  return String(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday))
+}
+
+function currentWeeklyResetDay() {
+  const weekday = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Seoul', weekday: 'short' }).format(new Date())
   return String(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(weekday))
 }
 
@@ -106,14 +107,12 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
   const loginAccount = accounts.find((account) => account.id === loginAccountId) || null
 
   function saveInlineLimits(account: AiAccountRow, formData: FormData) {
-    const dailyRemainingPercent = String(formData.get('dailyRemainingPercent') || '').trim()
     const dailyResetTime = String(formData.get('dailyResetTime') || '').trim()
-    const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') || '').trim()
     const weeklyResetAt = nextWeeklyResetAt(String(formData.get('weeklyResetDay') || ''), String(formData.get('weeklyResetTime') || ''))
     setInlineLimits((current) => ({ ...current, [account.id]: {
-      dailyLimit: dailyRemainingPercent ? `잔여 ${dailyRemainingPercent}%` : null,
+      dailyLimit: null,
       dailyResetTime: dailyResetTime || null,
-      weeklyLimit: weeklyRemainingPercent ? `잔여 ${weeklyRemainingPercent}%` : null,
+      weeklyLimit: null,
       weeklyResetAt,
     } }))
     setLimitErrors((current) => ({ ...current, [account.id]: '' }))
@@ -162,7 +161,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
       <div className="overflow-x-auto">
         <div className="min-w-[1120px]">
           <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)] md:items-center md:gap-2">
-            <div>계정명</div><div>상태</div><div>사용자</div><div>일/주 사용 한도 및 초기화</div><div>초기화</div><div>공유 사용</div>
+            <div>계정명</div><div>상태</div><div>사용자</div><div>일/주 초기화 시각</div><div>초기화</div><div>공유 사용</div>
           </div>
           <div className="divide-y">
             {sortedAccounts.map((account) => {
@@ -185,8 +184,8 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
                   </form>
                   <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="space-y-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
                     <input type="hidden" name="accountId" value={account.id} />
-                    <div className="grid grid-cols-[20px_64px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">일</span><div className="relative"><Input name="dailyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(inline?.dailyLimit ?? account.dailyLimit)} aria-label={`${account.name} 일 사용 잔여율`} className="h-8 px-2 pr-5 text-xs" /><span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span></div><Input name="dailyResetTime" type="time" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-1.5 text-xs" /></div>
-                    <div className="grid grid-cols-[20px_64px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">주</span><div className="relative"><Input name="weeklyRemainingPercent" type="number" min="0" max="100" defaultValue={limitPercent(inline?.weeklyLimit ?? account.weeklyLimit)} aria-label={`${account.name} 주간 사용 잔여율`} className="h-8 px-2 pr-5 text-xs" /><span className="pointer-events-none absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">%</span></div><div className="flex min-w-0 items-center gap-1.5"><select name="weeklyResetDay" defaultValue={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 요일`} className="h-8 w-20 rounded-md border bg-background px-2 text-xs"><option value="">요일</option><option value="0">일</option><option value="1">월</option><option value="2">화</option><option value="3">수</option><option value="4">목</option><option value="5">금</option><option value="6">토</option></select><Input name="weeklyResetTime" type="time" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 flex-1 px-1.5 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 한도 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button></div></div>
+                    <div className="grid grid-cols-[20px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">일</span><Input name="dailyResetTime" type="time" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} aria-label={`${account.name} 일 초기화 시각`} className="h-8 min-w-0 px-1.5 text-xs" /></div>
+                    <div className="grid grid-cols-[20px_minmax(0,1fr)] items-center gap-1.5"><span className="text-xs font-medium text-muted-foreground">주</span><div className="flex min-w-0 items-center gap-1.5"><input type="hidden" name="weeklyResetDay" value={weeklyResetDay(inline?.weeklyResetAt ?? account.weeklyResetAt) || currentWeeklyResetDay()} /><Input name="weeklyResetTime" type="time" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} aria-label={`${account.name} 주간 초기화 시각`} className="h-8 min-w-0 flex-1 px-1.5 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button></div></div>
                     {limitErrors[account.id] ? <p className="text-xs text-destructive">{limitErrors[account.id]}</p> : null}
                   </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents">

@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.18'
+const PLUGIN_VERSION = '1.2.19'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -10,11 +10,13 @@ const BRIDGE_STATE_KEY = 'funtastic-detail-page-bridge'
 const GENERATED_ASSETS_BY_SKU = {
   '110336-0001': [
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-dishsoap-v2.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-platefoam-v4.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-petbowl-v2.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-petceramic-v4.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-curvewash-v3.png`,
-    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-drain-v3.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-texture-v1.png`,
-    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-flex-v1.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-drain-v3.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-rinse-v4.png`,
   ],
   '112369-0001': [`${SERVER_URL}/detail-page-assets/water-bucket-ai-lifestyle-v1.png`],
   '112370-0001': [`${SERVER_URL}/detail-page-assets/ribbon-harness-ai-lifestyle-v1.png`],
@@ -1174,7 +1176,7 @@ function makeGenericProductInfo(product) {
   const section = makeSection('06 PRODUCT INFO', 890, COLORS.soft)
   makeLabel(section, 'PRODUCT INFO', 50, 54, 166, COLORS.green)
   appendText(section, '상품 고시 정보', 50, 118, 760, 40, 'Bold')
-  const fields = [['품목코드', product.sku], ['상품명', product.name], ['옵션', product.option || '-'], ['재질', product.material || '-'], ['사이즈', product.size || '-'], ['무게', product.weight || '-'], ['제조국', product.country || '-']]
+  const fields = [['상품명', product.name], ['옵션', product.option || '-'], ['재질', product.material || '-'], ['사이즈', product.size || '-'], ['무게', product.weight || '-'], ['제조국', product.country || '-']]
   fields.forEach(([label, value], index) => {
     const row = figma.createFrame()
     row.name = label; row.resize(760, 78); row.x = 50; row.y = 202 + index * 86
@@ -1242,11 +1244,16 @@ async function buildGenericDraft(job) {
     scratch.appendChild(await makeGenericOptions(job, images))
     const points = genericPointCopy(job.product)
     for (let index = 0; index < points.length; index += 1) {
-      scratch.appendChild(await makeGenericPoint(index + 1, points[index], images[(index + 2) % images.length]))
-      if (generatedImages[index]) scratch.appendChild(await makeGenericAiScene(generatedImages[index]))
+      const mainImage = job.product.sku === '110336-0001' ? generatedImages[index * 2] : images[(index + 2) % images.length]
+      const supportImage = job.product.sku === '110336-0001' ? generatedImages[index * 2 + 1] : generatedImages[index]
+      scratch.appendChild(await makeGenericPoint(index + 1, points[index], mainImage))
+      if (supportImage) scratch.appendChild(await makeGenericAiScene(supportImage))
     }
-    scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
-    scratch.appendChild(await makeGenericSize(job.product, images[0]))
+    if (job.product.sku !== '110336-0001') scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
+    const sizeImage = job.product.sku === '110336-0001'
+      ? `${SERVER_URL}/detail-page-assets/bone-loofah-cutout-v4.png`
+      : images[0]
+    scratch.appendChild(await makeGenericSize(job.product, sizeImage))
     scratch.appendChild(makeGenericProductInfo(job.product))
     scratch.appendChild(makeStandardCautions({ specificCautions: [] }))
     scratch.appendChild(await cloneIpNotice())

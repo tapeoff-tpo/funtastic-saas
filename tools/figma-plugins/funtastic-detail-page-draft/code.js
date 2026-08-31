@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.27'
+const PLUGIN_VERSION = '1.2.28'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1174,24 +1174,20 @@ function makeBoneLoofahIntro() {
 }
 
 async function makeBoneLoofahPoint(index, point, imageUrl) {
-  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / O-HEN REFERENCE`, 1210, COLORS.paper)
-  const header = figma.createFrame()
-  header.resize(860, 470)
-  header.fills = [{ type: 'SOLID', color: index % 2 ? { r: 0.24, g: 0.13, b: 0.08 } : { r: 0.49, g: 0.28, b: 0.16 } }]
-  section.appendChild(header)
-  const accent = figma.createRectangle()
-  accent.resize(64, 7)
-  accent.x = 64; accent.y = 62; accent.cornerRadius = 4
-  accent.fills = [{ type: 'SOLID', color: { r: 0.95, g: 0.69, b: 0.34 } }]
-  header.appendChild(accent)
-  const pointLabel = appendText(header, `POINT ${String(index).padStart(2, '0')}`, 64, 92, 720, 21, 'Bold', { r: 0.95, g: 0.76, b: 0.48 })
+  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / MINIMAL EDITORIAL`, 1130, COLORS.paper)
+  const pointLabel = appendText(section, `POINT ${String(index).padStart(2, '0')}`, 64, 58, 720, 20, 'Bold', { r: 0.67, g: 0.43, b: 0.25 })
   pointLabel.letterSpacing = { value: 10, unit: 'PERCENT' }
-  const pointTitle = appendText(header, point[0], 64, 142, 720, 52, 'Bold', COLORS.paper)
+  const pointTitle = appendText(section, point[0], 64, 112, 720, 52, 'Bold', COLORS.ink)
   pointTitle.lineHeight = { value: 125, unit: 'PERCENT' }
-  const pointBody = appendText(header, point[1], 64, 300, 720, 30, 'Semi Bold', { r: 1, g: 0.95, b: 0.87 })
+  const pointBody = appendText(section, point[1], 64, 260, 720, 28, 'Semi Bold', { r: 0.29, g: 0.27, b: 0.25 })
   pointBody.lineHeight = { value: 145, unit: 'PERCENT' }
-  const image = await makeImage(imageUrl, 760, 650, `POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
-  image.x = 50; image.y = 510; image.cornerRadius = 28
+  const divider = figma.createRectangle()
+  divider.resize(732, 1)
+  divider.x = 64; divider.y = 400
+  divider.fills = [{ type: 'SOLID', color: { r: 0.86, g: 0.82, b: 0.77 } }]
+  section.appendChild(divider)
+  const image = await makeImage(imageUrl, 860, 650, `POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
+  image.x = 0; image.y = 480; image.cornerRadius = 0
   section.appendChild(image)
   return section
 }
@@ -1240,9 +1236,9 @@ function makeBoneLoofahCare() {
 }
 
 async function makeGenericAiScene(imageUrl) {
-  const section = makeSection('USP SUPPORT IMAGE', 1000, COLORS.paper)
-  const image = await makeImage(imageUrl, 760, 900, 'USP / SUPPORT IMAGE')
-  image.x = 50; image.y = 50; image.cornerRadius = 28
+  const section = makeSection('USP SUPPORT IMAGE', 900, COLORS.paper)
+  const image = await makeImage(imageUrl, 860, 900, 'USP / SUPPORT IMAGE')
+  image.x = 0; image.y = 0; image.cornerRadius = 0
   section.appendChild(image)
   return section
 }

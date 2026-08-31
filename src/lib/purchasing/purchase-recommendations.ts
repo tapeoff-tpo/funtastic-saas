@@ -137,6 +137,9 @@ export function calculateStableMonthlyOutgoing(input: {
   const baselineMonthlyOutgoing = threeMonthAverageOutgoing
   const prioritizeCurrentMonth = input.isNewProduct === true
     || baselineMonthlyOutgoing < CURRENT_MONTH_PRIORITY_AVERAGE_THRESHOLD
+  const fallbackToAverageWhenCurrentMonthIsZero = input.isNewProduct !== true
+    && currentMonthOutgoing === 0
+    && baselineMonthlyOutgoing > 0
   const salesAnomalyDetected = !prioritizeCurrentMonth
     && currentMonthOutgoing >= baselineMonthlyOutgoing * 2
     && currentMonthOutgoing - baselineMonthlyOutgoing >= 20
@@ -149,7 +152,9 @@ export function calculateStableMonthlyOutgoing(input: {
   const increasingTrendDetected = !prioritizeCurrentMonth
     && !salesAnomalyDetected
     && salesTrend === 'increasing'
-  const effectiveMonthlyOutgoing = prioritizeCurrentMonth
+  const effectiveMonthlyOutgoing = fallbackToAverageWhenCurrentMonthIsZero
+    ? baselineMonthlyOutgoing
+    : prioritizeCurrentMonth
     ? currentMonthOutgoing
     : increasingTrendDetected
       ? baselineMonthlyOutgoing * INCREASING_TREND_AVERAGE_WEIGHT

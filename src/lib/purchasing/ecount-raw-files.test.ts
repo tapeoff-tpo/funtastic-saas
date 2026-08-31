@@ -5,7 +5,11 @@ import {
   readEcountPurchasingRawFileRows,
   type EcountPurchasingUpload,
 } from './ecount-purchasing-sync'
-import { mergeEcountRawFiles, type StoredEcountRawFile } from './ecount-raw-files'
+import {
+  getNewIncrementalEcountRawRows,
+  mergeEcountRawFiles,
+  type StoredEcountRawFile,
+} from './ecount-raw-files'
 
 describe('mergeEcountRawFiles', () => {
   it('adds new history rows and refreshes an overlapping purchase row', async () => {
@@ -19,12 +23,20 @@ describe('mergeEcountRawFiles', () => {
 
     const [merged] = await mergeEcountRawFiles([stored('purchaseHistory', first)], [stored('purchaseHistory', next)])
     const report = await readEcountPurchasingRawFileRows(merged)
+    const newRows = await getNewIncrementalEcountRawRows(
+      [stored('purchaseHistory', first)],
+      [stored('purchaseHistory', next)],
+      'purchaseHistory',
+    )
 
     expect(report.rows).toHaveLength(2)
     expect(report.rows).toEqual(expect.arrayContaining([
       expect.objectContaining({ '일자-No.': '20260701-1', '구매수량(EA)': '12' }),
       expect.objectContaining({ '일자-No.': '20260801-1', '품목코드': '100002-0001' }),
     ]))
+    expect(newRows).toEqual([
+      expect.objectContaining({ '일자-No.': '20260801-1', '품목코드': '100002-0001' }),
+    ])
   })
 
   it('uses the newest outbound row for the same outbound management code', async () => {

@@ -57,14 +57,41 @@ export async function mergeEcountRawFiles(
 
     const headers = mergeHeaders(existingReport.headers, incomingReport.headers)
     const rowsByIdentity = new Map<string, Record<string, string>>()
-    for (const row of existingReport.rows) rowsByIdentity.set(rawRowIdentity(incoming.kind, row), row)
-    for (const row of incomingReport.rows) rowsByIdentity.set(rawRowIdentity(incoming.kind, row), row)
+    for (const row of existingReport.rows) rowsByIdentity.set(getEcountRawRowIdentity(incoming.kind, row), row)
+    for (const row of incomingReport.rows) rowsByIdentity.set(getEcountRawRowIdentity(incoming.kind, row), row)
 
     return {
       ...incoming,
       fileBuffer: await buildWorkbookBuffer(headers, [...rowsByIdentity.values()]),
     }
   }))
+}
+
+/**
+ * Returns only rows that were not already held in the accumulated raw file.
+ * This is used for the short period between a purchase-history update and the
+ * next China-inventory snapshot; existing history must not be reintroduced as
+ * a new in-progress purchase just because its workbook is uploaded again.
+ */
+export async function getNewIncrementalEcountRawRows(
+  storedFiles: StoredEcountRawFile[],
+  incomingFiles: StoredEcountRawFile[],
+  kind: EcountReportKind,
+) {
+  const incoming = incomingFiles.find((file) => file.kind === kind)
+  if (!incoming) return []
+
+  const incomingReport = await readEcountPurchasingRawFileRows(incoming)
+  const stored = storedFiles.find((file) => file.kind === kind)
+  if (!stored || !isIncrementalEcountRawFile(kind)) return incomingReport.rows
+
+  const storedReport = await readEcountPurchasingRawFileRows(stored)
+  const storedIdentities = new Set(
+    storedReport.rows.map((row) => getEcountRawRowIdentity(kind, row)),
+  )
+  return incomingReport.rows.filter((row) => (
+    !storedIdentities.has(getEcountRawRowIdentity(kind, row))
+  ))
 }
 
 async function ensureTable() {
@@ -97,7 +124,14 @@ export async function getStoredEcountRawFiles(userId: string): Promise<StoredEco
     FROM purchasing_ecount_raw_files
     WHERE user_id = ${userId}::uuid
   `)
-  const rows = Array.isArray(result) ? result : result.rows ?? []
+  const rows = Array.isArray(result)
+    ? result
+    : ((result as unknown as { rows?: Array<{
+      kind: string
+      fileName: string
+      fileBase64: string
+      updatedAt: string
+    }> }).rows ?? [])
   return rows
     .filter((row): row is typeof row & { kind: EcountReportKind } => KINDS.includes(row.kind as EcountReportKind))
     .map((row) => ({
@@ -115,7 +149,9 @@ export async function getStoredEcountRawFileState(userId: string): Promise<Store
     FROM purchasing_ecount_raw_files
     WHERE user_id = ${userId}::uuid
   `)
-  const rows = Array.isArray(result) ? result : result.rows ?? []
+  const rows = Array.isArray(result)
+    ? result
+    : ((result as unknown as { rows?: Array<{ kind: string; fileName: string; updatedAt: string }> }).rows ?? [])
   return Object.fromEntries(rows
     .filter((row) => KINDS.includes(row.kind as EcountReportKind))
     .map((row) => [row.kind, { fileName: row.fileName, updatedAt: row.updatedAt }]))
@@ -158,7 +194,7 @@ function mergeHeaders(existing: string[], incoming: string[]) {
   return headers
 }
 
-function rawRowIdentity(kind: EcountReportKind, row: Record<string, string>) {
+export function getEcountRawRowIdentity(kind: EcountReportKind, row: Record<string, string>) {
   const value = (header: string) => row[header]?.trim() ?? ''
   const sku = value('품목코드')
   const dateNo = value('일자-No.')

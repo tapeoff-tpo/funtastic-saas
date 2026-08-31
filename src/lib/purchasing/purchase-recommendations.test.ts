@@ -141,6 +141,31 @@ describe('stable monthly outgoing', () => {
     })
   })
 
+  it('falls back to the three-month average when a low-sales item has no current-month outgoing', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 0,
+      threeMonthAverageOutgoing: 1.7,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 1.7,
+      baselineMonthlyOutgoing: 1.7,
+      salesAnomalyDetected: false,
+      salesTrend: 'steady',
+    })
+  })
+
+  it('keeps new products on the current-month basis even when an old average exists', () => {
+    expect(calculateStableMonthlyOutgoing({
+      currentMonthOutgoing: 0,
+      threeMonthAverageOutgoing: 1.7,
+      isNewProduct: true,
+    })).toEqual({
+      effectiveMonthlyOutgoing: 0,
+      baselineMonthlyOutgoing: 1.7,
+      salesAnomalyDetected: false,
+      salesTrend: 'new_product',
+    })
+  })
+
   it('switches to the three-month average at exactly five units', () => {
     expect(calculateStableMonthlyOutgoing({
       currentMonthOutgoing: 2,

@@ -4,15 +4,22 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { createClient } from '@/lib/supabase/server'
 import {
   classifyEcountPurchasingUpload,
+  getEcountChinaInventorySnapshotDate,
   getEcountReportLabel,
+  getLatestChinaInventorySnapshotAsOfDate,
+  getPersistedPurchaseHistoryBridgeKeys,
+  getPurchaseHistoryBridgeKeyFromRawRow,
+  getPurchaseHistoryBridgeKeysAfterChinaInventorySnapshot,
   getEcountPurchasingSyncState,
   parseEcountPurchasingSnapshot,
+  readEcountPurchasingRawFileRows,
   summarizeEcountPurchasingSnapshot,
   syncEcountPurchasingSnapshot,
   type EcountPurchasingUpload,
   type EcountReportKind,
 } from '@/lib/purchasing/ecount-purchasing-sync'
 import {
+  getNewIncrementalEcountRawRows,
   getStoredEcountRawFiles,
   mergeEcountRawFiles,
   saveStoredEcountRawFiles,
@@ -79,6 +86,14 @@ export async function POST(request: NextRequest) {
     }
     const combined = new Map<EcountReportKind, StoredEcountRawFile>(stored.map((file) => [file.kind, file]))
     for (const file of accumulated) combined.set(file.kind, file)
+    const changedKinds = classified.map((file) => file.kind)
+    const purchaseHistoryBridgeKeys = await getPurchaseHistoryBridgeKeys({
+      userId: workspaceUserId,
+      stored,
+      incoming: classified,
+      combinedFiles: [...combined.values()],
+      chinaInventoryWasUpdated: changedKinds.includes('chinaInventory'),
+    })
     let snapshot
     try {
       snapshot = await parseEcountPurchasingSnapshot({
@@ -87,6 +102,7 @@ export async function POST(request: NextRequest) {
         domesticInventoryReflectedThrough: requiredText(form, 'domesticInventoryReflectedThrough'),
         purchasePlanConfirmedSince: requiredText(form, 'purchasePlanConfirmedSince'),
         allowMissingReports: true,
+        purchaseHistoryBridgeKeys,
       })
     } catch (error) {
       return NextResponse.json({
@@ -100,7 +116,7 @@ export async function POST(request: NextRequest) {
         mode,
         summary,
         storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
-        changedKinds: classified.map((file) => file.kind),
+        changedKinds,
         currentState: await getEcountPurchasingSyncState(workspaceUserId),
       })
     }
@@ -109,7 +125,7 @@ export async function POST(request: NextRequest) {
       userId: workspaceUserId,
       requestedByUserId: user.id,
       snapshot,
-      reportKinds: classified.map((file) => file.kind),
+      reportKinds: changedKinds,
     })
     await saveStoredEcountRawFiles(workspaceUserId, accumulated)
     await Promise.all(classified.map((file) => recordDataRefresh({
@@ -127,7 +143,7 @@ export async function POST(request: NextRequest) {
       summary,
       result,
       storedFiles: summarizeStoredEcountRawFiles([...combined.values()]),
-      changedKinds: classified.map((file) => file.kind),
+      changedKinds,
       currentState: await getEcountPurchasingSyncState(workspaceUserId),
     })
   } catch (error) {
@@ -143,4 +159,46 @@ function requiredText(form: FormData, key: string) {
   const value = form.get(key)
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${key} 값을 입력해주세요.`)
   return value.trim()
+}
+
+async function getPurchaseHistoryBridgeKeys(input: {
+  userId: string
+  stored: StoredEcountRawFile[]
+  incoming: StoredEcountRawFile[]
+  combinedFiles: StoredEcountRawFile[]
+  chinaInventoryWasUpdated: boolean
+}) {
+  const historyFile = input.combinedFiles.find((file) => file.kind === 'purchaseHistory')
+  const chinaInventoryFile = input.combinedFiles.find((file) => file.kind === 'chinaInventory')
+  const [persistedKeys, newHistoryRows, historyRows, reportSnapshotDate] = await Promise.all([
+    input.chinaInventoryWasUpdated
+      ? Promise.resolve([])
+      : getPersistedPurchaseHistoryBridgeKeys(input.userId),
+    getNewIncrementalEcountRawRows(input.stored, input.incoming, 'purchaseHistory'),
+    historyFile
+      ? readEcountPurchasingRawFileRows(historyFile).then((report) => report.rows)
+      : Promise.resolve([]),
+    chinaInventoryFile
+      ? getEcountChinaInventorySnapshotDate(chinaInventoryFile)
+      : Promise.resolve(null),
+  ])
+  const inventorySnapshotDate = reportSnapshotDate
+    ?? (input.chinaInventoryWasUpdated
+      ? null
+      : await getLatestChinaInventorySnapshotAsOfDate(input.userId))
+  const keys = new Set(persistedKeys)
+  const addBridgeKey = (row: Record<string, string>) => {
+    if (row['진행상태'] !== '확인') return
+    keys.add(getPurchaseHistoryBridgeKeyFromRawRow(row))
+  }
+  for (const key of getPurchaseHistoryBridgeKeysAfterChinaInventorySnapshot(
+    historyRows,
+    inventorySnapshotDate,
+  )) {
+    keys.add(key)
+  }
+  if (!input.chinaInventoryWasUpdated) {
+    for (const row of newHistoryRows) addBridgeKey(row)
+  }
+  return [...keys]
 }

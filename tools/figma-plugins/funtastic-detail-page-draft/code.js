@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.14'
+const PLUGIN_VERSION = '1.2.15'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -9,10 +9,11 @@ const BRIDGE_STATE_KEY = 'funtastic-detail-page-bridge'
 
 const GENERATED_ASSETS_BY_SKU = {
   '110336-0001': [
-    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-wash-v1.png`,
-    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-hang-v1.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-dishsoap-v2.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-petbowl-v2.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-curvewash-v2.png`,
+    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-drain-v2.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-texture-v1.png`,
-    `${SERVER_URL}/detail-page-assets/bone-loofah-ai-flatlay-v1.png`,
     `${SERVER_URL}/detail-page-assets/bone-loofah-ai-flex-v1.png`,
   ],
   '112369-0001': [`${SERVER_URL}/detail-page-assets/water-bucket-ai-lifestyle-v1.png`],
@@ -1039,10 +1040,10 @@ async function buildDessertBearFromReference(job, images, target) {
 function genericPointCopy(product) {
   const text = `${product.name} ${product.option} ${product.material}`.toLowerCase()
   if (product.sku === '110336-0001' || /뼈다귀.*수세미|수세미.*뼈다귀/.test(text)) return [
-    ['손에 착 감기는 뼈다귀 그립', '가운데가 잘록한 뼈다귀 모양이라 젖은 상태에서도 손에 안정적으로 잡혀요.'],
-    ['식물성 수세미 결로 개운하게', '촘촘하고 탄탄한 작물 수세미의 결이 그릇과 조리도구의 잔여물을 꼼꼼하게 닦아줘요.'],
-    ['양끝의 넓은 면으로 빠르게', '도톰하고 넓은 양끝 면이 세척할 곳에 고르게 닿아 넓은 그릇도 효율적으로 닦을 수 있어요.'],
-    ['헹군 뒤 걸어두면 산뜻하게', '사용 후 물로 충분히 헹군 다음 걸이끈에 걸어두면 물 빠짐과 보관이 한결 간편해요.'],
+    ['세제를 묻혀 풍성하게 거품 세척', '주방세제를 가볍게 묻혀 거품을 낸 뒤 그릇과 조리도구를 개운하게 닦아보세요.'],
+    ['강아지 밥그릇도 꼼꼼하게', '매일 사용하는 반려동물 식기 안쪽까지 뼈다귀 수세미로 깔끔하게 관리할 수 있어요.'],
+    ['그릇의 둥근 굴곡까지 부드럽게', '유연한 수세미 면이 그릇 안쪽 곡선을 따라 닿아 가장자리와 굴곡진 부분도 세척하기 편해요.'],
+    ['헹군 뒤 걸어두면 물 빠짐도 간편하게', '사용 후 깨끗이 헹구고 걸이끈에 걸어두면 싱크대 주변을 깔끔하게 정리할 수 있어요.'],
   ]
   if (/키링|인형|플러시|곰|베어/.test(text)) return [
     ['한눈에 반하는 포인트', '작지만 또렷한 디테일로 매일 드는 가방의 분위기를 바꿔줘요.'],

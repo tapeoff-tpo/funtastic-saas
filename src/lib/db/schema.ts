@@ -1293,6 +1293,7 @@ export const gptAccounts = pgTable(
       renewalDueOn: date('renewal_due_on'),
       status: varchar('status', { length: 30 }).notNull().default('in_use'),
     currentUserName: varchar('current_user_name', { length: 100 }),
+    dailyLimit: varchar('daily_limit', { length: 100 }),
     dailyResetTime: varchar('daily_reset_time', { length: 10 }),
     weeklyResetAt: timestamp('weekly_reset_at', { withTimezone: true }),
     fiveHourLimit: varchar('five_hour_limit', { length: 100 }),

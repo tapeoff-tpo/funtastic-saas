@@ -135,6 +135,8 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
   await updateAiAccountLimits({
     userId,
     accountId: String(formData.get('accountId') ?? ''),
+    dailyRemainingPercent: String(formData.get('dailyRemainingPercent') ?? '').trim(),
+    dailyResetTime: String(formData.get('dailyResetTime') ?? '').trim(),
     weeklyRemainingPercent,
     weeklyResetAt,
   })

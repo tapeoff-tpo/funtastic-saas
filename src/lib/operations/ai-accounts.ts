@@ -629,16 +629,28 @@ export async function addAiAccountMessage(input: {
 export async function updateAiAccountLimits(input: {
   userId: string
   accountId: string
+  dailyRemainingPercent?: string | null
+  dailyResetTime?: string | null
   weeklyRemainingPercent?: string | null
   weeklyResetAt?: Date | null
 }) {
   await ensureAiAccountTables()
+  const parsedDailyPercent = Number(input.dailyRemainingPercent)
+  const dailyLimit = input.dailyRemainingPercent?.trim() && Number.isFinite(parsedDailyPercent)
+    ? `잔여 ${Math.min(100, Math.max(0, Math.round(parsedDailyPercent)))}%`
+    : null
+  const dailyResetTime = input.dailyResetTime?.trim() || null
+  if (dailyResetTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(dailyResetTime)) {
+    return { error: '일 초기화 시각은 HH:MM 형식으로 입력해주세요.' as const }
+  }
   const parsedPercent = Number(input.weeklyRemainingPercent)
   const weeklyLimit = input.weeklyRemainingPercent?.trim() && Number.isFinite(parsedPercent)
     ? `잔여 ${Math.min(100, Math.max(0, Math.round(parsedPercent)))}%`
     : null
   const [row] = await db.update(gptAccounts)
     .set({
+      dailyLimit,
+      dailyResetTime,
       weeklyLimit,
       weeklyResetAt: input.weeklyResetAt || null,
       updatedAt: new Date(),
@@ -651,7 +663,7 @@ export async function updateAiAccountLimits(input: {
     userId: input.userId,
     accountId: input.accountId,
     eventType: 'limit_updated',
-    message: '주간 한도 설정을 수정했습니다.',
+    message: '일/주 사용 한도와 초기화 시각을 수정했습니다.',
   })
   return { success: true }
 }

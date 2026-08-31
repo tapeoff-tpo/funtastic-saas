@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.30'
+const PLUGIN_VERSION = '1.2.31'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1188,9 +1188,9 @@ async function makeBoneLoofahPoint(index, point, imageUrl, supportImageUrl) {
   section.appendChild(card)
   const pointLabel = appendText(card, `POINT ${String(index).padStart(2, '0')}`, 52, 54, 676, 20, 'Bold', { r: 0.67, g: 0.43, b: 0.25 })
   pointLabel.letterSpacing = { value: 10, unit: 'PERCENT' }
-  const pointTitle = appendText(card, point[0], 52, 108, 676, 50, 'Bold', COLORS.ink)
+  const pointTitle = appendText(card, point[0], 52, 108, 676, 48, 'Semi Bold', { r: 0.25, g: 0.17, b: 0.13 })
   pointTitle.lineHeight = { value: 125, unit: 'PERCENT' }
-  const pointBody = appendText(card, point[1], 52, 252, 676, 27, 'Semi Bold', { r: 0.29, g: 0.27, b: 0.25 })
+  const pointBody = appendText(card, point[1], 52, 252, 676, 27, 'Regular', { r: 0.39, g: 0.34, b: 0.3 })
   pointBody.lineHeight = { value: 145, unit: 'PERCENT' }
   const image = await makeImage(imageUrl, 676, 570, `POINT ${String(index).padStart(2, '0')} / MAIN IMAGE`)
   image.x = 52; image.y = 410; image.cornerRadius = 24

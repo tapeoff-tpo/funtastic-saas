@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.16'
+const PLUGIN_VERSION = '1.2.17'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1040,10 +1040,10 @@ async function buildDessertBearFromReference(job, images, target) {
 function genericPointCopy(product) {
   const text = `${product.name} ${product.option} ${product.material}`.toLowerCase()
   if (product.sku === '110336-0001' || /뼈다귀.*수세미|수세미.*뼈다귀/.test(text)) return [
-    ['세제를 묻혀 풍성하게 거품 세척', '주방세제를 가볍게 묻혀 거품을 낸 뒤 그릇과 조리도구를 개운하게 닦아보세요.'],
-    ['강아지 밥그릇도 꼼꼼하게', '매일 사용하는 반려동물 식기 안쪽까지 뼈다귀 수세미로 깔끔하게 관리할 수 있어요.'],
-    ['그릇의 둥근 굴곡까지 부드럽게', '유연한 수세미 면이 그릇 안쪽 곡선을 따라 닿아 가장자리와 굴곡진 부분도 세척하기 편해요.'],
-    ['헹군 뒤 걸어두면 물 빠짐도 간편하게', '사용 후 깨끗이 헹구고 걸이끈에 걸어두면 싱크대 주변을 깔끔하게 정리할 수 있어요.'],
+    ['세제와 만나 거품이 풍성하게', '촘촘한 작물 수세미 결 사이로 세제가 고르게 퍼져 풍성한 거품 세척을 도와줘요.'],
+    ['우리 집 식기를 한 번에 깨끗하게', '일반 그릇은 물론 매일 사용하는 강아지 밥그릇까지 꼼꼼하게 닦아보세요.'],
+    ['잘록한 뼈다귀 쉐입, 손에 쏙', '가운데가 잘록해 손에 안정적으로 잡히고, 둥근 양끝이 그릇의 굴곡을 따라 부드럽게 닿아요.'],
+    ['씻고 걸어두면 보관까지 산뜻하게', '사용 후 깨끗이 헹군 다음 걸이끈에 걸어두면 물 빠짐과 싱크대 정리가 간편해요.'],
   ]
   if (/키링|인형|플러시|곰|베어/.test(text)) return [
     ['한눈에 반하는 포인트', '작지만 또렷한 디테일로 매일 드는 가방의 분위기를 바꿔줘요.'],

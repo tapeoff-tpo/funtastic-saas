@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.22'
+const PLUGIN_VERSION = '1.2.23'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1255,6 +1255,24 @@ function validateGeneratedFrame(frame, expectedImageCount) {
   frame.setPluginData('funtastic-layout-qa', JSON.stringify({ checkedAt: new Date().toISOString(), textCount: texts.length, imageCount: images.length }))
 }
 
+function cleanupTemporaryOverlays(target, sku) {
+  const page = target.parent
+  if (!page || page.type !== 'PAGE') return
+  const targetBox = target.absoluteBoundingBox
+  if (!targetBox) return
+  const temporaryPattern = /^(썸네일\s*\d*|thumbnail\s*\d*|제작중|등록완료|제작완료|test)$/i
+  for (const node of [...page.children]) {
+    if (node === target) continue
+    const label = node.type === 'TEXT' ? node.characters.trim() : node.name.trim()
+    const isFailedBuild = node.name === `AUTO QA BUILD · ${sku}`
+    if (!temporaryPattern.test(label) && !isFailedBuild) continue
+    const box = node.absoluteBoundingBox
+    if (!box) continue
+    const overlaps = box.x < targetBox.x + targetBox.width && box.x + box.width > targetBox.x && box.y < targetBox.y + targetBox.height && box.y + box.height > targetBox.y
+    if (overlaps || isFailedBuild) node.remove()
+  }
+}
+
 async function findOrCreateGenericTarget(job) {
   await figma.loadAllPagesAsync()
   for (const page of figma.root.children) {
@@ -1322,7 +1340,7 @@ async function buildGenericDraft(job) {
     target.name = `${job.product.name} ${job.product.sku} · 프리미엄 자동 제작본`
     target.setPluginData('funtastic-job-id', job.id); target.setPluginData('funtastic-sku', job.product.sku); target.setPluginData('funtastic-template', 'premium-editorial-v2')
     target.setPluginData('funtastic-layout-qa', scratch.getPluginData('funtastic-layout-qa'))
-    scratch.remove(); figma.currentPage.selection = [target]; figma.viewport.scrollAndZoomIntoView([target])
+    scratch.remove(); cleanupTemporaryOverlays(target, job.product.sku); figma.currentPage.selection = [target]; figma.viewport.scrollAndZoomIntoView([target])
     return target
   } catch (error) {
     try { scratch.remove() } catch {}

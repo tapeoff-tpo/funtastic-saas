@@ -45,7 +45,8 @@ type LoginInfo = {
 }
 
 function statusClassName(status: string) {
-  if (status === 'daily_limit_reached' || status === 'weekly_limit_reached') return 'border-red-200 bg-red-50 text-red-700'
+  if (status === 'daily_limit_reached') return 'border-amber-200 bg-amber-50 text-amber-800'
+  if (status === 'weekly_limit_reached') return 'border-red-200 bg-red-50 text-red-700'
   if (status === 'in_use') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   return 'border-slate-200 bg-slate-50 text-slate-600'
 }

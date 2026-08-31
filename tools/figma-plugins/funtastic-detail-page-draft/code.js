@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.24'
+const PLUGIN_VERSION = '1.2.25'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1074,8 +1074,9 @@ async function makeGenericCover(job, images) {
     const section = makeSection('00 COVER / BONE LOOFAH EDITORIAL', 1220, COLORS.paper)
     const hero = await makeImage(`${SERVER_URL}/detail-page-assets/bone-loofah-cover-editorial-v1.png`, 760, 880, 'COVER / BONE LOOFAH HERO')
     hero.x = 50; hero.y = 50; hero.cornerRadius = 32; section.appendChild(hero)
-    appendText(section, 'BONE SHAPED LOOFAH SCRUBBER', 50, 988, 760, 16, 'Bold', COLORS.amber)
-    appendText(section, job.product.name, 50, 1038, 760, 48, 'Bold', COLORS.ink)
+    const coverEyebrow = appendText(section, 'BONE SHAPED LOOFAH SCRUBBER', 50, 982, 760, 19, 'Bold', COLORS.amber)
+    coverEyebrow.letterSpacing = { value: 8, unit: 'PERCENT' }
+    appendText(section, job.product.name, 50, 1038, 760, 52, 'Bold', COLORS.ink)
     return section
   }
   const section = makeSection('00 COVER / PREMIUM EDITORIAL', 1220, COLORS.paper)
@@ -1102,7 +1103,7 @@ async function makeGenericOptions(job, images) {
   const names = genericOptionNames(job.product)
   const section = makeSection('01 OPTION / SPLIT EDITORIAL', 1120, COLORS.soft)
   makeLabel(section, 'OPTION', 50, 54, 118, COLORS.amber)
-  appendText(section, '옵션을 한눈에 확인하세요', 50, 116, 760, 40, 'Bold')
+  appendText(section, '옵션을 한눈에 확인하세요', 50, 116, 760, 44, 'Bold')
   const single = names.length === 1
   const width = single ? 760 : 370
   for (let index = 0; index < names.length; index += 1) {
@@ -1115,11 +1116,11 @@ async function makeGenericOptions(job, images) {
     const panel = figma.createFrame()
     panel.resize(width, 220); panel.x = 0; panel.y = 570
     panel.fills = [{ type: 'SOLID', color: index % 2 ? COLORS.red : COLORS.green }]
-    appendText(panel, names[index], 28, 46, width - 56, 26, 'Bold', COLORS.paper)
-    appendText(panel, job.product.size || '사이즈 정보 확인', 28, 116, width - 56, 17, 'Semi Bold', COLORS.paper)
+    appendText(panel, names[index], 28, 42, width - 56, 30, 'Bold', COLORS.paper)
+    appendText(panel, job.product.size || '사이즈 정보 확인', 28, 116, width - 56, 21, 'Semi Bold', COLORS.paper)
     card.appendChild(panel); section.appendChild(card)
   }
-  appendText(section, '* 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1048, 760, 14, 'Regular', COLORS.muted)
+  appendText(section, '* 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1044, 760, 17, 'Regular', COLORS.muted)
   return section
 }
 
@@ -1140,7 +1141,9 @@ async function makeGenericPoint(index, point, imageUrl) {
 function makeBoneLoofahIntro() {
   const section = makeSection('INTRO / REFERENCE-INSPIRED SUMMARY', 1180, { r: 0.68, g: 0.62, b: 0.56 })
   appendText(section, '뼈다귀 수세미가\n처음이라면?', 50, 72, 760, 48, 'Bold', COLORS.paper).textAlignHorizontal = 'CENTER'
-  appendText(section, '물에 적셔 부드럽게 만든 뒤 세제를 묻혀 사용해보세요.', 50, 210, 760, 19, 'Regular', COLORS.paper).textAlignHorizontal = 'CENTER'
+  const introBody = appendText(section, '물에 충분히 적셔 부드럽게 만든 뒤\n주방세제를 묻혀 사용해보세요.', 80, 210, 700, 23, 'Regular', COLORS.paper)
+  introBody.textAlignHorizontal = 'CENTER'
+  introBody.lineHeight = { value: 145, unit: 'PERCENT' }
   const cards = [
     ['도톰한 사용감', '물에 적시면\n한층 부드럽게'],
     ['풍성한 거품', '세제가 고르게\n퍼지는 섬유 결'],
@@ -1152,20 +1155,26 @@ function makeBoneLoofahIntro() {
     box.resize(355, 300); box.x = 50 + (index % 2) * 405; box.y = 330 + Math.floor(index / 2) * 350
     box.cornerRadius = 24; box.fills = [{ type: 'SOLID', color: COLORS.paper }]
     section.appendChild(box)
-    appendText(box, card[0], 28, 42, 299, 24, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-    appendText(box, card[1], 28, 118, 299, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+    appendText(box, String(index + 1).padStart(2, '0'), 28, 32, 299, 16, 'Bold', COLORS.amber).textAlignHorizontal = 'CENTER'
+    appendText(box, card[0], 28, 78, 299, 28, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
+    const summary = appendText(box, card[1], 28, 142, 299, 21, 'Regular', COLORS.muted)
+    summary.textAlignHorizontal = 'CENTER'
+    summary.lineHeight = { value: 145, unit: 'PERCENT' }
   })
   return section
 }
 
 async function makeBoneLoofahPoint(index, point, imageUrl) {
-  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / O-HEN REFERENCE`, 1080, COLORS.paper)
-  appendText(section, 'Point', 50, 52, 760, 26, 'Regular', { r: 0.86, g: 0.7, b: 0.42 }).textAlignHorizontal = 'CENTER'
-  appendText(section, String(index).padStart(2, '0'), 50, 96, 760, 18, 'Bold', COLORS.muted).textAlignHorizontal = 'CENTER'
-  appendText(section, point[0], 50, 152, 760, 40, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-  appendText(section, point[1], 90, 228, 680, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / O-HEN REFERENCE`, 1130, COLORS.paper)
+  const pointLabel = appendText(section, `POINT ${String(index).padStart(2, '0')}`, 50, 56, 760, 20, 'Bold', { r: 0.72, g: 0.48, b: 0.29 })
+  pointLabel.textAlignHorizontal = 'CENTER'
+  pointLabel.letterSpacing = { value: 10, unit: 'PERCENT' }
+  appendText(section, point[0], 60, 126, 740, 43, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
+  const pointBody = appendText(section, point[1], 95, 246, 670, 22, 'Regular', { r: 0.32, g: 0.29, b: 0.26 })
+  pointBody.textAlignHorizontal = 'CENTER'
+  pointBody.lineHeight = { value: 150, unit: 'PERCENT' }
   const image = await makeImage(imageUrl, 760, 650, `POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
-  image.x = 50; image.y = 360; image.cornerRadius = 0
+  image.x = 50; image.y = 430; image.cornerRadius = 0
   section.appendChild(image)
   return section
 }
@@ -1176,7 +1185,7 @@ function makeBoneLoofahCare() {
   eyebrow.textAlignHorizontal = 'CENTER'
   eyebrow.letterSpacing = { value: 12, unit: 'PERCENT' }
   appendText(section, '오래도록 산뜻하게 사용하는 법', 50, 112, 760, 38, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-  appendText(section, '간단한 관리만으로 수세미를 더욱 위생적으로 사용해보세요.', 80, 176, 700, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  appendText(section, '간단한 관리만으로 수세미를 더욱 위생적으로 사용해보세요.', 80, 176, 700, 20, 'Regular', { r: 0.36, g: 0.32, b: 0.28 }).textAlignHorizontal = 'CENTER'
 
   const tips = [
     ['충분히 적시기', '첫 사용 전 미지근한 물에\n5~10분간 충분히 적셔주세요.'],
@@ -1206,7 +1215,7 @@ function makeBoneLoofahCare() {
     const numberText = appendText(box, String(index + 1).padStart(2, '0'), 151, 38, 48, 16, 'Bold', COLORS.paper)
     numberText.textAlignHorizontal = 'CENTER'
     appendText(box, title, 25, 91, 300, 23, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-    const bodyText = appendText(box, body, 25, 132, 300, 16, 'Regular', COLORS.muted)
+    const bodyText = appendText(box, body, 25, 132, 300, 18, 'Regular', { r: 0.34, g: 0.3, b: 0.27 })
     bodyText.textAlignHorizontal = 'CENTER'
     bodyText.lineHeight = { value: 150, unit: 'PERCENT' }
   })
@@ -1244,7 +1253,7 @@ async function makeGenericSize(product, imageUrl) {
   vertical.fills = [{ type: 'SOLID', color: COLORS.red }]
   section.appendChild(vertical)
   appendText(section, product.size || '사이즈 정보 확인', 50, 916, 760, 28, 'Bold', COLORS.red).textAlignHorizontal = 'CENTER'
-  appendText(section, '* 봉제·조립 제품은 측정 위치와 방법에 따라 오차가 있을 수 있습니다.', 50, 1014, 760, 14, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  appendText(section, '* 제품은 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1008, 760, 17, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
   return section
 }
 
@@ -1257,8 +1266,8 @@ function makeGenericProductInfo(product) {
     const row = figma.createFrame()
     row.name = label; row.resize(760, 78); row.x = 50; row.y = 202 + index * 86
     row.fills = [{ type: 'SOLID', color: index % 2 ? COLORS.paper : COLORS.soft }]
-    appendText(row, label, 22, 25, 150, 15, 'Semi Bold', COLORS.muted)
-    const valueText = appendText(row, value, 182, 23, 548, 17, 'Semi Bold', COLORS.ink)
+    appendText(row, label, 22, 23, 150, 18, 'Semi Bold', COLORS.muted)
+    const valueText = appendText(row, value, 182, 21, 548, 20, 'Semi Bold', COLORS.ink)
     valueText.textAlignHorizontal = 'RIGHT'; section.appendChild(row)
   })
   return section

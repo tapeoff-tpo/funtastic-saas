@@ -13,6 +13,7 @@ import {
   deleteAiAccountUserCandidates,
   readAiAccountPassword,
   readAiAccountLoginInfo,
+  resetAiAccountRuntimeState,
   updateAiAccount,
   updateAiAccountAvailability,
   updateAiAccountLimits,
@@ -167,6 +168,17 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
     dailyResetTime,
     weeklyRemainingPercent,
     weeklyResetAt,
+  })
+  if (!('error' in result)) revalidatePath('/operations/ai-accounts')
+  return result
+}
+
+export async function resetAiAccountRuntimeStateAction(formData: FormData) {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+  const result = await resetAiAccountRuntimeState({
+    userId,
+    accountId: String(formData.get('accountId') ?? ''),
   })
   if (!('error' in result)) revalidatePath('/operations/ai-accounts')
   return result

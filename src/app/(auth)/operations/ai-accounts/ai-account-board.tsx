@@ -2,12 +2,13 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
-import { Eye, EyeOff, KeyRound, Save } from 'lucide-react'
+import { Eye, EyeOff, KeyRound, RotateCcw, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import {
   readAiAccountLoginInfoAction,
+  resetAiAccountRuntimeStateAction,
   updateAiAccountAvailabilityAction,
   updateAiAccountLimitsAction,
   updateAiAccountLoginInfoAction,
@@ -109,6 +110,8 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
   const [loginLoading, setLoginLoading] = useState(false)
   const [showPasswords, setShowPasswords] = useState(false)
   const [loginError, setLoginError] = useState('')
+  const [loginNotice, setLoginNotice] = useState('')
+  const [savingLogin, setSavingLogin] = useState(false)
 
   const sortedAccounts = useMemo(() => accounts.map((account, index) => ({ account, index }))
     .sort((left, right) => Number(right.account.sharedUse) - Number(left.account.sharedUse) || right.account.resetAvailableCount - left.account.resetAvailableCount || left.index - right.index)
@@ -148,6 +151,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
       gptPassword: '',
     })
     setLoginError('')
+    setLoginNotice('')
     setShowPasswords(false)
     if (cachedInfo) {
       setLoginLoading(false)
@@ -159,6 +163,28 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
     if ('error' in result) return setLoginError(result.error || '로그인 정보를 불러오지 못했습니다.')
     setLoginInfoCache((current) => ({ ...current, [accountId]: result }))
     setLoginInfo(result)
+  }
+
+  function saveLoginInfo(formData: FormData) {
+    setLoginError('')
+    setLoginNotice('')
+    setSavingLogin(true)
+    startTransition(async () => {
+      const result = await updateAiAccountLoginInfoAction(formData)
+      setSavingLogin(false)
+      if ('error' in result) return setLoginError(result.error || '로그인 정보를 저장하지 못했습니다.')
+      setLoginInfoCache((current) => ({
+        ...current,
+        [String(formData.get('accountId'))]: {
+          loginMethod: String(formData.get('loginMethod') || ''),
+          loginId: String(formData.get('loginId') || ''),
+          loginPassword: String(formData.get('loginPassword') || ''),
+          gptId: String(formData.get('gptId') || ''),
+          gptPassword: String(formData.get('gptPassword') || ''),
+        },
+      }))
+      setLoginNotice('저장했습니다.')
+    })
   }
 
   return (
@@ -199,9 +225,12 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
                     <span className="text-xs font-medium text-muted-foreground">주간</span><Input name="weeklyResetTime" type="text" inputMode="numeric" placeholder="MMDDHHMM" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} onBlur={(event) => { event.currentTarget.value = normalizeWeeklyResetInput(event.currentTarget.value) }} aria-label={`${account.name} 주간 초기화 일시`} className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
                     {limitErrors[account.id] ? <p className="col-span-5 text-xs text-destructive">{limitErrors[account.id]}</p> : null}
                   </form>
+                  <form action={resetAiAccountRuntimeStateAction}>
+                    <input type="hidden" name="accountId" value={account.id} />
+                    <Button type="submit" variant="outline" className="h-9 w-full text-xs" title={`${account.name} 상태와 초기화 시각 초기화`}><RotateCcw className="h-3.5 w-3.5" />초기화</Button>
+                  </form>
                   <form action={updateAiAccountAvailabilityAction} className="contents">
                     <input type="hidden" name="accountId" value={account.id} /><input type="hidden" name="changedField" value="" />
-                    <select name="resetAvailableCount" defaultValue={String(account.resetAvailableCount)} onChange={(event) => { const form = event.currentTarget.form; const field = form?.elements.namedItem('changedField'); if (field instanceof HTMLInputElement) field.value = 'resetAvailableCount'; form?.requestSubmit() }} aria-label={`${account.name} 초기화 가능 수`} className="h-9 w-full rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">{[0, 1, 2, 3].map((count) => <option key={count} value={count}>{count}개</option>)}</select>
                     <label className="flex h-9 items-center gap-2 rounded-md border bg-background px-2 text-xs font-medium"><input type="checkbox" name="sharedUse" value="true" defaultChecked={account.sharedUse} disabled={account.sharedUse} onChange={(event) => { const form = event.currentTarget.form; const field = form?.elements.namedItem('changedField'); if (field instanceof HTMLInputElement) field.value = 'sharedUse'; form?.requestSubmit() }} className="h-4 w-4" />{account.sharedUse ? '고정됨' : '사용 중'}</label>
                   </form>
                   <Button type="button" variant="outline" size="icon" className="h-9 w-9" title={`${account.name} 로그인 정보`} onClick={() => openLoginInfo(account.id)}><KeyRound className="h-4 w-4" /></Button>
@@ -219,19 +248,20 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
             <Dialog.Description className="mt-1 text-sm text-muted-foreground">간편 로그인과 GPT 계정 정보를 분리해 관리합니다.</Dialog.Description>
             {loginLoading ? <p className="mt-2 text-xs text-muted-foreground">저장된 비밀번호를 불러오는 중입니다.</p> : null}
             {loginError ? <p className="mt-4 text-sm text-destructive">{loginError}</p> : null}
-            {loginAccount && loginInfo ? <form key={`${loginAccount.id}-${loginInfo.loginPassword}-${loginInfo.gptPassword}`} action={updateAiAccountLoginInfoAction} className="mt-5 space-y-4">
+            {loginNotice ? <p className="mt-4 text-sm text-emerald-700">{loginNotice}</p> : null}
+            {loginAccount && loginInfo ? <form key={`${loginAccount.id}-${loginInfo.loginPassword}-${loginInfo.gptPassword}`} onSubmit={(event) => { event.preventDefault(); saveLoginInfo(new FormData(event.currentTarget)) }} className="mt-5 space-y-4">
               <input type="hidden" name="accountId" value={loginAccount.id} />
               <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">로그인 방식</span><select name="loginMethod" defaultValue={loginInfo.loginMethod} className="h-9 w-full rounded-md border bg-background px-3 text-sm"><option value="">선택 안 함</option><option value="피클">피클</option><option value="지메일">지메일</option><option value="네이버">네이버</option><option value="카카오">카카오</option><option value="기타">기타</option></select></label>
+                <label className="space-y-1 sm:col-span-2"><span className="text-xs font-medium text-muted-foreground">로그인 방식</span><select name="loginMethod" defaultValue={loginInfo.loginMethod} className="h-9 w-full rounded-md border bg-background px-3 text-sm"><option value="">선택 안 함</option><option value="피클">피클</option><option value="지메일">지메일</option><option value="네이버">네이버</option><option value="카카오">카카오</option><option value="기타">기타</option></select></label>
                 <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">로그인 아이디</span><Input name="loginId" defaultValue={loginInfo.loginId} autoComplete="username" className="h-9" /></label>
                 <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">로그인 비밀번호</span><Input name="loginPassword" type={showPasswords ? 'text' : 'password'} defaultValue={loginInfo.loginPassword} autoComplete="new-password" className="h-9" /></label>
                 <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">GPT 아이디</span><Input name="gptId" defaultValue={loginInfo.gptId} autoComplete="username" className="h-9" /></label>
-                <label className="space-y-1 sm:col-span-2"><span className="text-xs font-medium text-muted-foreground">GPT 비밀번호</span><Input name="gptPassword" type={showPasswords ? 'text' : 'password'} defaultValue={loginInfo.gptPassword} autoComplete="new-password" className="h-9" /></label>
+                <label className="space-y-1"><span className="text-xs font-medium text-muted-foreground">GPT 비밀번호</span><Input name="gptPassword" type={showPasswords ? 'text' : 'password'} defaultValue={loginInfo.gptPassword} autoComplete="new-password" className="h-9" /></label>
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <Button type="button" variant="outline" className="h-9" onClick={() => setShowPasswords((current) => !current)}>{showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}{showPasswords ? '비밀번호 숨기기' : '비밀번호 보기'}</Button>
                 <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline" className="h-9">닫기</Button>} />
-                <Button type="submit" className="h-9"><Save className="h-4 w-4" />저장</Button>
+                <Button type="submit" className="h-9" disabled={savingLogin}>{savingLogin ? '저장 중' : '저장'}</Button>
               </div>
             </form> : null}
           </Dialog.Popup>

@@ -765,3 +765,31 @@ export async function updateAiAccountLimits(input: {
   })
   return { success: true }
 }
+
+export async function resetAiAccountRuntimeState(input: {
+  userId: string
+  accountId: string
+}) {
+  await ensureAiAccountTables()
+  const [row] = await db.update(gptAccounts)
+    .set({
+      status: 'unselected',
+      currentUserName: null,
+      dailyLimit: null,
+      dailyResetTime: null,
+      weeklyLimit: null,
+      weeklyResetAt: null,
+      updatedAt: new Date(),
+    })
+    .where(and(eq(gptAccounts.userId, input.userId), eq(gptAccounts.id, input.accountId)))
+    .returning({ id: gptAccounts.id })
+  if (!row) return { error: '계정을 찾을 수 없습니다.' as const }
+
+  await db.insert(gptAccountMessages).values({
+    userId: input.userId,
+    accountId: input.accountId,
+    eventType: 'account_runtime_reset',
+    message: '상태, 사용자, 일간/주간 초기화 시각을 초기화했습니다.',
+  })
+  return { success: true }
+}

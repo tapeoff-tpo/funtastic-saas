@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.23'
+const PLUGIN_VERSION = '1.2.24'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1171,19 +1171,44 @@ async function makeBoneLoofahPoint(index, point, imageUrl) {
 }
 
 function makeBoneLoofahCare() {
-  const section = makeSection('HOW TO CARE / BONE LOOFAH', 880, { r: 0.68, g: 0.62, b: 0.56 })
-  appendText(section, 'How to care', 50, 58, 760, 28, 'Regular', { r: 0.95, g: 0.83, b: 0.62 }).textAlignHorizontal = 'CENTER'
-  appendText(section, '올바르게 사용하고 관리해요', 50, 118, 760, 36, 'Bold', COLORS.paper).textAlignHorizontal = 'CENTER'
+  const section = makeSection('HOW TO CARE / BONE LOOFAH', 790, { r: 0.96, g: 0.93, b: 0.87 })
+  const eyebrow = appendText(section, 'HOW TO CARE', 50, 60, 760, 22, 'Bold', { r: 0.66, g: 0.43, b: 0.25 })
+  eyebrow.textAlignHorizontal = 'CENTER'
+  eyebrow.letterSpacing = { value: 12, unit: 'PERCENT' }
+  appendText(section, '오래도록 산뜻하게 사용하는 법', 50, 112, 760, 38, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
+  appendText(section, '간단한 관리만으로 수세미를 더욱 위생적으로 사용해보세요.', 80, 176, 700, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+
   const tips = [
-    '처음 사용할 때는 미지근한 물에 5~10분 정도 충분히 적셔주세요.',
-    '사용 후에는 남아 있는 세제와 이물질을 깨끗하게 헹궈주세요.',
-    '걸이끈을 이용해 통풍이 잘되는 곳에서 완전히 말려주세요.',
-    '오염이나 마모 상태를 확인하고 필요할 때 새 제품으로 교체해주세요.',
+    ['충분히 적시기', '첫 사용 전 미지근한 물에\n5~10분간 충분히 적셔주세요.'],
+    ['깨끗하게 헹구기', '사용 후 세제와 이물질이\n남지 않도록 헹궈주세요.'],
+    ['통풍 건조하기', '걸이끈을 이용해 바람이 잘 드는\n곳에서 완전히 말려주세요.'],
+    ['상태 확인하기', '오염이나 마모가 보이면\n새 제품으로 교체해주세요.'],
   ]
-  tips.forEach((tip, index) => {
-    const box = figma.createFrame(); box.resize(760, 116); box.x = 50; box.y = 230 + index * 142
-    box.cornerRadius = 8; box.fills = [{ type: 'SOLID', color: COLORS.paper }]; section.appendChild(box)
-    appendText(box, tip, 30, 30, 700, 17, index === 0 ? 'Bold' : 'Regular', COLORS.ink).textAlignHorizontal = 'CENTER'
+  tips.forEach(([title, body], index) => {
+    const column = index % 2
+    const row = Math.floor(index / 2)
+    const box = figma.createFrame()
+    box.resize(350, 202)
+    box.x = 60 + column * 390
+    box.y = 268 + row * 232
+    box.cornerRadius = 22
+    box.fills = [{ type: 'SOLID', color: COLORS.paper }]
+    box.strokes = [{ type: 'SOLID', color: { r: 0.89, g: 0.82, b: 0.72 } }]
+    box.strokeWeight = 1
+    section.appendChild(box)
+
+    const number = figma.createEllipse()
+    number.resize(48, 48)
+    number.x = 151
+    number.y = 24
+    number.fills = [{ type: 'SOLID', color: { r: 0.74, g: 0.48, b: 0.28 } }]
+    box.appendChild(number)
+    const numberText = appendText(box, String(index + 1).padStart(2, '0'), 151, 38, 48, 16, 'Bold', COLORS.paper)
+    numberText.textAlignHorizontal = 'CENTER'
+    appendText(box, title, 25, 91, 300, 23, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
+    const bodyText = appendText(box, body, 25, 132, 300, 16, 'Regular', COLORS.muted)
+    bodyText.textAlignHorizontal = 'CENTER'
+    bodyText.lineHeight = { value: 150, unit: 'PERCENT' }
   })
   return section
 }

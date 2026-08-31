@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.31'
+const PLUGIN_VERSION = '1.2.32'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -1279,6 +1279,36 @@ async function makeGenericSize(product, imageUrl) {
   return section
 }
 
+async function makeBoneLoofahSize(imageUrl) {
+  const section = makeSection('05 SIZE INFO / BONE LOOFAH CUTOUT', 1120, COLORS.paper)
+  makeLabel(section, 'SIZE INFO', 50, 54, 136, COLORS.amber)
+  appendText(section, '한눈에 확인하는 실제 크기', 50, 118, 760, 42, 'Bold', { r: 0.25, g: 0.17, b: 0.13 })
+  const image = await makeImage(imageUrl, 500, 650, 'SIZE INFO / BONE LOOFAH CUTOUT')
+  image.x = 150; image.y = 240; image.cornerRadius = 0
+  section.appendChild(image)
+
+  const dimensionColor = { r: 0.84, g: 0.12, b: 0.1 }
+  const addLine = (x, y, width, height) => {
+    const line = figma.createRectangle()
+    line.resize(width, height); line.x = x; line.y = y
+    line.fills = [{ type: 'SOLID', color: dimensionColor }]
+    section.appendChild(line)
+  }
+  addLine(682, 318, 4, 480)
+  addLine(670, 318, 28, 4)
+  addLine(670, 794, 28, 4)
+  const verticalText = appendText(section, '14 cm', 700, 530, 110, 25, 'Bold', dimensionColor)
+  verticalText.textAlignHorizontal = 'CENTER'
+
+  addLine(226, 928, 350, 4)
+  addLine(226, 916, 4, 28)
+  addLine(572, 916, 4, 28)
+  const horizontalText = appendText(section, '8.5 cm', 326, 956, 150, 25, 'Bold', dimensionColor)
+  horizontalText.textAlignHorizontal = 'CENTER'
+  appendText(section, '* 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1040, 760, 19, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  return section
+}
+
 function makeGenericProductInfo(product) {
   const section = makeSection('06 PRODUCT INFO', 890, COLORS.soft)
   makeLabel(section, 'PRODUCT INFO', 50, 54, 166, COLORS.green)
@@ -1382,7 +1412,9 @@ async function buildGenericDraft(job) {
     const sizeImage = job.product.sku === '110336-0001'
       ? `${SERVER_URL}/detail-page-assets/bone-loofah-cutout-v4.png`
       : images[0]
-    scratch.appendChild(await makeGenericSize(job.product, sizeImage))
+    scratch.appendChild(job.product.sku === '110336-0001'
+      ? await makeBoneLoofahSize(sizeImage)
+      : await makeGenericSize(job.product, sizeImage))
     scratch.appendChild(makeGenericProductInfo(job.product))
     scratch.appendChild(makeStandardCautions({ specificCautions: [] }))
     scratch.appendChild(await cloneIpNotice())

@@ -1,5 +1,5 @@
 const SERVER_URL = 'https://funtastic-saas-vercel.vercel.app'
-const PLUGIN_VERSION = '1.2.24'
+const PLUGIN_VERSION = '1.2.33'
 const DEFAULT_FILE_KEY = 'X8yYgVtrAFKycEA0yy0kWI'
 const CANONICAL_DETAIL_PAGE_ANCHOR_ID = '390:2'
 const AUTO_SYNC_INTERVAL_MS = 8_000
@@ -38,6 +38,12 @@ const COLORS = {
   coral: { r: 0.9, g: 0.28, b: 0.21 },
   peach: { r: 0.99, g: 0.92, b: 0.86 },
   lavender: { r: 0.92, g: 0.91, b: 0.98 },
+}
+
+const FONT_BY_STYLE = {
+  Regular: { family: 'Inter', style: 'Regular' },
+  'Semi Bold': { family: 'Inter', style: 'Semi Bold' },
+  Bold: { family: 'Inter', style: 'Bold' },
 }
 
 const REQUIRED_CAUTIONS = [
@@ -266,16 +272,19 @@ function errorMessage(error) {
 }
 
 async function loadFonts() {
-  await Promise.all([
-    figma.loadFontAsync({ family: 'Inter', style: 'Regular' }),
-    figma.loadFontAsync({ family: 'Inter', style: 'Semi Bold' }),
-    figma.loadFontAsync({ family: 'Inter', style: 'Bold' }),
-  ])
+  const available = await figma.listAvailableFontsAsync()
+  const family = ['Pretendard', 'Noto Sans KR', 'Inter'].find((candidate) => available.some((font) => font.fontName.family === candidate)) || 'Inter'
+  for (const style of Object.keys(FONT_BY_STYLE)) {
+    const exact = available.find((font) => font.fontName.family === family && font.fontName.style === style)
+    const fallback = available.find((font) => font.fontName.family === family)
+    FONT_BY_STYLE[style] = exact?.fontName || fallback?.fontName || FONT_BY_STYLE[style]
+  }
+  await Promise.all(Object.values(FONT_BY_STYLE).map((font) => figma.loadFontAsync(font)))
 }
 
 function makeText(value, size, style = 'Regular', color = COLORS.ink, width = 760) {
   const node = figma.createText()
-  node.fontName = { family: 'Inter', style }
+  node.fontName = FONT_BY_STYLE[style] || FONT_BY_STYLE.Regular
   node.fontSize = size
   node.characters = String(value)
   node.fills = [{ type: 'SOLID', color }]
@@ -1074,8 +1083,9 @@ async function makeGenericCover(job, images) {
     const section = makeSection('00 COVER / BONE LOOFAH EDITORIAL', 1220, COLORS.paper)
     const hero = await makeImage(`${SERVER_URL}/detail-page-assets/bone-loofah-cover-editorial-v1.png`, 760, 880, 'COVER / BONE LOOFAH HERO')
     hero.x = 50; hero.y = 50; hero.cornerRadius = 32; section.appendChild(hero)
-    appendText(section, 'BONE SHAPED LOOFAH SCRUBBER', 50, 988, 760, 16, 'Bold', COLORS.amber)
-    appendText(section, job.product.name, 50, 1038, 760, 48, 'Bold', COLORS.ink)
+    const coverEyebrow = appendText(section, 'BONE SHAPED LOOFAH SCRUBBER', 50, 982, 760, 19, 'Bold', COLORS.amber)
+    coverEyebrow.letterSpacing = { value: 8, unit: 'PERCENT' }
+    appendText(section, job.product.name, 50, 1038, 760, 52, 'Bold', COLORS.ink)
     return section
   }
   const section = makeSection('00 COVER / PREMIUM EDITORIAL', 1220, COLORS.paper)
@@ -1102,7 +1112,7 @@ async function makeGenericOptions(job, images) {
   const names = genericOptionNames(job.product)
   const section = makeSection('01 OPTION / SPLIT EDITORIAL', 1120, COLORS.soft)
   makeLabel(section, 'OPTION', 50, 54, 118, COLORS.amber)
-  appendText(section, '옵션을 한눈에 확인하세요', 50, 116, 760, 40, 'Bold')
+  appendText(section, '옵션을 한눈에 확인하세요', 50, 116, 760, 44, 'Bold')
   const single = names.length === 1
   const width = single ? 760 : 370
   for (let index = 0; index < names.length; index += 1) {
@@ -1115,11 +1125,11 @@ async function makeGenericOptions(job, images) {
     const panel = figma.createFrame()
     panel.resize(width, 220); panel.x = 0; panel.y = 570
     panel.fills = [{ type: 'SOLID', color: index % 2 ? COLORS.red : COLORS.green }]
-    appendText(panel, names[index], 28, 46, width - 56, 26, 'Bold', COLORS.paper)
-    appendText(panel, job.product.size || '사이즈 정보 확인', 28, 116, width - 56, 17, 'Semi Bold', COLORS.paper)
+    appendText(panel, names[index], 28, 42, width - 56, 30, 'Bold', COLORS.paper)
+    appendText(panel, job.product.size || '사이즈 정보 확인', 28, 116, width - 56, 21, 'Semi Bold', COLORS.paper)
     card.appendChild(panel); section.appendChild(card)
   }
-  appendText(section, '* 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1048, 760, 14, 'Regular', COLORS.muted)
+  appendText(section, '* 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1044, 760, 17, 'Regular', COLORS.muted)
   return section
 }
 
@@ -1140,7 +1150,9 @@ async function makeGenericPoint(index, point, imageUrl) {
 function makeBoneLoofahIntro() {
   const section = makeSection('INTRO / REFERENCE-INSPIRED SUMMARY', 1180, { r: 0.68, g: 0.62, b: 0.56 })
   appendText(section, '뼈다귀 수세미가\n처음이라면?', 50, 72, 760, 48, 'Bold', COLORS.paper).textAlignHorizontal = 'CENTER'
-  appendText(section, '물에 적셔 부드럽게 만든 뒤 세제를 묻혀 사용해보세요.', 50, 210, 760, 19, 'Regular', COLORS.paper).textAlignHorizontal = 'CENTER'
+  const introBody = appendText(section, '물에 충분히 적셔 부드럽게 만든 뒤\n주방세제를 묻혀 사용해보세요.', 80, 210, 700, 28, 'Semi Bold', COLORS.paper)
+  introBody.textAlignHorizontal = 'CENTER'
+  introBody.lineHeight = { value: 145, unit: 'PERCENT' }
   const cards = [
     ['도톰한 사용감', '물에 적시면\n한층 부드럽게'],
     ['풍성한 거품', '세제가 고르게\n퍼지는 섬유 결'],
@@ -1152,21 +1164,40 @@ function makeBoneLoofahIntro() {
     box.resize(355, 300); box.x = 50 + (index % 2) * 405; box.y = 330 + Math.floor(index / 2) * 350
     box.cornerRadius = 24; box.fills = [{ type: 'SOLID', color: COLORS.paper }]
     section.appendChild(box)
-    appendText(box, card[0], 28, 42, 299, 24, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-    appendText(box, card[1], 28, 118, 299, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+    appendText(box, String(index + 1).padStart(2, '0'), 28, 32, 299, 16, 'Bold', COLORS.amber).textAlignHorizontal = 'CENTER'
+    appendText(box, card[0], 28, 78, 299, 28, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
+    const summary = appendText(box, card[1], 28, 142, 299, 25, 'Semi Bold', { r: 0.28, g: 0.27, b: 0.25 })
+    summary.textAlignHorizontal = 'CENTER'
+    summary.lineHeight = { value: 145, unit: 'PERCENT' }
   })
   return section
 }
 
-async function makeBoneLoofahPoint(index, point, imageUrl) {
-  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / O-HEN REFERENCE`, 1080, COLORS.paper)
-  appendText(section, 'Point', 50, 52, 760, 26, 'Regular', { r: 0.86, g: 0.7, b: 0.42 }).textAlignHorizontal = 'CENTER'
-  appendText(section, String(index).padStart(2, '0'), 50, 96, 760, 18, 'Bold', COLORS.muted).textAlignHorizontal = 'CENTER'
-  appendText(section, point[0], 50, 152, 760, 40, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-  appendText(section, point[1], 90, 228, 680, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
-  const image = await makeImage(imageUrl, 760, 650, `POINT ${String(index).padStart(2, '0')} / PRODUCT IMAGE`)
-  image.x = 50; image.y = 360; image.cornerRadius = 0
-  section.appendChild(image)
+async function makeBoneLoofahPoint(index, point, imageUrl, supportImageUrl) {
+  const sectionColors = [
+    { r: 0.95, g: 0.9, b: 0.83 },
+    { r: 0.91, g: 0.93, b: 0.88 },
+    { r: 0.94, g: 0.89, b: 0.86 },
+    { r: 0.91, g: 0.9, b: 0.86 },
+  ]
+  const section = makeSection(`POINT ${String(index).padStart(2, '0')} / CARD NEWS`, 1740, sectionColors[(index - 1) % sectionColors.length])
+  const card = figma.createFrame()
+  card.resize(780, 1640)
+  card.x = 40; card.y = 50; card.cornerRadius = 34; card.clipsContent = true
+  card.fills = [{ type: 'SOLID', color: COLORS.paper }]
+  section.appendChild(card)
+  const pointLabel = appendText(card, `POINT ${String(index).padStart(2, '0')}`, 52, 54, 676, 20, 'Bold', { r: 0.67, g: 0.43, b: 0.25 })
+  pointLabel.letterSpacing = { value: 10, unit: 'PERCENT' }
+  const pointTitle = appendText(card, point[0], 52, 108, 676, 48, 'Semi Bold', { r: 0.25, g: 0.17, b: 0.13 })
+  pointTitle.lineHeight = { value: 125, unit: 'PERCENT' }
+  const pointBody = appendText(card, point[1], 52, 252, 676, 27, 'Regular', { r: 0.39, g: 0.34, b: 0.3 })
+  pointBody.lineHeight = { value: 145, unit: 'PERCENT' }
+  const image = await makeImage(imageUrl, 676, 570, `POINT ${String(index).padStart(2, '0')} / MAIN IMAGE`)
+  image.x = 52; image.y = 410; image.cornerRadius = 24
+  card.appendChild(image)
+  const support = await makeImage(supportImageUrl, 676, 500, `POINT ${String(index).padStart(2, '0')} / SUPPORT IMAGE`)
+  support.x = 52; support.y = 1082; support.cornerRadius = 24
+  card.appendChild(support)
   return section
 }
 
@@ -1176,7 +1207,7 @@ function makeBoneLoofahCare() {
   eyebrow.textAlignHorizontal = 'CENTER'
   eyebrow.letterSpacing = { value: 12, unit: 'PERCENT' }
   appendText(section, '오래도록 산뜻하게 사용하는 법', 50, 112, 760, 38, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-  appendText(section, '간단한 관리만으로 수세미를 더욱 위생적으로 사용해보세요.', 80, 176, 700, 18, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  appendText(section, '간단한 관리만으로 수세미를 더욱 위생적으로 사용해보세요.', 80, 176, 700, 23, 'Semi Bold', { r: 0.3, g: 0.27, b: 0.24 }).textAlignHorizontal = 'CENTER'
 
   const tips = [
     ['충분히 적시기', '첫 사용 전 미지근한 물에\n5~10분간 충분히 적셔주세요.'],
@@ -1206,7 +1237,7 @@ function makeBoneLoofahCare() {
     const numberText = appendText(box, String(index + 1).padStart(2, '0'), 151, 38, 48, 16, 'Bold', COLORS.paper)
     numberText.textAlignHorizontal = 'CENTER'
     appendText(box, title, 25, 91, 300, 23, 'Bold', COLORS.ink).textAlignHorizontal = 'CENTER'
-    const bodyText = appendText(box, body, 25, 132, 300, 16, 'Regular', COLORS.muted)
+    const bodyText = appendText(box, body, 20, 130, 310, 21, 'Semi Bold', { r: 0.28, g: 0.25, b: 0.22 })
     bodyText.textAlignHorizontal = 'CENTER'
     bodyText.lineHeight = { value: 150, unit: 'PERCENT' }
   })
@@ -1214,9 +1245,9 @@ function makeBoneLoofahCare() {
 }
 
 async function makeGenericAiScene(imageUrl) {
-  const section = makeSection('USP SUPPORT IMAGE', 1000, COLORS.paper)
-  const image = await makeImage(imageUrl, 760, 900, 'USP / SUPPORT IMAGE')
-  image.x = 50; image.y = 50; image.cornerRadius = 28
+  const section = makeSection('USP SUPPORT IMAGE', 900, COLORS.paper)
+  const image = await makeImage(imageUrl, 860, 900, 'USP / SUPPORT IMAGE')
+  image.x = 0; image.y = 0; image.cornerRadius = 0
   section.appendChild(image)
   return section
 }
@@ -1244,7 +1275,37 @@ async function makeGenericSize(product, imageUrl) {
   vertical.fills = [{ type: 'SOLID', color: COLORS.red }]
   section.appendChild(vertical)
   appendText(section, product.size || '사이즈 정보 확인', 50, 916, 760, 28, 'Bold', COLORS.red).textAlignHorizontal = 'CENTER'
-  appendText(section, '* 봉제·조립 제품은 측정 위치와 방법에 따라 오차가 있을 수 있습니다.', 50, 1014, 760, 14, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
+  appendText(section, '* 제품은 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1004, 760, 20, 'Semi Bold', COLORS.muted).textAlignHorizontal = 'CENTER'
+  return section
+}
+
+async function makeBoneLoofahSize(imageUrl) {
+  const section = makeSection('05 SIZE INFO / BONE LOOFAH CUTOUT', 1120, COLORS.paper)
+  makeLabel(section, 'SIZE INFO', 50, 54, 136, COLORS.amber)
+  appendText(section, '한눈에 확인하는 실제 크기', 50, 118, 760, 42, 'Bold', { r: 0.25, g: 0.17, b: 0.13 })
+  const image = await makeImage(imageUrl, 500, 650, 'SIZE INFO / BONE LOOFAH CUTOUT')
+  image.x = 150; image.y = 240; image.cornerRadius = 0
+  section.appendChild(image)
+
+  const dimensionColor = { r: 0.84, g: 0.12, b: 0.1 }
+  const addLine = (x, y, width, height) => {
+    const line = figma.createRectangle()
+    line.resize(width, height); line.x = x; line.y = y
+    line.fills = [{ type: 'SOLID', color: dimensionColor }]
+    section.appendChild(line)
+  }
+  addLine(682, 318, 4, 480)
+  addLine(670, 318, 28, 4)
+  addLine(670, 794, 28, 4)
+  const verticalText = appendText(section, '14 cm', 700, 530, 110, 25, 'Bold', dimensionColor)
+  verticalText.textAlignHorizontal = 'CENTER'
+
+  addLine(226, 928, 350, 4)
+  addLine(226, 916, 4, 28)
+  addLine(572, 916, 4, 28)
+  const horizontalText = appendText(section, '8.5 cm', 326, 956, 150, 25, 'Bold', dimensionColor)
+  horizontalText.textAlignHorizontal = 'CENTER'
+  appendText(section, '* 측정 위치와 방법에 따라 약간의 오차가 있을 수 있습니다.', 50, 1040, 760, 19, 'Regular', COLORS.muted).textAlignHorizontal = 'CENTER'
   return section
 }
 
@@ -1257,8 +1318,8 @@ function makeGenericProductInfo(product) {
     const row = figma.createFrame()
     row.name = label; row.resize(760, 78); row.x = 50; row.y = 202 + index * 86
     row.fills = [{ type: 'SOLID', color: index % 2 ? COLORS.paper : COLORS.soft }]
-    appendText(row, label, 22, 25, 150, 15, 'Semi Bold', COLORS.muted)
-    const valueText = appendText(row, value, 182, 23, 548, 17, 'Semi Bold', COLORS.ink)
+    appendText(row, label, 22, 21, 150, 21, 'Semi Bold', COLORS.muted)
+    const valueText = appendText(row, value, 182, 19, 548, 23, 'Bold', COLORS.ink)
     valueText.textAlignHorizontal = 'RIGHT'; section.appendChild(row)
   })
   return section
@@ -1316,6 +1377,19 @@ async function findOrCreateGenericTarget(job) {
   return target
 }
 
+async function updateBoneLoofahSizeOnly(target) {
+  const current = target.children.find((node) => node.name.startsWith('05 SIZE INFO'))
+  if (!current) return null
+  const index = target.children.indexOf(current)
+  const replacement = await makeBoneLoofahSize(`${SERVER_URL}/detail-page-assets/bone-loofah-cutout-v4.png`)
+  target.insertChild(index, replacement)
+  current.remove()
+  target.setPluginData('funtastic-last-targeted-update', `size-info:${new Date().toISOString()}`)
+  figma.currentPage.selection = [replacement]
+  figma.viewport.scrollAndZoomIntoView([replacement])
+  return target
+}
+
 async function buildGenericDraft(job) {
   const generatedImages = GENERATED_ASSETS_BY_SKU[job.product.sku] || []
   if (!generatedImages.length) throw new Error('자료보완 필요: 제품 충실 AI 생성 이미지가 준비되지 않았습니다.')
@@ -1328,6 +1402,10 @@ async function buildGenericDraft(job) {
   if (!page || page.type !== 'PAGE') throw new Error('상세페이지를 배치할 Figma 페이지를 찾지 못했습니다.')
   await figma.setCurrentPageAsync(page)
   if (isDessertBearKeyring(job.product)) return buildDessertBearFromReference(job, images, target)
+  if (job.product.sku === '110336-0001' && target.children.length) {
+    const updated = await updateBoneLoofahSizeOnly(target)
+    if (updated) return updated
+  }
   const scratch = figma.createFrame()
   scratch.name = `AUTO QA BUILD · ${job.product.sku}`
   scratch.resize(860, 100); scratch.layoutMode = 'VERTICAL'; scratch.primaryAxisSizingMode = 'AUTO'; scratch.counterAxisSizingMode = 'FIXED'; scratch.itemSpacing = 0
@@ -1342,16 +1420,18 @@ async function buildGenericDraft(job) {
       const mainImage = job.product.sku === '110336-0001' ? generatedImages[index * 2] : images[(index + 2) % images.length]
       const supportImage = job.product.sku === '110336-0001' ? generatedImages[index * 2 + 1] : generatedImages[index]
       scratch.appendChild(job.product.sku === '110336-0001'
-        ? await makeBoneLoofahPoint(index + 1, points[index], mainImage)
+        ? await makeBoneLoofahPoint(index + 1, points[index], mainImage, supportImage)
         : await makeGenericPoint(index + 1, points[index], mainImage))
-      if (supportImage) scratch.appendChild(await makeGenericAiScene(supportImage))
+      if (supportImage && job.product.sku !== '110336-0001') scratch.appendChild(await makeGenericAiScene(supportImage))
     }
     if (job.product.sku !== '110336-0001') scratch.appendChild(await makeGenericSupplierGallery(images.slice(-2)))
     if (job.product.sku === '110336-0001') scratch.appendChild(makeBoneLoofahCare())
     const sizeImage = job.product.sku === '110336-0001'
       ? `${SERVER_URL}/detail-page-assets/bone-loofah-cutout-v4.png`
       : images[0]
-    scratch.appendChild(await makeGenericSize(job.product, sizeImage))
+    scratch.appendChild(job.product.sku === '110336-0001'
+      ? await makeBoneLoofahSize(sizeImage)
+      : await makeGenericSize(job.product, sizeImage))
     scratch.appendChild(makeGenericProductInfo(job.product))
     scratch.appendChild(makeStandardCautions({ specificCautions: [] }))
     scratch.appendChild(await cloneIpNotice())

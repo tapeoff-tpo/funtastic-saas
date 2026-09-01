@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import {
   addAiAccountMessage,
+  bulkResetAiAccountRuntimeState,
   addAiAccountUserCandidate,
   bulkUpdateAiAccountOperationalState,
   bulkUpdateAiAccountRenewal,
@@ -165,6 +166,14 @@ export async function resetAiAccountRuntimeStateAction(formData: FormData) {
     userId,
     accountId: String(formData.get('accountId') ?? ''),
   })
+  if (!('error' in result)) revalidatePath('/operations/ai-accounts')
+  return result
+}
+
+export async function bulkResetAiAccountRuntimeStateAction() {
+  const userId = await getWorkspaceIdForAction()
+  if (!userId) return { error: '로그인이 필요합니다.' }
+  const result = await bulkResetAiAccountRuntimeState({ userId })
   if (!('error' in result)) revalidatePath('/operations/ai-accounts')
   return result
 }

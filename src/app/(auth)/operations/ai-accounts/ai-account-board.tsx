@@ -12,6 +12,7 @@ import {
   weeklyResetCodeValue,
 } from '@/lib/operations/ai-account-reset-code'
 import {
+  bulkResetAiAccountRuntimeStateAction,
   readAiAccountLoginInfoAction,
   resetAiAccountRuntimeStateAction,
   updateAiAccountAvailabilityAction,
@@ -212,7 +213,7 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
       <div className="overflow-x-auto">
         <div className="min-w-[1120px]">
           <div className="hidden border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)_42px] md:items-center md:gap-2">
-            <div>계정명</div><div>상태</div><div>사용자</div><div>일간/주간 초기화 시각</div><div>초기화</div><div>공유 사용</div><div className="sr-only">로그인 정보</div>
+            <div>계정명</div><div>상태</div><div>사용자</div><div>일간/주간 초기화 시각</div><div className="flex items-center gap-2">초기화<form action={bulkResetAiAccountRuntimeStateAction}><Button type="submit" variant="outline" className="h-7 px-2 text-[11px]"><RotateCcw className="h-3 w-3" />일괄</Button></form></div><div>공유 사용</div><div className="sr-only">로그인 정보</div>
           </div>
           <div className="divide-y">
             {sortedAccounts.map((account) => {

@@ -1,11 +1,16 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useMemo, useRef, useState, useTransition } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
 import { Eye, EyeOff, KeyRound, RotateCcw, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import {
+  normalizeWeeklyResetCodeInput,
+  parseWeeklyResetCode,
+  weeklyResetCodeValue,
+} from '@/lib/operations/ai-account-reset-code'
 import {
   readAiAccountLoginInfoAction,
   resetAiAccountRuntimeStateAction,
@@ -57,15 +62,6 @@ function normalizeStatus(status: string) {
   return 'unselected'
 }
 
-function weeklyResetTime(value: string | null) {
-  if (!value) return ''
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).formatToParts(new Date(value))
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || ''
-  return `${part('month')}월 ${part('day')}일 ${part('hour')}:${part('minute')}`
-}
-
 function normalizeTimeInput(value: string) {
   const digits = value.replace(/\D/g, '')
   if (digits.length === 3) return `0${digits.slice(0, 1)}:${digits.slice(1)}`
@@ -73,37 +69,14 @@ function normalizeTimeInput(value: string) {
   return value
 }
 
-function normalizeWeeklyResetInput(value: string) {
-  const digits = value.replace(/\D/g, '')
-  if (digits.length !== 8) return value
-  return `${digits.slice(0, 2)}월 ${digits.slice(2, 4)}일 ${digits.slice(4, 6)}:${digits.slice(6)}`
-}
-
-function nextWeeklyResetAt(value: string) {
-  const digits = value.replace(/\D/g, '')
-  if (digits.length !== 8) return null
-  const month = Number(digits.slice(0, 2))
-  const day = Number(digits.slice(2, 4))
-  const hours = Number(digits.slice(4, 6))
-  const minutes = Number(digits.slice(6))
-  if (month < 1 || month > 12 || day < 1 || day > 31 || hours > 23 || minutes > 59) return null
-  const current = new Date()
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(current)
-  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value)
-  const createDate = (year: number) => new Date(Date.UTC(year, month - 1, day, hours - 9, minutes))
-  let next = createDate(part('year'))
-  const dateParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit' }).formatToParts(next)
-  const resultPart = (type: Intl.DateTimeFormatPartTypes) => Number(dateParts.find((item) => item.type === type)?.value)
-  if (resultPart('month') !== month || resultPart('day') !== day) return null
-  if (next <= current) next = createDate(part('year') + 1)
-  return next.toISOString()
-}
-
 export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props) {
   const [, startTransition] = useTransition()
   const [inlineLimits, setInlineLimits] = useState<Record<string, { dailyLimit: string | null; dailyResetTime: string | null; weeklyLimit: string | null; weeklyResetAt: string | null }>>({})
   const [savingLimitIds, setSavingLimitIds] = useState<string[]>([])
   const [limitErrors, setLimitErrors] = useState<Record<string, string>>({})
+  const [operationalOverrides, setOperationalOverrides] = useState<Record<string, { status: string; currentUserName: string | null }>>({})
+  const [operationalErrors, setOperationalErrors] = useState<Record<string, string>>({})
+  const operationalRevisions = useRef<Record<string, number>>({})
   const [loginAccountId, setLoginAccountId] = useState<string | null>(null)
   const [loginInfo, setLoginInfo] = useState<LoginInfo | null>(null)
   const [loginInfoCache, setLoginInfoCache] = useState<Record<string, LoginInfo>>({})
@@ -122,12 +95,19 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
 
   function saveInlineLimits(account: AiAccountRow, formData: FormData) {
     const dailyResetTime = normalizeTimeInput(String(formData.get('dailyResetTime') || '').trim())
-    const weeklyResetAt = nextWeeklyResetAt(normalizeWeeklyResetInput(String(formData.get('weeklyResetTime') || '').trim()))
+    const weeklyResetCode = normalizeWeeklyResetCodeInput(String(formData.get('weeklyResetTime') || '').trim())
+    const weeklyReset = parseWeeklyResetCode(weeklyResetCode)
+    if (weeklyReset.error) {
+      setLimitErrors((current) => ({ ...current, [account.id]: weeklyReset.error || '주간 초기화 시각을 확인해주세요.' }))
+      return
+    }
+    formData.set('dailyResetTime', dailyResetTime)
+    formData.set('weeklyResetTime', weeklyResetCode)
     setInlineLimits((current) => ({ ...current, [account.id]: {
       dailyLimit: null,
       dailyResetTime: dailyResetTime || null,
-      weeklyLimit: null,
-      weeklyResetAt,
+      weeklyLimit: weeklyReset.code,
+      weeklyResetAt: weeklyReset.resetAt?.toISOString() || null,
     } }))
     setLimitErrors((current) => ({ ...current, [account.id]: '' }))
     setSavingLimitIds((current) => [...current, account.id])
@@ -135,6 +115,40 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
       const result = await updateAiAccountLimitsAction(formData)
       setSavingLimitIds((current) => current.filter((id) => id !== account.id))
       if ('error' in result) setLimitErrors((current) => ({ ...current, [account.id]: result.error || '한도를 저장하지 못했습니다.' }))
+    })
+  }
+
+  function saveOperationalState(account: AiAccountRow, changedField: 'status' | 'currentUserName', value: string) {
+    const previous = operationalOverrides[account.id] || {
+      status: normalizeStatus(account.status),
+      currentUserName: account.currentUserName,
+    }
+    const next = { ...previous }
+    if (changedField === 'status') {
+      next.status = normalizeStatus(value)
+      if (next.status === 'unselected') next.currentUserName = null
+    } else {
+      next.currentUserName = value || null
+      if (next.status !== 'daily_limit_reached' && next.status !== 'weekly_limit_reached') {
+        next.status = next.currentUserName ? 'in_use' : 'unselected'
+      }
+    }
+
+    const revision = (operationalRevisions.current[account.id] || 0) + 1
+    operationalRevisions.current[account.id] = revision
+    setOperationalOverrides((current) => ({ ...current, [account.id]: next }))
+    setOperationalErrors((current) => ({ ...current, [account.id]: '' }))
+
+    const formData = new FormData()
+    formData.set('accountId', account.id)
+    formData.set('changedField', changedField)
+    formData.set('status', next.status)
+    formData.set('currentUserName', next.currentUserName || '')
+    startTransition(async () => {
+      const result = await updateAiAccountOperationalStateAction(formData)
+      if (operationalRevisions.current[account.id] !== revision || !('error' in result)) return
+      setOperationalOverrides((current) => ({ ...current, [account.id]: previous }))
+      setOperationalErrors((current) => ({ ...current, [account.id]: result.error || '상태를 저장하지 못했습니다.' }))
     })
   }
 
@@ -202,30 +216,31 @@ export function AiAccountBoard({ accounts, userCandidates, statusLabels }: Props
           </div>
           <div className="divide-y">
             {sortedAccounts.map((account) => {
-              const displayStatus = normalizeStatus(account.status)
+              const operational = operationalOverrides[account.id]
+              const displayStatus = normalizeStatus(operational?.status || account.status)
+              const displayCurrentUserName = operational ? operational.currentUserName : account.currentUserName
               const candidateNames = userCandidates.map((candidate) => candidate.name)
               const inline = inlineLimits[account.id]
               return (
                 <div key={account.id} className={cn('grid w-full gap-3 px-3 py-3 md:grid-cols-[minmax(130px,1.1fr)_minmax(110px,0.9fr)_minmax(120px,1fr)_minmax(420px,3.2fr)_minmax(80px,0.7fr)_minmax(100px,0.8fr)_42px] md:items-center md:gap-2', account.sharedUse && 'bg-emerald-50/50')}>
                   <button type="button" onClick={() => openLoginInfo(account.id)} className="truncate whitespace-nowrap text-left text-sm font-semibold outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring" title={`${account.name} 로그인 정보 열기`}>{account.name}</button>
-                  <form action={updateAiAccountOperationalStateAction} className="contents">
-                    <input type="hidden" name="accountId" value={account.id} /><input type="hidden" name="changedField" value="" />
-                    <select name="status" defaultValue={displayStatus} onChange={(event) => { const form = event.currentTarget.form; const field = form?.elements.namedItem('changedField'); if (field instanceof HTMLInputElement) field.value = 'status'; form?.requestSubmit() }} aria-label={`${account.name} 상태`} className={cn('h-9 w-full rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring', statusClassName(displayStatus))}>
+                  <div className="contents">
+                    <select value={displayStatus} onChange={(event) => saveOperationalState(account, 'status', event.currentTarget.value)} aria-label={`${account.name} 상태`} aria-invalid={Boolean(operationalErrors[account.id])} title={operationalErrors[account.id] || undefined} className={cn('h-9 w-full rounded-md border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring', statusClassName(displayStatus))}>
                       {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                     </select>
-                    <select name="currentUserName" defaultValue={account.currentUserName || ''} onChange={(event) => { const form = event.currentTarget.form; const field = form?.elements.namedItem('changedField'); if (field instanceof HTMLInputElement) field.value = 'currentUserName'; form?.requestSubmit() }} aria-label={`${account.name} 사용자`} className="h-9 w-full rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <select value={displayCurrentUserName || ''} onChange={(event) => saveOperationalState(account, 'currentUserName', event.currentTarget.value)} aria-label={`${account.name} 사용자`} aria-invalid={Boolean(operationalErrors[account.id])} title={operationalErrors[account.id] || undefined} className="h-9 w-full rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring">
                       <option value="">사용자 없음</option>
-                      {account.currentUserName && !candidateNames.includes(account.currentUserName) ? <option value={account.currentUserName}>{account.currentUserName}</option> : null}
+                      {displayCurrentUserName && !candidateNames.includes(displayCurrentUserName) ? <option value={displayCurrentUserName}>{displayCurrentUserName}</option> : null}
                       {userCandidates.map((candidate) => <option key={candidate.id} value={candidate.name}>{candidate.name}</option>)}
                     </select>
-                  </form>
+                  </div>
                   <form key={`${account.id}-${inline?.dailyLimit || ''}-${inline?.dailyResetTime || ''}-${inline?.weeklyLimit || ''}-${inline?.weeklyResetAt || ''}`} className="grid grid-cols-[34px_minmax(0,1fr)_34px_minmax(0,1fr)_32px] items-center gap-1.5" onSubmit={(event) => { event.preventDefault(); saveInlineLimits(account, new FormData(event.currentTarget)) }}>
                     <input type="hidden" name="accountId" value={account.id} />
                     <span className="text-xs font-medium text-muted-foreground">일간</span><Input name="dailyResetTime" type="text" inputMode="numeric" placeholder="00:00" defaultValue={inline?.dailyResetTime ?? account.dailyResetTime ?? ''} onBlur={(event) => { event.currentTarget.value = normalizeTimeInput(event.currentTarget.value) }} aria-label={`${account.name} 일간 초기화 시각`} className="h-8 min-w-0 px-2 text-xs" />
-                    <span className="text-xs font-medium text-muted-foreground">주간</span><Input name="weeklyResetTime" type="text" inputMode="numeric" placeholder="MMDDHHMM" defaultValue={weeklyResetTime(inline?.weeklyResetAt ?? account.weeklyResetAt)} onBlur={(event) => { event.currentTarget.value = normalizeWeeklyResetInput(event.currentTarget.value) }} aria-label={`${account.name} 주간 초기화 일시`} className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
+                    <span className="text-xs font-medium text-muted-foreground">주간</span><Input name="weeklyResetTime" type="text" inputMode="numeric" placeholder="HHMMMMDD" defaultValue={weeklyResetCodeValue(inline?.weeklyLimit ?? account.weeklyLimit, inline?.weeklyResetAt ?? account.weeklyResetAt)} onBlur={(event) => { event.currentTarget.value = normalizeWeeklyResetCodeInput(event.currentTarget.value) }} aria-label={`${account.name} 주간 초기화 일시`} title="시간 4자리만 입력하면 날짜는 0000으로 저장됩니다." className="h-8 min-w-0 px-2 text-xs" /><Button type="submit" variant="outline" size="icon" className="h-8 w-8 shrink-0" title={`${account.name} 초기화 시각 저장`} disabled={savingLimitIds.includes(account.id)}><Save className="h-3.5 w-3.5" /></Button>
                     {limitErrors[account.id] ? <p className="col-span-5 text-xs text-destructive">{limitErrors[account.id]}</p> : null}
                   </form>
-                  <form action={resetAiAccountRuntimeStateAction}>
+                  <form action={async (formData) => { await resetAiAccountRuntimeStateAction(formData) }}>
                     <input type="hidden" name="accountId" value={account.id} />
                     <Button type="submit" variant="outline" className="h-9 w-full text-xs" title={`${account.name} 상태와 초기화 시각 초기화`}><RotateCcw className="h-3.5 w-3.5" />초기화</Button>
                   </form>

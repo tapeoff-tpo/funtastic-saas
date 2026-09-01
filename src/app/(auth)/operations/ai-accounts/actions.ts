@@ -21,6 +21,7 @@ import {
   updateAiAccountOperationalState,
 } from '@/lib/operations/ai-accounts'
 import { createClient } from '@/lib/supabase/server'
+import { parseWeeklyResetCode } from '@/lib/operations/ai-account-reset-code'
 
 export async function createAiAccountAction(
   _prev: { error?: string; success?: boolean } | null,
@@ -75,9 +76,9 @@ export async function addAiAccountMessageAction(formData: FormData) {
 
 export async function updateAiAccountOperationalStateAction(formData: FormData) {
   const userId = await getWorkspaceIdForAction()
-  if (!userId) return
+  if (!userId) return { error: '로그인이 필요합니다.' }
 
-  await updateAiAccountOperationalState({
+  const result = await updateAiAccountOperationalState({
     userId,
     accountId: String(formData.get('accountId') ?? ''),
     status: String(formData.get('status') ?? ''),
@@ -85,7 +86,8 @@ export async function updateAiAccountOperationalStateAction(formData: FormData) 
     renewalDueOn: String(formData.get('renewalDueOn') ?? ''),
     changedField: String(formData.get('changedField') ?? ''),
   })
-  revalidatePath('/operations/ai-accounts')
+  if (!('error' in result)) revalidatePath('/operations/ai-accounts')
+  return result
 }
 
 export async function updateAiAccountAvailabilityAction(formData: FormData) {
@@ -131,7 +133,6 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
   const userId = await getWorkspaceIdForAction()
   if (!userId) return { error: '로그인이 필요합니다.' }
 
-  const weeklyRemainingPercent = String(formData.get('weeklyRemainingPercent') ?? '').trim()
   const normalizeTime = (value: string) => {
     const trimmed = value.trim()
     const digits = trimmed.replace(/\D/g, '')
@@ -141,33 +142,17 @@ export async function updateAiAccountLimitsAction(formData: FormData) {
   }
   const dailyResetTime = normalizeTime(String(formData.get('dailyResetTime') ?? ''))
   const weeklyResetValue = String(formData.get('weeklyResetTime') ?? '').trim()
-  const weeklyDigits = weeklyResetValue.replace(/\D/g, '')
-  let weeklyResetAt: Date | null = null
-  if (weeklyDigits) {
-    if (!/^\d{8}$/.test(weeklyDigits)) return { error: '주간 초기화는 MMDDHHMM 형식으로 입력해주세요.' }
-    const month = Number(weeklyDigits.slice(0, 2))
-    const day = Number(weeklyDigits.slice(2, 4))
-    const hours = Number(weeklyDigits.slice(4, 6))
-    const minutes = Number(weeklyDigits.slice(6))
-    if (month < 1 || month > 12 || day < 1 || day > 31 || hours > 23 || minutes > 59) return { error: '주간 초기화 일시를 확인해주세요.' }
-    const now = new Date()
-    const dateParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
-    const part = (type: Intl.DateTimeFormatPartTypes) => Number(dateParts.find((item) => item.type === type)?.value)
-    const createDate = (year: number) => new Date(Date.UTC(year, month - 1, day, hours - 9, minutes))
-    weeklyResetAt = createDate(part('year'))
-    const normalizedParts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit' }).formatToParts(weeklyResetAt)
-    const normalizedPart = (type: Intl.DateTimeFormatPartTypes) => Number(normalizedParts.find((item) => item.type === type)?.value)
-    if (normalizedPart('month') !== month || normalizedPart('day') !== day) return { error: '주간 초기화 날짜를 확인해주세요.' }
-    if (weeklyResetAt <= now) weeklyResetAt = createDate(part('year') + 1)
-  }
+  const weeklyReset = parseWeeklyResetCode(weeklyResetValue)
+  if (weeklyReset.error) return { error: weeklyReset.error }
 
   const result = await updateAiAccountLimits({
     userId,
     accountId: String(formData.get('accountId') ?? ''),
     dailyRemainingPercent: String(formData.get('dailyRemainingPercent') ?? '').trim(),
     dailyResetTime,
-    weeklyRemainingPercent,
-    weeklyResetAt,
+    weeklyRemainingPercent: '',
+    weeklyResetCode: weeklyReset.code,
+    weeklyResetAt: weeklyReset.resetAt,
   })
   if (!('error' in result)) revalidatePath('/operations/ai-accounts')
   return result

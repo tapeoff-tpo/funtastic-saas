@@ -730,6 +730,7 @@ export async function updateAiAccountLimits(input: {
   dailyRemainingPercent?: string | null
   dailyResetTime?: string | null
   weeklyRemainingPercent?: string | null
+  weeklyResetCode?: string | null
   weeklyResetAt?: Date | null
 }) {
   await ensureAiAccountTables()
@@ -742,9 +743,9 @@ export async function updateAiAccountLimits(input: {
     return { error: '일 초기화 시각은 HH:MM 형식으로 입력해주세요.' as const }
   }
   const parsedPercent = Number(input.weeklyRemainingPercent)
-  const weeklyLimit = input.weeklyRemainingPercent?.trim() && Number.isFinite(parsedPercent)
+  const weeklyLimit = input.weeklyResetCode?.trim() || (input.weeklyRemainingPercent?.trim() && Number.isFinite(parsedPercent)
     ? `잔여 ${Math.min(100, Math.max(0, Math.round(parsedPercent)))}%`
-    : null
+    : null)
   const [row] = await db.update(gptAccounts)
     .set({
       dailyLimit,

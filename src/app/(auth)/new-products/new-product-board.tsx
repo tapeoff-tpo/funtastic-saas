@@ -97,7 +97,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   useEffect(() => {
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
-      if (selectedStageIds.length === 0) {
+      if (selectedStageIds.length === 0 && !query.trim()) {
         setSummaries([])
         setTotal(0)
         setListLoading(false)
@@ -150,7 +150,10 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   }, [dataRevision, mode, selectedId])
 
   const detailLoading = mode === 'view' && Boolean(selectedId) && item?.id !== selectedId
-  const selectedStageName = selectedStageIds.length === initialStages.length
+  const hasSearchQuery = Boolean(query.trim())
+  const selectedStageName = selectedStageIds.length === 0 && hasSearchQuery
+    ? '검색 결과'
+    : selectedStageIds.length === initialStages.length
     ? '전체 상태'
     : selectedStageIds.length === 1
       ? initialStages.find((stage) => stage.id === selectedStageIds[0])?.name ?? '선택 단계'
@@ -212,7 +215,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           <ToolbarField label="상품 검색" className="xl:w-64">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" disabled={selectedStageIds.length === 0} className="pl-8" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" className="pl-8" />
             </div>
           </ToolbarField>
 
@@ -224,7 +227,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           </div>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          상태를 선택하면 해당 상품 목록이 표시됩니다. 목록은 최근 수정순 최대 50개까지 불러옵니다.
+          상태를 선택하면 해당 단계 목록을, 상품명을 검색하면 전체 상품의 결과를 표시합니다. 목록은 최근 수정순 최대 50개까지 불러옵니다.
         </p>
       </section>
 
@@ -252,7 +255,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           onSaved={reloadItem}
           onDeleted={handleDeleted}
         />
-      ) : selectedStageIds.length > 0 ? (
+      ) : selectedStageIds.length > 0 || hasSearchQuery ? (
         <ProductSummaryList
           title={selectedStageName}
           summaries={summaries}
@@ -519,7 +522,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="판매예정일"><Input type="date" value={values.plannedSaleDate} onChange={(event) => setValue('plannedSaleDate', event.target.value)} /></Field>
           <Field label="상세페이지 완료예정일"><Input type="date" value={values.detailPageDueDate} onChange={(event) => setValue('detailPageDueDate', event.target.value)} /></Field>
           <Field label="사방넷코드"><Input value={values.sabangnetCode} onChange={(event) => setValue('sabangnetCode', event.target.value)} placeholder="품목에 등록할 품목코드" /></Field>
-          <Field label="중국원가 (위안화)"><MoneyInput value={values.chinaUnitPriceCny} onChange={(value) => setValue('chinaUnitPriceCny', value)} /></Field>
+          <Field label="중국원가 (위안화)"><MoneyInput unit="위안" value={values.chinaUnitPriceCny} onChange={(value) => setValue('chinaUnitPriceCny', value)} /></Field>
           <Field label="원화원가 (₩)"><MoneyInput value={values.calculatedCostKrw} onChange={(value) => setValue('calculatedCostKrw', value)} /></Field>
           <Field label="이전원가 (₩)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
@@ -1009,8 +1012,36 @@ function TextArea({ value, onChange, placeholder, rows = 3, resizable = true, cl
   return <textarea value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} rows={rows} className={cn('w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-sm outline-none placeholder:text-muted-foreground focus:border-ring focus:ring-2 focus:ring-ring/30', resizable ? 'resize-y' : 'resize-none', rows === 1 && 'h-8 resize-none py-1', className)} />
 }
 
-function MoneyInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return <Input inputMode="numeric" value={value} onChange={(event) => onChange(event.target.value.replace(/[^0-9.]/g, ''))} placeholder="0" />
+function MoneyInput({ value, onChange, unit = '원' }: { value: string; onChange: (value: string) => void; unit?: string }) {
+  const [focused, setFocused] = useState(false)
+  const normalizedValue = normalizeMoneyInput(value)
+  const displayValue = focused ? normalizedValue : formatMoneyInput(normalizedValue, unit)
+
+  return (
+    <Input
+      inputMode="decimal"
+      value={displayValue}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={(event) => onChange(normalizeMoneyInput(event.target.value))}
+      placeholder={`0${unit}`}
+    />
+  )
+}
+
+function normalizeMoneyInput(value: string) {
+  const cleaned = value.replace(/[^0-9.]/g, '')
+  const [integerPart = '', ...decimalParts] = cleaned.split('.')
+  if (decimalParts.length === 0) return integerPart
+  return `${integerPart}.${decimalParts.join('')}`
+}
+
+function formatMoneyInput(value: string, unit: string) {
+  if (!value) return ''
+  const [integerPart = '', decimalPart] = value.split('.')
+  const formattedInteger = Number(integerPart || 0).toLocaleString('ko-KR')
+  const formattedNumber = decimalPart == null ? formattedInteger : `${formattedInteger}.${decimalPart}`
+  return `${formattedNumber}${unit}`
 }
 
 function ProfitCard({ label, price, profit, margin, fee }: { label: string; price: number; profit: number; margin: number; fee: string }) {

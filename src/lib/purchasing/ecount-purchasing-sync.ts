@@ -171,6 +171,7 @@ export type EcountPurchasingSnapshot = {
 const REPORT_DEFINITIONS: Array<{
   kind: EcountReportKind
   requiredHeaders: string[]
+  alternateRequiredHeaders?: string[][]
 }> = [
   {
     kind: 'purchaseRequest',
@@ -179,6 +180,16 @@ const REPORT_DEFINITIONS: Array<{
   {
     kind: 'purchasePlan',
     requiredHeaders: ['입고창고명', '실 구매 수량(C)', '구입관리코드', '현재상태'],
+    alternateRequiredHeaders: [[
+      '일자-No.',
+      '품목코드',
+      '구입관리코드',
+      '옵션명',
+      '수량',
+      '주문서번호',
+      '구매진행여부',
+      '발주요청일자no',
+    ]],
   },
   {
     kind: 'purchaseHistory',
@@ -193,6 +204,19 @@ const REPORT_DEFINITIONS: Array<{
     requiredHeaders: ['출고수량(EA)', '유효기간', '출고관리코드'],
   },
 ]
+
+const REPORT_HEADER_ALIASES: Partial<Record<EcountReportKind, Partial<Record<string, string[]>>>> = {
+  purchasePlan: {
+    '실 구매 수량(C)': ['수량'],
+    규격: ['옵션명'],
+    '주문서번호 (C)': ['주문서번호'],
+    '구매진행여부 (C)': ['구매진행여부'],
+  },
+}
+
+function reportHeaderSignatures(definition: (typeof REPORT_DEFINITIONS)[number]) {
+  return [definition.requiredHeaders, ...(definition.alternateRequiredHeaders ?? [])]
+}
 
 export async function parseEcountPurchasingSnapshot(input: {
   files: EcountPurchasingUpload[]
@@ -1507,7 +1531,9 @@ function findReportHeader(sheet: ExcelJS.Worksheet) {
       if (header && !columns.has(header)) columns.set(header, column)
     })
     const definition = REPORT_DEFINITIONS.find((candidate) => (
-      candidate.requiredHeaders.every((header) => columns.has(header))
+      reportHeaderSignatures(candidate).some((requiredHeaders) => (
+        requiredHeaders.every((header) => columns.has(header))
+      ))
     ))
     if (definition) return { kind: definition.kind, rowNumber, columns }
   }
@@ -1533,8 +1559,14 @@ function valueAt(
   report: ParsedReport,
   header: string,
 ) {
-  const column = report.columns.get(header)
-  return column ? cellText(source.row.getCell(column).value) : ''
+  const aliases = REPORT_HEADER_ALIASES[report.kind]?.[header] ?? []
+  for (const candidate of [header, ...aliases]) {
+    const column = report.columns.get(candidate)
+    if (!column) continue
+    const value = cellText(source.row.getCell(column).value)
+    if (value !== '') return value
+  }
+  return ''
 }
 
 function normalizeHeader(value: string) {
@@ -1603,9 +1635,11 @@ function describeHeaderProblem(sheet: ExcelJS.Worksheet) {
       if (header) headers.add(header)
     })
     for (const definition of REPORT_DEFINITIONS) {
-      const missing = definition.requiredHeaders.filter((header) => !headers.has(header))
-      const matched = definition.requiredHeaders.length - missing.length
-      if (!closest || matched > closest.matched) closest = { kind: definition.kind, matched, missing, rowNumber }
+      for (const requiredHeaders of reportHeaderSignatures(definition)) {
+        const missing = requiredHeaders.filter((header) => !headers.has(header))
+        const matched = requiredHeaders.length - missing.length
+        if (!closest || matched > closest.matched) closest = { kind: definition.kind, matched, missing, rowNumber }
+      }
     }
   }
   if (!closest || closest.matched === 0) return '첫 20행에서 필요한 열 제목을 찾지 못했습니다.'

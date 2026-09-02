@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
 import {
+  classifyEcountPurchasingUpload,
   getEcountChinaInventorySnapshotDate,
   getEcountPurchasingRefreshScope,
   getPurchaseHistoryBridgeKey,
@@ -109,6 +110,43 @@ describe('parseEcountPurchasingSnapshot', () => {
     expect(snapshot.activeRequests).toEqual([])
     expect(snapshot.purchaseCompleted).toEqual([])
     expect(snapshot.outboundPending).toEqual([])
+  })
+
+  it('recognizes the current Ecount purchase-plan query layout and reads its aliases', async () => {
+    const plan = await makeUpload('ESG002M.xlsx', [
+      '일자-No.', '제품특이사항', '식품용 대상여부', '구입관리코드', '품목코드', '품목명', '옵션명', '수량',
+      '중국창고 도착요청일', '등급(매출기여도/재고회전률/마진률)', '일 평균 주문량', '박스(定制盒子是否需要)',
+      '설명서(韩语说明书是否需要)', '판매자 강조사항 (卖家提醒内容)', '주문서번호', '판매자 출고예정일',
+      '구매진행여부', '담당자명', '용도', '비고(실 필요수량)', 'URL', '종결여부', '진행상태', '발주요청일자no',
+    ], [[
+      '20260902 -16', '', '', 'P-QUERY', '100001-0001', '조회 상품', '블랙', 20,
+      '2026-09-09', '', '', '', '', '', '3316379631024009579', '',
+      '개인', '', '', '', '', '종결', '조회', '20260902 -1',
+    ]])
+
+    await expect(classifyEcountPurchasingUpload(plan)).resolves.toEqual({
+      kind: 'purchasePlan',
+      fileName: 'ESG002M.xlsx',
+    })
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files: [plan],
+      domesticInventoryReflectedThrough: '2026-09-02',
+      asOfDate: '2026-09-02',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.purchaseCompleted).toEqual([
+      expect.objectContaining({
+        source: 'ecount_purchasing_snapshot_plan_purchase_completed',
+        sku: '100001-0001',
+        optionName: '블랙',
+        quantity: 20,
+        purchaseManagementCode: 'P-QUERY',
+        supplierOrderNumber: '3316379631024009579',
+        purchaseMethod: '개인',
+      }),
+    ])
   })
 
   it('maps Ecount raw rows to the current purchasing stages from row 2 headers', async () => {

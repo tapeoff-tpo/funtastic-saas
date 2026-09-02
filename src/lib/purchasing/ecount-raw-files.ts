@@ -195,10 +195,12 @@ function mergeHeaders(existing: string[], incoming: string[]) {
 }
 
 export function getEcountRawRowIdentity(kind: EcountReportKind, row: Record<string, string>) {
-  const value = (header: string) => row[header]?.trim() ?? ''
+  const value = (...headers: string[]) => (
+    headers.map((header) => row[header]?.trim() ?? '').find((candidate) => candidate !== '') ?? ''
+  )
   const sku = value('품목코드')
   const dateNo = value('일자-No.')
-  const option = value('규격')
+  const option = value('규격', '옵션명')
 
   if (kind === 'chinaOutbound') {
     const outboundCode = value('출고관리코드')

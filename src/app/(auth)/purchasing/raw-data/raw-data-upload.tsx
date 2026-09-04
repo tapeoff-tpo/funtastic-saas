@@ -41,7 +41,6 @@ type DiscontinuedPreview = {
   totalDataRows: number
   uniqueSkuCount: number
   discontinuedSkuCount: number
-  restoredSkuCount: number
   duplicateSkus: string[]
   registeredSkuCount: number
   unregisteredSkus: string[]
@@ -71,7 +70,7 @@ const REQUIRED_FILES: readonly RawDataFile[] = [
   { key: 'chinaInventory', label: '중국재고현황', detail: '현재 중국창고에 보유한 재고', uploadRule: '현재 전체본 · 중국창고 재고 전체' },
   { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건 · 구입관리코드 포함 시 주문서번호 없는 건도 연결', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'domesticInventory', label: '국내재고현황', detail: '재고관리에 반영할 국내 창고 현재고', uploadRule: '현재 전체본 · 국내 창고 재고 전체' },
-  { key: 'discontinuedProducts', label: '단종상품 현황', detail: '단종 또는 해제할 품목의 발주 상태', uploadRule: '변경 목록 · 파일에 적은 SKU만 상태 변경', templateHref: '/api/purchasing/discontinued-products/template' },
+  { key: 'discontinuedProducts', label: '단종상품 현황', detail: '단종할 품목 목록', uploadRule: '변경 목록 · 파일에 적은 SKU는 모두 단종 처리', templateHref: '/api/purchasing/discontinued-products/template' },
 ]
 
 export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles, dataFreshness }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles; dataFreshness: DataFreshness }) {
@@ -207,7 +206,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
-            <p className="mt-1 text-sm text-muted-foreground">이력 파일은 마지막 반영분 이후만 넣으면 서버 누적본에 합쳐집니다. 중국·국내재고는 전체 최신본, 단종상품은 변경할 SKU만 넣으세요.</p>
+            <p className="mt-1 text-sm text-muted-foreground">이력 파일은 마지막 반영분 이후만 넣으면 서버 누적본에 합쳐집니다. 중국·국내재고는 전체 최신본, 단종상품은 품목코드·품목명·옵션 목록만 넣으세요.</p>
           </div>
           <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 7 준비 · {selectedFiles.length}개 변경</span>
         </div>
@@ -278,7 +277,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <p>
           발주요청·발주계획·구매현황·중국출고는 새 기간만 올려도 기존 누적 이력에 합쳐지며, 같은 건은 새 파일 값으로 갱신됩니다.
-          수정 가능성이 있는 최근 7일은 함께 올리면 더 정확합니다. 중국출고에는 구입관리코드 열을 함께 넣으면 주문서번호 없는 건도 구매현황과 정확히 연결합니다. 중국·국내재고는 반드시 전체 최신본을 올리세요. 단종상품은 단종/해제할 SKU만 올리며, 파일에 없는 SKU는 기존 상태를 유지합니다. 미리보기만으로는 저장·반영되지 않으며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
+          수정 가능성이 있는 최근 7일은 함께 올리면 더 정확합니다. 중국출고에는 구입관리코드 열을 함께 넣으면 주문서번호 없는 건도 구매현황과 정확히 연결합니다. 중국·국내재고는 반드시 전체 최신본을 올리세요. 단종상품은 품목코드·품목명·옵션만 올리며, 파일에 있는 SKU를 단종 처리합니다. 파일에 없는 SKU는 기존 상태를 유지합니다. 미리보기만으로는 저장·반영되지 않으며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
         </p>
       </section>
     </div>
@@ -316,15 +315,14 @@ function DiscontinuedPreviewCard({ summary }: { summary: DiscontinuedPreview }) 
   return (
     <section className="rounded-lg border bg-background p-4">
       <h2 className="font-semibold">단종상품 미리보기</h2>
-      <p className="mt-1 text-sm text-muted-foreground">파일에 적힌 SKU만 바뀝니다. 단종은 발주추천과 자동추천에서 제외되고, 해제는 정상 발주 상태로 되돌립니다.</p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <p className="mt-1 text-sm text-muted-foreground">파일에 적힌 모든 SKU를 단종 처리합니다. 발주추천과 자동추천에서 제외되며, 파일에 없는 SKU는 바뀌지 않습니다.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StateCard label="처리 대상 SKU" value={`${summary.uniqueSkuCount.toLocaleString('ko-KR')}개`} />
         <StateCard label="단종 처리" value={`${summary.discontinuedSkuCount.toLocaleString('ko-KR')}개`} />
-        <StateCard label="단종 해제" value={`${summary.restoredSkuCount.toLocaleString('ko-KR')}개`} />
         <StateCard label="품목 등록 확인" value={`${summary.registeredSkuCount.toLocaleString('ko-KR')}개`} />
         <StateCard label="미등록 SKU" value={`${summary.unregisteredSkus.length.toLocaleString('ko-KR')}개`} />
       </div>
-      {summary.duplicateSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 중복 SKU {summary.duplicateSkus.length}개는 마지막 행의 단종여부로 반영됩니다: {summary.duplicateSkus.slice(0, 8).join(', ')}{summary.duplicateSkus.length > 8 ? ' …' : ''}</div> : null}
+      {summary.duplicateSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 중복 SKU {summary.duplicateSkus.length}개는 한 번만 단종 처리합니다: {summary.duplicateSkus.slice(0, 8).join(', ')}{summary.duplicateSkus.length > 8 ? ' …' : ''}</div> : null}
       {summary.unregisteredSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 품목에 없는 SKU {summary.unregisteredSkus.length}개는 새로 만들지 않고 건너뜁니다: {summary.unregisteredSkus.slice(0, 8).join(', ')}{summary.unregisteredSkus.length > 8 ? ' …' : ''}</div> : null}
     </section>
   )

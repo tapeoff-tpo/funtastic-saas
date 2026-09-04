@@ -28,8 +28,8 @@ export async function getDiscontinuedProductMatchSummary(
 }
 
 /**
- * Applies only the SKUs included in the file. A later partial file must never
- * reactivate an SKU simply because that SKU was not uploaded again.
+ * Applies only the SKUs included in the file. A later partial file leaves
+ * earlier discontinuation states unchanged when their SKU is not uploaded.
  */
 export async function applyDiscontinuedProductActions(input: {
   userId: string
@@ -37,44 +37,35 @@ export async function applyDiscontinuedProductActions(input: {
 }) {
   const registeredSkus = await getRegisteredProductSkus(input.userId, input.actions.map((action) => action.sku))
   const actions = input.actions.filter((action) => registeredSkus.has(action.sku))
-  const discontinuedActions = actions.filter((action) => action.action === 'discontinued')
   const now = new Date()
 
   let hiddenAutoRecommendationRows = 0
   await db.transaction(async (tx) => {
     for (const chunk of chunks(actions, PRODUCT_CHUNK_SIZE)) {
       const values = sql.join(chunk.map((action) => sql`(
-        ${action.sku}::text,
-        ${action.action}::text,
-        ${action.action === 'discontinued' ? buildStatusNote(action) : null}::text,
-        ${action.action === 'discontinued'}::boolean
+        ${action.sku}::text
       )`), sql`, `)
       await tx.execute(sql`
         UPDATE products AS product
         SET
-          purchasing_status = source.purchasing_status,
-          purchasing_status_note = source.purchasing_status_note,
+          purchasing_status = 'discontinued',
+          purchasing_status_note = '단종 원본 반영',
           purchasing_status_updated_at = ${now},
           metadata = jsonb_set(
             COALESCE(product.metadata, '{}'::jsonb),
             '{purchasingOutgoingMetrics}',
             COALESCE(product.metadata->'purchasingOutgoingMetrics', '{}'::jsonb)
-              || jsonb_build_object('isDiscontinued', source.is_discontinued),
+              || jsonb_build_object('isDiscontinued', true),
             true
           ),
           updated_at = ${now}
-        FROM (VALUES ${values}) AS source(
-          sku,
-          purchasing_status,
-          purchasing_status_note,
-          is_discontinued
-        )
+        FROM (VALUES ${values}) AS source(sku)
         WHERE product.user_id = ${input.userId}::uuid
           AND product.internal_sku = source.sku
       `)
     }
 
-    for (const chunk of chunks(discontinuedActions.map((action) => action.sku), PRODUCT_CHUNK_SIZE)) {
+    for (const chunk of chunks(actions.map((action) => action.sku), PRODUCT_CHUNK_SIZE)) {
       if (chunk.length === 0) continue
       const hiddenRows = await tx
         .update(purchaseRequestItems)
@@ -91,8 +82,7 @@ export async function applyDiscontinuedProductActions(input: {
 
   return {
     appliedSkuCount: actions.length,
-    discontinuedSkuCount: discontinuedActions.length,
-    restoredSkuCount: actions.length - discontinuedActions.length,
+    discontinuedSkuCount: actions.length,
     unregisteredSkus: input.actions
       .map((action) => action.sku)
       .filter((sku) => !registeredSkus.has(sku)),
@@ -153,11 +143,6 @@ async function getRegisteredProductSkus(userId: string, skus: string[]) {
     for (const row of rows) registered.add(row.sku)
   }
   return registered
-}
-
-function buildStatusNote(action: DiscontinuedProductAction) {
-  const details = [action.reason, action.discontinuedDate, action.note].filter(Boolean).join(' · ')
-  return details ? `단종 원본: ${details}` : '단종 원본 반영'
 }
 
 function chunks<T>(items: T[], size: number): T[][] {

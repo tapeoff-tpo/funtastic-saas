@@ -121,7 +121,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     ], [[
       '20260902 -16', '', '', 'P-QUERY', '100001-0001', '조회 상품', '블랙', 20,
       '2026-09-09', '', '', '', '', '', '3316379631024009579', '',
-      '개인', '', '', '', '', '종결', '조회', '20260902 -1',
+      '개인', '', '', '', '', '', '조회', '20260902 -1',
     ]])
 
     await expect(classifyEcountPurchasingUpload(plan)).resolves.toEqual({
@@ -145,6 +145,32 @@ describe('parseEcountPurchasingSnapshot', () => {
         purchaseManagementCode: 'P-QUERY',
         supplierOrderNumber: '3316379631024009579',
         purchaseMethod: '개인',
+      }),
+    ])
+  })
+
+  it('excludes terminated rows from the purchase-plan query even when their management code and SKU repeat', async () => {
+    const plan = await makeUpload('ESG002M.xlsx', [
+      '일자-No.', '구입관리코드', '품목코드', '품목명', '옵션명', '수량',
+      '주문서번호', '구매진행여부', '종결여부', '진행상태', '발주요청일자no',
+    ], [
+      ['20260304 -38', 'P-CLOSED', '111693-0001', '종결 상품', '베이지', 4, '', '핀둬둬', '종결', '조회', '20260304 -4'],
+      ['20260304 -36', 'P-CLOSED', '111693-0001', '종결 상품', '베이지', 10, '', '핀둬둬', '취소', '조회', '20260304 -2'],
+      ['20260904 -1', 'P-ACTIVE', '100001-0001', '진행 상품', '블랙', 20, '3316379631024009579', '개인', '', '조회', '20260904 -1'],
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files: [plan],
+      domesticInventoryReflectedThrough: '2026-09-04',
+      asOfDate: '2026-09-04',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.purchaseCompleted).toEqual([
+      expect.objectContaining({
+        purchaseManagementCode: 'P-ACTIVE',
+        sku: '100001-0001',
+        quantity: 20,
       }),
     ])
   })

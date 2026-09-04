@@ -149,10 +149,44 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[purchasing-raw-data]', error)
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : '발주 로우데이터 처리에 실패했습니다.' },
+      { error: getPurchasingRawDataErrorMessage(error) },
       { status: 500 },
     )
   }
+}
+
+function getPurchasingRawDataErrorMessage(error: unknown) {
+  const causes = errorChain(error)
+  const databaseCode = causes.find((cause) => typeof cause.code === 'string')?.code
+  if (databaseCode === '23505') {
+    return '같은 발주 원본 행이 중복되어 반영하지 못했습니다. 파일을 다시 내려받아 올리거나, 중복 행을 확인해주세요.'
+  }
+  if (databaseCode === '40P01' || databaseCode === '55P03') {
+    return '다른 데이터 반영 작업과 동시에 처리되어 반영하지 못했습니다. 잠시 후 최종 반영을 다시 눌러주세요.'
+  }
+
+  const safeMessage = causes
+    .map((cause) => cause.message)
+    .find((message): message is string => (
+      typeof message === 'string' && message.length > 0 && !message.startsWith('Failed query:')
+    ))
+  return safeMessage ?? '발주 로우데이터 반영 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
+}
+
+function errorChain(error: unknown) {
+  const causes: Array<{ message?: string; code?: string }> = []
+  const seen = new Set<unknown>()
+  let current = error
+  while (typeof current === 'object' && current !== null && !seen.has(current)) {
+    seen.add(current)
+    const candidate = current as { message?: unknown; code?: unknown; cause?: unknown }
+    causes.push({
+      message: typeof candidate.message === 'string' ? candidate.message : undefined,
+      code: typeof candidate.code === 'string' ? candidate.code : undefined,
+    })
+    current = candidate.cause
+  }
+  return causes
 }
 
 function requiredText(form: FormData, key: string) {

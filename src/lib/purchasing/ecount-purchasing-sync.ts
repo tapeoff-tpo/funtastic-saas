@@ -260,8 +260,11 @@ export async function parseEcountPurchasingSnapshot(input: {
   const chinaInventory = reportByKind.get('chinaInventory')!
   const chinaOutbound = reportByKind.get('chinaOutbound')!
 
+  // 발주계획 조회에는 과거 종결/취소 건도 함께 내려올 수 있다. 이 파일은
+  // 현재 구매 진행분만 나타내야 하므로 종결 행은 발주 파이프라인에 넣지 않는다.
   const purchasePlanRows = readRows(purchasePlan)
     .filter((row) => isPurchaseItemSku(valueAt(row, purchasePlan, '품목코드')))
+    .filter((row) => !isTerminalPurchasePlanRow(row, purchasePlan))
   const planRowsByPurchaseKey = new Map<string, Array<{ number: number; row: ExcelJS.Row }>>()
   for (const row of purchasePlanRows) {
     const key = purchaseKey(
@@ -663,6 +666,21 @@ function deduplicateCompletedRequests(items: EcountPurchaseCompletedItem[]) {
     if (!existing || item.sourceRowNumber > existing.sourceRowNumber) keyed.set(key, item)
   }
   return [...keyed.values(), ...unkeyed]
+}
+
+function isTerminalPurchasePlanRow(
+  row: { row: ExcelJS.Row },
+  purchasePlan: ParsedReport,
+) {
+  return ['종결여부', '현재상태'].some((header) => {
+    const status = valueAt(row, purchasePlan, header).replace(/\s+/g, '')
+    return status === '종결'
+      || status === '취소'
+      || status === '삭제'
+      || status === '종료'
+      || status.startsWith('종결처리')
+      || status.startsWith('취소처리')
+  })
 }
 
 function emptyReport(kind: EcountReportKind): ParsedReport {

@@ -19,9 +19,9 @@ export type DiscontinuedProductUpload = {
   fileBuffer: ArrayBuffer
 }
 
-const SKU_HEADERS = ['품목코드', '상품코드', 'SKU', '사방넷코드']
-const PRODUCT_NAME_HEADERS = ['품목명', '상품명', '상품 이름']
-const OPTION_HEADERS = ['옵션', '옵션명', '규격']
+const SKU_HEADER = '품목코드'
+const PRODUCT_NAME_HEADER = '품목명'
+const OPTION_HEADER = '옵션'
 
 /**
  * Reads the optional discontinued-product raw-data workbook. This is a patch
@@ -37,7 +37,7 @@ export async function parseDiscontinuedProductFile(
 
   const header = findHeader(sheet)
   if (!header) {
-    throw new Error(`${input.fileName}: 단종상품 양식이 아닙니다. 1~20행에 "품목코드" 열이 있어야 합니다.`)
+    throw new Error(`${input.fileName}: 단종상품 양식이 아닙니다. 1~20행에 "품목코드", "품목명", "옵션" 열이 모두 있어야 합니다.`)
   }
 
   const actionsBySku = new Map<string, DiscontinuedProductAction>()
@@ -100,20 +100,22 @@ function findHeader(sheet: ExcelJS.Worksheet) {
       const value = normalizeHeader(cellText(cell.value))
       if (value && !headers.has(value)) headers.set(value, columnNumber)
     })
-    const skuColumn = findColumn(headers, SKU_HEADERS)
-    if (!skuColumn) continue
+    const skuColumn = findColumn(headers, SKU_HEADER)
+    const productNameColumn = findColumn(headers, PRODUCT_NAME_HEADER)
+    const optionNameColumn = findColumn(headers, OPTION_HEADER)
+    if (!skuColumn || !productNameColumn || !optionNameColumn) continue
     return {
       rowNumber,
       skuColumn,
-      productNameColumn: findColumn(headers, PRODUCT_NAME_HEADERS),
-      optionNameColumn: findColumn(headers, OPTION_HEADERS),
+      productNameColumn,
+      optionNameColumn,
     }
   }
   return null
 }
 
-function findColumn(headers: Map<string, number>, aliases: string[]) {
-  return aliases.map(normalizeHeader).map((header) => headers.get(header)).find(Boolean) ?? null
+function findColumn(headers: Map<string, number>, header: string) {
+  return headers.get(normalizeHeader(header)) ?? null
 }
 
 function optionalText(row: ExcelJS.Row, columnNumber: number | null) {

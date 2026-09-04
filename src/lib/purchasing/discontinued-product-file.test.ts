@@ -40,17 +40,17 @@ describe('parseDiscontinuedProductFile', () => {
     })
   })
 
-  it('requires a product code column', async () => {
+  it('requires exactly the simple product-code, product-name, option headers', async () => {
     const workbook = new ExcelJS.Workbook()
     const sheet = workbook.addWorksheet('단종상품')
-    sheet.addRow(['품목명', '옵션'])
-    sheet.addRow(['첫 상품', '기본'])
+    sheet.addRow(['품목코드', '품목명', '규격'])
+    sheet.addRow(['111111-0001', '첫 상품', '기본'])
 
     const fileBuffer = await workbook.xlsx.writeBuffer()
     await expect(parseDiscontinuedProductFile({
       fileName: '잘못된양식.xlsx',
       fileBuffer: fileBuffer as ArrayBuffer,
-    })).rejects.toThrow('"품목코드" 열')
+    })).rejects.toThrow('"품목코드", "품목명", "옵션" 열이 모두')
   })
 
   it('creates a blank template that can be uploaded without treating its guide as a product row', async () => {

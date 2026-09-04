@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       fileName: parsed.fileName,
       totalDataRows: parsed.totalDataRows,
       uniqueSkuCount: parsed.actions.length,
-      discontinuedSkuCount: parsed.actions.length,
+      discontinuedSkuCount: matchSummary.registeredSkuCount,
       duplicateSkus: parsed.duplicateSkus,
       registeredSkuCount: matchSummary.registeredSkuCount,
       unregisteredSkus: matchSummary.unregisteredSkus,

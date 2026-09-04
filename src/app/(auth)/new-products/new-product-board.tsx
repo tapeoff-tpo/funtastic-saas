@@ -33,6 +33,7 @@ import type {
   NewProductEditorLayout,
   NewProductEditorSection,
   NewProductItem,
+  NewProductOptionDetail,
   NewProductStage,
   NewProductStageTone,
   NewProductSummary,
@@ -412,6 +413,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     ? editorValues(item, exchangeRate.rate)
     : emptyEditorValues(stages[0]?.id ?? '', exchangeRate.rate))
   const [pendingAttachments, setPendingAttachments] = useState<Partial<Record<NewProductAttachment['kind'], File[]>>>({})
+  const [pendingAttachmentDeletes, setPendingAttachmentDeletes] = useState<string[]>([])
   const [pending, startTransition] = useTransition()
   const [editing, setEditing] = useState(item === null)
 
@@ -441,6 +443,28 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     toast.success('펀타스틱 계산식으로 판매가를 계산했습니다.')
   }
 
+  async function saveAttachmentChanges(itemId: string) {
+    const pendingFiles = Object.entries(pendingAttachments).flatMap(([kind, files]) => (
+      (files ?? []).map((file) => ({ kind: kind as NewProductAttachment['kind'], file }))
+    ))
+    const attachmentIdsToDelete = [...new Set(pendingAttachmentDeletes)]
+    if (pendingFiles.length === 0 && attachmentIdsToDelete.length === 0) return
+
+    const [uploadResults, deleteResults] = await Promise.all([
+      Promise.allSettled(pendingFiles.map(({ kind, file }) => uploadAttachmentFile(itemId, kind, file))),
+      Promise.allSettled(attachmentIdsToDelete.map((attachmentId) => deleteAttachmentFile(attachmentId))),
+    ])
+    const failedUploads = uploadResults.filter((result) => result.status === 'rejected').length
+    const failedDeletes = deleteResults.filter((result) => result.status === 'rejected').length
+    if (failedUploads > 0 || failedDeletes > 0) {
+      const failedActions = [
+        failedUploads > 0 ? `파일 ${failedUploads}개 업로드` : null,
+        failedDeletes > 0 ? `파일 ${failedDeletes}개 삭제` : null,
+      ].filter(Boolean).join(' 및 ')
+      toast.warning(`상품 정보는 저장했지만 ${failedActions}에 실패했습니다.`)
+    }
+  }
+
   function save() {
     startTransition(async () => {
       if (item) {
@@ -449,6 +473,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           toast.error(result.error)
           return
         }
+        await saveAttachmentChanges(item.id)
         showItemMasterSaveToast(result.itemMasterSync.status, false)
         onSaved(item.id)
         return
@@ -459,16 +484,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
         toast.error(result.error)
         return
       }
-      const pendingFiles = Object.entries(pendingAttachments).flatMap(([kind, files]) => (
-        (files ?? []).map((file) => ({ kind: kind as NewProductAttachment['kind'], file }))
-      ))
-      if (pendingFiles.length > 0) {
-        const uploadResults = await Promise.allSettled(
-          pendingFiles.map(({ kind, file }) => uploadAttachmentFile(result.id, kind, file)),
-        )
-        const failedUploads = uploadResults.filter((uploadResult) => uploadResult.status === 'rejected').length
-        if (failedUploads > 0) toast.warning(`상품은 저장했지만 첨부파일 ${failedUploads}개를 업로드하지 못했습니다.`)
-      }
+      await saveAttachmentChanges(result.id)
       showItemMasterSaveToast(result.itemMasterSync.status, true)
       onSaved(result.id)
     })
@@ -478,6 +494,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     if (!item) return
     setValues(editorValues(item, exchangeRate.rate))
     setPendingAttachments({})
+    setPendingAttachmentDeletes([])
     setEditing(false)
   }
 
@@ -527,6 +544,13 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="이전원가 (₩)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
           <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
           <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
+          <div className={fullWidthFieldClass}>
+            <OptionDetailsEditor
+              value={values.optionDetails}
+              disabled={Boolean(item) && !editing}
+              onChange={(optionDetails) => setValue('optionDetails', optionDetails)}
+            />
+          </div>
           <div className={cn('space-y-5', fullWidthFieldClass)}>
             <MemoGroup title="핵심 메모">
               <MemoField editing={editing} label="필수 체크 사항" value={values.requiredChecks} onChange={(value) => setValue('requiredChecks', value)} placeholder="미팅 전 반드시 확인할 내용" />
@@ -542,22 +566,25 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
     ),
     attachments: (
       <EditorSection title="이미지 및 품질표시 파일" icon={ImageIcon}>
-        {!item && <p className="mb-3 rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">여기서 고른 파일은 신상품 저장 버튼을 누르면 상품 정보와 함께 업로드됩니다.</p>}
+        <p className="mb-3 rounded-lg bg-violet-50 px-3 py-2 text-xs text-violet-800">선택하거나 삭제한 파일은 변경사항 저장을 누를 때 상품 정보와 함께 반영됩니다.</p>
         <div className={cn('grid gap-3', fieldGridClass)}>
           {attachmentKinds.map(({ kind, label }) => (
             <AttachmentPanel
               key={kind}
-              itemId={item?.id ?? null}
               kind={kind}
               label={label}
               attachments={item?.attachments ?? []}
               pendingFiles={pendingAttachments[kind] ?? []}
+              pendingDeleteIds={pendingAttachmentDeletes}
+              disabled={pending || (Boolean(item) && !editing)}
               onPendingFilesChange={(update) => setPendingAttachments((current) => {
                 const currentFiles = current[kind] ?? []
                 const files = typeof update === 'function' ? update(currentFiles) : update
                 return { ...current, [kind]: files }
               })}
-              onChanged={() => item && onSaved(item.id)}
+              onPendingDeleteIdsChange={(update) => setPendingAttachmentDeletes((current) => (
+                typeof update === 'function' ? update(current) : update
+              ))}
             />
           ))}
         </div>
@@ -1054,26 +1081,134 @@ function ProfitCard({ label, price, profit, margin, fee }: { label: string; pric
   )
 }
 
-function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPendingFilesChange, onChanged }: {
-  itemId: string | null
+function OptionDetailsEditor({ value, onChange, disabled }: {
+  value: EditorOptionDetail[]
+  onChange: (value: EditorOptionDetail[]) => void
+  disabled: boolean
+}) {
+  function updateOption(index: number, key: keyof EditorOptionDetail, nextValue: string) {
+    onChange(value.map((option, optionIndex) => (
+      optionIndex === index ? { ...option, [key]: nextValue } : option
+    )))
+  }
+
+  function addOption() {
+    onChange([...value, emptyOptionDetail()])
+  }
+
+  function removeOption(index: number) {
+    onChange(value.filter((_, optionIndex) => optionIndex !== index))
+  }
+
+  return (
+    <section className="overflow-hidden rounded-lg border bg-card">
+      <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h4 className="text-sm font-semibold">옵션별 등록 정보</h4>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">옵션별 정보를 따로 관리합니다. 정밀여부, 첫발주, MOQ, 벌크수량은 제외했습니다.</p>
+        </div>
+        <Button type="button" size="sm" variant="outline" onClick={addOption} disabled={disabled}>
+          <Plus />옵션 추가
+        </Button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[1840px] text-left text-xs">
+          <thead className="bg-muted/40 text-muted-foreground">
+            <tr>
+              <OptionTableHeader className="min-w-[150px]">옵션명</OptionTableHeader>
+              <OptionTableHeader className="min-w-[140px]">사방넷코드(옵션)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[105px]">사방넷등록</OptionTableHeader>
+              <OptionTableHeader className="min-w-[125px]">원가(위안화) (C2)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[110px]">운송비 (C3)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[200px]">제품날개까지사이즈 (C6)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[160px]">벌크 사이즈 (C4)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[230px]">구매참고사항 (C5)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[115px]">원가(원화)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[125px]">이전원가(원화)</OptionTableHeader>
+              <OptionTableHeader className="min-w-[110px]">기준환율</OptionTableHeader>
+              <OptionTableHeader className="min-w-[110px]">B2B 판매가</OptionTableHeader>
+              <OptionTableHeader className="min-w-[110px]">B2C 판매가</OptionTableHeader>
+              <OptionTableHeader className="w-12" />
+            </tr>
+          </thead>
+          <tbody>
+            {value.map((option, index) => (
+              <tr key={option.id} className="border-t align-top">
+                <OptionTableCell><OptionTableInput value={option.optionName} onChange={(nextValue) => updateOption(index, 'optionName', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.sabangnetOptionCode} onChange={(nextValue) => updateOption(index, 'sabangnetOptionCode', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell>
+                  <select value={option.sabangnetRegistered} onChange={(event) => updateOption(index, 'sabangnetRegistered', event.target.value)} disabled={disabled} className="h-8 min-w-[94px] rounded-md border border-input bg-background px-2 text-xs">
+                    <option value="">미확인</option>
+                    <option value="Y">등록</option>
+                    <option value="N">미등록</option>
+                  </select>
+                </OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.chinaUnitPriceCny} onChange={(nextValue) => updateOption(index, 'chinaUnitPriceCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.unitShippingCny} onChange={(nextValue) => updateOption(index, 'unitShippingCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.productSize} onChange={(nextValue) => updateOption(index, 'productSize', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.bulkSize} onChange={(nextValue) => updateOption(index, 'bulkSize', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.purchaseReferenceNotes} onChange={(nextValue) => updateOption(index, 'purchaseReferenceNotes', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell className="text-center">
+                  <Button type="button" size="icon-sm" variant="ghost" aria-label={`${index + 1}번 옵션 삭제`} onClick={() => removeOption(index)} disabled={disabled}><Trash2 /></Button>
+                </OptionTableCell>
+              </tr>
+            ))}
+            {value.length === 0 && (
+              <tr className="border-t">
+                <td colSpan={14} className="px-3 py-7 text-center text-sm text-muted-foreground">등록할 옵션이 없습니다. 옵션 추가를 눌러 입력하세요.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
+function OptionTableHeader({ children, className }: { children?: React.ReactNode; className?: string }) {
+  return <th className={cn('border-r px-2 py-2 font-medium last:border-r-0', className)}>{children}</th>
+}
+
+function OptionTableCell({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <td className={cn('border-r p-1 last:border-r-0', className)}>{children}</td>
+}
+
+function OptionTableInput({ value, onChange, disabled, inputMode }: {
+  value: string
+  onChange: (value: string) => void
+  disabled: boolean
+  inputMode?: 'decimal' | 'numeric'
+}) {
+  return <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 min-w-[90px] text-xs" />
+}
+
+function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDeleteIds, onPendingFilesChange, onPendingDeleteIdsChange, disabled }: {
   kind: NewProductAttachment['kind']
   label: string
   attachments: NewProductAttachment[]
   pendingFiles: File[]
+  pendingDeleteIds: string[]
   onPendingFilesChange: (update: React.SetStateAction<File[]>) => void
-  onChanged: () => void
+  onPendingDeleteIdsChange: (update: React.SetStateAction<string[]>) => void
+  disabled: boolean
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<string[]>([])
-  const files = attachments.filter((attachment) => attachment.kind === kind)
+  const savedFiles = attachments.filter((attachment) => attachment.kind === kind)
+  const files = savedFiles.filter((attachment) => !pendingDeleteIds.includes(attachment.id))
+  const deletedFiles = savedFiles.filter((attachment) => pendingDeleteIds.includes(attachment.id))
   const isPdf = kind === 'quality_pdf'
   const selectedAttachments = files.filter((attachment) => selectedAttachmentIds.includes(attachment.id))
   const allAttachmentsSelected = files.length > 0 && selectedAttachments.length === files.length
-  const busy = uploading || deleting
+  const busy = uploading
 
-  async function upload(selectedFiles?: FileList | File[] | null) {
+  async function queueFiles(selectedFiles?: FileList | File[] | null) {
     const filesToUpload = selectedFiles ? Array.from(selectedFiles) : []
     if (filesToUpload.length === 0) return
 
@@ -1081,9 +1216,6 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
     const validFiles: File[] = []
     const invalidFiles: string[] = []
     let optimizedImageCount = 0
-    let uploadedCount = 0
-    const failedUploads: unknown[] = []
-    let optimizationLabel = ''
     try {
       for (const file of filesToUpload) {
         try {
@@ -1099,32 +1231,12 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
       }
       if (validFiles.length === 0) return
 
-      optimizationLabel = optimizedImageCount > 0 ? ` · 이미지 ${optimizedImageCount}개 용량 자동 최적화` : ''
-      if (!itemId) {
-        onPendingFilesChange((currentFiles) => [...currentFiles, ...validFiles])
-        toast.success(`${validFiles.length}개 파일을 저장 대기 목록에 추가했습니다.${optimizationLabel}`)
-        return
-      }
-
-      for (const file of validFiles) {
-        try {
-          await uploadAttachmentFile(itemId, kind, file)
-          uploadedCount += 1
-        } catch (error) {
-          failedUploads.push(error)
-        }
-      }
+      const optimizationLabel = optimizedImageCount > 0 ? ` · 이미지 ${optimizedImageCount}개 용량 자동 최적화` : ''
+      onPendingFilesChange((currentFiles) => [...currentFiles, ...validFiles])
+      toast.success(`${validFiles.length}개 파일을 저장 대기 목록에 추가했습니다.${optimizationLabel}`)
     } finally {
       setUploading(false)
       if (inputRef.current) inputRef.current.value = ''
-    }
-    if (uploadedCount > 0) {
-      toast.success(`${uploadedCount}개 파일 업로드 완료${optimizationLabel}`)
-      onChanged()
-    }
-    if (failedUploads.length > 0) {
-      const firstError = failedUploads[0]
-      toast.error(`${failedUploads.length}개 파일 업로드에 실패했습니다. ${firstError instanceof Error ? firstError.message : ''}`.trim())
     }
   }
 
@@ -1138,39 +1250,21 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
     setSelectedAttachmentIds(allAttachmentsSelected ? [] : files.map((attachment) => attachment.id))
   }
 
-  async function remove(attachment: NewProductAttachment) {
-    if (busy || !window.confirm(`“${attachment.fileName}” 파일을 정말 삭제할까요?`)) return
-    await removeAttachments([attachment])
+  function queueRemoval(attachmentsToRemove: NewProductAttachment[]) {
+    if (busy || disabled || attachmentsToRemove.length === 0) return
+    const label = attachmentsToRemove.length === 1
+      ? `“${attachmentsToRemove[0]!.fileName}” 파일을 삭제 대기할까요?`
+      : `선택한 ${attachmentsToRemove.length}개 파일을 삭제 대기할까요?`
+    if (!window.confirm(`${label} 변경사항 저장을 눌러야 실제로 삭제됩니다.`)) return
+
+    const ids = new Set(attachmentsToRemove.map((attachment) => attachment.id))
+    onPendingDeleteIdsChange((current) => [...new Set([...current, ...ids])])
+    setSelectedAttachmentIds((current) => current.filter((id) => !ids.has(id)))
+    toast.success(attachmentsToRemove.length === 1 ? '파일을 삭제 대기 목록에 넣었습니다.' : `${attachmentsToRemove.length}개 파일을 삭제 대기 목록에 넣었습니다.`)
   }
 
-  async function removeSelected() {
-    if (busy || selectedAttachments.length === 0) return
-    if (!window.confirm(`선택한 ${selectedAttachments.length}개 파일을 정말 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return
-    await removeAttachments(selectedAttachments)
-  }
-
-  async function removeAttachments(attachmentsToRemove: NewProductAttachment[]) {
-    setDeleting(true)
-    let results: PromiseSettledResult<void>[] = []
-    try {
-      results = await Promise.allSettled(attachmentsToRemove.map((attachment) => deleteAttachmentFile(attachment.id)))
-    } finally {
-      setDeleting(false)
-    }
-
-    const deletedAttachments = attachmentsToRemove.filter((_, index) => results[index]?.status === 'fulfilled')
-    const failedCount = results.filter((result) => result.status === 'rejected').length
-    if (deletedAttachments.length > 0) {
-      const deletedIds = new Set(deletedAttachments.map((attachment) => attachment.id))
-      setSelectedAttachmentIds((current) => current.filter((id) => !deletedIds.has(id)))
-      toast.success(deletedAttachments.length === 1 ? '파일을 삭제했습니다.' : `${deletedAttachments.length}개 파일을 삭제했습니다.`)
-      onChanged()
-    }
-    if (failedCount > 0) {
-      const firstFailure = results.find((result) => result.status === 'rejected')
-      const error = firstFailure && firstFailure.status === 'rejected' ? firstFailure.reason : null
-      toast.error(`${failedCount}개 파일 삭제에 실패했습니다. ${error instanceof Error ? error.message : ''}`.trim())
-    }
+  function restore(attachmentId: string) {
+    onPendingDeleteIdsChange((current) => current.filter((id) => id !== attachmentId))
   }
 
   return (
@@ -1178,25 +1272,25 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
       <p className="mb-2 text-xs font-semibold">{label}</p>
       <button
         type="button"
-        disabled={busy}
+        disabled={busy || disabled}
         onClick={() => inputRef.current?.click()}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => { event.preventDefault(); if (!busy) void upload(event.dataTransfer.files) }}
+        onDragOver={(event) => { if (!disabled) event.preventDefault() }}
+        onDrop={(event) => { event.preventDefault(); if (!busy && !disabled) void queueFiles(event.dataTransfer.files) }}
         className="flex w-full flex-col items-center justify-center rounded-lg border border-dashed py-4 text-xs text-muted-foreground transition hover:border-violet-400 hover:bg-violet-50/50 disabled:cursor-not-allowed"
       >
         {busy ? <Loader2 className="mb-1 h-5 w-5 animate-spin" /> : <UploadCloud className="mb-1 h-5 w-5" />}
-        {uploading ? '파일 처리 중...' : deleting ? '파일 삭제 중...' : isPdf ? 'PDF를 끌어놓거나 클릭' : '이미지를 여러 장 끌어놓거나 클릭'}
+        {uploading ? '파일 준비 중...' : isPdf ? 'PDF를 끌어놓거나 클릭' : '이미지를 여러 장 끌어놓거나 클릭'}
       </button>
-      <input ref={inputRef} type="file" accept={isPdf ? 'application/pdf' : 'image/jpeg,image/png,image/webp,image/gif'} multiple={!isPdf} className="hidden" onChange={(event) => void upload(event.target.files)} />
+      <input ref={inputRef} type="file" accept={isPdf ? 'application/pdf' : 'image/jpeg,image/png,image/webp,image/gif'} multiple={!isPdf} disabled={busy || disabled} className="hidden" onChange={(event) => void queueFiles(event.target.files)} />
       {files.length > 0 && (
         <div className="mt-2 space-y-2">
           {files.length > 1 ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-xs">
               <label className="flex cursor-pointer items-center gap-1.5 text-muted-foreground">
-                <input type="checkbox" checked={allAttachmentsSelected} onChange={toggleAllAttachments} disabled={busy} className="size-3.5 accent-foreground" />
+                <input type="checkbox" checked={allAttachmentsSelected} onChange={toggleAllAttachments} disabled={busy || disabled} className="size-3.5 accent-foreground" />
                 전체 선택
               </label>
-              <Button type="button" size="sm" variant="destructive" onClick={() => void removeSelected()} disabled={busy || selectedAttachments.length === 0} className="h-7 px-2 text-xs">
+              <Button type="button" size="sm" variant="destructive" onClick={() => queueRemoval(selectedAttachments)} disabled={busy || disabled || selectedAttachments.length === 0} className="h-7 px-2 text-xs">
                 <Trash2 className="h-3.5 w-3.5" />
                 선택 삭제 ({selectedAttachments.length})
               </Button>
@@ -1207,7 +1301,7 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
               <div key={attachment.id} className={cn('group relative overflow-hidden rounded-md border bg-muted/20', selectedAttachmentIds.includes(attachment.id) && 'border-violet-500 ring-1 ring-violet-200')}>
                 {files.length > 1 ? (
                   <label className="absolute left-1 top-1 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded-full bg-background/90 shadow-sm" title="삭제할 파일 선택">
-                    <input type="checkbox" checked={selectedAttachmentIds.includes(attachment.id)} onChange={() => toggleAttachment(attachment.id)} disabled={busy} aria-label={`${attachment.fileName} 선택`} className="size-3.5 accent-foreground" />
+                    <input type="checkbox" checked={selectedAttachmentIds.includes(attachment.id)} onChange={() => toggleAttachment(attachment.id)} disabled={busy || disabled} aria-label={`${attachment.fileName} 선택`} className="size-3.5 accent-foreground" />
                   </label>
                 ) : null}
                 <a href={`/api/new-products/attachments/${attachment.id}`} target="_blank" rel="noreferrer" className="block">
@@ -1218,7 +1312,7 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
                     <img src={`/api/new-products/attachments/${attachment.id}`} alt={attachment.fileName} className="h-24 w-full object-cover" />
                   )}
                 </a>
-                <button type="button" aria-label="첨부 삭제" disabled={busy} onClick={() => void remove(attachment)} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition group-hover:opacity-100 disabled:cursor-not-allowed"><Trash2 className="h-3 w-3" /></button>
+                <button type="button" aria-label="첨부 삭제" disabled={busy || disabled} onClick={() => queueRemoval([attachment])} className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/65 text-white opacity-0 transition group-hover:opacity-100 disabled:cursor-not-allowed"><Trash2 className="h-3 w-3" /></button>
               </div>
             ))}
           </div>
@@ -1230,7 +1324,18 @@ function AttachmentPanel({ itemId, kind, label, attachments, pendingFiles, onPen
             <div key={`${file.name}-${file.lastModified}-${index}`} className="flex items-center gap-2 rounded-md bg-violet-50 px-2 py-1.5 text-xs text-violet-800">
               {isPdf ? <FileText className="h-3.5 w-3.5" /> : <ImageIcon className="h-3.5 w-3.5" />}
               <span className="min-w-0 flex-1 truncate">{file.name}</span>
-              <button type="button" aria-label="대기 파일 제거" onClick={() => onPendingFilesChange((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index))}><Trash2 className="h-3.5 w-3.5" /></button>
+              <button type="button" aria-label="대기 파일 제거" disabled={busy || disabled} onClick={() => onPendingFilesChange((currentFiles) => currentFiles.filter((_, fileIndex) => fileIndex !== index))}><Trash2 className="h-3.5 w-3.5" /></button>
+            </div>
+          ))}
+        </div>
+      )}
+      {deletedFiles.length > 0 && (
+        <div className="mt-2 space-y-1 rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+          <p className="font-medium">저장 시 삭제 ({deletedFiles.length})</p>
+          {deletedFiles.map((attachment) => (
+            <div key={attachment.id} className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate">{attachment.fileName}</span>
+              <button type="button" disabled={busy || disabled} onClick={() => restore(attachment.id)} className="shrink-0 underline underline-offset-2">되돌리기</button>
             </div>
           ))}
         </div>
@@ -1383,7 +1488,62 @@ function attachmentTypeValidationError(file: File, isPdf: boolean) {
   return null
 }
 
+type EditorOptionDetail = {
+  id: string
+  optionName: string
+  sabangnetOptionCode: string
+  sabangnetRegistered: '' | 'Y' | 'N'
+  chinaUnitPriceCny: string
+  unitShippingCny: string
+  productSize: string
+  bulkSize: string
+  purchaseReferenceNotes: string
+  costKrw: string
+  previousCostKrw: string
+  exchangeRateKrw: string
+  b2bPrice: string
+  b2cPrice: string
+}
+
 type EditorValues = ReturnType<typeof emptyEditorValues>
+
+function emptyOptionDetail(): EditorOptionDetail {
+  return {
+    id: `option-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    optionName: '',
+    sabangnetOptionCode: '',
+    sabangnetRegistered: '',
+    chinaUnitPriceCny: '',
+    unitShippingCny: '',
+    productSize: '',
+    bulkSize: '',
+    purchaseReferenceNotes: '',
+    costKrw: '',
+    previousCostKrw: '',
+    exchangeRateKrw: '',
+    b2bPrice: '',
+    b2cPrice: '',
+  }
+}
+
+function editorOptionDetail(option: NewProductOptionDetail): EditorOptionDetail {
+  return {
+    id: option.id,
+    optionName: option.optionName ?? '',
+    sabangnetOptionCode: option.sabangnetOptionCode ?? '',
+    sabangnetRegistered: option.sabangnetRegistered ?? '',
+    chinaUnitPriceCny: valueString(option.chinaUnitPriceCny),
+    unitShippingCny: valueString(option.unitShippingCny),
+    productSize: option.productSize ?? '',
+    bulkSize: option.bulkSize ?? '',
+    purchaseReferenceNotes: option.purchaseReferenceNotes ?? '',
+    costKrw: valueString(option.costKrw),
+    previousCostKrw: valueString(option.previousCostKrw),
+    exchangeRateKrw: valueString(option.exchangeRateKrw),
+    b2bPrice: valueString(option.b2bPrice),
+    b2cPrice: valueString(option.b2cPrice),
+  }
+}
 
 function emptyEditorValues(stageId: string, exchangeRateKrw: number) {
   return {
@@ -1391,6 +1551,7 @@ function emptyEditorValues(stageId: string, exchangeRateKrw: number) {
     sampleCode: '',
     productName: '',
     productOption: '',
+    optionDetails: [] as EditorOptionDetail[],
     chinaUnitPriceCny: '',
     unitShippingCny: '',
     exchangeRateKrw: String(exchangeRateKrw),
@@ -1448,6 +1609,7 @@ function editorValues(item: NewProductItem, defaultExchangeRate: number): Editor
     sampleCode: item.sampleCode ?? '',
     productName: item.productName,
     productOption: item.productOption ?? '',
+    optionDetails: item.optionDetails.map(editorOptionDetail),
     chinaUnitPriceCny: valueString(item.chinaUnitPriceCny),
     unitShippingCny: valueString(item.unitShippingCny),
     exchangeRateKrw: valueString(item.exchangeRateKrw ?? defaultExchangeRate),

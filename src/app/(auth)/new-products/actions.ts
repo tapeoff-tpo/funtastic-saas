@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
+import { normalizeNewProductOptionDetails } from '@/lib/new-products/option-details'
 import {
   createNewProduct,
   deleteNewProduct,
@@ -155,6 +156,9 @@ function newProductValues(values: Record<string, unknown>): NewProductInput {
     productName: text(values.productName).trim().slice(0, 500),
     sampleCode: nullableText(values.sampleCode, 200),
     productOption: nullableText(values.productOption),
+    optionDetails: values.optionDetails === undefined
+      ? undefined
+      : normalizeNewProductOptionDetails(values.optionDetails),
     chinaUnitPriceCny: nullableNumber(values.chinaUnitPriceCny),
     unitShippingCny: nullableNumber(values.unitShippingCny),
     exchangeRateKrw: nullableNumber(values.exchangeRateKrw),

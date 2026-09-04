@@ -8,6 +8,12 @@ import {
   type NewProductItemMasterStage,
   type NewProductItemMasterValues,
 } from './item-master-sync'
+import {
+  normalizeNewProductOptionDetails,
+  type NewProductOptionDetail,
+} from './option-details'
+
+export type { NewProductOptionDetail } from './option-details'
 
 export const DEFAULT_NEW_PRODUCT_STAGES = [
   { name: '1차 통과 상품 등록', tone: 'blue' },
@@ -85,6 +91,7 @@ export type NewProductItem = {
   sampleCode: string | null
   productName: string
   productOption: string | null
+  optionDetails: NewProductOptionDetail[]
   chinaUnitPriceCny: number | null
   unitShippingCny: number | null
   exchangeRateKrw: number | null
@@ -144,6 +151,7 @@ export type NewProductInput = {
   sampleCode: string | null
   productName: string
   productOption: string | null
+  optionDetails?: NewProductOptionDetail[]
   chinaUnitPriceCny: number | null
   unitShippingCny: number | null
   exchangeRateKrw: number | null
@@ -611,6 +619,7 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
       item.sample_code AS "sampleCode",
       item.product_name AS "productName",
       item.product_option AS "productOption",
+      COALESCE(item.metadata -> 'optionDetails', '[]'::jsonb) AS "optionDetails",
       item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
       item.unit_shipping_cny::float8 AS "unitShippingCny",
       item.exchange_rate_krw::float8 AS "exchangeRateKrw",
@@ -701,6 +710,7 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
   return {
     ...item,
     stageTone: validTone(item.stageTone),
+    optionDetails: normalizeNewProductOptionDetails(item.optionDetails),
     attachments: jsonArray<NewProductAttachment>(item.attachments),
     stageHistory: jsonArray<NewProductStageHistory>(item.stageHistory),
   }
@@ -758,6 +768,7 @@ export async function getNewProductWorkflow(userId: string) {
         item.package_manufacturer AS "packageManufacturer",
         item.package_packing AS "packagePacking",
         item.product_option AS "productOption",
+        COALESCE(item.metadata -> 'optionDetails', '[]'::jsonb) AS "optionDetails",
         item.sabangnet_code AS "sabangnetCode",
         item.product_keywords AS "productKeywords",
         item.purchase_reference_notes AS "purchaseReferenceNotes",
@@ -823,6 +834,7 @@ export async function getNewProductWorkflow(userId: string) {
     items: resultRows<NewProductItem>(itemResult).map((item) => ({
       ...item,
       stageTone: validTone(item.stageTone),
+      optionDetails: normalizeNewProductOptionDetails(item.optionDetails),
       attachments: jsonArray<NewProductAttachment>(item.attachments),
       stageHistory: jsonArray<NewProductStageHistory>(item.stageHistory),
     })),
@@ -865,7 +877,7 @@ export async function createNewProduct(input: {
         b2b_option_surcharge, b2c_option_surcharge,
         notice_material, notice_size, notice_manufacturer, notice_weight, notice_country,
         notice_capacity, notice_food_safety, notice_components, notice_special_notes,
-        created_by_user_id
+        metadata, created_by_user_id
       ) VALUES (
         ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid,
         ${input.values.sampleCode}, ${input.values.productName}, ${input.values.productOption},
@@ -889,6 +901,7 @@ export async function createNewProduct(input: {
         ${input.values.noticeWeight}, ${input.values.noticeCountry}, ${input.values.noticeCapacity},
         ${input.values.noticeFoodSafety}, ${input.values.noticeComponents},
         ${input.values.noticeSpecialNotes},
+        ${JSON.stringify({ optionDetails: input.values.optionDetails ?? [] })}::jsonb,
         ${input.requestedByUserId}::uuid
       )
       RETURNING id
@@ -987,6 +1000,12 @@ export async function updateNewProduct(input: {
         notice_food_safety = ${input.values.noticeFoodSafety},
         notice_components = ${input.values.noticeComponents},
         notice_special_notes = ${input.values.noticeSpecialNotes},
+        metadata = CASE
+          WHEN ${input.values.optionDetails === undefined} THEN metadata
+          ELSE COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(
+            'optionDetails', ${JSON.stringify(input.values.optionDetails ?? [])}::jsonb
+          )
+        END,
         updated_at = now()
       WHERE id = ${input.itemId}::uuid AND user_id = ${input.userId}::uuid
     `)

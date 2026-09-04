@@ -109,7 +109,9 @@ export async function getStoredDiscontinuedProductRawFile(
     FROM purchasing_discontinued_product_raw_files
     WHERE user_id = ${userId}::uuid
   `)
-  const rows = Array.isArray(result) ? result : result.rows ?? []
+  const rows = Array.isArray(result)
+    ? result
+    : ((result as unknown as { rows?: Array<{ fileName: string; updatedAt: string }> }).rows ?? [])
   return rows[0] ?? null
 }
 

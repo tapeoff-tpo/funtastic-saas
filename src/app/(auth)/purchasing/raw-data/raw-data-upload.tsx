@@ -13,6 +13,21 @@ type DataFreshness = {
   outboundRawAt: string | null
   outboundReflectionAt: string | null
 }
+type FileKey =
+  | 'purchaseRequest'
+  | 'purchasePlan'
+  | 'purchaseHistory'
+  | 'chinaInventory'
+  | 'chinaOutbound'
+  | 'domesticInventory'
+  | 'discontinuedProducts'
+type RawDataFile = {
+  key: FileKey
+  label: string
+  detail: string
+  uploadRule: string
+  templateHref?: string
+}
 type StoredFiles = Partial<Record<FileKey, { fileName: string; updatedAt: string }>>
 type PurchasingUploadResponse = {
   error?: string
@@ -49,7 +64,7 @@ type SnapshotSummary = {
   warnings: string[]
 }
 
-const REQUIRED_FILES = [
+const REQUIRED_FILES: readonly RawDataFile[] = [
   { key: 'purchaseRequest', label: '발주요청현황', detail: '아직 구매되지 않은 구매요청 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'purchasePlan', label: '발주계획현황', detail: '구매중으로 넘어간 발주계획 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'purchaseHistory', label: '구매현황', detail: '구매되어 중국창고에 도착한 건', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
@@ -57,8 +72,7 @@ const REQUIRED_FILES = [
   { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건 · 구입관리코드 포함 시 주문서번호 없는 건도 연결', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'domesticInventory', label: '국내재고현황', detail: '재고관리에 반영할 국내 창고 현재고', uploadRule: '현재 전체본 · 국내 창고 재고 전체' },
   { key: 'discontinuedProducts', label: '단종상품 현황', detail: '단종 또는 해제할 품목의 발주 상태', uploadRule: '변경 목록 · 파일에 적은 SKU만 상태 변경', templateHref: '/api/purchasing/discontinued-products/template' },
-] as const
-type FileKey = (typeof REQUIRED_FILES)[number]['key']
+]
 
 export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles, dataFreshness }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles; dataFreshness: DataFreshness }) {
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})

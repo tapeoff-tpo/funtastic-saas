@@ -21,6 +21,21 @@ type PurchasingUploadResponse = {
   changedKinds?: FileKey[]
 }
 type DomesticInventoryResponse = InventoryPreview & { error?: string }
+type DiscontinuedPreview = {
+  fileName: string
+  totalDataRows: number
+  uniqueSkuCount: number
+  discontinuedSkuCount: number
+  restoredSkuCount: number
+  duplicateSkus: string[]
+  registeredSkuCount: number
+  unregisteredSkus: string[]
+}
+type DiscontinuedUploadResponse = {
+  error?: string
+  summary?: DiscontinuedPreview
+  storedFile?: { fileName: string; updatedAt: string } | null
+}
 type SnapshotSummary = {
   asOfDate: string
   domesticInventoryReflectedThrough: string
@@ -41,6 +56,7 @@ const REQUIRED_FILES = [
   { key: 'chinaInventory', label: '중국재고현황', detail: '현재 중국창고에 보유한 재고', uploadRule: '현재 전체본 · 중국창고 재고 전체' },
   { key: 'chinaOutbound', label: '중국출고현황', detail: '한국으로 출고 중이거나 완료된 건 · 구입관리코드 포함 시 주문서번호 없는 건도 연결', uploadRule: '이력 누적 · 마지막 반영분 이후 신규/변경분' },
   { key: 'domesticInventory', label: '국내재고현황', detail: '재고관리에 반영할 국내 창고 현재고', uploadRule: '현재 전체본 · 국내 창고 재고 전체' },
+  { key: 'discontinuedProducts', label: '단종상품 현황', detail: '단종 또는 해제할 품목의 발주 상태', uploadRule: '변경 목록 · 파일에 적은 SKU만 상태 변경', templateHref: '/api/purchasing/discontinued-products/template' },
 ] as const
 type FileKey = (typeof REQUIRED_FILES)[number]['key']
 
@@ -49,16 +65,20 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
   const [inventoryPreview, setInventoryPreview] = useState<InventoryPreview | null>(null)
+  const [discontinuedPreview, setDiscontinuedPreview] = useState<DiscontinuedPreview | null>(null)
   const [previewKinds, setPreviewKinds] = useState<FileKey[]>([])
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
   const [isPending, startTransition] = useTransition()
   const selectedFiles = REQUIRED_FILES.flatMap(({ key }) => files[key] ? [files[key]!] : [])
-  const selectedPurchasingFiles = REQUIRED_FILES.flatMap(({ key }) => key !== 'domesticInventory' && files[key] ? [files[key]!] : [])
+  const selectedPurchasingFiles = REQUIRED_FILES.flatMap(({ key }) => (
+    key !== 'domesticInventory' && key !== 'discontinuedProducts' && files[key] ? [files[key]!] : []
+  ))
   const domesticInventoryFile = files.domesticInventory
+  const discontinuedProductFile = files.discontinuedProducts
   const readyCount = REQUIRED_FILES.filter(({ key }) => files[key] || storedFiles[key]).length
-  const isVerified = Boolean(preview || inventoryPreview)
+  const isVerified = Boolean(preview || inventoryPreview || discontinuedPreview)
 
   function selectFile(key: FileKey, file?: File) {
     if (file && !/\.xlsx$/i.test(file.name)) {
@@ -68,6 +88,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     setFiles((current) => ({ ...current, [key]: file }))
     setPreview(null)
     setInventoryPreview(null)
+    setDiscontinuedPreview(null)
     setPreviewKinds([])
     setMessage(null)
     setError(null)
@@ -94,6 +115,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
       try {
         let purchasingBody: PurchasingUploadResponse | null = null
         let domesticBody: DomesticInventoryResponse | null = null
+        let discontinuedBody: DiscontinuedUploadResponse | null = null
 
         if (selectedPurchasingFiles.length > 0) {
           const form = new FormData()
@@ -110,7 +132,9 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
             const filesByName = new Map(selectedPurchasingFiles.map((file) => [file.name, file]))
             setFiles((current) => Object.fromEntries(REQUIRED_FILES.map(({ key }) => [
               key,
-              key === 'domesticInventory' ? current[key] : filesByName.get(purchasingBody!.summary!.files[key]),
+              key === 'domesticInventory' || key === 'discontinuedProducts'
+                ? current[key]
+                : filesByName.get(purchasingBody!.summary!.files[key]),
             ])))
           }
           setPreview(purchasingBody.summary)
@@ -130,12 +154,29 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           setInventoryPreview(domesticBody)
         }
 
+        if (discontinuedProductFile) {
+          const discontinuedForm = new FormData()
+          discontinuedForm.set('mode', mode)
+          discontinuedForm.set('file', discontinuedProductFile)
+          const response = await fetch('/api/purchasing/discontinued-products', { method: 'POST', body: discontinuedForm })
+          discontinuedBody = await readJsonResponse<DiscontinuedUploadResponse>(response, '단종상품 파일을 처리하지 못했습니다.')
+          if (!response.ok || !discontinuedBody.summary) {
+            throw new Error(discontinuedBody.error ?? '단종상품 파일을 처리하지 못했습니다.')
+          }
+          if (mode === 'apply' && discontinuedBody.storedFile) {
+            setStoredFiles((current) => ({ ...current, discontinuedProducts: discontinuedBody!.storedFile! }))
+          }
+          setDiscontinuedPreview(discontinuedBody.summary)
+        }
+
         if (mode === 'apply') {
           setFiles({})
-          setMessage(domesticInventoryFile && selectedPurchasingFiles.length === 0
+          setMessage(discontinuedProductFile && selectedPurchasingFiles.length === 0 && !domesticInventoryFile
+            ? '단종상품 상태가 반영되었습니다. 발주검토에서 추천계산을 다시 실행해주세요.'
+            : domesticInventoryFile && selectedPurchasingFiles.length === 0 && !discontinuedProductFile
             ? '국내재고가 재고관리에 반영되었습니다.'
-            : domesticInventoryFile
-              ? '발주 로우데이터와 국내재고 반영이 완료되었습니다.'
+            : domesticInventoryFile || discontinuedProductFile
+              ? '선택한 발주 로우데이터가 반영되었습니다. 발주검토에서 추천계산을 다시 실행해주세요.'
               : '발주 로우데이터 반영이 완료되었습니다. 이제 발주검토에서 추천계산을 다시 실행해주세요.')
         } else {
           setMessage('파일 검증이 완료되었습니다. 아래 내역을 확인한 뒤 최종 반영하세요.')
@@ -152,15 +193,17 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
-            <p className="mt-1 text-sm text-muted-foreground">이력 파일은 마지막 반영분 이후만 넣으면 서버 누적본에 합쳐집니다. 중국·국내재고는 전체 최신본을 넣으세요.</p>
+            <p className="mt-1 text-sm text-muted-foreground">이력 파일은 마지막 반영분 이후만 넣으면 서버 누적본에 합쳐집니다. 중국·국내재고는 전체 최신본, 단종상품은 변경할 SKU만 넣으세요.</p>
           </div>
-          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 6 준비 · {selectedFiles.length}개 변경</span>
+          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 7 준비 · {selectedFiles.length}개 변경</span>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
-          {REQUIRED_FILES.map(({ key, label, detail, uploadRule }, index) => {
+          {REQUIRED_FILES.map(({ key, label, detail, uploadRule, templateHref }, index) => {
             const file = files[key]
             const stored = storedFiles[key]
-            const recognized = preview?.files[key]
+            const recognized = key === 'discontinuedProducts'
+              ? discontinuedPreview?.fileName
+              : preview?.files[key]
             const displayedFileName = file?.name ?? stored?.fileName
             const matches = !recognized || recognized === displayedFileName
             return (
@@ -177,6 +220,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
                   <span className="block font-medium">{label}</span>
                   <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
                   <span className="mt-1 block text-xs font-medium text-sky-800">{uploadRule}</span>
+                  {templateHref ? <a href={templateHref} className="mt-1 inline-block text-xs font-medium text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>단종상품 양식 다운로드</a> : null}
                   <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : stored ? 'text-sky-800' : 'text-muted-foreground'}`}>{file?.name ?? (stored ? `저장됨: ${stored.fileName}` : '여기에 드래그하거나 클릭해서 .xlsx 선택')}</span>
                   {!file && stored ? <span className="mt-1 block text-xs text-muted-foreground">마지막 등록: {formatKstTimestamp(stored.updatedAt)}</span> : null}
                   {key === 'domesticInventory' && !file ? <span className="mt-1 block text-xs text-muted-foreground">마지막 반영: {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span> : null}
@@ -214,12 +258,13 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
 
       {preview ? <Preview summary={preview} kinds={previewKinds} /> : null}
       {inventoryPreview ? <section className="rounded-lg border bg-background p-4"><h2 className="font-semibold">국내재고 미리보기</h2><div className="mt-3 grid gap-3 sm:grid-cols-3"><StateCard label="전체 행" value={`${inventoryPreview.total.toLocaleString('ko-KR')}건`} /><StateCard label="정상" value={`${inventoryPreview.success.toLocaleString('ko-KR')}건`} /><StateCard label="오류" value={`${inventoryPreview.failed.toLocaleString('ko-KR')}건`} /></div></section> : null}
+      {discontinuedPreview ? <DiscontinuedPreviewCard summary={discontinuedPreview} /> : null}
 
       <section className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
         <p>
           발주요청·발주계획·구매현황·중국출고는 새 기간만 올려도 기존 누적 이력에 합쳐지며, 같은 건은 새 파일 값으로 갱신됩니다.
-          수정 가능성이 있는 최근 7일은 함께 올리면 더 정확합니다. 중국출고에는 구입관리코드 열을 함께 넣으면 주문서번호 없는 건도 구매현황과 정확히 연결합니다. 중국·국내재고는 반드시 전체 최신본을 올리세요. 미리보기만으로는 저장·반영되지 않으며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
+          수정 가능성이 있는 최근 7일은 함께 올리면 더 정확합니다. 중국출고에는 구입관리코드 열을 함께 넣으면 주문서번호 없는 건도 구매현황과 정확히 연결합니다. 중국·국내재고는 반드시 전체 최신본을 올리세요. 단종상품은 단종/해제할 SKU만 올리며, 파일에 없는 SKU는 기존 상태를 유지합니다. 미리보기만으로는 저장·반영되지 않으며, 수동 입력한 발주와 발주검토 항목은 삭제하지 않습니다.
         </p>
       </section>
     </div>
@@ -249,6 +294,24 @@ function Preview({ summary, kinds }: { summary: SnapshotSummary; kinds: FileKey[
         {visibleSections.map(([, label, section]) => <StateCard key={label} label={label} value={`${section.rows.toLocaleString('ko-KR')}행 / ${section.quantity.toLocaleString('ko-KR')}개`} />)}
       </div>
       {warnings.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">{warnings.map((warning) => <p key={warning}>• {warning}</p>)}</div> : null}
+    </section>
+  )
+}
+
+function DiscontinuedPreviewCard({ summary }: { summary: DiscontinuedPreview }) {
+  return (
+    <section className="rounded-lg border bg-background p-4">
+      <h2 className="font-semibold">단종상품 미리보기</h2>
+      <p className="mt-1 text-sm text-muted-foreground">파일에 적힌 SKU만 바뀝니다. 단종은 발주추천과 자동추천에서 제외되고, 해제는 정상 발주 상태로 되돌립니다.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <StateCard label="처리 대상 SKU" value={`${summary.uniqueSkuCount.toLocaleString('ko-KR')}개`} />
+        <StateCard label="단종 처리" value={`${summary.discontinuedSkuCount.toLocaleString('ko-KR')}개`} />
+        <StateCard label="단종 해제" value={`${summary.restoredSkuCount.toLocaleString('ko-KR')}개`} />
+        <StateCard label="품목 등록 확인" value={`${summary.registeredSkuCount.toLocaleString('ko-KR')}개`} />
+        <StateCard label="미등록 SKU" value={`${summary.unregisteredSkus.length.toLocaleString('ko-KR')}개`} />
+      </div>
+      {summary.duplicateSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 중복 SKU {summary.duplicateSkus.length}개는 마지막 행의 단종여부로 반영됩니다: {summary.duplicateSkus.slice(0, 8).join(', ')}{summary.duplicateSkus.length > 8 ? ' …' : ''}</div> : null}
+      {summary.unregisteredSkus.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">• 품목에 없는 SKU {summary.unregisteredSkus.length}개는 새로 만들지 않고 건너뜁니다: {summary.unregisteredSkus.slice(0, 8).join(', ')}{summary.unregisteredSkus.length > 8 ? ' …' : ''}</div> : null}
     </section>
   )
 }

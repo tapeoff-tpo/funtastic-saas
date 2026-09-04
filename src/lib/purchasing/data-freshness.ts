@@ -8,6 +8,7 @@ export type DataRefreshSource =
   | 'purchasing_raw:purchaseHistory'
   | 'purchasing_raw:chinaInventory'
   | 'purchasing_raw:chinaOutbound'
+  | 'purchasing_raw:discontinuedProducts'
 
 async function ensureDataRefreshEvents() {
   await db.execute(sql`

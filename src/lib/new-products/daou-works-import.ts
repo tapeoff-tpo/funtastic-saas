@@ -492,9 +492,11 @@ function inputText(value: unknown, maxLength: number) {
 }
 
 function numberValue(value: unknown) {
-  const normalized = cleanText(value).replace(/,/g, '').replace(/[^0-9.-]/g, '')
-  if (!normalized || normalized === '-' || normalized.toLowerCase() === 'null') return null
-  const parsed = Number(normalized)
+  const normalized = cleanText(value).replace(/,/g, '').replace(/\s+/g, '')
+  if (!normalized || normalized.toLowerCase() === 'null') return null
+  const matched = normalized.match(/^(\d+(?:\.\d+)?)(?:원|원화|₩|위안|위안화|元|¥|￥)?$/)
+  if (!matched) return null
+  const parsed = Number(matched[1])
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
 }
 

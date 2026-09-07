@@ -43,6 +43,15 @@ describe('Daou WORKS CSV import', () => {
     expect(normalizeDaouWorksImportItems(parsed.items)[0]?.source.updatedAt).toBe('2026-08-03T10:20:30+09:00')
   })
 
+  it('does not turn free-form cost notes into an amount', () => {
+    const parsed = parseDaouWorksCsvText([
+      '"*ID","상태","제품명","예상원가"',
+      '"5430263","1.제품서치(C)","테스트 상품","221104 BM유지연 단가 80위안(20,000원)"',
+    ].join('\n'))
+
+    expect(parsed.items[0]?.values.estimatedCost).toBeNull()
+  })
+
   it('keeps the complete WORKS stage order including empty states', () => {
     expect(DAOU_WORKS_STAGE_TEMPLATE.map((stage) => stage.name)).toEqual([
       '1.제품서치(C)',

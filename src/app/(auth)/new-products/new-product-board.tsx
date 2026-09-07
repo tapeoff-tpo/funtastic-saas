@@ -46,6 +46,7 @@ import {
   saveNewProductStagesAction,
   updateNewProductAction,
 } from './actions'
+import { DaouWorksImportDialog } from './daou-works-import-dialog'
 
 type Props = {
   initialStages: NewProductStage[]
@@ -224,6 +225,15 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
             {(mode === 'create' || selectedId) && <Button variant="outline" onClick={closeEditor}><PackageSearch />{mode === 'create' ? '등록 닫기' : '상품 목록'}</Button>}
             {canManageSettings && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
             {canManageSettings && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}
+            {canManageSettings && <DaouWorksImportDialog onImported={() => {
+              setSelectedStageIds([])
+              setQuery('')
+              setMode('view')
+              setSelectedId(null)
+              setItem(null)
+              setDataRevision((current) => current + 1)
+              router.refresh()
+            }} />}
             <Button onClick={startNewProduct}><Plus />신상품 등록</Button>
           </div>
         </div>
@@ -696,6 +706,8 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
       </fieldset>
 
+      {item?.daouWorks && <DaouWorksSourcePanel source={item.daouWorks} />}
+
       {item?.stageHistory && item.stageHistory.length > 0 && (
         <EditorSection title="최근 단계 변경 로그" icon={Sparkles}>
           <div className="grid gap-2 lg:grid-cols-2">
@@ -717,6 +729,68 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
       )}
     </div>
   )
+}
+
+function DaouWorksSourcePanel({ source }: { source: NonNullable<NewProductItem['daouWorks']> }) {
+  const rawEntries = Object.entries(source.rawFields)
+  const childSections = [
+    { label: '원본 옵션 행', rows: source.optionRows },
+    { label: '부자재 정보', rows: source.materialRows },
+    { label: '상품문의', rows: source.inquiryRows },
+  ].filter((section) => section.rows.length > 0)
+
+  return (
+    <EditorSection title="WORKS 원본 정보" icon={FileText}>
+      <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <SourceFact label="WORKS ID" value={source.sourceId} />
+        <SourceFact label="원본 상태" value={source.sourceStatus} />
+        <SourceFact label="등록" value={source.registeredAt ? `${formatSourceDate(source.registeredAt)}${source.registeredBy ? ` · ${source.registeredBy}` : ''}` : source.registeredBy} />
+        <SourceFact label="최종 수정" value={source.updatedAt ? `${formatSourceDate(source.updatedAt)}${source.updatedBy ? ` · ${source.updatedBy}` : ''}` : source.updatedBy} />
+      </div>
+
+      {(rawEntries.length > 0 || childSections.length > 0) && (
+        <details className="mt-3 rounded-lg border bg-muted/20">
+          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">WORKS 원본 입력값 보기</summary>
+          <div className="space-y-4 border-t p-3">
+            {rawEntries.length > 0 && (
+              <div className="grid gap-x-5 gap-y-3 md:grid-cols-2">
+                {rawEntries.map(([label, value]) => (
+                  <div key={label} className="min-w-0 border-b border-border/60 pb-2 text-xs last:border-0">
+                    <p className="text-muted-foreground">{label}</p>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-foreground">{value}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {childSections.map((section) => <RawSourceRows key={section.label} label={section.label} rows={section.rows} />)}
+          </div>
+        </details>
+      )}
+    </EditorSection>
+  )
+}
+
+function SourceFact({ label, value }: { label: string; value: string | null }) {
+  return <div className="rounded-md border bg-background px-2.5 py-2"><p className="text-[10px] text-muted-foreground">{label}</p><p className="mt-0.5 break-words font-medium text-foreground">{value || '미입력'}</p></div>
+}
+
+function RawSourceRows({ label, rows }: { label: string; rows: Array<Record<string, string>> }) {
+  const headers = [...new Set(rows.flatMap((row) => Object.keys(row)))].filter((header) => rows.some((row) => row[header]))
+  return (
+    <div>
+      <p className="mb-2 text-xs font-semibold">{label} {rows.length}행</p>
+      <div className="overflow-x-auto rounded-md border bg-background">
+        <table className="min-w-full text-left text-xs">
+          <thead className="bg-muted/50 text-muted-foreground"><tr>{headers.map((header) => <th key={header} className="whitespace-nowrap border-b px-2 py-1.5 font-medium">{header}</th>)}</tr></thead>
+          <tbody>{rows.map((row, index) => <tr key={`${label}-${index}`} className="align-top">{headers.map((header) => <td key={header} className="max-w-64 whitespace-pre-wrap break-words border-b px-2 py-1.5 last:border-b-0">{row[header] || '-'}</td>)}</tr>)}</tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function formatSourceDate(value: string) {
+  return value.replace('T', ' ').replace('+09:00', '')
 }
 
 function BulkDeleteProductsDialog({ itemIds, onDeleted }: { itemIds: string[]; onDeleted: () => void }) {

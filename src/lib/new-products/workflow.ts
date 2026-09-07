@@ -12,6 +12,12 @@ import {
   normalizeNewProductOptionDetails,
   type NewProductOptionDetail,
 } from './option-details'
+import {
+  DAOU_WORKS_STAGE_TEMPLATE,
+  normalizeDaouWorksImportItems,
+  type DaouWorksImportItem,
+  type DaouWorksSourceData,
+} from './daou-works-import'
 
 export type { NewProductOptionDetail } from './option-details'
 
@@ -92,6 +98,7 @@ export type NewProductItem = {
   productName: string
   productOption: string | null
   optionDetails: NewProductOptionDetail[]
+  daouWorks: DaouWorksSourceData | null
   chinaUnitPriceCny: number | null
   unitShippingCny: number | null
   exchangeRateKrw: number | null
@@ -372,6 +379,7 @@ async function createNewProductWorkflowSchema() {
       package_box_design varchar(100),
       package_manufacturer varchar(100),
       package_packing varchar(100),
+      daou_works_id text,
       metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
       created_by_user_id uuid,
       created_at timestamptz NOT NULL DEFAULT now(),
@@ -401,6 +409,7 @@ async function createNewProductWorkflowSchema() {
       ADD COLUMN IF NOT EXISTS detail_page_url text,
       ADD COLUMN IF NOT EXISTS memo_1 text,
       ADD COLUMN IF NOT EXISTS memo_2 text,
+      ADD COLUMN IF NOT EXISTS daou_works_id text,
       ADD COLUMN IF NOT EXISTS sabangnet_code varchar(100),
       ADD COLUMN IF NOT EXISTS product_keywords text,
       ADD COLUMN IF NOT EXISTS purchase_reference_notes text,
@@ -430,6 +439,11 @@ async function createNewProductWorkflowSchema() {
     CREATE INDEX IF NOT EXISTS new_product_workflow_items_workspace_sabangnet_idx
     ON new_product_workflow_items(user_id, sabangnet_code)
     WHERE sabangnet_code IS NOT NULL
+  `)
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS new_product_workflow_items_workspace_daou_works_unique
+    ON new_product_workflow_items(user_id, daou_works_id)
+    WHERE daou_works_id IS NOT NULL
   `)
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS new_product_workflow_stage_history (
@@ -620,6 +634,7 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
       item.product_name AS "productName",
       item.product_option AS "productOption",
       COALESCE(item.metadata -> 'optionDetails', '[]'::jsonb) AS "optionDetails",
+      item.metadata -> 'daouWorks' AS "daouWorks",
       item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
       item.unit_shipping_cny::float8 AS "unitShippingCny",
       item.exchange_rate_krw::float8 AS "exchangeRateKrw",
@@ -711,6 +726,7 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
     ...item,
     stageTone: validTone(item.stageTone),
     optionDetails: normalizeNewProductOptionDetails(item.optionDetails),
+    daouWorks: jsonObject<DaouWorksSourceData>(item.daouWorks),
     attachments: jsonArray<NewProductAttachment>(item.attachments),
     stageHistory: jsonArray<NewProductStageHistory>(item.stageHistory),
   }
@@ -769,6 +785,7 @@ export async function getNewProductWorkflow(userId: string) {
         item.package_packing AS "packagePacking",
         item.product_option AS "productOption",
         COALESCE(item.metadata -> 'optionDetails', '[]'::jsonb) AS "optionDetails",
+        item.metadata -> 'daouWorks' AS "daouWorks",
         item.sabangnet_code AS "sabangnetCode",
         item.product_keywords AS "productKeywords",
         item.purchase_reference_notes AS "purchaseReferenceNotes",
@@ -835,9 +852,407 @@ export async function getNewProductWorkflow(userId: string) {
       ...item,
       stageTone: validTone(item.stageTone),
       optionDetails: normalizeNewProductOptionDetails(item.optionDetails),
+      daouWorks: jsonObject<DaouWorksSourceData>(item.daouWorks),
       attachments: jsonArray<NewProductAttachment>(item.attachments),
       stageHistory: jsonArray<NewProductStageHistory>(item.stageHistory),
     })),
+  }
+}
+
+export async function importDaouWorksProducts(input: {
+  userId: string
+  requestedByUserId: string
+  items: unknown
+  replaceStages?: boolean
+}) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!viewer.isMain) throw new Error('WORKS 가져오기는 메인만 실행할 수 있습니다.')
+
+  const items = normalizeDaouWorksImportItems(input.items)
+  if (items.length === 0) throw new Error('가져올 WORKS 상품을 찾지 못했습니다.')
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-daou-import:${input.userId}`}))`)
+    const stages = await syncDaouWorksStages(tx, {
+      userId: input.userId,
+      statuses: items.map((item) => item.sourceStatus),
+      replaceStages: Boolean(input.replaceStages),
+      requestedByUserId: input.requestedByUserId,
+    })
+    const stageIds = new Map(stages.map((stage) => [stage.name, stage.id]))
+    if (items.some((item) => !stageIds.has(item.sourceStatus))) {
+      throw new Error('WORKS 상태를 상품관리 단계에 연결하지 못했습니다.')
+    }
+
+    const existingRows = resultRows<{ sourceId: string }>(await tx.execute(sql`
+      SELECT daou_works_id AS "sourceId"
+      FROM new_product_workflow_items
+      WHERE user_id = ${input.userId}::uuid
+        AND daou_works_id IN (${sql.join(items.map((item) => sql`${item.sourceId}`), sql`, `)})
+    `))
+    const existingSourceIds = new Set(existingRows.map((row) => row.sourceId))
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
+    const [{ nextNumber } = { nextNumber: 1 }] = resultRows<{ nextNumber: number }>(await tx.execute(sql`
+      SELECT COALESCE(MAX(product_number), 0)::int + 1 AS "nextNumber"
+      FROM new_product_workflow_items
+      WHERE user_id = ${input.userId}::uuid
+    `))
+    const importedAt = new Date().toISOString()
+    const payload = items.map((item, index) => daouWorksPayload({
+      item,
+      stageId: stageIds.get(item.sourceStatus)!,
+      productNumber: nextNumber + index,
+      importedAt,
+    }))
+
+    await tx.execute(sql`
+      INSERT INTO new_product_workflow_items (
+        user_id, product_number, stage_id, daou_works_id,
+        sample_code, product_name, product_option,
+        china_unit_price_cny, unit_shipping_cny, exchange_rate_krw, calculated_cost_krw,
+        domestic_sale_url, domestic_sale_price, detail_page_url, memo_1, memo_2,
+        english_name, source_url, required_checks, estimated_cost, history_notes, reference_notes,
+        china_item_name, planned_sale_date, detail_page_due_date, registered_product_name,
+        package_info_url, package_progress_status, package_status, korean_manual_status,
+        declared_value, b2b_price, b2c_price, carrier, b2b_shipping_fee, b2c_shipping_fee,
+        quality_notice_status, package_box_design, package_manufacturer, package_packing,
+        sabangnet_code, product_keywords, purchase_reference_notes, previous_cost_krw,
+        b2b_option_surcharge, b2c_option_surcharge,
+        notice_material, notice_size, notice_manufacturer, notice_weight, notice_country,
+        notice_capacity, notice_food_safety, notice_components, notice_special_notes,
+        metadata, created_by_user_id, created_at, updated_at
+      )
+      SELECT
+        ${input.userId}::uuid, payload.product_number, payload.stage_id::uuid, payload.source_id,
+        payload.sample_code, payload.product_name, payload.product_option,
+        payload.china_unit_price_cny, payload.unit_shipping_cny, payload.exchange_rate_krw, payload.calculated_cost_krw,
+        payload.domestic_sale_url, payload.domestic_sale_price, payload.detail_page_url, payload.memo_1, payload.memo_2,
+        payload.english_name, payload.source_url, payload.required_checks, payload.estimated_cost, payload.history_notes, payload.reference_notes,
+        payload.china_item_name, payload.planned_sale_date::date, payload.detail_page_due_date::date, payload.registered_product_name,
+        payload.package_info_url, payload.package_progress_status, payload.package_status, payload.korean_manual_status,
+        payload.declared_value, payload.b2b_price, payload.b2c_price, payload.carrier, payload.b2b_shipping_fee, payload.b2c_shipping_fee,
+        payload.quality_notice_status, payload.package_box_design, payload.package_manufacturer, payload.package_packing,
+        payload.sabangnet_code, payload.product_keywords, payload.purchase_reference_notes, payload.previous_cost_krw,
+        payload.b2b_option_surcharge, payload.b2c_option_surcharge,
+        payload.notice_material, payload.notice_size, payload.notice_manufacturer, payload.notice_weight, payload.notice_country,
+        payload.notice_capacity, payload.notice_food_safety, payload.notice_components, payload.notice_special_notes,
+        payload.metadata, ${input.requestedByUserId}::uuid, payload.created_at::timestamptz, payload.updated_at::timestamptz
+      FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb) AS payload(
+        source_id text, product_number integer, stage_id text,
+        sample_code text, product_name text, product_option text,
+        china_unit_price_cny numeric, unit_shipping_cny numeric, exchange_rate_krw numeric, calculated_cost_krw integer,
+        domestic_sale_url text, domestic_sale_price integer, detail_page_url text, memo_1 text, memo_2 text,
+        english_name text, source_url text, required_checks text, estimated_cost numeric, history_notes text, reference_notes text,
+        china_item_name text, planned_sale_date text, detail_page_due_date text, registered_product_name text,
+        package_info_url text, package_progress_status text, package_status text, korean_manual_status text,
+        declared_value numeric, b2b_price integer, b2c_price integer, carrier text, b2b_shipping_fee integer, b2c_shipping_fee integer,
+        quality_notice_status text, package_box_design text, package_manufacturer text, package_packing text,
+        sabangnet_code text, product_keywords text, purchase_reference_notes text, previous_cost_krw integer,
+        b2b_option_surcharge integer, b2c_option_surcharge integer,
+        notice_material text, notice_size text, notice_manufacturer text, notice_weight text, notice_country text,
+        notice_capacity text, notice_food_safety text, notice_components text, notice_special_notes text,
+        metadata jsonb, created_at text, updated_at text
+      )
+      ON CONFLICT (user_id, daou_works_id) WHERE daou_works_id IS NOT NULL
+      DO UPDATE SET
+        stage_id = EXCLUDED.stage_id,
+        sample_code = EXCLUDED.sample_code,
+        product_name = EXCLUDED.product_name,
+        product_option = EXCLUDED.product_option,
+        china_unit_price_cny = EXCLUDED.china_unit_price_cny,
+        unit_shipping_cny = EXCLUDED.unit_shipping_cny,
+        exchange_rate_krw = EXCLUDED.exchange_rate_krw,
+        calculated_cost_krw = EXCLUDED.calculated_cost_krw,
+        domestic_sale_url = EXCLUDED.domestic_sale_url,
+        domestic_sale_price = EXCLUDED.domestic_sale_price,
+        detail_page_url = EXCLUDED.detail_page_url,
+        memo_1 = EXCLUDED.memo_1,
+        memo_2 = EXCLUDED.memo_2,
+        english_name = EXCLUDED.english_name,
+        source_url = EXCLUDED.source_url,
+        required_checks = EXCLUDED.required_checks,
+        estimated_cost = EXCLUDED.estimated_cost,
+        history_notes = EXCLUDED.history_notes,
+        reference_notes = EXCLUDED.reference_notes,
+        china_item_name = EXCLUDED.china_item_name,
+        planned_sale_date = EXCLUDED.planned_sale_date,
+        detail_page_due_date = EXCLUDED.detail_page_due_date,
+        registered_product_name = EXCLUDED.registered_product_name,
+        package_info_url = EXCLUDED.package_info_url,
+        package_progress_status = EXCLUDED.package_progress_status,
+        package_status = EXCLUDED.package_status,
+        korean_manual_status = EXCLUDED.korean_manual_status,
+        declared_value = EXCLUDED.declared_value,
+        b2b_price = EXCLUDED.b2b_price,
+        b2c_price = EXCLUDED.b2c_price,
+        carrier = EXCLUDED.carrier,
+        b2b_shipping_fee = EXCLUDED.b2b_shipping_fee,
+        b2c_shipping_fee = EXCLUDED.b2c_shipping_fee,
+        quality_notice_status = EXCLUDED.quality_notice_status,
+        package_box_design = EXCLUDED.package_box_design,
+        package_manufacturer = EXCLUDED.package_manufacturer,
+        package_packing = EXCLUDED.package_packing,
+        sabangnet_code = EXCLUDED.sabangnet_code,
+        product_keywords = EXCLUDED.product_keywords,
+        purchase_reference_notes = EXCLUDED.purchase_reference_notes,
+        previous_cost_krw = EXCLUDED.previous_cost_krw,
+        b2b_option_surcharge = EXCLUDED.b2b_option_surcharge,
+        b2c_option_surcharge = EXCLUDED.b2c_option_surcharge,
+        notice_material = EXCLUDED.notice_material,
+        notice_size = EXCLUDED.notice_size,
+        notice_manufacturer = EXCLUDED.notice_manufacturer,
+        notice_weight = EXCLUDED.notice_weight,
+        notice_country = EXCLUDED.notice_country,
+        notice_capacity = EXCLUDED.notice_capacity,
+        notice_food_safety = EXCLUDED.notice_food_safety,
+        notice_components = EXCLUDED.notice_components,
+        notice_special_notes = EXCLUDED.notice_special_notes,
+        metadata = COALESCE(new_product_workflow_items.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+        updated_at = EXCLUDED.updated_at
+    `)
+
+    return {
+      processed: items.length,
+      inserted: items.filter((item) => !existingSourceIds.has(item.sourceId)).length,
+      updated: items.filter((item) => existingSourceIds.has(item.sourceId)).length,
+      stageCount: stages.length,
+    }
+  })
+}
+
+type WorkflowStageRow = {
+  id: string
+  name: string
+  position: number
+  tone: NewProductStageTone
+}
+
+async function syncDaouWorksStages(
+  tx: WorkflowTransaction,
+  input: {
+    userId: string
+    statuses: string[]
+    replaceStages: boolean
+    requestedByUserId: string
+  },
+) {
+  const existing = resultRows<WorkflowStageRow>(await tx.execute(sql`
+    SELECT id, name, position, tone
+    FROM new_product_workflow_stages
+    WHERE user_id = ${input.userId}::uuid
+    ORDER BY position, created_at
+    FOR UPDATE
+  `)).map((stage) => ({ ...stage, tone: validTone(stage.tone) }))
+
+  if (input.replaceStages) {
+    await applyDaouWorksStageTemplate(tx, { userId: input.userId, requestedByUserId: input.requestedByUserId, existing })
+  }
+
+  const current = resultRows<WorkflowStageRow>(await tx.execute(sql`
+    SELECT id, name, position, tone
+    FROM new_product_workflow_stages
+    WHERE user_id = ${input.userId}::uuid
+    ORDER BY position, created_at
+    FOR UPDATE
+  `)).map((stage) => ({ ...stage, tone: validTone(stage.tone) }))
+  const currentNames = new Set(current.map((stage) => stage.name))
+  let nextPosition = Math.max(0, ...current.map((stage) => stage.position)) + 1
+  for (const status of [...new Set(input.statuses.map((status) => status.trim()).filter(Boolean))]) {
+    if (currentNames.has(status)) continue
+    const template = DAOU_WORKS_STAGE_TEMPLATE.find((stage) => stage.name === status)
+    await tx.execute(sql`
+      INSERT INTO new_product_workflow_stages (user_id, name, tone, position)
+      VALUES (${input.userId}::uuid, ${status.slice(0, 160)}, ${template?.tone ?? 'slate'}, ${nextPosition})
+    `)
+    nextPosition += 1
+  }
+
+  return resultRows<WorkflowStageRow>(await tx.execute(sql`
+    SELECT id, name, position, tone
+    FROM new_product_workflow_stages
+    WHERE user_id = ${input.userId}::uuid
+    ORDER BY position, created_at
+  `)).map((stage) => ({ ...stage, tone: validTone(stage.tone) }))
+}
+
+async function applyDaouWorksStageTemplate(
+  tx: WorkflowTransaction,
+  input: { userId: string; requestedByUserId: string; existing: WorkflowStageRow[] },
+) {
+  const usedStageIds = new Set<string>()
+  const targetByName = new Map<string, WorkflowStageRow>()
+  const stagesByName = new Map(input.existing.map((stage) => [stage.name, stage]))
+
+  for (const template of DAOU_WORKS_STAGE_TEMPLATE) {
+    const exact = stagesByName.get(template.name)
+    if (exact && !usedStageIds.has(exact.id)) {
+      targetByName.set(template.name, exact)
+      usedStageIds.add(exact.id)
+      continue
+    }
+    const alias = daouWorksStageAliases(template.name)
+      .map((name) => stagesByName.get(name))
+      .find((stage): stage is WorkflowStageRow => Boolean(stage && !usedStageIds.has(stage.id)))
+    if (alias) {
+      targetByName.set(template.name, alias)
+      usedStageIds.add(alias.id)
+    }
+  }
+
+  const unclaimed = input.existing.filter((stage) => !usedStageIds.has(stage.id))
+  for (const template of DAOU_WORKS_STAGE_TEMPLATE) {
+    if (targetByName.has(template.name)) continue
+    const fallback = unclaimed.shift()
+    if (fallback) {
+      targetByName.set(template.name, fallback)
+      usedStageIds.add(fallback.id)
+    }
+  }
+
+  for (const [index, template] of DAOU_WORKS_STAGE_TEMPLATE.entries()) {
+    const existing = targetByName.get(template.name)
+    if (existing) {
+      await tx.execute(sql`
+        UPDATE new_product_workflow_stages
+        SET name = ${template.name}, tone = ${template.tone}, position = ${index + 1}, updated_at = now()
+        WHERE id = ${existing.id}::uuid AND user_id = ${input.userId}::uuid
+      `)
+    } else {
+      const [created] = resultRows<WorkflowStageRow>(await tx.execute(sql`
+        INSERT INTO new_product_workflow_stages (user_id, name, tone, position)
+        VALUES (${input.userId}::uuid, ${template.name}, ${template.tone}, ${index + 1})
+        RETURNING id, name, position, tone
+      `))
+      if (created) targetByName.set(template.name, created)
+    }
+  }
+
+  const targetStages = resultRows<WorkflowStageRow>(await tx.execute(sql`
+    SELECT id, name, position, tone
+    FROM new_product_workflow_stages
+    WHERE user_id = ${input.userId}::uuid
+  `))
+  const targetIds = new Set(DAOU_WORKS_STAGE_TEMPLATE.map((template) => targetByName.get(template.name)?.id).filter((id): id is string => Boolean(id)))
+  const targetByStageName = new Map(targetStages.map((stage) => [stage.name, stage]))
+  const firstStage = targetByStageName.get(DAOU_WORKS_STAGE_TEMPLATE[0].name)
+  if (!firstStage) throw new Error('WORKS 첫 단계를 만들지 못했습니다.')
+
+  for (const stage of input.existing.filter((entry) => !targetIds.has(entry.id))) {
+    const mappedName = legacyDaouWorksStage(stage.name)
+    const target = (mappedName ? targetByStageName.get(mappedName) : null) ?? firstStage
+    await tx.execute(sql`
+      UPDATE new_product_workflow_items
+      SET stage_id = ${target.id}::uuid, updated_at = now()
+      WHERE user_id = ${input.userId}::uuid AND stage_id = ${stage.id}::uuid
+    `)
+    await tx.execute(sql`
+      UPDATE new_product_workflow_stage_history
+      SET from_stage_id = ${target.id}::uuid
+      WHERE user_id = ${input.userId}::uuid AND from_stage_id = ${stage.id}::uuid
+    `)
+    await tx.execute(sql`
+      UPDATE new_product_workflow_stage_history
+      SET to_stage_id = ${target.id}::uuid
+      WHERE user_id = ${input.userId}::uuid AND to_stage_id = ${stage.id}::uuid
+    `)
+    await tx.execute(sql`
+      DELETE FROM new_product_workflow_stages
+      WHERE id = ${stage.id}::uuid AND user_id = ${input.userId}::uuid
+    `)
+  }
+}
+
+function daouWorksStageAliases(name: string) {
+  return DAOU_WORKS_STAGE_ALIASES[name] ?? []
+}
+
+const DAOU_WORKS_STAGE_ALIASES: Record<string, string[]> = {
+  '1.제품서치(C)': ['1차 통과 상품 등록'],
+  '2.샘플 구매대기(SCM팀)': ['샘플 구매'],
+  '5.샘플 광주도착&본사검수(MD팀)': ['샘플 국내 도착·최종 미팅'],
+  '6. 정보고시 제작 (디자인)': ['상품정보고시 제작', '사방넷 상품등록'],
+  '9.구매대기(SCM팀)': ['상품 구매 대기'],
+  '10.입고대기(SCM팀)': ['상품 입고 대기'],
+  '11.확정원가 입력(SCM팀)': ['원가 입력'],
+  '12.가격 산정대기(BM팀)': ['판매가·상품정보 입력'],
+  '13.상세페이지 완료대기(디자인팀)': ['상세페이지 완료 대기'],
+  '14-1.등록대기_자사몰(SCM팀)': ['등록대기 1순위'],
+  '14-2.등록대기_도매A': ['등록대기 2순위'],
+  '15.등록완료': ['등록완료'],
+  '90. 보류': ['진행보류'],
+  '9999. 진행불가': ['진행불가'],
+}
+
+function legacyDaouWorksStage(name: string) {
+  return Object.entries(DAOU_WORKS_STAGE_ALIASES).find(([, aliases]) => aliases.includes(name))?.[0]
+}
+
+function daouWorksPayload(input: {
+  item: DaouWorksImportItem
+  stageId: string
+  productNumber: number
+  importedAt: string
+}) {
+  const { values, source } = input.item
+  return {
+    source_id: input.item.sourceId,
+    product_number: input.productNumber,
+    stage_id: input.stageId,
+    sample_code: values.sampleCode,
+    product_name: values.productName,
+    product_option: values.productOption,
+    china_unit_price_cny: values.chinaUnitPriceCny,
+    unit_shipping_cny: values.unitShippingCny,
+    exchange_rate_krw: values.exchangeRateKrw,
+    calculated_cost_krw: values.calculatedCostKrw,
+    domestic_sale_url: values.domesticSaleUrl,
+    domestic_sale_price: values.domesticSalePrice,
+    detail_page_url: values.detailPageUrl,
+    memo_1: values.memo1,
+    memo_2: values.memo2,
+    english_name: values.englishName,
+    source_url: values.sourceUrl,
+    required_checks: values.requiredChecks,
+    estimated_cost: values.estimatedCost,
+    history_notes: values.historyNotes,
+    reference_notes: values.referenceNotes,
+    china_item_name: values.chinaItemName,
+    planned_sale_date: values.plannedSaleDate,
+    detail_page_due_date: values.detailPageDueDate,
+    registered_product_name: values.registeredProductName,
+    package_info_url: values.packageInfoUrl,
+    package_progress_status: values.packageProgressStatus,
+    package_status: values.packageStatus,
+    korean_manual_status: values.koreanManualStatus,
+    declared_value: values.declaredValue,
+    b2b_price: values.b2bPrice,
+    b2c_price: values.b2cPrice,
+    carrier: values.carrier,
+    b2b_shipping_fee: values.b2bShippingFee,
+    b2c_shipping_fee: values.b2cShippingFee,
+    quality_notice_status: values.qualityNoticeStatus,
+    package_box_design: values.packageBoxDesign,
+    package_manufacturer: values.packageManufacturer,
+    package_packing: values.packagePacking,
+    sabangnet_code: values.sabangnetCode,
+    product_keywords: values.productKeywords,
+    purchase_reference_notes: values.purchaseReferenceNotes,
+    previous_cost_krw: values.previousCostKrw,
+    b2b_option_surcharge: values.b2bOptionSurcharge,
+    b2c_option_surcharge: values.b2cOptionSurcharge,
+    notice_material: values.noticeMaterial,
+    notice_size: values.noticeSize,
+    notice_manufacturer: values.noticeManufacturer,
+    notice_weight: values.noticeWeight,
+    notice_country: values.noticeCountry,
+    notice_capacity: values.noticeCapacity,
+    notice_food_safety: values.noticeFoodSafety,
+    notice_components: values.noticeComponents,
+    notice_special_notes: values.noticeSpecialNotes,
+    metadata: { optionDetails: values.optionDetails ?? [], daouWorks: source },
+    created_at: source.registeredAt ?? input.importedAt,
+    updated_at: source.updatedAt ?? input.importedAt,
   }
 }
 
@@ -1448,6 +1863,17 @@ function jsonArray<T>(value: unknown): T[] {
     return Array.isArray(parsed) ? parsed as T[] : []
   } catch {
     return []
+  }
+}
+
+function jsonObject<T extends object>(value: unknown): T | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value as T
+  if (typeof value !== 'string') return null
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as T : null
+  } catch {
+    return null
   }
 }
 

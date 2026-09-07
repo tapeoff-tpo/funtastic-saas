@@ -21,6 +21,26 @@ export const DAOU_WORKS_STAGE_TEMPLATE = [
   { name: '9999. 진행불가', tone: 'red' },
 ] as const
 
+export const DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES: Record<string, string | null> = {
+  '1.제품서치(C)': '신상품 등록',
+  '2.샘플 구매대기(SCM팀)': '샘플 구매',
+  '3.샘플 중국도착 대기(C)': null,
+  '5.샘플 광주도착&본사검수(MD팀)': '샘플 국내 도착·최종 미팅',
+  '6. 정보고시 제작 (디자인)': '상품정보고시 제작',
+  '9.구매대기(SCM팀)': '상품 구매 대기',
+  '10.입고대기(SCM팀)': '상품 입고 대기',
+  '11.확정원가 입력(SCM팀)': '원가 입력',
+  '12.가격 산정대기(BM팀)': '상품정보 입력',
+  '13.상세페이지 완료대기(디자인팀)': '상세페이지 제작',
+  '14-1.등록대기_자사몰(SCM팀)': '등록대기 1순위',
+  '14-2.등록대기_도매A': '등록대기 2순위',
+  '15.등록완료': '등록완료',
+  '90. 보류': '진행보류',
+  '999-1. 샘플 판매요청': null,
+  '999-2. 샘플 판매완료': null,
+  '9999. 진행불가': '진행불가',
+}
+
 export type DaouWorksSourceData = {
   sourceId: string
   sourceStatus: string

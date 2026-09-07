@@ -7,12 +7,14 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  DAOU_WORKS_STAGE_TEMPLATE,
+  DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES,
   parseDaouWorksCsvFile,
   type DaouWorksCsvParseResult,
 } from '@/lib/new-products/daou-works-import'
+import type { NewProductStage } from '@/lib/new-products/workflow'
 
 type Props = {
+  stages: NewProductStage[]
   onImported: () => void
 }
 
@@ -25,13 +27,13 @@ type ImportResponse = {
 
 const BATCH_SIZE = 75
 
-export function DaouWorksImportDialog({ onImported }: Props) {
+export function DaouWorksImportDialog({ stages, onImported }: Props) {
   const [open, setOpen] = useState(false)
   const [parsed, setParsed] = useState<DaouWorksCsvParseResult | null>(null)
+  const [stageMappings, setStageMappings] = useState<Record<string, string>>({})
   const [fileName, setFileName] = useState('')
   const [parseError, setParseError] = useState('')
   const [parsing, setParsing] = useState(false)
-  const [replaceStages, setReplaceStages] = useState(true)
   const [progress, setProgress] = useState<{ current: number; total: number; inserted: number; updated: number } | null>(null)
   const [pending, startTransition] = useTransition()
 
@@ -43,15 +45,16 @@ export function DaouWorksImportDialog({ onImported }: Props) {
 
   function reset() {
     setParsed(null)
+    setStageMappings({})
     setFileName('')
     setParseError('')
     setParsing(false)
     setProgress(null)
-    setReplaceStages(true)
   }
 
   async function selectFile(file: File | null) {
     setParsed(null)
+    setStageMappings({})
     setParseError('')
     setProgress(null)
     setFileName(file?.name ?? '')
@@ -65,6 +68,7 @@ export function DaouWorksImportDialog({ onImported }: Props) {
     try {
       const result = await parseDaouWorksCsvFile(file)
       setParsed(result)
+      setStageMappings(createSuggestedStageMappings(result, stages))
     } catch (error) {
       setParseError(error instanceof Error ? error.message : 'CSV 파일을 읽지 못했습니다.')
     } finally {
@@ -72,8 +76,20 @@ export function DaouWorksImportDialog({ onImported }: Props) {
     }
   }
 
+  function updateStageMapping(sourceStatus: string, stageId: string) {
+    setStageMappings((current) => ({ ...current, [sourceStatus]: stageId }))
+  }
+
+  const missingStatuses = parsed?.statusCounts.filter(({ status }) => !stageMappings[status]) ?? []
+  const allStatusesMapped = Boolean(parsed) && missingStatuses.length === 0
+
   function importItems() {
-    if (!parsed) return
+    if (!parsed || !allStatusesMapped) {
+      setParseError('파일에 있는 모든 WORKS 상태를 현재 SaaS 단계에 연결해주세요.')
+      return
+    }
+
+    const mappingsForImport = { ...stageMappings }
     startTransition(async () => {
       const totalBatches = Math.ceil(parsed.items.length / BATCH_SIZE)
       let inserted = 0
@@ -86,7 +102,7 @@ export function DaouWorksImportDialog({ onImported }: Props) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               items: parsed.items.slice(index * BATCH_SIZE, (index + 1) * BATCH_SIZE),
-              replaceStages: replaceStages && index === 0,
+              stageMappings: mappingsForImport,
             }),
           })
           const body = await response.json().catch(() => ({})) as Partial<ImportResponse> & { error?: string }
@@ -116,11 +132,11 @@ export function DaouWorksImportDialog({ onImported }: Props) {
       <Dialog.Trigger render={(props) => <Button {...props} variant="outline"><FileUp />WORKS CSV 가져오기</Button>} />
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px]" />
-        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[88vh] w-[min(94vw,680px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl bg-background shadow-2xl">
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 flex max-h-[88vh] w-[min(94vw,840px)] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl bg-background shadow-2xl">
           <div className="border-b p-5">
             <Dialog.Title className="text-lg font-semibold">다우 WORKS 상품관리 가져오기</Dialog.Title>
             <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-              같은 WORKS ID는 갱신하고, 옵션·부자재·상품문의와 화면에 없는 원본 항목도 함께 보존합니다.
+              현재 SaaS 단계는 바꾸지 않고, WORKS 상태별로 넣을 기존 단계를 선택합니다.
             </Dialog.Description>
           </div>
 
@@ -136,33 +152,59 @@ export function DaouWorksImportDialog({ onImported }: Props) {
 
             {parsed && (
               <>
-                <div className="grid gap-2 sm:grid-cols-3">
+                <div className="grid gap-2 sm:grid-cols-4">
                   <SummaryCard label="상품" value={`${parsed.items.length.toLocaleString('ko-KR')}건`} />
                   <SummaryCard label="원본 행" value={`${parsed.rawRowCount.toLocaleString('ko-KR')}행`} />
-                  <SummaryCard label="WORKS 단계" value={`${DAOU_WORKS_STAGE_TEMPLATE.length}개`} />
+                  <SummaryCard label="WORKS 상태" value={`${parsed.statusCounts.length}개`} />
+                  <SummaryCard label="현재 SaaS 단계" value={`${stages.length}개`} />
                 </div>
 
-                <div className="rounded-lg border bg-muted/20 p-3">
-                  <label className="flex cursor-pointer items-start gap-2 text-sm">
-                    <input type="checkbox" checked={replaceStages} disabled={pending} onChange={(event) => setReplaceStages(event.target.checked)} className="mt-0.5" />
-                    <span>
-                      <strong className="font-medium">진행 단계를 WORKS 기준으로 교체</strong>
-                      <span className="mt-0.5 block text-xs text-muted-foreground">기존 SaaS 단계의 상품은 가장 가까운 WORKS 단계로 유지합니다.</span>
-                    </span>
-                  </label>
+                <div className="rounded-lg border bg-muted/20 p-3 text-sm">
+                  <p className="font-medium">상태 연결</p>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">현재 단계명과 순서는 변경하지 않습니다. 선택한 SaaS 단계에만 상품을 넣고, WORKS 원본 상태는 상품 상세의 원본 정보에 남깁니다.</p>
                 </div>
 
-                <div className="rounded-lg border p-3">
-                  <p className="mb-2 text-xs font-semibold text-muted-foreground">파일에서 확인한 현재 상태</p>
-                  <div className="flex max-h-28 flex-wrap content-start gap-1.5 overflow-y-auto">
-                    {parsed.statusCounts.map(({ status, count }) => (
-                      <span key={status} className="rounded-md border bg-background px-2 py-1 text-[11px]">{status} <strong>{count.toLocaleString('ko-KR')}</strong></span>
-                    ))}
-                  </div>
+                <div className="overflow-x-auto rounded-lg border">
+                  <table className="w-full min-w-[680px] text-left text-sm">
+                    <thead className="bg-muted/50 text-xs text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">WORKS 상태</th>
+                        <th className="w-20 px-3 py-2 text-right font-medium">상품</th>
+                        <th className="w-[320px] px-3 py-2 font-medium">넣을 현재 SaaS 단계</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {parsed.statusCounts.map(({ status, count }, index) => {
+                        const suggestedName = DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES[status]
+                        return (
+                          <tr key={status} className="align-top">
+                            <td className="px-3 py-3 font-medium">{status}</td>
+                            <td className="px-3 py-3 text-right tabular-nums">{count.toLocaleString('ko-KR')}</td>
+                            <td className="px-3 py-2">
+                              <label className="sr-only" htmlFor={`daou-works-stage-${index}`}>{status} SaaS 단계</label>
+                              <select
+                                id={`daou-works-stage-${index}`}
+                                value={stageMappings[status] ?? ''}
+                                disabled={pending}
+                                onChange={(event) => updateStageMapping(status, event.target.value)}
+                                className="h-9 w-full rounded-md border bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+                              >
+                                <option value="">현재 SaaS 단계 선택</option>
+                                {stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.position}. {stage.name}</option>)}
+                              </select>
+                              {suggestedName && <p className="mt-1 text-[11px] text-muted-foreground">추천 연결: {suggestedName}</p>}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
+
+                {missingStatuses.length > 0 && <p className="text-xs text-amber-700">단계 선택 필요: {missingStatuses.map(({ status }) => status).join(', ')}</p>}
 
                 <p className="text-xs leading-5 text-muted-foreground">
-                  CSV에는 실제 이미지·첨부파일이 포함되지 않아 파일명과 원본 입력값만 보존됩니다. 중간에 끊겨도 같은 CSV를 다시 가져오면 중복 생성되지 않습니다.
+                  CSV에는 실제 이미지·첨부파일이 포함되지 않아 파일명과 원본 입력값만 보존됩니다. 중간에 끊겨도 같은 CSV를 다시 가져오면 이미 저장된 WORKS ID는 중복 생성되지 않습니다.
                 </p>
               </>
             )}
@@ -178,15 +220,23 @@ export function DaouWorksImportDialog({ onImported }: Props) {
 
           <div className="flex justify-end gap-2 border-t p-4">
             <Dialog.Close render={(props) => <Button {...props} type="button" variant="outline" disabled={pending || parsing}>취소</Button>} />
-            <Button type="button" onClick={importItems} disabled={!parsed || pending || parsing}>
+            <Button type="button" onClick={importItems} disabled={!allStatusesMapped || pending || parsing}>
               {pending ? <Loader2 className="animate-spin" /> : <RotateCcw />}
-              {pending ? '가져오는 중...' : `${parsed?.items.length.toLocaleString('ko-KR') ?? 0}건 가져오기`}
+              {pending ? '가져오는 중...' : !allStatusesMapped ? '단계 매핑 필요' : `${parsed?.items.length.toLocaleString('ko-KR') ?? 0}건 가져오기`}
             </Button>
           </div>
         </Dialog.Popup>
       </Dialog.Portal>
     </Dialog.Root>
   )
+}
+
+function createSuggestedStageMappings(parsed: DaouWorksCsvParseResult, stages: NewProductStage[]) {
+  const stageIdByName = new Map(stages.map((stage) => [stage.name, stage.id]))
+  return Object.fromEntries(parsed.statusCounts.map(({ status }) => {
+    const suggestedName = DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES[status]
+    return [status, suggestedName ? stageIdByName.get(suggestedName) ?? '' : '']
+  }))
 }
 
 function SummaryCard({ label, value }: { label: string; value: string }) {

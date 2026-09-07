@@ -225,7 +225,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
             {(mode === 'create' || selectedId) && <Button variant="outline" onClick={closeEditor}><PackageSearch />{mode === 'create' ? '등록 닫기' : '상품 목록'}</Button>}
             {canManageSettings && <StageSettingsDialog stages={initialStages} onSaved={() => { setDataRevision((current) => current + 1); router.refresh() }} />}
             {canManageSettings && <LayoutSettingsDialog layout={layout} onSaved={setLayout} />}
-            {canManageSettings && <DaouWorksImportDialog onImported={() => {
+            {canManageSettings && <DaouWorksImportDialog stages={initialStages} onImported={() => {
               setSelectedStageIds([])
               setQuery('')
               setMode('view')

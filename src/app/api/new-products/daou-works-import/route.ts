@@ -25,7 +25,7 @@ export async function POST(request: Request) {
       userId: await getWorkspaceUserId(user.id),
       requestedByUserId: user.id,
       items: body.items,
-      replaceStages: body.replaceStages === true,
+      stageMappings: body.stageMappings,
     })
     revalidatePath('/new-products')
     return NextResponse.json(result, { headers: { 'Cache-Control': 'private, no-store' } })

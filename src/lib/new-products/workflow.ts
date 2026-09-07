@@ -13,7 +13,6 @@ import {
   type NewProductOptionDetail,
 } from './option-details'
 import {
-  DAOU_WORKS_STAGE_TEMPLATE,
   normalizeDaouWorksImportItems,
   type DaouWorksImportItem,
   type DaouWorksSourceData,
@@ -863,7 +862,7 @@ export async function importDaouWorksProducts(input: {
   userId: string
   requestedByUserId: string
   items: unknown
-  replaceStages?: boolean
+  stageMappings: unknown
 }) {
   await ensureNewProductWorkflowTables(input.userId)
   const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
@@ -871,19 +870,13 @@ export async function importDaouWorksProducts(input: {
 
   const items = normalizeDaouWorksImportItems(input.items)
   if (items.length === 0) throw new Error('가져올 WORKS 상품을 찾지 못했습니다.')
+  const stageMappings = normalizeDaouWorksStageMappings(input.stageMappings)
+  const sourceStatuses = [...new Set(items.map((item) => item.sourceStatus.trim()).filter(Boolean))]
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-daou-import:${input.userId}`}))`)
-    const stages = await syncDaouWorksStages(tx, {
-      userId: input.userId,
-      statuses: items.map((item) => item.sourceStatus),
-      replaceStages: Boolean(input.replaceStages),
-      requestedByUserId: input.requestedByUserId,
-    })
-    const stageIds = new Map(stages.map((stage) => [stage.name, stage.id]))
-    if (items.some((item) => !stageIds.has(item.sourceStatus))) {
-      throw new Error('WORKS 상태를 상품관리 단계에 연결하지 못했습니다.')
-    }
+    const stages = await listDaouWorksTargetStages(tx, input.userId)
+    const stageIds = resolveDaouWorksStageIds({ sourceStatuses, stageMappings, stages })
 
     const existingRows = resultRows<{ sourceId: string }>(await tx.execute(sql`
       SELECT daou_works_id AS "sourceId"
@@ -901,7 +894,7 @@ export async function importDaouWorksProducts(input: {
     const importedAt = new Date().toISOString()
     const payload = items.map((item, index) => daouWorksPayload({
       item,
-      stageId: stageIds.get(item.sourceStatus)!,
+      stageId: stageIds.get(item.sourceStatus.trim())!,
       productNumber: nextNumber + index,
       importedAt,
     }))
@@ -1025,167 +1018,41 @@ type WorkflowStageRow = {
   id: string
   name: string
   position: number
-  tone: NewProductStageTone
 }
 
-async function syncDaouWorksStages(
-  tx: WorkflowTransaction,
-  input: {
-    userId: string
-    statuses: string[]
-    replaceStages: boolean
-    requestedByUserId: string
-  },
-) {
-  const existing = resultRows<WorkflowStageRow>(await tx.execute(sql`
-    SELECT id, name, position, tone
-    FROM new_product_workflow_stages
-    WHERE user_id = ${input.userId}::uuid
-    ORDER BY position, created_at
-    FOR UPDATE
-  `)).map((stage) => ({ ...stage, tone: validTone(stage.tone) }))
-
-  if (input.replaceStages) {
-    await applyDaouWorksStageTemplate(tx, { userId: input.userId, requestedByUserId: input.requestedByUserId, existing })
-  }
-
-  const current = resultRows<WorkflowStageRow>(await tx.execute(sql`
-    SELECT id, name, position, tone
-    FROM new_product_workflow_stages
-    WHERE user_id = ${input.userId}::uuid
-    ORDER BY position, created_at
-    FOR UPDATE
-  `)).map((stage) => ({ ...stage, tone: validTone(stage.tone) }))
-  const currentNames = new Set(current.map((stage) => stage.name))
-  let nextPosition = Math.max(0, ...current.map((stage) => stage.position)) + 1
-  for (const status of [...new Set(input.statuses.map((status) => status.trim()).filter(Boolean))]) {
-    if (currentNames.has(status)) continue
-    const template = DAOU_WORKS_STAGE_TEMPLATE.find((stage) => stage.name === status)
-    await tx.execute(sql`
-      INSERT INTO new_product_workflow_stages (user_id, name, tone, position)
-      VALUES (${input.userId}::uuid, ${status.slice(0, 160)}, ${template?.tone ?? 'slate'}, ${nextPosition})
-    `)
-    nextPosition += 1
-  }
-
+async function listDaouWorksTargetStages(tx: WorkflowTransaction, userId: string) {
   return resultRows<WorkflowStageRow>(await tx.execute(sql`
-    SELECT id, name, position, tone
+    SELECT id, name, position
     FROM new_product_workflow_stages
-    WHERE user_id = ${input.userId}::uuid
+    WHERE user_id = ${userId}::uuid
     ORDER BY position, created_at
-  `)).map((stage) => ({ ...stage, tone: validTone(stage.tone) }))
-}
-
-async function applyDaouWorksStageTemplate(
-  tx: WorkflowTransaction,
-  input: { userId: string; requestedByUserId: string; existing: WorkflowStageRow[] },
-) {
-  const usedStageIds = new Set<string>()
-  const targetByName = new Map<string, WorkflowStageRow>()
-  const stagesByName = new Map(input.existing.map((stage) => [stage.name, stage]))
-
-  for (const template of DAOU_WORKS_STAGE_TEMPLATE) {
-    const exact = stagesByName.get(template.name)
-    if (exact && !usedStageIds.has(exact.id)) {
-      targetByName.set(template.name, exact)
-      usedStageIds.add(exact.id)
-      continue
-    }
-    const alias = daouWorksStageAliases(template.name)
-      .map((name) => stagesByName.get(name))
-      .find((stage): stage is WorkflowStageRow => Boolean(stage && !usedStageIds.has(stage.id)))
-    if (alias) {
-      targetByName.set(template.name, alias)
-      usedStageIds.add(alias.id)
-    }
-  }
-
-  const unclaimed = input.existing.filter((stage) => !usedStageIds.has(stage.id))
-  for (const template of DAOU_WORKS_STAGE_TEMPLATE) {
-    if (targetByName.has(template.name)) continue
-    const fallback = unclaimed.shift()
-    if (fallback) {
-      targetByName.set(template.name, fallback)
-      usedStageIds.add(fallback.id)
-    }
-  }
-
-  for (const [index, template] of DAOU_WORKS_STAGE_TEMPLATE.entries()) {
-    const existing = targetByName.get(template.name)
-    if (existing) {
-      await tx.execute(sql`
-        UPDATE new_product_workflow_stages
-        SET name = ${template.name}, tone = ${template.tone}, position = ${index + 1}, updated_at = now()
-        WHERE id = ${existing.id}::uuid AND user_id = ${input.userId}::uuid
-      `)
-    } else {
-      const [created] = resultRows<WorkflowStageRow>(await tx.execute(sql`
-        INSERT INTO new_product_workflow_stages (user_id, name, tone, position)
-        VALUES (${input.userId}::uuid, ${template.name}, ${template.tone}, ${index + 1})
-        RETURNING id, name, position, tone
-      `))
-      if (created) targetByName.set(template.name, created)
-    }
-  }
-
-  const targetStages = resultRows<WorkflowStageRow>(await tx.execute(sql`
-    SELECT id, name, position, tone
-    FROM new_product_workflow_stages
-    WHERE user_id = ${input.userId}::uuid
+    FOR UPDATE
   `))
-  const targetIds = new Set(DAOU_WORKS_STAGE_TEMPLATE.map((template) => targetByName.get(template.name)?.id).filter((id): id is string => Boolean(id)))
-  const targetByStageName = new Map(targetStages.map((stage) => [stage.name, stage]))
-  const firstStage = targetByStageName.get(DAOU_WORKS_STAGE_TEMPLATE[0].name)
-  if (!firstStage) throw new Error('WORKS 첫 단계를 만들지 못했습니다.')
+}
 
-  for (const stage of input.existing.filter((entry) => !targetIds.has(entry.id))) {
-    const mappedName = legacyDaouWorksStage(stage.name)
-    const target = (mappedName ? targetByStageName.get(mappedName) : null) ?? firstStage
-    await tx.execute(sql`
-      UPDATE new_product_workflow_items
-      SET stage_id = ${target.id}::uuid, updated_at = now()
-      WHERE user_id = ${input.userId}::uuid AND stage_id = ${stage.id}::uuid
-    `)
-    await tx.execute(sql`
-      UPDATE new_product_workflow_stage_history
-      SET from_stage_id = ${target.id}::uuid
-      WHERE user_id = ${input.userId}::uuid AND from_stage_id = ${stage.id}::uuid
-    `)
-    await tx.execute(sql`
-      UPDATE new_product_workflow_stage_history
-      SET to_stage_id = ${target.id}::uuid
-      WHERE user_id = ${input.userId}::uuid AND to_stage_id = ${stage.id}::uuid
-    `)
-    await tx.execute(sql`
-      DELETE FROM new_product_workflow_stages
-      WHERE id = ${stage.id}::uuid AND user_id = ${input.userId}::uuid
-    `)
+function resolveDaouWorksStageIds(input: {
+  sourceStatuses: string[]
+  stageMappings: Map<string, string>
+  stages: WorkflowStageRow[]
+}) {
+  const currentStageIds = new Set(input.stages.map((stage) => stage.id))
+  const resolved = new Map<string, string>()
+  for (const sourceStatus of input.sourceStatuses) {
+    const stageId = input.stageMappings.get(sourceStatus)
+    if (!stageId) throw new Error(`WORKS 상태 "${sourceStatus}"에 연결할 현재 SaaS 단계를 선택해주세요.`)
+    if (!currentStageIds.has(stageId)) {
+      throw new Error(`WORKS 상태 "${sourceStatus}"에 연결한 SaaS 단계를 찾지 못했습니다. 다시 선택해주세요.`)
+    }
+    resolved.set(sourceStatus, stageId)
   }
+  return resolved
 }
 
-function daouWorksStageAliases(name: string) {
-  return DAOU_WORKS_STAGE_ALIASES[name] ?? []
-}
-
-const DAOU_WORKS_STAGE_ALIASES: Record<string, string[]> = {
-  '1.제품서치(C)': ['1차 통과 상품 등록'],
-  '2.샘플 구매대기(SCM팀)': ['샘플 구매'],
-  '5.샘플 광주도착&본사검수(MD팀)': ['샘플 국내 도착·최종 미팅'],
-  '6. 정보고시 제작 (디자인)': ['상품정보고시 제작', '사방넷 상품등록'],
-  '9.구매대기(SCM팀)': ['상품 구매 대기'],
-  '10.입고대기(SCM팀)': ['상품 입고 대기'],
-  '11.확정원가 입력(SCM팀)': ['원가 입력'],
-  '12.가격 산정대기(BM팀)': ['판매가·상품정보 입력'],
-  '13.상세페이지 완료대기(디자인팀)': ['상세페이지 완료 대기'],
-  '14-1.등록대기_자사몰(SCM팀)': ['등록대기 1순위'],
-  '14-2.등록대기_도매A': ['등록대기 2순위'],
-  '15.등록완료': ['등록완료'],
-  '90. 보류': ['진행보류'],
-  '9999. 진행불가': ['진행불가'],
-}
-
-function legacyDaouWorksStage(name: string) {
-  return Object.entries(DAOU_WORKS_STAGE_ALIASES).find(([, aliases]) => aliases.includes(name))?.[0]
+function normalizeDaouWorksStageMappings(input: unknown) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return new Map<string, string>()
+  return new Map(Object.entries(input)
+    .map(([sourceStatus, stageId]) => [sourceStatus.trim(), typeof stageId === 'string' ? stageId.trim() : ''] as const)
+    .filter(([sourceStatus, stageId]) => Boolean(sourceStatus && stageId)))
 }
 
 function daouWorksPayload(input: {

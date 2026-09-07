@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES,
   DAOU_WORKS_STAGE_TEMPLATE,
   normalizeDaouWorksImportItems,
   parseDaouWorksCsvText,
@@ -72,5 +73,13 @@ describe('Daou WORKS CSV import', () => {
       '999-2. 샘플 판매완료',
       '9999. 진행불가',
     ])
+  })
+
+  it('suggests only matching SaaS stages and leaves ambiguous statuses for review', () => {
+    expect(Object.keys(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES)).toEqual(DAOU_WORKS_STAGE_TEMPLATE.map((stage) => stage.name))
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['10.입고대기(SCM팀)']).toBe('상품 입고 대기')
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['3.샘플 중국도착 대기(C)']).toBeNull()
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['999-1. 샘플 판매요청']).toBeNull()
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['999-2. 샘플 판매완료']).toBeNull()
   })
 })

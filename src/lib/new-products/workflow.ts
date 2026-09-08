@@ -676,7 +676,8 @@ export async function listNewProductSummaries(input: {
           item.notice_food_safety,
           item.notice_components,
           item.notice_special_notes,
-          item.metadata::text
+          -- The raw WORKS copy is intentionally loaded only on demand.
+          COALESCE(item.metadata -> 'optionDetails', '[]'::jsonb)::text
         ) ILIKE ${queryPattern}
         OR EXISTS (
           SELECT 1

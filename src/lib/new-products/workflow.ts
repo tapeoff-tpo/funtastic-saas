@@ -84,6 +84,11 @@ export type NewProductStageHistory = {
   changedAt: string
 }
 
+export type NewProductDaouWorksSourceSummary = Pick<
+  DaouWorksSourceData,
+  'sourceId' | 'sourceStatus' | 'registeredAt' | 'registeredBy' | 'updatedAt' | 'updatedBy'
+>
+
 export type NewProductItem = {
   id: string
   productNumber: number
@@ -98,7 +103,7 @@ export type NewProductItem = {
   productName: string
   productOption: string | null
   optionDetails: NewProductOptionDetail[]
-  daouWorks: DaouWorksSourceData | null
+  daouWorks: NewProductDaouWorksSourceSummary | null
   chinaUnitPriceCny: number | null
   unitShippingCny: number | null
   exchangeRateKrw: number | null
@@ -272,32 +277,68 @@ export const DEFAULT_NEW_PRODUCT_EDITOR_LAYOUT: NewProductEditorLayout = {
 let ensureSchemaPromise: Promise<void> | null = null
 const ensureWorkspacePromises = new Map<string, Promise<void>>()
 
+const daouWorksSummarySql = sql`
+  CASE
+    WHEN jsonb_typeof(item.metadata -> 'daouWorks') = 'object' THEN jsonb_build_object(
+      'sourceId', item.metadata -> 'daouWorks' ->> 'sourceId',
+      'sourceStatus', item.metadata -> 'daouWorks' ->> 'sourceStatus',
+      'registeredAt', item.metadata -> 'daouWorks' ->> 'registeredAt',
+      'registeredBy', item.metadata -> 'daouWorks' ->> 'registeredBy',
+      'updatedAt', item.metadata -> 'daouWorks' ->> 'updatedAt',
+      'updatedBy', item.metadata -> 'daouWorks' ->> 'updatedBy'
+    )
+    ELSE NULL
+  END
+`
+
 export async function ensureNewProductWorkflowTables(userId: string) {
-  await ensureNewProductWorkflowSchema()
   const existingPromise = ensureWorkspacePromises.get(userId)
   if (existingPromise) return existingPromise
 
-  const workspacePromise = db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-default-stages:${userId}`}))`)
-    const [{ count } = { count: 0 }] = resultRows<{ count: number }>(await tx.execute(sql`
-      SELECT COUNT(*)::int AS count
-      FROM new_product_workflow_stages
-      WHERE user_id = ${userId}::uuid
-    `))
-    if (count === 0) {
-      for (const [index, stage] of DEFAULT_NEW_PRODUCT_STAGES.entries()) {
-        await tx.execute(sql`
-          INSERT INTO new_product_workflow_stages (user_id, name, position, tone)
-          VALUES (${userId}::uuid, ${stage.name}, ${index + 1}, ${stage.tone})
-        `)
-      }
-    }
-  }).then(() => undefined).catch((error) => {
-    ensureWorkspacePromises.delete(userId)
-    throw error
-  })
+  const workspacePromise = ensureNewProductWorkflowWorkspace(userId)
+    .catch(async (error) => {
+      if (!isMissingNewProductWorkflowTable(error)) throw error
+      await ensureNewProductWorkflowSchema()
+      await ensureNewProductWorkflowWorkspace(userId)
+    })
+    .catch((error) => {
+      ensureWorkspacePromises.delete(userId)
+      throw error
+    })
   ensureWorkspacePromises.set(userId, workspacePromise)
   return workspacePromise
+}
+
+async function ensureNewProductWorkflowWorkspace(userId: string) {
+  const defaultStageValues = sql.join(DEFAULT_NEW_PRODUCT_STAGES.map((stage, index) => sql`
+    (${stage.name}::varchar(160), ${index + 1}::integer, ${stage.tone}::varchar(30))
+  `), sql`, `)
+
+  // The advisory lock and seed insert share one statement, so a cold start only
+  // performs one lightweight query once the migrated tables already exist.
+  await db.execute(sql`
+    WITH locked AS (
+      SELECT pg_advisory_xact_lock(hashtext(${`new-product-default-stages:${userId}`}))
+    ), defaults(name, position, tone) AS (
+      VALUES ${defaultStageValues}
+    )
+    INSERT INTO new_product_workflow_stages (user_id, name, position, tone)
+    SELECT ${userId}::uuid, defaults.name, defaults.position, defaults.tone
+    FROM defaults
+    CROSS JOIN locked
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM new_product_workflow_stages
+      WHERE user_id = ${userId}::uuid
+    )
+  `)
+}
+
+function isMissingNewProductWorkflowTable(error: unknown) {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === '42P01'
 }
 
 function ensureNewProductWorkflowSchema() {
@@ -543,8 +584,8 @@ export async function getNewProductViewer(input: { userId: string; actorUserId: 
 
 export async function getNewProductPageSetup(input: { userId: string; actorUserId: string }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const viewer = await getNewProductViewer(input)
-  const [stageResult, preferenceResult] = await Promise.all([
+  const [profile, stageResult, preferenceResult] = await Promise.all([
+    getProfile(input.actorUserId),
     db.execute<NewProductStage>(sql`
       SELECT
         stage.id,
@@ -573,7 +614,10 @@ export async function getNewProductPageSetup(input: { userId: string; actorUserI
       tone: validTone(stage.tone),
     })),
     editorLayout: normalizeNewProductEditorLayout(preference?.editorLayout),
-    viewer,
+    viewer: {
+      isMain: profile?.role === 'super_admin' && !profile.deactivatedAt,
+      operatorId: null,
+    },
   }
 }
 
@@ -702,7 +746,7 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
       item.product_name AS "productName",
       item.product_option AS "productOption",
       COALESCE(item.metadata -> 'optionDetails', '[]'::jsonb) AS "optionDetails",
-      item.metadata -> 'daouWorks' AS "daouWorks",
+      ${daouWorksSummarySql} AS "daouWorks",
       item.china_unit_price_cny::float8 AS "chinaUnitPriceCny",
       item.unit_shipping_cny::float8 AS "unitShippingCny",
       item.exchange_rate_krw::float8 AS "exchangeRateKrw",
@@ -794,10 +838,22 @@ export async function getNewProductItem(input: { userId: string; itemId: string 
     ...item,
     stageTone: validTone(item.stageTone),
     optionDetails: normalizeNewProductOptionDetails(item.optionDetails),
-    daouWorks: jsonObject<DaouWorksSourceData>(item.daouWorks),
+    daouWorks: jsonObject<NewProductDaouWorksSourceSummary>(item.daouWorks),
     attachments: jsonArray<NewProductAttachment>(item.attachments),
     stageHistory: jsonArray<NewProductStageHistory>(item.stageHistory),
   }
+}
+
+export async function getNewProductDaouWorksSource(input: { userId: string; itemId: string }) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const result = await db.execute<{ daouWorks: unknown }>(sql`
+    SELECT item.metadata -> 'daouWorks' AS "daouWorks"
+    FROM new_product_workflow_items item
+    WHERE item.user_id = ${input.userId}::uuid
+      AND item.id = ${input.itemId}::uuid
+  `)
+  const [item] = resultRows<{ daouWorks: unknown }>(result)
+  return item ? jsonObject<DaouWorksSourceData>(item.daouWorks) : null
 }
 
 export async function getNewProductWorkflow(userId: string) {
@@ -853,7 +909,7 @@ export async function getNewProductWorkflow(userId: string) {
         item.package_packing AS "packagePacking",
         item.product_option AS "productOption",
         COALESCE(item.metadata -> 'optionDetails', '[]'::jsonb) AS "optionDetails",
-        item.metadata -> 'daouWorks' AS "daouWorks",
+        ${daouWorksSummarySql} AS "daouWorks",
         item.sabangnet_code AS "sabangnetCode",
         item.product_keywords AS "productKeywords",
         item.purchase_reference_notes AS "purchaseReferenceNotes",
@@ -920,7 +976,7 @@ export async function getNewProductWorkflow(userId: string) {
       ...item,
       stageTone: validTone(item.stageTone),
       optionDetails: normalizeNewProductOptionDetails(item.optionDetails),
-      daouWorks: jsonObject<DaouWorksSourceData>(item.daouWorks),
+      daouWorks: jsonObject<NewProductDaouWorksSourceSummary>(item.daouWorks),
       attachments: jsonArray<NewProductAttachment>(item.attachments),
       stageHistory: jsonArray<NewProductStageHistory>(item.stageHistory),
     })),

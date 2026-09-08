@@ -27,6 +27,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import type { DaouWorksSourceData } from '@/lib/new-products/daou-works-import'
 import { calculateSalesPrices } from '@/lib/new-products/price-calculator'
 import type {
   NewProductAttachment,
@@ -702,7 +703,7 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           : <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">표시하도록 설정된 등록 영역이 없습니다. 상단의 레이아웃 설정에서 영역을 켜주세요.</div>}
       </fieldset>
 
-      {item?.daouWorks && <DaouWorksSourcePanel source={item.daouWorks} />}
+      {item?.daouWorks && <DaouWorksSourcePanel itemId={item.id} source={item.daouWorks} />}
 
       {item?.stageHistory && item.stageHistory.length > 0 && (
         <EditorSection title="최근 단계 변경 로그" icon={Sparkles}>
@@ -727,13 +728,37 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
   )
 }
 
-function DaouWorksSourcePanel({ source }: { source: NonNullable<NewProductItem['daouWorks']> }) {
-  const rawEntries = Object.entries(source.rawFields)
-  const childSections = [
-    { label: '원본 옵션 행', rows: source.optionRows },
-    { label: '부자재 정보', rows: source.materialRows },
-    { label: '상품문의', rows: source.inquiryRows },
-  ].filter((section) => section.rows.length > 0)
+function DaouWorksSourcePanel({ itemId, source }: {
+  itemId: string
+  source: NonNullable<NewProductItem['daouWorks']>
+}) {
+  const [rawSource, setRawSource] = useState<DaouWorksSourceData | null>(null)
+  const [rawSourceLoading, setRawSourceLoading] = useState(false)
+  const [rawSourceError, setRawSourceError] = useState<string | null>(null)
+  const rawEntries = rawSource ? Object.entries(rawSource.rawFields) : []
+  const childSections = rawSource
+    ? [
+      { label: '원본 옵션 행', rows: rawSource.optionRows },
+      { label: '부자재 정보', rows: rawSource.materialRows },
+      { label: '상품문의', rows: rawSource.inquiryRows },
+    ].filter((section) => section.rows.length > 0)
+    : []
+
+  async function loadRawSource() {
+    if (rawSource || rawSourceLoading) return
+    setRawSourceLoading(true)
+    setRawSourceError(null)
+    try {
+      const response = await fetch(`/api/new-products/items/${itemId}/works-source`, { cache: 'no-store' })
+      const result = await response.json() as { source?: DaouWorksSourceData; error?: string }
+      if (!response.ok || !result.source) throw new Error(result.error || 'WORKS 원본 정보를 불러오지 못했습니다.')
+      setRawSource(result.source)
+    } catch (error) {
+      setRawSourceError(error instanceof Error ? error.message : 'WORKS 원본 정보를 불러오지 못했습니다.')
+    } finally {
+      setRawSourceLoading(false)
+    }
+  }
 
   return (
     <EditorSection title="WORKS 원본 정보" icon={FileText}>
@@ -744,9 +769,21 @@ function DaouWorksSourcePanel({ source }: { source: NonNullable<NewProductItem['
         <SourceFact label="최종 수정" value={source.updatedAt ? `${formatSourceDate(source.updatedAt)}${source.updatedBy ? ` · ${source.updatedBy}` : ''}` : source.updatedBy} />
       </div>
 
-      {(rawEntries.length > 0 || childSections.length > 0) && (
-        <details className="mt-3 rounded-lg border bg-muted/20">
-          <summary className="cursor-pointer px-3 py-2 text-sm font-medium">WORKS 원본 입력값 보기</summary>
+      <details
+        className="mt-3 rounded-lg border bg-muted/20"
+        onToggle={(event) => {
+          if (event.currentTarget.open) void loadRawSource()
+        }}
+      >
+        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">WORKS 원본 입력값 보기</summary>
+        {rawSourceLoading ? (
+          <div className="flex items-center gap-2 border-t p-3 text-xs text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />원본 입력값을 불러오는 중입니다.</div>
+        ) : rawSourceError ? (
+          <div className="flex flex-wrap items-center gap-2 border-t p-3 text-xs text-destructive">
+            <span>{rawSourceError}</span>
+            <Button type="button" size="sm" variant="outline" onClick={() => void loadRawSource()}>다시 불러오기</Button>
+          </div>
+        ) : rawSource ? (
           <div className="space-y-4 border-t p-3">
             {rawEntries.length > 0 && (
               <div className="grid gap-x-5 gap-y-3 md:grid-cols-2">
@@ -759,9 +796,10 @@ function DaouWorksSourcePanel({ source }: { source: NonNullable<NewProductItem['
               </div>
             )}
             {childSections.map((section) => <RawSourceRows key={section.label} label={section.label} rows={section.rows} />)}
+            {rawEntries.length === 0 && childSections.length === 0 && <p className="text-xs text-muted-foreground">저장된 원본 입력값이 없습니다.</p>}
           </div>
-        </details>
-      )}
+        ) : null}
+      </details>
     </EditorSection>
   )
 }

@@ -236,6 +236,11 @@ function buildImportItem(sourceId: string, rows: Array<Record<string, string>>):
     ['진행불가사유', valueFor(rows, HEADER.discontinuedReason)],
     ['기타 참고사항', valueFor(rows, HEADER.otherNotes)],
   ])
+  const requiredCheckValues = splitDaouWorksRequiredChecks(valueFor(rows, HEADER.requiredChecks))
+  const referenceNotes = joinNotes([
+    ['히스토리', valueFor(rows, HEADER.historyNotes)],
+    ['비고', valueFor(rows, HEADER.referenceNotes)],
+  ])
   const firstOption = optionDetails[0]
   const values: DaouWorksImportValues = {
     sampleCode: valueFor(rows, HEADER.productNumber) ?? valueFor(rows, HEADER.sampleCode),
@@ -253,10 +258,10 @@ function buildImportItem(sourceId: string, rows: Array<Record<string, string>>):
     memo2: stoppedReason,
     englishName: valueFor(rows, HEADER.englishName),
     sourceUrl: valueFor(rows, HEADER.sourceUrl),
-    requiredChecks: valueFor(rows, HEADER.requiredChecks),
+    requiredChecks: requiredCheckValues.requiredChecks,
     estimatedCost: numberValue(valueFor(rows, HEADER.estimatedCost)),
-    historyNotes: valueFor(rows, HEADER.historyNotes),
-    referenceNotes: valueFor(rows, HEADER.referenceNotes),
+    historyNotes: null,
+    referenceNotes,
     chinaItemName: valueFor(rows, HEADER.chinaItemName),
     plannedSaleDate: dateOnly(valueFor(rows, HEADER.plannedSaleDate)),
     detailPageDueDate: dateOnly(valueFor(rows, HEADER.detailPageDueDate)),
@@ -276,7 +281,7 @@ function buildImportItem(sourceId: string, rows: Array<Record<string, string>>):
     packageManufacturer: inputText(valueFor(rows, HEADER.packageManufacturer), 100),
     packagePacking: inputText(valueFor(rows, HEADER.packagePacking), 100),
     sabangnetCode: firstOption?.sabangnetOptionCode ?? null,
-    productKeywords: null,
+    productKeywords: requiredCheckValues.productKeywords,
     purchaseReferenceNotes: firstOption?.purchaseReferenceNotes ?? null,
     previousCostKrw: firstOption?.previousCostKrw ?? null,
     b2bOptionSurcharge: firstOption?.b2bPrice ?? null,
@@ -293,6 +298,41 @@ function buildImportItem(sourceId: string, rows: Array<Record<string, string>>):
   }
 
   return { sourceId, sourceStatus, values, source }
+}
+
+export function splitDaouWorksRequiredChecks(value: string | null | undefined) {
+  const source = cleanMultilineText(value)
+  if (!source) return { requiredChecks: null, productKeywords: null }
+
+  const lines = source.split('\n')
+  const keywordIndex = lines.findIndex((line) => /^\s*(?:상품\s*)?키워드(?:\s*[:：]\s*(.*))?\s*$/i.test(line))
+  if (keywordIndex < 0) return { requiredChecks: source, productKeywords: null }
+
+  const keywordMatch = lines[keywordIndex]!.match(/^\s*(?:상품\s*)?키워드(?:\s*[:：]\s*(.*))?\s*$/i)
+  const followingLines = lines.slice(keywordIndex + 1)
+  let keywordEndIndex = followingLines.length
+
+  for (let index = 0; index < followingLines.length; index += 1) {
+    if (followingLines[index]!.trim()) continue
+    let nextContentIndex = index
+    while (nextContentIndex < followingLines.length && !followingLines[nextContentIndex]!.trim()) nextContentIndex += 1
+    if (nextContentIndex - index >= 2 && nextContentIndex < followingLines.length) {
+      keywordEndIndex = index
+      break
+    }
+    index = nextContentIndex - 1
+  }
+
+  const productKeywords = cleanMultilineText([
+    keywordMatch?.[1] ?? '',
+    ...followingLines.slice(0, keywordEndIndex),
+  ].join('\n'))
+  const requiredChecks = joinTextBlocks([
+    lines.slice(0, keywordIndex).join('\n'),
+    followingLines.slice(keywordEndIndex).join('\n'),
+  ])
+
+  return { requiredChecks, productKeywords }
 }
 
 function toOptionDetail(row: Record<string, string>, sourceId: string, index: number): NewProductOptionDetail | null {
@@ -545,6 +585,15 @@ function dateTimeValue(value: unknown) {
 function joinNotes(entries: Array<[string, string | null]>) {
   const values = entries.filter(([, value]) => Boolean(value)).map(([label, value]) => `${label}: ${value}`)
   return values.length > 0 ? values.join('\n\n') : null
+}
+
+function joinTextBlocks(values: string[]) {
+  const blocks = values.map(cleanMultilineText).filter((value): value is string => Boolean(value))
+  return blocks.length > 0 ? blocks.join('\n\n') : null
+}
+
+function cleanMultilineText(value: unknown) {
+  return nullableText(typeof value === 'string' ? value.replace(/\r\n?/g, '\n').replace(/[\t ]+\n/g, '\n') : value)
 }
 
 function cleanHeader(value: unknown) {

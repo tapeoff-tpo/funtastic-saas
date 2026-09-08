@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { DaouWorksImportItem } from './daou-works-import'
 import {
   applyPrimaryOptionValues,
+  buildDaouWorksTextFieldMigration,
   filterDaouWorksItemsWithUniqueSampleCodes,
   normalizeNewProductEditorLayout,
 } from './workflow'
@@ -51,6 +52,24 @@ describe('normalizeNewProductEditorLayout', () => {
       'first-new-source',
     ])
     expect(result.duplicateSampleCodes).toEqual(['ab-100', 'CD-200'])
+  })
+
+  it('moves only WORKS keyword text and history without changing other fields', () => {
+    expect(buildDaouWorksTextFieldMigration({
+      id: 'item-1',
+      requiredChecks: '키워드\n노트,수첩\n\n\n26년 3월 26일 소싱회의 통과\n方块本-黄色-yellow',
+      productKeywords: '기존키워드',
+      historyNotes: '샘플 구매 완료',
+      referenceNotes: '상세페이지 참고',
+    })).toMatchObject({
+      requiredChecks: '26년 3월 26일 소싱회의 통과\n方块本-黄色-yellow',
+      productKeywords: '기존키워드\n\n노트,수첩',
+      historyNotes: null,
+      referenceNotes: '히스토리: 샘플 구매 완료\n\n비고: 상세페이지 참고',
+      keywordMoved: true,
+      historyMoved: true,
+      changed: true,
+    })
   })
 })
 

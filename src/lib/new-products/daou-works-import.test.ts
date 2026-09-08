@@ -4,6 +4,7 @@ import {
   DAOU_WORKS_STAGE_TEMPLATE,
   normalizeDaouWorksImportItems,
   parseDaouWorksCsvText,
+  splitDaouWorksRequiredChecks,
 } from './daou-works-import'
 
 describe('Daou WORKS CSV import', () => {
@@ -51,6 +52,27 @@ describe('Daou WORKS CSV import', () => {
     ].join('\n'))
 
     expect(parsed.items[0]?.values.estimatedCost).toBeNull()
+  })
+
+  it('moves only the keyword block while retaining later meeting notes in required checks', () => {
+    const parsed = parseDaouWorksCsvText([
+      '"*ID","상태","제품명","필수 체크 사항","히스토리","비고 (참고사항)"',
+      '"5430265","1.제품서치(C)","테스트 상품","키워드\n노트,수첩,문구\n\n\n26년 3월 26일 소싱회의 통과\n方块本-黄色-yellow","샘플 구매 완료","상세페이지 참고"',
+    ].join('\n'))
+
+    expect(parsed.items[0]?.values).toMatchObject({
+      productKeywords: '노트,수첩,문구',
+      requiredChecks: '26년 3월 26일 소싱회의 통과\n方块本-黄色-yellow',
+      historyNotes: null,
+      referenceNotes: '히스토리: 샘플 구매 완료\n\n비고: 상세페이지 참고',
+    })
+  })
+
+  it('retains required-check text that is not marked as a keyword block', () => {
+    expect(splitDaouWorksRequiredChecks('26년 3월 26일 소싱회의 통과\n方块本-黄色-yellow')).toEqual({
+      requiredChecks: '26년 3월 26일 소싱회의 통과\n方块本-黄色-yellow',
+      productKeywords: null,
+    })
   })
 
   it('does not carry removed package size fields into option data', () => {

@@ -6,6 +6,7 @@ import { FileUp, Loader2, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { migrateDaouWorksTextFieldsAction } from './actions'
 import {
   DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES,
   parseDaouWorksCsvFile,
@@ -128,6 +129,20 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
     })
   }
 
+  function migrateExistingTextFields() {
+    if (!window.confirm('이미 가져온 WORKS 상품에서 키워드는 상품키워드로 옮기고, 히스토리와 기존 비고는 비고에 합칩니다. 단계·상품정보·옵션·수기 수정값은 변경하지 않습니다. 진행할까요?')) return
+    startTransition(async () => {
+      const result = await migrateDaouWorksTextFieldsAction()
+      if (!result.success) {
+        toast.error(result.error)
+        setParseError(result.error)
+        return
+      }
+      toast.success(`WORKS 텍스트 ${result.updated.toLocaleString('ko-KR')}건을 정리했습니다. 키워드 ${result.keywordsMoved.toLocaleString('ko-KR')}건 · 히스토리 ${result.historiesMoved.toLocaleString('ko-KR')}건`)
+      onImported()
+    })
+  }
+
   const progressPercent = progress ? Math.round((progress.current / progress.total) * 100) : 0
 
   return (
@@ -144,6 +159,17 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
           </div>
 
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+            <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-medium">이미 가져온 WORKS 텍스트 정리</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">필수 체크 사항의 키워드만 상품키워드로 옮기고, 히스토리와 기존 비고는 비고에 보존합니다.</p>
+              </div>
+              <Button type="button" variant="outline" onClick={migrateExistingTextFields} disabled={pending || parsing}>
+                {pending ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+                {pending ? '정리 중...' : '기존 데이터 정리'}
+              </Button>
+            </div>
+
             <div className="space-y-2">
               <label className="text-sm font-medium" htmlFor="daou-works-csv">WORKS CSV 파일</label>
               <Input id="daou-works-csv" type="file" accept=".csv,text/csv" disabled={pending || parsing} onChange={(event) => void selectFile(event.target.files?.[0] ?? null)} />

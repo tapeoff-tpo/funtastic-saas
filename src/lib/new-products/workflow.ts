@@ -14,6 +14,7 @@ import {
 } from './option-details'
 import {
   normalizeDaouWorksImportItems,
+  splitDaouWorksRequiredChecks,
   type DaouWorksImportItem,
   type DaouWorksSourceData,
 } from './daou-works-import'
@@ -1067,10 +1068,121 @@ export async function importDaouWorksProducts(input: {
   })
 }
 
+type DaouWorksTextFieldRow = {
+  id: string
+  requiredChecks: string | null
+  productKeywords: string | null
+  historyNotes: string | null
+  referenceNotes: string | null
+}
+
+export function buildDaouWorksTextFieldMigration(input: DaouWorksTextFieldRow) {
+  const keywordValues = splitDaouWorksRequiredChecks(input.requiredChecks)
+  const keywordMoved = Boolean(keywordValues.productKeywords)
+  const historyNotes = normalizeDaouWorksText(input.historyNotes)
+  const referenceNotes = normalizeDaouWorksText(input.referenceNotes)
+  const productKeywords = keywordMoved
+    ? joinUniqueDaouWorksText([input.productKeywords, keywordValues.productKeywords])
+    : input.productKeywords
+  const nextReferenceNotes = historyNotes
+    ? joinUniqueDaouWorksText([
+      `히스토리: ${historyNotes}`,
+      referenceNotes ? referenceNotes.startsWith('비고:') ? referenceNotes : `비고: ${referenceNotes}` : null,
+    ])
+    : input.referenceNotes
+  const values = {
+    requiredChecks: keywordMoved ? keywordValues.requiredChecks : input.requiredChecks,
+    productKeywords,
+    historyNotes: historyNotes ? null : input.historyNotes,
+    referenceNotes: nextReferenceNotes,
+  }
+
+  return {
+    ...values,
+    keywordMoved,
+    historyMoved: Boolean(historyNotes),
+    changed: values.requiredChecks !== input.requiredChecks
+      || values.productKeywords !== input.productKeywords
+      || values.historyNotes !== input.historyNotes
+      || values.referenceNotes !== input.referenceNotes,
+  }
+}
+
+export async function migrateDaouWorksTextFields(input: {
+  userId: string
+  requestedByUserId: string
+}) {
+  await ensureNewProductWorkflowTables(input.userId)
+  const viewer = await getNewProductViewer({ userId: input.userId, actorUserId: input.requestedByUserId })
+  if (!viewer.isMain) throw new Error('WORKS 텍스트 정리는 메인만 실행할 수 있습니다.')
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-daou-text-migration:${input.userId}`}))`)
+    const rows = resultRows<DaouWorksTextFieldRow>(await tx.execute(sql`
+      SELECT
+        id,
+        required_checks AS "requiredChecks",
+        product_keywords AS "productKeywords",
+        history_notes AS "historyNotes",
+        reference_notes AS "referenceNotes"
+      FROM new_product_workflow_items
+      WHERE user_id = ${input.userId}::uuid
+        AND daou_works_id IS NOT NULL
+    `))
+    const updates = rows.map((row) => ({ row, migration: buildDaouWorksTextFieldMigration(row) }))
+      .filter(({ migration }) => migration.changed)
+
+    for (let index = 0; index < updates.length; index += 500) {
+      const payload = updates.slice(index, index + 500).map(({ row, migration }) => ({
+        id: row.id,
+        required_checks: migration.requiredChecks,
+        product_keywords: migration.productKeywords,
+        history_notes: migration.historyNotes,
+        reference_notes: migration.referenceNotes,
+      }))
+      await tx.execute(sql`
+        UPDATE new_product_workflow_items AS item
+        SET
+          required_checks = payload.required_checks,
+          product_keywords = payload.product_keywords,
+          history_notes = payload.history_notes,
+          reference_notes = payload.reference_notes,
+          updated_at = now()
+        FROM jsonb_to_recordset(${JSON.stringify(payload)}::jsonb) AS payload(
+          id text,
+          required_checks text,
+          product_keywords text,
+          history_notes text,
+          reference_notes text
+        )
+        WHERE item.id = payload.id::uuid
+          AND item.user_id = ${input.userId}::uuid
+      `)
+    }
+
+    return {
+      scanned: rows.length,
+      updated: updates.length,
+      keywordsMoved: updates.filter(({ migration }) => migration.keywordMoved).length,
+      historiesMoved: updates.filter(({ migration }) => migration.historyMoved).length,
+    }
+  })
+}
+
 type WorkflowStageRow = {
   id: string
   name: string
   position: number
+}
+
+function normalizeDaouWorksText(value: string | null) {
+  const normalized = value?.trim()
+  return normalized || null
+}
+
+function joinUniqueDaouWorksText(values: Array<string | null>) {
+  const uniqueValues = [...new Set(values.map(normalizeDaouWorksText).filter((value): value is string => Boolean(value)))]
+  return uniqueValues.length > 0 ? uniqueValues.join('\n\n') : null
 }
 
 async function listDaouWorksTargetStages(tx: WorkflowTransaction, userId: string) {

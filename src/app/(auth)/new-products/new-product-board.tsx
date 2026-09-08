@@ -543,14 +543,14 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="상품명" required><Input value={values.productName} onChange={(event) => setValue('productName', event.target.value)} placeholder="상품명을 입력하세요" /></Field>
           <Field label="등록 상품명"><Input value={values.registeredProductName} onChange={(event) => setValue('registeredProductName', event.target.value)} /></Field>
           <Field label="제품 영문명"><Input value={values.englishName} onChange={(event) => setValue('englishName', event.target.value)} /></Field>
-          <Field label="중국사용 항목"><Input value={values.chinaItemName} onChange={(event) => setValue('chinaItemName', event.target.value)} /></Field>
+          <Field label="중국사용항목 (货源调查确认项目) - C"><Input value={values.chinaItemName} onChange={(event) => setValue('chinaItemName', event.target.value)} /></Field>
           <Field label="중국 구매 링크"><UrlInput value={values.sourceUrl} onChange={(value) => setValue('sourceUrl', value)} /></Field>
           <Field label="패키지 정보 URL"><UrlInput value={values.packageInfoUrl} onChange={(value) => setValue('packageInfoUrl', value)} /></Field>
           <Field label="판매예정일"><Input type="date" value={values.plannedSaleDate} onChange={(event) => setValue('plannedSaleDate', event.target.value)} /></Field>
           <Field label="상세페이지 완료예정일"><Input type="date" value={values.detailPageDueDate} onChange={(event) => setValue('detailPageDueDate', event.target.value)} /></Field>
           <Field label="B2B 판매가 (₩)"><MoneyInput value={values.b2bPrice} onChange={(value) => setValue('b2bPrice', value)} /></Field>
-          <Field label="B2C 판매가 (₩)"><MoneyInput value={values.b2cPrice} onChange={(value) => setValue('b2cPrice', value)} /></Field>
           <Field label="B2B 택배비"><MoneyInput value={values.b2bShippingFee} onChange={(value) => setValue('b2bShippingFee', value)} /></Field>
+          <Field label="B2C 판매가 (₩)"><MoneyInput value={values.b2cPrice} onChange={(value) => setValue('b2cPrice', value)} /></Field>
           <Field label="B2C 택배비"><MoneyInput value={values.b2cShippingFee} onChange={(value) => setValue('b2cShippingFee', value)} /></Field>
           <div className={fullWidthFieldClass}>
             <OptionDetailsEditor
@@ -1175,62 +1175,96 @@ function OptionDetailsEditor({ value, onChange, disabled }: {
       <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h4 className="text-sm font-semibold">옵션별 등록 정보</h4>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">옵션별 정보를 따로 관리합니다. 필요한 등록 항목만 표시합니다.</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">옵션별 정보를 한 표에서 관리합니다. 제품 낱개 사이즈와 벌크 사이즈는 제외했습니다.</p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={addOption} disabled={disabled}>
           <Plus />옵션 추가
         </Button>
       </div>
-      <div className="divide-y">
-        {value.map((option, index) => (
-          <div key={option.id} className="p-3">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="text-xs font-semibold text-muted-foreground">옵션 {index + 1}</p>
-              <Button type="button" size="sm" variant="ghost" aria-label={`${index + 1}번 옵션 삭제`} onClick={() => removeOption(index)} disabled={disabled}><Trash2 />삭제</Button>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-              <OptionField label="옵션명"><OptionInput value={option.optionName} onChange={(nextValue) => updateOption(index, 'optionName', nextValue)} disabled={disabled} /></OptionField>
-              <OptionField label="사방넷코드(옵션)"><OptionInput value={option.sabangnetOptionCode} onChange={(nextValue) => updateOption(index, 'sabangnetOptionCode', nextValue)} disabled={disabled} /></OptionField>
-              <OptionField label="사방넷등록">
-                <select value={option.sabangnetRegistered} onChange={(event) => updateOption(index, 'sabangnetRegistered', event.target.value)} disabled={disabled} className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs">
-                  <option value="">미확인</option>
-                  <option value="Y">등록</option>
-                  <option value="N">미등록</option>
-                </select>
-              </OptionField>
-              <OptionField label="원가(위안화) (C2)"><OptionInput value={option.chinaUnitPriceCny} onChange={(nextValue) => updateOption(index, 'chinaUnitPriceCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionField>
-              <OptionField label="운송비 (C3)"><OptionInput value={option.unitShippingCny} onChange={(nextValue) => updateOption(index, 'unitShippingCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionField>
-              <OptionField label="구매참고사항 (C5)" className="sm:col-span-2"><OptionInput value={option.purchaseReferenceNotes} onChange={(nextValue) => updateOption(index, 'purchaseReferenceNotes', nextValue)} disabled={disabled} /></OptionField>
-              <OptionField label="원가(원화)"><OptionInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
-              <OptionField label="이전원가(원화)"><OptionInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
-              <OptionField label="기준환율"><OptionInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" /></OptionField>
-              <OptionField label="B2B 옵션추가금"><OptionInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
-              <OptionField label="B2C 옵션추가금"><OptionInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
-            </div>
-          </div>
-        ))}
-        {value.length === 0 && <p className="px-3 py-7 text-center text-sm text-muted-foreground">등록할 옵션이 없습니다. 옵션 추가를 눌러 입력하세요.</p>}
+      <div className="w-full">
+        <table className="w-full table-fixed text-left text-[11px]">
+          <colgroup>
+            <col className="w-[11%]" />
+            <col className="w-[11%]" />
+            <col className="w-[6%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[14%]" />
+            <col className="w-[8%]" />
+            <col className="w-[8%]" />
+            <col className="w-[6%]" />
+            <col className="w-[8%]" />
+            <col className="w-[8%]" />
+            <col className="w-[6%]" />
+          </colgroup>
+          <thead className="bg-muted/40 text-muted-foreground">
+            <tr>
+              <OptionTableHeader>옵션명</OptionTableHeader>
+              <OptionTableHeader>사방넷코드</OptionTableHeader>
+              <OptionTableHeader>등록</OptionTableHeader>
+              <OptionTableHeader>원가 (元)</OptionTableHeader>
+              <OptionTableHeader>운송비</OptionTableHeader>
+              <OptionTableHeader>구매참고사항</OptionTableHeader>
+              <OptionTableHeader>원가 (₩)</OptionTableHeader>
+              <OptionTableHeader>이전원가</OptionTableHeader>
+              <OptionTableHeader>환율</OptionTableHeader>
+              <OptionTableHeader>B2B 추가금</OptionTableHeader>
+              <OptionTableHeader>B2C 추가금</OptionTableHeader>
+              <OptionTableHeader>삭제</OptionTableHeader>
+            </tr>
+          </thead>
+          <tbody>
+            {value.map((option, index) => (
+              <tr key={option.id} className="border-t align-top">
+                <OptionTableCell><OptionTableInput value={option.optionName} onChange={(nextValue) => updateOption(index, 'optionName', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.sabangnetOptionCode} onChange={(nextValue) => updateOption(index, 'sabangnetOptionCode', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell>
+                  <select value={option.sabangnetRegistered} onChange={(event) => updateOption(index, 'sabangnetRegistered', event.target.value)} disabled={disabled} className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-1 text-[10px]">
+                    <option value="">미확인</option>
+                    <option value="Y">등록</option>
+                    <option value="N">미등록</option>
+                  </select>
+                </OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.chinaUnitPriceCny} onChange={(nextValue) => updateOption(index, 'chinaUnitPriceCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.unitShippingCny} onChange={(nextValue) => updateOption(index, 'unitShippingCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.purchaseReferenceNotes} onChange={(nextValue) => updateOption(index, 'purchaseReferenceNotes', nextValue)} disabled={disabled} /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell className="text-center">
+                  <Button type="button" size="icon-sm" variant="ghost" aria-label={`${index + 1}번 옵션 삭제`} onClick={() => removeOption(index)} disabled={disabled}><Trash2 /></Button>
+                </OptionTableCell>
+              </tr>
+            ))}
+            {value.length === 0 && (
+              <tr className="border-t">
+                <td colSpan={12} className="px-3 py-7 text-center text-sm text-muted-foreground">등록할 옵션이 없습니다. 옵션 추가를 눌러 입력하세요.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </section>
   )
 }
 
-function OptionField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
-  return (
-    <label className={cn('block min-w-0 space-y-1', className)}>
-      <span className="block text-[11px] font-medium leading-4 text-muted-foreground">{label}</span>
-      {children}
-    </label>
-  )
+function OptionTableHeader({ children }: { children: React.ReactNode }) {
+  return <th className="border-r px-1.5 py-2 text-center text-[10px] font-medium leading-3 last:border-r-0">{children}</th>
 }
 
-function OptionInput({ value, onChange, disabled, inputMode }: {
+function OptionTableCell({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <td className={cn('border-r p-1 last:border-r-0', className)}>{children}</td>
+}
+
+function OptionTableInput({ value, onChange, disabled, inputMode }: {
   value: string
   onChange: (value: string) => void
   disabled: boolean
   inputMode?: 'decimal' | 'numeric'
 }) {
-  return <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full text-xs" />
+  return <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full min-w-0 px-1 text-[11px]" />
 }
 
 function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDeleteIds, onPendingFilesChange, onPendingDeleteIdsChange, disabled }: {

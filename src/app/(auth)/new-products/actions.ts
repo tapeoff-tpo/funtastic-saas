@@ -8,6 +8,7 @@ import {
   createNewProduct,
   deleteNewProduct,
   deleteNewProducts,
+  migrateDaouWorksTextFields,
   moveNewProducts,
   saveNewProductEditorLayout,
   saveNewProductStages,
@@ -242,4 +243,18 @@ function message(error: unknown) {
     return '이미 등록된 상품번호입니다.'
   }
   return value || '처리 중 오류가 발생했습니다.'
+}
+
+export async function migrateDaouWorksTextFieldsAction() {
+  try {
+    const auth = await actionUser()
+    const result = await migrateDaouWorksTextFields({
+      userId: auth.workspaceUserId,
+      requestedByUserId: auth.userId,
+    })
+    revalidatePath('/new-products')
+    return { success: true as const, ...result }
+  } catch (error) {
+    return { success: false as const, error: message(error) }
+  }
 }

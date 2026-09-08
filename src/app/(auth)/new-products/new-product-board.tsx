@@ -6,6 +6,7 @@ import { Dialog } from '@base-ui/react/dialog'
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpDown,
   CalendarDays,
   ExternalLink,
   FileText,
@@ -25,6 +26,7 @@ import {
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Pagination } from '@/components/ui/pagination'
 import { cn } from '@/lib/utils'
 import type { CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import type { DaouWorksSourceData } from '@/lib/new-products/daou-works-import'
@@ -38,6 +40,8 @@ import type {
   NewProductStage,
   NewProductStageTone,
   NewProductSummary,
+  NewProductSummarySort,
+  NewProductSummarySortDirection,
 } from '@/lib/new-products/workflow'
 import {
   createNewProductAction,
@@ -96,6 +100,10 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   const [dataRevision, setDataRevision] = useState(0)
   const [listLoading, setListLoading] = useState(true)
   const [layout, setLayout] = useState(initialLayout)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
+  const [sortBy, setSortBy] = useState<NewProductSummarySort>('updatedAt')
+  const [sortDirection, setSortDirection] = useState<NewProductSummarySortDirection>('desc')
 
   function showProduct(id: string) {
     setMode('view')
@@ -136,6 +144,10 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
       const params = new URLSearchParams()
       selectedStageIds.forEach((stageId) => params.append('stageId', stageId))
       if (query.trim()) params.set('query', query.trim())
+      params.set('page', String(page))
+      params.set('pageSize', String(pageSize))
+      params.set('sortBy', sortBy)
+      params.set('sortDirection', sortDirection)
       try {
         const response = await fetch(`/api/new-products/items?${params.toString()}`, {
           signal: controller.signal,
@@ -144,8 +156,14 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
         const result = await response.json() as { summaries?: NewProductSummary[]; total?: number; error?: string }
         if (!response.ok) throw new Error(result.error || '상품을 불러오지 못했습니다.')
         const nextSummaries = result.summaries ?? []
+        const nextTotal = result.total ?? 0
+        const lastPage = Math.max(1, Math.ceil(nextTotal / pageSize))
+        setTotal(nextTotal)
+        if (page > lastPage) {
+          setPage(lastPage)
+          return
+        }
         setSummaries(nextSummaries)
-        setTotal(result.total ?? 0)
         if (mode === 'view') {
           setSelectedId((current) => current && nextSummaries.some((summary) => summary.id === current)
             ? current
@@ -161,7 +179,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [dataRevision, mode, query, selectedStageIds])
+  }, [dataRevision, mode, page, pageSize, query, selectedStageIds, sortBy, sortDirection])
 
   useEffect(() => {
     if (mode !== 'view' || !selectedId) return
@@ -201,6 +219,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   function startNewProduct() {
     setSelectedStageIds([])
     setQuery('')
+    setPage(1)
     setMode('create')
     setSelectedId(null)
     setItem(null)
@@ -209,6 +228,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
 
   function changeStageFilter(stageIds: string[]) {
     setSelectedStageIds(stageIds)
+    setPage(1)
     setMode('view')
     setSelectedId(null)
     setItem(null)
@@ -238,6 +258,16 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
     router.refresh()
   }
 
+  function changeSummarySort(nextSort: NewProductSummarySort) {
+    setPage(1)
+    if (sortBy === nextSort) {
+      setSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
+      return
+    }
+    setSortBy(nextSort)
+    setSortDirection(nextSort === 'status' || nextSort === 'productName' ? 'asc' : 'desc')
+  }
+
   return (
     <div className="space-y-4">
       <section className="rounded-xl border bg-background p-3 shadow-sm">
@@ -251,7 +281,10 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setPage(1)
+                }}
                 onKeyDown={(event) => {
                   if (event.key !== 'Enter' || !query.trim()) return
                   event.preventDefault()
@@ -270,6 +303,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
             {canManageSettings && <DaouWorksImportDialog stages={initialStages} onImported={() => {
               setSelectedStageIds([])
               setQuery('')
+              setPage(1)
               setMode('view')
               setSelectedId(null)
               setItem(null)
@@ -280,7 +314,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           </div>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          상태를 선택하면 해당 단계 목록을, 상품명·번호·비고·주문서번호 등 내용을 검색하면 전체 상품의 결과를 표시합니다. 목록은 최근 수정순 최대 50개까지 불러옵니다.
+          상태를 선택하면 해당 단계 목록을, 상품명·번호·비고·주문서번호 등 내용을 검색하면 전체 상품의 결과를 표시합니다. 목록은 페이지로 나뉘며 열 제목을 눌러 정렬할 수 있습니다.
         </p>
       </section>
 
@@ -310,29 +344,63 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
         />
       ) : selectedStageIds.length > 0 || hasSearchQuery ? (
         <ProductSummaryList
+          key={`summary-${page}-${pageSize}-${sortBy}-${sortDirection}-${selectedStageIds.join(':')}-${query.trim()}`}
           title={selectedStageName}
           summaries={summaries}
           total={total}
           loading={listLoading}
+          page={page}
+          pageSize={pageSize}
+          sortBy={sortBy}
+          sortDirection={sortDirection}
           onSelect={selectProduct}
           onDeleted={handleDeleted}
+          onPageChange={setPage}
+          onPageSizeChange={(nextPageSize) => {
+            setPageSize(nextPageSize)
+            setPage(1)
+          }}
+          onSortChange={changeSummarySort}
         />
       ) : null}
     </div>
   )
 }
 
-function ProductSummaryList({ title, summaries, total, loading, onSelect, onDeleted }: {
+function ProductSummaryList({
+  title,
+  summaries,
+  total,
+  loading,
+  page,
+  pageSize,
+  sortBy,
+  sortDirection,
+  onSelect,
+  onDeleted,
+  onPageChange,
+  onPageSizeChange,
+  onSortChange,
+}: {
   title: string
   summaries: NewProductSummary[]
   total: number
   loading: boolean
+  page: number
+  pageSize: number
+  sortBy: NewProductSummarySort
+  sortDirection: NewProductSummarySortDirection
   onSelect: (id: string) => void
   onDeleted: () => void
+  onPageChange: (page: number) => void
+  onPageSizeChange: (pageSize: number) => void
+  onSortChange: (sort: NewProductSummarySort) => void
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const visibleSelectedIds = summaries.filter((summary) => selectedIds.includes(summary.id)).map((summary) => summary.id)
   const allVisibleSelected = summaries.length > 0 && visibleSelectedIds.length === summaries.length
+  const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
+  const rangeEnd = Math.min(page * pageSize, total)
 
   function toggle(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])
@@ -343,9 +411,11 @@ function ProductSummaryList({ title, summaries, total, loading, onSelect, onDele
       <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold">{title} 상품</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">총 {total.toLocaleString('ko-KR')}건</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            총 {total.toLocaleString('ko-KR')}건{total > 0 ? ` · ${rangeStart.toLocaleString('ko-KR')}–${rangeEnd.toLocaleString('ko-KR')}건 표시` : ''}
+          </p>
         </div>
-        {summaries.length > 0 && (
+        {!loading && summaries.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
               <input type="checkbox" checked={allVisibleSelected} onChange={() => setSelectedIds(allVisibleSelected ? [] : summaries.map((summary) => summary.id))} />
@@ -364,27 +434,58 @@ function ProductSummaryList({ title, summaries, total, loading, onSelect, onDele
       {loading ? (
         <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />상품 목록을 불러오는 중입니다.</div>
       ) : summaries.length > 0 ? (
-        <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-3">
-          {summaries.map((summary) => (
-            <div key={summary.id} className={cn('relative rounded-lg border bg-background transition hover:border-violet-300 hover:bg-violet-50/50 hover:shadow-sm', selectedIds.includes(summary.id) && 'border-violet-400 ring-1 ring-violet-200')}>
-              <label className="absolute left-3 top-3 z-10 flex h-7 w-7 cursor-pointer items-center justify-center rounded-md bg-background/90 shadow-sm" aria-label={`${summary.productName} 선택`}>
-                <input type="checkbox" checked={selectedIds.includes(summary.id)} onChange={() => toggle(summary.id)} />
-              </label>
-              <button type="button" onClick={() => onSelect(summary.id)} className="w-full p-3 pl-12 text-left">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold">{summary.productName}</p>
-                  <p className="mt-1 truncate text-xs text-muted-foreground">상품번호 {summary.sampleCode || '미입력'}</p>
-                </div>
-                <span className={cn('shrink-0 rounded-full px-2 py-1 text-[10px] font-medium', toneClasses[summary.stageTone])}>{summary.stageName}</span>
-              </div>
-                <div className="mt-3 space-y-0.5 text-[11px] text-muted-foreground">
-                  <p>최초 등록 {formatDateTime(summary.createdAt)}</p>
-                  <p>최근 수정 {formatDateTime(summary.updatedAt)}</p>
-                </div>
-              </button>
-            </div>
-          ))}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="bg-muted/50 text-xs text-muted-foreground">
+              <tr className="border-b">
+                <th className="w-12 px-3 py-2.5 text-center">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={() => setSelectedIds(allVisibleSelected ? [] : summaries.map((summary) => summary.id))}
+                    aria-label="현재 목록 전체 선택"
+                  />
+                </th>
+                <ProductSummarySortHeader label="상품명" sort="productName" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="min-w-[260px] text-left" />
+                <ProductSummarySortHeader label="상태" sort="status" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-44 text-left" />
+                <ProductSummarySortHeader label="등록일" sort="createdAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
+                <ProductSummarySortHeader label="수정일" sort="updatedAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
+              </tr>
+            </thead>
+            <tbody>
+              {summaries.map((summary, index) => (
+                <tr
+                  key={summary.id}
+                  onClick={(event) => {
+                    if ((event.target as HTMLElement).closest('button, input, label')) return
+                    onSelect(summary.id)
+                  }}
+                  className={cn(
+                    'cursor-pointer border-b transition-colors hover:bg-muted/50',
+                    index % 2 === 1 && 'bg-muted/15',
+                    selectedIds.includes(summary.id) && 'bg-violet-50 hover:bg-violet-50',
+                  )}
+                >
+                  <td className="px-3 py-3 text-center" onClick={(event) => event.stopPropagation()}>
+                    <label className="inline-flex cursor-pointer items-center justify-center" aria-label={`${summary.productName} 선택`}>
+                      <input type="checkbox" checked={selectedIds.includes(summary.id)} onChange={() => toggle(summary.id)} />
+                    </label>
+                  </td>
+                  <td className="px-3 py-3 align-middle">
+                    <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <span className="block truncate font-semibold text-foreground">{summary.productName}</span>
+                      <span className="mt-1 block truncate text-xs text-muted-foreground">상품번호 {summary.sampleCode || summary.productNumber || '미입력'}</span>
+                    </button>
+                  </td>
+                  <td className="px-3 py-3 align-middle">
+                    <span title={summary.stageName} className={cn('inline-flex max-w-40 truncate rounded-full px-2 py-1 text-[11px] font-medium', toneClasses[summary.stageTone])}>{summary.stageName}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.createdAt)}</td>
+                  <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.updatedAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="flex min-h-48 flex-col items-center justify-center text-center">
@@ -393,8 +494,45 @@ function ProductSummaryList({ title, summaries, total, loading, onSelect, onDele
           <p className="mt-1 text-xs text-muted-foreground">검색어를 지우거나 다른 상태를 선택해주세요.</p>
         </div>
       )}
-      {!loading && total > summaries.length && <p className="border-t px-4 py-2 text-[11px] text-muted-foreground">최근 수정된 {summaries.length}건만 표시 중입니다. 검색어로 오래된 상품을 찾을 수 있습니다.</p>}
+      {!loading && total > 0 && (
+        <div className="border-t px-4">
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            pageSizeOptions={[25, 50, 100, 200]}
+            onPageChange={onPageChange}
+            onPageSizeChange={onPageSizeChange}
+          />
+        </div>
+      )}
     </section>
+  )
+}
+
+function ProductSummarySortHeader({
+  label,
+  sort,
+  activeSort,
+  direction,
+  onSort,
+  className,
+}: {
+  label: string
+  sort: NewProductSummarySort
+  activeSort: NewProductSummarySort
+  direction: NewProductSummarySortDirection
+  onSort: (sort: NewProductSummarySort) => void
+  className?: string
+}) {
+  const isActive = activeSort === sort
+  return (
+    <th className={cn('px-3 py-2.5 font-medium', className)} aria-sort={isActive ? direction === 'asc' ? 'ascending' : 'descending' : 'none'}>
+      <button type="button" onClick={() => onSort(sort)} className="inline-flex items-center gap-1 rounded px-1 py-0.5 hover:bg-muted-foreground/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" title={`${label} 정렬`}>
+        {label}
+        {isActive ? direction === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" /> : <ArrowUpDown className="size-3 opacity-45" />}
+      </button>
+    </th>
   )
 }
 

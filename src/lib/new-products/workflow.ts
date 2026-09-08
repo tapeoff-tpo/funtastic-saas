@@ -251,6 +251,16 @@ export type NewProductSummary = {
   updatedAt: string
 }
 
+export const NEW_PRODUCT_SUMMARY_SORTS = [
+  'status',
+  'productName',
+  'createdAt',
+  'updatedAt',
+] as const
+
+export type NewProductSummarySort = (typeof NEW_PRODUCT_SUMMARY_SORTS)[number]
+export type NewProductSummarySortDirection = 'asc' | 'desc'
+
 export const NEW_PRODUCT_EDITOR_SECTIONS = [
   'progress',
   'basic',
@@ -626,10 +636,17 @@ export async function listNewProductSummaries(input: {
   stageIds?: string[] | null
   query?: string | null
   limit?: number
+  page?: number
+  sortBy?: NewProductSummarySort
+  sortDirection?: NewProductSummarySortDirection
 }) {
   await ensureNewProductWorkflowTables(input.userId)
   const query = input.query?.trim().slice(0, 200) ?? ''
-  const limit = Math.min(100, Math.max(1, Math.floor(input.limit ?? 50)))
+  const limit = Math.min(200, Math.max(1, Math.floor(input.limit ?? 50)))
+  const page = Math.max(1, Math.floor(input.page ?? 1))
+  const sortBy = input.sortBy ?? 'updatedAt'
+  const sortDirection = input.sortDirection ?? 'desc'
+  const offset = (page - 1) * limit
   const stageIds = [...new Set(input.stageIds ?? [])].slice(0, 40)
   const stageCondition = stageIds.length > 0
     ? sql`AND item.stage_id IN (${sql.join(stageIds.map((stageId) => sql`${stageId}::uuid`), sql`, `)})`
@@ -709,8 +726,9 @@ export async function listNewProductSummaries(input: {
       WHERE item.user_id = ${input.userId}::uuid
       ${stageCondition}
       ${searchCondition}
-      ORDER BY item.updated_at DESC, item.product_number DESC
+      ORDER BY ${newProductSummaryOrderSql(sortBy, sortDirection)}
       LIMIT ${limit}
+      OFFSET ${offset}
     `),
     db.execute<{ count: number }>(sql`
       SELECT COUNT(*)::int AS count
@@ -727,6 +745,29 @@ export async function listNewProductSummaries(input: {
       stageTone: validTone(item.stageTone),
     })),
     total: count,
+  }
+}
+
+function newProductSummaryOrderSql(sortBy: NewProductSummarySort, direction: NewProductSummarySortDirection) {
+  const descending = direction === 'desc'
+  switch (sortBy) {
+    case 'status':
+      return descending
+        ? sql`stage.position DESC, item.product_name ASC, item.product_number ASC`
+        : sql`stage.position ASC, item.product_name ASC, item.product_number ASC`
+    case 'productName':
+      return descending
+        ? sql`item.product_name DESC, item.product_number DESC`
+        : sql`item.product_name ASC, item.product_number ASC`
+    case 'createdAt':
+      return descending
+        ? sql`item.created_at DESC, item.product_number DESC`
+        : sql`item.created_at ASC, item.product_number ASC`
+    case 'updatedAt':
+    default:
+      return descending
+        ? sql`item.updated_at DESC, item.product_number DESC`
+        : sql`item.updated_at ASC, item.product_number ASC`
   }
 }
 

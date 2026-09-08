@@ -1264,7 +1264,7 @@ function OptionRegistrationInput({ value, onChange, disabled }: {
   disabled: boolean
 }) {
   const displayValue = value === 'Y' ? '등록' : value === 'N' ? '미등록' : value
-  return <Input value={displayValue} onChange={(event) => onChange(event.target.value)} disabled={disabled} placeholder="등록/미등록" className="h-8 w-full min-w-0 px-1 text-[10px]" />
+  return <Input value={displayValue} onChange={(event) => onChange(event.target.value)} disabled={disabled} placeholder="등록/미등록" className="h-8 w-full min-w-0 px-1 text-center text-[10px]" />
 }
 
 function OptionTableInput({ value, onChange, disabled, inputMode, numeric = false }: {
@@ -1277,7 +1277,7 @@ function OptionTableInput({ value, onChange, disabled, inputMode, numeric = fals
   const [focused, setFocused] = useState(false)
   const normalizedValue = numeric ? normalizeMoneyInput(value) : value
   const displayValue = numeric && !focused ? formatNumericInput(normalizedValue) : normalizedValue
-  return <Input value={displayValue} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onChange={(event) => onChange(numeric ? normalizeMoneyInput(event.target.value) : event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full min-w-0 px-1 text-[11px]" />
+  return <Input value={displayValue} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onChange={(event) => onChange(numeric ? normalizeMoneyInput(event.target.value) : event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full min-w-0 px-1 text-center text-[11px]" />
 }
 
 function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDeleteIds, onPendingFilesChange, onPendingDeleteIdsChange, disabled }: {

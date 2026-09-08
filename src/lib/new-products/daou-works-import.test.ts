@@ -60,6 +60,7 @@ describe('Daou WORKS CSV import', () => {
       '3.샘플 중국도착 대기(C)',
       '5.샘플 광주도착&본사검수(MD팀)',
       '6. 정보고시 제작 (디자인)',
+      '7.사방넷 제품등록(SCM팀)',
       '9.구매대기(SCM팀)',
       '10.입고대기(SCM팀)',
       '11.확정원가 입력(SCM팀)',
@@ -75,11 +76,13 @@ describe('Daou WORKS CSV import', () => {
     ])
   })
 
-  it('suggests only matching SaaS stages and leaves ambiguous statuses for review', () => {
+  it('suggests the approved SaaS stage for every WORKS status', () => {
     expect(Object.keys(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES)).toEqual(DAOU_WORKS_STAGE_TEMPLATE.map((stage) => stage.name))
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['2.샘플 구매대기(SCM팀)']).toBe('샘플 구매 대기')
     expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['10.입고대기(SCM팀)']).toBe('상품 입고 대기')
-    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['3.샘플 중국도착 대기(C)']).toBeNull()
-    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['999-1. 샘플 판매요청']).toBeNull()
-    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['999-2. 샘플 판매완료']).toBeNull()
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['3.샘플 중국도착 대기(C)']).toBe('샘플 구매 완료')
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['7.사방넷 제품등록(SCM팀)']).toBe('사방넷 상품등록')
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['999-1. 샘플 판매요청']).toBe('진행불가')
+    expect(DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES['999-2. 샘플 판매완료']).toBe('진행불가')
   })
 })

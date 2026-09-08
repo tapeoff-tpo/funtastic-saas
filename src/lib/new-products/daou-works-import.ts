@@ -7,6 +7,7 @@ export const DAOU_WORKS_STAGE_TEMPLATE = [
   { name: '3.샘플 중국도착 대기(C)', tone: 'cyan' },
   { name: '5.샘플 광주도착&본사검수(MD팀)', tone: 'teal' },
   { name: '6. 정보고시 제작 (디자인)', tone: 'amber' },
+  { name: '7.사방넷 제품등록(SCM팀)', tone: 'amber' },
   { name: '9.구매대기(SCM팀)', tone: 'indigo' },
   { name: '10.입고대기(SCM팀)', tone: 'purple' },
   { name: '11.확정원가 입력(SCM팀)', tone: 'rose' },
@@ -23,10 +24,11 @@ export const DAOU_WORKS_STAGE_TEMPLATE = [
 
 export const DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES: Record<string, string | null> = {
   '1.제품서치(C)': '신상품 등록',
-  '2.샘플 구매대기(SCM팀)': '샘플 구매',
-  '3.샘플 중국도착 대기(C)': null,
+  '2.샘플 구매대기(SCM팀)': '샘플 구매 대기',
+  '3.샘플 중국도착 대기(C)': '샘플 구매 완료',
   '5.샘플 광주도착&본사검수(MD팀)': '샘플 국내 도착·최종 미팅',
   '6. 정보고시 제작 (디자인)': '상품정보고시 제작',
+  '7.사방넷 제품등록(SCM팀)': '사방넷 상품등록',
   '9.구매대기(SCM팀)': '상품 구매 대기',
   '10.입고대기(SCM팀)': '상품 입고 대기',
   '11.확정원가 입력(SCM팀)': '원가 입력',
@@ -36,8 +38,8 @@ export const DAOU_WORKS_SUGGESTED_SAAS_STAGE_NAMES: Record<string, string | null
   '14-2.등록대기_도매A': '등록대기 2순위',
   '15.등록완료': '등록완료',
   '90. 보류': '진행보류',
-  '999-1. 샘플 판매요청': null,
-  '999-2. 샘플 판매완료': null,
+  '999-1. 샘플 판매요청': '진행불가',
+  '999-2. 샘플 판매완료': '진행불가',
   '9999. 진행불가': '진행불가',
 }
 

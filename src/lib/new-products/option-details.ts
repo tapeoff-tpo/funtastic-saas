@@ -5,8 +5,6 @@ export type NewProductOptionDetail = {
   sabangnetRegistered: 'Y' | 'N' | null
   chinaUnitPriceCny: number | null
   unitShippingCny: number | null
-  productSize: string | null
-  bulkSize: string | null
   purchaseReferenceNotes: string | null
   costKrw: number | null
   previousCostKrw: number | null
@@ -36,8 +34,6 @@ export function normalizeNewProductOptionDetails(value: unknown): NewProductOpti
       sabangnetRegistered: registered === 'Y' ? 'Y' : registered === 'N' ? 'N' : null,
       chinaUnitPriceCny: nullableNumber(row.chinaUnitPriceCny),
       unitShippingCny: nullableNumber(row.unitShippingCny),
-      productSize: nullableText(row.productSize, 1_000),
-      bulkSize: nullableText(row.bulkSize, 1_000),
       purchaseReferenceNotes: nullableText(row.purchaseReferenceNotes),
       costKrw: nullableInteger(row.costKrw),
       previousCostKrw: nullableInteger(row.previousCostKrw),

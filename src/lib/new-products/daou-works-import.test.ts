@@ -53,6 +53,18 @@ describe('Daou WORKS CSV import', () => {
     expect(parsed.items[0]?.values.estimatedCost).toBeNull()
   })
 
+  it('does not carry removed package size fields into option data', () => {
+    const parsed = parseDaouWorksCsvText([
+      '"*ID","상태","제품명","옵션-옵션명","옵션-제품 낱개 패키지 사이즈 (C6)","옵션-벌크 사이즈 (C4)"',
+      '"5430264","1.제품서치(C)","테스트 상품","화이트","60*48*43","72*56*46"',
+    ].join('\n'))
+
+    const option = parsed.items[0]?.values.optionDetails[0]
+    expect(option).toMatchObject({ optionName: '화이트' })
+    expect(option).not.toHaveProperty('productSize')
+    expect(option).not.toHaveProperty('bulkSize')
+  })
+
   it('keeps the complete WORKS stage order including empty states', () => {
     expect(DAOU_WORKS_STAGE_TEMPLATE.map((stage) => stage.name)).toEqual([
       '1.제품서치(C)',

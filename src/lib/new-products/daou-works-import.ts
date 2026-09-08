@@ -125,8 +125,6 @@ const OPTION_HEADERS = {
   sabangnetRegistered: '옵션-사방넷 등록',
   chinaUnitPriceCny: '옵션-원가(위안화) (C2)',
   unitShippingCny: '옵션-운송비 (C3)',
-  productSize: '옵션-제품 낱개 패키지 사이즈 (C6)',
-  bulkSize: '옵션-벌크 사이즈 (C4)',
   purchaseReferenceNotes: '옵션-구매 참고사항 (C5)',
   costKrw: '옵션-원가(원화)',
   previousCostKrw: '옵션-이전원가(원화)',
@@ -302,15 +300,13 @@ function toOptionDetail(row: Record<string, string>, sourceId: string, index: nu
   const sabangnetOptionCode = nullableText(row[stripPrefix(OPTION_HEADERS.sabangnetOptionCode)], 100)
   const chinaUnitPriceCny = numberValue(row[stripPrefix(OPTION_HEADERS.chinaUnitPriceCny)])
   const unitShippingCny = numberValue(row[stripPrefix(OPTION_HEADERS.unitShippingCny)])
-  const productSize = nullableText(row[stripPrefix(OPTION_HEADERS.productSize)], 1_000)
-  const bulkSize = nullableText(row[stripPrefix(OPTION_HEADERS.bulkSize)], 1_000)
   const purchaseReferenceNotes = nullableText(row[stripPrefix(OPTION_HEADERS.purchaseReferenceNotes)])
   const costKrw = integerValue(row[stripPrefix(OPTION_HEADERS.costKrw)])
   const previousCostKrw = integerValue(row[stripPrefix(OPTION_HEADERS.previousCostKrw)])
   const exchangeRateKrw = numberValue(row[stripPrefix(OPTION_HEADERS.exchangeRateKrw)])
   const b2bPrice = integerValue(row[stripPrefix(OPTION_HEADERS.b2bPrice)])
   const b2cPrice = integerValue(row[stripPrefix(OPTION_HEADERS.b2cPrice)])
-  if (!optionName && !sabangnetOptionCode && chinaUnitPriceCny == null && unitShippingCny == null && !productSize && !bulkSize && !purchaseReferenceNotes && costKrw == null && previousCostKrw == null && exchangeRateKrw == null && b2bPrice == null && b2cPrice == null) {
+  if (!optionName && !sabangnetOptionCode && chinaUnitPriceCny == null && unitShippingCny == null && !purchaseReferenceNotes && costKrw == null && previousCostKrw == null && exchangeRateKrw == null && b2bPrice == null && b2cPrice == null) {
     return null
   }
 
@@ -322,8 +318,6 @@ function toOptionDetail(row: Record<string, string>, sourceId: string, index: nu
     sabangnetRegistered: registered === 'Y' ? 'Y' : registered === 'N' ? 'N' : null,
     chinaUnitPriceCny,
     unitShippingCny,
-    productSize,
-    bulkSize,
     purchaseReferenceNotes,
     costKrw,
     previousCostKrw,

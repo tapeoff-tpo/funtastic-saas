@@ -1179,86 +1179,62 @@ function OptionDetailsEditor({ value, onChange, disabled }: {
       <div className="flex flex-col gap-2 border-b px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h4 className="text-sm font-semibold">옵션별 등록 정보</h4>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">옵션별 정보를 따로 관리합니다. 정밀여부, 첫발주, MOQ, 벌크수량은 제외했습니다.</p>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">옵션별 정보를 따로 관리합니다. 필요한 등록 항목만 표시합니다.</p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={addOption} disabled={disabled}>
           <Plus />옵션 추가
         </Button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="min-w-[1840px] text-left text-xs">
-          <thead className="bg-muted/40 text-muted-foreground">
-            <tr>
-              <OptionTableHeader className="min-w-[150px]">옵션명</OptionTableHeader>
-              <OptionTableHeader className="min-w-[140px]">사방넷코드(옵션)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[105px]">사방넷등록</OptionTableHeader>
-              <OptionTableHeader className="min-w-[125px]">원가(위안화) (C2)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[110px]">운송비 (C3)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[200px]">제품날개까지사이즈 (C6)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[160px]">벌크 사이즈 (C4)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[230px]">구매참고사항 (C5)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[115px]">원가(원화)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[125px]">이전원가(원화)</OptionTableHeader>
-              <OptionTableHeader className="min-w-[110px]">기준환율</OptionTableHeader>
-              <OptionTableHeader className="min-w-[110px]">B2B 판매가</OptionTableHeader>
-              <OptionTableHeader className="min-w-[110px]">B2C 판매가</OptionTableHeader>
-              <OptionTableHeader className="w-12" />
-            </tr>
-          </thead>
-          <tbody>
-            {value.map((option, index) => (
-              <tr key={option.id} className="border-t align-top">
-                <OptionTableCell><OptionTableInput value={option.optionName} onChange={(nextValue) => updateOption(index, 'optionName', nextValue)} disabled={disabled} /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.sabangnetOptionCode} onChange={(nextValue) => updateOption(index, 'sabangnetOptionCode', nextValue)} disabled={disabled} /></OptionTableCell>
-                <OptionTableCell>
-                  <select value={option.sabangnetRegistered} onChange={(event) => updateOption(index, 'sabangnetRegistered', event.target.value)} disabled={disabled} className="h-8 min-w-[94px] rounded-md border border-input bg-background px-2 text-xs">
-                    <option value="">미확인</option>
-                    <option value="Y">등록</option>
-                    <option value="N">미등록</option>
-                  </select>
-                </OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.chinaUnitPriceCny} onChange={(nextValue) => updateOption(index, 'chinaUnitPriceCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.unitShippingCny} onChange={(nextValue) => updateOption(index, 'unitShippingCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.productSize} onChange={(nextValue) => updateOption(index, 'productSize', nextValue)} disabled={disabled} /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.bulkSize} onChange={(nextValue) => updateOption(index, 'bulkSize', nextValue)} disabled={disabled} /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.purchaseReferenceNotes} onChange={(nextValue) => updateOption(index, 'purchaseReferenceNotes', nextValue)} disabled={disabled} /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
-                <OptionTableCell className="text-center">
-                  <Button type="button" size="icon-sm" variant="ghost" aria-label={`${index + 1}번 옵션 삭제`} onClick={() => removeOption(index)} disabled={disabled}><Trash2 /></Button>
-                </OptionTableCell>
-              </tr>
-            ))}
-            {value.length === 0 && (
-              <tr className="border-t">
-                <td colSpan={14} className="px-3 py-7 text-center text-sm text-muted-foreground">등록할 옵션이 없습니다. 옵션 추가를 눌러 입력하세요.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="divide-y">
+        {value.map((option, index) => (
+          <div key={option.id} className="p-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold text-muted-foreground">옵션 {index + 1}</p>
+              <Button type="button" size="sm" variant="ghost" aria-label={`${index + 1}번 옵션 삭제`} onClick={() => removeOption(index)} disabled={disabled}><Trash2 />삭제</Button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              <OptionField label="옵션명"><OptionInput value={option.optionName} onChange={(nextValue) => updateOption(index, 'optionName', nextValue)} disabled={disabled} /></OptionField>
+              <OptionField label="사방넷코드(옵션)"><OptionInput value={option.sabangnetOptionCode} onChange={(nextValue) => updateOption(index, 'sabangnetOptionCode', nextValue)} disabled={disabled} /></OptionField>
+              <OptionField label="사방넷등록">
+                <select value={option.sabangnetRegistered} onChange={(event) => updateOption(index, 'sabangnetRegistered', event.target.value)} disabled={disabled} className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs">
+                  <option value="">미확인</option>
+                  <option value="Y">등록</option>
+                  <option value="N">미등록</option>
+                </select>
+              </OptionField>
+              <OptionField label="원가(위안화) (C2)"><OptionInput value={option.chinaUnitPriceCny} onChange={(nextValue) => updateOption(index, 'chinaUnitPriceCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionField>
+              <OptionField label="운송비 (C3)"><OptionInput value={option.unitShippingCny} onChange={(nextValue) => updateOption(index, 'unitShippingCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionField>
+              <OptionField label="구매참고사항 (C5)" className="sm:col-span-2"><OptionInput value={option.purchaseReferenceNotes} onChange={(nextValue) => updateOption(index, 'purchaseReferenceNotes', nextValue)} disabled={disabled} /></OptionField>
+              <OptionField label="원가(원화)"><OptionInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
+              <OptionField label="이전원가(원화)"><OptionInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
+              <OptionField label="기준환율"><OptionInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" /></OptionField>
+              <OptionField label="B2B 판매가"><OptionInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
+              <OptionField label="B2C 판매가"><OptionInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
+            </div>
+          </div>
+        ))}
+        {value.length === 0 && <p className="px-3 py-7 text-center text-sm text-muted-foreground">등록할 옵션이 없습니다. 옵션 추가를 눌러 입력하세요.</p>}
       </div>
     </section>
   )
 }
 
-function OptionTableHeader({ children, className }: { children?: React.ReactNode; className?: string }) {
-  return <th className={cn('border-r px-2 py-2 font-medium last:border-r-0', className)}>{children}</th>
+function OptionField({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <label className={cn('block min-w-0 space-y-1', className)}>
+      <span className="block text-[11px] font-medium leading-4 text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  )
 }
 
-function OptionTableCell({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <td className={cn('border-r p-1 last:border-r-0', className)}>{children}</td>
-}
-
-function OptionTableInput({ value, onChange, disabled, inputMode }: {
+function OptionInput({ value, onChange, disabled, inputMode }: {
   value: string
   onChange: (value: string) => void
   disabled: boolean
   inputMode?: 'decimal' | 'numeric'
 }) {
-  return <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 min-w-[90px] text-xs" />
+  return <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full text-xs" />
 }
 
 function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDeleteIds, onPendingFilesChange, onPendingDeleteIdsChange, disabled }: {
@@ -1569,8 +1545,6 @@ type EditorOptionDetail = {
   sabangnetRegistered: '' | 'Y' | 'N'
   chinaUnitPriceCny: string
   unitShippingCny: string
-  productSize: string
-  bulkSize: string
   purchaseReferenceNotes: string
   costKrw: string
   previousCostKrw: string
@@ -1589,8 +1563,6 @@ function emptyOptionDetail(): EditorOptionDetail {
     sabangnetRegistered: '',
     chinaUnitPriceCny: '',
     unitShippingCny: '',
-    productSize: '',
-    bulkSize: '',
     purchaseReferenceNotes: '',
     costKrw: '',
     previousCostKrw: '',
@@ -1608,8 +1580,6 @@ function editorOptionDetail(option: NewProductOptionDetail): EditorOptionDetail 
     sabangnetRegistered: option.sabangnetRegistered ?? '',
     chinaUnitPriceCny: valueString(option.chinaUnitPriceCny),
     unitShippingCny: valueString(option.unitShippingCny),
-    productSize: option.productSize ?? '',
-    bulkSize: option.bulkSize ?? '',
     purchaseReferenceNotes: option.purchaseReferenceNotes ?? '',
     costKrw: valueString(option.costKrw),
     previousCostKrw: valueString(option.previousCostKrw),

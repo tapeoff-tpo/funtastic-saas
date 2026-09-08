@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { normalizeNewProductOptionDetails } from './option-details'
 
 describe('normalizeNewProductOptionDetails', () => {
-  it('normalizes editable option values into the stored option format', () => {
+  it('normalizes editable option values and drops removed size fields', () => {
     expect(normalizeNewProductOptionDetails([
       {
         id: 'red-large',
@@ -12,6 +12,7 @@ describe('normalizeNewProductOptionDetails', () => {
         chinaUnitPriceCny: '4.1',
         unitShippingCny: '10.5',
         productSize: '60*48*43',
+        bulkSize: '72*56*46',
         purchaseReferenceNotes: '10개입',
         costKrw: '851.4',
         previousCostKrw: '854',
@@ -26,8 +27,6 @@ describe('normalizeNewProductOptionDetails', () => {
       sabangnetRegistered: 'Y',
       chinaUnitPriceCny: 4.1,
       unitShippingCny: 10.5,
-      productSize: '60*48*43',
-      bulkSize: null,
       purchaseReferenceNotes: '10개입',
       costKrw: 851,
       previousCostKrw: 854,

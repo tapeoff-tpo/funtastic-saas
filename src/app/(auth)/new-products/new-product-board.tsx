@@ -97,6 +97,32 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   const [listLoading, setListLoading] = useState(true)
   const [layout, setLayout] = useState(initialLayout)
 
+  function showProduct(id: string) {
+    setMode('view')
+    setSelectedId(id)
+    setItem((current) => current?.id === id ? current : null)
+  }
+
+  function showProductList() {
+    setMode('view')
+    setSelectedId(null)
+    setItem(null)
+  }
+
+  useEffect(() => {
+    function handlePopState(event: PopStateEvent) {
+      const itemId = event.state?.newProductItemId
+      if (typeof itemId === 'string') {
+        showProduct(itemId)
+        return
+      }
+      showProductList()
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+
   useEffect(() => {
     const controller = new AbortController()
     const timer = window.setTimeout(async () => {
@@ -164,9 +190,12 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
 
   function selectProduct(id: string) {
     if (!id) return
-    setMode('view')
-    setSelectedId(id)
-    setItem((current) => current?.id === id ? current : null)
+    window.history.pushState(
+      { ...window.history.state, newProductItemId: id },
+      '',
+      window.location.href,
+    )
+    showProduct(id)
   }
 
   function startNewProduct() {
@@ -186,9 +215,11 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
   }
 
   function closeEditor() {
-    setMode('view')
-    setSelectedId(null)
-    setItem(null)
+    if (selectedId && window.history.state?.newProductItemId === selectedId) {
+      window.history.back()
+      return
+    }
+    showProductList()
   }
 
   function reloadItem(id: string) {
@@ -218,7 +249,17 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           <ToolbarField label="상품 검색" className="xl:w-64">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="상품명·번호·비고·주문서번호" className="pl-8" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' || !query.trim()) return
+                  event.preventDefault()
+                  closeEditor()
+                }}
+                placeholder="상품명·번호·비고·주문서번호"
+                className="pl-8"
+              />
             </div>
           </ToolbarField>
 

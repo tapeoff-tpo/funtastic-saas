@@ -548,12 +548,6 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="패키지 정보 URL"><UrlInput value={values.packageInfoUrl} onChange={(value) => setValue('packageInfoUrl', value)} /></Field>
           <Field label="판매예정일"><Input type="date" value={values.plannedSaleDate} onChange={(event) => setValue('plannedSaleDate', event.target.value)} /></Field>
           <Field label="상세페이지 완료예정일"><Input type="date" value={values.detailPageDueDate} onChange={(event) => setValue('detailPageDueDate', event.target.value)} /></Field>
-          <Field label="사방넷코드"><Input value={values.sabangnetCode} onChange={(event) => setValue('sabangnetCode', event.target.value)} placeholder="품목에 등록할 품목코드" /></Field>
-          <Field label="중국원가 (위안화)"><MoneyInput unit="위안" value={values.chinaUnitPriceCny} onChange={(value) => setValue('chinaUnitPriceCny', value)} /></Field>
-          <Field label="원화원가 (₩)"><MoneyInput value={values.calculatedCostKrw} onChange={(value) => setValue('calculatedCostKrw', value)} /></Field>
-          <Field label="이전원가 (₩)"><MoneyInput value={values.previousCostKrw} onChange={(value) => setValue('previousCostKrw', value)} /></Field>
-          <Field label="B2B 옵션추가금"><MoneyInput value={values.b2bOptionSurcharge} onChange={(value) => setValue('b2bOptionSurcharge', value)} /></Field>
-          <Field label="B2C 옵션추가금"><MoneyInput value={values.b2cOptionSurcharge} onChange={(value) => setValue('b2cOptionSurcharge', value)} /></Field>
           <div className={fullWidthFieldClass}>
             <OptionDetailsEditor
               value={values.optionDetails}

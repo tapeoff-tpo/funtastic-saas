@@ -208,6 +208,24 @@ export type NewProductInput = {
   noticeSpecialNotes: string | null
 }
 
+// Item master has one representative set of values; use the first option for it.
+export function applyPrimaryOptionValues(values: NewProductInput): NewProductInput {
+  const primaryOption = values.optionDetails?.[0]
+  if (!primaryOption) return values
+
+  return {
+    ...values,
+    sabangnetCode: primaryOption.sabangnetOptionCode ?? values.sabangnetCode,
+    chinaUnitPriceCny: primaryOption.chinaUnitPriceCny ?? values.chinaUnitPriceCny,
+    unitShippingCny: primaryOption.unitShippingCny ?? values.unitShippingCny,
+    exchangeRateKrw: primaryOption.exchangeRateKrw ?? values.exchangeRateKrw,
+    calculatedCostKrw: primaryOption.costKrw ?? values.calculatedCostKrw,
+    previousCostKrw: primaryOption.previousCostKrw ?? values.previousCostKrw,
+    b2bOptionSurcharge: primaryOption.b2bPrice ?? values.b2bOptionSurcharge,
+    b2cOptionSurcharge: primaryOption.b2cPrice ?? values.b2cOptionSurcharge,
+  }
+}
+
 export type ItemMasterSyncResult = {
   status: 'not_required' | 'pending_code' | 'created' | 'updated'
   productId?: string
@@ -1204,12 +1222,13 @@ export async function createNewProduct(input: {
   values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
-  const calculatedCostKrw = input.values.calculatedCostKrw ?? calculateCnyCostKrw({
-    chinaUnitPriceCny: input.values.chinaUnitPriceCny,
-    unitShippingCny: input.values.unitShippingCny,
-    exchangeRateKrw: input.values.exchangeRateKrw,
+  const values = applyPrimaryOptionValues(input.values)
+  const calculatedCostKrw = values.calculatedCostKrw ?? calculateCnyCostKrw({
+    chinaUnitPriceCny: values.chinaUnitPriceCny,
+    unitShippingCny: values.unitShippingCny,
+    exchangeRateKrw: values.exchangeRateKrw,
   })
-  const estimatedCost = input.values.estimatedCost ?? calculatedCostKrw
+  const estimatedCost = values.estimatedCost ?? calculatedCostKrw
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
     const stage = await assertStage(tx, input.userId, input.values.stageId)
@@ -1243,7 +1262,7 @@ export async function createNewProduct(input: {
       ) VALUES (
         ${input.userId}::uuid, ${nextNumber}, ${input.values.stageId}::uuid,
         ${input.values.sampleCode}, ${input.values.productName}, ${input.values.productOption},
-        ${input.values.chinaUnitPriceCny}, ${input.values.unitShippingCny}, ${input.values.exchangeRateKrw}, ${calculatedCostKrw},
+        ${values.chinaUnitPriceCny}, ${values.unitShippingCny}, ${values.exchangeRateKrw}, ${calculatedCostKrw},
         ${input.values.domesticSaleUrl}, ${input.values.domesticSalePrice}, ${input.values.detailPageUrl}, ${input.values.memo1}, ${input.values.memo2},
         ${input.values.englishName},
         ${input.values.sourceUrl}, ${input.values.requiredChecks}, ${estimatedCost},
@@ -1256,9 +1275,9 @@ export async function createNewProduct(input: {
         ${input.values.b2bShippingFee}, ${input.values.b2cShippingFee},
         ${input.values.qualityNoticeStatus}, ${input.values.packageBoxDesign},
         ${input.values.packageManufacturer}, ${input.values.packagePacking},
-        ${input.values.sabangnetCode}, ${input.values.productKeywords}, ${input.values.purchaseReferenceNotes},
-        ${input.values.previousCostKrw},
-        ${input.values.b2bOptionSurcharge}, ${input.values.b2cOptionSurcharge},
+        ${values.sabangnetCode}, ${input.values.productKeywords}, ${input.values.purchaseReferenceNotes},
+        ${values.previousCostKrw},
+        ${values.b2bOptionSurcharge}, ${values.b2cOptionSurcharge},
         ${input.values.noticeMaterial}, ${input.values.noticeSize}, ${input.values.noticeManufacturer},
         ${input.values.noticeWeight}, ${input.values.noticeCountry}, ${input.values.noticeCapacity},
         ${input.values.noticeFoodSafety}, ${input.values.noticeComponents},
@@ -1280,7 +1299,7 @@ export async function createNewProduct(input: {
       userId: input.userId,
       itemId: created!.id,
       stage,
-      values: { ...input.values, calculatedCostKrw },
+      values: { ...values, calculatedCostKrw },
     })
     return { id: created!.id, productNumber: nextNumber, itemMasterSync }
   })
@@ -1293,6 +1312,7 @@ export async function updateNewProduct(input: {
   values: NewProductInput
 }) {
   await ensureNewProductWorkflowTables(input.userId)
+  const values = applyPrimaryOptionValues(input.values)
   return db.transaction(async (tx) => {
     const [current] = resultRows<{ stageId: string }>(await tx.execute(sql`
       SELECT stage_id AS "stageId"
@@ -1308,10 +1328,10 @@ export async function updateNewProduct(input: {
       sampleCode: input.values.sampleCode,
       excludeItemId: input.itemId,
     })
-    const calculatedCostKrw = input.values.calculatedCostKrw ?? calculateCnyCostKrw({
-      chinaUnitPriceCny: input.values.chinaUnitPriceCny,
-      unitShippingCny: input.values.unitShippingCny,
-      exchangeRateKrw: input.values.exchangeRateKrw,
+    const calculatedCostKrw = values.calculatedCostKrw ?? calculateCnyCostKrw({
+      chinaUnitPriceCny: values.chinaUnitPriceCny,
+      unitShippingCny: values.unitShippingCny,
+      exchangeRateKrw: values.exchangeRateKrw,
     })
 
     await tx.execute(sql`
@@ -1320,9 +1340,9 @@ export async function updateNewProduct(input: {
         sample_code = ${input.values.sampleCode},
         product_name = ${input.values.productName},
         product_option = ${input.values.productOption},
-        china_unit_price_cny = ${input.values.chinaUnitPriceCny},
-        unit_shipping_cny = ${input.values.unitShippingCny},
-        exchange_rate_krw = ${input.values.exchangeRateKrw},
+        china_unit_price_cny = ${values.chinaUnitPriceCny},
+        unit_shipping_cny = ${values.unitShippingCny},
+        exchange_rate_krw = ${values.exchangeRateKrw},
         calculated_cost_krw = ${calculatedCostKrw},
         domestic_sale_url = ${input.values.domesticSaleUrl},
         domestic_sale_price = ${input.values.domesticSalePrice},
@@ -1353,12 +1373,12 @@ export async function updateNewProduct(input: {
         package_box_design = ${input.values.packageBoxDesign},
         package_manufacturer = ${input.values.packageManufacturer},
         package_packing = ${input.values.packagePacking},
-        sabangnet_code = ${input.values.sabangnetCode},
+        sabangnet_code = ${values.sabangnetCode},
         product_keywords = ${input.values.productKeywords},
         purchase_reference_notes = ${input.values.purchaseReferenceNotes},
-        previous_cost_krw = ${input.values.previousCostKrw},
-        b2b_option_surcharge = ${input.values.b2bOptionSurcharge},
-        b2c_option_surcharge = ${input.values.b2cOptionSurcharge},
+        previous_cost_krw = ${values.previousCostKrw},
+        b2b_option_surcharge = ${values.b2bOptionSurcharge},
+        b2c_option_surcharge = ${values.b2cOptionSurcharge},
         notice_material = ${input.values.noticeMaterial},
         notice_size = ${input.values.noticeSize},
         notice_manufacturer = ${input.values.noticeManufacturer},
@@ -1392,7 +1412,7 @@ export async function updateNewProduct(input: {
       userId: input.userId,
       itemId: input.itemId,
       stage,
-      values: { ...input.values, calculatedCostKrw },
+      values: { ...values, calculatedCostKrw },
     })
   })
 }

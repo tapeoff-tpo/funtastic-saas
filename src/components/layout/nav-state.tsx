@@ -57,6 +57,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/outbound-reflection': '출고반영',
   '/analytics/rocket-outbound': '로켓배송/대량 매출',
   '/analytics/short-meeting': '숏미팅',
+  '/new-products': '상품관리',
   '/operations/deal-calendar': '딜 캘린더',
   '/operations/sourcing': '소싱',
   '/operations/marketplace-registration': '상품 등록 관리',

@@ -217,7 +217,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           <ToolbarField label="상품 검색" className="xl:w-64">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제품명·상품번호" className="pl-8" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="상품명·번호·비고·주문서번호" className="pl-8" />
             </div>
           </ToolbarField>
 
@@ -238,7 +238,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           </div>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          상태를 선택하면 해당 단계 목록을, 상품명을 검색하면 전체 상품의 결과를 표시합니다. 목록은 최근 수정순 최대 50개까지 불러옵니다.
+          상태를 선택하면 해당 단계 목록을, 상품명·번호·비고·주문서번호 등 내용을 검색하면 전체 상품의 결과를 표시합니다. 목록은 최근 수정순 최대 50개까지 불러옵니다.
         </p>
       </section>
 

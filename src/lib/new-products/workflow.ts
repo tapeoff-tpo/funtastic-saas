@@ -590,12 +590,57 @@ export async function listNewProductSummaries(input: {
   const stageCondition = stageIds.length > 0
     ? sql`AND item.stage_id IN (${sql.join(stageIds.map((stageId) => sql`${stageId}::uuid`), sql`, `)})`
     : sql``
+  const queryPattern = `%${query}%`
   const searchCondition = query
     ? sql`AND (
-        item.product_name ILIKE ${`%${query}%`}
-        OR COALESCE(item.sample_code, '') ILIKE ${`%${query}%`}
-        OR COALESCE(item.registered_product_name, '') ILIKE ${`%${query}%`}
-        OR item.product_number::text ILIKE ${`%${query}%`}
+        concat_ws(
+          ' ',
+          item.product_number::text,
+          item.sample_code,
+          item.product_name,
+          item.product_option,
+          item.registered_product_name,
+          item.english_name,
+          item.china_item_name,
+          item.sabangnet_code,
+          item.daou_works_id,
+          item.domestic_sale_url,
+          item.detail_page_url,
+          item.source_url,
+          item.package_info_url,
+          item.memo_1,
+          item.memo_2,
+          item.required_checks,
+          item.history_notes,
+          item.reference_notes,
+          item.product_keywords,
+          item.purchase_reference_notes,
+          item.package_progress_status,
+          item.package_status,
+          item.korean_manual_status,
+          item.carrier,
+          item.quality_notice_status,
+          item.package_box_design,
+          item.package_manufacturer,
+          item.package_packing,
+          item.notice_material,
+          item.notice_size,
+          item.notice_manufacturer,
+          item.notice_weight,
+          item.notice_country,
+          item.notice_capacity,
+          item.notice_food_safety,
+          item.notice_components,
+          item.notice_special_notes,
+          item.metadata::text
+        ) ILIKE ${queryPattern}
+        OR EXISTS (
+          SELECT 1
+          FROM new_product_workflow_stage_history history
+          WHERE history.item_id = item.id
+            AND history.user_id = ${input.userId}::uuid
+            AND COALESCE(history.note, '') ILIKE ${queryPattern}
+        )
       )`
     : sql``
 

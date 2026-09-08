@@ -548,6 +548,10 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="패키지 정보 URL"><UrlInput value={values.packageInfoUrl} onChange={(value) => setValue('packageInfoUrl', value)} /></Field>
           <Field label="판매예정일"><Input type="date" value={values.plannedSaleDate} onChange={(event) => setValue('plannedSaleDate', event.target.value)} /></Field>
           <Field label="상세페이지 완료예정일"><Input type="date" value={values.detailPageDueDate} onChange={(event) => setValue('detailPageDueDate', event.target.value)} /></Field>
+          <Field label="B2B 판매가 (₩)"><MoneyInput value={values.b2bPrice} onChange={(value) => setValue('b2bPrice', value)} /></Field>
+          <Field label="B2C 판매가 (₩)"><MoneyInput value={values.b2cPrice} onChange={(value) => setValue('b2cPrice', value)} /></Field>
+          <Field label="B2B 택배비"><MoneyInput value={values.b2bShippingFee} onChange={(value) => setValue('b2bShippingFee', value)} /></Field>
+          <Field label="B2C 택배비"><MoneyInput value={values.b2cShippingFee} onChange={(value) => setValue('b2cShippingFee', value)} /></Field>
           <div className={fullWidthFieldClass}>
             <OptionDetailsEditor
               value={values.optionDetails}
@@ -639,8 +643,6 @@ function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted 
           <Field label="B2B 판매가·도매 (₩)"><MoneyInput value={values.b2bPrice} onChange={(value) => setValue('b2bPrice', value)} /></Field>
           <Field label="B2C 판매가·소매 (₩)"><MoneyInput value={values.b2cPrice} onChange={(value) => setValue('b2cPrice', value)} /></Field>
           <Field label="신고금액"><MoneyInput value={values.declaredValue} onChange={(value) => setValue('declaredValue', value)} /></Field>
-          <Field label="B2B 택배비"><MoneyInput value={values.b2bShippingFee} onChange={(value) => setValue('b2bShippingFee', value)} /></Field>
-          <Field label="B2C 택배비"><MoneyInput value={values.b2cShippingFee} onChange={(value) => setValue('b2cShippingFee', value)} /></Field>
         </div>
         {calculation && (
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -1202,8 +1204,8 @@ function OptionDetailsEditor({ value, onChange, disabled }: {
               <OptionField label="원가(원화)"><OptionInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
               <OptionField label="이전원가(원화)"><OptionInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
               <OptionField label="기준환율"><OptionInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" /></OptionField>
-              <OptionField label="B2B 판매가"><OptionInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
-              <OptionField label="B2C 판매가"><OptionInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
+              <OptionField label="B2B 옵션추가금"><OptionInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
+              <OptionField label="B2C 옵션추가금"><OptionInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionField>
             </div>
           </div>
         ))}

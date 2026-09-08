@@ -37,6 +37,7 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
   const [parseError, setParseError] = useState('')
   const [parsing, setParsing] = useState(false)
   const [progress, setProgress] = useState<{ current: number; total: number; inserted: number; updated: number; skippedDuplicateSampleCodes: number } | null>(null)
+  const [textMigrationConfirmationOpen, setTextMigrationConfirmationOpen] = useState(false)
   const [pending, startTransition] = useTransition()
 
   function setDialogOpen(next: boolean) {
@@ -130,7 +131,7 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
   }
 
   function migrateExistingTextFields() {
-    if (!window.confirm('이미 가져온 WORKS 상품에서 키워드는 상품키워드로 옮기고, 히스토리와 기존 비고는 비고에 합칩니다. 단계·상품정보·옵션·수기 수정값은 변경하지 않습니다. 진행할까요?')) return
+    setTextMigrationConfirmationOpen(false)
     startTransition(async () => {
       const result = await migrateDaouWorksTextFieldsAction()
       if (!result.success) {
@@ -146,7 +147,8 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
   const progressPercent = progress ? Math.round((progress.current / progress.total) * 100) : 0
 
   return (
-    <Dialog.Root open={open} onOpenChange={setDialogOpen}>
+    <>
+      <Dialog.Root open={open} onOpenChange={setDialogOpen}>
       <Dialog.Trigger render={(props) => <Button {...props} variant="outline"><FileUp />WORKS CSV 가져오기</Button>} />
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40 backdrop-blur-[1px]" />
@@ -164,7 +166,7 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
                 <p className="text-sm font-medium">이미 가져온 WORKS 텍스트 정리</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">필수 체크 사항의 키워드만 상품키워드로 옮기고, 히스토리와 기존 비고는 비고에 보존합니다.</p>
               </div>
-              <Button type="button" variant="outline" onClick={migrateExistingTextFields} disabled={pending || parsing}>
+              <Button type="button" variant="outline" onClick={() => setTextMigrationConfirmationOpen(true)} disabled={pending || parsing}>
                 {pending ? <Loader2 className="animate-spin" /> : <RotateCcw />}
                 {pending ? '정리 중...' : '기존 데이터 정리'}
               </Button>
@@ -256,7 +258,27 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
           </div>
         </Dialog.Popup>
       </Dialog.Portal>
-    </Dialog.Root>
+      </Dialog.Root>
+
+      <Dialog.Root open={textMigrationConfirmationOpen} onOpenChange={setTextMigrationConfirmationOpen}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-[60] bg-black/45" />
+          <Dialog.Popup className="fixed left-1/2 top-1/2 z-[60] w-[min(92vw,480px)] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-background p-5 shadow-2xl">
+            <Dialog.Title className="text-base font-semibold">기존 WORKS 텍스트를 정리할까요?</Dialog.Title>
+            <Dialog.Description className="mt-2 text-sm leading-6 text-muted-foreground">
+              필수 체크 사항의 키워드는 상품키워드로 옮기고, 히스토리와 기존 비고는 비고에 합칩니다. 단계·상품정보·옵션·수기 수정값은 변경하지 않습니다.
+            </Dialog.Description>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setTextMigrationConfirmationOpen(false)} disabled={pending}>취소</Button>
+              <Button type="button" onClick={migrateExistingTextFields} disabled={pending}>
+                {pending && <Loader2 className="animate-spin" />}
+                정리 실행
+              </Button>
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
   )
 }
 

@@ -31,7 +31,11 @@ export function normalizeNewProductOptionDetails(value: unknown): NewProductOpti
       id,
       optionName: nullableText(row.optionName, 500),
       sabangnetOptionCode: nullableText(row.sabangnetOptionCode, 100),
-      sabangnetRegistered: registered === 'Y' ? 'Y' : registered === 'N' ? 'N' : null,
+      sabangnetRegistered: registered === 'Y' || registered === '등록'
+        ? 'Y'
+        : registered === 'N' || registered === '미등록'
+          ? 'N'
+          : null,
       chinaUnitPriceCny: nullableNumber(row.chinaUnitPriceCny),
       unitShippingCny: nullableNumber(row.unitShippingCny),
       purchaseReferenceNotes: nullableText(row.purchaseReferenceNotes),

@@ -1134,11 +1134,15 @@ function normalizeMoneyInput(value: string) {
 }
 
 function formatMoneyInput(value: string, unit: string) {
+  const formatted = formatNumericInput(value)
+  return formatted ? `${formatted}${unit}` : ''
+}
+
+function formatNumericInput(value: string) {
   if (!value) return ''
   const [integerPart = '', decimalPart] = value.split('.')
   const formattedInteger = Number(integerPart || 0).toLocaleString('ko-KR')
-  const formattedNumber = decimalPart == null ? formattedInteger : `${formattedInteger}.${decimalPart}`
-  return `${formattedNumber}${unit}`
+  return decimalPart == null ? formattedInteger : `${formattedInteger}.${decimalPart}`
 }
 
 function ProfitCard({ label, price, profit, margin, fee }: { label: string; price: number; profit: number; margin: number; fee: string }) {
@@ -1219,20 +1223,16 @@ function OptionDetailsEditor({ value, onChange, disabled }: {
                 <OptionTableCell><OptionTableInput value={option.optionName} onChange={(nextValue) => updateOption(index, 'optionName', nextValue)} disabled={disabled} /></OptionTableCell>
                 <OptionTableCell><OptionTableInput value={option.sabangnetOptionCode} onChange={(nextValue) => updateOption(index, 'sabangnetOptionCode', nextValue)} disabled={disabled} /></OptionTableCell>
                 <OptionTableCell>
-                  <select value={option.sabangnetRegistered} onChange={(event) => updateOption(index, 'sabangnetRegistered', event.target.value)} disabled={disabled} className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-1 text-[10px]">
-                    <option value="">미확인</option>
-                    <option value="Y">등록</option>
-                    <option value="N">미등록</option>
-                  </select>
+                  <OptionRegistrationInput value={option.sabangnetRegistered} onChange={(nextValue) => updateOption(index, 'sabangnetRegistered', nextValue)} disabled={disabled} />
                 </OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.chinaUnitPriceCny} onChange={(nextValue) => updateOption(index, 'chinaUnitPriceCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.unitShippingCny} onChange={(nextValue) => updateOption(index, 'unitShippingCny', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.chinaUnitPriceCny} onChange={(nextValue) => updateOption(index, 'chinaUnitPriceCny', nextValue)} disabled={disabled} inputMode="decimal" numeric /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.unitShippingCny} onChange={(nextValue) => updateOption(index, 'unitShippingCny', nextValue)} disabled={disabled} inputMode="decimal" numeric /></OptionTableCell>
                 <OptionTableCell><OptionTableInput value={option.purchaseReferenceNotes} onChange={(nextValue) => updateOption(index, 'purchaseReferenceNotes', nextValue)} disabled={disabled} /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
-                <OptionTableCell><OptionTableInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.costKrw} onChange={(nextValue) => updateOption(index, 'costKrw', nextValue)} disabled={disabled} inputMode="numeric" numeric /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.previousCostKrw} onChange={(nextValue) => updateOption(index, 'previousCostKrw', nextValue)} disabled={disabled} inputMode="numeric" numeric /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.exchangeRateKrw} onChange={(nextValue) => updateOption(index, 'exchangeRateKrw', nextValue)} disabled={disabled} inputMode="decimal" numeric /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.b2bPrice} onChange={(nextValue) => updateOption(index, 'b2bPrice', nextValue)} disabled={disabled} inputMode="numeric" numeric /></OptionTableCell>
+                <OptionTableCell><OptionTableInput value={option.b2cPrice} onChange={(nextValue) => updateOption(index, 'b2cPrice', nextValue)} disabled={disabled} inputMode="numeric" numeric /></OptionTableCell>
                 <OptionTableCell className="text-center">
                   <Button type="button" size="icon-sm" variant="ghost" aria-label={`${index + 1}번 옵션 삭제`} onClick={() => removeOption(index)} disabled={disabled}><Trash2 /></Button>
                 </OptionTableCell>
@@ -1258,13 +1258,26 @@ function OptionTableCell({ children, className }: { children: React.ReactNode; c
   return <td className={cn('border-r p-1 last:border-r-0', className)}>{children}</td>
 }
 
-function OptionTableInput({ value, onChange, disabled, inputMode }: {
+function OptionRegistrationInput({ value, onChange, disabled }: {
+  value: string
+  onChange: (value: string) => void
+  disabled: boolean
+}) {
+  const displayValue = value === 'Y' ? '등록' : value === 'N' ? '미등록' : value
+  return <Input value={displayValue} onChange={(event) => onChange(event.target.value)} disabled={disabled} placeholder="등록/미등록" className="h-8 w-full min-w-0 px-1 text-[10px]" />
+}
+
+function OptionTableInput({ value, onChange, disabled, inputMode, numeric = false }: {
   value: string
   onChange: (value: string) => void
   disabled: boolean
   inputMode?: 'decimal' | 'numeric'
+  numeric?: boolean
 }) {
-  return <Input value={value} onChange={(event) => onChange(event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full min-w-0 px-1 text-[11px]" />
+  const [focused, setFocused] = useState(false)
+  const normalizedValue = numeric ? normalizeMoneyInput(value) : value
+  const displayValue = numeric && !focused ? formatNumericInput(normalizedValue) : normalizedValue
+  return <Input value={displayValue} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onChange={(event) => onChange(numeric ? normalizeMoneyInput(event.target.value) : event.target.value)} disabled={disabled} inputMode={inputMode} className="h-8 w-full min-w-0 px-1 text-[11px]" />
 }
 
 function AttachmentPanel({ kind, label, attachments, pendingFiles, pendingDeleteIds, onPendingFilesChange, onPendingDeleteIdsChange, disabled }: {
@@ -1572,7 +1585,7 @@ type EditorOptionDetail = {
   id: string
   optionName: string
   sabangnetOptionCode: string
-  sabangnetRegistered: '' | 'Y' | 'N'
+  sabangnetRegistered: string
   chinaUnitPriceCny: string
   unitShippingCny: string
   purchaseReferenceNotes: string

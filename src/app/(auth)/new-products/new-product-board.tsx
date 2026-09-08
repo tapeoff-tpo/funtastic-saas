@@ -346,6 +346,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
         <ProductSummaryList
           key={`summary-${page}-${pageSize}-${sortBy}-${sortDirection}-${selectedStageIds.join(':')}-${query.trim()}`}
           title={selectedStageName}
+          stages={initialStages}
           summaries={summaries}
           total={total}
           loading={listLoading}
@@ -369,6 +370,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
 
 function ProductSummaryList({
   title,
+  stages,
   summaries,
   total,
   loading,
@@ -383,6 +385,7 @@ function ProductSummaryList({
   onSortChange,
 }: {
   title: string
+  stages: NewProductStage[]
   summaries: NewProductSummary[]
   total: number
   loading: boolean
@@ -401,6 +404,7 @@ function ProductSummaryList({
   const allVisibleSelected = summaries.length > 0 && visibleSelectedIds.length === summaries.length
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
   const rangeEnd = Math.min(page * pageSize, total)
+  const stagePositionById = new Map(stages.map((stage) => [stage.id, stage.position]))
 
   function toggle(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])
@@ -435,7 +439,7 @@ function ProductSummaryList({
         <div className="flex min-h-48 items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" />상품 목록을 불러오는 중입니다.</div>
       ) : summaries.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[940px] table-fixed text-sm">
             <thead className="bg-muted/50 text-xs text-muted-foreground">
               <tr className="border-b">
                 <th className="w-12 px-3 py-2.5 text-center">
@@ -446,44 +450,52 @@ function ProductSummaryList({
                     aria-label="현재 목록 전체 선택"
                   />
                 </th>
-                <ProductSummarySortHeader label="상품명" sort="productName" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="min-w-[260px] text-left" />
-                <ProductSummarySortHeader label="상태" sort="status" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-44 text-left" />
+                <th className="w-36 px-3 py-2.5 text-left font-medium">상품번호</th>
+                <ProductSummarySortHeader label="상품명" sort="productName" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-[280px] text-left" />
+                <ProductSummarySortHeader label="상태" sort="status" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-48 text-left" />
                 <ProductSummarySortHeader label="등록일" sort="createdAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
                 <ProductSummarySortHeader label="수정일" sort="updatedAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
               </tr>
             </thead>
             <tbody>
-              {summaries.map((summary, index) => (
-                <tr
-                  key={summary.id}
-                  onClick={(event) => {
-                    if ((event.target as HTMLElement).closest('button, input, label')) return
-                    onSelect(summary.id)
-                  }}
-                  className={cn(
-                    'cursor-pointer border-b transition-colors hover:bg-muted/50',
-                    index % 2 === 1 && 'bg-muted/15',
-                    selectedIds.includes(summary.id) && 'bg-violet-50 hover:bg-violet-50',
-                  )}
-                >
-                  <td className="px-3 py-3 text-center" onClick={(event) => event.stopPropagation()}>
-                    <label className="inline-flex cursor-pointer items-center justify-center" aria-label={`${summary.productName} 선택`}>
-                      <input type="checkbox" checked={selectedIds.includes(summary.id)} onChange={() => toggle(summary.id)} />
-                    </label>
-                  </td>
-                  <td className="px-3 py-3 align-middle">
-                    <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      <span className="block truncate font-semibold text-foreground">{summary.productName}</span>
-                      <span className="mt-1 block truncate text-xs text-muted-foreground">상품번호 {summary.sampleCode || summary.productNumber || '미입력'}</span>
-                    </button>
-                  </td>
-                  <td className="px-3 py-3 align-middle">
-                    <span title={summary.stageName} className={cn('inline-flex max-w-40 truncate rounded-full px-2 py-1 text-[11px] font-medium', toneClasses[summary.stageTone])}>{summary.stageName}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.createdAt)}</td>
-                  <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.updatedAt)}</td>
-                </tr>
-              ))}
+              {summaries.map((summary, index) => {
+                const stagePosition = stagePositionById.get(summary.stageId)
+                const stageLabel = stagePosition != null ? `${stagePosition}. ${summary.stageName}` : summary.stageName
+
+                return (
+                  <tr
+                    key={summary.id}
+                    onClick={(event) => {
+                      if ((event.target as HTMLElement).closest('button, input, label')) return
+                      onSelect(summary.id)
+                    }}
+                    className={cn(
+                      'cursor-pointer border-b transition-colors hover:bg-muted/50',
+                      index % 2 === 1 && 'bg-muted/15',
+                      selectedIds.includes(summary.id) && 'bg-violet-50 hover:bg-violet-50',
+                    )}
+                  >
+                    <td className="px-3 py-3 text-center" onClick={(event) => event.stopPropagation()}>
+                      <label className="inline-flex cursor-pointer items-center justify-center" aria-label={`${summary.productName} 선택`}>
+                        <input type="checkbox" checked={selectedIds.includes(summary.id)} onChange={() => toggle(summary.id)} />
+                      </label>
+                    </td>
+                    <td className="w-36 truncate px-3 py-3 font-mono text-xs text-muted-foreground">
+                      {summary.sampleCode || summary.productNumber || '미입력'}
+                    </td>
+                    <td className="w-[280px] px-3 py-3 align-middle">
+                      <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <span title={summary.productName} className="block truncate font-semibold text-foreground">{summary.productName}</span>
+                      </button>
+                    </td>
+                    <td className="px-3 py-3 align-middle">
+                      <span title={stageLabel} className={cn('inline-flex max-w-44 truncate rounded-full px-2 py-1 text-[11px] font-medium', toneClasses[summary.stageTone])}>{stageLabel}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.createdAt)}</td>
+                    <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.updatedAt)}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

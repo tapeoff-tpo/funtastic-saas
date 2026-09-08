@@ -450,9 +450,9 @@ function ProductSummaryList({
                     aria-label="현재 목록 전체 선택"
                   />
                 </th>
+                <ProductSummarySortHeader label="상태" sort="status" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-48 text-left" />
                 <th className="w-36 px-3 py-2.5 text-left font-medium">상품번호</th>
                 <ProductSummarySortHeader label="상품명" sort="productName" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-[280px] text-left" />
-                <ProductSummarySortHeader label="상태" sort="status" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-48 text-left" />
                 <ProductSummarySortHeader label="등록일" sort="createdAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
                 <ProductSummarySortHeader label="수정일" sort="updatedAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
               </tr>
@@ -480,6 +480,9 @@ function ProductSummaryList({
                         <input type="checkbox" checked={selectedIds.includes(summary.id)} onChange={() => toggle(summary.id)} />
                       </label>
                     </td>
+                    <td className="px-3 py-3 align-middle">
+                      <span title={stageLabel} className={cn('inline-flex max-w-44 truncate rounded-full px-2 py-1 text-[11px] font-medium', toneClasses[summary.stageTone])}>{stageLabel}</span>
+                    </td>
                     <td className="w-36 truncate px-3 py-3 font-mono text-xs text-muted-foreground">
                       {summary.sampleCode || summary.productNumber || '미입력'}
                     </td>
@@ -487,9 +490,6 @@ function ProductSummaryList({
                       <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <span title={summary.productName} className="block truncate font-semibold text-foreground">{summary.productName}</span>
                       </button>
-                    </td>
-                    <td className="px-3 py-3 align-middle">
-                      <span title={stageLabel} className={cn('inline-flex max-w-44 truncate rounded-full px-2 py-1 text-[11px] font-medium', toneClasses[summary.stageTone])}>{stageLabel}</span>
                     </td>
                     <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.createdAt)}</td>
                     <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{formatDateTime(summary.updatedAt)}</td>

@@ -237,5 +237,9 @@ function nullableDate(value: unknown) {
 }
 
 function message(error: unknown) {
-  return error instanceof Error ? error.message : '처리 중 오류가 발생했습니다.'
+  const value = error instanceof Error ? error.message : ''
+  if (value.includes('new_product_workflow_items_workspace_sample_code_unique')) {
+    return '이미 등록된 상품번호입니다.'
+  }
+  return value || '처리 중 오류가 발생했습니다.'
 }

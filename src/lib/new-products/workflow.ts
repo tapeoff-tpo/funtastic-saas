@@ -440,6 +440,11 @@ async function createNewProductWorkflowSchema() {
     WHERE sabangnet_code IS NOT NULL
   `)
   await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS new_product_workflow_items_workspace_sample_code_unique
+    ON new_product_workflow_items(user_id, lower(btrim(sample_code)))
+    WHERE sample_code IS NOT NULL AND length(btrim(sample_code)) > 0
+  `)
+  await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS new_product_workflow_items_workspace_daou_works_unique
     ON new_product_workflow_items(user_id, daou_works_id)
     WHERE daou_works_id IS NOT NULL
@@ -885,6 +890,35 @@ export async function importDaouWorksProducts(input: {
         AND daou_works_id IN (${sql.join(items.map((item) => sql`${item.sourceId}`), sql`, `)})
     `))
     const existingSourceIds = new Set(existingRows.map((row) => row.sourceId))
+    const candidateSampleCodes = [...new Set(items
+      .map((item) => normalizedSampleCode(item.values.sampleCode))
+      .filter((sampleCode): sampleCode is string => Boolean(sampleCode)))]
+    const existingSampleCodeRows = candidateSampleCodes.length === 0
+      ? []
+      : resultRows<{ sourceId: string | null; sampleCode: string }>(await tx.execute(sql`
+        SELECT
+          daou_works_id AS "sourceId",
+          lower(btrim(sample_code)) AS "sampleCode"
+        FROM new_product_workflow_items
+        WHERE user_id = ${input.userId}::uuid
+          AND lower(btrim(sample_code)) IN (${sql.join(candidateSampleCodes.map((sampleCode) => sql`${sampleCode}`), sql`, `)})
+      `))
+    const filtered = filterDaouWorksItemsWithUniqueSampleCodes({
+      items,
+      existingRows: existingSampleCodeRows,
+    })
+    const importableItems = filtered.items
+
+    if (importableItems.length === 0) {
+      return {
+        processed: items.length,
+        inserted: 0,
+        updated: 0,
+        skippedDuplicateSampleCodes: filtered.duplicateSampleCodes.length,
+        stageCount: stages.length,
+      }
+    }
+
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
     const [{ nextNumber } = { nextNumber: 1 }] = resultRows<{ nextNumber: number }>(await tx.execute(sql`
       SELECT COALESCE(MAX(product_number), 0)::int + 1 AS "nextNumber"
@@ -892,7 +926,7 @@ export async function importDaouWorksProducts(input: {
       WHERE user_id = ${input.userId}::uuid
     `))
     const importedAt = new Date().toISOString()
-    const payload = items.map((item, index) => daouWorksPayload({
+    const payload = importableItems.map((item, index) => daouWorksPayload({
       item,
       stageId: stageIds.get(item.sourceStatus.trim())!,
       productNumber: nextNumber + index,
@@ -1007,8 +1041,9 @@ export async function importDaouWorksProducts(input: {
 
     return {
       processed: items.length,
-      inserted: items.filter((item) => !existingSourceIds.has(item.sourceId)).length,
-      updated: items.filter((item) => existingSourceIds.has(item.sourceId)).length,
+      inserted: importableItems.filter((item) => !existingSourceIds.has(item.sourceId)).length,
+      updated: importableItems.filter((item) => existingSourceIds.has(item.sourceId)).length,
+      skippedDuplicateSampleCodes: filtered.duplicateSampleCodes.length,
       stageCount: stages.length,
     }
   })
@@ -1053,6 +1088,46 @@ function normalizeDaouWorksStageMappings(input: unknown) {
   return new Map(Object.entries(input)
     .map(([sourceStatus, stageId]) => [sourceStatus.trim(), typeof stageId === 'string' ? stageId.trim() : ''] as const)
     .filter(([sourceStatus, stageId]) => Boolean(sourceStatus && stageId)))
+}
+
+export function filterDaouWorksItemsWithUniqueSampleCodes(input: {
+  items: DaouWorksImportItem[]
+  existingRows: Array<{ sourceId: string | null; sampleCode: string }>
+}) {
+  const existingSourceIdsByCode = new Map<string, Set<string | null>>()
+  for (const row of input.existingRows) {
+    const sampleCode = normalizedSampleCode(row.sampleCode)
+    if (!sampleCode) continue
+    const sourceIds = existingSourceIdsByCode.get(sampleCode) ?? new Set<string | null>()
+    sourceIds.add(row.sourceId)
+    existingSourceIdsByCode.set(sampleCode, sourceIds)
+  }
+
+  const importedSourceIdByCode = new Map<string, string>()
+  const duplicateSampleCodes = new Map<string, string>()
+  const items = input.items.filter((item) => {
+    const sampleCode = normalizedSampleCode(item.values.sampleCode)
+    if (!sampleCode) return true
+
+    const existingSourceIds = existingSourceIdsByCode.get(sampleCode)
+    const conflictsWithExisting = [...(existingSourceIds ?? [])].some((sourceId) => sourceId !== item.sourceId)
+    const sourceIdInImport = importedSourceIdByCode.get(sampleCode)
+    const conflictsWithinImport = Boolean(sourceIdInImport && sourceIdInImport !== item.sourceId)
+    if (conflictsWithExisting || conflictsWithinImport) {
+      duplicateSampleCodes.set(sampleCode, item.values.sampleCode!.trim())
+      return false
+    }
+
+    importedSourceIdByCode.set(sampleCode, item.sourceId)
+    return true
+  })
+
+  return { items, duplicateSampleCodes: [...duplicateSampleCodes.values()] }
+}
+
+function normalizedSampleCode(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase()
+  return normalized || null
 }
 
 function daouWorksPayload(input: {
@@ -1138,6 +1213,11 @@ export async function createNewProduct(input: {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`new-product-number:${input.userId}`}))`)
     const stage = await assertStage(tx, input.userId, input.values.stageId)
+    await assertNewProductSampleCodeAvailable({
+      tx,
+      userId: input.userId,
+      sampleCode: input.values.sampleCode,
+    })
     const [{ nextNumber } = { nextNumber: 1 }] = resultRows<{ nextNumber: number }>(await tx.execute(sql`
       SELECT COALESCE(MAX(product_number), 0)::int + 1 AS "nextNumber"
       FROM new_product_workflow_items
@@ -1222,6 +1302,12 @@ export async function updateNewProduct(input: {
     `))
     if (!current) throw new Error('신상품을 찾을 수 없습니다.')
     const stage = await assertStage(tx, input.userId, input.values.stageId)
+    await assertNewProductSampleCodeAvailable({
+      tx,
+      userId: input.userId,
+      sampleCode: input.values.sampleCode,
+      excludeItemId: input.itemId,
+    })
     const calculatedCostKrw = input.values.calculatedCostKrw ?? calculateCnyCostKrw({
       chinaUnitPriceCny: input.values.chinaUnitPriceCny,
       unitShippingCny: input.values.unitShippingCny,
@@ -1309,6 +1395,32 @@ export async function updateNewProduct(input: {
       values: { ...input.values, calculatedCostKrw },
     })
   })
+}
+
+async function assertNewProductSampleCodeAvailable(input: {
+  tx: WorkflowTransaction
+  userId: string
+  sampleCode: string | null
+  excludeItemId?: string
+}) {
+  const sampleCode = normalizedSampleCode(input.sampleCode)
+  if (!sampleCode) return
+  const excludeItemClause = input.excludeItemId
+    ? sql`AND id <> ${input.excludeItemId}::uuid`
+    : sql``
+  const [existing] = resultRows<{ productNumber: number; productName: string }>(await input.tx.execute(sql`
+    SELECT
+      product_number AS "productNumber",
+      product_name AS "productName"
+    FROM new_product_workflow_items
+    WHERE user_id = ${input.userId}::uuid
+      AND lower(btrim(sample_code)) = ${sampleCode}
+      ${excludeItemClause}
+    LIMIT 1
+  `))
+  if (!existing) return
+
+  throw new Error(`상품번호 "${input.sampleCode?.trim()}"는 이미 ${existing.productName}에 등록되어 있습니다.`)
 }
 
 export async function deleteNewProduct(input: { userId: string; itemId: string }) {

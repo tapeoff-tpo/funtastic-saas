@@ -22,6 +22,7 @@ type ImportResponse = {
   processed: number
   inserted: number
   updated: number
+  skippedDuplicateSampleCodes: number
   stageCount: number
 }
 
@@ -34,7 +35,7 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
   const [fileName, setFileName] = useState('')
   const [parseError, setParseError] = useState('')
   const [parsing, setParsing] = useState(false)
-  const [progress, setProgress] = useState<{ current: number; total: number; inserted: number; updated: number } | null>(null)
+  const [progress, setProgress] = useState<{ current: number; total: number; inserted: number; updated: number; skippedDuplicateSampleCodes: number } | null>(null)
   const [pending, startTransition] = useTransition()
 
   function setDialogOpen(next: boolean) {
@@ -94,9 +95,10 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
       const totalBatches = Math.ceil(parsed.items.length / BATCH_SIZE)
       let inserted = 0
       let updated = 0
+      let skippedDuplicateSampleCodes = 0
       try {
         for (let index = 0; index < totalBatches; index += 1) {
-          setProgress({ current: index + 1, total: totalBatches, inserted, updated })
+          setProgress({ current: index + 1, total: totalBatches, inserted, updated, skippedDuplicateSampleCodes })
           const response = await fetch('/api/new-products/daou-works-import', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -111,9 +113,10 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
           }
           inserted += body.inserted ?? 0
           updated += body.updated ?? 0
+          skippedDuplicateSampleCodes += body.skippedDuplicateSampleCodes ?? 0
         }
-        setProgress({ current: totalBatches, total: totalBatches, inserted, updated })
-        toast.success(`WORKS 상품 ${inserted.toLocaleString('ko-KR')}건을 가져왔습니다.${updated > 0 ? ` ${updated.toLocaleString('ko-KR')}건은 최신 원본으로 갱신했습니다.` : ''}`)
+        setProgress({ current: totalBatches, total: totalBatches, inserted, updated, skippedDuplicateSampleCodes })
+        toast.success(`WORKS 상품 ${inserted.toLocaleString('ko-KR')}건을 가져왔습니다.${updated > 0 ? ` ${updated.toLocaleString('ko-KR')}건은 최신 원본으로 갱신했습니다.` : ''}${skippedDuplicateSampleCodes > 0 ? ` 중복 상품번호 ${skippedDuplicateSampleCodes.toLocaleString('ko-KR')}건은 건너뛰었습니다.` : ''}`)
         setOpen(false)
         reset()
         onImported()
@@ -213,7 +216,7 @@ export function DaouWorksImportDialog({ stages, onImported }: Props) {
               <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-3">
                 <div className="flex items-center justify-between gap-3 text-sm font-medium text-violet-900"><span>가져오는 중</span><span>{progress.current} / {progress.total}</span></div>
                 <div className="mt-2 h-2 overflow-hidden rounded-full bg-violet-100"><div className="h-full rounded-full bg-violet-600 transition-[width]" style={{ width: `${progressPercent}%` }} /></div>
-                <p className="mt-2 text-xs text-violet-800">신규 {progress.inserted.toLocaleString('ko-KR')}건 · 갱신 {progress.updated.toLocaleString('ko-KR')}건</p>
+                <p className="mt-2 text-xs text-violet-800">신규 {progress.inserted.toLocaleString('ko-KR')}건 · 갱신 {progress.updated.toLocaleString('ko-KR')}건{progress.skippedDuplicateSampleCodes > 0 ? ` · 중복 상품번호 건너뜀 ${progress.skippedDuplicateSampleCodes.toLocaleString('ko-KR')}건` : ''}</p>
               </div>
             )}
           </div>

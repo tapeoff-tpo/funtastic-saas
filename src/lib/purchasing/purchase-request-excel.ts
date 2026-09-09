@@ -4,6 +4,7 @@ import { and, asc, desc, eq, getTableColumns, gt, ilike, or, sql } from 'drizzle
 import type { SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { products, purchaseRequestItems } from '@/lib/db/schema'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics } from './items'
 import { purchaseRequestWriteLockKey } from './purchase-request-create'
@@ -17,6 +18,7 @@ import {
   PURCHASE_REQUEST_STATUSES,
   type PurchaseRequestStatus,
 } from './purchase-request-status'
+import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 
 const PURCHASE_BUYERS: Record<string, string> = {
   '1': '한상철',
@@ -71,6 +73,8 @@ export async function exportPurchaseRequestsExcel(input: {
   overdueOnly?: boolean
   search?: string
 }) {
+  await ensurePurchasePaymentTrackingSchema()
+  const exchangeRateReference = await getLatestCnyKrwReferenceRate()
   const rows = await getPurchaseRequestRowsForExcel(input)
   const outgoingMetricsBySku = await getSkuOutgoingMetrics(input.userId, rows.map((row) => row.sku))
   const workbook = new ExcelJS.Workbook()
@@ -95,9 +99,10 @@ export async function exportPurchaseRequestsExcel(input: {
   for (const row of rows) {
     const outgoingMetrics = outgoingMetricsBySku.get(row.sku)
     const costs = calculatePurchaseCosts({
-      requestedQuantity: row.requestedQuantity,
-      unitCostYuan: row.unitCostYuan,
-      unitCostKrw: row.unitCostKrw,
+      requestedQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
+      specialPriceCny: row.specialPriceCny,
+      newCostCny: row.newCostCny,
+      exchangeRateKrw: row.costExchangeRateKrw ?? exchangeRateReference.rate,
     })
     sheet.addRow({
       ID: row.id,
@@ -146,6 +151,7 @@ export async function importPurchaseRequestsExcel(input: {
   defaultStatus?: PurchaseRequestStatus
   sourceFileName?: string
 }) {
+  await ensurePurchasePaymentTrackingSchema()
   const workbook = new ExcelJS.Workbook()
   await workbook.xlsx.load(input.fileBuffer)
   const sheet = workbook.worksheets[0]
@@ -327,8 +333,8 @@ async function getPurchaseRequestRowsForExcel(input: {
 
   return db.select({
     ...getTableColumns(purchaseRequestItems),
-    unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-    unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+    specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+    newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
     purchasingStatus: products.purchasingStatus,
   }).from(purchaseRequestItems)
     .leftJoin(products, and(
@@ -411,6 +417,7 @@ function parsePurchaseStatus(value: string): PurchaseRequestStatus | null {
   const trimmed = value.trim()
   if (!trimmed) return null
   if ((PURCHASE_REQUEST_STATUSES as readonly string[]).includes(trimmed)) return trimmed as PurchaseRequestStatus
+  if (trimmed === '구매중') return 'purchase_completed'
   const found = PURCHASE_REQUEST_STATUSES.find((status) => PURCHASE_REQUEST_STATUS_LABELS[status] === trimmed)
   return found ?? null
 }

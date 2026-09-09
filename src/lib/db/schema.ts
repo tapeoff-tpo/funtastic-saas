@@ -740,6 +740,10 @@ export const purchaseRequestItems = pgTable(
     outboundExpectedDate: date('outbound_expected_date'),
     purchaseMethod: varchar('purchase_method', { length: 100 }),
     purchaseConfirmed: boolean('purchase_confirmed').notNull().default(false),
+    paymentStatus: varchar('payment_status', { length: 30 }).notNull().default('pending'),
+    paymentPaidAt: timestamp('payment_paid_at', { withTimezone: true }),
+    costExchangeRateKrw: numeric('cost_exchange_rate_krw', { precision: 12, scale: 4 }),
+    costExchangeRateDate: date('cost_exchange_rate_date'),
     chinaReceivedQuantity: integer('china_received_quantity'),
     chinaReceivedAt: timestamp('china_received_at', { withTimezone: true }),
     delayReason: varchar('delay_reason', { length: 50 }),
@@ -759,6 +763,7 @@ export const purchaseRequestItems = pgTable(
   },
   (table) => [
     index('purchase_request_items_user_status').on(table.userId, table.status),
+    index('purchase_request_items_user_payment_status').on(table.userId, table.paymentStatus),
     index('purchase_request_items_user_sku').on(table.userId, table.sku),
     index('purchase_request_items_batch').on(table.batchId),
     uniqueIndex('purchase_request_items_user_management_code_sku').on(

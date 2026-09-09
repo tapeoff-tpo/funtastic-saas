@@ -7,6 +7,7 @@ import {
   updatePurchaseRequestPlanFields,
 } from '@/lib/purchasing/purchase-requests'
 import { PURCHASE_DELAY_REASONS } from '@/lib/purchasing/purchase-delay'
+import { PURCHASE_PAYMENT_STATUSES } from '@/lib/purchasing/purchase-request-status'
 import { createClient } from '@/lib/supabase/server'
 
 const bodySchema = z.object({
@@ -19,6 +20,7 @@ const bodySchema = z.object({
   outboundExpectedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   purchaseMethod: z.string().max(100).nullable().optional(),
   purchaseConfirmed: z.boolean().optional(),
+  paymentStatus: z.enum(PURCHASE_PAYMENT_STATUSES).optional(),
   buyerCode: z.enum(['1', '2', '3', '4', '5']).nullable().optional(),
   buyerName: z.string().max(100).nullable().optional(),
   delayReason: z.enum(PURCHASE_DELAY_REASONS).nullable().optional(),

@@ -63,6 +63,10 @@ describe('purchase request status labels', () => {
   it('labels completed purchase requests as outbound completed', () => {
     expect(PURCHASE_REQUEST_STATUS_LABELS.completed).toBe('중국출고완료')
   })
+
+  it('labels the post-purchase stage as purchase completed', () => {
+    expect(PURCHASE_REQUEST_STATUS_LABELS.purchase_completed).toBe('구매완료')
+  })
 })
 
 describe('purchase request ordering', () => {

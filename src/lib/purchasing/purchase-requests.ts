@@ -7,14 +7,19 @@ import {
   products,
   purchaseRequestItems,
 } from '@/lib/db/schema'
-import { sumPurchaseCosts } from './purchase-costs'
+import { calculatePurchaseCosts, sumPurchaseCosts } from './purchase-costs'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import {
   PURCHASE_DELAY_TRACKING_START_DATE,
   purchaseDelayReasonToItemStatus,
   type PurchaseDelayReason,
 } from './purchase-delay'
 import { PURCHASE_URL_HEADER } from './items'
-import type { PurchaseRequestStatus } from './purchase-request-status'
+import {
+  type PurchasePaymentStatus,
+  type PurchaseRequestStatus,
+} from './purchase-request-status'
+import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 
 const CHINA_INVENTORY_WAREHOUSE_ORDER = [
   '부품관리',
@@ -25,17 +30,48 @@ const CHINA_INVENTORY_WAREHOUSE_ORDER = [
   '중국창고',
 ] as const
 
-export const PURCHASE_COST_SUMMARY_STATUSES = ['purchased', 'purchase_completed'] as const
-export type PurchaseCostSummaryStatus = (typeof PURCHASE_COST_SUMMARY_STATUSES)[number]
+const ACTIVE_PURCHASE_PAYMENT_STATUSES = [
+  'purchased',
+  'purchase_completed',
+  'china_arrived',
+  'outbound_requested',
+] as const
 
-export async function getPurchaseStageCostSummary(userId: string) {
+const PURCHASE_COMPLETED_COST_STATUSES = [
+  'purchase_completed',
+  'china_arrived',
+  'outbound_requested',
+] as const
+
+export type PurchaseCostSummary = {
+  itemCount: number
+  totalCostYuan: number
+  totalCostKrw: number
+  missingYuanCostCount: number
+  missingKrwCostCount: number
+}
+
+type PurchaseCostRow = {
+  status: PurchaseRequestStatus
+  paymentStatus?: string | null
+  requestedQuantity: number
+  actualPurchaseQuantity: number | null
+  specialPriceCny: string | null
+  newCostCny: string | null
+  costExchangeRateKrw: string | null
+}
+
+export async function getPurchasePaymentFlowSummary(userId: string, fallbackExchangeRateKrw: number) {
+  await ensurePurchasePaymentTrackingSchema()
   const rows = await db
     .select({
       status: purchaseRequestItems.status,
+      paymentStatus: purchaseRequestItems.paymentStatus,
       requestedQuantity: purchaseRequestItems.requestedQuantity,
       actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
-      unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-      unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+      specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+      newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+      costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
     })
     .from(purchaseRequestItems)
     .leftJoin(products, and(
@@ -44,26 +80,57 @@ export async function getPurchaseStageCostSummary(userId: string) {
     ))
     .where(and(
       eq(purchaseRequestItems.userId, userId),
-      inArray(purchaseRequestItems.status, [...PURCHASE_COST_SUMMARY_STATUSES]),
+      inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
     ))
 
-  return Object.fromEntries(PURCHASE_COST_SUMMARY_STATUSES.map((status) => {
-    const statusRows = rows.filter((row) => row.status === status)
-    return [status, {
-      itemCount: statusRows.length,
-      ...sumPurchaseCosts(statusRows.map((row) => ({
-        requestedQuantity: row.actualPurchaseQuantity ?? row.requestedQuantity,
-        unitCostYuan: row.unitCostYuan,
-        unitCostKrw: row.unitCostKrw,
-      }))),
-    }]
-  })) as Record<PurchaseCostSummaryStatus, {
-    itemCount: number
-    totalCostYuan: number
-    totalCostKrw: number
-    missingYuanCostCount: number
-    missingKrwCostCount: number
-  }>
+  const purchaseBefore = rows.filter((row) => row.status === 'purchased')
+  const purchaseCompleted = rows.filter((row) => (
+    PURCHASE_COMPLETED_COST_STATUSES.includes(row.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number])
+  ))
+  const paymentPending = purchaseCompleted.filter((row) => normalizePaymentStatus(row.paymentStatus) === 'pending')
+  const paymentPaid = rows.filter((row) => normalizePaymentStatus(row.paymentStatus) === 'paid')
+  const beforeOutbound = purchaseCompleted.filter((row) => normalizePaymentStatus(row.paymentStatus) === 'before_outbound')
+  const outstanding = rows.filter((row) => normalizePaymentStatus(row.paymentStatus) !== 'paid')
+
+  return {
+    total: summarizePurchaseCosts(rows, fallbackExchangeRateKrw),
+    purchaseBefore: summarizePurchaseCosts(purchaseBefore, fallbackExchangeRateKrw),
+    purchaseCompleted: summarizePurchaseCosts(purchaseCompleted, fallbackExchangeRateKrw),
+    paymentPending: summarizePurchaseCosts(paymentPending, fallbackExchangeRateKrw),
+    paymentPaid: summarizePurchaseCosts(paymentPaid, fallbackExchangeRateKrw),
+    beforeOutbound: summarizePurchaseCosts(beforeOutbound, fallbackExchangeRateKrw),
+    outstanding: summarizePurchaseCosts(outstanding, fallbackExchangeRateKrw),
+  }
+}
+
+function summarizePurchaseCosts(rows: PurchaseCostRow[], fallbackExchangeRateKrw?: number): PurchaseCostSummary {
+  return {
+    itemCount: rows.length,
+    ...sumPurchaseCosts(rows.map((row) => ({
+      requestedQuantity: purchaseCostQuantity(row),
+      specialPriceCny: row.specialPriceCny,
+      newCostCny: row.newCostCny,
+      exchangeRateKrw: row.costExchangeRateKrw ?? fallbackExchangeRateKrw,
+    }))),
+  }
+}
+
+function calculatePurchaseCost(row: PurchaseCostRow, fallbackExchangeRateKrw?: number) {
+  return calculatePurchaseCosts({
+    requestedQuantity: purchaseCostQuantity(row),
+    specialPriceCny: row.specialPriceCny,
+    newCostCny: row.newCostCny,
+    exchangeRateKrw: row.costExchangeRateKrw ?? fallbackExchangeRateKrw,
+  })
+}
+
+function purchaseCostQuantity(item: Pick<PurchaseCostRow, 'requestedQuantity' | 'actualPurchaseQuantity'>) {
+  return item.actualPurchaseQuantity ?? item.requestedQuantity
+}
+
+function normalizePaymentStatus(value: string | null | undefined): PurchasePaymentStatus {
+  if (value === 'paid' || value === 'before_outbound') return value
+  return 'pending'
 }
 
 export async function getPurchaseRequests(input: {
@@ -76,7 +143,9 @@ export async function getPurchaseRequests(input: {
   sort?: string
   order?: string
   outboundDate?: string
+  exchangeRateKrw?: number
 }) {
+  await ensurePurchasePaymentTrackingSchema()
   const page = input.page ?? 1
   const pageSize = input.pageSize ?? 50
   const conditions: SQL[] = [eq(purchaseRequestItems.userId, input.userId)]
@@ -127,7 +196,7 @@ export async function getPurchaseRequests(input: {
   }
 
   const where = and(...conditions)
-  const orderBy = purchaseRequestOrderBy(input.sort, input.order)
+  const orderBy = purchaseRequestOrderBy(input.sort, input.order, input.exchangeRateKrw)
   const overduePurchaseRequestConditions: SQL[] = [
     eq(purchaseRequestItems.userId, input.userId),
     eq(purchaseRequestItems.status, 'purchased'),
@@ -167,8 +236,8 @@ export async function getPurchaseRequests(input: {
     db
       .select({
         ...getTableColumns(purchaseRequestItems),
-        unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-        unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+        specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+        newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
         purchaseUrl: sql<string | null>`NULLIF(BTRIM(COALESCE(${products.metadata}->'esa009m'->>${PURCHASE_URL_HEADER}, '')), '')`,
         purchasingStatus: products.purchasingStatus,
         purchasingStatusNote: products.purchasingStatusNote,
@@ -205,8 +274,9 @@ export async function getPurchaseRequests(input: {
         productName: purchaseRequestItems.productName,
         requestedQuantity: purchaseRequestItems.requestedQuantity,
         actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
-        unitCostYuan: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
-        unitCostKrw: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'works 신규 원가', '')`,
+        specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+        newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+        costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
       })
       .from(purchaseRequestItems)
       .leftJoin(products, and(
@@ -219,24 +289,29 @@ export async function getPurchaseRequests(input: {
   ])
   const overduePurchaseRequestCount = overduePurchaseRequestRows[0]?.total ?? 0
   const overduePurchaseCompletedCount = overduePurchaseCompletedRows[0]?.total ?? 0
+  const pricedItems = items.map((item) => ({
+    ...item,
+    ...calculatePurchaseCosts({
+      requestedQuantity: purchaseCostQuantity(item),
+      specialPriceCny: item.specialPriceCny,
+      newCostCny: item.newCostCny,
+      exchangeRateKrw: item.costExchangeRateKrw ?? input.exchangeRateKrw,
+    }),
+  }))
   const missingCostItems = costRows
-    .filter((row) => row.unitCostYuan == null || row.unitCostKrw == null)
-    .map((row) => ({
+    .map((row) => ({ row, costs: calculatePurchaseCost(row, input.exchangeRateKrw) }))
+    .filter(({ costs }) => costs.unitCostYuan === null || costs.unitCostKrw === null)
+    .map(({ row, costs }) => ({
       sku: row.sku,
       productName: row.productName,
-      missingYuan: row.unitCostYuan == null,
-      missingKrw: row.unitCostKrw == null,
+      missingYuan: costs.unitCostYuan === null,
+      missingKrw: costs.unitCostKrw === null,
     }))
 
   return {
-    items,
+    items: pricedItems,
     total,
-    costTotals: sumPurchaseCosts(costRows.map((row) => ({
-      ...row,
-      requestedQuantity: row.status === 'purchased' || row.status === 'purchase_completed'
-        ? row.actualPurchaseQuantity ?? row.requestedQuantity
-        : row.requestedQuantity,
-    }))),
+    costTotals: summarizePurchaseCosts(costRows, input.exchangeRateKrw),
     missingCostItems,
     overduePurchasedCount: overduePurchaseCompletedCount,
     overduePurchaseRequestCount,
@@ -267,6 +342,11 @@ export async function updatePurchaseRequestStatus(input: {
   id: string
   status: PurchaseRequestStatus
 }) {
+  await ensurePurchasePaymentTrackingSchema()
+  const exchangeRateReference = input.status === 'requested'
+    ? null
+    : await getLatestCnyKrwReferenceRate()
+
   return db.transaction(async (tx) => {
     const [current] = await tx
       .select()
@@ -296,6 +376,10 @@ export async function updatePurchaseRequestStatus(input: {
     const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
       status: input.status,
       updatedAt: new Date(),
+    }
+    if (input.status !== 'requested' && !current.costExchangeRateKrw && exchangeRateReference) {
+      values.costExchangeRateKrw = String(exchangeRateReference.rate)
+      values.costExchangeRateDate = exchangeRateReference.date ?? todayKstDate()
     }
     if (input.status === 'purchased') {
       values.requestDate = current.requestDate ?? todayKstDate()
@@ -335,12 +419,14 @@ export async function updatePurchaseRequestPlanFields(input: {
   outboundExpectedDate?: string | null
   purchaseMethod?: string | null
   purchaseConfirmed?: boolean
+  paymentStatus?: PurchasePaymentStatus
   buyerCode?: string | null
   buyerName?: string | null
   delayReason?: PurchaseDelayReason | null
   delayNote?: string | null
   applyDelayReasonToItem?: boolean
 }) {
+  await ensurePurchasePaymentTrackingSchema()
   const requestedQuantity = normalizePurchaseRequestQuantity(input.requestedQuantity)
   const actualPurchaseQuantity = normalizeOptionalPurchaseRequestQuantity(input.actualPurchaseQuantity)
   const chinaReceivedQuantity = normalizeOptionalPurchaseRequestQuantity(input.chinaReceivedQuantity)
@@ -350,6 +436,9 @@ export async function updatePurchaseRequestPlanFields(input: {
   if (chinaReceivedQuantity === null) return null
   if (outboundRequestedQuantity === null) return null
   const now = new Date()
+  const exchangeRateReference = input.paymentStatus === undefined
+    ? null
+    : await getLatestCnyKrwReferenceRate()
   const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
     updatedAt: now,
   }
@@ -370,6 +459,10 @@ export async function updatePurchaseRequestPlanFields(input: {
   }
   if (input.purchaseConfirmed !== undefined) {
     values.purchaseConfirmed = input.purchaseConfirmed
+  }
+  if (input.paymentStatus !== undefined) {
+    values.paymentStatus = input.paymentStatus
+    values.paymentPaidAt = input.paymentStatus === 'paid' ? now : null
   }
   if (input.buyerCode !== undefined) {
     const buyerCode = normalizePurchaseBuyerCode(input.buyerCode)
@@ -396,6 +489,11 @@ export async function updatePurchaseRequestPlanFields(input: {
       .limit(1)
 
     if (!current) return null
+
+    if (input.paymentStatus !== undefined && !current.costExchangeRateKrw && exchangeRateReference) {
+      values.costExchangeRateKrw = String(exchangeRateReference.rate)
+      values.costExchangeRateDate = exchangeRateReference.date ?? todayKstDate()
+    }
 
     if (outboundRequestedQuantity !== undefined) {
       values.rawData = {
@@ -483,12 +581,23 @@ export function getOutboundRequestedQuantity(item: {
   return item.chinaReceivedQuantity ?? item.actualPurchaseQuantity ?? item.requestedQuantity
 }
 
-export function purchaseRequestOrderBy(sort?: string, order?: string): SQL[] {
+export function purchaseRequestOrderBy(sort?: string, order?: string, fallbackExchangeRateKrw = 0): SQL[] {
   const direction = order === 'asc' ? asc : desc
-  const unitCostYuan = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'신규원가(元)', ''), '[^0-9.-]', '', 'g'), '')::numeric`
-  const unitCostKrw = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'works 신규 원가', ''), '[^0-9.-]', '', 'g'), '')::numeric`
-  const totalCostYuan = sql<number>`COALESCE(${unitCostYuan}, 0) * ${purchaseRequestItems.requestedQuantity}`
-  const totalCostKrw = sql<number>`COALESCE(${unitCostKrw}, 0) * ${purchaseRequestItems.requestedQuantity}`
+  const specialPriceCny = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'특가(元)', ''), '[^0-9.-]', '', 'g'), '')::numeric`
+  const newCostCny = sql<number>`NULLIF(regexp_replace(COALESCE(${products.metadata}->'esa009m'->>'신규원가(元)', ''), '[^0-9.-]', '', 'g'), '')::numeric`
+  const unitCostYuan = sql<number>`CASE
+    WHEN ${specialPriceCny} > 0 THEN ${specialPriceCny}
+    WHEN ${newCostCny} > 0 THEN ${newCostCny}
+    ELSE NULL
+  END`
+  const baseExchangeRateKrw = sql<number>`COALESCE(${purchaseRequestItems.costExchangeRateKrw}, ${fallbackExchangeRateKrw})`
+  const unitCostKrw = sql<number>`CASE
+    WHEN ${unitCostYuan} IS NULL OR ${baseExchangeRateKrw} <= 0 THEN NULL
+    ELSE ROUND(${unitCostYuan} * ${baseExchangeRateKrw} * 1.05)
+  END`
+  const costQuantity = sql<number>`COALESCE(${purchaseRequestItems.actualPurchaseQuantity}, ${purchaseRequestItems.requestedQuantity})`
+  const totalCostYuan = sql<number>`COALESCE(${unitCostYuan}, 0) * ${costQuantity}`
+  const totalCostKrw = sql<number>`COALESCE(${unitCostKrw}, 0) * ${costQuantity}`
   const purchaseDate = sql<Date>`COALESCE(${purchaseRequestItems.requestDate}, ${purchaseRequestItems.createdAt}::date)`
 
   switch (sort) {

@@ -3,14 +3,15 @@ import type { Metadata } from 'next'
 import { ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
-import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import { calculateAppliedPurchaseExchangeRateKrw, calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import {
   getCompletedOutboundDateOptions,
   getOutboundRequestedQuantity,
+  getPurchasePaymentFlowSummary,
   getPurchaseRequests,
-  getPurchaseStageCostSummary,
-  PURCHASE_COST_SUMMARY_STATUSES,
+  type PurchaseCostSummary,
 } from '@/lib/purchasing/purchase-requests'
 import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
 import {
@@ -33,6 +34,7 @@ import {
   PurchaseDelayReasonField,
   PurchaseDeleteButton,
   PurchasePlanFieldsV2,
+  PurchasePaymentStatusField,
   PurchasePaginationControls,
   PurchaseQuantityField,
   PurchaseRecommendationGenerator,
@@ -107,7 +109,8 @@ export async function PurchasingOrdersView({
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
-  const [initialPurchaseRequestResult, purchaseStageCostSummary] = await Promise.all([
+  const exchangeRateReference = await getLatestCnyKrwReferenceRate()
+  const [initialPurchaseRequestResult, purchasePaymentFlowSummary] = await Promise.all([
     getPurchaseRequests({
       userId: workspaceUserId,
       status: selectedStatus,
@@ -118,9 +121,10 @@ export async function PurchasingOrdersView({
       sort: sort ?? undefined,
       order,
       outboundDate: status === 'completed' ? outboundDate : undefined,
+      exchangeRateKrw: exchangeRateReference.rate,
     }),
     basePath === '/purchasing/orders' && !overdueOnly
-      ? getPurchaseStageCostSummary(workspaceUserId)
+      ? getPurchasePaymentFlowSummary(workspaceUserId, exchangeRateReference.rate)
       : Promise.resolve(null),
   ])
   let purchaseRequestResult = initialPurchaseRequestResult
@@ -137,6 +141,7 @@ export async function PurchasingOrdersView({
       sort: sort ?? undefined,
       order,
       outboundDate: status === 'completed' ? outboundDate : undefined,
+      exchangeRateKrw: exchangeRateReference.rate,
     })
   }
   const {
@@ -179,7 +184,7 @@ export async function PurchasingOrdersView({
     (showCosts ? 4 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (showPurchaseUrlColumn ? 1 : 0) +
-    (isRequestedStatus ? 0 : 2) +
+    (isRequestedStatus ? 0 : 3) +
     (overdueOnly ? 1 : 0)
   const listLabel = overdueOnly
     ? selectedStatus === 'purchased'
@@ -285,47 +290,39 @@ export async function PurchasingOrdersView({
         </section>
       ) : null}
 
-      {purchaseStageCostSummary ? (
-        <section className="grid gap-3 sm:grid-cols-2" aria-label="발주 단계별 구매금액">
-          {PURCHASE_COST_SUMMARY_STATUSES.map((summaryStatus) => {
-            const summary = purchaseStageCostSummary[summaryStatus]
-            const hasMissingCost = summary.missingYuanCostCount > 0 || summary.missingKrwCostCount > 0
-            return (
-              <Link
-                key={summaryStatus}
-                href={purchaseOrdersHref({
-                  basePath,
-                  status: summaryStatus,
-                  showCosts,
-                  showRecommendationBasis,
-                  pageSize,
-                })}
-                className={`rounded-md border px-4 py-3 transition-colors hover:bg-muted/40 ${
-                  status === summaryStatus ? 'border-foreground bg-muted/20' : 'bg-background'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium">{PURCHASE_REQUEST_STATUS_LABELS[summaryStatus]}</span>
-                  <span className="text-xs text-muted-foreground">{summary.itemCount.toLocaleString('ko-KR')}건</span>
-                </div>
-                <div className="mt-2 text-xl font-semibold tabular-nums">
-                  ₩ {formatCost(summary.totalCostKrw, 0)}
-                </div>
-                <div className="mt-1 text-xs tabular-nums text-muted-foreground">
-                  元 {formatCost(summary.totalCostYuan, 2)}
-                  {hasMissingCost
-                    ? ` · 원가 누락 ₩ ${summary.missingKrwCostCount.toLocaleString('ko-KR')}건 / 元 ${summary.missingYuanCostCount.toLocaleString('ko-KR')}건`
-                    : ' · 원가 누락 없음'}
-                </div>
-              </Link>
-            )
-          })}
+      {purchasePaymentFlowSummary ? (
+        <section className="space-y-3 rounded-md border bg-muted/20 p-3" aria-label="발주 결제 금액 흐름">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold">발주·결제 금액 흐름</h2>
+              <p className="text-xs text-muted-foreground">
+                기준 환율 {formatCost(exchangeRateReference.rate, 2)}원/元
+                {exchangeRateReference.date ? ` (${exchangeRateReference.date})` : ''}
+                {' '}× 1.05 = 적용 {formatCost(calculateAppliedPurchaseExchangeRateKrw(exchangeRateReference.rate), 2)}원/元
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground">원가: 특가(元) 우선, 신규원가(元) 보조</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <PurchaseFlowCard label="발주금액 총액" summary={purchasePaymentFlowSummary.total} description="현재 진행 중 발주" />
+            <PurchaseFlowCard label="구매 전" summary={purchasePaymentFlowSummary.purchaseBefore} description="발주요청 단계" />
+            <PurchaseFlowCard label="구매 완료" summary={purchasePaymentFlowSummary.purchaseCompleted} description="구매완료 이후 단계" />
+            <PurchaseFlowCard label="미결제 잔액" summary={purchasePaymentFlowSummary.outstanding} description="결제 완료를 제외한 금액" emphasized />
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <PurchaseFlowCard label="결제 대기" summary={purchasePaymentFlowSummary.paymentPending} description="구매 완료 후 미결제" compact />
+            <PurchaseFlowCard label="결제 완료" summary={purchasePaymentFlowSummary.paymentPaid} description="결제 완료로 기록된 금액" compact />
+            <PurchaseFlowCard label="출고 전 결제" summary={purchasePaymentFlowSummary.beforeOutbound} description="대량 주문 등 출고 직전 결제" compact />
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            중국출고완료 건은 현재 금액 흐름에서 제외됩니다. 항목별 결제 상태를 바꾸면 요약과 미결제 잔액에 바로 반영됩니다.
+          </p>
         </section>
       ) : null}
 
       <section className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-md border bg-muted/20 px-3 py-2">
         <span className="text-sm font-medium">
-          {listLabel} 총 구매금액
+          {listLabel} 예상 발주금액
         </span>
         <span className="text-sm tabular-nums">
           <span className="text-muted-foreground">元 </span>
@@ -508,6 +505,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
+                  {isRequestedStatus ? null : <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태</th>}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />
@@ -542,7 +540,7 @@ export async function PurchasingOrdersView({
                       ? item.purchaseUrl
                       : null
                     const costs = calculatePurchaseCosts({
-                      requestedQuantity: item.requestedQuantity,
+                      requestedQuantity: item.actualPurchaseQuantity ?? item.requestedQuantity,
                       unitCostYuan: item.unitCostYuan,
                       unitCostKrw: item.unitCostKrw,
                     })
@@ -657,6 +655,17 @@ export async function PurchasingOrdersView({
                           />
                         </td>
                       )}
+                      {isRequestedStatus ? null : (
+                        <td className="px-2 py-2 text-center align-middle">
+                          <PurchasePaymentStatusField
+                            key={`${item.id}:${item.paymentStatus}`}
+                            id={item.id}
+                            paymentStatus={item.paymentStatus}
+                            paidAt={item.paymentPaidAt}
+                            enabled={item.status !== 'purchased'}
+                          />
+                        </td>
+                      )}
                       {overdueOnly ? (
                         <td className="px-3 py-2 align-middle">
                           <PurchaseDelayReasonField
@@ -748,6 +757,41 @@ export async function PurchasingOrdersView({
           </div>
         </section>
       </PurchaseBulkSelectionProvider>
+    </div>
+  )
+}
+
+function PurchaseFlowCard({
+  label,
+  summary,
+  description,
+  emphasized = false,
+  compact = false,
+}: {
+  label: string
+  summary: PurchaseCostSummary
+  description: string
+  emphasized?: boolean
+  compact?: boolean
+}) {
+  const hasMissingCost = summary.missingYuanCostCount > 0 || summary.missingKrwCostCount > 0
+
+  return (
+    <div className={`rounded-md border px-3 py-2 ${emphasized ? 'border-foreground bg-background' : 'bg-background/80'}`}>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{label}</span>
+        <span className="whitespace-nowrap text-xs text-muted-foreground">{summary.itemCount.toLocaleString('ko-KR')}건</span>
+      </div>
+      <div className={`${compact ? 'mt-1 text-lg' : 'mt-2 text-xl'} font-semibold tabular-nums`}>
+        ₩ {formatCost(summary.totalCostKrw, 0)}
+      </div>
+      <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">元 {formatCost(summary.totalCostYuan, 2)}</div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        {description}
+        {hasMissingCost
+          ? ` · 원가 누락 ${Math.max(summary.missingYuanCostCount, summary.missingKrwCostCount).toLocaleString('ko-KR')}건`
+          : ''}
+      </p>
     </div>
   )
 }

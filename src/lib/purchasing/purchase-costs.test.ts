@@ -27,6 +27,20 @@ describe('purchase costs', () => {
       totalCostKrw: null,
     })
   })
+
+  it('uses special price first and applies the daily exchange rate plus five percent', () => {
+    expect(calculatePurchaseCosts({
+      requestedQuantity: 3,
+      specialPriceCny: '10元',
+      newCostCny: '12',
+      exchangeRateKrw: 200,
+    })).toEqual({
+      unitCostYuan: 10,
+      unitCostKrw: 2100,
+      totalCostYuan: 30,
+      totalCostKrw: 6300,
+    })
+  })
 })
 
 describe('purchase cost totals', () => {

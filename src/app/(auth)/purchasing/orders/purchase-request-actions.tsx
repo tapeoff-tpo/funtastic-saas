@@ -19,7 +19,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  PURCHASE_PAYMENT_STATUSES,
+  PURCHASE_PAYMENT_STATUS_LABELS,
   PURCHASE_REQUEST_STATUS_LABELS,
+  type PurchasePaymentStatus,
   type PurchaseRequestStatus,
 } from '@/lib/purchasing/purchase-request-status'
 import {
@@ -879,6 +882,64 @@ export function PurchaseStatusButton({
   )
 }
 
+export function PurchasePaymentStatusField({
+  id,
+  paymentStatus,
+  paidAt,
+  enabled,
+}: {
+  id: string
+  paymentStatus: string | null
+  paidAt: string | Date | null
+  enabled: boolean
+}) {
+  const router = useRouter()
+  const initialValue = isPurchasePaymentStatus(paymentStatus) ? paymentStatus : 'pending'
+  const [value, setValue] = useState<PurchasePaymentStatus>(initialValue)
+  const [isPending, startTransition] = useTransition()
+
+  if (!enabled) {
+    return <span className="whitespace-nowrap text-xs font-medium text-muted-foreground">구매 전</span>
+  }
+
+  function save(nextValue: PurchasePaymentStatus) {
+    const previousValue = value
+    setValue(nextValue)
+    startTransition(async () => {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentStatus: nextValue }),
+      })
+      if (response.ok) {
+        router.refresh()
+        return
+      }
+      setValue(previousValue)
+      window.alert('결제 상태 저장에 실패했습니다.')
+    })
+  }
+
+  return (
+    <div className="space-y-1 text-center">
+      <select
+        value={value}
+        onChange={(event) => save(event.target.value as PurchasePaymentStatus)}
+        disabled={isPending}
+        aria-label="결제 상태"
+        className="h-7 min-w-[104px] rounded-md border border-input bg-background px-2 text-xs"
+      >
+        {PURCHASE_PAYMENT_STATUSES.map((status) => (
+          <option key={status} value={status}>{PURCHASE_PAYMENT_STATUS_LABELS[status]}</option>
+        ))}
+      </select>
+      {value === 'paid' && paidAt ? (
+        <div className="whitespace-nowrap text-[11px] text-muted-foreground">{formatDateInput(paidAt)} 결제</div>
+      ) : null}
+    </div>
+  )
+}
+
 export function PurchaseQuantityField({
   id,
   field,
@@ -1263,6 +1324,10 @@ function parseQuantityPreview(value: string, fallback: number) {
   const next = Number(value)
   if (!Number.isFinite(next) || next < 0) return fallback
   return next
+}
+
+function isPurchasePaymentStatus(value: string | null): value is PurchasePaymentStatus {
+  return PURCHASE_PAYMENT_STATUSES.includes(value as PurchasePaymentStatus)
 }
 
 function formatCostValue(value: number | null, maximumFractionDigits: number) {

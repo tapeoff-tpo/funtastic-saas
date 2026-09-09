@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ClipboardList } from 'lucide-react'
 import { calculateAppliedPurchaseExchangeRateKrw } from '@/lib/purchasing/purchase-costs'
+import { PaymentFlowPendingLink } from './payment-flow-pending-link'
 import type {
   PurchaseCostSummary,
   PurchasePaymentFlowSummary,
@@ -103,7 +104,7 @@ function PurchaseFlowCard({
   }
 
   return (
-    <Link
+    <PaymentFlowPendingLink
       href={`/purchasing/payment-flow?${params.toString()}`}
       scroll={false}
       aria-current={active ? 'page' : undefined}
@@ -125,7 +126,7 @@ function PurchaseFlowCard({
           ? ` · 원가 누락 ${Math.max(summary.missingYuanCostCount, summary.missingKrwCostCount).toLocaleString('ko-KR')}건`
           : ''}
       </p>
-    </Link>
+    </PaymentFlowPendingLink>
   )
 }
 

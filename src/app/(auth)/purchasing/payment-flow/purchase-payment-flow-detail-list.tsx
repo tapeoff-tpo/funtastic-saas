@@ -9,6 +9,7 @@ import {
   type PurchasePaymentFlowDetailItem,
   type PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
+import { PaymentFlowPendingLink } from './payment-flow-pending-link'
 
 export function PurchasePaymentFlowDetailList({
   view,
@@ -183,9 +184,9 @@ function PageLink({
     params.set('order', order)
   }
   return (
-    <Link href={`/purchasing/payment-flow?${params.toString()}#payment-flow-details`} className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
+    <PaymentFlowPendingLink href={`/purchasing/payment-flow?${params.toString()}#payment-flow-details`} className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
       {children}
-    </Link>
+    </PaymentFlowPendingLink>
   )
 }
 
@@ -210,14 +211,14 @@ function PaymentFlowSortHeader({
   if (pageSize !== 50) params.set('pageSize', String(pageSize))
 
   return (
-    <Link
+    <PaymentFlowPendingLink
       href={`/purchasing/payment-flow?${params.toString()}`}
       scroll={false}
       className="inline-flex w-full items-center justify-end gap-1 hover:text-foreground"
     >
       {label}
       <span className="text-muted-foreground">{indicator}</span>
-    </Link>
+    </PaymentFlowPendingLink>
   )
 }
 

@@ -5,6 +5,7 @@ import {
 } from '@/lib/purchasing/purchase-request-status'
 import {
   PURCHASE_PAYMENT_FLOW_VIEW_LABELS,
+  type PurchasePaymentFlowSort,
   type PurchasePaymentFlowDetailItem,
   type PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
@@ -16,6 +17,8 @@ export function PurchasePaymentFlowDetailList({
   page,
   pageSize,
   totalPages,
+  sort,
+  order,
 }: {
   view: PurchasePaymentFlowView
   items: PurchasePaymentFlowDetailItem[]
@@ -23,6 +26,8 @@ export function PurchasePaymentFlowDetailList({
   page: number
   pageSize: number
   totalPages: number
+  sort: PurchasePaymentFlowSort | null
+  order: 'asc' | 'desc'
 }) {
   const label = PURCHASE_PAYMENT_FLOW_VIEW_LABELS[view]
   const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1
@@ -39,6 +44,8 @@ export function PurchasePaymentFlowDetailList({
         </div>
         <form action="/purchasing/payment-flow" className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="view" value={view} />
+          {sort ? <input type="hidden" name="sort" value={sort} /> : null}
+          {sort ? <input type="hidden" name="order" value={order} /> : null}
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <span>목록 보기</span>
             <select
@@ -83,8 +90,12 @@ export function PurchasePaymentFlowDetailList({
                 <th className="min-w-[290px] px-3 py-2 font-medium">상품</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">구매수량</th>
                 <th className="min-w-[130px] px-3 py-2 font-medium">주문서번호</th>
-                <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">금액(元)</th>
-                <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">금액(₩)</th>
+                <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                  <PaymentFlowSortHeader label="금액(元)" column="totalCostYuan" view={view} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                </th>
+                <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                  <PaymentFlowSortHeader label="금액(₩)" column="totalCostKrw" view={view} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                </th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">결제일</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">발주</th>
               </tr>
@@ -134,9 +145,9 @@ export function PurchasePaymentFlowDetailList({
         <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm">
           <span className="text-xs text-muted-foreground">{pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건</span>
           <div className="flex items-center gap-2">
-            <PageLink view={view} page={page - 1} pageSize={pageSize} disabled={page <= 1}>이전</PageLink>
+            <PageLink view={view} page={page - 1} pageSize={pageSize} sort={sort} order={order} disabled={page <= 1}>이전</PageLink>
             <span className="text-xs tabular-nums text-muted-foreground">{page.toLocaleString('ko-KR')} / {totalPages.toLocaleString('ko-KR')}</span>
-            <PageLink view={view} page={page + 1} pageSize={pageSize} disabled={page >= totalPages}>다음</PageLink>
+            <PageLink view={view} page={page + 1} pageSize={pageSize} sort={sort} order={order} disabled={page >= totalPages}>다음</PageLink>
           </div>
         </div>
       ) : null}
@@ -148,12 +159,16 @@ function PageLink({
   view,
   page,
   pageSize,
+  sort,
+  order,
   disabled,
   children,
 }: {
   view: PurchasePaymentFlowView
   page: number
   pageSize: number
+  sort: PurchasePaymentFlowSort | null
+  order: 'asc' | 'desc'
   disabled: boolean
   children: React.ReactNode
 }) {
@@ -163,9 +178,45 @@ function PageLink({
 
   const params = new URLSearchParams({ view, page: String(page) })
   if (pageSize !== 50) params.set('pageSize', String(pageSize))
+  if (sort) {
+    params.set('sort', sort)
+    params.set('order', order)
+  }
   return (
     <Link href={`/purchasing/payment-flow?${params.toString()}#payment-flow-details`} className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
       {children}
+    </Link>
+  )
+}
+
+function PaymentFlowSortHeader({
+  label,
+  column,
+  view,
+  pageSize,
+  currentSort,
+  currentOrder,
+}: {
+  label: string
+  column: PurchasePaymentFlowSort
+  view: PurchasePaymentFlowView
+  pageSize: number
+  currentSort: PurchasePaymentFlowSort | null
+  currentOrder: 'asc' | 'desc'
+}) {
+  const nextOrder = currentSort === column && currentOrder === 'asc' ? 'desc' : 'asc'
+  const indicator = currentSort === column ? (currentOrder === 'asc' ? '↑' : '↓') : ''
+  const params = new URLSearchParams({ view, sort: column, order: nextOrder })
+  if (pageSize !== 50) params.set('pageSize', String(pageSize))
+
+  return (
+    <Link
+      href={`/purchasing/payment-flow?${params.toString()}`}
+      scroll={false}
+      className="inline-flex w-full items-center justify-end gap-1 hover:text-foreground"
+    >
+      {label}
+      <span className="text-muted-foreground">{indicator}</span>
     </Link>
   )
 }

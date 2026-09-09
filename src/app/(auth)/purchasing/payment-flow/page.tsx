@@ -6,7 +6,10 @@ import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import {
   filterPurchasePaymentFlowItems,
   getPurchasePaymentFlowData,
+  PURCHASE_PAYMENT_FLOW_SORTS,
   PURCHASE_PAYMENT_FLOW_VIEWS,
+  sortPurchasePaymentFlowItems,
+  type PurchasePaymentFlowSort,
   type PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
 import { ProductFlowNav } from '@/components/product-flow-nav'
@@ -26,6 +29,8 @@ export default async function PurchasePaymentFlowPage({
 }) {
   const params = await searchParams
   const view = parsePaymentFlowView(stringParam(params.view)) ?? 'total'
+  const sort = parsePaymentFlowSort(stringParam(params.sort))
+  const order = parseSortOrder(stringParam(params.order)) ?? 'desc'
   const pageSize = parsePageSize(stringParam(params.pageSize))
   const requestedPage = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const supabase = await createClient()
@@ -36,9 +41,10 @@ export default async function PurchasePaymentFlowPage({
   const exchangeRateReference = await getLatestCnyKrwReferenceRate()
   const { summary, items } = await getPurchasePaymentFlowData(workspaceUserId, exchangeRateReference.rate)
   const filteredItems = filterPurchasePaymentFlowItems(items, view)
-  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize))
+  const sortedItems = sortPurchasePaymentFlowItems(filteredItems, sort, order)
+  const totalPages = Math.max(1, Math.ceil(sortedItems.length / pageSize))
   const page = Math.min(requestedPage, totalPages)
-  const pageItems = filteredItems.slice((page - 1) * pageSize, page * pageSize)
+  const pageItems = sortedItems.slice((page - 1) * pageSize, page * pageSize)
 
   return (
     <div className="space-y-5">
@@ -62,14 +68,19 @@ export default async function PurchasePaymentFlowPage({
         summary={summary}
         exchangeRateReference={exchangeRateReference}
         activeView={view}
+        pageSize={pageSize}
+        sort={sort}
+        order={order}
       />
       <PurchasePaymentFlowDetailList
         view={view}
         items={pageItems}
-        total={filteredItems.length}
+        total={sortedItems.length}
         page={page}
         pageSize={pageSize}
         totalPages={totalPages}
+        sort={sort}
+        order={order}
       />
     </div>
   )
@@ -83,6 +94,16 @@ function parsePaymentFlowView(value: string | undefined): PurchasePaymentFlowVie
   return PURCHASE_PAYMENT_FLOW_VIEWS.includes(value as PurchasePaymentFlowView)
     ? value as PurchasePaymentFlowView
     : null
+}
+
+function parsePaymentFlowSort(value: string | undefined): PurchasePaymentFlowSort | null {
+  return PURCHASE_PAYMENT_FLOW_SORTS.includes(value as PurchasePaymentFlowSort)
+    ? value as PurchasePaymentFlowSort
+    : null
+}
+
+function parseSortOrder(value: string | undefined): 'asc' | 'desc' | null {
+  return value === 'asc' || value === 'desc' ? value : null
 }
 
 function parsePageSize(value: string | undefined) {

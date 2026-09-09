@@ -5,6 +5,7 @@ import {
   normalizeOptionalPurchaseRequestQuantity,
   normalizePurchaseRequestQuantity,
   purchaseRequestOrderBy,
+  sortPurchasePaymentFlowItems,
 } from './purchase-requests'
 import { PURCHASE_REQUEST_STATUS_LABELS } from './purchase-request-status'
 
@@ -96,5 +97,20 @@ describe('purchase payment flow views', () => {
     expect(isPurchasePaymentFlowViewItem(paid, 'outstanding')).toBe(false)
     expect(isPurchasePaymentFlowViewItem(paid, 'payment_paid')).toBe(true)
     expect(isPurchasePaymentFlowViewItem(beforeOutbound, 'before_outbound')).toBe(true)
+  })
+})
+
+describe('purchase payment flow ordering', () => {
+  const paymentFlowItems = [
+    { id: 'first', sku: '100001-0001', totalCostYuan: 30, totalCostKrw: 5_000 },
+    { id: 'missing', sku: '100002-0001', totalCostYuan: null, totalCostKrw: null },
+    { id: 'last', sku: '100003-0001', totalCostYuan: 10, totalCostKrw: 2_000 },
+  ] as Parameters<typeof sortPurchasePaymentFlowItems>[0]
+
+  it('sorts total amounts without moving missing costs ahead of known amounts', () => {
+    expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'totalCostKrw', 'asc').map((item) => item.id))
+      .toEqual(['last', 'first', 'missing'])
+    expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'totalCostYuan', 'desc').map((item) => item.id))
+      .toEqual(['first', 'last', 'missing'])
   })
 })

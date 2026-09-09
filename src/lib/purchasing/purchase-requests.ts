@@ -73,6 +73,9 @@ export const PURCHASE_PAYMENT_FLOW_VIEWS = [
 
 export type PurchasePaymentFlowView = (typeof PURCHASE_PAYMENT_FLOW_VIEWS)[number]
 
+export const PURCHASE_PAYMENT_FLOW_SORTS = ['totalCostYuan', 'totalCostKrw'] as const
+export type PurchasePaymentFlowSort = (typeof PURCHASE_PAYMENT_FLOW_SORTS)[number]
+
 export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, string> = {
   total: '발주금액 총액',
   purchase_before: '구매 전',
@@ -224,6 +227,27 @@ export function filterPurchasePaymentFlowItems(
   view: PurchasePaymentFlowView,
 ) {
   return items.filter((item) => isPurchasePaymentFlowViewItem(item, view))
+}
+
+export function sortPurchasePaymentFlowItems(
+  items: PurchasePaymentFlowDetailItem[],
+  sort: PurchasePaymentFlowSort | null | undefined,
+  order: 'asc' | 'desc' = 'desc',
+) {
+  if (!sort) return items
+
+  const direction = order === 'asc' ? 1 : -1
+  return items
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftCost = left.item[sort]
+      const rightCost = right.item[sort]
+      if (leftCost === null) return rightCost === null ? left.index - right.index : 1
+      if (rightCost === null) return -1
+      const difference = leftCost - rightCost
+      return difference === 0 ? left.index - right.index : difference * direction
+    })
+    .map(({ item }) => item)
 }
 
 function summarizePurchaseCosts(rows: PurchaseCostRow[], fallbackExchangeRateKrw?: number): PurchaseCostSummary {

@@ -4,11 +4,11 @@ import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import {
-  filterPurchasePaymentFlowItems,
-  getPurchasePaymentFlowData,
+  getPurchasePaymentFlowDetailPage,
+  getPurchasePaymentFlowSummary,
+  getPurchasePaymentFlowViewSummary,
   PURCHASE_PAYMENT_FLOW_SORTS,
   PURCHASE_PAYMENT_FLOW_VIEWS,
-  sortPurchasePaymentFlowItems,
   type PurchasePaymentFlowSort,
   type PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
@@ -37,14 +37,36 @@ export default async function PurchasePaymentFlowPage({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const workspaceUserId = await getWorkspaceUserId(user.id)
-  const exchangeRateReference = await getLatestCnyKrwReferenceRate()
-  const { summary, items } = await getPurchasePaymentFlowData(workspaceUserId, exchangeRateReference.rate)
-  const filteredItems = filterPurchasePaymentFlowItems(items, view)
-  const sortedItems = sortPurchasePaymentFlowItems(filteredItems, sort, order)
-  const totalPages = Math.max(1, Math.ceil(sortedItems.length / pageSize))
+  const [workspaceUserId, exchangeRateReference] = await Promise.all([
+    getWorkspaceUserId(user.id),
+    getLatestCnyKrwReferenceRate(),
+  ])
+  const [summary, initialDetailPage] = await Promise.all([
+    getPurchasePaymentFlowSummary(workspaceUserId, exchangeRateReference.rate),
+    getPurchasePaymentFlowDetailPage({
+      userId: workspaceUserId,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
+      view,
+      page: requestedPage,
+      pageSize,
+      sort,
+      order,
+    }),
+  ])
+  const total = getPurchasePaymentFlowViewSummary(summary, view).itemCount
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const page = Math.min(requestedPage, totalPages)
-  const pageItems = sortedItems.slice((page - 1) * pageSize, page * pageSize)
+  const detailPage = page === requestedPage
+    ? initialDetailPage
+    : await getPurchasePaymentFlowDetailPage({
+      userId: workspaceUserId,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
+      view,
+      page,
+      pageSize,
+      sort,
+      order,
+    })
 
   return (
     <div className="space-y-5">
@@ -74,8 +96,8 @@ export default async function PurchasePaymentFlowPage({
       />
       <PurchasePaymentFlowDetailList
         view={view}
-        items={pageItems}
-        total={sortedItems.length}
+        items={detailPage.items}
+        total={total}
         page={page}
         pageSize={pageSize}
         totalPages={totalPages}

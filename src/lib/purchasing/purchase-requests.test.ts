@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getPurchasePaymentFlowViewSummary,
   isPurchasePaymentFlowViewItem,
   getOutboundRequestedQuantity,
   normalizeOptionalPurchaseRequestQuantity,
@@ -97,6 +98,28 @@ describe('purchase payment flow views', () => {
     expect(isPurchasePaymentFlowViewItem(paid, 'outstanding')).toBe(false)
     expect(isPurchasePaymentFlowViewItem(paid, 'payment_paid')).toBe(true)
     expect(isPurchasePaymentFlowViewItem(beforeOutbound, 'before_outbound')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem({ status: 'china_arrived', paymentStatus: null }, 'payment_pending')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem({ status: 'china_arrived', paymentStatus: 'unknown' }, 'payment_pending')).toBe(true)
+  })
+
+  it('uses the matching summary total for every money tab', () => {
+    const summary = {
+      total: { itemCount: 1, totalCostYuan: 1, totalCostKrw: 1, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      purchaseBefore: { itemCount: 2, totalCostYuan: 2, totalCostKrw: 2, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      purchaseCompleted: { itemCount: 3, totalCostYuan: 3, totalCostKrw: 3, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      paymentPending: { itemCount: 4, totalCostYuan: 4, totalCostKrw: 4, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      paymentPaid: { itemCount: 5, totalCostYuan: 5, totalCostKrw: 5, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      beforeOutbound: { itemCount: 6, totalCostYuan: 6, totalCostKrw: 6, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      outstanding: { itemCount: 7, totalCostYuan: 7, totalCostKrw: 7, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+    }
+
+    expect(getPurchasePaymentFlowViewSummary(summary, 'total').itemCount).toBe(1)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_before').itemCount).toBe(2)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_completed').itemCount).toBe(3)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'payment_pending').itemCount).toBe(4)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'payment_paid').itemCount).toBe(5)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'before_outbound').itemCount).toBe(6)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'outstanding').itemCount).toBe(7)
   })
 })
 

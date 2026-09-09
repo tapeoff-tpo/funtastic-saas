@@ -120,12 +120,38 @@ export type PurchasePaymentFlowData = {
   items: PurchasePaymentFlowDetailItem[]
 }
 
+export type PurchasePaymentFlowDetailPage = {
+  items: PurchasePaymentFlowDetailItem[]
+}
+
 export async function getPurchasePaymentFlowSummary(
   userId: string,
   fallbackExchangeRateKrw: number,
 ): Promise<PurchasePaymentFlowSummary> {
-  const { summary } = await getPurchasePaymentFlowData(userId, fallbackExchangeRateKrw)
-  return summary
+  await ensurePurchasePaymentTrackingSchema()
+  const costs = purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw)
+  const summaryRows = await db
+    .select({
+      status: purchaseRequestItems.status,
+      paymentStatus: purchaseRequestItems.paymentStatus,
+      itemCount: count(),
+      totalCostYuan: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostYuan}, 0)), 0)`,
+      totalCostKrw: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostKrw}, 0)), 0)`,
+      missingYuanCostCount: sql<number>`COUNT(*) FILTER (WHERE ${costs.totalCostYuan} IS NULL)`,
+      missingKrwCostCount: sql<number>`COUNT(*) FILTER (WHERE ${costs.totalCostKrw} IS NULL)`,
+    })
+    .from(purchaseRequestItems)
+    .leftJoin(products, and(
+      eq(products.userId, purchaseRequestItems.userId),
+      eq(products.internalSku, purchaseRequestItems.sku),
+    ))
+    .where(and(
+      eq(purchaseRequestItems.userId, userId),
+      inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
+    ))
+    .groupBy(purchaseRequestItems.status, purchaseRequestItems.paymentStatus)
+
+  return summarizePurchasePaymentFlowGroups(summaryRows)
 }
 
 export async function getPurchasePaymentFlowData(
@@ -201,6 +227,72 @@ export async function getPurchasePaymentFlowData(
   }
 }
 
+export async function getPurchasePaymentFlowDetailPage(input: {
+  userId: string
+  fallbackExchangeRateKrw: number
+  view: PurchasePaymentFlowView
+  page: number
+  pageSize: number
+  sort: PurchasePaymentFlowSort | null | undefined
+  order: 'asc' | 'desc'
+}): Promise<PurchasePaymentFlowDetailPage> {
+  await ensurePurchasePaymentTrackingSchema()
+  const page = positiveIntegerOr(input.page, 1)
+  const pageSize = Math.min(200, positiveIntegerOr(input.pageSize, 50))
+  const where = paymentFlowDetailWhere(input.userId, input.view)
+  const orderBy = paymentFlowDetailOrderBy(input.sort, input.order, input.fallbackExchangeRateKrw)
+
+  const rows = await db
+    .select({
+      id: purchaseRequestItems.id,
+      status: purchaseRequestItems.status,
+      paymentStatus: purchaseRequestItems.paymentStatus,
+      paymentPaidAt: purchaseRequestItems.paymentPaidAt,
+      sku: purchaseRequestItems.sku,
+      productName: purchaseRequestItems.productName,
+      optionName: purchaseRequestItems.optionName,
+      requestedQuantity: purchaseRequestItems.requestedQuantity,
+      actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+      purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
+      supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
+      requestDate: purchaseRequestItems.requestDate,
+      outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
+      specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+      newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+      costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
+    })
+    .from(purchaseRequestItems)
+    .leftJoin(products, and(
+      eq(products.userId, purchaseRequestItems.userId),
+      eq(products.internalSku, purchaseRequestItems.sku),
+    ))
+    .where(where)
+    .orderBy(...orderBy)
+    .limit(pageSize)
+    .offset((page - 1) * pageSize)
+
+  return {
+    items: rows.map((row) => {
+      const costs = calculatePurchaseCost(row, input.fallbackExchangeRateKrw)
+      return {
+        id: row.id,
+        status: row.status,
+        paymentStatus: normalizePaymentStatus(row.paymentStatus),
+        paymentPaidAt: row.paymentPaidAt,
+        sku: row.sku,
+        productName: row.productName,
+        optionName: row.optionName,
+        quantity: purchaseCostQuantity(row),
+        purchaseManagementCode: row.purchaseManagementCode,
+        supplierOrderNumber: row.supplierOrderNumber,
+        requestDate: row.requestDate,
+        outboundExpectedDate: row.outboundExpectedDate,
+        ...costs,
+      }
+    }),
+  }
+}
+
 export function isPurchasePaymentFlowViewItem(
   item: { status: PurchaseRequestStatus; paymentStatus?: string | null },
   view: PurchasePaymentFlowView,
@@ -248,6 +340,215 @@ export function sortPurchasePaymentFlowItems(
       return difference === 0 ? left.index - right.index : difference * direction
     })
     .map(({ item }) => item)
+}
+
+export function getPurchasePaymentFlowViewSummary(
+  summary: PurchasePaymentFlowSummary,
+  view: PurchasePaymentFlowView,
+): PurchaseCostSummary {
+  switch (view) {
+    case 'purchase_before':
+      return summary.purchaseBefore
+    case 'purchase_completed':
+      return summary.purchaseCompleted
+    case 'outstanding':
+      return summary.outstanding
+    case 'payment_pending':
+      return summary.paymentPending
+    case 'payment_paid':
+      return summary.paymentPaid
+    case 'before_outbound':
+      return summary.beforeOutbound
+    default:
+      return summary.total
+  }
+}
+
+type PurchasePaymentFlowSummaryGroup = {
+  status: PurchaseRequestStatus
+  paymentStatus: string | null
+  itemCount: number | string
+  totalCostYuan: number | string
+  totalCostKrw: number | string
+  missingYuanCostCount: number | string
+  missingKrwCostCount: number | string
+}
+
+function summarizePurchasePaymentFlowGroups(rows: PurchasePaymentFlowSummaryGroup[]): PurchasePaymentFlowSummary {
+  const summaries = Object.fromEntries(
+    PURCHASE_PAYMENT_FLOW_VIEWS.map((view) => [view, emptyPurchaseCostSummary()]),
+  ) as Record<PurchasePaymentFlowView, PurchaseCostSummary>
+
+  for (const row of rows) {
+    const groupSummary = {
+      itemCount: wholeNumber(row.itemCount),
+      totalCostYuan: finiteNumber(row.totalCostYuan),
+      totalCostKrw: finiteNumber(row.totalCostKrw),
+      missingYuanCostCount: wholeNumber(row.missingYuanCostCount),
+      missingKrwCostCount: wholeNumber(row.missingKrwCostCount),
+    }
+
+    for (const view of PURCHASE_PAYMENT_FLOW_VIEWS) {
+      if (!isPurchasePaymentFlowViewItem(row, view)) continue
+      addPurchaseCostSummary(summaries[view], groupSummary)
+    }
+  }
+
+  for (const summary of Object.values(summaries)) {
+    summary.totalCostYuan = Math.round(summary.totalCostYuan * 100) / 100
+    summary.totalCostKrw = Math.round(summary.totalCostKrw)
+  }
+
+  return {
+    total: summaries.total,
+    purchaseBefore: summaries.purchase_before,
+    purchaseCompleted: summaries.purchase_completed,
+    paymentPending: summaries.payment_pending,
+    paymentPaid: summaries.payment_paid,
+    beforeOutbound: summaries.before_outbound,
+    outstanding: summaries.outstanding,
+  }
+}
+
+function emptyPurchaseCostSummary(): PurchaseCostSummary {
+  return {
+    itemCount: 0,
+    totalCostYuan: 0,
+    totalCostKrw: 0,
+    missingYuanCostCount: 0,
+    missingKrwCostCount: 0,
+  }
+}
+
+function addPurchaseCostSummary(target: PurchaseCostSummary, source: PurchaseCostSummary) {
+  target.itemCount += source.itemCount
+  target.totalCostYuan += source.totalCostYuan
+  target.totalCostKrw += source.totalCostKrw
+  target.missingYuanCostCount += source.missingYuanCostCount
+  target.missingKrwCostCount += source.missingKrwCostCount
+}
+
+function finiteNumber(value: number | string | null | undefined) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : 0
+}
+
+function wholeNumber(value: number | string | null | undefined) {
+  return Math.max(0, Math.trunc(finiteNumber(value)))
+}
+
+function positiveIntegerOr(value: number, fallback: number) {
+  if (!Number.isFinite(value)) return fallback
+  return Math.max(1, Math.trunc(value))
+}
+
+function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView): SQL {
+  const conditions: SQL[] = [
+    eq(purchaseRequestItems.userId, userId),
+    inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
+  ]
+  const normalizedPaymentStatus = normalizedPurchasePaymentStatusSql()
+
+  if (view === 'purchase_before') {
+    conditions.push(eq(purchaseRequestItems.status, 'purchased'))
+  } else if (view === 'purchase_completed') {
+    conditions.push(inArray(purchaseRequestItems.status, [...PURCHASE_COMPLETED_COST_STATUSES]))
+  } else if (view === 'outstanding') {
+    conditions.push(sql`${normalizedPaymentStatus} <> 'paid'`)
+  } else if (view === 'payment_pending') {
+    conditions.push(inArray(purchaseRequestItems.status, [...PURCHASE_COMPLETED_COST_STATUSES]))
+    conditions.push(sql`${normalizedPaymentStatus} = 'pending'`)
+  } else if (view === 'payment_paid') {
+    conditions.push(sql`${normalizedPaymentStatus} = 'paid'`)
+  } else if (view === 'before_outbound') {
+    conditions.push(inArray(purchaseRequestItems.status, [...PURCHASE_COMPLETED_COST_STATUSES]))
+    conditions.push(sql`${normalizedPaymentStatus} = 'before_outbound'`)
+  }
+
+  return and(...conditions) ?? sql`TRUE`
+}
+
+function paymentFlowDetailOrderBy(
+  sort: PurchasePaymentFlowSort | null | undefined,
+  order: 'asc' | 'desc',
+  fallbackExchangeRateKrw: number,
+): SQL[] {
+  if (sort) {
+    const costs = purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw)
+    const totalCost = sort === 'totalCostYuan' ? costs.totalCostYuan : costs.totalCostKrw
+    const costOrder = order === 'asc'
+      ? sql`${totalCost} ASC NULLS LAST`
+      : sql`${totalCost} DESC NULLS LAST`
+
+    return [
+      costOrder,
+      desc(purchaseRequestItems.updatedAt),
+      desc(purchaseRequestItems.createdAt),
+      asc(purchaseRequestItems.sku),
+      asc(purchaseRequestItems.id),
+    ]
+  }
+
+  return [
+    desc(purchaseRequestItems.updatedAt),
+    desc(purchaseRequestItems.createdAt),
+    asc(purchaseRequestItems.sku),
+    asc(purchaseRequestItems.id),
+  ]
+}
+
+function normalizedPurchasePaymentStatusSql() {
+  return sql<PurchasePaymentStatus>`CASE
+    WHEN ${purchaseRequestItems.paymentStatus} = 'paid' THEN 'paid'
+    WHEN ${purchaseRequestItems.paymentStatus} = 'before_outbound' THEN 'before_outbound'
+    ELSE 'pending'
+  END`
+}
+
+function purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw: number) {
+  const specialPriceCny = productMetadataCostCnySql('특가(元)')
+  const newCostCny = productMetadataCostCnySql('신규원가(元)')
+  const unitCostYuan = sql<number>`CASE
+    WHEN ${specialPriceCny} > 0 THEN ${specialPriceCny}
+    WHEN ${newCostCny} > 0 THEN ${newCostCny}
+    ELSE NULL
+  END`
+  const quantity = sql<number>`GREATEST(0, COALESCE(
+    ${purchaseRequestItems.actualPurchaseQuantity},
+    ${purchaseRequestItems.requestedQuantity}
+  ))`
+  const baseExchangeRateKrw = sql<number>`COALESCE(
+    ${purchaseRequestItems.costExchangeRateKrw},
+    ${Number.isFinite(fallbackExchangeRateKrw) ? fallbackExchangeRateKrw : 0}
+  )`
+  const appliedExchangeRateKrw = sql<number>`CASE
+    WHEN ${baseExchangeRateKrw} <= 0 THEN NULL
+    ELSE ROUND(${baseExchangeRateKrw} * 1.05, 4)
+  END`
+
+  return {
+    totalCostYuan: sql<number>`CASE
+      WHEN ${unitCostYuan} IS NULL THEN NULL
+      ELSE ${unitCostYuan} * ${quantity}
+    END`,
+    totalCostKrw: sql<number>`CASE
+      WHEN ${unitCostYuan} IS NULL OR ${appliedExchangeRateKrw} IS NULL THEN NULL
+      ELSE ROUND(${unitCostYuan} * ${quantity} * ${appliedExchangeRateKrw})
+    END`,
+  }
+}
+
+function productMetadataCostCnySql(field: '특가(元)' | '신규원가(元)') {
+  const numericText = sql<string>`regexp_replace(
+    COALESCE(${products.metadata}->'esa009m'->>${field}, ''),
+    '[^0-9.-]',
+    '',
+    'g'
+  )`
+  return sql<number>`CASE
+    WHEN ${numericText} ~ '^-?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)$' THEN ${numericText}::numeric
+    ELSE NULL
+  END`
 }
 
 function summarizePurchaseCosts(rows: PurchaseCostRow[], fallbackExchangeRateKrw?: number): PurchaseCostSummary {

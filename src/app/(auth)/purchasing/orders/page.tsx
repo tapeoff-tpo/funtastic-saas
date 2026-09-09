@@ -174,7 +174,8 @@ export async function PurchasingOrdersView({
   const pageEnd = Math.min(total, page * pageSize)
   const visibleColumnCount =
     8 +
-    (showCosts ? 4 : 0) +
+    (showCosts ? (isRequestedStatus ? 3 : 4) : 0) +
+    (isRequestedStatus ? 1 : 0) +
     (showRecommendationBasis ? 1 : 0) +
     (showPurchaseUrlColumn ? 1 : 0) +
     (isRequestedStatus ? 0 : 3) +
@@ -445,6 +446,11 @@ export async function PurchasingOrdersView({
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label={quantityColumn.label} column="requestedQuantity" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />
                   </th>
+                  {isRequestedStatus ? (
+                    <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                      <SortHeader label="총 금액(₩)" column="totalCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
+                    </th>
+                  ) : null}
                   {showCosts ? (
                     <>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
@@ -456,9 +462,11 @@ export async function PurchasingOrdersView({
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                         <SortHeader label="총 원가(元)" column="totalCostYuan" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
                       </th>
-                      <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(₩)" column="totalCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
-                      </th>
+                      {isRequestedStatus ? null : (
+                        <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
+                          <SortHeader label="총 원가(₩)" column="totalCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
+                        </th>
+                      )}
                     </>
                   ) : null}
                   {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
@@ -586,12 +594,17 @@ export async function PurchasingOrdersView({
                             </div>
                           ) : null}
                       </td>
+                      {isRequestedStatus ? (
+                        <td className="px-3 py-2 text-right font-medium tabular-nums align-middle">
+                          {formatCost(costs.totalCostKrw, 0)}
+                        </td>
+                      ) : null}
                       {showCosts ? (
                         <>
                           <td className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostYuan, 2)}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{formatCost(costs.unitCostKrw, 0)}</td>
                           <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostYuan, 2)}</td>
-                          <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>
+                          {isRequestedStatus ? null : <td className="px-3 py-2 text-right font-medium tabular-nums">{formatCost(costs.totalCostKrw, 0)}</td>}
                         </>
                       ) : null}
                       {showRecommendationBasis ? (

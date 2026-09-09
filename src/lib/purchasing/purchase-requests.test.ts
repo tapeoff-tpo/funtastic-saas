@@ -79,6 +79,7 @@ describe('purchase request ordering', () => {
   it('adds stable tie-breakers for supported sorts', () => {
     expect(purchaseRequestOrderBy('requestedQuantity', 'asc')).toHaveLength(2)
     expect(purchaseRequestOrderBy('productName', 'desc')).toHaveLength(3)
+    expect(purchaseRequestOrderBy('totalCostKrw', 'asc')).toHaveLength(2)
   })
 })
 

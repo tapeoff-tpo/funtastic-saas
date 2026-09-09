@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  isPurchasePaymentFlowViewItem,
   getOutboundRequestedQuantity,
   normalizeOptionalPurchaseRequestQuantity,
   normalizePurchaseRequestQuantity,
@@ -78,5 +79,21 @@ describe('purchase request ordering', () => {
   it('adds stable tie-breakers for supported sorts', () => {
     expect(purchaseRequestOrderBy('requestedQuantity', 'asc')).toHaveLength(2)
     expect(purchaseRequestOrderBy('productName', 'desc')).toHaveLength(3)
+  })
+})
+
+describe('purchase payment flow views', () => {
+  const purchaseBefore = { status: 'purchased' as const, paymentStatus: 'pending' }
+  const purchaseCompleted = { status: 'purchase_completed' as const, paymentStatus: 'pending' }
+  const paid = { status: 'china_arrived' as const, paymentStatus: 'paid' }
+  const beforeOutbound = { status: 'outbound_requested' as const, paymentStatus: 'before_outbound' }
+
+  it('keeps each money tab aligned with its summary calculation', () => {
+    expect(isPurchasePaymentFlowViewItem(purchaseBefore, 'purchase_before')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'purchase_completed')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'payment_pending')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(paid, 'outstanding')).toBe(false)
+    expect(isPurchasePaymentFlowViewItem(paid, 'payment_paid')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(beforeOutbound, 'before_outbound')).toBe(true)
   })
 })

@@ -61,6 +61,28 @@ export type PurchasePaymentFlowSummary = {
   outstanding: PurchaseCostSummary
 }
 
+export const PURCHASE_PAYMENT_FLOW_VIEWS = [
+  'total',
+  'purchase_before',
+  'purchase_completed',
+  'outstanding',
+  'payment_pending',
+  'payment_paid',
+  'before_outbound',
+] as const
+
+export type PurchasePaymentFlowView = (typeof PURCHASE_PAYMENT_FLOW_VIEWS)[number]
+
+export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, string> = {
+  total: '발주금액 총액',
+  purchase_before: '구매 전',
+  purchase_completed: '구매 완료',
+  outstanding: '미결제 잔액',
+  payment_pending: '결제 대기',
+  payment_paid: '결제 완료',
+  before_outbound: '출고 전 결제',
+}
+
 type PurchaseCostRow = {
   status: PurchaseRequestStatus
   paymentStatus?: string | null
@@ -71,17 +93,58 @@ type PurchaseCostRow = {
   costExchangeRateKrw: string | null
 }
 
+export type PurchasePaymentFlowDetailItem = {
+  id: string
+  status: PurchaseRequestStatus
+  paymentStatus: PurchasePaymentStatus
+  paymentPaidAt: Date | null
+  sku: string
+  productName: string
+  optionName: string | null
+  quantity: number
+  purchaseManagementCode: string | null
+  supplierOrderNumber: string | null
+  requestDate: string | null
+  outboundExpectedDate: string | null
+  unitCostYuan: number | null
+  unitCostKrw: number | null
+  totalCostYuan: number | null
+  totalCostKrw: number | null
+}
+
+export type PurchasePaymentFlowData = {
+  summary: PurchasePaymentFlowSummary
+  items: PurchasePaymentFlowDetailItem[]
+}
+
 export async function getPurchasePaymentFlowSummary(
   userId: string,
   fallbackExchangeRateKrw: number,
 ): Promise<PurchasePaymentFlowSummary> {
+  const { summary } = await getPurchasePaymentFlowData(userId, fallbackExchangeRateKrw)
+  return summary
+}
+
+export async function getPurchasePaymentFlowData(
+  userId: string,
+  fallbackExchangeRateKrw: number,
+): Promise<PurchasePaymentFlowData> {
   await ensurePurchasePaymentTrackingSchema()
   const rows = await db
     .select({
+      id: purchaseRequestItems.id,
       status: purchaseRequestItems.status,
       paymentStatus: purchaseRequestItems.paymentStatus,
+      paymentPaidAt: purchaseRequestItems.paymentPaidAt,
+      sku: purchaseRequestItems.sku,
+      productName: purchaseRequestItems.productName,
+      optionName: purchaseRequestItems.optionName,
       requestedQuantity: purchaseRequestItems.requestedQuantity,
       actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+      purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
+      supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
+      requestDate: purchaseRequestItems.requestDate,
+      outboundExpectedDate: purchaseRequestItems.outboundExpectedDate,
       specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
       newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
       costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
@@ -95,25 +158,72 @@ export async function getPurchasePaymentFlowSummary(
       eq(purchaseRequestItems.userId, userId),
       inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
     ))
+    .orderBy(desc(purchaseRequestItems.updatedAt), desc(purchaseRequestItems.createdAt), asc(purchaseRequestItems.sku))
 
-  const purchaseBefore = rows.filter((row) => row.status === 'purchased')
-  const purchaseCompleted = rows.filter((row) => (
-    PURCHASE_COMPLETED_COST_STATUSES.includes(row.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number])
-  ))
-  const paymentPending = purchaseCompleted.filter((row) => normalizePaymentStatus(row.paymentStatus) === 'pending')
-  const paymentPaid = rows.filter((row) => normalizePaymentStatus(row.paymentStatus) === 'paid')
-  const beforeOutbound = purchaseCompleted.filter((row) => normalizePaymentStatus(row.paymentStatus) === 'before_outbound')
-  const outstanding = rows.filter((row) => normalizePaymentStatus(row.paymentStatus) !== 'paid')
+  const summary = Object.fromEntries(
+    PURCHASE_PAYMENT_FLOW_VIEWS.map((view) => [
+      view,
+      summarizePurchaseCosts(rows.filter((row) => isPurchasePaymentFlowViewItem(row, view)), fallbackExchangeRateKrw),
+    ]),
+  ) as Record<PurchasePaymentFlowView, PurchaseCostSummary>
 
   return {
-    total: summarizePurchaseCosts(rows, fallbackExchangeRateKrw),
-    purchaseBefore: summarizePurchaseCosts(purchaseBefore, fallbackExchangeRateKrw),
-    purchaseCompleted: summarizePurchaseCosts(purchaseCompleted, fallbackExchangeRateKrw),
-    paymentPending: summarizePurchaseCosts(paymentPending, fallbackExchangeRateKrw),
-    paymentPaid: summarizePurchaseCosts(paymentPaid, fallbackExchangeRateKrw),
-    beforeOutbound: summarizePurchaseCosts(beforeOutbound, fallbackExchangeRateKrw),
-    outstanding: summarizePurchaseCosts(outstanding, fallbackExchangeRateKrw),
+    summary: {
+      total: summary.total,
+      purchaseBefore: summary.purchase_before,
+      purchaseCompleted: summary.purchase_completed,
+      paymentPending: summary.payment_pending,
+      paymentPaid: summary.payment_paid,
+      beforeOutbound: summary.before_outbound,
+      outstanding: summary.outstanding,
+    },
+    items: rows.map((row) => {
+      const costs = calculatePurchaseCost(row, fallbackExchangeRateKrw)
+      return {
+        id: row.id,
+        status: row.status,
+        paymentStatus: normalizePaymentStatus(row.paymentStatus),
+        paymentPaidAt: row.paymentPaidAt,
+        sku: row.sku,
+        productName: row.productName,
+        optionName: row.optionName,
+        quantity: purchaseCostQuantity(row),
+        purchaseManagementCode: row.purchaseManagementCode,
+        supplierOrderNumber: row.supplierOrderNumber,
+        requestDate: row.requestDate,
+        outboundExpectedDate: row.outboundExpectedDate,
+        ...costs,
+      }
+    }),
   }
+}
+
+export function isPurchasePaymentFlowViewItem(
+  item: { status: PurchaseRequestStatus; paymentStatus?: string | null },
+  view: PurchasePaymentFlowView,
+) {
+  const paymentStatus = normalizePaymentStatus(item.paymentStatus)
+
+  if (view === 'total') return true
+  if (view === 'purchase_before') return item.status === 'purchased'
+  if (view === 'purchase_completed') return PURCHASE_COMPLETED_COST_STATUSES.includes(
+    item.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number],
+  )
+  if (view === 'outstanding') return paymentStatus !== 'paid'
+  if (view === 'payment_pending') {
+    return PURCHASE_COMPLETED_COST_STATUSES.includes(item.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number])
+      && paymentStatus === 'pending'
+  }
+  if (view === 'payment_paid') return paymentStatus === 'paid'
+  return PURCHASE_COMPLETED_COST_STATUSES.includes(item.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number])
+    && paymentStatus === 'before_outbound'
+}
+
+export function filterPurchasePaymentFlowItems(
+  items: PurchasePaymentFlowDetailItem[],
+  view: PurchasePaymentFlowView,
+) {
+  return items.filter((item) => isPurchasePaymentFlowViewItem(item, view))
 }
 
 function summarizePurchaseCosts(rows: PurchaseCostRow[], fallbackExchangeRateKrw?: number): PurchaseCostSummary {

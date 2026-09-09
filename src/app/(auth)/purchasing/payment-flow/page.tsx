@@ -3,22 +3,42 @@ import type { Metadata } from 'next'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
-import { getPurchasePaymentFlowSummary } from '@/lib/purchasing/purchase-requests'
+import {
+  filterPurchasePaymentFlowItems,
+  getPurchasePaymentFlowData,
+  PURCHASE_PAYMENT_FLOW_VIEWS,
+  type PurchasePaymentFlowView,
+} from '@/lib/purchasing/purchase-requests'
 import { ProductFlowNav } from '@/components/product-flow-nav'
+import { PurchasePaymentFlowDetailList } from './purchase-payment-flow-detail-list'
 import { PurchasePaymentFlowSummaryPanel } from './purchase-payment-flow-summary'
 
 export const metadata: Metadata = {
   title: '발주금액',
 }
 
-export default async function PurchasePaymentFlowPage() {
+const PAYMENT_FLOW_PAGE_SIZES = [10, 50, 100, 200] as const
+
+export default async function PurchasePaymentFlowPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const params = await searchParams
+  const view = parsePaymentFlowView(stringParam(params.view)) ?? 'total'
+  const pageSize = parsePageSize(stringParam(params.pageSize))
+  const requestedPage = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const exchangeRateReference = await getLatestCnyKrwReferenceRate()
-  const summary = await getPurchasePaymentFlowSummary(workspaceUserId, exchangeRateReference.rate)
+  const { summary, items } = await getPurchasePaymentFlowData(workspaceUserId, exchangeRateReference.rate)
+  const filteredItems = filterPurchasePaymentFlowItems(items, view)
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize))
+  const page = Math.min(requestedPage, totalPages)
+  const pageItems = filteredItems.slice((page - 1) * pageSize, page * pageSize)
 
   return (
     <div className="space-y-5">
@@ -27,7 +47,7 @@ export default async function PurchasePaymentFlowPage() {
         <div>
           <h1 className="text-2xl font-semibold">발주금액</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            현재 진행 중인 발주 금액과 결제 현황, 미결제 잔액을 확인합니다.
+            금액 항목을 누르면 해당 금액에 포함된 발주 건을 바로 확인할 수 있습니다.
           </p>
         </div>
         <Link
@@ -41,7 +61,33 @@ export default async function PurchasePaymentFlowPage() {
       <PurchasePaymentFlowSummaryPanel
         summary={summary}
         exchangeRateReference={exchangeRateReference}
+        activeView={view}
+      />
+      <PurchasePaymentFlowDetailList
+        view={view}
+        items={pageItems}
+        total={filteredItems.length}
+        page={page}
+        pageSize={pageSize}
+        totalPages={totalPages}
       />
     </div>
   )
+}
+
+function stringParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value
+}
+
+function parsePaymentFlowView(value: string | undefined): PurchasePaymentFlowView | null {
+  return PURCHASE_PAYMENT_FLOW_VIEWS.includes(value as PurchasePaymentFlowView)
+    ? value as PurchasePaymentFlowView
+    : null
+}
+
+function parsePageSize(value: string | undefined) {
+  const pageSize = Number(value)
+  return PAYMENT_FLOW_PAGE_SIZES.includes(pageSize as (typeof PAYMENT_FLOW_PAGE_SIZES)[number])
+    ? pageSize
+    : 50
 }

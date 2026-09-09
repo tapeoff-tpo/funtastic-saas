@@ -4,6 +4,7 @@ import { calculateAppliedPurchaseExchangeRateKrw } from '@/lib/purchasing/purcha
 import type {
   PurchaseCostSummary,
   PurchasePaymentFlowSummary,
+  PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
 
 type ExchangeRateReference = {
@@ -14,9 +15,11 @@ type ExchangeRateReference = {
 export function PurchasePaymentFlowSummaryPanel({
   summary,
   exchangeRateReference,
+  activeView,
 }: {
   summary: PurchasePaymentFlowSummary
   exchangeRateReference: ExchangeRateReference
+  activeView: PurchasePaymentFlowView
 }) {
   const appliedExchangeRate = calculateAppliedPurchaseExchangeRateKrw(exchangeRateReference.rate)
 
@@ -41,21 +44,21 @@ export function PurchasePaymentFlowSummaryPanel({
         </Link>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <PurchaseFlowCard label="발주금액 총액" summary={summary.total} description="현재 진행 중 발주" />
-        <PurchaseFlowCard label="구매 전" summary={summary.purchaseBefore} description="발주요청 단계" />
-        <PurchaseFlowCard label="구매 완료" summary={summary.purchaseCompleted} description="구매완료 이후 단계" />
-        <PurchaseFlowCard label="미결제 잔액" summary={summary.outstanding} description="결제 완료를 제외한 금액" emphasized />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="발주금액 분류">
+        <PurchaseFlowCard label="발주금액 총액" view="total" summary={summary.total} description="현재 진행 중 발주" active={activeView === 'total'} />
+        <PurchaseFlowCard label="구매 전" view="purchase_before" summary={summary.purchaseBefore} description="발주요청 단계" active={activeView === 'purchase_before'} />
+        <PurchaseFlowCard label="구매 완료" view="purchase_completed" summary={summary.purchaseCompleted} description="구매완료 이후 단계" active={activeView === 'purchase_completed'} />
+        <PurchaseFlowCard label="미결제 잔액" view="outstanding" summary={summary.outstanding} description="결제 완료를 제외한 금액" emphasized active={activeView === 'outstanding'} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <PurchaseFlowCard label="결제 대기" summary={summary.paymentPending} description="구매 완료 후 미결제" compact />
-        <PurchaseFlowCard label="결제 완료" summary={summary.paymentPaid} description="결제 완료로 기록된 금액" compact />
-        <PurchaseFlowCard label="출고 전 결제" summary={summary.beforeOutbound} description="대량 주문 등 출고 직전 결제" compact />
+      <div className="grid gap-3 sm:grid-cols-3" aria-label="결제 상태 분류">
+        <PurchaseFlowCard label="결제 대기" view="payment_pending" summary={summary.paymentPending} description="구매 완료 후 미결제" compact active={activeView === 'payment_pending'} />
+        <PurchaseFlowCard label="결제 완료" view="payment_paid" summary={summary.paymentPaid} description="결제 완료로 기록된 금액" compact active={activeView === 'payment_paid'} />
+        <PurchaseFlowCard label="출고 전 결제" view="before_outbound" summary={summary.beforeOutbound} description="대량 주문 등 출고 직전 결제" compact active={activeView === 'before_outbound'} />
       </div>
 
       <p className="text-xs text-muted-foreground">
-        중국출고완료 건은 현재 금액 흐름에서 제외됩니다. 결제 상태는 발주 탭에서 변경할 수 있습니다.
+        금액 항목을 누르면 아래에 포함 주문 건이 표시됩니다. 중국출고완료 건은 현재 금액 흐름에서 제외됩니다.
       </p>
     </section>
   )
@@ -63,21 +66,31 @@ export function PurchasePaymentFlowSummaryPanel({
 
 function PurchaseFlowCard({
   label,
+  view,
   summary,
   description,
   emphasized = false,
   compact = false,
+  active = false,
 }: {
   label: string
+  view: PurchasePaymentFlowView
   summary: PurchaseCostSummary
   description: string
   emphasized?: boolean
   compact?: boolean
+  active?: boolean
 }) {
   const hasMissingCost = summary.missingYuanCostCount > 0 || summary.missingKrwCostCount > 0
 
   return (
-    <div className={`rounded-md border px-3 py-2 ${emphasized ? 'border-foreground bg-background' : 'bg-muted/20'}`}>
+    <Link
+      href={`/purchasing/payment-flow?view=${view}#payment-flow-details`}
+      aria-current={active ? 'page' : undefined}
+      className={`rounded-md border px-3 py-2 text-left transition-colors hover:border-foreground hover:bg-muted ${
+        active || emphasized ? 'border-foreground bg-background' : 'bg-muted/20'
+      }`}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{label}</span>
         <span className="whitespace-nowrap text-xs text-muted-foreground">{summary.itemCount.toLocaleString('ko-KR')}건</span>
@@ -92,7 +105,7 @@ function PurchaseFlowCard({
           ? ` · 원가 누락 ${Math.max(summary.missingYuanCostCount, summary.missingKrwCostCount).toLocaleString('ko-KR')}건`
           : ''}
       </p>
-    </div>
+    </Link>
   )
 }
 

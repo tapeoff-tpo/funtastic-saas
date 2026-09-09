@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname } from 'next/navigation'
 
 type PurchasingLanguage = 'ko' | 'zh'
@@ -299,6 +299,7 @@ export function PurchasingLanguageSwitcher() {
   const enabled = isPurchasingPath(pathname)
   const [language, setLanguage] = useState<PurchasingLanguage>('ko')
   const [mounted, setMounted] = useState(false)
+  const hasAppliedChineseTranslation = useRef(false)
   const labels = useMemo(() => ({ ko: '한국어', zh: '中文' }), [])
 
   useEffect(() => {
@@ -326,7 +327,22 @@ export function PurchasingLanguageSwitcher() {
 
   useEffect(() => {
     if (!enabled) {
-      applyLanguage(document.body, 'ko')
+      if (hasAppliedChineseTranslation.current) {
+        applyLanguage(document.body, 'ko')
+        hasAppliedChineseTranslation.current = false
+      }
+      document.documentElement.lang = 'ko'
+      return
+    }
+
+    // Korean is the page's native language. Scanning and rewriting the entire
+    // document after every Server Component update both slows down large tables
+    // and can restore stale text from the previous tab.
+    if (language === 'ko') {
+      if (hasAppliedChineseTranslation.current) {
+        applyLanguage(document.body, 'ko')
+        hasAppliedChineseTranslation.current = false
+      }
       document.documentElement.lang = 'ko'
       return
     }
@@ -335,6 +351,7 @@ export function PurchasingLanguageSwitcher() {
     const sync = () => {
       applying = true
       applyLanguage(document.body, language)
+      hasAppliedChineseTranslation.current = true
       document.documentElement.lang = language === 'zh' ? 'zh-CN' : 'ko'
       window.setTimeout(() => {
         applying = false

@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
-import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
+import { getCurrentUser } from '@/lib/auth/current-user'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import {
   getPurchasePaymentFlowDetailPage,
@@ -33,8 +33,7 @@ export default async function PurchasePaymentFlowPage({
   const order = parseSortOrder(stringParam(params.order)) ?? 'desc'
   const pageSize = parsePageSize(stringParam(params.pageSize))
   const requestedPage = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = await getCurrentUser()
   if (!user) return null
 
   const [workspaceUserId, exchangeRateReference] = await Promise.all([

@@ -1,3 +1,4 @@
+import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -40,6 +41,9 @@ export async function PATCH(
   }
 
   if (!row) return NextResponse.json({ error: '발주 항목을 찾을 수 없습니다.' }, { status: 404 })
+
+  revalidatePath('/purchasing/orders')
+  revalidatePath('/purchasing/payment-flow')
 
   return NextResponse.json({
     id: row.id,

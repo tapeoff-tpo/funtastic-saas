@@ -51,6 +51,16 @@ export type PurchaseCostSummary = {
   missingKrwCostCount: number
 }
 
+export type PurchasePaymentFlowSummary = {
+  total: PurchaseCostSummary
+  purchaseBefore: PurchaseCostSummary
+  purchaseCompleted: PurchaseCostSummary
+  paymentPending: PurchaseCostSummary
+  paymentPaid: PurchaseCostSummary
+  beforeOutbound: PurchaseCostSummary
+  outstanding: PurchaseCostSummary
+}
+
 type PurchaseCostRow = {
   status: PurchaseRequestStatus
   paymentStatus?: string | null
@@ -61,7 +71,10 @@ type PurchaseCostRow = {
   costExchangeRateKrw: string | null
 }
 
-export async function getPurchasePaymentFlowSummary(userId: string, fallbackExchangeRateKrw: number) {
+export async function getPurchasePaymentFlowSummary(
+  userId: string,
+  fallbackExchangeRateKrw: number,
+): Promise<PurchasePaymentFlowSummary> {
   await ensurePurchasePaymentTrackingSchema()
   const rows = await db
     .select({

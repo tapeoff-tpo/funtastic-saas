@@ -30,6 +30,7 @@ const ROUTE_LABELS: Record<string, string> = {
   '/costs': '품목',
   '/purchasing/china-inventory': '중국재고',
   '/purchasing/orders': '발주',
+  '/purchasing/payment-flow': '발주금액',
   '/purchasing/purchases': '발주검토',
   '/purchasing/raw-data': '발주 로우데이터',
   '/purchasing/overdue': '구매/입고지연',

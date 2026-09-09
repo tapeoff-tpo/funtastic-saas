@@ -52,6 +52,7 @@ export async function PATCH(
   revalidatePath('/purchasing/overdue')
   revalidatePath('/purchasing/purchases')
   revalidatePath('/purchasing/orders')
+  revalidatePath('/purchasing/payment-flow')
   revalidatePath('/costs')
   return NextResponse.json({ id: row.id, excludedRecommendationCount: row.excludedRecommendationCount })
 }
@@ -71,5 +72,6 @@ export async function DELETE(
   })
 
   if (!row) return NextResponse.json({ error: '발주 항목을 찾을 수 없습니다.' }, { status: 404 })
+  revalidatePath('/purchasing/payment-flow')
   return NextResponse.json({ id: row.id })
 }

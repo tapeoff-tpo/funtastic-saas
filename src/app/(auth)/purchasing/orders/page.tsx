@@ -4,14 +4,12 @@ import { ExternalLink, Eye, EyeOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
-import { calculateAppliedPurchaseExchangeRateKrw, calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
+import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
 import {
   getCompletedOutboundDateOptions,
   getOutboundRequestedQuantity,
-  getPurchasePaymentFlowSummary,
   getPurchaseRequests,
-  type PurchaseCostSummary,
 } from '@/lib/purchasing/purchase-requests'
 import { getPurchasingDataFreshness } from '@/lib/purchasing/data-freshness'
 import {
@@ -110,23 +108,18 @@ export async function PurchasingOrdersView({
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
   const exchangeRateReference = await getLatestCnyKrwReferenceRate()
-  const [initialPurchaseRequestResult, purchasePaymentFlowSummary] = await Promise.all([
-    getPurchaseRequests({
-      userId: workspaceUserId,
-      status: selectedStatus,
-      overdueOnly,
-      search: search ?? undefined,
-      page: requestedPage,
-      pageSize,
-      sort: sort ?? undefined,
-      order,
-      outboundDate: status === 'completed' ? outboundDate : undefined,
-      exchangeRateKrw: exchangeRateReference.rate,
-    }),
-    basePath === '/purchasing/orders' && !overdueOnly
-      ? getPurchasePaymentFlowSummary(workspaceUserId, exchangeRateReference.rate)
-      : Promise.resolve(null),
-  ])
+  const initialPurchaseRequestResult = await getPurchaseRequests({
+    userId: workspaceUserId,
+    status: selectedStatus,
+    overdueOnly,
+    search: search ?? undefined,
+    page: requestedPage,
+    pageSize,
+    sort: sort ?? undefined,
+    order,
+    outboundDate: status === 'completed' ? outboundDate : undefined,
+    exchangeRateKrw: exchangeRateReference.rate,
+  })
   let purchaseRequestResult = initialPurchaseRequestResult
   const totalPages = Math.max(1, Math.ceil(purchaseRequestResult.total / pageSize))
   const page = Math.min(requestedPage, totalPages)
@@ -287,36 +280,6 @@ export async function PurchasingOrdersView({
             발주요청 지연 {overduePurchaseRequestCount.toLocaleString('ko-KR')}건,
             구매완료 입고지연 {overduePurchaseCompletedCount.toLocaleString('ko-KR')}건입니다.
           </span>
-        </section>
-      ) : null}
-
-      {purchasePaymentFlowSummary ? (
-        <section className="space-y-3 rounded-md border bg-muted/20 p-3" aria-label="발주 결제 금액 흐름">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-sm font-semibold">발주·결제 금액 흐름</h2>
-              <p className="text-xs text-muted-foreground">
-                기준 환율 {formatCost(exchangeRateReference.rate, 2)}원/元
-                {exchangeRateReference.date ? ` (${exchangeRateReference.date})` : ''}
-                {' '}× 1.05 = 적용 {formatCost(calculateAppliedPurchaseExchangeRateKrw(exchangeRateReference.rate), 2)}원/元
-              </p>
-            </div>
-            <p className="text-xs text-muted-foreground">원가: 특가(元) 우선, 신규원가(元) 보조</p>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <PurchaseFlowCard label="발주금액 총액" summary={purchasePaymentFlowSummary.total} description="현재 진행 중 발주" />
-            <PurchaseFlowCard label="구매 전" summary={purchasePaymentFlowSummary.purchaseBefore} description="발주요청 단계" />
-            <PurchaseFlowCard label="구매 완료" summary={purchasePaymentFlowSummary.purchaseCompleted} description="구매완료 이후 단계" />
-            <PurchaseFlowCard label="미결제 잔액" summary={purchasePaymentFlowSummary.outstanding} description="결제 완료를 제외한 금액" emphasized />
-          </div>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <PurchaseFlowCard label="결제 대기" summary={purchasePaymentFlowSummary.paymentPending} description="구매 완료 후 미결제" compact />
-            <PurchaseFlowCard label="결제 완료" summary={purchasePaymentFlowSummary.paymentPaid} description="결제 완료로 기록된 금액" compact />
-            <PurchaseFlowCard label="출고 전 결제" summary={purchasePaymentFlowSummary.beforeOutbound} description="대량 주문 등 출고 직전 결제" compact />
-          </div>
-          <p className="text-[11px] text-muted-foreground">
-            중국출고완료 건은 현재 금액 흐름에서 제외됩니다. 항목별 결제 상태를 바꾸면 요약과 미결제 잔액에 바로 반영됩니다.
-          </p>
         </section>
       ) : null}
 
@@ -757,41 +720,6 @@ export async function PurchasingOrdersView({
           </div>
         </section>
       </PurchaseBulkSelectionProvider>
-    </div>
-  )
-}
-
-function PurchaseFlowCard({
-  label,
-  summary,
-  description,
-  emphasized = false,
-  compact = false,
-}: {
-  label: string
-  summary: PurchaseCostSummary
-  description: string
-  emphasized?: boolean
-  compact?: boolean
-}) {
-  const hasMissingCost = summary.missingYuanCostCount > 0 || summary.missingKrwCostCount > 0
-
-  return (
-    <div className={`rounded-md border px-3 py-2 ${emphasized ? 'border-foreground bg-background' : 'bg-background/80'}`}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{label}</span>
-        <span className="whitespace-nowrap text-xs text-muted-foreground">{summary.itemCount.toLocaleString('ko-KR')}건</span>
-      </div>
-      <div className={`${compact ? 'mt-1 text-lg' : 'mt-2 text-xl'} font-semibold tabular-nums`}>
-        ₩ {formatCost(summary.totalCostKrw, 0)}
-      </div>
-      <div className="mt-0.5 text-xs tabular-nums text-muted-foreground">元 {formatCost(summary.totalCostYuan, 2)}</div>
-      <p className="mt-1 text-[11px] text-muted-foreground">
-        {description}
-        {hasMissingCost
-          ? ` · 원가 누락 ${Math.max(summary.missingYuanCostCount, summary.missingKrwCostCount).toLocaleString('ko-KR')}건`
-          : ''}
-      </p>
     </div>
   )
 }

@@ -11,12 +11,17 @@ const LANGUAGE_EVENT = 'funtastic-purchasing-language-change'
 const PURCHASING_PATHS = [
   '/purchasing/china-inventory',
   '/purchasing/orders',
+  '/purchasing/payment-flow',
   '/purchasing/purchases',
   '/purchasing/overdue',
 ]
 
 const EXACT_TRANSLATIONS: Record<string, string> = {
   '발주': '采购',
+  '발주금액': '采购金额',
+  '발주·결제 금액 현황': '采购与付款金额情况',
+  '발주 목록 보기': '查看采购列表',
+  '발주에서 결제 상태 변경': '在采购中修改付款状态',
   '품목': '品项',
   '중국재고': '中国库存',
   '발주검토': '采购审核',

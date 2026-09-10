@@ -655,9 +655,11 @@ export async function PurchasingOrdersView({
                           <PurchasePlanFieldsV2
                             id={item.id}
                             supplierOrderNumber={item.supplierOrderNumber}
-                            dateValue={item.status === 'purchased' ? item.requestDate : item.outboundExpectedDate}
-                            dateField={item.status === 'purchased' ? 'requestDate' : 'outboundExpectedDate'}
-                            dateLabel={item.status === 'purchased'
+                            dateValue={item.status === 'purchased' || item.status === 'china_arrived' ? item.requestDate : item.outboundExpectedDate}
+                            dateField={item.status === 'purchased' || item.status === 'china_arrived' ? 'requestDate' : 'outboundExpectedDate'}
+                            dateLabel={item.status === 'china_arrived'
+                              ? '중국도착일'
+                              : item.status === 'purchased'
                               ? '발주요청 날짜'
                               : item.status === 'outbound_requested' || item.status === 'completed'
                                 ? '출고날짜'

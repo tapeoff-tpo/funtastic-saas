@@ -1,4 +1,4 @@
-﻿import { and, eq, inArray, sql } from 'drizzle-orm'
+﻿import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   chinaWarehouseInventory,
@@ -525,7 +525,23 @@ export async function generatePurchaseRecommendations(input: {
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
-        inArray(purchaseRequestItems.status, ['requested', 'purchased', 'purchase_completed', 'outbound_requested', 'completed']),
+        or(
+          inArray(purchaseRequestItems.status, [
+            'requested',
+            'purchased',
+            'purchase_completed',
+            'outbound_requested',
+            'completed',
+          ]),
+          // China-arrived quantities already represented by the China stock
+          // snapshot must not be counted as inbound pipeline again. Only the
+          // gap between purchase history and the latest inventory snapshot is
+          // intentionally kept as an in-progress quantity.
+          and(
+            eq(purchaseRequestItems.status, 'china_arrived'),
+            sql`${purchaseRequestItems.rawData}->>'pendingChinaInventorySnapshot' = 'true'`,
+          ),
+        )!,
       ))
 
     const autoReviewRows = activeRequestRows.filter(
@@ -944,7 +960,7 @@ function isAutoPurchaseRecommendation(rawData: unknown) {
     && rawData.source === 'auto_purchase_recommendation'
 }
 
-function purchasePipelineQuantity(input: {
+export function purchasePipelineQuantity(input: {
   status: string
   requestedQuantity: number
   actualPurchaseQuantity: number | null
@@ -964,15 +980,23 @@ function purchasePipelineQuantity(input: {
       ?? input.actualPurchaseQuantity
       ?? input.requestedQuantity
     : input.status === 'china_arrived'
-      ? input.chinaReceivedQuantity
-        ?? input.actualPurchaseQuantity
-        ?? input.requestedQuantity
+      ? isPendingChinaInventorySnapshot(input.rawData)
+        ? readPositiveInteger(input.rawData, 'pendingChinaInventoryQuantity') ?? 0
+        : 0
       : input.status === 'purchase_completed' || input.status === 'purchased'
         ? input.actualPurchaseQuantity
           ?? input.requestedQuantity
         : input.requestedQuantity
 
   return Math.max(0, Math.trunc(finiteNumber(quantity)))
+}
+
+export function isPendingChinaInventorySnapshot(rawData: unknown) {
+  if (typeof rawData !== 'object' || rawData === null || !('pendingChinaInventorySnapshot' in rawData)) {
+    return false
+  }
+  const value = rawData.pendingChinaInventorySnapshot
+  return value === true || value === 'true'
 }
 
 function readPositiveInteger(rawData: unknown, key: string) {

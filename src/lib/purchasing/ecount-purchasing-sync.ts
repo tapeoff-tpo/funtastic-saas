@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { createHash } from 'node:crypto'
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   chinaWarehouseInventory,
@@ -11,6 +11,7 @@ import {
   getReflectedOutboundMatchKeys,
 } from './reflected-outbound-items'
 import { getIgnoredPurchasingItemKeys, purchasingItemIdentity } from './ignored-purchasing-items'
+import { ensurePurchaseRequestManagementCodeSkuLookupIndex } from './purchase-request-item-index'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -109,6 +110,16 @@ export type EcountPurchaseCompletedItem = {
   shippingFeeCny: number | null
 }
 
+/** A purchase-history row that has reached the China warehouse. */
+export type EcountChinaArrivedItem = EcountPurchaseCompletedItem & {
+  /**
+   * Quantity that is newer than the latest China-inventory snapshot and has
+   * not yet been matched to China outbound. It must remain in the purchase
+   * recommendation pipeline until the next inventory snapshot catches up.
+   */
+  pendingChinaInventoryQuantity: number
+}
+
 export type EcountChinaInventoryItem = {
   sourceFileName: string
   sourceRowNumber: number
@@ -152,11 +163,18 @@ export type EcountOutboundPendingItem = {
 
 export type EcountPurchasingSnapshot = {
   asOfDate: string
+  /** Printed date from the China-inventory workbook, when it provides one. */
+  chinaInventorySnapshotAsOfDate: string | null
   domesticInventoryReflectedThrough: string
   purchasePlanConfirmedSince: string
   files: Record<EcountReportKind, string>
   activeRequests: EcountPendingRequest[]
   purchaseCompleted: EcountPurchaseCompletedItem[]
+  /**
+   * Confirmed rows in 구매현황. Unlike 중국재고현황, this report keeps the
+   * purchase/order identity needed by the China-arrival screen.
+   */
+  chinaArrived: EcountChinaArrivedItem[]
   chinaInventory: EcountChinaInventoryItem[]
   outboundCompleted: EcountOutboundPendingItem[]
   outboundPending: EcountOutboundPendingItem[]
@@ -164,8 +182,10 @@ export type EcountPurchasingSnapshot = {
     activeRequestRows: number
     activeRequestsMatchedToPlan: number
     activeRequestsMatchedToPurchase: number
+    planRowsWithIdentifierMismatch: number
     outboundRowsWithSupplierOrder: number
     outboundRowsMatchedToPurchase: number
+    outboundRowsWithIdentifierMismatch: number
     outboundRowsWithoutReliableSupplierOrder: number
   }
   warnings: string[]
@@ -262,6 +282,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   const purchaseHistory = reportByKind.get('purchaseHistory')!
   const chinaInventory = reportByKind.get('chinaInventory')!
   const chinaOutbound = reportByKind.get('chinaOutbound')!
+  const chinaInventorySnapshotAsOfDate = readChinaInventorySnapshotAsOfDate(chinaInventory)
 
   // 발주계획 조회에는 과거 종결/취소 건도 함께 내려올 수 있다. 이 파일은
   // 현재 구매 진행분만 나타내야 하므로 종결 행은 발주 파이프라인에 넣지 않는다.
@@ -535,17 +556,30 @@ export async function parseEcountPurchasingSnapshot(input: {
     historyItems,
   )
   const purchaseHistoryBridgeKeys = new Set(input.purchaseHistoryBridgeKeys ?? [])
-  const purchaseHistoryAwaitingChinaInventory = remainingPurchaseHistoryBridgeItems(
-    historyItems.filter((item) => (
-      purchaseHistoryBridgeKeys.has(getPurchaseHistoryBridgeKey(item))
-        && hasReliablePurchaseIdentity(item)
-    )),
+  // China-arrival is an order-level current state. Subtract any outbound
+  // quantities by the existing strong identifier matching before rendering it,
+  // so fully shipped purchases do not remain in this stage.
+  const outstandingChinaArrivals = remainingPurchaseHistoryBridgeItems(
+    historyItems,
     rawChinaOutboundItems,
   )
-  // Purchase-history bridge keys are supplied only for arrivals received after
-  // the last China-inventory upload. Keep them in the pipeline until that
-  // inventory is refreshed or a matching China-outbound row is received.
-  const purchaseCompleted = [...purchaseCompletedFromPlan, ...purchaseHistoryAwaitingChinaInventory]
+  // 구매현황 is the source of the China-arrival stage. A recent arrival can be
+  // newer than the latest China-inventory snapshot, so retain just its
+  // globally unmatched quantity as a pipeline marker on the same
+  // China-arrival row. The marker must share the same outbound allocation as
+  // the stage itself, otherwise an outbound can be subtracted twice.
+  // Do not create a second purchase_completed row: that would both duplicate
+  // the order in the UI and collide with the management-code/SKU unique key.
+  const chinaArrived: EcountChinaArrivedItem[] = outstandingChinaArrivals.map((item) => ({
+    ...item,
+    pendingChinaInventoryQuantity: (
+      purchaseHistoryBridgeKeys.has(getPurchaseHistoryBridgeKey(item))
+      && hasReliablePurchaseIdentity(item)
+    )
+      ? item.quantity
+      : 0,
+  }))
+  const purchaseCompleted = purchaseCompletedFromPlan
 
   // Split shipments remain distinct by outbound date so date-based inventory
   // reflection stays exact. Rows from the same supplier order + SKU + date are
@@ -567,6 +601,9 @@ export async function parseEcountPurchasingSnapshot(input: {
   const activeRequestsMatchedToPurchase = activeRequests.filter((row) => purchaseKeys.has(
     purchaseKey(row.purchaseManagementCode, row.sku)!,
   )).length
+  const planRowsWithIdentifierMismatch = planItems.filter((plan) => (
+    hasManagementGroupSupplierMismatch(plan, historyItems)
+  )).length
   const outboundRowsWithSupplierOrder = rawChinaOutboundItems.filter((row) => row.supplierOrderNumber !== null)
   const outboundRowsWithPurchaseReference = rawChinaOutboundItems.filter((row) => (
     row.purchaseManagementCode !== null || row.supplierOrderNumber !== null
@@ -578,6 +615,9 @@ export async function parseEcountPurchasingSnapshot(input: {
     if (managementKey) return purchaseKeys.has(managementKey)
     return purchaseSupplierKeys.has(supplierKey(row.supplierOrderNumber, row.sku)!)
   }).length
+  const outboundRowsWithIdentifierMismatch = rawChinaOutboundItems.filter((outbound) => (
+    hasManagementGroupSupplierMismatch(outbound, historyItems)
+  )).length
   const outboundRowsWithoutReliableSupplierOrder = rawChinaOutboundItems.length - outboundRowsWithSupplierOrder.length
   const outboundRowsWithoutPurchaseReference = rawChinaOutboundItems.length - outboundRowsWithPurchaseReference.length
 
@@ -590,9 +630,16 @@ export async function parseEcountPurchasingSnapshot(input: {
   if (outboundRowsWithPurchaseReference.length !== outboundRowsMatchedToPurchase) {
     warnings.push(`중국출고 구매 대조 ${outboundRowsMatchedToPurchase.toLocaleString('ko-KR')}/${outboundRowsWithPurchaseReference.length.toLocaleString('ko-KR')}건이 구매현황과 일치합니다.`)
   }
+  if (planRowsWithIdentifierMismatch > 0) {
+    warnings.push(`발주계획 ${planRowsWithIdentifierMismatch.toLocaleString('ko-KR')}건은 구입관리코드는 구매현황과 일치하지만 주문서번호가 다릅니다. 구입관리코드 기준으로 연결했으니 원본을 확인해주세요.`)
+  }
+  if (outboundRowsWithIdentifierMismatch > 0) {
+    warnings.push(`중국출고 ${outboundRowsWithIdentifierMismatch.toLocaleString('ko-KR')}건은 구입관리코드는 구매현황과 일치하지만 주문서번호가 다릅니다. 구입관리코드 기준으로 연결했으니 원본을 확인해주세요.`)
+  }
 
   return {
     asOfDate,
+    chinaInventorySnapshotAsOfDate,
     domesticInventoryReflectedThrough: reflectedThrough,
     purchasePlanConfirmedSince,
     files: {
@@ -604,6 +651,7 @@ export async function parseEcountPurchasingSnapshot(input: {
     },
     activeRequests,
     purchaseCompleted,
+    chinaArrived,
     chinaInventory: chinaInventoryItems,
     outboundCompleted,
     outboundPending,
@@ -611,8 +659,10 @@ export async function parseEcountPurchasingSnapshot(input: {
       activeRequestRows: activeRequests.length,
       activeRequestsMatchedToPlan,
       activeRequestsMatchedToPurchase,
+      planRowsWithIdentifierMismatch,
       outboundRowsWithSupplierOrder: outboundRowsWithSupplierOrder.length,
       outboundRowsMatchedToPurchase,
+      outboundRowsWithIdentifierMismatch,
       outboundRowsWithoutReliableSupplierOrder,
     },
     warnings,
@@ -734,8 +784,11 @@ export async function getEcountChinaInventorySnapshotDate(
   input: EcountPurchasingUpload,
 ) {
   const report = await loadEcountReport(input)
-  if (report.kind !== 'chinaInventory') return null
+  return readChinaInventorySnapshotAsOfDate(report)
+}
 
+function readChinaInventorySnapshotAsOfDate(report: ParsedReport) {
+  if (report.kind !== 'chinaInventory') return null
   let snapshotDate: string | null = null
   for (let rowNumber = 1; rowNumber < report.headerRowNumber; rowNumber += 1) {
     report.sheet.getRow(rowNumber).eachCell({ includeEmpty: false }, (cell) => {
@@ -817,58 +870,102 @@ function hasReliablePurchaseIdentity(item: EcountPurchaseCompletedItem) {
   return Boolean(item.purchaseManagementCode || item.supplierOrderNumber)
 }
 
+type PurchasingMatchItem = Pick<
+  EcountPurchaseCompletedItem,
+  'sku' | 'purchaseManagementCode' | 'supplierOrderNumber'
+>
+
+function purchaseManagementMatch(
+  left: PurchasingMatchItem,
+  right: PurchasingMatchItem,
+) {
+  return Boolean(
+    left.sku === right.sku
+    && left.purchaseManagementCode
+    && right.purchaseManagementCode
+    && left.purchaseManagementCode === right.purchaseManagementCode,
+  )
+}
+
+function purchasingItemsMatch(
+  left: PurchasingMatchItem,
+  right: PurchasingMatchItem,
+) {
+  if (left.sku !== right.sku) return false
+  const hasManagementKeyOnBothSides = Boolean(
+    left.purchaseManagementCode && right.purchaseManagementCode,
+  )
+  if (hasManagementKeyOnBothSides) return purchaseManagementMatch(left, right)
+
+  // Supplier order + SKU is only a fallback when the management key cannot be
+  // used on both records. Some supplier-order cells are memo text, so this
+  // path deliberately requires a validated order number on each side.
+  const leftSupplierOrderKey = supplierKey(left.supplierOrderNumber, left.sku)
+  const rightSupplierOrderKey = supplierKey(right.supplierOrderNumber, right.sku)
+  return Boolean(leftSupplierOrderKey && rightSupplierOrderKey && leftSupplierOrderKey === rightSupplierOrderKey)
+}
+
+function hasManagementGroupSupplierMismatch(
+  item: PurchasingMatchItem,
+  counterparts: PurchasingMatchItem[],
+) {
+  const supplierOrderKey = supplierKey(item.supplierOrderNumber, item.sku)
+  if (!supplierOrderKey) return false
+
+  const matchingSupplierOrderKeys = counterparts
+    .filter((counterpart) => purchaseManagementMatch(item, counterpart))
+    .map((counterpart) => supplierKey(counterpart.supplierOrderNumber, counterpart.sku))
+    .filter((key): key is string => key !== null)
+
+  // Multiple supplier orders may legitimately exist within the same management
+  // code + SKU group. Only warn when that group has a reliable supplier-order
+  // value, but none agrees with the row being reconciled.
+  return matchingSupplierOrderKeys.length > 0 && !matchingSupplierOrderKeys.includes(supplierOrderKey)
+}
+
 function purchaseHistoryMatchesChinaOutbound(
   purchase: EcountPurchaseCompletedItem,
   outbound: EcountOutboundPendingItem,
 ) {
-  if (purchase.sku !== outbound.sku) return false
-  const purchaseOrderKey = supplierKey(purchase.supplierOrderNumber, purchase.sku)
-  const outboundOrderKey = supplierKey(outbound.supplierOrderNumber, outbound.sku)
-  if (purchaseOrderKey && outboundOrderKey) return purchaseOrderKey === outboundOrderKey
-  return Boolean(
-    purchase.purchaseManagementCode
-    && outbound.purchaseManagementCode
-    && purchase.purchaseManagementCode === outbound.purchaseManagementCode,
-  )
+  return purchasingItemsMatch(purchase, outbound)
 }
 
 function remainingPurchaseHistoryBridgeItems(
   historyItems: EcountPurchaseCompletedItem[],
   outboundItems: EcountOutboundPendingItem[],
 ) {
-  const groups = new Map<string, EcountPurchaseCompletedItem[]>()
-  for (const item of historyItems) {
-    const groupKey = purchaseHistoryOutboundGroupKey(item)
-    const items = groups.get(groupKey) ?? []
-    items.push(item)
-    groups.set(groupKey, items)
+  const remainingHistoryItems = historyItems
+    .map((item, index) => ({ item, index, remainingQuantity: item.quantity }))
+    .sort((left, right) => (
+      (left.item.purchaseDate ?? '9999-12-31').localeCompare(right.item.purchaseDate ?? '9999-12-31')
+      || left.item.sourceRowNumber - right.item.sourceRowNumber
+      || left.index - right.index
+    ))
+
+  // Allocate each physical outbound row once. A supplier-order fallback can
+  // legitimately match more than one management-code group when the outbound
+  // report omits its management code; subtracting it independently from every
+  // group would understate the outstanding China stock.
+  const orderedOutboundItems = [...outboundItems].sort((left, right) => (
+    left.effectiveDate.localeCompare(right.effectiveDate)
+    || left.sourceRowNumber - right.sourceRowNumber
+  ))
+  for (const outbound of orderedOutboundItems) {
+    let remainingOutboundQuantity = outbound.quantity
+    for (const history of remainingHistoryItems) {
+      if (remainingOutboundQuantity === 0) break
+      if (history.remainingQuantity === 0 || !purchaseHistoryMatchesChinaOutbound(history.item, outbound)) {
+        continue
+      }
+      const consumed = Math.min(history.remainingQuantity, remainingOutboundQuantity)
+      history.remainingQuantity -= consumed
+      remainingOutboundQuantity -= consumed
+    }
   }
 
-  return [...groups.values()].flatMap((items) => {
-    const outboundQuantity = outboundItems
-      .filter((outbound) => items.some((item) => purchaseHistoryMatchesChinaOutbound(item, outbound)))
-      .reduce((sum, outbound) => sum + outbound.quantity, 0)
-    let remainingOutboundQuantity = outboundQuantity
-    return [...items]
-      .sort((left, right) => (
-        (left.purchaseDate ?? '9999-12-31').localeCompare(right.purchaseDate ?? '9999-12-31')
-        || left.sourceRowNumber - right.sourceRowNumber
-      ))
-      .flatMap((item) => {
-        const remainingQuantity = Math.max(0, item.quantity - remainingOutboundQuantity)
-        remainingOutboundQuantity = Math.max(0, remainingOutboundQuantity - item.quantity)
-        return remainingQuantity > 0 ? [{ ...item, quantity: remainingQuantity }] : []
-      })
-  })
-}
-
-function purchaseHistoryOutboundGroupKey(item: EcountPurchaseCompletedItem) {
-  const managementKey = item.purchaseManagementCode
-    ? purchaseKey(item.purchaseManagementCode, item.sku)
-    : null
-  if (managementKey) return `management:${managementKey}`
-  const supplierOrderKey = supplierKey(item.supplierOrderNumber, item.sku)
-  return `supplier:${supplierOrderKey ?? getPurchaseHistoryBridgeKey(item)}`
+  return remainingHistoryItems.flatMap(({ item, remainingQuantity }) => (
+    remainingQuantity > 0 ? [{ ...item, quantity: remainingQuantity }] : []
+  ))
 }
 
 function reconcilePlanWithPurchaseHistory(
@@ -887,22 +984,12 @@ function reconcilePlanWithPurchaseHistory(
     ))
 
   return planItems.flatMap((plan) => {
-    // Strong identifiers define the workflow identity. Once the same supplier
-    // order + SKU (or management code + SKU when an order number is missing)
-    // appears in purchase history, the plan has progressed regardless of a
-    // quantity discrepancy between reports.
+    // Purchase-management-code + SKU is the workflow identity. Supplier
+    // order + SKU is only used where one side lacks that management key. A
+    // strong match means the plan has progressed despite report quantities
+    // being different.
     const strongMatch = orderedHistory.some(({ item }) => {
-      if (plan.sku !== item.sku) return false
-      const planOrderKey = supplierKey(plan.supplierOrderNumber, plan.sku)
-      const historyOrderKey = supplierKey(item.supplierOrderNumber, item.sku)
-      if (planOrderKey && historyOrderKey) return planOrderKey === historyOrderKey
-      return Boolean(
-        !planOrderKey
-        && !historyOrderKey
-        && plan.purchaseManagementCode
-        && item.purchaseManagementCode
-        && plan.purchaseManagementCode === item.purchaseManagementCode,
-      )
+      return purchasingItemsMatch(plan, item)
     })
     if (strongMatch) return []
 
@@ -1068,22 +1155,28 @@ function pipelineMatchScore(
     && right.supplierOrderNumber
     && left.supplierOrderNumber !== right.supplierOrderNumber,
   )
-  // A conflicting strong identifier means these are different purchases unless
-  // the other strong identifier explicitly matches. Do not merge two orders
-  // merely because SKU, option, and quantity happen to be identical.
-  if (managementConflicts && !orderMatches) return 0
-  if (orderConflicts && !managementMatches) return 0
+  const managementKeyAvailableOnBothSides = Boolean(
+    left.purchaseManagementCode && right.purchaseManagementCode,
+  )
+  const supplierOrderAvailableOnBothSides = Boolean(
+    left.supplierOrderNumber && right.supplierOrderNumber,
+  )
+  // Management code is authoritative whenever both reports carry it. Supplier
+  // order only breaks ties when the management key is unavailable on a side.
+  if (managementKeyAvailableOnBothSides && managementConflicts) return 0
+  if (!managementKeyAvailableOnBothSides && supplierOrderAvailableOnBothSides && orderConflicts) return 0
 
   const leftOption = left.optionName?.trim() ?? ''
   const rightOption = right.optionName?.trim() ?? ''
-  // Order number + SKU (or management code + SKU when no order number exists)
-  // is authoritative. Option labels often change between Ecount reports.
+  // Unidentified legacy rows retain the prior SKU/option fallback. Option
+  // labels often change between Ecount reports, so an identifier match is
+  // still allowed to override a differing option label.
   if (!orderMatches && !managementMatches && leftOption && rightOption && leftOption !== rightOption) return 0
 
   let score = 10
   if (leftOption && rightOption && leftOption === rightOption) score += 10
-  if (managementMatches) score += 80
-  if (orderMatches) score += 100
+  if (managementMatches) score += 100
+  else if (orderMatches) score += 80
   return score
 }
 
@@ -1113,6 +1206,20 @@ export function summarizeEcountPurchasingSnapshot(snapshot: EcountPurchasingSnap
         productName: item.productName,
         quantity: item.quantity,
         chinaArrivalRequestDate: item.chinaArrivalRequestDate,
+      })),
+    },
+    chinaArrived: {
+      rows: snapshot.chinaArrived.length,
+      quantity: sumQuantities(snapshot.chinaArrived),
+      pendingChinaInventoryQuantity: snapshot.chinaArrived.reduce(
+        (sum, item) => sum + item.pendingChinaInventoryQuantity,
+        0,
+      ),
+      samples: snapshot.chinaArrived.slice(0, 5).map((item) => ({
+        sku: item.sku,
+        productName: item.productName,
+        quantity: item.quantity,
+        supplierOrderNumber: item.supplierOrderNumber,
       })),
     },
     chinaInventory: {
@@ -1174,23 +1281,52 @@ export async function getEcountPurchasingSyncState(userId: string) {
 
 /** Fallback only when the inventory workbook has no printed snapshot date. */
 export async function getLatestChinaInventorySnapshotAsOfDate(userId: string) {
-  const [row] = await db
-    .select({
-      snapshotAsOfDate: sql<string | null>`MAX(${purchaseRequestItems.rawData}->>'snapshotAsOfDate')`,
-    })
-    .from(purchaseRequestItems)
-    .where(and(
-      eq(purchaseRequestItems.userId, userId),
-      sql`${purchaseRequestItems.rawData}->>'source' = ${ECOUNT_CHINA_ARRIVED_SOURCE}`,
-    ))
-  return row?.snapshotAsOfDate ? normalizeDateOnly(row.snapshotAsOfDate) : null
+  const [[arrivalRow], [inventoryRow]] = await Promise.all([
+    db
+      .select({
+        snapshotAsOfDate: sql<string | null>`MAX(${purchaseRequestItems.rawData}->>'snapshotAsOfDate')`,
+      })
+      .from(purchaseRequestItems)
+      .where(and(
+        eq(purchaseRequestItems.userId, userId),
+        sql`${purchaseRequestItems.rawData}->>'source' = ${ECOUNT_CHINA_ARRIVED_SOURCE}`,
+      )),
+    // China inventory no longer creates purchase-request rows. Its latest
+    // write time is a safe fallback baseline when the workbook itself has no
+    // printed snapshot date.
+    db
+      .select({
+        snapshotAsOfDate: sql<string | null>`MAX((timezone('Asia/Seoul', ${chinaWarehouseInventory.updatedAt}))::date)::text`,
+      })
+      .from(chinaWarehouseInventory)
+      .where(eq(chinaWarehouseInventory.userId, userId)),
+  ])
+  return resolveChinaInventorySnapshotAsOfDate(
+    arrivalRow?.snapshotAsOfDate ?? null,
+    inventoryRow?.snapshotAsOfDate ?? null,
+  )
 }
 
 /**
- * Purchase-history rows are temporarily held in the purchasing pipeline after
- * an incremental history upload, until the next China-inventory snapshot (or
- * a matching China-outbound row) replaces them. Persist their keys so another
- * partial upload does not accidentally drop that temporary protection.
+ * A printed workbook snapshot date is the authoritative inventory baseline.
+ * `updatedAt` only says when we uploaded that workbook, so it is a fallback
+ * for legacy rows that lack the printed date.
+ */
+export function resolveChinaInventorySnapshotAsOfDate(
+  arrivalSnapshotAsOfDate: string | null,
+  inventoryUpdatedAtDate: string | null,
+) {
+  const arrivalSnapshotDate = arrivalSnapshotAsOfDate
+    ? normalizeDateOnly(arrivalSnapshotAsOfDate)
+    : null
+  if (arrivalSnapshotDate) return arrivalSnapshotDate
+  return inventoryUpdatedAtDate ? normalizeDateOnly(inventoryUpdatedAtDate) : null
+}
+
+/**
+ * Purchase-history rows newer than the China-inventory snapshot are kept as
+ * China-arrival rows with a small pipeline marker. Persist their keys so a
+ * later partial upload does not lose that temporary protection.
  */
 export async function getPersistedPurchaseHistoryBridgeKeys(userId: string) {
   const rows = await db
@@ -1200,9 +1336,20 @@ export async function getPersistedPurchaseHistoryBridgeKeys(userId: string) {
     .from(purchaseRequestItems)
     .where(and(
       eq(purchaseRequestItems.userId, userId),
-      eq(purchaseRequestItems.status, 'purchase_completed'),
-      sql`${purchaseRequestItems.rawData}->>'source' = ${ECOUNT_PURCHASE_COMPLETED_SOURCE}`,
       sql`COALESCE(${purchaseRequestItems.rawData}->>'purchaseHistoryBridgeKey', '') <> ''`,
+      or(
+        and(
+          eq(purchaseRequestItems.status, 'china_arrived'),
+          sql`${purchaseRequestItems.rawData}->>'source' = ${ECOUNT_CHINA_ARRIVED_SOURCE}`,
+          sql`${purchaseRequestItems.rawData}->>'pendingChinaInventorySnapshot' = 'true'`,
+        ),
+        // Kept only for a safe transition from the prior implementation,
+        // which stored this marker as a duplicate purchase_completed row.
+        and(
+          eq(purchaseRequestItems.status, 'purchase_completed'),
+          sql`${purchaseRequestItems.rawData}->>'source' = ${ECOUNT_PURCHASE_COMPLETED_SOURCE}`,
+        ),
+      )!,
     ))
 
   return rows
@@ -1216,9 +1363,22 @@ export async function syncEcountPurchasingSnapshot(input: {
   snapshot: EcountPurchasingSnapshot
   reportKinds?: EcountReportKind[]
 }) {
+  await ensurePurchaseRequestManagementCodeSkuLookupIndex()
   const reflectedOutboundMatchKeys = await getReflectedOutboundMatchKeys(input.userId)
   const ignoredPurchasingItemKeys = await getIgnoredPurchasingItemKeys(input.userId)
-  const refreshOutbound = getEcountPurchasingRefreshScope(input.reportKinds).refreshOutbound
+  const refreshScope = getEcountPurchasingRefreshScope(input.reportKinds)
+  const refreshOutbound = refreshScope.refreshOutbound
+  // A purchase-history-only upload replaces the old China-arrival rows. Keep
+  // the latest inventory snapshot date on those rows so the temporary
+  // recommendation bridge remains safe even after the old inventory-derived
+  // rows have been removed.
+  const latestChinaInventorySnapshotAsOfDate = (
+    refreshScope.reportKinds.has('purchaseHistory')
+    || refreshScope.reportKinds.has('chinaInventory')
+    || refreshScope.refreshOutbound
+  )
+    ? await getLatestChinaInventorySnapshotAsOfDate(input.userId)
+    : null
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
 
@@ -1229,6 +1389,9 @@ export async function syncEcountPurchasingSnapshot(input: {
       sourcesToReplace,
     } = getEcountPurchasingRefreshScope(input.reportKinds)
     const refreshPurchaseHistoryBridge = refreshOutbound || reportKinds.has('chinaInventory')
+    const refreshChinaArrivals = reportKinds.has('purchaseHistory')
+      || reportKinds.has('chinaInventory')
+      || refreshOutbound
     const selectedPurchaseCompleted = (
       refreshPurchasePipeline
         ? input.snapshot.purchaseCompleted
@@ -1239,14 +1402,22 @@ export async function syncEcountPurchasingSnapshot(input: {
           : []
     )
       .filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
-      source: item.source,
-      sku: item.sku,
-      purchaseManagementCode: item.purchaseManagementCode,
-      supplierOrderNumber: item.supplierOrderNumber,
-    })))
+        source: item.source,
+        sku: item.sku,
+        purchaseManagementCode: item.purchaseManagementCode,
+        supplierOrderNumber: item.supplierOrderNumber,
+      })))
+    const selectedChinaArrived = (refreshChinaArrivals ? input.snapshot.chinaArrived : [])
+      .filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
+        source: ECOUNT_CHINA_ARRIVED_SOURCE,
+        sku: item.sku,
+        purchaseManagementCode: item.purchaseManagementCode,
+        supplierOrderNumber: item.supplierOrderNumber,
+      })))
     const snapshotManagedItems = [
       ...(refreshPurchasePipeline ? input.snapshot.activeRequests : []),
       ...selectedPurchaseCompleted,
+      ...selectedChinaArrived,
     ]
     const activeCodes = [...new Set(snapshotManagedItems
       .map((item) => item.purchaseManagementCode)
@@ -1356,26 +1527,44 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const chinaArrivedRows = (reportKinds.has('chinaInventory') ? input.snapshot.chinaInventory : []).map((item) => ({
+    const chinaArrivedRows = selectedChinaArrived.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'china_arrived' as const,
-      requestDate: input.snapshot.asOfDate,
+      requestDate: item.purchaseDate,
       sku: item.sku,
       productName: item.productName,
       optionName: item.optionName,
       requestedQuantity: item.quantity,
       actualPurchaseQuantity: item.quantity,
       chinaReceivedQuantity: item.quantity,
-      chinaReceivedAt: snapshotDate,
-      sourceCurrentState: 'Ecount China inventory',
+      chinaReceivedAt: item.purchaseDate
+        ? new Date(`${item.purchaseDate}T00:00:00.000Z`)
+        : snapshotDate,
+      chinaArrivalRequestDate: item.chinaArrivalRequestDate,
+      expectedArrivalDate: item.chinaArrivalRequestDate,
+      purchaseManagementCode: item.purchaseManagementCode,
+      supplierOrderNumber: item.supplierOrderNumber,
+      purchaseMethod: item.purchaseMethod,
+      purchaseConfirmed: true,
+      sourceCurrentState: 'Ecount purchase history',
       rawData: {
         source: ECOUNT_CHINA_ARRIVED_SOURCE,
         sourceFileName: item.sourceFileName,
         sourceRowNumber: item.sourceRowNumber,
-        snapshotAsOfDate: input.snapshot.asOfDate,
-        productType: item.productType,
-        warehouseQuantities: item.warehouseQuantities,
+        sourceDateNo: item.sourceDateNo,
+        sourceRequestFileName: item.sourceRequestFileName,
+        sourceRequestRowNumber: item.sourceRequestRowNumber,
+        purchaseOrderNumber: item.purchaseOrderNumber,
+        purchaseHistoryBridgeKey: getPurchaseHistoryBridgeKey(item),
+        pendingChinaInventorySnapshot: item.pendingChinaInventoryQuantity > 0,
+        pendingChinaInventoryQuantity: item.pendingChinaInventoryQuantity,
+        // Use the workbook's printed inventory date where it exists. The form
+        // as-of date may be later than that snapshot. On a purchase-history-
+        // only refresh retain the prior inventory baseline instead.
+        snapshotAsOfDate: reportKinds.has('chinaInventory')
+          ? input.snapshot.chinaInventorySnapshotAsOfDate ?? input.snapshot.asOfDate
+          : latestChinaInventorySnapshotAsOfDate,
         syncedByUserId: input.requestedByUserId,
         syncedAt: now.toISOString(),
       },
@@ -1522,9 +1711,15 @@ export function getEcountPurchasingRefreshScope(reportKindsInput?: EcountReportK
       ECOUNT_PURCHASE_COMPLETED_SOURCE,
     )
   }
-  if (reportKinds.has('chinaInventory')) {
+  // 중국창고도착 is always rebuilt from order-level 구매현황, never from the
+  // SKU-level China-inventory rows. An inventory-only refresh reuses the
+  // already-stored purchase-history state only to recalculate its pending
+  // inventory marker; it does not map inventory rows into arrival rows.
+  if (reportKinds.has('purchaseHistory') || reportKinds.has('chinaInventory') || refreshOutbound) {
     sourcesToReplace.push(ECOUNT_CHINA_ARRIVED_SOURCE)
-    if (!refreshPurchasePipeline) sourcesToReplace.push(ECOUNT_PURCHASE_COMPLETED_SOURCE)
+  }
+  if (reportKinds.has('chinaInventory') && !refreshPurchasePipeline) {
+    sourcesToReplace.push(ECOUNT_PURCHASE_COMPLETED_SOURCE)
   }
   if (refreshOutbound && !refreshPurchasePipeline) {
     sourcesToReplace.push(ECOUNT_PURCHASE_COMPLETED_SOURCE)

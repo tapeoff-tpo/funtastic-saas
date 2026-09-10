@@ -57,6 +57,7 @@ type SnapshotSummary = {
   files: Record<string, string>
   activeRequests: PreviewSection
   purchaseCompleted: PreviewSection & { confirmedPlanRows: number }
+  chinaArrived: PreviewSection
   chinaInventory: PreviewSection
   outboundCompleted: PreviewSection
   outboundPending: PreviewSection
@@ -288,6 +289,7 @@ function Preview({ summary, kinds }: { summary: SnapshotSummary; kinds: FileKey[
   const sections = [
     ['purchaseRequest', '발주요청(구매요청)', summary.activeRequests],
     ['purchasePlan', '구매완료·구매중', summary.purchaseCompleted],
+    ['purchaseHistory', '중국창고도착 (구매현황)', summary.chinaArrived],
     ['chinaInventory', '중국현재고', summary.chinaInventory],
     ['chinaOutbound', '한국출고 진행', summary.outboundPending],
     ['chinaOutbound', '중국출고 완료', summary.outboundCompleted],
@@ -303,7 +305,7 @@ function Preview({ summary, kinds }: { summary: SnapshotSummary; kinds: FileKey[
   return (
     <section className="rounded-lg border bg-background p-4">
       <h2 className="font-semibold">이번에 변경할 항목 미리보기</h2>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         {visibleSections.map(([, label, section]) => <StateCard key={label} label={label} value={`${section.rows.toLocaleString('ko-KR')}행 / ${section.quantity.toLocaleString('ko-KR')}개`} />)}
       </div>
       {warnings.length > 0 ? <div className="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900">{warnings.map((warning) => <p key={warning}>• {warning}</p>)}</div> : null}

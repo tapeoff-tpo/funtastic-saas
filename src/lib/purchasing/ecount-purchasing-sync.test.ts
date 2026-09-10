@@ -7,6 +7,7 @@ import {
   getPurchaseHistoryBridgeKey,
   getPurchaseHistoryBridgeKeysAfterChinaInventorySnapshot,
   parseEcountPurchasingSnapshot,
+  resolveChinaInventorySnapshotAsOfDate,
   type EcountPurchasingUpload,
 } from './ecount-purchasing-sync'
 
@@ -25,9 +26,10 @@ describe('getEcountPurchasingRefreshScope', () => {
     const historyScope = getEcountPurchasingRefreshScope(['purchaseHistory'])
     expect(historyScope.refreshPurchasePipeline).toBe(true)
     expect(historyScope.refreshOutbound).toBe(true)
+    expect(historyScope.sourcesToReplace).toContain('ecount_purchasing_snapshot_china_arrived')
   })
 
-  it('keeps an independent inventory-only update limited to inventory', () => {
+  it('rebuilds order-level China arrivals from purchase history on an inventory refresh', () => {
     const scope = getEcountPurchasingRefreshScope(['chinaInventory'])
     expect(scope.refreshPurchasePipeline).toBe(false)
     expect(scope.refreshOutbound).toBe(false)
@@ -43,6 +45,7 @@ describe('getEcountPurchasingRefreshScope', () => {
     expect(scope.refreshOutbound).toBe(true)
     expect(scope.sourcesToReplace).toEqual(expect.arrayContaining([
       'ecount_purchasing_snapshot_purchase_completed',
+      'ecount_purchasing_snapshot_china_arrived',
       'ecount_purchasing_snapshot_outbound',
       'ecount_purchasing_snapshot_outbound_completed',
     ]))
@@ -50,6 +53,11 @@ describe('getEcountPurchasingRefreshScope', () => {
 })
 
 describe('parseEcountPurchasingSnapshot', () => {
+  it('keeps the printed China-inventory date ahead of a later upload timestamp', () => {
+    expect(resolveChinaInventorySnapshotAsOfDate('2026-09-07', '2026-09-10')).toBe('2026-09-07')
+    expect(resolveChinaInventorySnapshotAsOfDate(null, '2026-09-10')).toBe('2026-09-10')
+  })
+
   it('uses the printed China-inventory snapshot date to restore newer stored purchase history', async () => {
     const chinaInventory = await makeUpload(
       'ESZ018R.xlsx',
@@ -78,8 +86,15 @@ describe('parseEcountPurchasingSnapshot', () => {
         '주문서번호 (C)': '3316362603001063953',
       },
     ], snapshotDate)
+    const parsedSnapshot = await parseEcountPurchasingSnapshot({
+      files: [chinaInventory],
+      domesticInventoryReflectedThrough: '2026-08-31',
+      asOfDate: '2026-08-31',
+      allowMissingReports: true,
+    })
 
     expect(snapshotDate).toBe('2026-08-26')
+    expect(parsedSnapshot.chinaInventorySnapshotAsOfDate).toBe('2026-08-26')
     expect(keys).toEqual([getPurchaseHistoryBridgeKey({
       sourceDateNo: '20260827-2',
       sku: '112194-0001',
@@ -109,6 +124,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     ])
     expect(snapshot.activeRequests).toEqual([])
     expect(snapshot.purchaseCompleted).toEqual([])
+    expect(snapshot.chinaArrived).toEqual([])
     expect(snapshot.outboundPending).toEqual([])
   })
 
@@ -419,7 +435,7 @@ describe('parseEcountPurchasingSnapshot', () => {
     }))
   })
 
-  it('keeps a newly arrived purchase in the pipeline despite older China stock for the same SKU', async () => {
+  it('keeps a newly arrived purchase as an identified China arrival with a pending-inventory marker', async () => {
     const files = await Promise.all([
       makeUpload('purchase-plan.xlsx', [
         '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
@@ -458,14 +474,17 @@ describe('parseEcountPurchasingSnapshot', () => {
       })],
     })
 
-    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining({
-      source: 'ecount_purchasing_snapshot_purchase_completed',
+    expect(snapshot.purchaseCompleted).not.toContainEqual(expect.objectContaining({
+      sku: '112194-0001',
+    }))
+    expect(snapshot.chinaArrived).toContainEqual(expect.objectContaining({
       sku: '112194-0001',
       quantity: 20,
       purchaseManagementCode: '20260819-110151-88',
       supplierOrderNumber: '3316362603001063953',
+      pendingChinaInventoryQuantity: 20,
     }))
-    expect(snapshot.purchaseCompleted
+    expect(snapshot.chinaArrived
       .filter((item) => item.sku === '112194-0001')
       .reduce((sum, item) => sum + item.quantity, 0))
       .toBe(20)
@@ -483,7 +502,7 @@ describe('parseEcountPurchasingSnapshot', () => {
         '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
         '구입관리코드', '주문서번호', '출고관리코드',
       ], [
-        ['112194-0001', '20260828-1', '히카리 슬림형 쌀통', '화이트', 20, '2026-08-28', 'OTHER-CODE', '3316362603001063953', 'OUT-88'],
+        ['112194-0001', '20260828-1', '히카리 슬림형 쌀통', '화이트', 20, '2026-08-28', '', '3316362603001063953', 'OUT-88'],
       ]),
     ])
 
@@ -502,8 +521,7 @@ describe('parseEcountPurchasingSnapshot', () => {
       })],
     })
 
-    expect(snapshot.purchaseCompleted).not.toContainEqual(expect.objectContaining({
-      source: 'ecount_purchasing_snapshot_purchase_completed',
+    expect(snapshot.chinaArrived).not.toContainEqual(expect.objectContaining({
       sku: '112194-0001',
     }))
   })
@@ -539,15 +557,201 @@ describe('parseEcountPurchasingSnapshot', () => {
       })],
     })
 
-    expect(snapshot.purchaseCompleted).toContainEqual(expect.objectContaining({
-      source: 'ecount_purchasing_snapshot_purchase_completed',
+    expect(snapshot.chinaArrived).toContainEqual(expect.objectContaining({
       sku: '112194-0001',
       quantity: 60,
+      purchaseManagementCode: '20260819-110151-88',
+      supplierOrderNumber: '3316362603001063953',
+      pendingChinaInventoryQuantity: 60,
     }))
     expect(snapshot.outboundCompleted).toContainEqual(expect.objectContaining({
       sku: '112194-0001',
       quantity: 40,
     }))
+  })
+
+  it('marks only the globally unshipped recent arrival as pending inventory', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260820-1', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 100, '', 'PO-OLD', 'P-1', '확인', '3316362603001063953'],
+        ['20260827-2', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 100, '', 'PO-NEW', 'P-1', '확인', '3316362603001063953'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['112194-0001', '20260828-1', '히카리 슬림형 쌀통', '화이트', 100, '2026-08-28', 'P-1', '3316362603001063953', 'OUT-1'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-27',
+      asOfDate: '2026-08-28',
+      allowMissingReports: true,
+      purchaseHistoryBridgeKeys: [getPurchaseHistoryBridgeKey({
+        sourceDateNo: '20260827-2',
+        sku: '112194-0001',
+        optionName: '화이트',
+        purchaseManagementCode: 'P-1',
+        purchaseOrderNumber: 'PO-NEW',
+        supplierOrderNumber: '3316362603001063953',
+      })],
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sourceDateNo: '20260827-2',
+        quantity: 100,
+        pendingChinaInventoryQuantity: 100,
+      }),
+    ])
+  })
+
+  it('uses the management code as the primary China-outbound match key', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        // Intentionally list order B first. Within a shared management-code
+        // group, the management code is authoritative, so the earliest row is
+        // consumed before the supplier-order fallback is considered.
+        ['20260827-1', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 10, '', 'PO-B', 'P-SHARED', '확인', '3316362603001063952'],
+        ['20260827-2', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 10, '', 'PO-A', 'P-SHARED', '확인', '3316362603001063951'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['112194-0001', '20260828-1', '히카리 슬림형 쌀통', '화이트', 10, '2026-08-28', 'P-SHARED', '3316362603001063951', 'OUT-A'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-27',
+      asOfDate: '2026-08-28',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sku: '112194-0001',
+        quantity: 10,
+        purchaseManagementCode: 'P-SHARED',
+        supplierOrderNumber: '3316362603001063951',
+      }),
+    ])
+    expect(snapshot.validation.outboundRowsWithIdentifierMismatch).toBe(0)
+  })
+
+  it('keeps distinct supplier orders separate when the management code is unavailable', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260827-1', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 10, '', 'PO-B', '', '확인', '3316362603001063952'],
+        ['20260827-2', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 10, '', 'PO-A', '', '확인', '3316362603001063951'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['112194-0001', '20260828-1', '히카리 슬림형 쌀통', '화이트', 10, '2026-08-28', '', '3316362603001063951', 'OUT-A'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-27',
+      asOfDate: '2026-08-28',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sku: '112194-0001',
+        quantity: 10,
+        purchaseManagementCode: null,
+        supplierOrderNumber: '3316362603001063952',
+      }),
+    ])
+  })
+
+  it('allocates a supplier-fallback outbound only once across management-code groups', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260827-1', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 100, '', 'PO-M1', 'P-M1', '확인', '3316362603001063951'],
+        ['20260827-2', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 100, '', 'PO-M2', 'P-M2', '확인', '3316362603001063951'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['112194-0001', '20260828-1', '히카리 슬림형 쌀통', '화이트', 100, '2026-08-28', '', '3316362603001063951', 'OUT-A'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-27',
+      asOfDate: '2026-08-28',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sku: '112194-0001',
+        quantity: 100,
+        purchaseManagementCode: 'P-M2',
+        supplierOrderNumber: '3316362603001063951',
+      }),
+    ])
+  })
+
+  it('reports a supplier-order mismatch within a matching management-code group', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260827-1', '중국창고', '112194-0001', '히카리 슬림형 쌀통', '화이트', 10, '3316362603001063952', '개인', 'P-SHARED', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260827-1', '112194-0001', '히카리 슬림형 쌀통', '화이트', '', 10, '', 'PO-A', 'P-SHARED', '확인', '3316362603001063951'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['112194-0001', '20260828-1', '히카리 슬림형 쌀통', '화이트', 10, '2026-08-28', 'P-SHARED', '3316362603001063952', 'OUT-B'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-08-27',
+      asOfDate: '2026-08-28',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([])
+    expect(snapshot.validation.planRowsWithIdentifierMismatch).toBe(1)
+    expect(snapshot.validation.outboundRowsWithIdentifierMismatch).toBe(1)
+    expect(snapshot.warnings.join(' ')).toContain(
+      '구입관리코드는 구매현황과 일치하지만 주문서번호가 다릅니다',
+    )
   })
 
   it('matches orderless outbound rows by purchase management code and sku', async () => {

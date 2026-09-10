@@ -11,6 +11,8 @@ import {
   isDomesticPurchaseProduct,
   isDiscontinuedPurchaseProduct,
   isExcludedPurchaseRecommendation,
+  isPendingChinaInventorySnapshot,
+  purchasePipelineQuantity,
 } from './purchase-recommendations'
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
 
@@ -22,6 +24,32 @@ describe('purchase minimum quantities', () => {
     expect(applyPurchaseMinimumQuantity(10)).toBe(10)
     expect(applyPurchaseMinimumQuantity(11)).toBe(20)
     expect(applyPurchaseMinimumQuantity(27)).toBe(30)
+  })
+})
+
+describe('China-arrival purchase pipeline', () => {
+  it('counts only the amount missing from the latest China-inventory snapshot', () => {
+    expect(purchasePipelineQuantity({
+      status: 'china_arrived',
+      requestedQuantity: 400,
+      actualPurchaseQuantity: 400,
+      chinaReceivedQuantity: 400,
+      rawData: {
+        pendingChinaInventorySnapshot: true,
+        pendingChinaInventoryQuantity: 20,
+      },
+    })).toBe(20)
+  })
+
+  it('does not count a China-arrival row already reflected in China inventory', () => {
+    expect(isPendingChinaInventorySnapshot({ pendingChinaInventorySnapshot: false })).toBe(false)
+    expect(purchasePipelineQuantity({
+      status: 'china_arrived',
+      requestedQuantity: 400,
+      actualPurchaseQuantity: 400,
+      chinaReceivedQuantity: 400,
+      rawData: { pendingChinaInventorySnapshot: false },
+    })).toBe(0)
   })
 })
 

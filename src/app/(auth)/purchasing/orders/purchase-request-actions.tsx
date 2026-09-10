@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Check, Download, Loader2, Plus, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
+import { Check, ChevronDown, Download, Loader2, Plus, Save, Sparkles, Trash2, Upload, WalletCards } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -208,33 +208,61 @@ export function PurchaseBulkInventoryReflectedButton() {
 
 export function CompletedOutboundDateFilter({
   dates,
-  selectedDate,
+  selectedDates,
 }: {
   dates: Array<{ date: string; count: number }>
-  selectedDate: string
+  selectedDates: string[]
 }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const selected = dates.find((item) => item.date === selectedDate)
+  const menuRef = useRef<HTMLDetailsElement>(null)
+  const [draftDates, setDraftDates] = useState<string[]>(selectedDates)
+  const selectedDateSet = new Set(selectedDates)
+  const selectedCount = dates
+    .filter((item) => selectedDateSet.has(item.date))
+    .reduce((total, item) => total + item.count, 0)
+  const selectedLabel = selectedDates.length === 0
+    ? '출고날짜 전체'
+    : selectedDates.length === 1
+      ? (() => {
+        const selected = dates.find((item) => item.date === selectedDates[0])
+        return selected ? `${selected.date} (${selected.count.toLocaleString('ko-KR')}건)` : selectedDates[0]
+      })()
+      : `출고날짜 ${selectedDates.length.toLocaleString('ko-KR')}개 선택`
 
-  function changeDate(value: string) {
+  useEffect(() => {
+    setDraftDates(selectedDates)
+  }, [selectedDates])
+
+  function applyDates(nextDates: string[]) {
     const params = new URLSearchParams(window.location.search)
-    if (value) params.set('outboundDate', value)
-    else params.delete('outboundDate')
+    params.delete('outboundDate')
+    nextDates.forEach((date) => params.append('outboundDate', date))
     params.delete('page')
-    router.push(`${window.location.pathname}?${params.toString()}`)
+    const query = params.toString()
+    router.push(query ? `${window.location.pathname}?${query}` : window.location.pathname)
+    menuRef.current?.removeAttribute('open')
   }
 
-  function reflectDate() {
-    if (!selected) return
-    if (!window.confirm(`${selected.date} 출고완료 ${selected.count.toLocaleString('ko-KR')}건을 목록에서 삭제하시겠습니까?`)) return
+  function toggleDate(date: string) {
+    setDraftDates((current) => (
+      current.includes(date)
+        ? current.filter((item) => item !== date)
+        : [...current, date]
+    ))
+  }
+
+  function reflectDates() {
+    if (selectedDates.length === 0) return
+    const selectedDateText = selectedDates.length === 1 ? selectedDates[0] : `${selectedDates.length.toLocaleString('ko-KR')}개 날짜`
+    if (!window.confirm(`${selectedDateText} 출고완료 ${selectedCount.toLocaleString('ko-KR')}건을 목록에서 삭제하시겠습니까?`)) return
     if (!window.confirm('정말 삭제하시겠습니까? 국내재고 반영이 완료된 경우에만 진행해주세요.')) return
 
     startTransition(async () => {
       const response = await fetch('/api/purchasing/purchase-requests/reflected-outbound', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ outboundDate: selected.date }),
+        body: JSON.stringify({ outboundDates: selectedDates }),
       })
       const body = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -245,20 +273,56 @@ export function CompletedOutboundDateFilter({
       const params = new URLSearchParams(window.location.search)
       params.delete('outboundDate')
       params.delete('page')
-      router.push(`${window.location.pathname}?${params.toString()}`)
+      const query = params.toString()
+      router.push(query ? `${window.location.pathname}?${query}` : window.location.pathname)
       router.refresh()
     })
   }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select value={selectedDate} onChange={(event) => changeDate(event.target.value)} className="h-8 rounded-md border border-input bg-background px-2 text-xs">
-        <option value="">출고날짜 전체</option>
-        {dates.map((item) => <option key={item.date} value={item.date}>{item.date} ({item.count.toLocaleString('ko-KR')}건)</option>)}
-      </select>
-      <Button type="button" size="sm" variant="destructive" disabled={!selected || isPending} onClick={reflectDate}>
+      <details ref={menuRef} className="relative">
+        <summary className="flex h-8 cursor-pointer list-none items-center gap-1 rounded-md border border-input bg-background px-2 text-xs marker:content-none hover:bg-muted">
+          <span className="max-w-44 truncate">{selectedLabel}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+        </summary>
+        <div className="absolute right-0 z-30 mt-1 w-64 rounded-md border bg-popover p-2 shadow-lg">
+          <div className="mb-2 flex items-center justify-between gap-2 border-b pb-2">
+            <span className="text-xs font-medium">출고날짜 선택</span>
+            <button
+              type="button"
+              onClick={() => setDraftDates([])}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              전체 선택 해제
+            </button>
+          </div>
+          <div className="max-h-64 space-y-1 overflow-y-auto pr-1">
+            {dates.map((item) => (
+              <label key={item.date} className="flex cursor-pointer items-center justify-between gap-2 rounded px-1.5 py-1 text-xs hover:bg-muted">
+                <span className="flex min-w-0 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={draftDates.includes(item.date)}
+                    onChange={() => toggleDate(item.date)}
+                    className="size-3.5"
+                  />
+                  <span>{item.date}</span>
+                </span>
+                <span className="shrink-0 text-muted-foreground">{item.count.toLocaleString('ko-KR')}건</span>
+              </label>
+            ))}
+          </div>
+          <div className="mt-2 flex justify-end border-t pt-2">
+            <Button type="button" size="sm" onClick={() => applyDates(draftDates)}>
+              {draftDates.length === 0 ? '전체 적용' : `${draftDates.length.toLocaleString('ko-KR')}개 날짜 적용`}
+            </Button>
+          </div>
+        </div>
+      </details>
+      <Button type="button" size="sm" variant="destructive" disabled={selectedDates.length === 0 || isPending} onClick={reflectDates}>
         {isPending ? <Loader2 className="animate-spin" /> : <Trash2 />}
-        해당 날짜 전체 삭제
+        선택 날짜 전체 삭제
       </Button>
     </div>
   )
@@ -535,6 +599,7 @@ export function PurchasePaginationControls({
   basePath,
   status,
   search,
+  outboundDates,
   showCosts,
   showRecommendationBasis,
   sort,
@@ -546,6 +611,7 @@ export function PurchasePaginationControls({
   basePath: string
   status: PurchaseRequestStatus | undefined
   search: string | undefined
+  outboundDates: string[]
   showCosts: boolean
   showRecommendationBasis: boolean
   sort: string | undefined
@@ -561,6 +627,7 @@ export function PurchasePaginationControls({
     const params = new URLSearchParams()
     if (status) params.set('status', status)
     if (search) params.set('search', search)
+    outboundDates.forEach((date) => params.append('outboundDate', date))
     if (showCosts) params.set('showCosts', '1')
     params.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
     if (sort) params.set('sort', sort)

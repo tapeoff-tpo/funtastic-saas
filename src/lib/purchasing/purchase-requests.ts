@@ -590,7 +590,8 @@ export async function getPurchaseRequests(input: {
   pageSize?: number
   sort?: string
   order?: string
-  outboundDate?: string
+  /** Completed-outbound date groups selected in the list filter. */
+  outboundDates?: readonly string[]
   exchangeRateKrw?: number
 }) {
   await ensurePurchasePaymentTrackingSchema()
@@ -629,8 +630,11 @@ export async function getPurchaseRequests(input: {
       conditions.push(gt(purchaseRequestItems.requestedQuantity, 0))
     }
   }
-  if (input.status === 'completed' && input.outboundDate) {
-    conditions.push(eq(purchaseRequestItems.outboundExpectedDate, input.outboundDate))
+  if (input.status === 'completed' && input.outboundDates?.length) {
+    conditions.push(inArray(
+      purchaseRequestItems.outboundExpectedDate,
+      [...new Set(input.outboundDates)],
+    ))
   }
   if (input.search) {
     const pattern = `%${input.search}%`

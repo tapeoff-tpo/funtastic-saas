@@ -9,6 +9,14 @@ import {
   sortPurchasePaymentFlowItems,
 } from './purchase-requests'
 import { PURCHASE_REQUEST_STATUS_LABELS } from './purchase-request-status'
+import { completedOutboundCleanupCutoffDate } from './reflected-outbound-items'
+
+describe('completed outbound cleanup cutoff', () => {
+  it('uses the KST calendar date and includes rows exactly 14 days old', () => {
+    expect(completedOutboundCleanupCutoffDate(new Date('2026-09-09T14:59:59.999Z'))).toBe('2026-08-26')
+    expect(completedOutboundCleanupCutoffDate(new Date('2026-09-09T15:00:00.000Z'))).toBe('2026-08-27')
+  })
+})
 
 describe('normalize purchase request quantity', () => {
   it('accepts positive integer quantities', () => {

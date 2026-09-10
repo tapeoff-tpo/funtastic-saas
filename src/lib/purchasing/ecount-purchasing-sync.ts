@@ -6,7 +6,10 @@ import {
   chinaWarehouseInventory,
   purchaseRequestItems,
 } from '@/lib/db/schema'
-import { getReflectedOutboundMatchKeys } from './reflected-outbound-items'
+import {
+  cleanupExpiredCompletedOutboundItems,
+  getReflectedOutboundMatchKeys,
+} from './reflected-outbound-items'
 import { getIgnoredPurchasingItemKeys, purchasingItemIdentity } from './ignored-purchasing-items'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
@@ -1215,7 +1218,8 @@ export async function syncEcountPurchasingSnapshot(input: {
 }) {
   const reflectedOutboundMatchKeys = await getReflectedOutboundMatchKeys(input.userId)
   const ignoredPurchasingItemKeys = await getIgnoredPurchasingItemKeys(input.userId)
-  return db.transaction(async (tx) => {
+  const refreshOutbound = getEcountPurchasingRefreshScope(input.reportKinds).refreshOutbound
+  const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
 
     const {
@@ -1492,6 +1496,15 @@ export async function syncEcountPurchasingSnapshot(input: {
       chinaInventoryQuantity: reportKinds.has('chinaInventory') ? sumQuantities(input.snapshot.chinaInventory) : 0,
     }
   })
+
+  if (refreshOutbound) {
+    await cleanupExpiredCompletedOutboundItems({
+      userId: input.userId,
+      reflectedByUserId: input.requestedByUserId,
+    })
+  }
+
+  return result
 }
 
 export function getEcountPurchasingRefreshScope(reportKindsInput?: EcountReportKind[]) {

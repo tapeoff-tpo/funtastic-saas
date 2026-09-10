@@ -7,7 +7,8 @@ import { createClient } from '@/lib/supabase/server'
 const bodySchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(500).optional(),
   outboundDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-}).refine((value) => Boolean(value.outboundDate || value.ids?.length), {
+  outboundDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(100).optional(),
+}).refine((value) => Boolean(value.outboundDate || value.outboundDates?.length || value.ids?.length), {
   message: '선택 항목 또는 출고날짜가 필요합니다.',
 })
 
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
       reflectedByUserId: user.id,
       ids: body.data.ids,
       outboundDate: body.data.outboundDate,
+      outboundDates: body.data.outboundDates,
     })
     return NextResponse.json(result)
   } catch (error) {

@@ -6,6 +6,7 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import { calculatePurchaseCosts } from '@/lib/purchasing/purchase-costs'
 import { isPurchaseDelayTrackingDate } from '@/lib/purchasing/purchase-delay'
+import { cleanupExpiredCompletedOutboundItems } from '@/lib/purchasing/reflected-outbound-items'
 import {
   getCompletedOutboundDateOptions,
   getOutboundRequestedQuantity,
@@ -98,15 +99,20 @@ export async function PurchasingOrdersView({
   const showCosts = stringParam(params.showCosts) === '1'
   const sort = stringParam(params.sort)
   const order = parseOrder(stringParam(params.order)) ?? 'desc'
-  const outboundDate = /^\d{4}-\d{2}-\d{2}$/.test(stringParam(params.outboundDate) ?? '')
-    ? stringParam(params.outboundDate)!
-    : ''
+  const selectedOutboundDates = parseOutboundDates(params.outboundDate)
+  const outboundDates = status === 'completed' ? selectedOutboundDates : []
 
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
   const workspaceUserId = await getWorkspaceUserId(user.id)
+  const completedOutboundAutoCleanup = status === 'completed'
+    ? await cleanupExpiredCompletedOutboundItems({
+      userId: workspaceUserId,
+      reflectedByUserId: user.id,
+    })
+    : null
   const exchangeRateReference = await getLatestCnyKrwReferenceRate()
   const initialPurchaseRequestResult = await getPurchaseRequests({
     userId: workspaceUserId,
@@ -117,7 +123,7 @@ export async function PurchasingOrdersView({
     pageSize,
     sort: sort ?? undefined,
     order,
-    outboundDate: status === 'completed' ? outboundDate : undefined,
+    outboundDates: outboundDates.length > 0 ? outboundDates : undefined,
     exchangeRateKrw: exchangeRateReference.rate,
   })
   let purchaseRequestResult = initialPurchaseRequestResult
@@ -133,7 +139,7 @@ export async function PurchasingOrdersView({
       pageSize,
       sort: sort ?? undefined,
       order,
-      outboundDate: status === 'completed' ? outboundDate : undefined,
+      outboundDates: outboundDates.length > 0 ? outboundDates : undefined,
       exchangeRateKrw: exchangeRateReference.rate,
     })
   }
@@ -194,6 +200,7 @@ export async function PurchasingOrdersView({
   if (pageSize !== 50) costToggleParams.set('pageSize', String(pageSize))
   if (sort) costToggleParams.set('sort', sort)
   if (order) costToggleParams.set('order', order)
+  appendOutboundDateParams(costToggleParams, selectedOutboundDates)
   costToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (!showCosts) costToggleParams.set('showCosts', '1')
   const costToggleHref = `${basePath}?${costToggleParams.toString()}`
@@ -204,6 +211,7 @@ export async function PurchasingOrdersView({
   if (pageSize !== 50) basisToggleParams.set('pageSize', String(pageSize))
   if (sort) basisToggleParams.set('sort', sort)
   if (order) basisToggleParams.set('order', order)
+  appendOutboundDateParams(basisToggleParams, selectedOutboundDates)
   if (showCosts) basisToggleParams.set('showCosts', '1')
   basisToggleParams.set('showRecommendationBasis', showRecommendationBasis ? '0' : '1')
   const basisToggleHref = `${basePath}?${basisToggleParams.toString()}`
@@ -212,6 +220,17 @@ export async function PurchasingOrdersView({
   if (overdueOnly) excelExportParams.set('overdueOnly', '1')
   if (search) excelExportParams.set('search', search)
   const excelExportHref = `/api/purchasing/purchase-requests/export?${excelExportParams.toString()}`
+  const sortHeaderProps = {
+    status: selectedStatus,
+    search,
+    outboundDates: selectedOutboundDates,
+    showCosts,
+    showRecommendationBasis,
+    currentSort: sort,
+    currentOrder: order,
+    basePath,
+    pageSize,
+  }
 
   return (
     <div className="space-y-4">
@@ -225,6 +244,7 @@ export async function PurchasingOrdersView({
         </div>
         <form className="flex items-center gap-2" action={basePath}>
           {selectedStatus ? <input type="hidden" name="status" value={selectedStatus} /> : null}
+          {selectedOutboundDates.map((date) => <input key={date} type="hidden" name="outboundDate" value={date} />)}
           {showCosts ? <input type="hidden" name="showCosts" value="1" /> : null}
           <input type="hidden" name="showRecommendationBasis" value={showRecommendationBasis ? '1' : '0'} />
           {pageSize !== 50 ? <input type="hidden" name="pageSize" value={pageSize} /> : null}
@@ -242,6 +262,19 @@ export async function PurchasingOrdersView({
 
       {showRecommendationGenerator ? (
         <PurchaseRecommendationGenerator initialTargetStockMonths={latestTargetStockMonths} />
+      ) : null}
+
+      {completedOutboundAutoCleanup && completedOutboundAutoCleanup.reflectedCount > 0 ? (
+        <section className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">
+          <strong>중국출고완료 자동 정리</strong>
+          <span className="ml-2">
+            출고일 기준 14일이 지난 {completedOutboundAutoCleanup.reflectedCount.toLocaleString('ko-KR')}건 · {completedOutboundAutoCleanup.reflectedQuantity.toLocaleString('ko-KR')}개를 목록에서 정리했습니다.
+            같은 중국출고 원본을 다시 반영해도 다시 나타나지 않습니다.
+            {completedOutboundAutoCleanup.skippedMissingMatchKeyCount > 0
+              ? ` 식별키가 없는 ${completedOutboundAutoCleanup.skippedMissingMatchKeyCount.toLocaleString('ko-KR')}건은 안전하게 남겨뒀습니다.`
+              : ''}
+          </span>
+        </section>
       ) : null}
 
       {newProductFirstSaleItems.length > 0 ? (
@@ -339,6 +372,7 @@ export async function PurchasingOrdersView({
               showRecommendationBasis,
               sort,
               order,
+              outboundDates: selectedOutboundDates,
               pageSize,
             })
             return (
@@ -369,6 +403,7 @@ export async function PurchasingOrdersView({
             showRecommendationBasis,
             sort,
             order,
+            outboundDates: selectedOutboundDates,
             pageSize,
           })
           return (
@@ -400,7 +435,7 @@ export async function PurchasingOrdersView({
               {status === 'completed' ? (
                 <CompletedOutboundDateFilter
                   dates={completedOutboundDates.flatMap((item) => item.date ? [{ date: String(item.date), count: item.count }] : [])}
-                  selectedDate={outboundDate}
+                  selectedDates={outboundDates}
                 />
               ) : null}
               {isRequestedStatus ? <PurchaseRequestCreateDialog /> : null}
@@ -435,36 +470,36 @@ export async function PurchasingOrdersView({
                   </th>
                   <th className="sticky left-12 z-20 w-px whitespace-nowrap bg-muted px-3 py-2 text-center font-medium">No.</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="상태" column="status" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />
+                    <SortHeader label="상태" column="status" {...sortHeaderProps} align="center" />
                   </th>
                   <th className="min-w-[280px] px-3 py-2 font-medium">
-                    <SortHeader label="상품" column="productName" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} />
+                    <SortHeader label="상품" column="productName" {...sortHeaderProps} />
                   </th>
                   {showPurchaseUrlColumn ? (
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">URL</th>
                   ) : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label={quantityColumn.label} column="requestedQuantity" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />
+                    <SortHeader label={quantityColumn.label} column="requestedQuantity" {...sortHeaderProps} align="center" />
                   </th>
                   {isRequestedStatus ? (
                     <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                      <SortHeader label="총 금액(₩)" column="totalCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
+                      <SortHeader label="총 금액(₩)" column="totalCostKrw" {...sortHeaderProps} align="right" />
                     </th>
                   ) : null}
                   {showCosts ? (
                     <>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(元)" column="unitCostYuan" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
+                        <SortHeader label="개당 원가(元)" column="unitCostYuan" {...sortHeaderProps} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
+                        <SortHeader label="개당 원가(₩)" column="unitCostKrw" {...sortHeaderProps} align="right" />
                       </th>
                       <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                        <SortHeader label="총 원가(元)" column="totalCostYuan" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
+                        <SortHeader label="총 원가(元)" column="totalCostYuan" {...sortHeaderProps} align="right" />
                       </th>
                       {isRequestedStatus ? null : (
                         <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                          <SortHeader label="총 원가(₩)" column="totalCostKrw" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="right" />
+                          <SortHeader label="총 원가(₩)" column="totalCostKrw" {...sortHeaderProps} align="right" />
                         </th>
                       )}
                     </>
@@ -472,14 +507,14 @@ export async function PurchasingOrdersView({
                   {showRecommendationBasis ? <th className="min-w-[360px] px-3 py-2 text-center font-medium">추천근거</th> : null}
                   {isRequestedStatus ? null : (
                     <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                      <SortHeader label="구입관리코드" column="purchaseManagementCode" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />
+                      <SortHeader label="구입관리코드" column="purchaseManagementCode" {...sortHeaderProps} align="center" />
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
                   {isRequestedStatus ? null : <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태</th>}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
-                    <SortHeader label="담당자" column="buyerName" status={selectedStatus} search={search} showCosts={showCosts} showRecommendationBasis={showRecommendationBasis} currentSort={sort} currentOrder={order} basePath={basePath} pageSize={pageSize} align="center" />
+                    <SortHeader label="담당자" column="buyerName" {...sortHeaderProps} align="center" />
                   </th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">상태 변경</th>
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">삭제</th>
@@ -679,6 +714,7 @@ export async function PurchasingOrdersView({
                 basePath={basePath}
                 status={selectedStatus}
                 search={search}
+                outboundDates={selectedOutboundDates}
                 showCosts={showCosts}
                 showRecommendationBasis={showRecommendationBasis}
                 sort={sort}
@@ -696,6 +732,7 @@ export async function PurchasingOrdersView({
                   showRecommendationBasis,
                   sort,
                   order,
+                  outboundDates: selectedOutboundDates,
                   page: Math.max(1, page - 1),
                   pageSize,
                 })}
@@ -717,6 +754,7 @@ export async function PurchasingOrdersView({
                   showRecommendationBasis,
                   sort,
                   order,
+                  outboundDates: selectedOutboundDates,
                   page: Math.min(totalPages, page + 1),
                   pageSize,
                 })}
@@ -742,6 +780,7 @@ function SortHeader({
   column,
   status,
   search,
+  outboundDates,
   showCosts,
   showRecommendationBasis,
   currentSort,
@@ -754,6 +793,7 @@ function SortHeader({
   column: string
   status: PurchaseRequestStatus | undefined
   search: string | undefined
+  outboundDates: string[]
   showCosts: boolean
   showRecommendationBasis: boolean
   currentSort: string | undefined
@@ -768,6 +808,7 @@ function SortHeader({
     basePath,
     status,
     search,
+    outboundDates,
     showCosts,
     showRecommendationBasis,
     sort: column,
@@ -919,6 +960,11 @@ function stringParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
 
+function parseOutboundDates(value: string | string[] | undefined) {
+  const values = Array.isArray(value) ? value : value ? [value] : []
+  return Array.from(new Set(values.filter((item) => /^\d{4}-\d{2}-\d{2}$/.test(item))))
+}
+
 function parseStatus(value: string | undefined, allowedStatuses: readonly PurchaseRequestStatus[]): PurchaseRequestStatus | null {
   if (!value) return null
   return allowedStatuses.includes(value as PurchaseRequestStatus) ? value as PurchaseRequestStatus : null
@@ -949,6 +995,7 @@ function purchaseOrdersHref({
   basePath,
   status,
   search,
+  outboundDates,
   showCosts,
   showRecommendationBasis,
   sort,
@@ -959,6 +1006,7 @@ function purchaseOrdersHref({
   basePath: string
   status?: PurchaseRequestStatus
   search?: string
+  outboundDates?: readonly string[]
   showCosts?: boolean
   showRecommendationBasis?: boolean
   sort?: string
@@ -969,6 +1017,7 @@ function purchaseOrdersHref({
   const params = new URLSearchParams()
   if (status) params.set('status', status)
   if (search) params.set('search', search)
+  appendOutboundDateParams(params, outboundDates)
   if (showCosts) params.set('showCosts', '1')
   if (showRecommendationBasis !== undefined) params.set('showRecommendationBasis', showRecommendationBasis ? '1' : '0')
   if (sort) params.set('sort', sort)
@@ -977,6 +1026,10 @@ function purchaseOrdersHref({
   if (pageSize && pageSize !== 50) params.set('pageSize', String(pageSize))
   const query = params.toString()
   return query ? `${basePath}?${query}` : basePath
+}
+
+function appendOutboundDateParams(params: URLSearchParams, dates: readonly string[] | undefined) {
+  dates?.forEach((date) => params.append('outboundDate', date))
 }
 
 function formatNumber(value: unknown) {

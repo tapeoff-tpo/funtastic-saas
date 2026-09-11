@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, type DragEvent } from 'react'
+import { useEffect, useState, useTransition, type DragEvent } from 'react'
 import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -74,6 +74,20 @@ const REQUIRED_FILES: readonly RawDataFile[] = [
   { key: 'discontinuedProducts', label: '단종상품 현황', detail: '단종할 품목 목록', uploadRule: '변경 목록 · 파일에 적은 SKU는 모두 단종 처리', templateHref: '/api/purchasing/discontinued-products/template' },
 ]
 
+const PURCHASING_FILE_KEYS: readonly FileKey[] = ['purchaseRequest', 'purchasePlan', 'purchaseHistory', 'chinaInventory', 'chinaOutbound']
+const SPECIAL_FILE_KEYS: readonly FileKey[] = ['domesticInventory', 'discontinuedProducts']
+
+function isExcelFile(file: File) {
+  return /\.xlsx$/i.test(file.name)
+}
+
+function getLikelySpecialFileKey(file: File): FileKey | null {
+  const name = file.name.toLowerCase()
+  if (name.includes('단종')) return 'discontinuedProducts'
+  if (/(국내\s*재고|재고\s*코드\s*관리|stock\s*code)/i.test(name)) return 'domesticInventory'
+  return null
+}
+
 export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles, dataFreshness }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles; dataFreshness: DataFreshness }) {
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
   const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
@@ -84,6 +98,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [isPending, startTransition] = useTransition()
   const selectedFiles = REQUIRED_FILES.flatMap(({ key }) => files[key] ? [files[key]!] : [])
   const selectedPurchasingFiles = REQUIRED_FILES.flatMap(({ key }) => (
@@ -94,8 +109,22 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const readyCount = REQUIRED_FILES.filter(({ key }) => files[key] || storedFiles[key]).length
   const isVerified = Boolean(preview || inventoryPreview || discontinuedPreview)
 
+  useEffect(() => {
+    // Without this, dropping a file a few pixels outside a card can make the
+    // browser navigate to the spreadsheet instead of keeping the upload page.
+    const preventFileDropNavigation = (event: globalThis.DragEvent) => {
+      if (Array.from(event.dataTransfer?.types ?? []).includes('Files')) event.preventDefault()
+    }
+    window.addEventListener('dragover', preventFileDropNavigation)
+    window.addEventListener('drop', preventFileDropNavigation)
+    return () => {
+      window.removeEventListener('dragover', preventFileDropNavigation)
+      window.removeEventListener('drop', preventFileDropNavigation)
+    }
+  }, [])
+
   function selectFile(key: FileKey, file?: File) {
-    if (file && !/\.xlsx$/i.test(file.name)) {
+    if (file && !isExcelFile(file)) {
       setError('엑셀 파일(.xlsx)만 넣을 수 있습니다.')
       return
     }
@@ -108,10 +137,79 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     setError(null)
   }
 
-  function dropFile(event: DragEvent<HTMLLabelElement>, key: FileKey) {
-    event.preventDefault()
+  function selectDroppedFiles(fileList: FileList | File[], targetKey?: FileKey) {
+    const droppedFiles = Array.from(fileList)
+    const excelFiles = droppedFiles.filter(isExcelFile)
+    const skippedFiles = droppedFiles.filter((file) => !isExcelFile(file))
+    if (excelFiles.length === 0) {
+      setError('엑셀 파일(.xlsx)만 넣을 수 있습니다.')
+      return
+    }
+
+    const next = { ...files }
+    const remainingFiles = [...excelFiles]
+    let acceptedCount = 0
+    let overflowCount = 0
+
+    if (!targetKey) {
+      // Domestic inventory and discontinued-product files use their own API
+      // endpoint, so put obvious filenames in those cards before assigning the
+      // ordinary Ecount batch. The raw-data API still makes the authoritative
+      // header-based classification for all five Ecount reports.
+      for (const specialKey of SPECIAL_FILE_KEYS) {
+        const fileIndex = remainingFiles.findIndex((file) => getLikelySpecialFileKey(file) === specialKey)
+        if (fileIndex < 0) continue
+        next[specialKey] = remainingFiles.splice(fileIndex, 1)[0]
+        acceptedCount += 1
+      }
+    }
+
+    // A file dropped directly onto a card must stay on that card. The server
+    // verifies the actual Ecount report type during preview, so this also lets
+    // someone deliberately test a file in a different card without its name
+    // silently moving it first.
+    const firstTarget = targetKey
+    const allKeys = [...PURCHASING_FILE_KEYS, ...SPECIAL_FILE_KEYS]
+    const slots = firstTarget
+      ? [firstTarget, ...allKeys.filter((key) => key !== firstTarget && !next[key])]
+      : [...PURCHASING_FILE_KEYS.filter((key) => !next[key]), ...SPECIAL_FILE_KEYS.filter((key) => !next[key])]
+
+    for (const file of remainingFiles) {
+      const slot = slots.shift()
+      if (!slot) {
+        overflowCount += 1
+        continue
+      }
+      next[slot] = file
+      acceptedCount += 1
+    }
+    setFiles(next)
+    setPreview(null)
+    setInventoryPreview(null)
+    setDiscontinuedPreview(null)
+    setPreviewKinds([])
     setDragOver(null)
-    selectFile(key, event.dataTransfer.files[0])
+    setIsDraggingFiles(false)
+
+    const details = [
+      `${acceptedCount}개 파일을 임시 선택했습니다. 미리보기·검증에서 파일 종류와 내용을 확인하세요.`,
+      skippedFiles.length > 0 ? `.xlsx가 아닌 ${skippedFiles.length}개 파일은 제외했습니다.` : null,
+      overflowCount > 0 ? `빈 업로드 칸이 없어 ${overflowCount}개 파일은 제외했습니다.` : null,
+    ].filter(Boolean)
+    setMessage(details.join(' '))
+    setError(null)
+  }
+
+  function dropFile(event: DragEvent<HTMLElement>, key?: FileKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    selectDroppedFiles(event.dataTransfer.files, key)
+  }
+
+  function onFileInputChange(key: FileKey, fileList: FileList | null, input: HTMLInputElement) {
+    if (fileList) selectDroppedFiles(fileList, key)
+    // Lets the user choose the same file again after removing or replacing it.
+    input.value = ''
   }
 
   function submit(mode: 'preview' | 'apply') {
@@ -203,13 +301,37 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
 
   return (
     <div className="space-y-4">
-      <section className="rounded-lg border bg-background p-4">
+      <section
+        className={`rounded-lg border bg-background p-4 transition-colors ${isDraggingFiles ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : ''}`}
+        onDragEnter={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes('Files')) return
+          event.preventDefault()
+          setIsDraggingFiles(true)
+        }}
+        onDragOver={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes('Files')) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+          setIsDraggingFiles(true)
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setIsDraggingFiles(false)
+            setDragOver(null)
+          }
+        }}
+        onDrop={(event) => dropFile(event)}
+      >
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
             <p className="mt-1 text-sm text-muted-foreground">이력 파일은 마지막 반영분 이후만 넣으면 서버 누적본에 합쳐집니다. 중국·국내재고는 전체 최신본, 단종상품은 품목코드·품목명·옵션 목록만 넣으세요.</p>
           </div>
           <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 7 준비 · {selectedFiles.length}개 변경</span>
+        </div>
+        <div className={`mt-3 flex items-center gap-2 rounded-md border border-dashed px-3 py-2 text-sm transition-colors ${isDraggingFiles ? 'border-primary bg-background text-primary' : 'border-muted-foreground/30 text-muted-foreground'}`}>
+          <Upload className="size-4 shrink-0" />
+          <span>{isDraggingFiles ? '여기에 놓으면 파일을 추가합니다.' : '파일을 카드 어디에나, 또는 이 영역에 여러 개 한꺼번에 드래그해 놓을 수 있습니다.'}</span>
         </div>
         <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {REQUIRED_FILES.map(({ key, label, detail, uploadRule, templateHref }, index) => {
@@ -221,28 +343,37 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
             const displayedFileName = file?.name ?? stored?.fileName
             const matches = !recognized || recognized === displayedFileName
             return (
-              <label
+              <div
                 key={key}
                 className={`relative flex min-h-28 cursor-pointer gap-3 rounded-lg border-2 border-dashed p-4 transition-colors hover:bg-muted/30 ${dragOver === key ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : file ? 'border-emerald-300 bg-emerald-50/50' : stored ? 'border-sky-200 bg-sky-50/40' : 'border-muted-foreground/25'}`}
-                onDragEnter={(event) => { event.preventDefault(); setDragOver(key) }}
-                onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
+                onDragEnter={(event) => { event.preventDefault(); setIsDraggingFiles(true); setDragOver(key) }}
+                onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFiles(true); setDragOver(key) }}
                 onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(null) }}
                 onDrop={(event) => dropFile(event, key)}
               >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">{file || stored ? <Check className={`size-4 ${file ? 'text-emerald-700' : 'text-sky-700'}`} /> : index + 1}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{label}</span>
-                  <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
-                  <span className="mt-1 block text-xs font-medium text-sky-800">{uploadRule}</span>
-                  {templateHref ? <a href={templateHref} className="mt-1 inline-block text-xs font-medium text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>단종상품 양식 다운로드</a> : null}
-                  <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : stored ? 'text-sky-800' : 'text-muted-foreground'}`}>{file?.name ?? (stored ? `저장됨: ${stored.fileName}` : '여기에 드래그하거나 클릭해서 .xlsx 선택')}</span>
-                  {!file && stored ? <span className="mt-1 block text-xs text-muted-foreground">마지막 등록: {formatKstTimestamp(stored.updatedAt)}</span> : null}
-                  {key === 'domesticInventory' && !file ? <span className="mt-1 block text-xs text-muted-foreground">마지막 반영: {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span> : null}
-                  {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
-                </span>
-                {file ? <button type="button" aria-label={`${label} 파일 제거`} className="rounded p-1 hover:bg-background" onClick={(event) => { event.preventDefault(); selectFile(key) }}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 text-muted-foreground" />}
-                <input type="file" accept=".xlsx" className="sr-only" onChange={(event) => selectFile(key, event.target.files?.[0])} />
-              </label>
+                <label htmlFor={`raw-data-file-${key}`} className={`flex min-w-0 flex-1 cursor-pointer gap-3 ${templateHref ? 'pb-5' : ''}`}>
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">{file || stored ? <Check className={`size-4 ${file ? 'text-emerald-700' : 'text-sky-700'}`} /> : index + 1}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{label}</span>
+                    <span className="mt-0.5 block text-xs text-muted-foreground">{detail}</span>
+                    <span className="mt-1 block text-xs font-medium text-sky-800">{uploadRule}</span>
+                    <span className={`mt-3 block truncate text-sm ${file ? 'font-medium text-emerald-800' : stored ? 'text-sky-800' : 'text-muted-foreground'}`}>{file?.name ?? (stored ? `저장됨: ${stored.fileName}` : '여기에 드래그하거나 클릭해서 .xlsx 선택')}</span>
+                    {!file && stored ? <span className="mt-1 block text-xs text-muted-foreground">마지막 등록: {formatKstTimestamp(stored.updatedAt)}</span> : null}
+                    {key === 'domesticInventory' && !file ? <span className="mt-1 block text-xs text-muted-foreground">마지막 반영: {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span> : null}
+                    {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
+                  </span>
+                </label>
+                {templateHref ? <a href={templateHref} className="absolute bottom-3 left-14 text-xs font-medium text-primary underline underline-offset-2">단종상품 양식 다운로드</a> : null}
+                {file ? <button type="button" aria-label={`${label} 파일 제거`} className="shrink-0 rounded p-1 hover:bg-background" onClick={() => selectFile(key)}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 shrink-0 text-muted-foreground" />}
+                <input
+                  id={`raw-data-file-${key}`}
+                  type="file"
+                  accept=".xlsx"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => onFileInputChange(key, event.target.files, event.currentTarget)}
+                />
+              </div>
             )
           })}
         </div>

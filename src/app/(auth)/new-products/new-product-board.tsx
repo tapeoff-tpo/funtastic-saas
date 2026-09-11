@@ -47,6 +47,7 @@ import {
   createNewProductAction,
   deleteNewProductAction,
   deleteNewProductsAction,
+  moveNewProductsAction,
   saveNewProductEditorLayoutAction,
   saveNewProductStagesAction,
   updateNewProductAction,
@@ -258,6 +259,23 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
     router.refresh()
   }
 
+  function handleSummaryStageChanged(itemId: string, stageId: string) {
+    const stage = initialStages.find((candidate) => candidate.id === stageId)
+    if (!stage) return
+
+    setSummaries((current) => current.map((summary) => summary.id === itemId
+      ? {
+        ...summary,
+        stageId: stage.id,
+        stageName: stage.name,
+        stageTone: stage.tone,
+        updatedAt: new Date().toISOString(),
+      }
+      : summary))
+    setDataRevision((current) => current + 1)
+    router.refresh()
+  }
+
   function changeSummarySort(nextSort: NewProductSummarySort) {
     setPage(1)
     if (sortBy === nextSort) {
@@ -356,6 +374,7 @@ export function NewProductBoard({ initialStages, initialLayout, canManageSetting
           sortDirection={sortDirection}
           onSelect={selectProduct}
           onDeleted={handleDeleted}
+          onStageChanged={handleSummaryStageChanged}
           onPageChange={setPage}
           onPageSizeChange={(nextPageSize) => {
             setPageSize(nextPageSize)
@@ -380,6 +399,7 @@ function ProductSummaryList({
   sortDirection,
   onSelect,
   onDeleted,
+  onStageChanged,
   onPageChange,
   onPageSizeChange,
   onSortChange,
@@ -395,19 +415,64 @@ function ProductSummaryList({
   sortDirection: NewProductSummarySortDirection
   onSelect: (id: string) => void
   onDeleted: () => void
+  onStageChanged: (itemId: string, stageId: string) => void
   onPageChange: (page: number) => void
   onPageSizeChange: (pageSize: number) => void
   onSortChange: (sort: NewProductSummarySort) => void
 }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [changingStageIds, setChangingStageIds] = useState<string[]>([])
+  const [pendingStageIds, setPendingStageIds] = useState<Record<string, string>>({})
+  const [, startTransition] = useTransition()
   const visibleSelectedIds = summaries.filter((summary) => selectedIds.includes(summary.id)).map((summary) => summary.id)
   const allVisibleSelected = summaries.length > 0 && visibleSelectedIds.length === summaries.length
   const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1
   const rangeEnd = Math.min(page * pageSize, total)
   const stagePositionById = new Map(stages.map((stage) => [stage.id, stage.position]))
+  const stageById = new Map(stages.map((stage) => [stage.id, stage]))
 
   function toggle(id: string) {
     setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])
+  }
+
+  function clearPendingStage(itemId: string) {
+    setPendingStageIds((current) => {
+      if (!current[itemId]) return current
+      const next = { ...current }
+      delete next[itemId]
+      return next
+    })
+  }
+
+  function changeStage(summary: NewProductSummary, stageId: string) {
+    if (stageId === summary.stageId || changingStageIds.includes(summary.id)) return
+    const stage = stageById.get(stageId)
+    if (!stage) return
+
+    setPendingStageIds((current) => ({ ...current, [summary.id]: stageId }))
+    setChangingStageIds((current) => [...new Set([...current, summary.id])])
+    startTransition(async () => {
+      try {
+        const result = await moveNewProductsAction({ itemIds: [summary.id], stageId })
+        if (!result.success) {
+          clearPendingStage(summary.id)
+          toast.error(result.error)
+          return
+        }
+        onStageChanged(summary.id, stageId)
+        clearPendingStage(summary.id)
+        if (result.itemMasterPendingCodes > 0) {
+          toast.warning(`${summary.productName} 상태를 ${stage.name}으로 변경했습니다. 사방넷코드를 입력하면 품목에 반영됩니다.`)
+        } else {
+          toast.success(`${summary.productName} 상태를 ${stage.name}으로 변경했습니다.`)
+        }
+      } catch (error) {
+        clearPendingStage(summary.id)
+        toast.error(error instanceof Error ? error.message : '상태를 변경하지 못했습니다.')
+      } finally {
+        setChangingStageIds((current) => current.filter((itemId) => itemId !== summary.id))
+      }
+    })
   }
 
   return (
@@ -466,7 +531,7 @@ function ProductSummaryList({
                   <tr
                     key={summary.id}
                     onClick={(event) => {
-                      if ((event.target as HTMLElement).closest('button, input, label')) return
+                      if ((event.target as HTMLElement).closest('button, input, label, select')) return
                       onSelect(summary.id)
                     }}
                     className={cn(
@@ -480,8 +545,20 @@ function ProductSummaryList({
                         <input type="checkbox" checked={selectedIds.includes(summary.id)} onChange={() => toggle(summary.id)} />
                       </label>
                     </td>
-                    <td className="px-3 py-3 align-middle">
-                      <span title={stageLabel} className={cn('inline-flex max-w-44 truncate rounded-full px-2 py-1 text-[11px] font-medium', toneClasses[summary.stageTone])}>{stageLabel}</span>
+                    <td className="px-3 py-3 align-middle" onClick={(event) => event.stopPropagation()}>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          aria-label={`${summary.productName} 상태`}
+                          value={pendingStageIds[summary.id] ?? summary.stageId}
+                          disabled={changingStageIds.includes(summary.id)}
+                          onChange={(event) => changeStage(summary, event.target.value)}
+                          className={cn('h-8 min-w-0 flex-1 rounded-md border border-transparent px-2 text-xs font-medium outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-wait disabled:opacity-70', toneClasses[stageById.get(pendingStageIds[summary.id] ?? summary.stageId)?.tone ?? summary.stageTone])}
+                          title={stageLabel}
+                        >
+                          {stages.map((stage) => <option key={stage.id} value={stage.id}>{stage.position}. {stage.name}</option>)}
+                        </select>
+                        {changingStageIds.includes(summary.id) ? <Loader2 className="size-4 shrink-0 animate-spin text-muted-foreground" aria-label="상태 저장 중" /> : null}
+                      </div>
                     </td>
                     <td className="w-36 truncate px-3 py-3 font-mono text-xs text-muted-foreground">
                       {summary.sampleCode || summary.productNumber || '미입력'}

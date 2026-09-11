@@ -639,12 +639,35 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
   selectedIds: string[]
   onChange: (ids: string[]) => void
 }) {
+  const detailsRef = useRef<HTMLDetailsElement>(null)
+  const [isOpen, setIsOpen] = useState(false)
   const allSelected = stages.length > 0 && selectedIds.length === stages.length
   const summary = selectedIds.length === 0
     ? '상태를 선택하세요'
     : allSelected
       ? '상태: 모두'
       : `상태: ${selectedIds.length}개 선택`
+
+  useEffect(() => {
+    if (!isOpen) return
+
+    function closeWhenClickingOutside(event: PointerEvent) {
+      if (event.target instanceof Node && !detailsRef.current?.contains(event.target)) {
+        setIsOpen(false)
+      }
+    }
+
+    function closeWithEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setIsOpen(false)
+    }
+
+    document.addEventListener('pointerdown', closeWhenClickingOutside)
+    document.addEventListener('keydown', closeWithEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeWhenClickingOutside)
+      document.removeEventListener('keydown', closeWithEscape)
+    }
+  }, [isOpen])
 
   function toggleStage(stageId: string) {
     onChange(selectedIds.includes(stageId)
@@ -653,7 +676,12 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
   }
 
   return (
-    <details className="group relative">
+    <details
+      ref={detailsRef}
+      open={isOpen}
+      onToggle={() => setIsOpen(detailsRef.current?.open ?? false)}
+      className="group relative"
+    >
       <summary className="flex h-8 cursor-pointer list-none items-center justify-between rounded-lg border border-input bg-background px-2.5 text-sm marker:content-none">
         <span className="truncate">{summary}</span>
         <span className="ml-2 text-xs text-muted-foreground transition group-open:rotate-180">⌄</span>

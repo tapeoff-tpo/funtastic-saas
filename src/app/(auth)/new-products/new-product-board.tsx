@@ -517,7 +517,7 @@ function ProductSummaryList({
                 </th>
                 <ProductSummarySortHeader label="상태" sort="status" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-48 text-left" />
                 <th className="w-36 px-3 py-2.5 text-center font-medium">상품번호</th>
-                <ProductSummarySortHeader label="상품명" sort="productName" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-[280px] text-left" />
+                <ProductSummarySortHeader label="상품명" sort="productName" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-[280px] text-center" />
                 <ProductSummarySortHeader label="등록일" sort="createdAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
                 <ProductSummarySortHeader label="수정일" sort="updatedAt" activeSort={sortBy} direction={sortDirection} onSort={onSortChange} className="w-40 text-left" />
               </tr>
@@ -564,7 +564,7 @@ function ProductSummaryList({
                       {summary.sampleCode || summary.productNumber || '미입력'}
                     </td>
                     <td className="w-[280px] px-3 py-3 align-middle">
-                      <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <button type="button" onClick={() => onSelect(summary.id)} className="block w-full text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <span title={summary.productName} className="block truncate font-semibold text-foreground">{summary.productName}</span>
                       </button>
                     </td>

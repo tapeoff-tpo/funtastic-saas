@@ -351,7 +351,25 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
                 onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(null) }}
                 onDrop={(event) => dropFile(event, key)}
               >
-                <label htmlFor={`raw-data-file-${key}`} className={`flex min-w-0 flex-1 cursor-pointer gap-3 ${templateHref ? 'pb-5' : ''}`}>
+                {/*
+                  Keep a real file input over the entire card. A visually hidden
+                  input is clickable, but is not a dependable drop target in
+                  Chrome/Windows; this native hit area handles both click and
+                  drag/drop before React's card handler normalizes the files.
+                */}
+                <input
+                  id={`raw-data-file-${key}`}
+                  aria-label={`${label} 파일 선택`}
+                  type="file"
+                  accept=".xlsx"
+                  multiple
+                  className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                  onDragEnter={(event) => { event.preventDefault(); setIsDraggingFiles(true); setDragOver(key) }}
+                  onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFiles(true); setDragOver(key) }}
+                  onDrop={(event) => dropFile(event, key)}
+                  onChange={(event) => onFileInputChange(key, event.target.files, event.currentTarget)}
+                />
+                <span className={`flex min-w-0 flex-1 gap-3 ${templateHref ? 'pb-5' : ''}`}>
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">{file || stored ? <Check className={`size-4 ${file ? 'text-emerald-700' : 'text-sky-700'}`} /> : index + 1}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block font-medium">{label}</span>
@@ -362,17 +380,9 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
                     {key === 'domesticInventory' && !file ? <span className="mt-1 block text-xs text-muted-foreground">마지막 반영: {formatKstTimestamp(dataFreshness.domesticInventoryAt)}</span> : null}
                     {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
                   </span>
-                </label>
-                {templateHref ? <a href={templateHref} className="absolute bottom-3 left-14 text-xs font-medium text-primary underline underline-offset-2">단종상품 양식 다운로드</a> : null}
-                {file ? <button type="button" aria-label={`${label} 파일 제거`} className="shrink-0 rounded p-1 hover:bg-background" onClick={() => selectFile(key)}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 shrink-0 text-muted-foreground" />}
-                <input
-                  id={`raw-data-file-${key}`}
-                  type="file"
-                  accept=".xlsx"
-                  multiple
-                  className="sr-only"
-                  onChange={(event) => onFileInputChange(key, event.target.files, event.currentTarget)}
-                />
+                </span>
+                {templateHref ? <a href={templateHref} className="absolute bottom-3 left-14 z-20 text-xs font-medium text-primary underline underline-offset-2">단종상품 양식 다운로드</a> : null}
+                {file ? <button type="button" aria-label={`${label} 파일 제거`} className="z-20 shrink-0 rounded p-1 hover:bg-background" onClick={() => selectFile(key)}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 shrink-0 text-muted-foreground" />}
               </div>
             )
           })}

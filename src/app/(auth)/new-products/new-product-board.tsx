@@ -639,7 +639,7 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
   selectedIds: string[]
   onChange: (ids: string[]) => void
 }) {
-  const detailsRef = useRef<HTMLDetailsElement>(null)
+  const filterRef = useRef<HTMLDivElement>(null)
   const [isOpen, setIsOpen] = useState(false)
   const allSelected = stages.length > 0 && selectedIds.length === stages.length
   const summary = selectedIds.length === 0
@@ -652,7 +652,13 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
     if (!isOpen) return
 
     function closeWhenClickingOutside(event: PointerEvent) {
-      if (event.target instanceof Node && !detailsRef.current?.contains(event.target)) {
+      if (event.target instanceof Node && !filterRef.current?.contains(event.target)) {
+        setIsOpen(false)
+      }
+    }
+
+    function closeWhenFocusMovesOutside(event: FocusEvent) {
+      if (event.target instanceof Node && !filterRef.current?.contains(event.target)) {
         setIsOpen(false)
       }
     }
@@ -662,9 +668,11 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
     }
 
     document.addEventListener('pointerdown', closeWhenClickingOutside)
+    document.addEventListener('focusin', closeWhenFocusMovesOutside)
     document.addEventListener('keydown', closeWithEscape)
     return () => {
       document.removeEventListener('pointerdown', closeWhenClickingOutside)
+      document.removeEventListener('focusin', closeWhenFocusMovesOutside)
       document.removeEventListener('keydown', closeWithEscape)
     }
   }, [isOpen])
@@ -676,40 +684,50 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
   }
 
   return (
-    <details
-      ref={detailsRef}
-      open={isOpen}
-      onToggle={() => setIsOpen(detailsRef.current?.open ?? false)}
-      onBlur={(event) => {
-        if (event.relatedTarget instanceof Node && detailsRef.current?.contains(event.relatedTarget)) return
-        setIsOpen(false)
-      }}
-      className="group relative"
-    >
-      <summary className="flex h-8 cursor-pointer list-none items-center justify-between rounded-lg border border-input bg-background px-2.5 text-sm marker:content-none">
+    <div ref={filterRef} className="relative">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-haspopup="true"
+        aria-controls="new-product-stage-filter"
+        onClick={() => setIsOpen((current) => !current)}
+        className="flex h-8 w-full items-center justify-between rounded-lg border border-input bg-background px-2.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <span className="truncate">{summary}</span>
-        <span className="ml-2 text-xs text-muted-foreground transition group-open:rotate-180">⌄</span>
-      </summary>
-      <div className="absolute left-0 top-full z-40 mt-1 max-h-80 w-[min(90vw,360px)] overflow-y-auto rounded-lg border bg-background p-2 shadow-xl">
-        <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-muted/60">
+        <span className={cn('ml-2 text-xs text-muted-foreground transition', isOpen && 'rotate-180')}>⌄</span>
+      </button>
+      {isOpen ? (
+        <div id="new-product-stage-filter" className="absolute left-0 top-full z-40 mt-1 max-h-80 w-[min(90vw,360px)] overflow-y-auto rounded-lg border bg-background p-2 shadow-xl">
+          <div className="flex items-center gap-2 rounded-md px-2 py-2 text-sm font-semibold hover:bg-muted/60">
           <input
             type="checkbox"
             checked={allSelected}
             onChange={() => onChange(allSelected ? [] : stages.map((stage) => stage.id))}
+            aria-label="전체 단계 선택"
           />
-          <span className="flex-1">전체 단계</span>
-          <span className="text-xs text-muted-foreground">{stages.reduce((sum, stage) => sum + stage.itemCount, 0)}</span>
-        </label>
-        <div className="my-1 border-t" />
-        {stages.map((stage, index) => (
-          <label key={stage.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted/60">
-            <input type="checkbox" checked={selectedIds.includes(stage.id)} onChange={() => toggleStage(stage.id)} />
-            <span className="min-w-0 flex-1 truncate">{index + 1}. {stage.name}</span>
-            <span className="text-xs text-muted-foreground">{stage.itemCount}</span>
-          </label>
-        ))}
-      </div>
-    </details>
+            <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => onChange(allSelected ? [] : stages.map((stage) => stage.id))}>
+              <span className="flex-1">전체 단계</span>
+              <span className="text-xs font-normal text-muted-foreground">{stages.reduce((sum, stage) => sum + stage.itemCount, 0)}</span>
+            </button>
+          </div>
+          <div className="my-1 border-t" />
+          {stages.map((stage, index) => (
+            <div key={stage.id} className="flex items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted/60">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(stage.id)}
+                onChange={() => toggleStage(stage.id)}
+                aria-label={`${index + 1}. ${stage.name} 선택`}
+              />
+              <button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => toggleStage(stage.id)}>
+                <span className="min-w-0 flex-1 truncate">{index + 1}. {stage.name}</span>
+                <span className="text-xs text-muted-foreground">{stage.itemCount}</span>
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   )
 }
 function ProductEditor({ item, stages, layout, exchangeRate, onSaved, onDeleted }: {

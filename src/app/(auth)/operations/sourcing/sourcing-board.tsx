@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Dialog } from '@base-ui/react/dialog'
 import {
@@ -80,6 +80,29 @@ type DraftOption = {
 type SheetOwner = {
   id: string | null
   displayName: string
+}
+
+type OwnerSheetSaveResult = {
+  savedCount: number
+  passedCount: number
+}
+
+type OwnerSheetHandle = {
+  save: () => Promise<OwnerSheetSaveResult>
+}
+
+type OwnerSheetProps = {
+  meetingId: string
+  owner: SheetOwner
+  rows: ManualSourcingItem[]
+  operators: SourcingOperator[]
+  canAssignOwner?: boolean
+  isEditing: boolean
+  exchangeRate: number
+  allowNewRows?: boolean
+  showSaveButton?: boolean
+  isBulkSaving?: boolean
+  onChanged: () => void
 }
 
 const manualSourcingReviewStatusLabels: Record<ManualSourcingReviewStatus, string> = {
@@ -501,10 +524,13 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
   const [status, setStatus] = useState<SourcingMeeting['status']>(meeting.status)
   const [isEditing, setIsEditing] = useState(false)
   const [pending, startTransition] = useTransition()
+  const [isSavingAll, startSavingAll] = useTransition()
+  const ownerSheetRefs = useRef(new Map<string, OwnerSheetHandle>())
   const selectedOwnerId = viewer.isMain ? activeOwnerId : viewer.operatorId
   const selectedOperator = operators.find((operator) => operator.id === selectedOwnerId) ?? null
   const canEdit = viewer.isMain || Boolean(viewer.operatorId)
   const showAllOperators = viewer.isMain && !selectedOwnerId
+  const isSaving = pending || isSavingAll
   const operatorSections = showAllOperators
     ? operators.map((operator) => ({ owner: { id: operator.id, displayName: operator.displayName }, items: meeting.items.filter((item) => item.ownerOperatorId === operator.id) }))
     : selectedOperator
@@ -533,7 +559,53 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
     })
   }
 
+  function registerOwnerSheet(ownerId: string | null) {
+    const key = ownerId ?? 'unassigned'
+    return (sheet: OwnerSheetHandle | null) => {
+      if (sheet) {
+        ownerSheetRefs.current.set(key, sheet)
+      } else {
+        ownerSheetRefs.current.delete(key)
+      }
+    }
+  }
+
+  function saveAllChanges() {
+    if (!meetingDate || !title.trim()) return
+
+    startSavingAll(async () => {
+      try {
+        const results: OwnerSheetSaveResult[] = []
+        for (const sheet of ownerSheetRefs.current.values()) {
+          results.push(await sheet.save())
+        }
+
+        const meetingResult = await updateSourcingMeetingAction({
+          meetingId: meeting.id,
+          values: { meetingDate, title, status },
+        })
+        if (!meetingResult.success) {
+          toast.error(meetingResult.error)
+          return
+        }
+
+        const savedCount = results.reduce((total, result) => total + result.savedCount, 0)
+        const passedCount = results.reduce((total, result) => total + result.passedCount, 0)
+        toast.success(passedCount > 0
+          ? `전체 ${savedCount}개 상품을 저장했고, 통과 ${passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
+          : savedCount > 0
+            ? `전체 ${savedCount}개 상품을 저장했습니다.`
+            : '소싱회의 전체 변경사항을 저장했습니다.')
+        setIsEditing(false)
+        router.refresh()
+      } catch (error) {
+        toast.error(errorMessage(error))
+      }
+    })
+  }
+
   function toggleEditing() {
+    ownerSheetRefs.current.clear()
     if (isEditing) {
       setMeetingDate(meeting.meetingDate)
       setTitle(meeting.title)
@@ -560,7 +632,13 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
             </p>
           </div>
           <div className="flex flex-wrap items-start justify-end gap-2">
-            {canEdit ? <Button type="button" variant={isEditing ? 'outline' : 'default'} onClick={toggleEditing}>{isEditing ? '수정 취소' : '수정'}</Button> : null}
+            {canEdit ? <Button type="button" variant={isEditing ? 'outline' : 'default'} onClick={toggleEditing} disabled={isSaving}>{isEditing ? '수정 취소' : '수정'}</Button> : null}
+            {showAllOperators && isEditing ? (
+              <Button type="button" onClick={saveAllChanges} disabled={isSaving || !meetingDate || !title.trim()}>
+                {isSavingAll ? <Loader2 className="animate-spin" /> : <Save />}
+                {isSavingAll ? '전체 저장 중...' : '전체 변경사항 저장'}
+              </Button>
+            ) : null}
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-right text-sm">
               <p className="text-xs text-muted-foreground">이번 회의 기본 환율</p>
               <p className="font-semibold">1 ¥ = {exchangeRate.rate.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원</p>
@@ -586,10 +664,12 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
                 <option value="archived">이전 데이터</option>
               </select>
             </label>
-            <Button type="button" onClick={saveMeetingDetails} disabled={pending || !meetingDate || !title.trim()}>
-              {pending ? <Loader2 className="animate-spin" /> : <Save />}
-              회의 저장
-            </Button>
+            {!showAllOperators ? (
+              <Button type="button" onClick={saveMeetingDetails} disabled={pending || !meetingDate || !title.trim()}>
+                {pending ? <Loader2 className="animate-spin" /> : <Save />}
+                회의 저장
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </header>
@@ -597,6 +677,7 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
       {operatorSections.map((section) => (
         <OwnerSheet
           key={`${section.owner.id}:${isEditing ? 'edit' : 'view'}`}
+          ref={showAllOperators ? registerOwnerSheet(section.owner.id) : undefined}
           meetingId={meeting.id}
           owner={section.owner}
           rows={section.items}
@@ -604,6 +685,8 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
           canAssignOwner={showAllOperators}
           isEditing={isEditing}
           exchangeRate={exchangeRate.rate}
+          showSaveButton={!showAllOperators}
+          isBulkSaving={isSavingAll}
           onChanged={() => router.refresh()}
         />
       ))}
@@ -611,6 +694,7 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
       {unassignedItems.length > 0 ? (
         <OwnerSheet
           key={`unassigned:${isEditing ? 'edit' : 'view'}`}
+          ref={showAllOperators ? registerOwnerSheet(null) : undefined}
           meetingId={meeting.id}
           owner={{ id: null, displayName: '미지정 · 이전 수집 데이터' }}
           rows={unassignedItems}
@@ -619,6 +703,8 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
           isEditing={isEditing}
           exchangeRate={exchangeRate.rate}
           allowNewRows={false}
+          showSaveButton={!showAllOperators}
+          isBulkSaving={isSavingAll}
           onChanged={() => router.refresh()}
         />
       ) : null}
@@ -632,21 +718,24 @@ function MeetingSheet({ meeting, operators, viewer, activeOwnerId, exchangeRate,
   )
 }
 
-function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOwner = false, isEditing, exchangeRate, allowNewRows = true, onChanged }: {
-  meetingId: string
-  owner: SheetOwner
-  rows: ManualSourcingItem[]
-  operators: SourcingOperator[]
-  canAssignOwner?: boolean
-  isEditing: boolean
-  exchangeRate: number
-  allowNewRows?: boolean
-  onChanged: () => void
-}) {
+const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerSheet({
+  meetingId,
+  owner,
+  rows: sourceRows,
+  operators,
+  canAssignOwner = false,
+  isEditing,
+  exchangeRate,
+  allowNewRows = true,
+  showSaveButton = true,
+  isBulkSaving = false,
+  onChanged,
+}: OwnerSheetProps, ref) {
   const [rows, setRows] = useState<DraftRow[]>(() => sourceRows.map((item) => rowFromItem(item, exchangeRate)))
   const [pending, startTransition] = useTransition()
   const canAddRows = isEditing && allowNewRows && Boolean(owner.id)
   const showOwnerColumn = canAssignOwner
+  const isBusy = pending || isBulkSaving
 
   function updateRow(clientId: string, patch: Partial<DraftRow>) {
     setRows((currentRows) => currentRows.map((row) => row.clientId === clientId ? { ...row, ...patch } : row))
@@ -689,7 +778,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
     setRows((currentRows) => currentRows.filter((row) => row.clientId !== clientId))
   }
 
-  async function persistRows(targetRows: DraftRow[]) {
+  const persistRows = useCallback(async (targetRows: DraftRow[]) => {
     const result = await saveSourcingMeetingRowsAction({
       meetingId,
       rows: targetRows.map((row) => ({
@@ -716,21 +805,32 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
     if (!result.success) throw new Error(result.error)
 
     return new Map(result.saved.map((saved) => [saved.clientId, saved.id]))
-  }
+  }, [meetingId])
+
+  const saveRows = useCallback(async (): Promise<OwnerSheetSaveResult> => {
+    const populatedRows = rows.filter((row) => row.productName.trim())
+    if (populatedRows.length === 0) return { savedCount: 0, passedCount: 0 }
+
+    await persistRows(rows)
+    return {
+      savedCount: populatedRows.length,
+      passedCount: populatedRows.filter((row) => row.status === 'passed').length,
+    }
+  }, [persistRows, rows])
+
+  useImperativeHandle(ref, () => ({ save: saveRows }), [saveRows])
 
   function saveAll() {
     startTransition(async () => {
       try {
-        const populatedRows = rows.filter((row) => row.productName.trim())
-        if (populatedRows.length === 0) {
+        const result = await saveRows()
+        if (result.savedCount === 0) {
           toast.message('상품명이 입력된 행부터 저장됩니다.')
           return
         }
-        await persistRows(rows)
-        const passedCount = populatedRows.filter((row) => row.status === 'passed').length
-        toast.success(passedCount > 0
-          ? `${populatedRows.length}개 상품을 저장했고, 통과 ${passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
-          : `${populatedRows.length}개 상품을 저장했습니다.`)
+        toast.success(result.passedCount > 0
+          ? `${result.savedCount}개 상품을 저장했고, 통과 ${result.passedCount}개는 상품관리 1단계에 자동 등록했습니다.`
+          : `${result.savedCount}개 상품을 저장했습니다.`)
         onChanged()
       } catch (error) {
         toast.error(errorMessage(error))
@@ -748,30 +848,34 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
         <div>
           <h3 className="text-sm font-semibold">{owner.displayName}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            이 표 안에서 여러 상품을 추가하고 한 번에 저장할 수 있습니다. 긴 텍스트는 셀 높이가 자동으로 늘어납니다.
+            {showSaveButton
+              ? '이 표 안에서 여러 상품을 추가하고 한 번에 저장할 수 있습니다. 긴 텍스트는 셀 높이가 자동으로 늘어납니다.'
+              : '메인 위쪽의 전체 변경사항 저장으로 모든 등록자 표를 함께 저장합니다.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canAddRows ? (
             <>
-              <Button type="button" variant="outline" size="sm" onClick={() => appendRows(1)} disabled={pending}>
+              <Button type="button" variant="outline" size="sm" onClick={() => appendRows(1)} disabled={isBusy}>
                 <Plus />
                 행 추가
               </Button>
-              <Button type="button" variant="outline" size="sm" onClick={() => appendRows(5)} disabled={pending}>
+              <Button type="button" variant="outline" size="sm" onClick={() => appendRows(5)} disabled={isBusy}>
                 <Plus />
                 5행 추가
               </Button>
             </>
           ) : null}
-          <Button type="button" size="sm" onClick={saveAll} disabled={pending || rows.length === 0}>
-            {pending ? <Loader2 className="animate-spin" /> : <Save />}
-            {pending ? '저장 중...' : '변경사항 저장'}
-          </Button>
+          {showSaveButton ? (
+            <Button type="button" size="sm" onClick={saveAll} disabled={isBusy || rows.length === 0}>
+              {pending ? <Loader2 className="animate-spin" /> : <Save />}
+              {pending ? '저장 중...' : '변경사항 저장'}
+            </Button>
+          ) : null}
         </div>
       </div>
 
-      <div className="w-full overflow-hidden">
+      <div className={cn('w-full overflow-hidden', isBulkSaving && 'pointer-events-none opacity-60')} aria-busy={isBusy}>
         <table className="w-full table-fixed border-collapse text-xs">
           <colgroup>
             <col className="w-[3%]" />
@@ -860,7 +964,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
                       <select
                         value={row.status}
                         onChange={(event) => updateRow(row.clientId, { status: event.target.value as ManualSourcingReviewStatus })}
-                        disabled={pending}
+                        disabled={isBusy}
                         className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {Object.entries(manualSourcingReviewStatusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -870,11 +974,11 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
                   </TableCell>
                   <TableCell>
                     {!row.itemId ? (
-                      <Button type="button" variant="ghost" size="icon-sm" aria-label="빈 행 제거" onClick={() => removeUnsavedRow(row.clientId)} disabled={pending}>
+                      <Button type="button" variant="ghost" size="icon-sm" aria-label="빈 행 제거" onClick={() => removeUnsavedRow(row.clientId)} disabled={isBusy}>
                         <X />
                       </Button>
                     ) : (
-                      <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" aria-label="상품 삭제" onClick={() => deleteSavedRow(row)} disabled={pending}>
+                      <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" aria-label="상품 삭제" onClick={() => deleteSavedRow(row)} disabled={isBusy}>
                         <Trash2 />
                       </Button>
                     )}
@@ -890,7 +994,7 @@ function OwnerSheet({ meetingId, owner, rows: sourceRows, operators, canAssignOw
       </div>
     </section>
   )
-}
+})
 
 function ReadOnlyOwnerSheet({ owner, rows, showOwnerColumn }: {
   owner: SheetOwner

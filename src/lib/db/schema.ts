@@ -742,6 +742,8 @@ export const purchaseRequestItems = pgTable(
     purchaseConfirmed: boolean('purchase_confirmed').notNull().default(false),
     paymentStatus: varchar('payment_status', { length: 30 }).notNull().default('pending'),
     paymentPaidAt: timestamp('payment_paid_at', { withTimezone: true }),
+    bulkPaymentPending: boolean('bulk_payment_pending').notNull().default(false),
+    bulkPaymentDueDate: date('bulk_payment_due_date'),
     costExchangeRateKrw: numeric('cost_exchange_rate_krw', { precision: 12, scale: 4 }),
     costExchangeRateDate: date('cost_exchange_rate_date'),
     chinaReceivedQuantity: integer('china_received_quantity'),

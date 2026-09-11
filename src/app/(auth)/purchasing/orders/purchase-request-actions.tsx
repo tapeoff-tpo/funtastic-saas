@@ -954,22 +954,24 @@ export function PurchasePaymentStatusField({
   paymentStatus,
   paidAt,
   enabled,
+  bulkPaymentPending,
+  bulkPaymentDueDate,
 }: {
   id: string
   paymentStatus: string | null
   paidAt: string | Date | null
   enabled: boolean
+  bulkPaymentPending: boolean
+  bulkPaymentDueDate: string | null
 }) {
   const router = useRouter()
   const initialValue = isPurchasePaymentStatus(paymentStatus) ? paymentStatus : 'pending'
   const [value, setValue] = useState<PurchasePaymentStatus>(initialValue)
+  const [isBulkPending, setIsBulkPending] = useState(bulkPaymentPending)
+  const [dueDate, setDueDate] = useState(bulkPaymentDueDate ?? '')
   const [isPending, startTransition] = useTransition()
 
-  if (!enabled) {
-    return <span className="whitespace-nowrap text-xs font-medium text-muted-foreground">구매 전</span>
-  }
-
-  function save(nextValue: PurchasePaymentStatus) {
+  function savePaymentStatus(nextValue: PurchasePaymentStatus) {
     const previousValue = value
     setValue(nextValue)
     startTransition(async () => {
@@ -987,19 +989,66 @@ export function PurchasePaymentStatusField({
     })
   }
 
+  function saveBulkPayment(nextPending: boolean, nextDueDate = dueDate) {
+    const previousPending = isBulkPending
+    const previousDueDate = dueDate
+    setIsBulkPending(nextPending)
+    setDueDate(nextPending ? nextDueDate : '')
+    startTransition(async () => {
+      const response = await fetch(`/api/purchasing/purchase-requests/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          bulkPaymentPending: nextPending,
+          bulkPaymentDueDate: nextPending ? nextDueDate || null : null,
+        }),
+      })
+      if (response.ok) {
+        router.refresh()
+        return
+      }
+      setIsBulkPending(previousPending)
+      setDueDate(previousDueDate)
+      window.alert('대량결제대기 저장에 실패했습니다.')
+    })
+  }
+
   return (
     <div className="space-y-1 text-center">
-      <select
-        value={value}
-        onChange={(event) => save(event.target.value as PurchasePaymentStatus)}
-        disabled={isPending}
-        aria-label="결제 상태"
-        className="h-7 min-w-[104px] rounded-md border border-input bg-background px-2 text-xs"
-      >
-        {PURCHASE_PAYMENT_STATUSES.map((status) => (
-          <option key={status} value={status}>{PURCHASE_PAYMENT_STATUS_LABELS[status]}</option>
-        ))}
-      </select>
+      {enabled ? (
+        <select
+          value={value}
+          onChange={(event) => savePaymentStatus(event.target.value as PurchasePaymentStatus)}
+          disabled={isPending}
+          aria-label="결제 상태"
+          className="h-7 min-w-[104px] rounded-md border border-input bg-background px-2 text-xs"
+        >
+          {PURCHASE_PAYMENT_STATUSES.map((status) => (
+            <option key={status} value={status}>{PURCHASE_PAYMENT_STATUS_LABELS[status]}</option>
+          ))}
+        </select>
+      ) : (
+        <div className="whitespace-nowrap text-xs font-medium text-muted-foreground">구매 전</div>
+      )}
+      <label className="flex items-center justify-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-700">
+        <input
+          type="checkbox"
+          checked={isBulkPending}
+          disabled={isPending}
+          onChange={(event) => saveBulkPayment(event.target.checked)}
+        />
+        대량결제대기
+      </label>
+      {isBulkPending ? (
+        <input
+          type="date"
+          value={dueDate}
+          disabled={isPending}
+          aria-label="대량결제 예정일"
+          onChange={(event) => saveBulkPayment(true, event.target.value)}
+          className="h-7 w-[128px] rounded-md border border-input bg-background px-1.5 text-xs"
+        />
+      ) : null}
       {value === 'paid' && paidAt ? (
         <div className="whitespace-nowrap text-[11px] text-muted-foreground">{formatDateInput(paidAt)} 결제</div>
       ) : null}

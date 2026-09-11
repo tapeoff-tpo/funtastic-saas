@@ -9,6 +9,8 @@ export function ensurePurchasePaymentTrackingSchema() {
       ALTER TABLE purchase_request_items
         ADD COLUMN IF NOT EXISTS payment_status varchar(30) NOT NULL DEFAULT 'pending',
         ADD COLUMN IF NOT EXISTS payment_paid_at timestamp with time zone,
+        ADD COLUMN IF NOT EXISTS bulk_payment_pending boolean NOT NULL DEFAULT false,
+        ADD COLUMN IF NOT EXISTS bulk_payment_due_date date,
         ADD COLUMN IF NOT EXISTS cost_exchange_rate_krw numeric(12, 4),
         ADD COLUMN IF NOT EXISTS cost_exchange_rate_date date
     `)

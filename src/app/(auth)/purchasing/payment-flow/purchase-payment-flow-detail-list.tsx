@@ -78,11 +78,12 @@ export function PurchasePaymentFlowDetailList({
         <p className="px-3 py-10 text-center text-sm text-muted-foreground">해당 금액에 포함된 주문 건이 없습니다.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] text-left text-sm">
+          <table className="w-full min-w-[1080px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">No.</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">금액 구분</th>
+                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">대량결제</th>
                 <th className="min-w-[290px] px-3 py-2 font-medium">상품</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">구매수량</th>
                 <th className="min-w-[130px] px-3 py-2 font-medium">주문서번호</th>
@@ -103,6 +104,14 @@ export function PurchasePaymentFlowDetailList({
                   </td>
                   <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
                     {getPurchaseAmountCategory(item)}
+                  </td>
+                  <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
+                    {item.bulkPaymentPending ? (
+                      <div>
+                        <div className="font-medium text-amber-700">대량결제대기</div>
+                        <div className="mt-0.5 text-muted-foreground">{item.bulkPaymentDueDate ?? '날짜 미지정'}</div>
+                      </div>
+                    ) : '-'}
                   </td>
                   <td className="px-3 py-2">
                     <div className="font-medium text-foreground">{item.productName}</div>

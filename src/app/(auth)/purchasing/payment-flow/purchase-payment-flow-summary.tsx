@@ -41,15 +41,16 @@ export function PurchasePaymentFlowSummaryPanel({
         <p className="mt-1 text-xs text-muted-foreground">원가: 특가(元) 우선, 신규원가(元) 보조</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="발주금액 분류">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="발주금액 분류">
         <PurchaseFlowCard label="발주금액 총액" view="total" summary={summary.total} description="현재 진행 중 발주" active={activeView === 'total'} pageSize={pageSize} sort={sort} order={order} />
         <PurchaseFlowCard label="발주요청" view="purchase_before" summary={summary.purchaseBefore} description="결제 대기 금액에 포함되는 구매요청 단계" active={activeView === 'purchase_before'} pageSize={pageSize} sort={sort} order={order} />
         <PurchaseFlowCard label="결제 대기 (미결제 잔액)" view="outstanding" summary={summary.outstanding} description="주문서번호가 아직 없는 전체 건" emphasized active={activeView === 'outstanding'} pageSize={pageSize} sort={sort} order={order} />
         <PurchaseFlowCard label="구매 완료" view="purchase_completed" summary={summary.purchaseCompleted} description="주문서번호 등록 완료" active={activeView === 'purchase_completed'} pageSize={pageSize} sort={sort} order={order} />
+        <PurchaseFlowCard label="대량결제대기" view="bulk_pending" summary={summary.bulkPending} description="수동 지정한 날짜형 대량 주문" active={activeView === 'bulk_pending'} pageSize={pageSize} sort={sort} order={order} />
       </div>
 
       <p className="text-xs text-muted-foreground">
-        결제 대기와 미결제 잔액은 같은 금액입니다. 주문서번호가 없으면 결제 대기, 있으면 구매 완료로 계산하며 발주요청은 결제 대기에 포함됩니다. 중국출고완료 건은 현재 금액에서 제외됩니다.
+        결제 대기와 미결제 잔액은 같은 금액입니다. 주문서번호가 없으면 결제 대기, 있으면 구매 완료로 계산합니다. 대량결제대기는 두 구분과 별도로 수동 지정하며 2개월 자동삭제에서 제외됩니다.
       </p>
     </section>
   )

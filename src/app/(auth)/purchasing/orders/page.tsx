@@ -22,6 +22,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ProductFlowNav } from '@/components/product-flow-nav'
+import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
 import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
@@ -234,6 +235,7 @@ export async function PurchasingOrdersView({
 
   return (
     <div className="space-y-4">
+      <PurchaseOrderRetentionCleanup />
       <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
@@ -511,7 +513,7 @@ export async function PurchasingOrdersView({
                     </th>
                   )}
                   {isRequestedStatus ? null : <th className="min-w-[430px] px-3 py-2 font-medium">구매 정보</th>}
-                  {isRequestedStatus ? null : <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태</th>}
+                  {isRequestedStatus ? null : <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">결제 상태 / 대량</th>}
                   {overdueOnly ? <th className="min-w-[340px] px-3 py-2 font-medium">지연 사유</th> : null}
                   <th className="w-px whitespace-nowrap px-2 py-2 text-center font-medium">
                     <SortHeader label="담당자" column="buyerName" {...sortHeaderProps} align="center" />
@@ -671,11 +673,13 @@ export async function PurchasingOrdersView({
                       {isRequestedStatus ? null : (
                         <td className="px-2 py-2 text-center align-middle">
                           <PurchasePaymentStatusField
-                            key={`${item.id}:${item.paymentStatus}`}
+                            key={`${item.id}:${item.paymentStatus}:${item.bulkPaymentPending}:${item.bulkPaymentDueDate ?? ''}`}
                             id={item.id}
                             paymentStatus={item.paymentStatus}
                             paidAt={item.paymentPaidAt}
                             enabled={item.status !== 'purchased'}
+                            bulkPaymentPending={item.bulkPaymentPending}
+                            bulkPaymentDueDate={item.bulkPaymentDueDate}
                           />
                         </td>
                       )}

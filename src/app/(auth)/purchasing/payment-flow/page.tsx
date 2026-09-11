@@ -15,6 +15,7 @@ import {
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { PurchasePaymentFlowDetailList } from './purchase-payment-flow-detail-list'
 import { PurchasePaymentFlowSummaryPanel } from './purchase-payment-flow-summary'
+import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
 
 export const metadata: Metadata = {
   title: '발주금액',
@@ -69,6 +70,7 @@ export default async function PurchasePaymentFlowPage({
 
   return (
     <div className="space-y-5">
+      <PurchaseOrderRetentionCleanup />
       <ProductFlowNav />
       <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>

@@ -21,6 +21,8 @@ const bodySchema = z.object({
   purchaseMethod: z.string().max(100).nullable().optional(),
   purchaseConfirmed: z.boolean().optional(),
   paymentStatus: z.enum(PURCHASE_PAYMENT_STATUSES).optional(),
+  bulkPaymentPending: z.boolean().optional(),
+  bulkPaymentDueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   buyerCode: z.enum(['1', '2', '3', '4', '5']).nullable().optional(),
   buyerName: z.string().max(100).nullable().optional(),
   delayReason: z.enum(PURCHASE_DELAY_REASONS).nullable().optional(),

@@ -101,12 +101,13 @@ describe('purchase payment flow views', () => {
     supplierOrderNumber: '3316362603001063953',
   }
 
-  it('exposes only the four order-number-based money views', () => {
+  it('exposes order-number views plus the independent bulk-payment view', () => {
     expect(PURCHASE_PAYMENT_FLOW_VIEWS).toEqual([
       'total',
       'purchase_before',
       'purchase_completed',
       'outstanding',
+      'bulk_pending',
     ])
   })
 
@@ -158,6 +159,24 @@ describe('purchase payment flow views', () => {
     }, 'purchase_completed')).toBe(true)
   })
 
+  it('shows manually marked bulk payments independently of the order-number category', () => {
+    const withoutOrder = {
+      status: 'purchase_completed' as const,
+      supplierOrderNumber: null,
+      bulkPaymentPending: true,
+    }
+    const withOrder = {
+      status: 'purchase_completed' as const,
+      supplierOrderNumber: '3316362603001063953',
+      bulkPaymentPending: true,
+    }
+
+    expect(isPurchasePaymentFlowViewItem(withoutOrder, 'outstanding')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(withoutOrder, 'bulk_pending')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(withOrder, 'purchase_completed')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(withOrder, 'bulk_pending')).toBe(true)
+  })
+
   it('uses the precomputed order-number flag for grouped summary rows', () => {
     expect(isPurchasePaymentFlowViewItem({
       status: 'purchase_completed',
@@ -175,12 +194,14 @@ describe('purchase payment flow views', () => {
       purchaseBefore: { itemCount: 2, totalCostYuan: 2, totalCostKrw: 2, missingYuanCostCount: 0, missingKrwCostCount: 0 },
       purchaseCompleted: { itemCount: 3, totalCostYuan: 3, totalCostKrw: 3, missingYuanCostCount: 0, missingKrwCostCount: 0 },
       outstanding: { itemCount: 4, totalCostYuan: 4, totalCostKrw: 4, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      bulkPending: { itemCount: 5, totalCostYuan: 5, totalCostKrw: 5, missingYuanCostCount: 0, missingKrwCostCount: 0 },
     }
 
     expect(getPurchasePaymentFlowViewSummary(summary, 'total').itemCount).toBe(1)
     expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_before').itemCount).toBe(2)
     expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_completed').itemCount).toBe(3)
     expect(getPurchasePaymentFlowViewSummary(summary, 'outstanding').itemCount).toBe(4)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'bulk_pending').itemCount).toBe(5)
   })
 })
 

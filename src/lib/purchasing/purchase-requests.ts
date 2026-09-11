@@ -50,6 +50,7 @@ export type PurchasePaymentFlowSummary = {
   purchaseBefore: PurchaseCostSummary
   purchaseCompleted: PurchaseCostSummary
   outstanding: PurchaseCostSummary
+  bulkPending: PurchaseCostSummary
 }
 
 export const PURCHASE_PAYMENT_FLOW_VIEWS = [
@@ -57,6 +58,7 @@ export const PURCHASE_PAYMENT_FLOW_VIEWS = [
   'purchase_before',
   'purchase_completed',
   'outstanding',
+  'bulk_pending',
 ] as const
 
 export type PurchasePaymentFlowView = (typeof PURCHASE_PAYMENT_FLOW_VIEWS)[number]
@@ -69,6 +71,7 @@ export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, 
   purchase_before: '발주요청',
   purchase_completed: '구매 완료',
   outstanding: '결제 대기 (미결제 잔액)',
+  bulk_pending: '대량결제대기',
 }
 
 type PurchaseCostRow = {
@@ -86,6 +89,8 @@ export type PurchasePaymentFlowDetailItem = {
   status: PurchaseRequestStatus
   paymentStatus: PurchasePaymentStatus
   paymentPaidAt: Date | null
+  bulkPaymentPending: boolean
+  bulkPaymentDueDate: string | null
   sku: string
   productName: string
   optionName: string | null
@@ -120,6 +125,7 @@ export async function getPurchasePaymentFlowSummary(
     .select({
       status: purchaseRequestItems.status,
       hasSupplierOrderNumber,
+      bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
       itemCount: count(),
       totalCostYuan: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostYuan}, 0)), 0)`,
       totalCostKrw: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostKrw}, 0)), 0)`,
@@ -135,7 +141,7 @@ export async function getPurchasePaymentFlowSummary(
       eq(purchaseRequestItems.userId, userId),
       inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
     ))
-    .groupBy(purchaseRequestItems.status, hasSupplierOrderNumber)
+    .groupBy(purchaseRequestItems.status, hasSupplierOrderNumber, purchaseRequestItems.bulkPaymentPending)
 
   return summarizePurchasePaymentFlowGroups(summaryRows)
 }
@@ -151,6 +157,8 @@ export async function getPurchasePaymentFlowData(
       status: purchaseRequestItems.status,
       paymentStatus: purchaseRequestItems.paymentStatus,
       paymentPaidAt: purchaseRequestItems.paymentPaidAt,
+      bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
+      bulkPaymentDueDate: purchaseRequestItems.bulkPaymentDueDate,
       sku: purchaseRequestItems.sku,
       productName: purchaseRequestItems.productName,
       optionName: purchaseRequestItems.optionName,
@@ -188,6 +196,7 @@ export async function getPurchasePaymentFlowData(
       purchaseBefore: summary.purchase_before,
       purchaseCompleted: summary.purchase_completed,
       outstanding: summary.outstanding,
+      bulkPending: summary.bulk_pending,
     },
     items: rows.map((row) => {
       const costs = calculatePurchaseCost(row, fallbackExchangeRateKrw)
@@ -196,6 +205,8 @@ export async function getPurchasePaymentFlowData(
         status: row.status,
         paymentStatus: normalizePaymentStatus(row.paymentStatus),
         paymentPaidAt: row.paymentPaidAt,
+        bulkPaymentPending: row.bulkPaymentPending,
+        bulkPaymentDueDate: row.bulkPaymentDueDate,
         sku: row.sku,
         productName: row.productName,
         optionName: row.optionName,
@@ -231,6 +242,8 @@ export async function getPurchasePaymentFlowDetailPage(input: {
       status: purchaseRequestItems.status,
       paymentStatus: purchaseRequestItems.paymentStatus,
       paymentPaidAt: purchaseRequestItems.paymentPaidAt,
+      bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
+      bulkPaymentDueDate: purchaseRequestItems.bulkPaymentDueDate,
       sku: purchaseRequestItems.sku,
       productName: purchaseRequestItems.productName,
       optionName: purchaseRequestItems.optionName,
@@ -262,6 +275,8 @@ export async function getPurchasePaymentFlowDetailPage(input: {
         status: row.status,
         paymentStatus: normalizePaymentStatus(row.paymentStatus),
         paymentPaidAt: row.paymentPaidAt,
+        bulkPaymentPending: row.bulkPaymentPending,
+        bulkPaymentDueDate: row.bulkPaymentDueDate,
         sku: row.sku,
         productName: row.productName,
         optionName: row.optionName,
@@ -282,6 +297,7 @@ export function isPurchasePaymentFlowViewItem(
     supplierOrderNumber?: string | null
     hasSupplierOrderNumber?: boolean
     paymentStatus?: string | null
+    bulkPaymentPending?: boolean
   },
   view: PurchasePaymentFlowView,
 ) {
@@ -291,6 +307,7 @@ export function isPurchasePaymentFlowViewItem(
   if (view === 'total') return true
   if (view === 'purchase_completed') return hasSupplierOrderNumber
   if (view === 'purchase_before') return item.status === 'purchased' && !hasSupplierOrderNumber
+  if (view === 'bulk_pending') return item.bulkPaymentPending === true
   return !hasSupplierOrderNumber
 }
 
@@ -333,6 +350,8 @@ export function getPurchasePaymentFlowViewSummary(
       return summary.purchaseCompleted
     case 'outstanding':
       return summary.outstanding
+    case 'bulk_pending':
+      return summary.bulkPending
     default:
       return summary.total
   }
@@ -341,6 +360,7 @@ export function getPurchasePaymentFlowViewSummary(
 type PurchasePaymentFlowSummaryGroup = {
   status: PurchaseRequestStatus
   hasSupplierOrderNumber: boolean
+  bulkPaymentPending: boolean
   itemCount: number | string
   totalCostYuan: number | string
   totalCostKrw: number | string
@@ -378,6 +398,7 @@ function summarizePurchasePaymentFlowGroups(rows: PurchasePaymentFlowSummaryGrou
     purchaseBefore: summaries.purchase_before,
     purchaseCompleted: summaries.purchase_completed,
     outstanding: summaries.outstanding,
+    bulkPending: summaries.bulk_pending,
   }
 }
 
@@ -427,6 +448,8 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView): 
     conditions.push(hasSupplierOrderNumber)
   } else if (view === 'outstanding') {
     conditions.push(sql`NOT (${hasSupplierOrderNumber})`)
+  } else if (view === 'bulk_pending') {
+    conditions.push(eq(purchaseRequestItems.bulkPaymentPending, true))
   }
 
   return and(...conditions) ?? sql`TRUE`
@@ -832,6 +855,8 @@ export async function updatePurchaseRequestPlanFields(input: {
   purchaseMethod?: string | null
   purchaseConfirmed?: boolean
   paymentStatus?: PurchasePaymentStatus
+  bulkPaymentPending?: boolean
+  bulkPaymentDueDate?: string | null
   buyerCode?: string | null
   buyerName?: string | null
   delayReason?: PurchaseDelayReason | null
@@ -876,6 +901,13 @@ export async function updatePurchaseRequestPlanFields(input: {
     values.paymentStatus = input.paymentStatus
     values.paymentPaidAt = input.paymentStatus === 'paid' ? now : null
   }
+  if (input.bulkPaymentPending !== undefined) {
+    values.bulkPaymentPending = input.bulkPaymentPending
+    if (!input.bulkPaymentPending) values.bulkPaymentDueDate = null
+  }
+  if (input.bulkPaymentDueDate !== undefined) {
+    values.bulkPaymentDueDate = input.bulkPaymentDueDate || null
+  }
   if (input.buyerCode !== undefined) {
     const buyerCode = normalizePurchaseBuyerCode(input.buyerCode)
     values.buyerCode = buyerCode
@@ -901,6 +933,9 @@ export async function updatePurchaseRequestPlanFields(input: {
       .limit(1)
 
     if (!current) return null
+
+    const effectiveBulkPaymentPending = input.bulkPaymentPending ?? current.bulkPaymentPending
+    if (input.bulkPaymentDueDate && !effectiveBulkPaymentPending) return null
 
     if (input.paymentStatus !== undefined && !current.costExchangeRateKrw && exchangeRateReference) {
       values.costExchangeRateKrw = String(exchangeRateReference.rate)

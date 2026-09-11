@@ -1,7 +1,9 @@
 import ExcelJS from 'exceljs'
 import { describe, expect, it } from 'vitest'
 import {
+  applyBulkPaymentOverride,
   classifyEcountPurchasingUpload,
+  collectBulkPaymentOverrides,
   getEcountChinaInventorySnapshotDate,
   getEcountPurchasingRefreshScope,
   getPurchaseHistoryBridgeKey,
@@ -10,6 +12,54 @@ import {
   resolveChinaInventorySnapshotAsOfDate,
   type EcountPurchasingUpload,
 } from './ecount-purchasing-sync'
+
+describe('bulk payment override persistence', () => {
+  it('carries a manual bulk-payment marker across an Ecount stage replacement', () => {
+    const overrides = collectBulkPaymentOverrides([{
+      sku: '112194-0001',
+      purchaseManagementCode: '20260819-110151-87',
+      supplierOrderNumber: null,
+      bulkPaymentPending: true,
+      bulkPaymentDueDate: '2026-10-15',
+    }])
+    const next = applyBulkPaymentOverride({
+      userId: 'workspace-user',
+      rowNumber: 1,
+      status: 'purchase_completed',
+      sku: '112194-0001',
+      productName: '히카리 슬림형 쌀통',
+      requestedQuantity: 100,
+      purchaseManagementCode: '20260819-110151-87',
+      supplierOrderNumber: '3316362603001063953',
+    }, overrides)
+
+    expect(next.bulkPaymentPending).toBe(true)
+    expect(next.bulkPaymentDueDate).toBe('2026-10-15')
+  })
+
+  it('does not carry ordinary payment rows into the bulk-payment list', () => {
+    const overrides = collectBulkPaymentOverrides([{
+      sku: '112194-0001',
+      purchaseManagementCode: '20260819-110151-87',
+      supplierOrderNumber: '3316362603001063953',
+      bulkPaymentPending: false,
+      bulkPaymentDueDate: null,
+    }])
+    const next = applyBulkPaymentOverride({
+      userId: 'workspace-user',
+      rowNumber: 1,
+      status: 'china_arrived',
+      sku: '112194-0001',
+      productName: '히카리 슬림형 쌀통',
+      requestedQuantity: 100,
+      purchaseManagementCode: '20260819-110151-87',
+      supplierOrderNumber: '3316362603001063953',
+    }, overrides)
+
+    expect(next.bulkPaymentPending).toBeUndefined()
+    expect(next.bulkPaymentDueDate).toBeUndefined()
+  })
+})
 
 describe('getEcountPurchasingRefreshScope', () => {
   it('rebuilds every linked purchase stage when one purchase file changes', () => {

@@ -10,6 +10,7 @@ import {
 import { calculatePurchaseCosts } from './purchase-costs'
 import { getSkuOutgoingMetrics, type PurchasingSpecialBulkOutgoingAdjustment } from './items'
 import { isDiscontinuedPurchasingStatus } from './purchase-delay'
+import { cleanupExpiredEcountPurchaseOrderRows } from './purchase-order-retention'
 
 type ProductGroupMoqRule = {
   productName: string
@@ -361,6 +362,9 @@ export async function generatePurchaseRecommendations(input: {
     ? null
     : Math.max(0, Math.trunc(finiteNumber(input.budgetKrw)))
   const now = input.now ?? new Date()
+
+  // Expired order rows must not inflate the in-progress pipeline quantity.
+  await cleanupExpiredEcountPurchaseOrderRows({ userId: input.userId, now })
 
   const [domesticInventoryRows, chinaInventoryRows] = await Promise.all([
     db

@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs'
 import { createHash } from 'node:crypto'
-import { and, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
   chinaWarehouseInventory,
@@ -10,8 +10,10 @@ import {
   cleanupExpiredCompletedOutboundItems,
   getReflectedOutboundMatchKeys,
 } from './reflected-outbound-items'
+import { cleanupExpiredEcountPurchaseOrderRowsInTransaction } from './purchase-order-retention'
 import { getIgnoredPurchasingItemKeys, purchasingItemIdentity } from './ignored-purchasing-items'
 import { ensurePurchaseRequestManagementCodeSkuLookupIndex } from './purchase-request-item-index'
+import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -1363,6 +1365,7 @@ export async function syncEcountPurchasingSnapshot(input: {
   snapshot: EcountPurchasingSnapshot
   reportKinds?: EcountReportKind[]
 }) {
+  await ensurePurchasePaymentTrackingSchema()
   await ensurePurchaseRequestManagementCodeSkuLookupIndex()
   const reflectedOutboundMatchKeys = await getReflectedOutboundMatchKeys(input.userId)
   const ignoredPurchasingItemKeys = await getIgnoredPurchasingItemKeys(input.userId)
@@ -1447,12 +1450,22 @@ export async function syncEcountPurchasingSnapshot(input: {
     }
 
     const replaceableRows = await tx
-      .select({ id: purchaseRequestItems.id })
+      .select({
+        id: purchaseRequestItems.id,
+        sku: purchaseRequestItems.sku,
+        purchaseManagementCode: purchaseRequestItems.purchaseManagementCode,
+        supplierOrderNumber: purchaseRequestItems.supplierOrderNumber,
+        bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
+        bulkPaymentDueDate: purchaseRequestItems.bulkPaymentDueDate,
+        updatedAt: purchaseRequestItems.updatedAt,
+      })
       .from(purchaseRequestItems)
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
         isReplaceableEcountSource(sourcesToReplace),
       ))
+      .orderBy(desc(purchaseRequestItems.updatedAt))
+    const bulkPaymentOverrides = collectBulkPaymentOverrides(replaceableRows)
     if (replaceableRows.length > 0) {
       await tx.delete(purchaseRequestItems).where(inArray(
         purchaseRequestItems.id,
@@ -1647,7 +1660,7 @@ export async function syncEcountPurchasingSnapshot(input: {
       ...chinaArrivedRows,
       ...outboundRows,
       ...outboundCompletedRows,
-    ]
+    ].map((row) => applyBulkPaymentOverride(row, bulkPaymentOverrides))
     for (const rows of chunks(rowsToInsert, 500)) {
       await tx.insert(purchaseRequestItems).values(rows)
     }
@@ -1673,6 +1686,13 @@ export async function syncEcountPurchasingSnapshot(input: {
           })))
       }
     }
+
+    // Keep replacement and retention atomic so stale order rows never become
+    // visible again between a raw-data refresh and its cleanup.
+    await cleanupExpiredEcountPurchaseOrderRowsInTransaction(tx, {
+      userId: input.userId,
+      now,
+    })
 
     return {
       replacedPurchaseRows: replaceableRows.length,
@@ -1885,6 +1905,55 @@ function supplierKey(orderNumber: string | null, sku: string) {
   return orderNumber && isReliableSupplierOrderNumber(orderNumber) && sku
     ? `${orderNumber}::${sku}`
     : null
+}
+
+type BulkPaymentIdentity = {
+  sku: string
+  purchaseManagementCode: string | null
+  supplierOrderNumber: string | null
+}
+
+function bulkPaymentIdentityKeys(item: BulkPaymentIdentity) {
+  return [
+    purchaseKey(item.purchaseManagementCode ?? '', item.sku),
+    supplierKey(item.supplierOrderNumber, item.sku),
+  ].map((key, index) => key ? `${index === 0 ? 'management' : 'supplier'}:${key}` : null)
+    .filter((key): key is string => Boolean(key))
+}
+
+/** @internal Exported for regression coverage of raw-refresh persistence. */
+export function collectBulkPaymentOverrides(rows: Array<BulkPaymentIdentity & {
+  bulkPaymentPending: boolean
+  bulkPaymentDueDate: string | null
+}>) {
+  const overrides = new Map<string, string | null>()
+  for (const row of rows) {
+    if (!row.bulkPaymentPending) continue
+    for (const key of bulkPaymentIdentityKeys(row)) {
+      if (!overrides.has(key)) overrides.set(key, row.bulkPaymentDueDate)
+    }
+  }
+  return overrides
+}
+
+/** @internal Exported for regression coverage of raw-refresh persistence. */
+export function applyBulkPaymentOverride(
+  row: PurchaseRequestItemInsert,
+  overrides: Map<string, string | null>,
+): PurchaseRequestItemInsert {
+  for (const key of bulkPaymentIdentityKeys({
+    sku: row.sku,
+    purchaseManagementCode: row.purchaseManagementCode ?? null,
+    supplierOrderNumber: row.supplierOrderNumber ?? null,
+  })) {
+    if (!overrides.has(key)) continue
+    return {
+      ...row,
+      bulkPaymentPending: true,
+      bulkPaymentDueDate: overrides.get(key) ?? null,
+    }
+  }
+  return row
 }
 
 function sumQuantities<T extends { quantity?: number; requestedQuantity?: number }>(items: T[]) {

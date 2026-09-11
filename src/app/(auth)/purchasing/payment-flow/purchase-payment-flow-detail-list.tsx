@@ -1,9 +1,5 @@
 import Link from 'next/link'
 import {
-  PURCHASE_PAYMENT_STATUS_LABELS,
-  PURCHASE_REQUEST_STATUS_LABELS,
-} from '@/lib/purchasing/purchase-request-status'
-import {
   PURCHASE_PAYMENT_FLOW_VIEW_LABELS,
   type PurchasePaymentFlowSort,
   type PurchasePaymentFlowDetailItem,
@@ -82,12 +78,11 @@ export function PurchasePaymentFlowDetailList({
         <p className="px-3 py-10 text-center text-sm text-muted-foreground">해당 금액에 포함된 주문 건이 없습니다.</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1050px] text-left text-sm">
+          <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">No.</th>
-                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">진행상태</th>
-                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">결제 상태</th>
+                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">금액 구분</th>
                 <th className="min-w-[290px] px-3 py-2 font-medium">상품</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">구매수량</th>
                 <th className="min-w-[130px] px-3 py-2 font-medium">주문서번호</th>
@@ -97,7 +92,6 @@ export function PurchasePaymentFlowDetailList({
                 <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
                   <PaymentFlowSortHeader label="금액(₩)" column="totalCostKrw" view={view} pageSize={pageSize} currentSort={sort} currentOrder={order} />
                 </th>
-                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">결제일</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">발주</th>
               </tr>
             </thead>
@@ -108,10 +102,7 @@ export function PurchasePaymentFlowDetailList({
                     {((page - 1) * pageSize + index + 1).toLocaleString('ko-KR')}
                   </td>
                   <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
-                    {PURCHASE_REQUEST_STATUS_LABELS[item.status]}
-                  </td>
-                  <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
-                    {PURCHASE_PAYMENT_STATUS_LABELS[item.paymentStatus]}
+                    {getPurchaseAmountCategory(item)}
                   </td>
                   <td className="px-3 py-2">
                     <div className="font-medium text-foreground">{item.productName}</div>
@@ -126,7 +117,6 @@ export function PurchasePaymentFlowDetailList({
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatCost(item.totalCostYuan, 2)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatCost(item.totalCostKrw, 0)}</td>
-                  <td className="px-3 py-2 text-center text-xs whitespace-nowrap text-muted-foreground">{formatDate(item.paymentPaidAt)}</td>
                   <td className="px-3 py-2 text-center">
                     <Link
                       href={`/purchasing/orders?status=${item.status}&search=${encodeURIComponent(item.purchaseManagementCode ?? item.sku)}`}
@@ -227,12 +217,8 @@ function formatCost(value: number | null, maximumFractionDigits: number) {
   return value.toLocaleString('ko-KR', { maximumFractionDigits })
 }
 
-function formatDate(value: Date | null) {
-  if (!value) return '-'
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(value)
+function getPurchaseAmountCategory(item: PurchasePaymentFlowDetailItem) {
+  if (item.supplierOrderNumber?.trim()) return '구매 완료'
+  if (item.status === 'purchased') return '발주요청 · 결제 대기'
+  return '결제 대기'
 }

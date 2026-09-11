@@ -37,12 +37,6 @@ const ACTIVE_PURCHASE_PAYMENT_STATUSES = [
   'outbound_requested',
 ] as const
 
-const PURCHASE_COMPLETED_COST_STATUSES = [
-  'purchase_completed',
-  'china_arrived',
-  'outbound_requested',
-] as const
-
 export type PurchaseCostSummary = {
   itemCount: number
   totalCostYuan: number
@@ -55,9 +49,6 @@ export type PurchasePaymentFlowSummary = {
   total: PurchaseCostSummary
   purchaseBefore: PurchaseCostSummary
   purchaseCompleted: PurchaseCostSummary
-  paymentPending: PurchaseCostSummary
-  paymentPaid: PurchaseCostSummary
-  beforeOutbound: PurchaseCostSummary
   outstanding: PurchaseCostSummary
 }
 
@@ -66,9 +57,6 @@ export const PURCHASE_PAYMENT_FLOW_VIEWS = [
   'purchase_before',
   'purchase_completed',
   'outstanding',
-  'payment_pending',
-  'payment_paid',
-  'before_outbound',
 ] as const
 
 export type PurchasePaymentFlowView = (typeof PURCHASE_PAYMENT_FLOW_VIEWS)[number]
@@ -78,12 +66,9 @@ export type PurchasePaymentFlowSort = (typeof PURCHASE_PAYMENT_FLOW_SORTS)[numbe
 
 export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, string> = {
   total: '발주금액 총액',
-  purchase_before: '구매 전',
+  purchase_before: '발주요청',
   purchase_completed: '구매 완료',
-  outstanding: '미결제 잔액',
-  payment_pending: '결제 대기',
-  payment_paid: '결제 완료',
-  before_outbound: '출고 전 결제',
+  outstanding: '결제 대기 (미결제 잔액)',
 }
 
 type PurchaseCostRow = {
@@ -130,10 +115,11 @@ export async function getPurchasePaymentFlowSummary(
 ): Promise<PurchasePaymentFlowSummary> {
   await ensurePurchasePaymentTrackingSchema()
   const costs = purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw)
+  const hasSupplierOrderNumber = hasSupplierOrderNumberSql()
   const summaryRows = await db
     .select({
       status: purchaseRequestItems.status,
-      paymentStatus: purchaseRequestItems.paymentStatus,
+      hasSupplierOrderNumber,
       itemCount: count(),
       totalCostYuan: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostYuan}, 0)), 0)`,
       totalCostKrw: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostKrw}, 0)), 0)`,
@@ -149,7 +135,7 @@ export async function getPurchasePaymentFlowSummary(
       eq(purchaseRequestItems.userId, userId),
       inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
     ))
-    .groupBy(purchaseRequestItems.status, purchaseRequestItems.paymentStatus)
+    .groupBy(purchaseRequestItems.status, hasSupplierOrderNumber)
 
   return summarizePurchasePaymentFlowGroups(summaryRows)
 }
@@ -201,9 +187,6 @@ export async function getPurchasePaymentFlowData(
       total: summary.total,
       purchaseBefore: summary.purchase_before,
       purchaseCompleted: summary.purchase_completed,
-      paymentPending: summary.payment_pending,
-      paymentPaid: summary.payment_paid,
-      beforeOutbound: summary.before_outbound,
       outstanding: summary.outstanding,
     },
     items: rows.map((row) => {
@@ -294,24 +277,21 @@ export async function getPurchasePaymentFlowDetailPage(input: {
 }
 
 export function isPurchasePaymentFlowViewItem(
-  item: { status: PurchaseRequestStatus; paymentStatus?: string | null },
+  item: {
+    status: PurchaseRequestStatus
+    supplierOrderNumber?: string | null
+    hasSupplierOrderNumber?: boolean
+    paymentStatus?: string | null
+  },
   view: PurchasePaymentFlowView,
 ) {
-  const paymentStatus = normalizePaymentStatus(item.paymentStatus)
+  const hasSupplierOrderNumber = item.hasSupplierOrderNumber
+    ?? Boolean(item.supplierOrderNumber?.trim())
 
   if (view === 'total') return true
-  if (view === 'purchase_before') return item.status === 'purchased'
-  if (view === 'purchase_completed') return PURCHASE_COMPLETED_COST_STATUSES.includes(
-    item.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number],
-  )
-  if (view === 'outstanding') return paymentStatus !== 'paid'
-  if (view === 'payment_pending') {
-    return PURCHASE_COMPLETED_COST_STATUSES.includes(item.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number])
-      && paymentStatus === 'pending'
-  }
-  if (view === 'payment_paid') return paymentStatus === 'paid'
-  return PURCHASE_COMPLETED_COST_STATUSES.includes(item.status as (typeof PURCHASE_COMPLETED_COST_STATUSES)[number])
-    && paymentStatus === 'before_outbound'
+  if (view === 'purchase_completed') return hasSupplierOrderNumber
+  if (view === 'purchase_before') return item.status === 'purchased' && !hasSupplierOrderNumber
+  return !hasSupplierOrderNumber
 }
 
 export function filterPurchasePaymentFlowItems(
@@ -353,12 +333,6 @@ export function getPurchasePaymentFlowViewSummary(
       return summary.purchaseCompleted
     case 'outstanding':
       return summary.outstanding
-    case 'payment_pending':
-      return summary.paymentPending
-    case 'payment_paid':
-      return summary.paymentPaid
-    case 'before_outbound':
-      return summary.beforeOutbound
     default:
       return summary.total
   }
@@ -366,7 +340,7 @@ export function getPurchasePaymentFlowViewSummary(
 
 type PurchasePaymentFlowSummaryGroup = {
   status: PurchaseRequestStatus
-  paymentStatus: string | null
+  hasSupplierOrderNumber: boolean
   itemCount: number | string
   totalCostYuan: number | string
   totalCostKrw: number | string
@@ -403,9 +377,6 @@ function summarizePurchasePaymentFlowGroups(rows: PurchasePaymentFlowSummaryGrou
     total: summaries.total,
     purchaseBefore: summaries.purchase_before,
     purchaseCompleted: summaries.purchase_completed,
-    paymentPending: summaries.payment_pending,
-    paymentPaid: summaries.payment_paid,
-    beforeOutbound: summaries.before_outbound,
     outstanding: summaries.outstanding,
   }
 }
@@ -447,22 +418,15 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView): 
     eq(purchaseRequestItems.userId, userId),
     inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
   ]
-  const normalizedPaymentStatus = normalizedPurchasePaymentStatusSql()
+  const hasSupplierOrderNumber = hasSupplierOrderNumberSql()
 
   if (view === 'purchase_before') {
     conditions.push(eq(purchaseRequestItems.status, 'purchased'))
+    conditions.push(sql`NOT (${hasSupplierOrderNumber})`)
   } else if (view === 'purchase_completed') {
-    conditions.push(inArray(purchaseRequestItems.status, [...PURCHASE_COMPLETED_COST_STATUSES]))
+    conditions.push(hasSupplierOrderNumber)
   } else if (view === 'outstanding') {
-    conditions.push(sql`${normalizedPaymentStatus} <> 'paid'`)
-  } else if (view === 'payment_pending') {
-    conditions.push(inArray(purchaseRequestItems.status, [...PURCHASE_COMPLETED_COST_STATUSES]))
-    conditions.push(sql`${normalizedPaymentStatus} = 'pending'`)
-  } else if (view === 'payment_paid') {
-    conditions.push(sql`${normalizedPaymentStatus} = 'paid'`)
-  } else if (view === 'before_outbound') {
-    conditions.push(inArray(purchaseRequestItems.status, [...PURCHASE_COMPLETED_COST_STATUSES]))
-    conditions.push(sql`${normalizedPaymentStatus} = 'before_outbound'`)
+    conditions.push(sql`NOT (${hasSupplierOrderNumber})`)
   }
 
   return and(...conditions) ?? sql`TRUE`
@@ -497,12 +461,8 @@ function paymentFlowDetailOrderBy(
   ]
 }
 
-function normalizedPurchasePaymentStatusSql() {
-  return sql<PurchasePaymentStatus>`CASE
-    WHEN ${purchaseRequestItems.paymentStatus} = 'paid' THEN 'paid'
-    WHEN ${purchaseRequestItems.paymentStatus} = 'before_outbound' THEN 'before_outbound'
-    ELSE 'pending'
-  END`
+function hasSupplierOrderNumberSql() {
+  return sql<boolean>`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NOT NULL`
 }
 
 function purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw: number) {

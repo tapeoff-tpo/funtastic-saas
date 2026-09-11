@@ -5,6 +5,7 @@ import {
   getOutboundRequestedQuantity,
   normalizeOptionalPurchaseRequestQuantity,
   normalizePurchaseRequestQuantity,
+  PURCHASE_PAYMENT_FLOW_VIEWS,
   purchaseRequestOrderBy,
   sortPurchasePaymentFlowItems,
 } from './purchase-requests'
@@ -94,40 +95,92 @@ describe('purchase request ordering', () => {
 })
 
 describe('purchase payment flow views', () => {
-  const purchaseBefore = { status: 'purchased' as const, paymentStatus: 'pending' }
-  const purchaseCompleted = { status: 'purchase_completed' as const, paymentStatus: 'pending' }
-  const paid = { status: 'china_arrived' as const, paymentStatus: 'paid' }
-  const beforeOutbound = { status: 'outbound_requested' as const, paymentStatus: 'before_outbound' }
+  const purchaseBefore = { status: 'purchased' as const, supplierOrderNumber: null }
+  const purchaseCompleted = {
+    status: 'purchase_completed' as const,
+    supplierOrderNumber: '3316362603001063953',
+  }
 
-  it('keeps each money tab aligned with its summary calculation', () => {
-    expect(isPurchasePaymentFlowViewItem(purchaseBefore, 'purchase_before')).toBe(true)
-    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'purchase_completed')).toBe(true)
-    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'payment_pending')).toBe(true)
-    expect(isPurchasePaymentFlowViewItem(paid, 'outstanding')).toBe(false)
-    expect(isPurchasePaymentFlowViewItem(paid, 'payment_paid')).toBe(true)
-    expect(isPurchasePaymentFlowViewItem(beforeOutbound, 'before_outbound')).toBe(true)
-    expect(isPurchasePaymentFlowViewItem({ status: 'china_arrived', paymentStatus: null }, 'payment_pending')).toBe(true)
-    expect(isPurchasePaymentFlowViewItem({ status: 'china_arrived', paymentStatus: 'unknown' }, 'payment_pending')).toBe(true)
+  it('exposes only the four order-number-based money views', () => {
+    expect(PURCHASE_PAYMENT_FLOW_VIEWS).toEqual([
+      'total',
+      'purchase_before',
+      'purchase_completed',
+      'outstanding',
+    ])
   })
 
-  it('uses the matching summary total for every money tab', () => {
+  it('treats an orderless purchase request as both purchase-before and outstanding', () => {
+    expect(isPurchasePaymentFlowViewItem(purchaseBefore, 'purchase_before')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(purchaseBefore, 'outstanding')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(purchaseBefore, 'purchase_completed')).toBe(false)
+  })
+
+  it('classifies every active status solely by whether an order number exists', () => {
+    const activeStatuses = [
+      'purchased',
+      'purchase_completed',
+      'china_arrived',
+      'outbound_requested',
+    ] as const
+
+    for (const status of activeStatuses) {
+      const completed = { status, supplierOrderNumber: '3316362603001063953' }
+      expect(isPurchasePaymentFlowViewItem(completed, 'purchase_completed')).toBe(true)
+      expect(isPurchasePaymentFlowViewItem(completed, 'outstanding')).toBe(false)
+
+      const outstanding = { status, supplierOrderNumber: null }
+      expect(isPurchasePaymentFlowViewItem(outstanding, 'purchase_completed')).toBe(false)
+      expect(isPurchasePaymentFlowViewItem(outstanding, 'outstanding')).toBe(true)
+    }
+
+    expect(isPurchasePaymentFlowViewItem(purchaseCompleted, 'purchase_completed')).toBe(true)
+  })
+
+  it('treats null, empty, and whitespace-only order numbers as outstanding', () => {
+    for (const supplierOrderNumber of [null, '', '   ']) {
+      const item = { status: 'china_arrived' as const, supplierOrderNumber }
+      expect(isPurchasePaymentFlowViewItem(item, 'outstanding')).toBe(true)
+      expect(isPurchasePaymentFlowViewItem(item, 'purchase_completed')).toBe(false)
+    }
+  })
+
+  it('ignores the old manual payment status when classifying the amount', () => {
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'china_arrived',
+      supplierOrderNumber: null,
+      paymentStatus: 'paid',
+    }, 'outstanding')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'purchase_completed',
+      supplierOrderNumber: '3316362603001063953',
+      paymentStatus: 'pending',
+    }, 'purchase_completed')).toBe(true)
+  })
+
+  it('uses the precomputed order-number flag for grouped summary rows', () => {
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'purchase_completed',
+      hasSupplierOrderNumber: true,
+    }, 'purchase_completed')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'purchase_completed',
+      hasSupplierOrderNumber: false,
+    }, 'outstanding')).toBe(true)
+  })
+
+  it('uses the matching summary total for each money view', () => {
     const summary = {
       total: { itemCount: 1, totalCostYuan: 1, totalCostKrw: 1, missingYuanCostCount: 0, missingKrwCostCount: 0 },
       purchaseBefore: { itemCount: 2, totalCostYuan: 2, totalCostKrw: 2, missingYuanCostCount: 0, missingKrwCostCount: 0 },
       purchaseCompleted: { itemCount: 3, totalCostYuan: 3, totalCostKrw: 3, missingYuanCostCount: 0, missingKrwCostCount: 0 },
-      paymentPending: { itemCount: 4, totalCostYuan: 4, totalCostKrw: 4, missingYuanCostCount: 0, missingKrwCostCount: 0 },
-      paymentPaid: { itemCount: 5, totalCostYuan: 5, totalCostKrw: 5, missingYuanCostCount: 0, missingKrwCostCount: 0 },
-      beforeOutbound: { itemCount: 6, totalCostYuan: 6, totalCostKrw: 6, missingYuanCostCount: 0, missingKrwCostCount: 0 },
-      outstanding: { itemCount: 7, totalCostYuan: 7, totalCostKrw: 7, missingYuanCostCount: 0, missingKrwCostCount: 0 },
+      outstanding: { itemCount: 4, totalCostYuan: 4, totalCostKrw: 4, missingYuanCostCount: 0, missingKrwCostCount: 0 },
     }
 
     expect(getPurchasePaymentFlowViewSummary(summary, 'total').itemCount).toBe(1)
     expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_before').itemCount).toBe(2)
     expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_completed').itemCount).toBe(3)
-    expect(getPurchasePaymentFlowViewSummary(summary, 'payment_pending').itemCount).toBe(4)
-    expect(getPurchasePaymentFlowViewSummary(summary, 'payment_paid').itemCount).toBe(5)
-    expect(getPurchasePaymentFlowViewSummary(summary, 'before_outbound').itemCount).toBe(6)
-    expect(getPurchasePaymentFlowViewSummary(summary, 'outstanding').itemCount).toBe(7)
+    expect(getPurchasePaymentFlowViewSummary(summary, 'outstanding').itemCount).toBe(4)
   })
 })
 

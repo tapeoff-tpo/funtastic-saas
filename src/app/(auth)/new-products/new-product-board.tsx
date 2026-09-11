@@ -680,6 +680,10 @@ function StageMultiSelect({ stages, selectedIds, onChange }: {
       ref={detailsRef}
       open={isOpen}
       onToggle={() => setIsOpen(detailsRef.current?.open ?? false)}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && detailsRef.current?.contains(event.relatedTarget)) return
+        setIsOpen(false)
+      }}
       className="group relative"
     >
       <summary className="flex h-8 cursor-pointer list-none items-center justify-between rounded-lg border border-input bg-background px-2.5 text-sm marker:content-none">

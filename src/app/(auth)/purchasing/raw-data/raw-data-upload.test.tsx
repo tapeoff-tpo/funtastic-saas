@@ -53,19 +53,19 @@ describe('PurchasingRawDataUpload drag and drop', () => {
       types: ['Files'],
       dropEffect: '',
     }
-    const cardInput = screen.getByLabelText('국내재고현황 파일 선택')
+    const card = screen.getByTestId('raw-data-dropzone-domesticInventory')
 
-    fireEvent.drop(cardInput, { dataTransfer })
+    fireEvent.drop(card, { dataTransfer })
 
     expect(screen.getByText('domestic-stock.xlsx')).toBeInTheDocument()
   })
 
-  it('accepts an Excel file selected by the full-card native input', () => {
+  it('accepts an Excel file selected through the hidden file input', () => {
     renderUploader()
     const file = new File(['workbook'], 'purchase-plan.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     })
-    const cardInput = screen.getByLabelText('발주계획현황 파일 선택')
+    const cardInput = screen.getByLabelText('발주계획현황 엑셀 파일 입력')
 
     fireEvent.change(cardInput, { target: { files: [file] } })
 

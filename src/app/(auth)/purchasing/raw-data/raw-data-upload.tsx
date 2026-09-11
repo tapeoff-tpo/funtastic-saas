@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useTransition, type DragEvent } from 'react'
+import { useEffect, useRef, useState, useTransition, type DragEvent } from 'react'
 import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -99,6 +99,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+  const fileInputRefs = useRef<Partial<Record<FileKey, HTMLInputElement | null>>>({})
   const [isPending, startTransition] = useTransition()
   const selectedFiles = REQUIRED_FILES.flatMap(({ key }) => files[key] ? [files[key]!] : [])
   const selectedPurchasingFiles = REQUIRED_FILES.flatMap(({ key }) => (
@@ -345,28 +346,25 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
             return (
               <div
                 key={key}
+                data-testid={`raw-data-dropzone-${key}`}
                 className={`relative flex min-h-28 cursor-pointer gap-3 rounded-lg border-2 border-dashed p-4 transition-colors hover:bg-muted/30 ${dragOver === key ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : file ? 'border-emerald-300 bg-emerald-50/50' : stored ? 'border-sky-200 bg-sky-50/40' : 'border-muted-foreground/25'}`}
-                onDragEnter={(event) => { event.preventDefault(); setIsDraggingFiles(true); setDragOver(key) }}
-                onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFiles(true); setDragOver(key) }}
+                onClick={(event) => {
+                  if (event.target instanceof Element && event.target.closest('a, button, input')) return
+                  fileInputRefs.current[key]?.click()
+                }}
+                onDragEnterCapture={(event) => { event.preventDefault(); setIsDraggingFiles(true); setDragOver(key) }}
+                onDragOverCapture={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFiles(true); setDragOver(key) }}
                 onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(null) }}
-                onDrop={(event) => dropFile(event, key)}
+                onDropCapture={(event) => dropFile(event, key)}
               >
-                {/*
-                  Keep a real file input over the entire card. A visually hidden
-                  input is clickable, but is not a dependable drop target in
-                  Chrome/Windows; this native hit area handles both click and
-                  drag/drop before React's card handler normalizes the files.
-                */}
                 <input
                   id={`raw-data-file-${key}`}
-                  aria-label={`${label} 파일 선택`}
+                  aria-label={`${label} 엑셀 파일 입력`}
+                  ref={(node) => { fileInputRefs.current[key] = node }}
                   type="file"
                   accept=".xlsx"
                   multiple
-                  className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
-                  onDragEnter={(event) => { event.preventDefault(); setIsDraggingFiles(true); setDragOver(key) }}
-                  onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFiles(true); setDragOver(key) }}
-                  onDrop={(event) => dropFile(event, key)}
+                  className="hidden"
                   onChange={(event) => onFileInputChange(key, event.target.files, event.currentTarget)}
                 />
                 <span className={`flex min-w-0 flex-1 gap-3 ${templateHref ? 'pb-5' : ''}`}>
@@ -381,8 +379,12 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
                     {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
                   </span>
                 </span>
-                {templateHref ? <a href={templateHref} className="absolute bottom-3 left-14 z-20 text-xs font-medium text-primary underline underline-offset-2">단종상품 양식 다운로드</a> : null}
-                {file ? <button type="button" aria-label={`${label} 파일 제거`} className="z-20 shrink-0 rounded p-1 hover:bg-background" onClick={() => selectFile(key)}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 shrink-0 text-muted-foreground" />}
+                {templateHref ? <a href={templateHref} className="absolute bottom-3 left-14 text-xs font-medium text-primary underline underline-offset-2">단종상품 양식 다운로드</a> : null}
+                {file ? (
+                  <button type="button" aria-label={`${label} 파일 제거`} className="shrink-0 rounded p-1 hover:bg-background" onClick={() => selectFile(key)}><X className="size-4" /></button>
+                ) : (
+                  <button type="button" aria-label={`${label} 파일 선택`} className="inline-flex shrink-0 items-center gap-1 rounded border bg-background px-2 py-1 text-xs font-medium hover:bg-muted" onClick={() => fileInputRefs.current[key]?.click()}><FileSpreadsheet className="size-4" />파일 선택</button>
+                )}
               </div>
             )
           })}

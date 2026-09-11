@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -75,6 +75,7 @@ const REQUIRED_FILES: readonly RawDataFile[] = [
 ]
 
 export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles, dataFreshness }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles; dataFreshness: DataFreshness }) {
+  const uploadGridRef = useRef<HTMLDivElement>(null)
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
   const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
@@ -94,7 +95,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const readyCount = REQUIRED_FILES.filter(({ key }) => files[key] || storedFiles[key]).length
   const isVerified = Boolean(preview || inventoryPreview || discontinuedPreview)
 
-  function selectFile(key: FileKey, file?: File) {
+  const selectFile = useCallback((key: FileKey, file?: File) => {
     if (file && !/\.xlsx$/i.test(file.name)) {
       setError('엑셀 파일(.xlsx)만 넣을 수 있습니다.')
       return
@@ -106,13 +107,85 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     setPreviewKinds([])
     setMessage(null)
     setError(null)
-  }
+  }, [])
 
-  function dropFile(event: DragEvent<HTMLLabelElement>, key: FileKey) {
-    event.preventDefault()
-    setDragOver(null)
-    selectFile(key, event.dataTransfer.files[0])
-  }
+  useEffect(() => {
+    const uploadGrid = uploadGridRef.current
+    if (!uploadGrid) return
+
+    // Capture the browser's native events before React's delegated handlers.
+    // Windows Explorer can expose DataTransfer details only when the file is
+    // released, so dragover must be accepted without first inspecting `types`.
+    const getCardKey = (event: globalThis.DragEvent) => {
+      const target = event.target
+      const element = target instanceof Element
+        ? target
+        : target instanceof Node
+          ? target.parentElement
+          : null
+      const pointElement = typeof document.elementFromPoint === 'function'
+        && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
+        ? document.elementFromPoint(event.clientX, event.clientY)
+        : null
+      const card = element?.closest<HTMLElement>('[data-raw-data-file-key]')
+        ?? pointElement?.closest<HTMLElement>('[data-raw-data-file-key]')
+      if (!card || !uploadGrid.contains(card)) return null
+      const key = card.dataset.rawDataFileKey
+      return REQUIRED_FILES.some((item) => item.key === key) ? key as FileKey : null
+    }
+    const firstFile = (dataTransfer: DataTransfer) => (
+      dataTransfer.files[0]
+      ?? Array.from(dataTransfer.items ?? [])
+        .find((item) => item.kind === 'file')
+        ?.getAsFile()
+      ?? undefined
+    )
+    const allowCardDrop = (event: globalThis.DragEvent) => {
+      const key = getCardKey(event)
+      if (!key) return null
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+      return key
+    }
+    const onDragEnter = (event: globalThis.DragEvent) => {
+      const key = allowCardDrop(event)
+      if (key) setDragOver(key)
+    }
+    const onDragOver = (event: globalThis.DragEvent) => {
+      const key = allowCardDrop(event)
+      if (key) setDragOver(key)
+    }
+    const onDragLeave = (event: globalThis.DragEvent) => {
+      const currentKey = getCardKey(event)
+      if (!currentKey) return
+      const relatedElement = event.relatedTarget instanceof Element ? event.relatedTarget : null
+      const relatedCard = relatedElement?.closest<HTMLElement>('[data-raw-data-file-key]')
+      const nextKey = relatedCard && uploadGrid.contains(relatedCard)
+        ? relatedCard.dataset.rawDataFileKey as FileKey
+        : null
+      if (nextKey !== currentKey) setDragOver(nextKey)
+    }
+    const onDrop = (event: globalThis.DragEvent) => {
+      const key = allowCardDrop(event)
+      if (!key || !event.dataTransfer) return
+      setDragOver(null)
+      const file = firstFile(event.dataTransfer)
+      if (file) selectFile(key, file)
+      else setError('드래그한 파일을 읽지 못했습니다. 파일을 다시 놓아주세요.')
+    }
+
+    document.addEventListener('dragenter', onDragEnter, true)
+    document.addEventListener('dragover', onDragOver, true)
+    document.addEventListener('dragleave', onDragLeave, true)
+    document.addEventListener('drop', onDrop, true)
+    return () => {
+      document.removeEventListener('dragenter', onDragEnter, true)
+      document.removeEventListener('dragover', onDragOver, true)
+      document.removeEventListener('dragleave', onDragLeave, true)
+      document.removeEventListener('drop', onDrop, true)
+    }
+  }, [selectFile])
 
   function submit(mode: 'preview' | 'apply') {
     if (selectedFiles.length === 0) {
@@ -211,7 +284,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           </div>
           <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 7 준비 · {selectedFiles.length}개 변경</span>
         </div>
-        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div ref={uploadGridRef} className="mt-4 grid gap-3 lg:grid-cols-2">
           {REQUIRED_FILES.map(({ key, label, detail, uploadRule, templateHref }, index) => {
             const file = files[key]
             const stored = storedFiles[key]
@@ -223,11 +296,8 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
             return (
               <label
                 key={key}
+                data-raw-data-file-key={key}
                 className={`relative flex min-h-28 cursor-pointer gap-3 rounded-lg border-2 border-dashed p-4 transition-colors hover:bg-muted/30 ${dragOver === key ? 'border-primary bg-primary/5 ring-2 ring-primary/20' : file ? 'border-emerald-300 bg-emerald-50/50' : stored ? 'border-sky-200 bg-sky-50/40' : 'border-muted-foreground/25'}`}
-                onDragEnter={(event) => { event.preventDefault(); setDragOver(key) }}
-                onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }}
-                onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(null) }}
-                onDrop={(event) => dropFile(event, key)}
               >
                 <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold">{file || stored ? <Check className={`size-4 ${file ? 'text-emerald-700' : 'text-sky-700'}`} /> : index + 1}</span>
                 <span className="min-w-0 flex-1">

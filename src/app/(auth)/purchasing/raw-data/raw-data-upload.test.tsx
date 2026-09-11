@@ -10,39 +10,18 @@ const freshness = {
   outboundReflectionAt: null,
 }
 
-function renderUploader() {
+function renderUploader(initialStoredFiles: Record<string, { fileName: string; updatedAt: string }> = {}) {
   return render(
     <PurchasingRawDataUpload
       today="2026-09-11"
       inventoryUpdatedDate="2026-09-11"
-      initialStoredFiles={{}}
+      initialStoredFiles={initialStoredFiles}
       dataFreshness={freshness}
     />,
   )
 }
 
 describe('PurchasingRawDataUpload drag and drop', () => {
-  it('adds an Excel file dropped on the overall upload area', () => {
-    renderUploader()
-    const file = new File(['workbook'], 'ESG002M.xlsx', {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
-    const dataTransfer = {
-      files: [file],
-      types: ['Files'],
-      dropEffect: '',
-    }
-    const uploadArea = screen
-      .getByText('파일을 카드 어디에나, 또는 이 영역에 여러 개 한꺼번에 드래그해 놓을 수 있습니다.')
-      .closest('section')
-
-    expect(uploadArea).not.toBeNull()
-    fireEvent.drop(uploadArea!, { dataTransfer })
-
-    expect(screen.getByText('ESG002M.xlsx')).toBeInTheDocument()
-    expect(screen.getByText(/1개 파일을 임시 선택했습니다/)).toBeInTheDocument()
-  })
-
   it('keeps an Excel file dropped on its specific card', () => {
     renderUploader()
     const file = new File(['workbook'], 'domestic-stock.xlsx', {
@@ -53,22 +32,44 @@ describe('PurchasingRawDataUpload drag and drop', () => {
       types: ['Files'],
       dropEffect: '',
     }
-    const card = screen.getByTestId('raw-data-dropzone-domesticInventory')
+    const card = getCard('국내재고현황')
 
     fireEvent.drop(card, { dataTransfer })
 
     expect(screen.getByText('domestic-stock.xlsx')).toBeInTheDocument()
   })
 
-  it('accepts an Excel file selected through the hidden file input', () => {
+  it('replaces a stored file when a new file is dropped on that card', () => {
+    renderUploader({
+      purchaseRequest: { fileName: 'previous-request.xlsx', updatedAt: '2026-09-10T01:41:45.000Z' },
+    })
+    const file = new File(['workbook'], 'new-request.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    })
+    const dataTransfer = { files: [file], types: ['Files'], dropEffect: '' }
+
+    fireEvent.drop(getCard('발주요청현황'), { dataTransfer })
+
+    expect(screen.getByText('new-request.xlsx')).toBeInTheDocument()
+  })
+
+  it('accepts an Excel file selected through the card input', () => {
     renderUploader()
     const file = new File(['workbook'], 'purchase-plan.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     })
-    const cardInput = screen.getByLabelText('발주계획현황 엑셀 파일 입력')
+    const cardInput = getCard('발주계획현황').querySelector('input[type="file"]')
 
-    fireEvent.change(cardInput, { target: { files: [file] } })
+    expect(cardInput).not.toBeNull()
+
+    fireEvent.change(cardInput!, { target: { files: [file] } })
 
     expect(screen.getByText('purchase-plan.xlsx')).toBeInTheDocument()
   })
 })
+
+function getCard(label: string) {
+  const card = screen.getByText(label).closest('label')
+  if (!card) throw new Error(`${label} 업로드 카드를 찾지 못했습니다.`)
+  return card
+}

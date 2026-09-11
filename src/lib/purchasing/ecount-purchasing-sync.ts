@@ -14,6 +14,11 @@ import { cleanupExpiredEcountPurchaseOrderRowsInTransaction } from './purchase-o
 import { getIgnoredPurchasingItemKeys, purchasingItemIdentity } from './ignored-purchasing-items'
 import { ensurePurchaseRequestManagementCodeSkuLookupIndex } from './purchase-request-item-index'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
+import {
+  ensurePurchaseFundLedgerSchema,
+  reconcilePurchaseFundDebitsInTransaction,
+} from './purchase-fund-ledger'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
 export const ECOUNT_PENDING_REQUEST_SOURCE = 'ecount_purchasing_snapshot_request'
@@ -1365,10 +1370,18 @@ export async function syncEcountPurchasingSnapshot(input: {
   snapshot: EcountPurchasingSnapshot
   reportKinds?: EcountReportKind[]
 }) {
-  await ensurePurchasePaymentTrackingSchema()
-  await ensurePurchaseRequestManagementCodeSkuLookupIndex()
-  const reflectedOutboundMatchKeys = await getReflectedOutboundMatchKeys(input.userId)
-  const ignoredPurchasingItemKeys = await getIgnoredPurchasingItemKeys(input.userId)
+  const [
+    reflectedOutboundMatchKeys,
+    ignoredPurchasingItemKeys,
+    exchangeRateReference,
+  ] = await Promise.all([
+    getReflectedOutboundMatchKeys(input.userId),
+    getIgnoredPurchasingItemKeys(input.userId),
+    getLatestCnyKrwReferenceRate(),
+    ensurePurchasePaymentTrackingSchema(),
+    ensurePurchaseRequestManagementCodeSkuLookupIndex(),
+    ensurePurchaseFundLedgerSchema(),
+  ])
   const refreshScope = getEcountPurchasingRefreshScope(input.reportKinds)
   const refreshOutbound = refreshScope.refreshOutbound
   // A purchase-history-only upload replaces the old China-arrival rows. Keep
@@ -1687,6 +1700,13 @@ export async function syncEcountPurchasingSnapshot(input: {
       }
     }
 
+    // Snapshot the debit before retention removes historical source rows. The
+    // fund ledger remains intact after source-row replacement or cleanup.
+    await reconcilePurchaseFundDebitsInTransaction(tx, {
+      userId: input.userId,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
+    })
+
     // Keep replacement and retention atomic so stale order rows never become
     // visible again between a raw-data refresh and its cleanup.
     await cleanupExpiredEcountPurchaseOrderRowsInTransaction(tx, {
@@ -1710,6 +1730,7 @@ export async function syncEcountPurchasingSnapshot(input: {
     await cleanupExpiredCompletedOutboundItems({
       userId: input.userId,
       reflectedByUserId: input.requestedByUserId,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
     })
   }
 

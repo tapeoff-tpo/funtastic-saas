@@ -1,6 +1,11 @@
 import { and, eq, inArray, lte, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { purchaseRequestItems } from '@/lib/db/schema'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import {
+  ensurePurchaseFundLedgerSchema,
+  reconcilePurchaseFundDebitsInTransaction,
+} from './purchase-fund-ledger'
 
 export const OUTBOUND_COMPLETED_SOURCE = 'ecount_purchasing_snapshot_outbound_completed'
 export const COMPLETED_OUTBOUND_RETENTION_DAYS = 14
@@ -54,8 +59,16 @@ export async function reflectSelectedOutboundItems(input: {
   outboundDate?: string
   outboundDates?: string[]
 }) {
-  await ensureReflectedOutboundItemsTable()
+  const [, , exchangeRateReference] = await Promise.all([
+    ensureReflectedOutboundItemsTable(),
+    ensurePurchaseFundLedgerSchema(),
+    getLatestCnyKrwReferenceRate(),
+  ])
   return db.transaction(async (tx) => {
+    await reconcilePurchaseFundDebitsInTransaction(tx, {
+      userId: input.userId,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
+    })
     const outboundDates = selectedOutboundDates(input)
     const selection = outboundDates.length > 0
       ? inArray(purchaseRequestItems.outboundExpectedDate, outboundDates)
@@ -71,6 +84,7 @@ export async function reflectSelectedOutboundItems(input: {
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
         eq(purchaseRequestItems.status, 'completed'),
+        eq(purchaseRequestItems.bulkPaymentPending, false),
         selection,
         sql`${purchaseRequestItems.rawData}->>'source' = ${OUTBOUND_COMPLETED_SOURCE}`,
       ))
@@ -86,6 +100,7 @@ export async function reflectSelectedOutboundItems(input: {
       await tx.delete(purchaseRequestItems).where(and(
         eq(purchaseRequestItems.userId, input.userId),
         eq(purchaseRequestItems.status, 'completed'),
+        eq(purchaseRequestItems.bulkPaymentPending, false),
         inArray(purchaseRequestItems.id, reflected.map((row) => row.id)),
       ))
     }
@@ -108,12 +123,22 @@ export async function cleanupExpiredCompletedOutboundItems(input: {
   userId: string
   reflectedByUserId?: string
   now?: Date
+  fallbackExchangeRateKrw?: number
 }) {
   const cutoffDate = completedOutboundCleanupCutoffDate(input.now)
-  await ensureReflectedOutboundItemsTable()
+  const [, , exchangeRateReference] = await Promise.all([
+    ensureReflectedOutboundItemsTable(),
+    ensurePurchaseFundLedgerSchema(),
+    input.fallbackExchangeRateKrw === undefined ? getLatestCnyKrwReferenceRate() : null,
+  ])
+  const fallbackExchangeRateKrw = input.fallbackExchangeRateKrw ?? exchangeRateReference?.rate ?? 200
 
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`completed-outbound-cleanup:${input.userId}`}))`)
+    await reconcilePurchaseFundDebitsInTransaction(tx, {
+      userId: input.userId,
+      fallbackExchangeRateKrw,
+    })
 
     const rows = await tx
       .select({
@@ -126,6 +151,7 @@ export async function cleanupExpiredCompletedOutboundItems(input: {
       .where(and(
         eq(purchaseRequestItems.userId, input.userId),
         eq(purchaseRequestItems.status, 'completed'),
+        eq(purchaseRequestItems.bulkPaymentPending, false),
         sql`${purchaseRequestItems.rawData}->>'source' = ${OUTBOUND_COMPLETED_SOURCE}`,
         sql`${purchaseRequestItems.outboundExpectedDate} IS NOT NULL`,
         lte(purchaseRequestItems.outboundExpectedDate, cutoffDate),
@@ -138,6 +164,7 @@ export async function cleanupExpiredCompletedOutboundItems(input: {
       await tx.delete(purchaseRequestItems).where(and(
         eq(purchaseRequestItems.userId, input.userId),
         eq(purchaseRequestItems.status, 'completed'),
+        eq(purchaseRequestItems.bulkPaymentPending, false),
         inArray(purchaseRequestItems.id, reflected.map((row) => row.id)),
         lte(purchaseRequestItems.outboundExpectedDate, cutoffDate),
       ))

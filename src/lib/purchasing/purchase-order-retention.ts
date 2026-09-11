@@ -5,6 +5,11 @@ import {
   purchaseRequestItems,
 } from '@/lib/db/schema'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
+import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import {
+  ensurePurchaseFundLedgerSchema,
+  reconcilePurchaseFundDebitsInTransaction,
+} from './purchase-fund-ledger'
 
 const KST_OFFSET_MS = 9 * 60 * 60 * 1_000
 const PURCHASE_ORDER_RETENTION_MONTHS = 2
@@ -59,7 +64,11 @@ export async function cleanupExpiredEcountPurchaseOrderRows(input: {
   userId: string
   now?: Date
 }): Promise<PurchaseOrderRetentionCleanupResult> {
-  await ensurePurchasePaymentTrackingSchema()
+  const [, , exchangeRateReference] = await Promise.all([
+    ensurePurchasePaymentTrackingSchema(),
+    ensurePurchaseFundLedgerSchema(),
+    getLatestCnyKrwReferenceRate(),
+  ])
   return db.transaction(async (tx) => {
     await tx.execute(sql`
       SELECT pg_advisory_xact_lock(
@@ -67,6 +76,10 @@ export async function cleanupExpiredEcountPurchaseOrderRows(input: {
       )
     `)
 
+    await reconcilePurchaseFundDebitsInTransaction(tx, {
+      userId: input.userId,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
+    })
     return cleanupExpiredEcountPurchaseOrderRowsInTransaction(tx, input)
   })
 }

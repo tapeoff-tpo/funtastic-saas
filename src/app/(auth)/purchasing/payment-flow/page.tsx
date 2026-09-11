@@ -4,6 +4,10 @@ import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
 import { getCurrentUser } from '@/lib/auth/current-user'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import {
+  ensurePurchaseFundDebitBackfill,
+  getPurchaseFundLedgerData,
+} from '@/lib/purchasing/purchase-fund-ledger'
+import {
   getPurchasePaymentFlowDetailPage,
   getPurchasePaymentFlowSummary,
   getPurchasePaymentFlowViewSummary,
@@ -15,6 +19,7 @@ import {
 import { ProductFlowNav } from '@/components/product-flow-nav'
 import { PurchasePaymentFlowDetailList } from './purchase-payment-flow-detail-list'
 import { PurchasePaymentFlowSummaryPanel } from './purchase-payment-flow-summary'
+import { PurchaseFundLedgerPanel } from './purchase-fund-ledger-panel'
 import { PurchaseOrderRetentionCleanup } from '../purchase-order-retention-cleanup'
 
 export const metadata: Metadata = {
@@ -41,7 +46,11 @@ export default async function PurchasePaymentFlowPage({
     getWorkspaceUserId(user.id),
     getLatestCnyKrwReferenceRate(),
   ])
-  const [summary, initialDetailPage] = await Promise.all([
+  await ensurePurchaseFundDebitBackfill({
+    userId: workspaceUserId,
+    fallbackExchangeRateKrw: exchangeRateReference.rate,
+  })
+  const [summary, initialDetailPage, fundLedger] = await Promise.all([
     getPurchasePaymentFlowSummary(workspaceUserId, exchangeRateReference.rate),
     getPurchasePaymentFlowDetailPage({
       userId: workspaceUserId,
@@ -52,6 +61,7 @@ export default async function PurchasePaymentFlowPage({
       sort,
       order,
     }),
+    getPurchaseFundLedgerData(workspaceUserId),
   ])
   const total = getPurchasePaymentFlowViewSummary(summary, view).itemCount
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -87,6 +97,7 @@ export default async function PurchasePaymentFlowPage({
         </Link>
       </header>
 
+      <PurchaseFundLedgerPanel data={fundLedger} />
       <PurchasePaymentFlowSummaryPanel
         summary={summary}
         exchangeRateReference={exchangeRateReference}

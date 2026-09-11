@@ -6,6 +6,12 @@ import {
   type PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
 import { PaymentFlowPendingLink } from './payment-flow-pending-link'
+import {
+  PurchaseBulkPaymentDialog,
+  PurchaseBulkSelectionProvider,
+  PurchaseRowCheckbox,
+  PurchaseSelectAllCheckbox,
+} from '../orders/purchase-request-actions'
 
 export function PurchasePaymentFlowDetailList({
   view,
@@ -31,6 +37,7 @@ export function PurchasePaymentFlowDetailList({
   const pageEnd = Math.min(total, page * pageSize)
 
   return (
+    <PurchaseBulkSelectionProvider ids={items.map((item) => item.id)} nextStatus={null}>
     <section id="payment-flow-details" className="overflow-hidden rounded-md border bg-background" aria-label={`${label} 포함 주문 건`}>
       <div className="flex flex-col gap-3 border-b px-3 py-3 md:flex-row md:items-center md:justify-between">
         <div>
@@ -39,6 +46,8 @@ export function PurchasePaymentFlowDetailList({
             총 {total.toLocaleString('ko-KR')}건 · {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} 표시
           </p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <PurchaseBulkPaymentDialog />
         <form action="/purchasing/payment-flow" className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="view" value={view} />
           {sort ? <input type="hidden" name="sort" value={sort} /> : null}
@@ -72,6 +81,7 @@ export function PurchasePaymentFlowDetailList({
             이동
           </button>
         </form>
+        </div>
       </div>
 
       {items.length === 0 ? (
@@ -81,6 +91,9 @@ export function PurchasePaymentFlowDetailList({
           <table className="w-full min-w-[1080px] text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
+                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">
+                  <PurchaseSelectAllCheckbox />
+                </th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">No.</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">금액 구분</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">대량결제</th>
@@ -99,6 +112,7 @@ export function PurchasePaymentFlowDetailList({
             <tbody className="divide-y">
               {items.map((item, index) => (
                 <tr key={item.id} className="align-middle hover:bg-muted/30">
+                  <td className="px-3 py-2 text-center"><PurchaseRowCheckbox id={item.id} /></td>
                   <td className="px-3 py-2 text-center text-xs tabular-nums text-muted-foreground">
                     {((page - 1) * pageSize + index + 1).toLocaleString('ko-KR')}
                   </td>
@@ -152,6 +166,7 @@ export function PurchasePaymentFlowDetailList({
         </div>
       ) : null}
     </section>
+    </PurchaseBulkSelectionProvider>
   )
 }
 

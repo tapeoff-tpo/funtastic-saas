@@ -27,6 +27,7 @@ import {
   PurchaseBulkBuyerApply,
   PurchaseBulkDeleteButton,
   PurchaseBulkInventoryReflectedButton,
+  PurchaseBulkPaymentDialog,
   PurchaseBulkSelectionProvider,
   PurchaseBulkStatusButton,
   CompletedOutboundDateFilter,
@@ -107,14 +108,17 @@ export async function PurchasingOrdersView({
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return null
 
-  const workspaceUserId = await getWorkspaceUserId(user.id)
+  const [workspaceUserId, exchangeRateReference] = await Promise.all([
+    getWorkspaceUserId(user.id),
+    getLatestCnyKrwReferenceRate(),
+  ])
   const completedOutboundAutoCleanup = status === 'completed'
     ? await cleanupExpiredCompletedOutboundItems({
       userId: workspaceUserId,
       reflectedByUserId: user.id,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
     })
     : null
-  const exchangeRateReference = await getLatestCnyKrwReferenceRate()
   const initialPurchaseRequestResult = await getPurchaseRequests({
     userId: workspaceUserId,
     status: selectedStatus,
@@ -457,6 +461,7 @@ export async function PurchasingOrdersView({
                 {showRecommendationBasis ? <EyeOff /> : <Eye />}
                 {showRecommendationBasis ? '추천근거 닫기' : '추천근거 보기'}
               </Link>
+              {isRequestedStatus ? null : <PurchaseBulkPaymentDialog />}
               <PurchaseBulkDeleteButton />
               {status === 'completed' ? <PurchaseBulkInventoryReflectedButton /> : null}
               {overdueOnly ? null : <PurchaseBulkStatusButton />}

@@ -20,6 +20,10 @@ import {
   type PurchaseRequestStatus,
 } from './purchase-request-status'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
+import {
+  ensurePurchaseFundLedgerSchema,
+  reconcilePurchaseFundDebitsInTransaction,
+} from './purchase-fund-ledger'
 
 const CHINA_INVENTORY_WAREHOUSE_ORDER = [
   '부품관리',
@@ -873,7 +877,11 @@ export async function updatePurchaseRequestPlanFields(input: {
   if (chinaReceivedQuantity === null) return null
   if (outboundRequestedQuantity === null) return null
   const now = new Date()
-  const exchangeRateReference = input.paymentStatus === undefined
+  const shouldReconcileFund = input.supplierOrderNumber !== undefined
+    || requestedQuantity !== undefined
+    || actualPurchaseQuantity !== undefined
+  if (shouldReconcileFund) await ensurePurchaseFundLedgerSchema()
+  const exchangeRateReference = input.paymentStatus === undefined && !shouldReconcileFund
     ? null
     : await getLatestCnyKrwReferenceRate()
   const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
@@ -963,6 +971,13 @@ export async function updatePurchaseRequestPlanFields(input: {
 
     if (!row) return null
 
+    if (shouldReconcileFund) {
+      await reconcilePurchaseFundDebitsInTransaction(tx, {
+        userId: input.userId,
+        fallbackExchangeRateKrw: exchangeRateReference?.rate ?? 200,
+      })
+    }
+
     let excludedRecommendationCount = 0
     if (input.applyDelayReasonToItem && input.delayReason) {
       const purchasingStatus = purchaseDelayReasonToItemStatus(input.delayReason)
@@ -997,6 +1012,51 @@ export async function updatePurchaseRequestPlanFields(input: {
 
     return { ...row, excludedRecommendationCount }
   })
+}
+
+export async function updatePurchaseRequestPlanFieldsBulk(input: {
+  userId: string
+  ids: string[]
+  buyerCode?: string | null
+  bulkPaymentPending?: boolean
+  bulkPaymentDueDate?: string | null
+}) {
+  await ensurePurchasePaymentTrackingSchema()
+
+  const ids = Array.from(new Set(input.ids))
+  if (ids.length === 0) return []
+  if (input.bulkPaymentDueDate !== undefined && input.bulkPaymentPending === undefined) {
+    throw new Error('대량결제 예정일을 변경하려면 대량결제대기 여부도 함께 지정해야 합니다.')
+  }
+  if (input.bulkPaymentPending === false && input.bulkPaymentDueDate) {
+    throw new Error('대량결제대기 해제 시 예정일을 지정할 수 없습니다.')
+  }
+
+  const values: Partial<typeof purchaseRequestItems.$inferInsert> = {
+    updatedAt: new Date(),
+  }
+  if (input.buyerCode !== undefined) {
+    const buyerCode = normalizePurchaseBuyerCode(input.buyerCode)
+    values.buyerCode = buyerCode
+    values.buyerName = PURCHASE_BUYERS[buyerCode]
+  }
+  if (input.bulkPaymentPending !== undefined) {
+    values.bulkPaymentPending = input.bulkPaymentPending
+    values.bulkPaymentDueDate = input.bulkPaymentPending
+      ? input.bulkPaymentDueDate || null
+      : null
+  }
+
+  if (input.buyerCode === undefined && input.bulkPaymentPending === undefined) return []
+
+  return db
+    .update(purchaseRequestItems)
+    .set(values)
+    .where(and(
+      eq(purchaseRequestItems.userId, input.userId),
+      inArray(purchaseRequestItems.id, ids),
+    ))
+    .returning({ id: purchaseRequestItems.id })
 }
 
 export function normalizePurchaseRequestQuantity(value: unknown) {
@@ -1089,7 +1149,15 @@ export async function deletePurchaseRequestItem(input: {
   userId: string
   id: string
 }) {
+  const [, exchangeRateReference] = await Promise.all([
+    ensurePurchaseFundLedgerSchema(),
+    getLatestCnyKrwReferenceRate(),
+  ])
   return db.transaction(async (tx) => {
+    await reconcilePurchaseFundDebitsInTransaction(tx, {
+      userId: input.userId,
+      fallbackExchangeRateKrw: exchangeRateReference.rate,
+    })
     const [item] = await tx
       .select({ id: purchaseRequestItems.id })
       .from(purchaseRequestItems)

@@ -776,6 +776,34 @@ export const purchaseRequestItems = pgTable(
   ],
 )
 
+export const purchaseFundEntries = pgTable(
+  'purchase_fund_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    entryType: varchar('entry_type', { length: 30 }).notNull(),
+    occurredOn: date('occurred_on').notNull(),
+    amountKrw: numeric('amount_krw', { precision: 16, scale: 2 }).notNull().default('0'),
+    amountCny: numeric('amount_cny', { precision: 16, scale: 2 }),
+    memo: text('memo'),
+    sourceKey: varchar('source_key', { length: 255 }),
+    supplierOrderNumber: varchar('supplier_order_number', { length: 100 }),
+    sourcePurchaseItemId: uuid('source_purchase_item_id')
+      .references(() => purchaseRequestItems.id, { onDelete: 'set null' }),
+    missingCostCount: integer('missing_cost_count').notNull().default(0),
+    details: jsonb('details').$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: uuid('created_by'),
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidedBy: uuid('voided_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('purchase_fund_entries_user_source_key').on(table.userId, table.sourceKey),
+    index('purchase_fund_entries_user_occurred_on').on(table.userId, table.occurredOn),
+  ],
+)
+
 export const chinaWarehouseInventory = pgTable(
   'china_warehouse_inventory',
   {

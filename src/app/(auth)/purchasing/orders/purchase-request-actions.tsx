@@ -385,6 +385,130 @@ export function PurchaseBulkBuyerApply() {
   )
 }
 
+export function PurchaseBulkPaymentDialog() {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [open, setOpen] = useState(false)
+  const [dueDate, setDueDate] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+  const selectedCount = context.selectedIds.size
+
+  function applyBulkPayment(nextPending: boolean) {
+    const ids = Array.from(context.selectedIds)
+    if (ids.length === 0) return
+
+    setError(null)
+    startTransition(async () => {
+      const response = await fetch('/api/purchasing/purchase-requests/bulk-update', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ids,
+          bulkPaymentPending: nextPending,
+          bulkPaymentDueDate: nextPending ? dueDate || null : null,
+        }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setError(body.error ?? '대량결제대기 일괄 저장에 실패했습니다.')
+        return
+      }
+
+      const updatedCount = Number(body.updatedCount ?? 0)
+      const ignoredCount = Number(body.ignoredCount ?? 0)
+      context.clear()
+      setOpen(false)
+      setDueDate('')
+      toast.success(
+        nextPending
+          ? `${updatedCount.toLocaleString('ko-KR')}건을 대량결제대기로 지정했습니다.`
+          : `${updatedCount.toLocaleString('ko-KR')}건의 대량결제대기를 해제했습니다.`,
+        ignoredCount > 0
+          ? { description: `현재 작업공간에서 찾지 못한 ${ignoredCount.toLocaleString('ko-KR')}건은 제외했습니다.` }
+          : undefined,
+      )
+      router.refresh()
+    })
+  }
+
+  function markBulkPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    applyBulkPayment(true)
+  }
+
+  return (
+    <Dialog.Root
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen)
+        if (nextOpen) {
+          setDueDate('')
+          setError(null)
+        }
+      }}
+    >
+      <Dialog.Trigger
+        render={(props) => (
+          <Button
+            {...props}
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={selectedCount === 0}
+          >
+            <WalletCards />
+            선택 대량결제 {selectedCount.toLocaleString('ko-KR')}
+          </Button>
+        )}
+      />
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/40" />
+        <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 w-[min(460px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-background p-5 shadow-xl">
+          <Dialog.Title className="text-base font-semibold">대량결제대기 일괄 설정</Dialog.Title>
+          <Dialog.Description className="mt-1 text-sm text-muted-foreground">
+            선택한 {selectedCount.toLocaleString('ko-KR')}개 발주 상품을 한 번에 지정하거나 해제합니다.
+          </Dialog.Description>
+          <form onSubmit={markBulkPayment} className="mt-4 space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="bulk-payment-due-date">대량결제 예정일 (선택)</Label>
+              <Input
+                id="bulk-payment-due-date"
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(event.target.value)}
+                disabled={isPending}
+              />
+              <p className="text-xs text-muted-foreground">날짜를 비워두면 예정일 없이 대량결제대기로 표시합니다.</p>
+            </div>
+            {error ? <p className="text-sm text-destructive">{error}</p> : null}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Dialog.Close
+                render={(props) => (
+                  <Button {...props} type="button" variant="outline" disabled={isPending}>취소</Button>
+                )}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => applyBulkPayment(false)}
+                disabled={isPending}
+              >
+                {isPending ? <Loader2 className="animate-spin" /> : null}
+                선택 항목 지정 해제
+              </Button>
+              <Button type="submit" disabled={isPending}>
+                {isPending ? <Loader2 className="animate-spin" /> : <Check />}
+                대량결제대기 지정
+              </Button>
+            </div>
+          </form>
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
 export function PurchaseRequestCreateDialog() {
   const router = useRouter()
   const searchParams = useSearchParams()

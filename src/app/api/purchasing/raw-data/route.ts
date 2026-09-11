@@ -1,3 +1,4 @@
+import { gunzipSync } from 'node:zlib'
 import { revalidatePath } from 'next/cache'
 import { NextRequest, NextResponse } from 'next/server'
 import { getWorkspaceUserId } from '@/lib/admin-accounts/queries'
@@ -27,8 +28,15 @@ import {
   type StoredEcountRawFile,
 } from '@/lib/purchasing/ecount-raw-files'
 import { recordDataRefresh } from '@/lib/purchasing/data-freshness'
+import {
+  PURCHASING_RAW_BUNDLE_CONTENT_TYPE,
+  unpackPurchasingRawDataBundle,
+  type PurchasingRawDataBundleFields,
+} from '@/lib/purchasing/raw-data-upload-bundle'
 
 const MAX_TOTAL_SIZE = 4 * 1024 * 1024
+const MAX_BUNDLED_TOTAL_SIZE = 25 * 1024 * 1024
+const MAX_UNPACKED_BUNDLE_SIZE = MAX_BUNDLED_TOTAL_SIZE + 256 * 1024
 const REPORT_KINDS: EcountReportKind[] = ['purchaseRequest', 'purchasePlan', 'purchaseHistory', 'chinaInventory', 'chinaOutbound']
 
 export const runtime = 'nodejs'
@@ -40,25 +48,32 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: '로그인이 필요합니다.' }, { status: 401 })
 
   try {
-    const form = await request.formData()
-    const mode = form.get('mode') === 'apply' ? 'apply' : 'preview'
-    const files = form.getAll('files').filter((value): value is File => value instanceof File)
-    if (files.length === 0 || files.length > REPORT_KINDS.length) {
+    let uploadRequest: Awaited<ReturnType<typeof readPurchasingRawDataRequest>>
+    try {
+      uploadRequest = await readPurchasingRawDataRequest(request)
+    } catch (error) {
+      return NextResponse.json({
+        error: error instanceof Error ? error.message : '업로드 파일을 읽지 못했습니다.',
+      }, { status: 400 })
+    }
+    const { mode, fields, uploads } = uploadRequest
+    if (uploads.length === 0 || uploads.length > REPORT_KINDS.length) {
       return NextResponse.json({ error: '변경할 원본 파일을 1~5개 선택해주세요.' }, { status: 400 })
     }
-    if (files.some((file) => !/\.xlsx$/i.test(file.name))) {
+    if (uploads.some((file) => !/\.xlsx$/i.test(file.fileName))) {
       return NextResponse.json({ error: '엑셀 파일(.xlsx)만 업로드할 수 있습니다.' }, { status: 400 })
     }
-    const totalSize = files.reduce((sum, file) => sum + file.size, 0)
-    if (totalSize > MAX_TOTAL_SIZE) {
-      return NextResponse.json({ error: '파일 전체 용량은 4MB 이하여야 합니다.' }, { status: 400 })
+    const totalSize = uploads.reduce((sum, file) => sum + file.fileBuffer.byteLength, 0)
+    const uploadLimit = uploadRequest.transport === 'gzip-bundle' ? MAX_BUNDLED_TOTAL_SIZE : MAX_TOTAL_SIZE
+    if (totalSize > uploadLimit) {
+      return NextResponse.json({
+        error: uploadRequest.transport === 'gzip-bundle'
+          ? '압축 해제한 파일 전체 용량은 25MB 이하여야 합니다.'
+          : '파일 전체 용량은 4MB 이하여야 합니다.',
+      }, { status: 400 })
     }
 
     const workspaceUserId = await getWorkspaceUserId(user.id)
-    const uploads: EcountPurchasingUpload[] = await Promise.all(files.map(async (file) => ({
-      fileName: file.name.slice(0, 255),
-      fileBuffer: await file.arrayBuffer(),
-    })))
     const classified: StoredEcountRawFile[] = []
     for (const upload of uploads) {
       try {
@@ -98,9 +113,9 @@ export async function POST(request: NextRequest) {
     try {
       snapshot = await parseEcountPurchasingSnapshot({
         files: [...combined.values()],
-        asOfDate: requiredText(form, 'asOfDate'),
-        domesticInventoryReflectedThrough: requiredText(form, 'domesticInventoryReflectedThrough'),
-        purchasePlanConfirmedSince: requiredText(form, 'purchasePlanConfirmedSince'),
+        asOfDate: fields.asOfDate,
+        domesticInventoryReflectedThrough: fields.domesticInventoryReflectedThrough,
+        purchasePlanConfirmedSince: fields.purchasePlanConfirmedSince,
         allowMissingReports: true,
         purchaseHistoryBridgeKeys,
       })
@@ -152,6 +167,58 @@ export async function POST(request: NextRequest) {
       { error: getPurchasingRawDataErrorMessage(error) },
       { status: 500 },
     )
+  }
+}
+
+async function readPurchasingRawDataRequest(request: NextRequest): Promise<{
+  mode: 'preview' | 'apply'
+  fields: PurchasingRawDataBundleFields
+  uploads: EcountPurchasingUpload[]
+  transport: 'multipart' | 'gzip-bundle'
+}> {
+  const contentType = request.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase()
+  if (contentType === PURCHASING_RAW_BUNDLE_CONTENT_TYPE) {
+    const compressed = await request.arrayBuffer()
+    if (compressed.byteLength === 0 || compressed.byteLength > MAX_TOTAL_SIZE) {
+      throw new Error('압축 업로드 데이터는 4MB 이하여야 합니다.')
+    }
+
+    let unpackedBytes: Uint8Array
+    try {
+      const uncompressed = gunzipSync(Buffer.from(compressed), {
+        maxOutputLength: MAX_UNPACKED_BUNDLE_SIZE,
+      })
+      unpackedBytes = new Uint8Array(uncompressed.buffer, uncompressed.byteOffset, uncompressed.byteLength)
+    } catch {
+      throw new Error('압축 업로드 파일을 풀지 못했습니다. 파일을 다시 선택해주세요.')
+    }
+    const unpacked = unpackPurchasingRawDataBundle(unpackedBytes)
+    return {
+      mode: unpacked.fields.mode,
+      fields: unpacked.fields,
+      uploads: unpacked.files.map((file) => ({
+        fileName: file.name.slice(0, 255),
+        fileBuffer: file.bytes.slice().buffer as ArrayBuffer,
+      })),
+      transport: 'gzip-bundle',
+    }
+  }
+
+  const form = await request.formData()
+  const files = form.getAll('files').filter((value): value is File => value instanceof File)
+  return {
+    mode: form.get('mode') === 'apply' ? 'apply' : 'preview',
+    fields: {
+      mode: form.get('mode') === 'apply' ? 'apply' : 'preview',
+      asOfDate: requiredText(form, 'asOfDate'),
+      domesticInventoryReflectedThrough: requiredText(form, 'domesticInventoryReflectedThrough'),
+      purchasePlanConfirmedSince: requiredText(form, 'purchasePlanConfirmedSince'),
+    },
+    uploads: await Promise.all(files.map(async (file) => ({
+      fileName: file.name.slice(0, 255),
+      fileBuffer: await file.arrayBuffer(),
+    }))),
+    transport: 'multipart',
   }
 }
 

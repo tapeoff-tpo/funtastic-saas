@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react'
 import { AlertTriangle, Check, CheckCircle2, FileSpreadsheet, Loader2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import {
+  packPurchasingRawDataBundle,
+  PURCHASING_RAW_BUNDLE_CONTENT_TYPE,
+  type PurchasingRawDataBundleFields,
+} from '@/lib/purchasing/raw-data-upload-bundle'
 
 type PreviewSection = { rows: number; quantity: number; samples: Array<{ sku: string; productName: string; quantity: number }> }
 type InventoryPreview = { total: number; success: number; failed: number; errors?: Array<{ sku: string; error: string }> }
@@ -74,8 +79,23 @@ const REQUIRED_FILES: readonly RawDataFile[] = [
   { key: 'discontinuedProducts', label: '단종상품 현황', detail: '단종할 품목 목록', uploadRule: '변경 목록 · 파일에 적은 SKU는 모두 단종 처리', templateHref: '/api/purchasing/discontinued-products/template' },
 ]
 
+const PURCHASING_FILE_KEYS: readonly FileKey[] = ['purchaseRequest', 'purchasePlan', 'purchaseHistory', 'chinaInventory', 'chinaOutbound']
+const SPECIAL_FILE_KEYS: readonly FileKey[] = ['domesticInventory', 'discontinuedProducts']
+const MAX_MULTIPART_FILE_BYTES = 4 * 1024 * 1024
+
+function isExcelFile(file: File) {
+  return /\.xlsx$/i.test(file.name)
+}
+
+function getLikelySpecialFileKey(file: File): FileKey | null {
+  const name = file.name.toLowerCase()
+  if (name.includes('단종')) return 'discontinuedProducts'
+  if (/(국내\s*재고|재고\s*코드\s*관리|stock\s*code)/i.test(name)) return 'domesticInventory'
+  return null
+}
+
 export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialStoredFiles, dataFreshness }: { today: string; inventoryUpdatedDate: string; initialStoredFiles: StoredFiles; dataFreshness: DataFreshness }) {
-  const uploadGridRef = useRef<HTMLDivElement>(null)
+  const uploadSectionRef = useRef<HTMLElement>(null)
   const [files, setFiles] = useState<Partial<Record<FileKey, File>>>({})
   const [storedFiles, setStoredFiles] = useState(initialStoredFiles)
   const [preview, setPreview] = useState<SnapshotSummary | null>(null)
@@ -85,6 +105,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragOver, setDragOver] = useState<FileKey | null>(null)
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const [isPending, startTransition] = useTransition()
   const selectedFiles = REQUIRED_FILES.flatMap(({ key }) => files[key] ? [files[key]!] : [])
   const selectedPurchasingFiles = REQUIRED_FILES.flatMap(({ key }) => (
@@ -96,7 +117,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
   const isVerified = Boolean(preview || inventoryPreview || discontinuedPreview)
 
   const selectFile = useCallback((key: FileKey, file?: File) => {
-    if (file && !/\.xlsx$/i.test(file.name)) {
+    if (file && !isExcelFile(file)) {
       setError('엑셀 파일(.xlsx)만 넣을 수 있습니다.')
       return
     }
@@ -109,14 +130,69 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
     setError(null)
   }, [])
 
+  const selectDroppedFiles = useCallback((fileList: FileList | readonly File[], targetKey?: FileKey) => {
+    const droppedFiles = Array.from(fileList)
+    const excelFiles = droppedFiles.filter(isExcelFile)
+    const skippedCount = droppedFiles.length - excelFiles.length
+    if (excelFiles.length === 0) {
+      setIsDraggingFiles(false)
+      setDragOver(null)
+      setError('엑셀 파일(.xlsx)만 넣을 수 있습니다.')
+      return
+    }
+
+    const next = { ...files }
+    const remainingFiles = [...excelFiles]
+    let acceptedCount = 0
+    let overflowCount = 0
+
+    if (!targetKey) {
+      for (const specialKey of SPECIAL_FILE_KEYS) {
+        const fileIndex = remainingFiles.findIndex((file) => getLikelySpecialFileKey(file) === specialKey)
+        if (fileIndex < 0) continue
+        next[specialKey] = remainingFiles.splice(fileIndex, 1)[0]
+        acceptedCount += 1
+      }
+    }
+
+    const allKeys = [...PURCHASING_FILE_KEYS, ...SPECIAL_FILE_KEYS]
+    const slots = targetKey
+      ? [targetKey, ...allKeys.filter((key) => key !== targetKey && !next[key])]
+      : [...PURCHASING_FILE_KEYS.filter((key) => !next[key]), ...SPECIAL_FILE_KEYS.filter((key) => !next[key])]
+
+    for (const file of remainingFiles) {
+      const slot = slots.shift()
+      if (!slot) {
+        overflowCount += 1
+        continue
+      }
+      next[slot] = file
+      acceptedCount += 1
+    }
+
+    setFiles(next)
+    setPreview(null)
+    setInventoryPreview(null)
+    setDiscontinuedPreview(null)
+    setPreviewKinds([])
+    setDragOver(null)
+    setIsDraggingFiles(false)
+    setMessage([
+      `${acceptedCount}개 파일을 선택했습니다. 미리보기·검증을 누르면 실제 파일 종류대로 자동 정리됩니다.`,
+      skippedCount > 0 ? `.xlsx가 아닌 ${skippedCount}개 파일은 제외했습니다.` : null,
+      overflowCount > 0 ? `업로드 칸이 부족해 ${overflowCount}개 파일은 제외했습니다.` : null,
+    ].filter(Boolean).join(' '))
+    setError(null)
+  }, [files])
+
   useEffect(() => {
-    const uploadGrid = uploadGridRef.current
-    if (!uploadGrid) return
+    const uploadSection = uploadSectionRef.current
+    if (!uploadSection) return
 
     // Capture the browser's native events before React's delegated handlers.
     // Windows Explorer can expose DataTransfer details only when the file is
     // released, so dragover must be accepted without first inspecting `types`.
-    const getCardKey = (event: globalThis.DragEvent) => {
+    const getDropLocation = (event: globalThis.DragEvent) => {
       const target = event.target
       const element = target instanceof Element
         ? target
@@ -127,52 +203,63 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         && Number.isFinite(event.clientX) && Number.isFinite(event.clientY)
         ? document.elementFromPoint(event.clientX, event.clientY)
         : null
-      const card = element?.closest<HTMLElement>('[data-raw-data-file-key]')
-        ?? pointElement?.closest<HTMLElement>('[data-raw-data-file-key]')
-      if (!card || !uploadGrid.contains(card)) return null
+      const dropElement = element && uploadSection.contains(element) ? element : pointElement
+      if (!dropElement || !uploadSection.contains(dropElement)) return null
+      const card = dropElement.closest<HTMLElement>('[data-raw-data-file-key]')
+      if (!card || !uploadSection.contains(card)) return { key: null }
       const key = card.dataset.rawDataFileKey
-      return REQUIRED_FILES.some((item) => item.key === key) ? key as FileKey : null
+      return { key: REQUIRED_FILES.some((item) => item.key === key) ? key as FileKey : null }
     }
-    const firstFile = (dataTransfer: DataTransfer) => (
-      dataTransfer.files[0]
-      ?? Array.from(dataTransfer.items ?? [])
-        .find((item) => item.kind === 'file')
-        ?.getAsFile()
-      ?? undefined
-    )
-    const allowCardDrop = (event: globalThis.DragEvent) => {
-      const key = getCardKey(event)
-      if (!key) return null
+    const getDroppedFiles = (dataTransfer: DataTransfer) => {
+      const directFiles = Array.from(dataTransfer.files)
+      if (directFiles.length > 0) return directFiles
+      return Array.from(dataTransfer.items ?? []).flatMap((item) => {
+        if (item.kind !== 'file') return []
+        const file = item.getAsFile()
+        return file ? [file] : []
+      })
+    }
+    const allowSectionDrop = (event: globalThis.DragEvent) => {
+      const location = getDropLocation(event)
+      if (!location) return null
       event.preventDefault()
       event.stopPropagation()
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-      return key
+      return location
     }
     const onDragEnter = (event: globalThis.DragEvent) => {
-      const key = allowCardDrop(event)
-      if (key) setDragOver(key)
+      const location = allowSectionDrop(event)
+      if (!location) return
+      setIsDraggingFiles(true)
+      setDragOver(location.key)
     }
     const onDragOver = (event: globalThis.DragEvent) => {
-      const key = allowCardDrop(event)
-      if (key) setDragOver(key)
+      const location = allowSectionDrop(event)
+      if (!location) return
+      setIsDraggingFiles(true)
+      setDragOver(location.key)
     }
     const onDragLeave = (event: globalThis.DragEvent) => {
-      const currentKey = getCardKey(event)
-      if (!currentKey) return
       const relatedElement = event.relatedTarget instanceof Element ? event.relatedTarget : null
-      const relatedCard = relatedElement?.closest<HTMLElement>('[data-raw-data-file-key]')
-      const nextKey = relatedCard && uploadGrid.contains(relatedCard)
-        ? relatedCard.dataset.rawDataFileKey as FileKey
-        : null
-      if (nextKey !== currentKey) setDragOver(nextKey)
+      if (!relatedElement || !uploadSection.contains(relatedElement)) {
+        setIsDraggingFiles(false)
+        setDragOver(null)
+        return
+      }
+      const relatedCard = relatedElement.closest<HTMLElement>('[data-raw-data-file-key]')
+      const key = relatedCard?.dataset.rawDataFileKey
+      setDragOver(REQUIRED_FILES.some((item) => item.key === key) ? key as FileKey : null)
     }
     const onDrop = (event: globalThis.DragEvent) => {
-      const key = allowCardDrop(event)
-      if (!key || !event.dataTransfer) return
-      setDragOver(null)
-      const file = firstFile(event.dataTransfer)
-      if (file) selectFile(key, file)
-      else setError('드래그한 파일을 읽지 못했습니다. 파일을 다시 놓아주세요.')
+      const location = allowSectionDrop(event)
+      if (!location || !event.dataTransfer) return
+      const droppedFiles = getDroppedFiles(event.dataTransfer)
+      if (droppedFiles.length > 0) selectDroppedFiles(droppedFiles, location.key ?? undefined)
+      else {
+        setIsDraggingFiles(false)
+        setDragOver(null)
+        setError('드래그한 파일을 읽지 못했습니다. 파일을 다시 놓아주세요.')
+      }
     }
 
     document.addEventListener('dragenter', onDragEnter, true)
@@ -185,7 +272,12 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
       document.removeEventListener('dragleave', onDragLeave, true)
       document.removeEventListener('drop', onDrop, true)
     }
-  }, [selectFile])
+  }, [selectDroppedFiles])
+
+  function onFileInputChange(key: FileKey, fileList: FileList | null, input: HTMLInputElement) {
+    if (fileList) selectDroppedFiles(fileList, key)
+    input.value = ''
+  }
 
   function submit(mode: 'preview' | 'apply') {
     if (selectedFiles.length === 0) {
@@ -205,13 +297,15 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
         let discontinuedBody: DiscontinuedUploadResponse | null = null
 
         if (selectedPurchasingFiles.length > 0) {
-          const form = new FormData()
-          form.set('mode', mode)
-          form.set('asOfDate', today)
-          form.set('domesticInventoryReflectedThrough', inventoryUpdatedDate)
-          form.set('purchasePlanConfirmedSince', '2026-07-01')
-          for (const file of selectedPurchasingFiles) form.append('files', file)
-          const response = await fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
+          const response = await postPurchasingRawData({
+            files: selectedPurchasingFiles,
+            fields: {
+              mode,
+              asOfDate: today,
+              domesticInventoryReflectedThrough: inventoryUpdatedDate,
+              purchasePlanConfirmedSince: '2026-07-01',
+            },
+          })
           purchasingBody = await readJsonResponse<PurchasingUploadResponse>(response, '발주 로우데이터를 처리하지 못했습니다.')
           if (mode === 'apply' && purchasingBody.storedFiles) setStoredFiles(purchasingBody.storedFiles)
           if (!response.ok || !purchasingBody.summary) throw new Error(purchasingBody.error ?? '발주 로우데이터를 처리하지 못했습니다.')
@@ -276,7 +370,10 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
 
   return (
     <div className="space-y-4">
-      <section className="rounded-lg border bg-background p-4">
+      <section
+        ref={uploadSectionRef}
+        className={`rounded-lg border bg-background p-4 transition-shadow ${isDraggingFiles ? 'ring-2 ring-primary/30' : ''}`}
+      >
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="font-semibold">1. 파일별로 업로드</h2>
@@ -284,7 +381,7 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
           </div>
           <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{readyCount} / 7 준비 · {selectedFiles.length}개 변경</span>
         </div>
-        <div ref={uploadGridRef} className="mt-4 grid gap-3 lg:grid-cols-2">
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
           {REQUIRED_FILES.map(({ key, label, detail, uploadRule, templateHref }, index) => {
             const file = files[key]
             const stored = storedFiles[key]
@@ -311,7 +408,13 @@ export function PurchasingRawDataUpload({ today, inventoryUpdatedDate, initialSt
                   {recognized ? <span className={`mt-1 block text-xs ${matches ? 'text-emerald-700' : 'text-destructive'}`}>{matches ? '파일 종류 확인 완료' : `이 칸의 파일과 실제 종류가 다릅니다: ${recognized}`}</span> : null}
                 </span>
                 {file ? <button type="button" aria-label={`${label} 파일 제거`} className="rounded p-1 hover:bg-background" onClick={(event) => { event.preventDefault(); selectFile(key) }}><X className="size-4" /></button> : <FileSpreadsheet className="size-5 text-muted-foreground" />}
-                <input type="file" accept=".xlsx" className="sr-only" onChange={(event) => selectFile(key, event.target.files?.[0])} />
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  multiple
+                  className="sr-only"
+                  onChange={(event) => onFileInputChange(key, event.target.files, event.currentTarget)}
+                />
               </label>
             )
           })}
@@ -402,6 +505,39 @@ function DiscontinuedPreviewCard({ summary }: { summary: DiscontinuedPreview }) 
 
 function StateCard({ label, value }: { label: string; value: string }) {
   return <div className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>
+}
+
+async function postPurchasingRawData(input: {
+  files: File[]
+  fields: PurchasingRawDataBundleFields
+}) {
+  const totalFileBytes = input.files.reduce((sum, file) => sum + file.size, 0)
+  if (totalFileBytes <= MAX_MULTIPART_FILE_BYTES) {
+    const form = new FormData()
+    form.set('mode', input.fields.mode)
+    form.set('asOfDate', input.fields.asOfDate)
+    form.set('domesticInventoryReflectedThrough', input.fields.domesticInventoryReflectedThrough)
+    form.set('purchasePlanConfirmedSince', input.fields.purchasePlanConfirmedSince)
+    for (const file of input.files) form.append('files', file)
+    return fetch('/api/purchasing/raw-data', { method: 'POST', body: form })
+  }
+
+  if (typeof CompressionStream === 'undefined') {
+    throw new Error('여러 파일의 합계가 4MB를 넘습니다. 최신 Chrome 또는 Edge에서 다시 시도해주세요.')
+  }
+  const packed = await packPurchasingRawDataBundle(input.fields, input.files)
+  const compressedStream = new Blob([packed.buffer as ArrayBuffer])
+    .stream()
+    .pipeThrough(new CompressionStream('gzip'))
+  const compressedBody = await new Response(compressedStream).arrayBuffer()
+  if (compressedBody.byteLength > MAX_MULTIPART_FILE_BYTES) {
+    throw new Error('압축 후에도 업로드 용량이 큽니다. 파일을 나누어 올려주세요.')
+  }
+  return fetch('/api/purchasing/raw-data', {
+    method: 'POST',
+    headers: { 'Content-Type': PURCHASING_RAW_BUNDLE_CONTENT_TYPE },
+    body: compressedBody,
+  })
 }
 
 async function readJsonResponse<T extends { error?: string }>(response: Response, fallback: string): Promise<T> {

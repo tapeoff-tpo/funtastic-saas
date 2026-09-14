@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition, type FormEvent } from 'react'
+import { useState, useTransition, type FormEvent, type ReactNode } from 'react'
 import { Dialog } from '@base-ui/react/dialog'
 import { ArrowDownRight, ArrowUpRight, Loader2, Plus, Trash2, WalletCards } from 'lucide-react'
 import { useRouter } from 'next/navigation'
@@ -8,12 +8,22 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import type { CnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
+import { calculateAppliedPurchaseExchangeRateKrw } from '@/lib/purchasing/purchase-costs'
 import type {
   PurchaseFundLedgerData,
   PurchaseFundManualEntryType,
 } from '@/lib/purchasing/purchase-fund-ledger'
 
-export function PurchaseFundLedgerPanel({ data }: { data: PurchaseFundLedgerData }) {
+export function PurchaseFundLedgerPanel({
+  data,
+  exchangeRateReference,
+  children,
+}: {
+  data: PurchaseFundLedgerData
+  exchangeRateReference: CnyKrwReferenceRate
+  children: ReactNode
+}) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [entryType, setEntryType] = useState<PurchaseFundManualEntryType>('deposit')
@@ -24,6 +34,7 @@ export function PurchaseFundLedgerPanel({ data }: { data: PurchaseFundLedgerData
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const summary = data.summary
+  const appliedExchangeRate = calculateAppliedPurchaseExchangeRateKrw(exchangeRateReference.rate)
 
   function resetForm() {
     setEntryType('deposit')
@@ -90,12 +101,12 @@ export function PurchaseFundLedgerPanel({ data }: { data: PurchaseFundLedgerData
   }
 
   return (
-    <section className="space-y-3 rounded-lg border bg-background p-4" aria-label="발주 입금 및 잔액 장부">
+    <section className="space-y-4 rounded-lg border bg-background p-4" aria-label="발주금액 및 입금 잔액 현황">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-base font-semibold">
             <WalletCards className="size-4" />
-            입금·발주 잔액
+            발주금액 · 입금/잔액 현황
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
             입금은 직접 추가하고, 주문서번호가 생성된 발주는 자동으로 차감됩니다.
@@ -212,6 +223,26 @@ export function PurchaseFundLedgerPanel({ data }: { data: PurchaseFundLedgerData
         </Dialog.Root>
       </div>
 
+      <div className="rounded-md border bg-muted/30 px-3 py-2.5 text-xs" aria-label="발주금액 계산 환율">
+        <div className="flex flex-wrap gap-x-6 gap-y-1">
+          <p>
+            <span className="text-muted-foreground">현재 조회 기준환율 </span>
+            <span className="font-semibold tabular-nums">{formatRate(exchangeRateReference.rate)}원/元</span>
+            <span className="ml-1 text-muted-foreground">
+              {exchangeRateReference.source === 'fallback'
+                ? '(환율 조회 실패 · 임시값)'
+                : exchangeRateReference.date ? `(고시일 ${exchangeRateReference.date})` : ''}
+            </span>
+          </p>
+          <p>
+            <span className="text-muted-foreground">원화 계산 적용환율 </span>
+            <span className="font-semibold tabular-nums">{appliedExchangeRate === null ? '-' : formatRate(appliedExchangeRate)}원/元</span>
+            <span className="ml-1 text-muted-foreground">(기준환율 × 1.05)</span>
+          </p>
+        </div>
+        <p className="mt-1 text-muted-foreground">기존 발주에 저장된 환율이 있으면 해당 환율을 우선 적용합니다.</p>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-3">
         <FundSummaryCard
           label="누적 입금"
@@ -250,6 +281,12 @@ export function PurchaseFundLedgerPanel({ data }: { data: PurchaseFundLedgerData
         </div>
       ) : null}
 
+      {children}
+
+      <div className="border-t pt-4">
+        <h3 className="text-sm font-semibold">입금·발주 거래내역</h3>
+        <p className="mt-1 text-xs text-muted-foreground">입금과 주문서번호가 생성된 발주의 차감을 날짜순으로 확인합니다.</p>
+      </div>
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full min-w-[860px] text-sm">
           <thead className="bg-muted/60 text-xs text-muted-foreground">
@@ -368,6 +405,10 @@ function formatKrw(value: number) {
 }
 
 function formatCny(value: number) {
+  return value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
+}
+
+function formatRate(value: number) {
   return value.toLocaleString('ko-KR', { maximumFractionDigits: 2 })
 }
 

@@ -1,4 +1,3 @@
-import { calculateAppliedPurchaseExchangeRateKrw } from '@/lib/purchasing/purchase-costs'
 import { PaymentFlowPendingLink } from './payment-flow-pending-link'
 import type {
   PurchaseCostSummary,
@@ -7,38 +6,26 @@ import type {
   PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
 
-type ExchangeRateReference = {
-  rate: number
-  date: string | null
-}
-
 export function PurchasePaymentFlowSummaryPanel({
   summary,
-  exchangeRateReference,
   activeView,
   pageSize,
   sort,
   order,
 }: {
   summary: PurchasePaymentFlowSummary
-  exchangeRateReference: ExchangeRateReference
   activeView: PurchasePaymentFlowView
   pageSize: number
   sort: PurchasePaymentFlowSort | null
   order: 'asc' | 'desc'
 }) {
-  const appliedExchangeRate = calculateAppliedPurchaseExchangeRateKrw(exchangeRateReference.rate)
-
   return (
-    <section className="space-y-4" aria-label="발주금액 흐름">
-      <div className="border-b pb-3">
-        <h2 className="text-lg font-semibold">발주금액 현황</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          기준 환율 {formatCost(exchangeRateReference.rate, 2)}원/元
-          {exchangeRateReference.date ? ` (${exchangeRateReference.date})` : ''}
-          {' '}× 1.05 = 적용 {formatCost(appliedExchangeRate, 2)}원/元
+    <section className="space-y-3 border-t pt-4" aria-label="발주금액 흐름">
+      <div>
+        <h3 className="text-sm font-semibold">발주금액 현황</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          현재 진행 중인 발주 기준입니다. 원가는 특가(元)를 우선하고, 없으면 신규원가(元)를 사용합니다.
         </p>
-        <p className="mt-1 text-xs text-muted-foreground">원가: 특가(元) 우선, 신규원가(元) 보조</p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="발주금액 분류">
@@ -50,7 +37,7 @@ export function PurchasePaymentFlowSummaryPanel({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        결제 대기와 미결제 잔액은 같은 금액입니다. 주문서번호가 없으면 결제 대기, 있으면 구매 완료로 계산합니다. 대량결제대기는 두 구분과 별도로 수동 지정하며 2개월 자동삭제에서 제외됩니다.
+        주문서번호가 없으면 결제 대기(미결제 잔액), 있으면 구매 완료입니다. 발주요청은 결제 대기의 일부이고, 수동 지정한 대량결제대기는 다른 분류와 겹칠 수 있어 카드 금액을 서로 더하면 안 됩니다. 장부의 누적 차감액과도 집계 범위가 다릅니다.
       </p>
     </section>
   )

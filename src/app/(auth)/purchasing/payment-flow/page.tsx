@@ -97,15 +97,15 @@ export default async function PurchasePaymentFlowPage({
         </Link>
       </header>
 
-      <PurchaseFundLedgerPanel data={fundLedger} />
-      <PurchasePaymentFlowSummaryPanel
-        summary={summary}
-        exchangeRateReference={exchangeRateReference}
-        activeView={view}
-        pageSize={pageSize}
-        sort={sort}
-        order={order}
-      />
+      <PurchaseFundLedgerPanel data={fundLedger} exchangeRateReference={exchangeRateReference}>
+        <PurchasePaymentFlowSummaryPanel
+          summary={summary}
+          activeView={view}
+          pageSize={pageSize}
+          sort={sort}
+          order={order}
+        />
+      </PurchaseFundLedgerPanel>
       <PurchasePaymentFlowDetailList
         view={view}
         items={detailPage.items}

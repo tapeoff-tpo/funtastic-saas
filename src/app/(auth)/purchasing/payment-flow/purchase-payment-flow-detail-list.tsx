@@ -6,6 +6,7 @@ import {
   type PurchasePaymentFlowView,
 } from '@/lib/purchasing/purchase-requests'
 import { PaymentFlowPendingLink } from './payment-flow-pending-link'
+import { PaymentFlowProductSearch } from './payment-flow-product-search'
 import {
   PurchaseBulkPaymentDialog,
   PurchaseBulkSelectionProvider,
@@ -15,6 +16,7 @@ import {
 
 export function PurchasePaymentFlowDetailList({
   view,
+  search,
   items,
   total,
   page,
@@ -24,6 +26,7 @@ export function PurchasePaymentFlowDetailList({
   order,
 }: {
   view: PurchasePaymentFlowView
+  search: string
   items: PurchasePaymentFlowDetailItem[]
   total: number
   page: number
@@ -42,13 +45,14 @@ export function PurchasePaymentFlowDetailList({
   const pageEnd = Math.min(total, page * pageSize)
 
   return (
-    <PurchaseBulkSelectionProvider ids={items.map((item) => item.id)} nextStatus={null}>
+    <PurchaseBulkSelectionProvider key={`${view}:${search}:${page}:${pageSize}:${sort}:${order}`} ids={items.map((item) => item.id)} nextStatus={null}>
     <section id="payment-flow-details" className="overflow-hidden rounded-md border bg-background" aria-label={heading}>
+      <PaymentFlowProductSearch key={`${view}:${search}`} view={view} search={search} pageSize={pageSize} sort={sort} order={order} />
       <div className="flex flex-col gap-3 border-b px-3 py-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h3 className="text-base font-semibold">{heading}</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            총 {total.toLocaleString('ko-KR')}건 · {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} 표시
+            {search ? `“${search}” 검색 결과 ` : '총 '}{total.toLocaleString('ko-KR')}건 · {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} 표시
           </p>
           {view === 'purchase_completed' ? (
             <p className="mt-1 text-xs text-muted-foreground">주문서번호가 있어 자동 차감 대상으로 분류된 현재 발주입니다. 이전 발주까지 포함한 실제 차감 기록은 아래 거래내역에서 확인할 수 있습니다.</p>
@@ -58,6 +62,7 @@ export function PurchasePaymentFlowDetailList({
           <PurchaseBulkPaymentDialog />
         <form action="/purchasing/payment-flow" className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="view" value={view} />
+          {search ? <input type="hidden" name="search" value={search} /> : null}
           {sort ? <input type="hidden" name="sort" value={sort} /> : null}
           {sort ? <input type="hidden" name="order" value={order} /> : null}
           <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -93,7 +98,7 @@ export function PurchasePaymentFlowDetailList({
       </div>
 
       {items.length === 0 ? (
-        <p className="px-3 py-10 text-center text-sm text-muted-foreground">해당 금액에 포함된 주문 건이 없습니다.</p>
+        <p className="px-3 py-10 text-center text-sm text-muted-foreground">{search ? '검색 결과가 없습니다.' : '해당 금액에 포함된 주문 건이 없습니다.'}</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1080px] text-left text-sm">
@@ -109,10 +114,10 @@ export function PurchasePaymentFlowDetailList({
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">구매수량</th>
                 <th className="min-w-[130px] px-3 py-2 font-medium">주문서번호</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                  <PaymentFlowSortHeader label="금액(元)" column="totalCostYuan" view={view} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                  <PaymentFlowSortHeader label="금액(元)" column="totalCostYuan" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
                 </th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                  <PaymentFlowSortHeader label="금액(₩)" column="totalCostKrw" view={view} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                  <PaymentFlowSortHeader label="금액(₩)" column="totalCostKrw" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
                 </th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">발주</th>
               </tr>
@@ -167,9 +172,9 @@ export function PurchasePaymentFlowDetailList({
         <div className="flex items-center justify-between gap-2 border-t px-3 py-2 text-sm">
           <span className="text-xs text-muted-foreground">{pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} / {total.toLocaleString('ko-KR')}건</span>
           <div className="flex items-center gap-2">
-            <PageLink view={view} page={page - 1} pageSize={pageSize} sort={sort} order={order} disabled={page <= 1}>이전</PageLink>
+            <PageLink view={view} search={search} page={page - 1} pageSize={pageSize} sort={sort} order={order} disabled={page <= 1}>이전</PageLink>
             <span className="text-xs tabular-nums text-muted-foreground">{page.toLocaleString('ko-KR')} / {totalPages.toLocaleString('ko-KR')}</span>
-            <PageLink view={view} page={page + 1} pageSize={pageSize} sort={sort} order={order} disabled={page >= totalPages}>다음</PageLink>
+            <PageLink view={view} search={search} page={page + 1} pageSize={pageSize} sort={sort} order={order} disabled={page >= totalPages}>다음</PageLink>
           </div>
         </div>
       ) : null}
@@ -180,6 +185,7 @@ export function PurchasePaymentFlowDetailList({
 
 function PageLink({
   view,
+  search,
   page,
   pageSize,
   sort,
@@ -188,6 +194,7 @@ function PageLink({
   children,
 }: {
   view: PurchasePaymentFlowView
+  search: string
   page: number
   pageSize: number
   sort: PurchasePaymentFlowSort | null
@@ -200,6 +207,7 @@ function PageLink({
   }
 
   const params = new URLSearchParams({ view, page: String(page) })
+  if (search) params.set('search', search)
   if (pageSize !== 50) params.set('pageSize', String(pageSize))
   if (sort) {
     params.set('sort', sort)
@@ -216,6 +224,7 @@ function PaymentFlowSortHeader({
   label,
   column,
   view,
+  search,
   pageSize,
   currentSort,
   currentOrder,
@@ -223,6 +232,7 @@ function PaymentFlowSortHeader({
   label: string
   column: PurchasePaymentFlowSort
   view: PurchasePaymentFlowView
+  search: string
   pageSize: number
   currentSort: PurchasePaymentFlowSort | null
   currentOrder: 'asc' | 'desc'
@@ -230,6 +240,7 @@ function PaymentFlowSortHeader({
   const nextOrder = currentSort === column && currentOrder === 'asc' ? 'desc' : 'asc'
   const indicator = currentSort === column ? (currentOrder === 'asc' ? '↑' : '↓') : ''
   const params = new URLSearchParams({ view, sort: column, order: nextOrder })
+  if (search) params.set('search', search)
   if (pageSize !== 50) params.set('pageSize', String(pageSize))
 
   return (

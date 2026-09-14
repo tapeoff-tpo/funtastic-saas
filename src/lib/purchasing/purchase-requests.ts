@@ -229,6 +229,7 @@ export async function getPurchasePaymentFlowDetailPage(input: {
   userId: string
   fallbackExchangeRateKrw: number
   view: PurchasePaymentFlowView
+  search?: string
   page: number
   pageSize: number
   sort: PurchasePaymentFlowSort | null | undefined
@@ -237,7 +238,7 @@ export async function getPurchasePaymentFlowDetailPage(input: {
   await ensurePurchasePaymentTrackingSchema()
   const page = positiveIntegerOr(input.page, 1)
   const pageSize = Math.min(200, positiveIntegerOr(input.pageSize, 50))
-  const where = paymentFlowDetailWhere(input.userId, input.view)
+  const where = paymentFlowDetailWhere(input.userId, input.view, input.search)
   const orderBy = paymentFlowDetailOrderBy(input.sort, input.order, input.fallbackExchangeRateKrw)
 
   const rows = await db
@@ -293,6 +294,20 @@ export async function getPurchasePaymentFlowDetailPage(input: {
       }
     }),
   }
+}
+
+export async function getPurchasePaymentFlowDetailCount(input: {
+  userId: string
+  view: PurchasePaymentFlowView
+  search: string
+}): Promise<number> {
+  await ensurePurchasePaymentTrackingSchema()
+  const [row] = await db
+    .select({ itemCount: count() })
+    .from(purchaseRequestItems)
+    .where(paymentFlowDetailWhere(input.userId, input.view, input.search))
+
+  return Number(row?.itemCount ?? 0)
 }
 
 export function isPurchasePaymentFlowViewItem(
@@ -438,7 +453,7 @@ function positiveIntegerOr(value: number, fallback: number) {
   return Math.max(1, Math.trunc(value))
 }
 
-function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView): SQL {
+function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView, search?: string): SQL {
   const conditions: SQL[] = [
     eq(purchaseRequestItems.userId, userId),
     inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
@@ -454,6 +469,17 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView): 
     conditions.push(sql`NOT (${hasSupplierOrderNumber})`)
   } else if (view === 'bulk_pending') {
     conditions.push(eq(purchaseRequestItems.bulkPaymentPending, true))
+  }
+
+  if (search?.trim()) {
+    const pattern = `%${search.trim().replace(/[\\%_]/g, '\\$&')}%`
+    conditions.push(or(
+      ilike(purchaseRequestItems.sku, pattern),
+      ilike(purchaseRequestItems.productName, pattern),
+      ilike(purchaseRequestItems.optionName, pattern),
+      ilike(purchaseRequestItems.purchaseManagementCode, pattern),
+      ilike(purchaseRequestItems.supplierOrderNumber, pattern),
+    )!)
   }
 
   return and(...conditions) ?? sql`TRUE`

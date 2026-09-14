@@ -8,6 +8,7 @@ import {
   getPurchaseFundLedgerData,
 } from '@/lib/purchasing/purchase-fund-ledger'
 import {
+  getPurchasePaymentFlowDetailCount,
   getPurchasePaymentFlowDetailPage,
   getPurchasePaymentFlowSummary,
   getPurchasePaymentFlowViewSummary,
@@ -38,6 +39,7 @@ export default async function PurchasePaymentFlowPage({
   const sort = parsePaymentFlowSort(stringParam(params.sort))
   const order = parseSortOrder(stringParam(params.order)) ?? 'desc'
   const pageSize = parsePageSize(stringParam(params.pageSize))
+  const search = (stringParam(params.search) ?? '').trim().slice(0, 120)
   const requestedPage = Math.max(1, Number(stringParam(params.page) ?? '1') || 1)
   const user = await getCurrentUser()
   if (!user) return null
@@ -50,20 +52,22 @@ export default async function PurchasePaymentFlowPage({
     userId: workspaceUserId,
     fallbackExchangeRateKrw: exchangeRateReference.rate,
   })
-  const [summary, initialDetailPage, fundLedger] = await Promise.all([
+  const [summary, initialDetailPage, fundLedger, filteredTotal] = await Promise.all([
     getPurchasePaymentFlowSummary(workspaceUserId, exchangeRateReference.rate),
     getPurchasePaymentFlowDetailPage({
       userId: workspaceUserId,
       fallbackExchangeRateKrw: exchangeRateReference.rate,
       view,
+      search,
       page: requestedPage,
       pageSize,
       sort,
       order,
     }),
     getPurchaseFundLedgerData(workspaceUserId),
+    search ? getPurchasePaymentFlowDetailCount({ userId: workspaceUserId, view, search }) : Promise.resolve(null),
   ])
-  const total = getPurchasePaymentFlowViewSummary(summary, view).itemCount
+  const total = filteredTotal ?? getPurchasePaymentFlowViewSummary(summary, view).itemCount
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
   const page = Math.min(requestedPage, totalPages)
   const detailPage = page === requestedPage
@@ -72,6 +76,7 @@ export default async function PurchasePaymentFlowPage({
       userId: workspaceUserId,
       fallbackExchangeRateKrw: exchangeRateReference.rate,
       view,
+      search,
       page,
       pageSize,
       sort,
@@ -101,12 +106,14 @@ export default async function PurchasePaymentFlowPage({
         <PurchasePaymentFlowSummaryPanel
           summary={summary}
           activeView={view}
+          search={search}
           pageSize={pageSize}
           sort={sort}
           order={order}
         />
         <PurchasePaymentFlowDetailList
           view={view}
+          search={search}
           items={detailPage.items}
           total={total}
           page={page}

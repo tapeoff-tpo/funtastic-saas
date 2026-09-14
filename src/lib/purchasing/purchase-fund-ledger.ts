@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import {
@@ -8,6 +9,10 @@ import {
 import { calculatePurchaseCosts } from './purchase-costs'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 import type { PurchaseRequestStatus } from './purchase-request-status'
+import {
+  isUniqueSupplierOrderIdentifier,
+  normalizeSupplierOrderReference,
+} from './supplier-order-reference'
 
 export const PURCHASE_FUND_MANUAL_ENTRY_TYPES = ['deposit', 'opening_balance'] as const
 
@@ -131,7 +136,9 @@ export function ensurePurchaseFundLedgerSchema() {
 /**
  * Builds one durable debit per supplier order. The same order can appear in
  * several purchasing lifecycle views, so lifecycle copies are collapsed by
- * management-code/SKU before the order total is calculated.
+ * management-code/SKU before the order total is calculated. Free-text order
+ * references such as "웨이신" are purchase evidence, not globally unique order
+ * IDs, so they are separated by the strongest available row identity.
  */
 export function buildPurchaseDebitSnapshots(
   rows: PurchaseFundDebitSourceRow[],
@@ -140,14 +147,14 @@ export function buildPurchaseDebitSnapshots(
   const rowsByOrder = new Map<string, PurchaseFundDebitSourceRow[]>()
 
   for (const row of rows) {
-    const orderNumber = normalizeKeyPart(row.supplierOrderNumber)
-    if (!orderNumber) continue
-    const values = rowsByOrder.get(orderNumber) ?? []
+    const orderGroupKey = purchaseDebitOrderGroupKey(row)
+    if (!orderGroupKey) continue
+    const values = rowsByOrder.get(orderGroupKey) ?? []
     values.push(row)
-    rowsByOrder.set(orderNumber, values)
+    rowsByOrder.set(orderGroupKey, values)
   }
 
-  return [...rowsByOrder.entries()].map(([supplierOrderNumber, orderRows]) => {
+  return [...rowsByOrder.entries()].map(([sourceKey, orderRows]) => {
     const rowsByLine = new Map<string, PurchaseFundDebitSourceRow>()
     for (const row of orderRows) {
       const key = purchaseDebitLineKey(row)
@@ -186,11 +193,12 @@ export function buildPurchaseDebitSnapshots(
     const selectedSource = lineRows.reduce((selected, row) => (
       compareDebitSourceRows(row, selected) > 0 ? row : selected
     ))
+    const supplierOrderNumber = normalizeSupplierOrderReference(selectedSource.supplierOrderNumber)!
     const occurredOn = earliestPurchaseDate(orderRows)
     const productNames = [...new Set(lines.map((line) => line.productName).filter(Boolean))]
 
     return {
-      sourceKey: `supplier-order:${supplierOrderNumber}`,
+      sourceKey,
       supplierOrderNumber,
       sourcePurchaseItemId: selectedSource.id,
       occurredOn,
@@ -211,7 +219,30 @@ export function buildPurchaseDebitSnapshots(
   }).sort((left, right) => (
     left.occurredOn.localeCompare(right.occurredOn)
       || left.supplierOrderNumber.localeCompare(right.supplierOrderNumber)
+      || left.sourceKey.localeCompare(right.sourceKey)
   ))
+}
+
+function purchaseDebitOrderGroupKey(row: PurchaseFundDebitSourceRow) {
+  const supplierOrderReference = normalizeSupplierOrderReference(row.supplierOrderNumber)
+  if (!supplierOrderReference) return null
+  if (isUniqueSupplierOrderIdentifier(supplierOrderReference)) {
+    // Preserve the existing durable key for ordinary numeric supplier orders.
+    return `supplier-order:${supplierOrderReference}`
+  }
+
+  const purchaseManagementCode = normalizeKeyPart(row.purchaseManagementCode)
+  const purchaseOrderNumber = normalizeKeyPart(rawString(row.rawData.purchaseOrderNumber))
+  const sourceDateNo = normalizeKeyPart(rawString(row.rawData.sourceDateNo))
+  const fallbackIdentity = purchaseManagementCode
+    ? `management:${purchaseManagementCode}`
+    : purchaseOrderNumber
+      ? `purchase-order:${purchaseOrderNumber}`
+      : sourceDateNo
+        ? `source-date:${sourceDateNo}|sku:${normalizeKeyPart(row.sku)}|option:${normalizeKeyPart(row.optionName)}`
+        : `row:${row.id}`
+  const digest = createHash('sha256').update(fallbackIdentity).digest('hex').slice(0, 32)
+  return `supplier-reference:${digest}`
 }
 
 export async function reconcilePurchaseFundDebits(input: {

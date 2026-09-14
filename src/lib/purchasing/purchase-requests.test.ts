@@ -146,6 +146,15 @@ describe('purchase payment flow views', () => {
     }
   })
 
+  it.each(['웨이신', '알리페이', 'wechat', 'ssj', '신성진'])(
+    'treats the text order reference %s as purchase completed',
+    (supplierOrderNumber) => {
+      const item = { status: 'purchase_completed' as const, supplierOrderNumber }
+      expect(isPurchasePaymentFlowViewItem(item, 'purchase_completed')).toBe(true)
+      expect(isPurchasePaymentFlowViewItem(item, 'outstanding')).toBe(false)
+    },
+  )
+
   it('ignores the old manual payment status when classifying the amount', () => {
     expect(isPurchasePaymentFlowViewItem({
       status: 'china_arrived',

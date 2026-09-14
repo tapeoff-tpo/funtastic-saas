@@ -440,6 +440,13 @@ describe('parseEcountPurchasingSnapshot', () => {
       sku: '101542-0001',
       quantity: 400,
       purchaseManagementCode: '20260729-110151-9',
+      supplierOrderNumber: '웨이신',
+    }))
+    expect(snapshot.chinaArrived).toContainEqual(expect.objectContaining({
+      sku: '101542-0001',
+      quantity: 400,
+      purchaseManagementCode: '20260625-110151-17',
+      supplierOrderNumber: '웨이신',
     }))
   })
 
@@ -980,6 +987,29 @@ describe('parseEcountPurchasingSnapshot', () => {
       purchasedQuantity: 100,
       isFullyOutbound: true,
     })
+  })
+
+  it('keeps a text purchase reference on a China-outbound row without treating it as a shared order key', async () => {
+    const outbound = await makeUpload('china-outbound.xlsx', [
+      '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+    ], [
+      ['100001-0001', '20260901-1', '위챗 구매 상품', '기본', 20, '2026-09-01', 'wechat', 'OUT-WECHAT'],
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files: [outbound],
+      domesticInventoryReflectedThrough: '2026-09-02',
+      asOfDate: '2026-09-02',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.outboundCompleted).toEqual([
+      expect.objectContaining({
+        sku: '100001-0001',
+        supplierOrderNumber: 'wechat',
+        fallbackMatchKey: 'outbound:OUT-WECHAT:100001-0001',
+      }),
+    ])
   })
 })
 

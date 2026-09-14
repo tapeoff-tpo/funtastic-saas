@@ -17,7 +17,7 @@ function row(overrides: Partial<PurchaseFundDebitSourceRow> = {}): PurchaseFundD
     requestedQuantity: 100,
     actualPurchaseQuantity: 100,
     purchaseManagementCode: 'BUY-001',
-    supplierOrderNumber: 'ORDER-001',
+    supplierOrderNumber: '3316362603001063953',
     costExchangeRateKrw: null,
     specialPriceCny: '10',
     newCostCny: '12',
@@ -42,7 +42,7 @@ describe('purchase fund debit snapshots', () => {
 
     expect(snapshots).toHaveLength(1)
     expect(snapshots[0]).toMatchObject({
-      supplierOrderNumber: 'ORDER-001',
+      supplierOrderNumber: '3316362603001063953',
       occurredOn: '2026-09-01',
       amountCny: 1_000,
       amountKrw: 210_000,
@@ -98,13 +98,46 @@ describe('purchase fund debit snapshots', () => {
       row(),
       row({
         id: '55555555-5555-4555-8555-555555555555',
-        supplierOrderNumber: 'ORDER-002',
+        supplierOrderNumber: '3316362603001063954',
       }),
     ], 200)
 
     expect(snapshots.map((snapshot) => snapshot.supplierOrderNumber)).toEqual([
-      'ORDER-001',
-      'ORDER-002',
+      '3316362603001063953',
+      '3316362603001063954',
     ])
+  })
+
+  it('separates reused text references by purchase management code', () => {
+    const snapshots = buildPurchaseDebitSnapshots([
+      row({ supplierOrderNumber: '웨이신' }),
+      row({
+        id: '66666666-6666-4666-8666-666666666666',
+        supplierOrderNumber: '웨이신',
+        purchaseManagementCode: 'BUY-002',
+      }),
+    ], 200)
+
+    expect(snapshots).toHaveLength(2)
+    expect(new Set(snapshots.map((snapshot) => snapshot.sourceKey)).size).toBe(2)
+    expect(snapshots.every((snapshot) => snapshot.supplierOrderNumber === '웨이신')).toBe(true)
+  })
+
+  it('collapses lifecycle copies carrying the same text reference and management code', () => {
+    const snapshots = buildPurchaseDebitSnapshots([
+      row({ supplierOrderNumber: 'wechat' }),
+      row({
+        id: '77777777-7777-4777-8777-777777777777',
+        status: 'china_arrived',
+        supplierOrderNumber: 'wechat',
+      }),
+    ], 200)
+
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]).toMatchObject({
+      supplierOrderNumber: 'wechat',
+      amountCny: 1_000,
+      amountKrw: 210_000,
+    })
   })
 })

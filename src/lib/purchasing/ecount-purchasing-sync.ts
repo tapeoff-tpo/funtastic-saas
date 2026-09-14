@@ -18,6 +18,11 @@ import {
   ensurePurchaseFundLedgerSchema,
   reconcilePurchaseFundDebitsInTransaction,
 } from './purchase-fund-ledger'
+import {
+  isUniqueSupplierOrderIdentifier,
+  normalizeEcountSupplierOrderReference,
+  normalizeSupplierOrderReference,
+} from './supplier-order-reference'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 
 export const ECOUNT_PURCHASING_LEGACY_SOURCE = 'ecount_purchasing_replacement'
@@ -392,12 +397,12 @@ export async function parseEcountPurchasingSnapshot(input: {
       const sourceDateNo = valueAt(row, chinaOutbound, '일자-No.')
       const purchaseManagementCode = emptyToNull(valueAt(row, chinaOutbound, '구입관리코드'))
       const outboundManagementCode = emptyToNull(valueAt(row, chinaOutbound, '출고관리코드'))
-      const rawSupplierOrderNumber = valueAt(row, chinaOutbound, '주문서번호')
-      const supplierOrderNumber = isReliableSupplierOrderNumber(rawSupplierOrderNumber)
-        ? rawSupplierOrderNumber
-        : null
-      const supplierLegacyMatchKey = supplierOrderNumber
-        ? `supplier:${supplierOrderNumber}:${sku}`
+      const supplierOrderNumber = normalizeEcountSupplierOrderReference(
+        valueAt(row, chinaOutbound, '주문서번호'),
+      )
+      const uniqueSupplierOrderNumber = reliableSupplierOrderNumber(supplierOrderNumber ?? '')
+      const supplierLegacyMatchKey = uniqueSupplierOrderNumber
+        ? `supplier:${uniqueSupplierOrderNumber}:${sku}`
         : ''
       const rowLegacyMatchKey = `row:${sourceDateNo}:${sku}:${row.number}`
       const fallbackMatchKey = outboundManagementCode
@@ -479,7 +484,9 @@ export async function parseEcountPurchasingSnapshot(input: {
           : null,
         purchaseManagementCode,
         purchaseOrderNumber: null,
-        supplierOrderNumber: reliableSupplierOrderNumber(valueAt(plan, purchasePlan, '주문서번호 (C)')),
+        supplierOrderNumber: normalizeEcountSupplierOrderReference(
+          valueAt(plan, purchasePlan, '주문서번호 (C)'),
+        ),
         purchaseMethod: emptyToNull(valueAt(plan, purchasePlan, '구매진행여부 (C)')),
         unitPriceCny: null,
         shippingFeeCny: null,
@@ -535,7 +542,9 @@ export async function parseEcountPurchasingSnapshot(input: {
       const chinaArrivalRequestDate = parseDate(valueAt(row, purchaseHistory, '중국창고 도착요청일'))
       if (sourceQuantity === 0) return null
 
-      const supplierOrderNumber = reliableSupplierOrderNumber(valueAt(row, purchaseHistory, '주문서번호 (C)'))
+      const supplierOrderNumber = normalizeEcountSupplierOrderReference(
+        valueAt(row, purchaseHistory, '주문서번호 (C)'),
+      )
       return {
         source: ECOUNT_PURCHASE_COMPLETED_SOURCE,
         sourceFileName: purchaseHistory.fileName,
@@ -611,9 +620,11 @@ export async function parseEcountPurchasingSnapshot(input: {
   const planRowsWithIdentifierMismatch = planItems.filter((plan) => (
     hasManagementGroupSupplierMismatch(plan, historyItems)
   )).length
-  const outboundRowsWithSupplierOrder = rawChinaOutboundItems.filter((row) => row.supplierOrderNumber !== null)
+  const outboundRowsWithSupplierOrder = rawChinaOutboundItems.filter((row) => (
+    supplierKey(row.supplierOrderNumber, row.sku) !== null
+  ))
   const outboundRowsWithPurchaseReference = rawChinaOutboundItems.filter((row) => (
-    row.purchaseManagementCode !== null || row.supplierOrderNumber !== null
+    row.purchaseManagementCode !== null || supplierKey(row.supplierOrderNumber, row.sku) !== null
   ))
   const outboundRowsMatchedToPurchase = outboundRowsWithPurchaseReference.filter((row) => {
     const managementKey = row.purchaseManagementCode
@@ -874,7 +885,7 @@ function sameManagedSku(
 }
 
 function hasReliablePurchaseIdentity(item: EcountPurchaseCompletedItem) {
-  return Boolean(item.purchaseManagementCode || item.supplierOrderNumber)
+  return Boolean(item.purchaseManagementCode || supplierKey(item.supplierOrderNumber, item.sku))
 }
 
 type PurchasingMatchItem = Pick<
@@ -1147,10 +1158,12 @@ function pipelineMatchScore(
     && right.purchaseManagementCode
     && left.purchaseManagementCode === right.purchaseManagementCode,
   )
+  const leftSupplierOrderKey = supplierKey(left.supplierOrderNumber, left.sku)
+  const rightSupplierOrderKey = supplierKey(right.supplierOrderNumber, right.sku)
   const orderMatches = Boolean(
-    left.supplierOrderNumber
-    && right.supplierOrderNumber
-    && left.supplierOrderNumber === right.supplierOrderNumber,
+    leftSupplierOrderKey
+    && rightSupplierOrderKey
+    && leftSupplierOrderKey === rightSupplierOrderKey,
   )
   const managementConflicts = Boolean(
     left.purchaseManagementCode
@@ -1158,16 +1171,14 @@ function pipelineMatchScore(
     && left.purchaseManagementCode !== right.purchaseManagementCode,
   )
   const orderConflicts = Boolean(
-    left.supplierOrderNumber
-    && right.supplierOrderNumber
-    && left.supplierOrderNumber !== right.supplierOrderNumber,
+    leftSupplierOrderKey
+    && rightSupplierOrderKey
+    && leftSupplierOrderKey !== rightSupplierOrderKey,
   )
   const managementKeyAvailableOnBothSides = Boolean(
     left.purchaseManagementCode && right.purchaseManagementCode,
   )
-  const supplierOrderAvailableOnBothSides = Boolean(
-    left.supplierOrderNumber && right.supplierOrderNumber,
-  )
+  const supplierOrderAvailableOnBothSides = Boolean(leftSupplierOrderKey && rightSupplierOrderKey)
   // Management code is authoritative whenever both reports carry it. Supplier
   // order only breaks ties when the management key is unavailable on a side.
   if (managementKeyAvailableOnBothSides && managementConflicts) return 0
@@ -1890,7 +1901,7 @@ function isPurchaseItemSku(value: string) {
 }
 
 function isReliableSupplierOrderNumber(value: string) {
-  return /^[1-9]\d{8,}$/.test(value)
+  return isUniqueSupplierOrderIdentifier(value)
 }
 
 function describeHeaderProblem(sheet: ExcelJS.Worksheet) {
@@ -1914,8 +1925,8 @@ function describeHeaderProblem(sheet: ExcelJS.Worksheet) {
 }
 
 function reliableSupplierOrderNumber(value: string) {
-  const normalized = value.trim()
-  return isReliableSupplierOrderNumber(normalized) ? normalized : null
+  const normalized = normalizeSupplierOrderReference(value)
+  return isReliableSupplierOrderNumber(normalized ?? '') ? normalized : null
 }
 
 function purchaseKey(code: string, sku: string) {

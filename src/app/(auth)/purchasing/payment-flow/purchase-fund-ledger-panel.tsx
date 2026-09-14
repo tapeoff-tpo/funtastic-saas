@@ -283,12 +283,13 @@ export function PurchaseFundLedgerPanel({
 
       {children}
 
-      <div className="border-t pt-4">
-        <h3 className="text-sm font-semibold">입금·발주 거래내역</h3>
-        <p className="mt-1 text-xs text-muted-foreground">입금과 주문서번호가 생성된 발주의 차감을 날짜순으로 확인합니다.</p>
-      </div>
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full min-w-[860px] text-sm">
+      <details className="group border-t pt-4">
+        <summary className="cursor-pointer text-sm font-semibold marker:text-muted-foreground">
+          입금·발주 거래내역 펼치기 ({data.entries.length.toLocaleString('ko-KR')}건 표시)
+        </summary>
+        <p className="mt-1 text-xs text-muted-foreground">입금과 주문서번호가 생성된 발주의 실제 차감 기록입니다. 현재 진행 중인 발주 목록과 달리 이전 발주도 남아 있습니다.</p>
+        <div className="mt-3 overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[860px] text-sm">
           <thead className="bg-muted/60 text-xs text-muted-foreground">
             <tr>
               <th className="px-3 py-2 text-left font-medium">날짜</th>
@@ -341,11 +342,12 @@ export function PurchaseFundLedgerPanel({
               </tr>
             ))}
           </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 자동 차감 내역은 원본 발주가 2개월 후 정리되어도 장부에 계속 남으며, 기초잔액은 해당 날짜부터 잔액 계산을 다시 시작합니다.
-      </p>
+          </table>
+        </div>
+        <p className="mt-3 text-xs text-muted-foreground">
+          주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 자동 차감 내역은 원본 발주가 2개월 후 정리되어도 장부에 계속 남으며, 기초잔액은 해당 날짜부터 잔액 계산을 다시 시작합니다.
+        </p>
+      </details>
     </section>
   )
 }

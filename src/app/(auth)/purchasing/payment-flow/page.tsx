@@ -105,17 +105,17 @@ export default async function PurchasePaymentFlowPage({
           sort={sort}
           order={order}
         />
+        <PurchasePaymentFlowDetailList
+          view={view}
+          items={detailPage.items}
+          total={total}
+          page={page}
+          pageSize={pageSize}
+          totalPages={totalPages}
+          sort={sort}
+          order={order}
+        />
       </PurchaseFundLedgerPanel>
-      <PurchasePaymentFlowDetailList
-        view={view}
-        items={detailPage.items}
-        total={total}
-        page={page}
-        pageSize={pageSize}
-        totalPages={totalPages}
-        sort={sort}
-        order={order}
-      />
     </div>
   )
 }

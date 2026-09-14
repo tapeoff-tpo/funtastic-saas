@@ -33,18 +33,26 @@ export function PurchasePaymentFlowDetailList({
   order: 'asc' | 'desc'
 }) {
   const label = PURCHASE_PAYMENT_FLOW_VIEW_LABELS[view]
+  const heading = view === 'outstanding'
+    ? '현재 결제 대기 목록'
+    : view === 'purchase_completed'
+      ? '구매 완료 · 발주 차감 대상 목록'
+      : `${label} 포함 주문 건`
   const pageStart = total === 0 ? 0 : (page - 1) * pageSize + 1
   const pageEnd = Math.min(total, page * pageSize)
 
   return (
     <PurchaseBulkSelectionProvider ids={items.map((item) => item.id)} nextStatus={null}>
-    <section id="payment-flow-details" className="overflow-hidden rounded-md border bg-background" aria-label={`${label} 포함 주문 건`}>
+    <section id="payment-flow-details" className="overflow-hidden rounded-md border bg-background" aria-label={heading}>
       <div className="flex flex-col gap-3 border-b px-3 py-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2 className="text-base font-semibold">{label} 포함 주문 건</h2>
+          <h3 className="text-base font-semibold">{heading}</h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
             총 {total.toLocaleString('ko-KR')}건 · {pageStart.toLocaleString('ko-KR')}-{pageEnd.toLocaleString('ko-KR')} 표시
           </p>
+          {view === 'purchase_completed' ? (
+            <p className="mt-1 text-xs text-muted-foreground">주문서번호가 있어 자동 차감 대상으로 분류된 현재 발주입니다. 이전 발주까지 포함한 실제 차감 기록은 아래 거래내역에서 확인할 수 있습니다.</p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <PurchaseBulkPaymentDialog />

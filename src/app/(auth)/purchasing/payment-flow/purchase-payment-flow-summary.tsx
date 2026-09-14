@@ -24,7 +24,7 @@ export function PurchasePaymentFlowSummaryPanel({
       <div>
         <h3 className="text-sm font-semibold">발주금액 현황</h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          현재 진행 중인 발주 기준입니다. 원가는 특가(元)를 우선하고, 없으면 신규원가(元)를 사용합니다.
+          금액 카드를 누르면 바로 아래 목록이 바뀝니다. 현재 진행 중인 발주 기준이며, 원가는 특가(元)를 우선하고 없으면 신규원가(元)를 사용합니다.
         </p>
       </div>
 

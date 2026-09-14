@@ -14,6 +14,7 @@ import type {
   PurchaseFundLedgerData,
   PurchaseFundManualEntryType,
 } from '@/lib/purchasing/purchase-fund-ledger'
+import { ChinaFundStatementPanel } from './china-fund-statement-panel'
 
 export function PurchaseFundLedgerPanel({
   data,
@@ -280,6 +281,8 @@ export function PurchaseFundLedgerPanel({
             : null}
         </div>
       ) : null}
+
+      <ChinaFundStatementPanel />
 
       {children}
 

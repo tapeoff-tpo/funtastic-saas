@@ -804,6 +804,40 @@ export const purchaseFundEntries = pgTable(
   ],
 )
 
+export const chinaFundStatementEntries = pgTable(
+  'china_fund_statement_entries',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    userId: uuid('user_id').notNull(),
+    importBatchId: uuid('import_batch_id').notNull(),
+    occurredOn: date('occurred_on').notNull(),
+    sequence: integer('sequence').notNull(),
+    direction: varchar('direction', { length: 30 }).notNull(),
+    signedAmountCny: numeric('signed_amount_cny', { precision: 16, scale: 2 }).notNull(),
+    balanceAfterCny: numeric('balance_after_cny', { precision: 16, scale: 2 }).notNull(),
+    sourceKey: varchar('source_key', { length: 255 }).notNull(),
+    sourceLabel: text('source_label'),
+    memo: text('memo'),
+    rawData: jsonb('raw_data').$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: uuid('created_by'),
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidedBy: uuid('voided_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('china_fund_statement_entries_user_active_source_key')
+      .on(table.userId, table.sourceKey)
+      .where(sql`${table.voidedAt} IS NULL`),
+    index('china_fund_statement_entries_user_date_created_sequence').on(
+      table.userId,
+      table.occurredOn,
+      table.createdAt,
+      table.sequence,
+    ),
+  ],
+)
+
 export const chinaWarehouseInventory = pgTable(
   'china_warehouse_inventory',
   {

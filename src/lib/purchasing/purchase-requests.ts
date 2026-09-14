@@ -24,6 +24,14 @@ import {
   ensurePurchaseFundLedgerSchema,
   reconcilePurchaseFundDebitsInTransaction,
 } from './purchase-fund-ledger'
+import {
+  ensureIgnoredPurchasingItemsTable,
+  ignorePurchasingItemsInTransaction,
+  purchasingItemIdentity,
+  purchasingItemOrderIdentity,
+  purchasingOutboundComponentIdentity,
+} from './ignored-purchasing-items'
+import { isUniqueSupplierOrderIdentifier } from './supplier-order-reference'
 
 const CHINA_INVENTORY_WAREHOUSE_ORDER = [
   '부품관리',
@@ -40,6 +48,8 @@ const ACTIVE_PURCHASE_PAYMENT_STATUSES = [
   'china_arrived',
   'outbound_requested',
 ] as const
+
+const PAYMENT_FLOW_MANUALLY_COMPLETED_SOURCE = 'payment_flow_manually_completed'
 
 export type PurchaseCostSummary = {
   itemCount: number
@@ -813,6 +823,7 @@ export async function updatePurchaseRequestStatus(input: {
     : await getLatestCnyKrwReferenceRate()
 
   return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
     const [current] = await tx
       .select()
       .from(purchaseRequestItems)
@@ -960,6 +971,7 @@ export async function updatePurchaseRequestPlanFields(input: {
   }
 
   return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
     const [current] = await tx
       .select()
       .from(purchaseRequestItems)
@@ -1180,6 +1192,7 @@ export async function deletePurchaseRequestItem(input: {
     getLatestCnyKrwReferenceRate(),
   ])
   return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
     await reconcilePurchaseFundDebitsInTransaction(tx, {
       userId: input.userId,
       fallbackExchangeRateKrw: exchangeRateReference.rate,
@@ -1225,6 +1238,268 @@ export async function deletePurchaseRequestItem(input: {
 
     return { id: input.id }
   })
+}
+
+export async function deletePurchaseRequestItemsWithoutInventoryMovements(input: {
+  userId: string
+  ids: string[]
+}) {
+  const ids = Array.from(new Set(input.ids))
+  if (ids.length === 0) {
+    return { deletedIds: [], inventoryLinkedIds: [], ineligibleIds: [], missingIds: [] }
+  }
+
+  await ensureIgnoredPurchasingItemsTable()
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+    const workspaceRows = await tx
+      .select()
+      .from(purchaseRequestItems)
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        inArray(purchaseRequestItems.id, ids),
+      ))
+    const workspaceIds = new Set(workspaceRows.map((row) => row.id))
+    const eligibleRows = workspaceRows.filter((row) => (
+      ACTIVE_PURCHASE_PAYMENT_STATUSES.includes(row.status as (typeof ACTIVE_PURCHASE_PAYMENT_STATUSES)[number])
+      && !row.supplierOrderNumber?.trim()
+    ))
+    const eligibleIds = new Set(eligibleRows.map((row) => row.id))
+
+    const movementRows = eligibleIds.size === 0
+      ? []
+      : await tx
+        .select({ purchaseRequestItemId: chinaWarehouseInventoryMovements.purchaseRequestItemId })
+        .from(chinaWarehouseInventoryMovements)
+        .where(and(
+          eq(chinaWarehouseInventoryMovements.userId, input.userId),
+          inArray(chinaWarehouseInventoryMovements.purchaseRequestItemId, [...eligibleIds]),
+        ))
+    const inventoryLinkedIds = new Set(movementRows.map((row) => row.purchaseRequestItemId))
+    const deletableIds = [...eligibleIds].filter((id) => !inventoryLinkedIds.has(id))
+
+    const deletedRows = deletableIds.length === 0
+      ? []
+      : await tx
+        .delete(purchaseRequestItems)
+        .where(and(
+          eq(purchaseRequestItems.userId, input.userId),
+          inArray(purchaseRequestItems.id, deletableIds),
+          inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
+          sql`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NULL`,
+          sql`NOT EXISTS (
+            SELECT 1
+            FROM ${chinaWarehouseInventoryMovements}
+            WHERE ${chinaWarehouseInventoryMovements.purchaseRequestItemId} = ${purchaseRequestItems.id}
+          )`,
+        ))
+        .returning({ id: purchaseRequestItems.id })
+    const deletedIds = new Set(deletedRows.map((row) => row.id))
+
+    await ignorePurchasingItemsInTransaction(tx, {
+      userId: input.userId,
+      items: eligibleRows
+        .filter((row) => deletedIds.has(row.id))
+        .flatMap((row) => purchaseRequestItemIgnoreIdentityKeys(row).map((identityKey) => ({
+          identityKey,
+          reason: '사용자 삭제',
+        }))),
+    })
+
+    return {
+      deletedIds: [...deletedIds],
+      inventoryLinkedIds: [...inventoryLinkedIds],
+      ineligibleIds: [...workspaceIds].filter((id) => !eligibleIds.has(id)),
+      missingIds: ids.filter((id) => !workspaceIds.has(id)),
+    }
+  })
+}
+
+export async function completeOutstandingPurchaseRequestItems(input: {
+  userId: string
+  ids: string[]
+}) {
+  const ids = Array.from(new Set(input.ids))
+  if (ids.length === 0) {
+    return { completedIds: [], ineligibleIds: [], missingIds: [] }
+  }
+
+  await Promise.all([
+    ensurePurchasePaymentTrackingSchema(),
+    ensureIgnoredPurchasingItemsTable(),
+  ])
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+    const workspaceRows = await tx
+      .select()
+      .from(purchaseRequestItems)
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        inArray(purchaseRequestItems.id, ids),
+      ))
+    const workspaceIds = new Set(workspaceRows.map((row) => row.id))
+    const eligibleRows = workspaceRows.filter(isOutstandingPurchasePaymentRow)
+    const eligibleIds = eligibleRows.map((row) => row.id)
+
+    const completedRows = eligibleIds.length === 0
+      ? []
+      : await tx
+        .update(purchaseRequestItems)
+        .set({
+          status: 'completed',
+          // Moving the raw source out of the replaceable Ecount namespace
+          // keeps the completed row and its inventory movement history from
+          // being cascade-deleted on a later raw-data upload.
+          rawData: sql`${purchaseRequestItems.rawData} || jsonb_build_object(
+            'originalSource', COALESCE(
+              ${purchaseRequestItems.rawData}->>'originalSource',
+              ${purchaseRequestItems.rawData}->>'source'
+            ),
+            'source', ${PAYMENT_FLOW_MANUALLY_COMPLETED_SOURCE},
+            'paymentFlowManuallyCompleted', true,
+            'paymentFlowCompletedAt', now()
+          )`,
+          updatedAt: new Date(),
+        })
+        .where(and(
+          eq(purchaseRequestItems.userId, input.userId),
+          inArray(purchaseRequestItems.id, eligibleIds),
+          inArray(purchaseRequestItems.status, [...ACTIVE_PURCHASE_PAYMENT_STATUSES]),
+          sql`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NULL`,
+        ))
+        .returning({ id: purchaseRequestItems.id })
+
+    const completedIds = new Set(completedRows.map((row) => row.id))
+
+    // Only touch inventory after the guarded update has actually claimed the
+    // row. Another request may have filled an order number or changed status
+    // after the initial read; those rows return no id and remain untouched.
+    // Domestic inventory is separate and is never changed here.
+    for (const row of eligibleRows) {
+      if (!completedIds.has(row.id)) continue
+      if (row.status === 'china_arrived') await addChinaWarehouseStock(tx, row)
+      await subtractChinaWarehouseStock(tx, row)
+    }
+
+    await ignorePurchasingItemsInTransaction(tx, {
+      userId: input.userId,
+      items: eligibleRows
+        .filter((row) => completedIds.has(row.id))
+        .flatMap((row) => purchaseRequestItemIgnoreIdentityKeys(row).map((identityKey) => ({
+          identityKey,
+          reason: '결제 대기 목록 사용자 완료 처리',
+        }))),
+    })
+
+    return {
+      completedIds: [...completedIds],
+      ineligibleIds: [...workspaceIds].filter((id) => !completedIds.has(id)),
+      missingIds: ids.filter((id) => !workspaceIds.has(id)),
+    }
+  })
+}
+
+function isOutstandingPurchasePaymentRow(item: {
+  status: PurchaseRequestStatus
+  supplierOrderNumber: string | null
+}) {
+  return ACTIVE_PURCHASE_PAYMENT_STATUSES.includes(item.status as (typeof ACTIVE_PURCHASE_PAYMENT_STATUSES)[number])
+    && !item.supplierOrderNumber?.trim()
+}
+
+function purchaseRequestItemIgnoreIdentityKeys(item: {
+  sku: string
+  purchaseManagementCode: string | null
+  supplierOrderNumber: string | null
+  rawData: Record<string, unknown>
+}) {
+  const source = typeof item.rawData.source === 'string' ? item.rawData.source : ''
+  const stableOutboundOrderKey = Boolean(item.purchaseManagementCode?.trim())
+    || isUniqueSupplierOrderIdentifier(item.supplierOrderNumber)
+  const outboundEffectiveDate = typeof item.rawData.effectiveDate === 'string'
+    ? item.rawData.effectiveDate.trim()
+    : ''
+  const identityInput = {
+    source,
+    sku: item.sku,
+    purchaseManagementCode: item.purchaseManagementCode,
+    supplierOrderNumber: item.supplierOrderNumber,
+    fallbackDiscriminator: source === 'ecount_purchasing_snapshot_outbound'
+      && stableOutboundOrderKey
+      && outboundEffectiveDate
+      ? outboundEffectiveDate
+      : purchaseRequestItemFallbackDiscriminator(item.rawData),
+    // One purchase line can leave China in several partial shipments. Each
+    // outbound date/fallback key must remain independently closable.
+    includeFallbackDiscriminator: source === 'ecount_purchasing_snapshot_outbound',
+  }
+  const keys = [purchasingItemIdentity(identityInput)]
+  const isEcountSource = source === 'ecount_purchasing_replacement'
+    || source.startsWith('ecount_purchasing_snapshot_')
+  const isOutboundSource = source === 'ecount_purchasing_snapshot_outbound'
+
+  if (isOutboundSource) {
+    for (const componentMatchKey of purchaseRequestItemOutboundComponentMatchKeys(item.rawData)) {
+      keys.push(purchasingOutboundComponentIdentity({
+        source,
+        sku: item.sku,
+        purchaseManagementCode: item.purchaseManagementCode,
+        componentMatchKey,
+      }))
+    }
+  }
+
+  // Strong purchase identifiers survive stage/source changes. Do not add an
+  // order-wide key for outbound rows because one purchase may have several
+  // independently managed split-shipment dates.
+  if (isEcountSource && !isOutboundSource) {
+    const orderIdentity = purchasingItemOrderIdentity(identityInput)
+    if (orderIdentity) keys.push(orderIdentity)
+  }
+
+  // Purchase-history and China-arrival rows share the same durable bridge
+  // fallback even when both order identifiers are absent. Save its sibling
+  // source alias so a partial raw-data refresh cannot revive the other stage.
+  if (!purchasingItemOrderIdentity(identityInput)) {
+    const siblingSource = source === 'ecount_purchasing_snapshot_purchase_completed'
+      ? 'ecount_purchasing_snapshot_china_arrived'
+      : source === 'ecount_purchasing_snapshot_china_arrived'
+        ? 'ecount_purchasing_snapshot_purchase_completed'
+        : null
+    if (siblingSource) keys.push(purchasingItemIdentity({ ...identityInput, source: siblingSource }))
+  }
+
+  return [...new Set(keys)]
+}
+
+function purchaseRequestItemOutboundComponentMatchKeys(rawData: Record<string, unknown>) {
+  const directKeys = Array.isArray(rawData.componentMatchKeys)
+    ? rawData.componentMatchKeys
+    : []
+  const componentKeys = Array.isArray(rawData.outboundComponents)
+    ? rawData.outboundComponents.map((component) => (
+      component && typeof component === 'object' && 'matchKey' in component
+        ? component.matchKey
+        : null
+    ))
+    : []
+  return [...new Set([...directKeys, ...componentKeys]
+    .filter((value): value is string => typeof value === 'string' && Boolean(value.trim()))
+    .map((value) => value.trim()))]
+}
+
+function purchaseRequestItemFallbackDiscriminator(rawData: Record<string, unknown>) {
+  for (const key of ['purchaseHistoryBridgeKey', 'fallbackMatchKey']) {
+    const value = rawData[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  const sourceDateNo = typeof rawData.sourceDateNo === 'string' ? rawData.sourceDateNo.trim() : ''
+  const sourceRowNumber = Number(rawData.sourceRowNumber)
+  return sourceDateNo && Number.isFinite(sourceRowNumber)
+    ? `${sourceDateNo}|${Math.trunc(sourceRowNumber)}`
+    : sourceDateNo
 }
 
 export async function getChinaWarehouseInventory(input: {

@@ -11,7 +11,12 @@ import {
   getReflectedOutboundMatchKeys,
 } from './reflected-outbound-items'
 import { cleanupExpiredEcountPurchaseOrderRowsInTransaction } from './purchase-order-retention'
-import { getIgnoredPurchasingItemKeys, purchasingItemIdentity } from './ignored-purchasing-items'
+import {
+  ensureIgnoredPurchasingItemsTable,
+  getIgnoredPurchasingItemKeysInTransaction,
+  isPurchasingItemIgnored,
+  purchasingOutboundComponentIdentity,
+} from './ignored-purchasing-items'
 import { ensurePurchaseRequestManagementCodeSkuLookupIndex } from './purchase-request-item-index'
 import { ensurePurchasePaymentTrackingSchema } from './purchase-payment-tracking'
 import {
@@ -1140,6 +1145,34 @@ function removeReflectedOutboundComponents(
   }
 }
 
+function removeIgnoredOutboundComponents(
+  item: EcountOutboundPendingItem,
+  ignoredKeys: ReadonlySet<string>,
+): EcountOutboundPendingItem | null {
+  const outboundComponents = item.outboundComponents.filter((component) => (
+    !ignoredKeys.has(purchasingOutboundComponentIdentity({
+      source: ECOUNT_OUTBOUND_SOURCE,
+      sku: item.sku,
+      purchaseManagementCode: item.purchaseManagementCode,
+      componentMatchKey: component.matchKey,
+    }))
+  ))
+  if (outboundComponents.length === 0) return null
+  if (outboundComponents.length === item.outboundComponents.length) return item
+
+  const quantity = outboundComponents.reduce((sum, component) => sum + component.quantity, 0)
+  const componentMatchKeys = outboundComponents.map((component) => component.matchKey)
+  return {
+    ...item,
+    quantity,
+    fallbackMatchKey: componentMatchKeys.length === 1
+      ? componentMatchKeys[0]
+      : item.fallbackMatchKey,
+    componentMatchKeys,
+    outboundComponents,
+  }
+}
+
 function outboundComponentLegacyMatchKeys(component: EcountOutboundPendingItem['outboundComponents'][number] | undefined) {
   if (!component) return []
   return [...new Set([
@@ -1383,12 +1416,11 @@ export async function syncEcountPurchasingSnapshot(input: {
 }) {
   const [
     reflectedOutboundMatchKeys,
-    ignoredPurchasingItemKeys,
     exchangeRateReference,
   ] = await Promise.all([
     getReflectedOutboundMatchKeys(input.userId),
-    getIgnoredPurchasingItemKeys(input.userId),
     getLatestCnyKrwReferenceRate(),
+    ensureIgnoredPurchasingItemsTable(),
     ensurePurchasePaymentTrackingSchema(),
     ensurePurchaseRequestManagementCodeSkuLookupIndex(),
     ensurePurchaseFundLedgerSchema(),
@@ -1408,6 +1440,7 @@ export async function syncEcountPurchasingSnapshot(input: {
     : null
   const result = await db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+    const ignoredPurchasingItemKeys = await getIgnoredPurchasingItemKeysInTransaction(tx, input.userId)
 
     const {
       reportKinds,
@@ -1419,6 +1452,14 @@ export async function syncEcountPurchasingSnapshot(input: {
     const refreshChinaArrivals = reportKinds.has('purchaseHistory')
       || reportKinds.has('chinaInventory')
       || refreshOutbound
+    const selectedActiveRequests = (refreshPurchasePipeline ? input.snapshot.activeRequests : [])
+      .filter((item) => !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
+        source: ECOUNT_PENDING_REQUEST_SOURCE,
+        sku: item.sku,
+        purchaseManagementCode: item.purchaseManagementCode,
+        supplierOrderNumber: null,
+        fallbackDiscriminator: `${item.sourceDateNo}|${item.sourceRowNumber}`,
+      }))
     const selectedPurchaseCompleted = (
       refreshPurchasePipeline
         ? input.snapshot.purchaseCompleted
@@ -1428,21 +1469,63 @@ export async function syncEcountPurchasingSnapshot(input: {
           )
           : []
     )
-      .filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
+      .filter((item) => !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
         source: item.source,
         sku: item.sku,
         purchaseManagementCode: item.purchaseManagementCode,
         supplierOrderNumber: item.supplierOrderNumber,
-      })))
+        // Purchase-history rows persist the durable bridge key in rawData.
+        // Request/plan rows do not, so their stored tombstone uses the same
+        // source row fallback written to rawData below.
+        fallbackDiscriminator: item.source === ECOUNT_PURCHASE_COMPLETED_SOURCE
+          ? getPurchaseHistoryBridgeKey(item)
+          : `${item.sourceDateNo}|${item.sourceRowNumber}`,
+      }))
     const selectedChinaArrived = (refreshChinaArrivals ? input.snapshot.chinaArrived : [])
-      .filter((item) => !ignoredPurchasingItemKeys.has(purchasingItemIdentity({
+      .filter((item) => !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
         source: ECOUNT_CHINA_ARRIVED_SOURCE,
         sku: item.sku,
         purchaseManagementCode: item.purchaseManagementCode,
         supplierOrderNumber: item.supplierOrderNumber,
-      })))
+        fallbackDiscriminator: getPurchaseHistoryBridgeKey(item),
+      }))
+    const selectedOutboundPending = (refreshOutbound ? input.snapshot.outboundPending : [])
+      .map((item) => removeIgnoredOutboundComponents(item, ignoredPurchasingItemKeys))
+      .filter((item): item is EcountOutboundPendingItem => item !== null)
+      .filter((item) => !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
+        source: ECOUNT_OUTBOUND_SOURCE,
+        sku: item.sku,
+        purchaseManagementCode: item.purchaseManagementCode,
+        supplierOrderNumber: item.supplierOrderNumber,
+        // Management/order keyed rows are aggregated per outbound date. The
+        // component fallback can change when another split-shipment row is
+        // added to that same date, while effectiveDate remains stable.
+        fallbackDiscriminator: item.purchaseManagementCode
+          || reliableSupplierOrderNumber(item.supplierOrderNumber ?? '')
+          ? item.effectiveDate
+          : item.fallbackMatchKey,
+        includeFallbackDiscriminator: true,
+      }))
+    const selectedOutboundCompleted = (refreshOutbound ? input.snapshot.outboundCompleted : [])
+      .map((item) => removeReflectedOutboundComponents(item, reflectedOutboundMatchKeys))
+      .filter((item): item is EcountOutboundPendingItem => item !== null)
+      .map((item) => removeIgnoredOutboundComponents(item, ignoredPurchasingItemKeys))
+      .filter((item): item is EcountOutboundPendingItem => item !== null)
+      .filter((item) => !isPurchasingItemIgnored(ignoredPurchasingItemKeys, {
+        // A manually completed/deleted pending shipment must also suppress
+        // the same row after its raw-data date advances it to completed.
+        source: ECOUNT_OUTBOUND_SOURCE,
+        sku: item.sku,
+        purchaseManagementCode: item.purchaseManagementCode,
+        supplierOrderNumber: item.supplierOrderNumber,
+        fallbackDiscriminator: item.purchaseManagementCode
+          || reliableSupplierOrderNumber(item.supplierOrderNumber ?? '')
+          ? item.effectiveDate
+          : item.fallbackMatchKey,
+        includeFallbackDiscriminator: true,
+      }))
     const snapshotManagedItems = [
-      ...(refreshPurchasePipeline ? input.snapshot.activeRequests : []),
+      ...selectedActiveRequests,
       ...selectedPurchaseCompleted,
       ...selectedChinaArrived,
     ]
@@ -1505,7 +1588,7 @@ export async function syncEcountPurchasingSnapshot(input: {
     const now = new Date()
     const snapshotDate = new Date(`${input.snapshot.asOfDate}T00:00:00.000Z`)
 
-    const requestRows = (refreshPurchasePipeline ? input.snapshot.activeRequests : []).map((item) => ({
+    const requestRows = selectedActiveRequests.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'purchased' as const,
@@ -1606,7 +1689,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundRows = (refreshOutbound ? input.snapshot.outboundPending : []).map((item) => ({
+    const outboundRows = selectedOutboundPending.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'outbound_requested' as const,
@@ -1640,10 +1723,7 @@ export async function syncEcountPurchasingSnapshot(input: {
         syncedAt: now.toISOString(),
       },
     }))
-    const outboundCompletedRows = (refreshOutbound ? input.snapshot.outboundCompleted : [])
-      .map((item) => removeReflectedOutboundComponents(item, reflectedOutboundMatchKeys))
-      .filter((item): item is EcountOutboundPendingItem => item !== null)
-      .map((item) => ({
+    const outboundCompletedRows = selectedOutboundCompleted.map((item) => ({
       userId: input.userId,
       rowNumber: ++nextRowNumber,
       status: 'completed' as const,

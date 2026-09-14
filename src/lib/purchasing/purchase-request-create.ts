@@ -57,5 +57,7 @@ export async function createPurchaseRequest(input: CreatePurchaseRequestInput) {
 }
 
 export function purchaseRequestWriteLockKey(userId: string) {
-  return `purchase-request-write:${userId}`
+  // All writers that can replace or advance purchase rows share one lock so
+  // a raw/Excel import cannot revive a row while a manual bulk action closes it.
+  return `ecount-purchasing-sync:${userId}`
 }

@@ -845,6 +845,125 @@ export function PurchaseBulkDeleteButton() {
   )
 }
 
+export function PurchasePaymentFlowBulkActions() {
+  const router = useRouter()
+  const context = useBulkSelection()
+  const [pendingAction, setPendingAction] = useState<'complete' | 'delete' | null>(null)
+  const selectedCount = context.selectedIds.size
+
+  async function completeSelected() {
+    const ids = Array.from(context.selectedIds)
+    if (ids.length === 0) return
+    if (!window.confirm(
+      `선택한 ${ids.length.toLocaleString('ko-KR')}건을 완료 처리할까요?\n이미 국내 입고 및 재고 반영이 끝난 건만 완료하세요.\n국내재고는 바뀌지 않으며, 연결된 중국재고는 출고 완료로 정리됩니다.`,
+    )) return
+
+    setPendingAction('complete')
+    try {
+      const response = await fetch('/api/purchasing/purchase-requests/bulk-complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      const body = await response.json().catch(() => ({}))
+      const completedCount = Number(body.completedCount ?? 0)
+      const ineligibleCount = Number(body.ineligibleCount ?? 0)
+      const missingCount = Number(body.missingCount ?? 0)
+      if (!response.ok) {
+        toast.error(body.error ?? '선택 항목 완료 처리에 실패했습니다.')
+        return
+      }
+
+      context.clear()
+      if (completedCount > 0) {
+        toast.success(`${completedCount.toLocaleString('ko-KR')}건을 완료 처리했습니다.`, ineligibleCount > 0
+          ? { description: `이미 완료됐거나 결제 대기 항목이 아닌 ${ineligibleCount.toLocaleString('ko-KR')}건은 제외했습니다.` }
+          : missingCount > 0
+            ? { description: `이미 없어진 ${missingCount.toLocaleString('ko-KR')}건은 제외했습니다.` }
+            : undefined)
+      } else {
+        toast.info('완료 처리할 결제 대기 항목을 찾지 못했습니다.')
+      }
+      router.refresh()
+    } catch {
+      toast.error('선택 항목 완료 처리 중 연결 오류가 발생했습니다.')
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  async function deleteSelected() {
+    const ids = Array.from(context.selectedIds)
+    if (ids.length === 0) return
+    if (!window.confirm(`선택한 ${ids.length.toLocaleString('ko-KR')}건을 정말 삭제할까요?\n삭제한 발주 항목은 복구할 수 없습니다.`)) return
+
+    setPendingAction('delete')
+    try {
+      const response = await fetch('/api/purchasing/purchase-requests/bulk-delete', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      })
+      const body = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        toast.error(body.error ?? '선택 항목 삭제에 실패했습니다.')
+        return
+      }
+
+      const deletedCount = Number(body.deletedCount ?? 0)
+      const inventoryLinkedCount = Number(body.inventoryLinkedCount ?? 0)
+      const ineligibleCount = Number(body.ineligibleCount ?? 0)
+      const missingCount = Number(body.missingCount ?? 0)
+      context.clear()
+      if (deletedCount > 0) {
+        toast.success(`${deletedCount.toLocaleString('ko-KR')}건을 삭제했습니다.`, inventoryLinkedCount > 0
+          ? { description: `중국재고 이동이 연결된 ${inventoryLinkedCount.toLocaleString('ko-KR')}건은 보호했습니다. 해당 건은 완료 처리해주세요.` }
+          : ineligibleCount > 0
+            ? { description: `결제 대기 항목이 아닌 ${ineligibleCount.toLocaleString('ko-KR')}건은 제외했습니다.` }
+          : missingCount > 0
+            ? { description: `이미 없어진 ${missingCount.toLocaleString('ko-KR')}건은 제외했습니다.` }
+            : undefined)
+      } else if (inventoryLinkedCount > 0) {
+        toast.warning('중국재고 이동이 연결된 항목은 삭제할 수 없습니다.', {
+          description: `${inventoryLinkedCount.toLocaleString('ko-KR')}건을 완료 처리해주세요.`,
+        })
+      } else {
+        toast.info('삭제할 항목을 찾지 못했습니다.')
+      }
+      router.refresh()
+    } catch {
+      toast.error('선택 항목 삭제 중 연결 오류가 발생했습니다.')
+    } finally {
+      setPendingAction(null)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={completeSelected}
+        disabled={pendingAction !== null || selectedCount === 0}
+      >
+        {pendingAction === 'complete' ? <Loader2 className="animate-spin" /> : <Check />}
+        선택 {selectedCount.toLocaleString('ko-KR')}건 완료
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant="destructive"
+        onClick={deleteSelected}
+        disabled={pendingAction !== null || selectedCount === 0}
+      >
+        {pendingAction === 'delete' ? <Loader2 className="animate-spin" /> : <Trash2 />}
+        선택 {selectedCount.toLocaleString('ko-KR')}건 삭제
+      </Button>
+    </div>
+  )
+}
+
 function useBulkSelection() {
   const context = useContext(BulkSelectionContext)
   if (!context) throw new Error('Purchase bulk selection context is missing.')

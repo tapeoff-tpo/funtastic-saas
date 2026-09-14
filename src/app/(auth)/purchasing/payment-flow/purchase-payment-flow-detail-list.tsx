@@ -10,6 +10,7 @@ import { PaymentFlowProductSearch } from './payment-flow-product-search'
 import {
   PurchaseBulkPaymentDialog,
   PurchaseBulkSelectionProvider,
+  PurchasePaymentFlowBulkActions,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
 } from '../orders/purchase-request-actions'
@@ -59,41 +60,42 @@ export function PurchasePaymentFlowDetailList({
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {view === 'outstanding' ? <PurchasePaymentFlowBulkActions /> : null}
           <PurchaseBulkPaymentDialog />
-        <form action="/purchasing/payment-flow" className="flex flex-wrap items-center gap-2">
-          <input type="hidden" name="view" value={view} />
-          {search ? <input type="hidden" name="search" value={search} /> : null}
-          {sort ? <input type="hidden" name="sort" value={sort} /> : null}
-          {sort ? <input type="hidden" name="order" value={order} /> : null}
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>목록 보기</span>
-            <select
-              name="pageSize"
-              defaultValue={pageSize}
-              className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-              aria-label="목록 보기 개수"
-            >
-              {[10, 50, 100, 200].map((size) => <option key={size} value={size}>{size}개</option>)}
-            </select>
-          </label>
-          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>페이지</span>
-            <input
-              name="page"
-              type="number"
-              inputMode="numeric"
-              min={1}
-              max={totalPages}
-              defaultValue={page}
-              className="h-8 w-16 rounded-md border border-input bg-background px-2 text-center text-sm tabular-nums text-foreground"
-              aria-label="이동할 페이지"
-            />
-            <span>/ {totalPages.toLocaleString('ko-KR')}</span>
-          </label>
-          <button type="submit" className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
-            이동
-          </button>
-        </form>
+          <form action="/purchasing/payment-flow" className="flex flex-wrap items-center gap-2">
+            <input type="hidden" name="view" value={view} />
+            {search ? <input type="hidden" name="search" value={search} /> : null}
+            {sort ? <input type="hidden" name="sort" value={sort} /> : null}
+            {sort ? <input type="hidden" name="order" value={order} /> : null}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>목록 보기</span>
+              <select
+                name="pageSize"
+                defaultValue={pageSize}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                aria-label="목록 보기 개수"
+              >
+                {[10, 50, 100, 200].map((size) => <option key={size} value={size}>{size}개</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>페이지</span>
+              <input
+                name="page"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                max={totalPages}
+                defaultValue={page}
+                className="h-8 w-16 rounded-md border border-input bg-background px-2 text-center text-sm tabular-nums text-foreground"
+                aria-label="이동할 페이지"
+              />
+              <span>/ {totalPages.toLocaleString('ko-KR')}</span>
+            </label>
+            <button type="submit" className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-muted">
+              이동
+            </button>
+          </form>
         </div>
       </div>
 

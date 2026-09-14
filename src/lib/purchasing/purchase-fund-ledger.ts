@@ -145,8 +145,15 @@ export function buildPurchaseDebitSnapshots(
   fallbackExchangeRateKrw: number,
 ): PurchaseFundDebitSnapshot[] {
   const rowsByOrder = new Map<string, PurchaseFundDebitSourceRow[]>()
+  const canonicalGenericReferenceSkuKeys = new Set(rows.flatMap((row) => {
+    if (row.status === 'outbound_requested' || row.status === 'completed') return []
+    const reference = normalizeSupplierOrderReference(row.supplierOrderNumber)
+    if (!reference || isUniqueSupplierOrderIdentifier(reference)) return []
+    return [genericReferenceSkuKey(reference, row.sku)]
+  }))
 
   for (const row of rows) {
+    if (isUnidentifiedGenericLogisticsCopy(row, canonicalGenericReferenceSkuKeys)) continue
     const orderGroupKey = purchaseDebitOrderGroupKey(row)
     if (!orderGroupKey) continue
     const values = rowsByOrder.get(orderGroupKey) ?? []
@@ -221,6 +228,22 @@ export function buildPurchaseDebitSnapshots(
       || left.supplierOrderNumber.localeCompare(right.supplierOrderNumber)
       || left.sourceKey.localeCompare(right.sourceKey)
   ))
+}
+
+function isUnidentifiedGenericLogisticsCopy(
+  row: PurchaseFundDebitSourceRow,
+  canonicalReferenceSkuKeys: Set<string>,
+) {
+  if (row.status !== 'outbound_requested' && row.status !== 'completed') return false
+  const supplierOrderReference = normalizeSupplierOrderReference(row.supplierOrderNumber)
+  if (!supplierOrderReference || isUniqueSupplierOrderIdentifier(supplierOrderReference)) return false
+  if (normalizeKeyPart(row.purchaseManagementCode)) return false
+  if (normalizeKeyPart(rawString(row.rawData.purchaseOrderNumber))) return false
+  return canonicalReferenceSkuKeys.has(genericReferenceSkuKey(supplierOrderReference, row.sku))
+}
+
+function genericReferenceSkuKey(reference: string, sku: string) {
+  return `${normalizeKeyPart(reference).toLocaleLowerCase('en-US')}|${normalizeKeyPart(sku)}`
 }
 
 function purchaseDebitOrderGroupKey(row: PurchaseFundDebitSourceRow) {

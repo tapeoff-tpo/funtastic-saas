@@ -140,4 +140,25 @@ describe('purchase fund debit snapshots', () => {
       amountKrw: 210_000,
     })
   })
+
+  it('does not debit an unidentified text-reference outbound copy twice', () => {
+    const snapshots = buildPurchaseDebitSnapshots([
+      row({ supplierOrderNumber: '웨이신' }),
+      row({
+        id: '88888888-8888-4888-8888-888888888888',
+        status: 'completed',
+        supplierOrderNumber: '웨이신',
+        purchaseManagementCode: null,
+        requestDate: '2026-09-05',
+        rawData: { sourceDateNo: '20260905-1' },
+      }),
+    ], 200)
+
+    expect(snapshots).toHaveLength(1)
+    expect(snapshots[0]).toMatchObject({
+      supplierOrderNumber: '웨이신',
+      amountCny: 1_000,
+      amountKrw: 210_000,
+    })
+  })
 })

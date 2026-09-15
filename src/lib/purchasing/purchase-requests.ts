@@ -7,7 +7,11 @@ import {
   products,
   purchaseRequestItems,
 } from '@/lib/db/schema'
-import { calculatePurchaseCosts, sumPurchaseCosts } from './purchase-costs'
+import {
+  calculateAppliedPurchaseExchangeRateKrw,
+  calculatePurchaseCosts,
+  sumPurchaseCosts,
+} from './purchase-costs'
 import { getLatestCnyKrwReferenceRate } from '@/lib/new-products/cny-cost'
 import {
   PURCHASE_DELAY_TRACKING_START_DATE,
@@ -93,7 +97,7 @@ export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, 
   purchase_before: '발주요청',
   purchase_completed: '구매 완료',
   outstanding: '결제 대기 (미결제 잔액)',
-  bulk_pending: '대량결제대기',
+  bulk_pending: '대량결제대기 잔금',
 }
 
 type PurchaseCostRow = {
@@ -113,6 +117,12 @@ export type PurchasePaymentFlowDetailItem = {
   paymentPaidAt: Date | null
   bulkPaymentPending: boolean
   bulkPaymentDueDate: string | null
+  bulkPaymentDepositCny: number
+  bulkPaymentDepositKrw: number
+  bulkPaymentDepositPaidAt: string | null
+  bulkPaymentDepositMemo: string | null
+  bulkPaymentRemainingCny: number | null
+  bulkPaymentRemainingKrw: number | null
   sku: string
   productName: string
   optionName: string | null
@@ -153,6 +163,26 @@ export async function getPurchasePaymentFlowSummary(
       totalCostKrw: sql<number>`COALESCE(SUM(COALESCE(${costs.totalCostKrw}, 0)), 0)`,
       missingYuanCostCount: sql<number>`COUNT(*) FILTER (WHERE ${costs.totalCostYuan} IS NULL)`,
       missingKrwCostCount: sql<number>`COUNT(*) FILTER (WHERE ${costs.totalCostKrw} IS NULL)`,
+      bulkRemainingCostYuan: sql<number>`COALESCE(SUM(
+        CASE WHEN ${purchaseRequestItems.bulkPaymentPending} IS TRUE
+          THEN GREATEST(COALESCE(${costs.totalCostYuan}, 0) - COALESCE(${purchaseRequestItems.bulkPaymentDepositCny}, 0), 0)
+          ELSE 0
+        END
+      ), 0)`,
+      bulkRemainingCostKrw: sql<number>`COALESCE(SUM(
+        CASE WHEN ${purchaseRequestItems.bulkPaymentPending} IS TRUE
+          THEN GREATEST(COALESCE(${costs.totalCostKrw}, 0) - COALESCE(${purchaseRequestItems.bulkPaymentDepositKrw}, 0), 0)
+          ELSE 0
+        END
+      ), 0)`,
+      bulkMissingYuanCostCount: sql<number>`COUNT(*) FILTER (
+        WHERE ${purchaseRequestItems.bulkPaymentPending} IS TRUE
+          AND ${costs.totalCostYuan} IS NULL
+      )`,
+      bulkMissingKrwCostCount: sql<number>`COUNT(*) FILTER (
+        WHERE ${purchaseRequestItems.bulkPaymentPending} IS TRUE
+          AND ${costs.totalCostKrw} IS NULL
+      )`,
     })
     .from(purchaseRequestItems)
     .leftJoin(products, and(
@@ -181,6 +211,10 @@ export async function getPurchasePaymentFlowData(
       paymentPaidAt: purchaseRequestItems.paymentPaidAt,
       bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
       bulkPaymentDueDate: purchaseRequestItems.bulkPaymentDueDate,
+      bulkPaymentDepositCny: purchaseRequestItems.bulkPaymentDepositCny,
+      bulkPaymentDepositKrw: purchaseRequestItems.bulkPaymentDepositKrw,
+      bulkPaymentDepositPaidAt: purchaseRequestItems.bulkPaymentDepositPaidAt,
+      bulkPaymentDepositMemo: purchaseRequestItems.bulkPaymentDepositMemo,
       sku: purchaseRequestItems.sku,
       productName: purchaseRequestItems.productName,
       optionName: purchaseRequestItems.optionName,
@@ -205,12 +239,8 @@ export async function getPurchasePaymentFlowData(
     ))
     .orderBy(desc(purchaseRequestItems.updatedAt), desc(purchaseRequestItems.createdAt), asc(purchaseRequestItems.sku))
 
-  const summary = Object.fromEntries(
-    PURCHASE_PAYMENT_FLOW_VIEWS.map((view) => [
-      view,
-      summarizePurchaseCosts(rows.filter((row) => isPurchasePaymentFlowViewItem(row, view)), fallbackExchangeRateKrw),
-    ]),
-  ) as Record<PurchasePaymentFlowView, PurchaseCostSummary>
+  const items = rows.map((row) => toPurchasePaymentFlowDetailItem(row, fallbackExchangeRateKrw))
+  const summary = summarizePurchasePaymentFlowItems(items)
 
   return {
     summary: {
@@ -220,26 +250,7 @@ export async function getPurchasePaymentFlowData(
       outstanding: summary.outstanding,
       bulkPending: summary.bulk_pending,
     },
-    items: rows.map((row) => {
-      const costs = calculatePurchaseCost(row, fallbackExchangeRateKrw)
-      return {
-        id: row.id,
-        status: row.status,
-        paymentStatus: normalizePaymentStatus(row.paymentStatus),
-        paymentPaidAt: row.paymentPaidAt,
-        bulkPaymentPending: row.bulkPaymentPending,
-        bulkPaymentDueDate: row.bulkPaymentDueDate,
-        sku: row.sku,
-        productName: row.productName,
-        optionName: row.optionName,
-        quantity: purchaseCostQuantity(row),
-        purchaseManagementCode: row.purchaseManagementCode,
-        supplierOrderNumber: row.supplierOrderNumber,
-        requestDate: row.requestDate,
-        outboundExpectedDate: row.outboundExpectedDate,
-        ...costs,
-      }
-    }),
+    items,
   }
 }
 
@@ -267,6 +278,10 @@ export async function getPurchasePaymentFlowDetailPage(input: {
       paymentPaidAt: purchaseRequestItems.paymentPaidAt,
       bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
       bulkPaymentDueDate: purchaseRequestItems.bulkPaymentDueDate,
+      bulkPaymentDepositCny: purchaseRequestItems.bulkPaymentDepositCny,
+      bulkPaymentDepositKrw: purchaseRequestItems.bulkPaymentDepositKrw,
+      bulkPaymentDepositPaidAt: purchaseRequestItems.bulkPaymentDepositPaidAt,
+      bulkPaymentDepositMemo: purchaseRequestItems.bulkPaymentDepositMemo,
       sku: purchaseRequestItems.sku,
       productName: purchaseRequestItems.productName,
       optionName: purchaseRequestItems.optionName,
@@ -291,26 +306,7 @@ export async function getPurchasePaymentFlowDetailPage(input: {
     .offset((page - 1) * pageSize)
 
   return {
-    items: rows.map((row) => {
-      const costs = calculatePurchaseCost(row, input.fallbackExchangeRateKrw)
-      return {
-        id: row.id,
-        status: row.status,
-        paymentStatus: normalizePaymentStatus(row.paymentStatus),
-        paymentPaidAt: row.paymentPaidAt,
-        bulkPaymentPending: row.bulkPaymentPending,
-        bulkPaymentDueDate: row.bulkPaymentDueDate,
-        sku: row.sku,
-        productName: row.productName,
-        optionName: row.optionName,
-        quantity: purchaseCostQuantity(row),
-        purchaseManagementCode: row.purchaseManagementCode,
-        supplierOrderNumber: row.supplierOrderNumber,
-        requestDate: row.requestDate,
-        outboundExpectedDate: row.outboundExpectedDate,
-        ...costs,
-      }
-    }),
+    items: rows.map((row) => toPurchasePaymentFlowDetailItem(row, input.fallbackExchangeRateKrw)),
   }
 }
 
@@ -436,7 +432,7 @@ function comparePurchasePaymentFlowSortValues(
     return (left - right) * direction
   }
 
-  return left.localeCompare(right, 'ko-KR') * direction
+  return String(left).localeCompare(String(right), 'ko-KR') * direction
 }
 
 export function getPurchasePaymentFlowViewSummary(
@@ -466,6 +462,10 @@ type PurchasePaymentFlowSummaryGroup = {
   totalCostKrw: number | string
   missingYuanCostCount: number | string
   missingKrwCostCount: number | string
+  bulkRemainingCostYuan: number | string
+  bulkRemainingCostKrw: number | string
+  bulkMissingYuanCostCount: number | string
+  bulkMissingKrwCostCount: number | string
 }
 
 function summarizePurchasePaymentFlowGroups(rows: PurchasePaymentFlowSummaryGroup[]): PurchasePaymentFlowSummary {
@@ -481,10 +481,17 @@ function summarizePurchasePaymentFlowGroups(rows: PurchasePaymentFlowSummaryGrou
       missingYuanCostCount: wholeNumber(row.missingYuanCostCount),
       missingKrwCostCount: wholeNumber(row.missingKrwCostCount),
     }
+    const bulkBalanceSummary = {
+      itemCount: wholeNumber(row.itemCount),
+      totalCostYuan: finiteNumber(row.bulkRemainingCostYuan),
+      totalCostKrw: finiteNumber(row.bulkRemainingCostKrw),
+      missingYuanCostCount: wholeNumber(row.bulkMissingYuanCostCount),
+      missingKrwCostCount: wholeNumber(row.bulkMissingKrwCostCount),
+    }
 
     for (const view of PURCHASE_PAYMENT_FLOW_VIEWS) {
       if (!isPurchasePaymentFlowViewItem(row, view)) continue
-      addPurchaseCostSummary(summaries[view], groupSummary)
+      addPurchaseCostSummary(summaries[view], view === 'bulk_pending' ? bulkBalanceSummary : groupSummary)
     }
   }
 
@@ -697,8 +704,121 @@ function calculatePurchaseCost(row: PurchaseCostRow, fallbackExchangeRateKrw?: n
   })
 }
 
+type PurchasePaymentFlowSourceRow = PurchaseCostRow & {
+  id: string
+  paymentStatus: string | null
+  paymentPaidAt: Date | null
+  bulkPaymentPending: boolean
+  bulkPaymentDueDate: string | null
+  bulkPaymentDepositCny: string | number | null
+  bulkPaymentDepositKrw: string | number | null
+  bulkPaymentDepositPaidAt: string | null
+  bulkPaymentDepositMemo: string | null
+  sku: string
+  productName: string
+  optionName: string | null
+  purchaseManagementCode: string | null
+  supplierOrderNumber: string | null
+  requestDate: string | null
+  outboundExpectedDate: string | null
+}
+
+function toPurchasePaymentFlowDetailItem(
+  row: PurchasePaymentFlowSourceRow,
+  fallbackExchangeRateKrw: number,
+): PurchasePaymentFlowDetailItem {
+  const costs = calculatePurchaseCost(row, fallbackExchangeRateKrw)
+  const paymentBalance = calculateBulkPaymentBalance({
+    totalCostYuan: costs.totalCostYuan,
+    totalCostKrw: costs.totalCostKrw,
+    bulkPaymentDepositCny: row.bulkPaymentDepositCny,
+    bulkPaymentDepositKrw: row.bulkPaymentDepositKrw,
+  })
+
+  return {
+    id: row.id,
+    status: row.status,
+    paymentStatus: normalizePaymentStatus(row.paymentStatus),
+    paymentPaidAt: row.paymentPaidAt,
+    bulkPaymentPending: row.bulkPaymentPending,
+    bulkPaymentDueDate: row.bulkPaymentDueDate,
+    bulkPaymentDepositCny: paymentBalance.depositCny,
+    bulkPaymentDepositKrw: paymentBalance.depositKrw,
+    bulkPaymentDepositPaidAt: row.bulkPaymentDepositPaidAt,
+    bulkPaymentDepositMemo: row.bulkPaymentDepositMemo,
+    bulkPaymentRemainingCny: paymentBalance.remainingCny,
+    bulkPaymentRemainingKrw: paymentBalance.remainingKrw,
+    sku: row.sku,
+    productName: row.productName,
+    optionName: row.optionName,
+    quantity: purchaseCostQuantity(row),
+    purchaseManagementCode: row.purchaseManagementCode,
+    supplierOrderNumber: row.supplierOrderNumber,
+    requestDate: row.requestDate,
+    outboundExpectedDate: row.outboundExpectedDate,
+    ...costs,
+  }
+}
+
+export function calculateBulkPaymentBalance(input: {
+  totalCostYuan: number | null
+  totalCostKrw: number | null
+  bulkPaymentDepositCny: string | number | null | undefined
+  bulkPaymentDepositKrw: string | number | null | undefined
+}) {
+  const depositCny = nonNegativeMoney(input.bulkPaymentDepositCny)
+  const depositKrw = nonNegativeMoney(input.bulkPaymentDepositKrw)
+
+  return {
+    depositCny,
+    depositKrw,
+    remainingCny: input.totalCostYuan === null
+      ? null
+      : roundMoney(Math.max(0, input.totalCostYuan - depositCny)),
+    remainingKrw: input.totalCostKrw === null
+      ? null
+      : Math.round(Math.max(0, input.totalCostKrw - depositKrw)),
+  }
+}
+
+function summarizePurchasePaymentFlowItems(items: PurchasePaymentFlowDetailItem[]) {
+  const summaries = Object.fromEntries(
+    PURCHASE_PAYMENT_FLOW_VIEWS.map((view) => [view, emptyPurchaseCostSummary()]),
+  ) as Record<PurchasePaymentFlowView, PurchaseCostSummary>
+
+  for (const item of items) {
+    for (const view of PURCHASE_PAYMENT_FLOW_VIEWS) {
+      if (!isPurchasePaymentFlowViewItem(item, view)) continue
+      const isBulkBalance = view === 'bulk_pending'
+      addPurchaseCostSummary(summaries[view], {
+        itemCount: 1,
+        totalCostYuan: isBulkBalance ? (item.bulkPaymentRemainingCny ?? 0) : (item.totalCostYuan ?? 0),
+        totalCostKrw: isBulkBalance ? (item.bulkPaymentRemainingKrw ?? 0) : (item.totalCostKrw ?? 0),
+        missingYuanCostCount: (isBulkBalance ? item.bulkPaymentRemainingCny : item.totalCostYuan) === null ? 1 : 0,
+        missingKrwCostCount: (isBulkBalance ? item.bulkPaymentRemainingKrw : item.totalCostKrw) === null ? 1 : 0,
+      })
+    }
+  }
+
+  for (const summary of Object.values(summaries)) {
+    summary.totalCostYuan = roundMoney(summary.totalCostYuan)
+    summary.totalCostKrw = Math.round(summary.totalCostKrw)
+  }
+
+  return summaries
+}
+
 function purchaseCostQuantity(item: Pick<PurchaseCostRow, 'requestedQuantity' | 'actualPurchaseQuantity'>) {
   return item.actualPurchaseQuantity ?? item.requestedQuantity
+}
+
+function nonNegativeMoney(value: string | number | null | undefined) {
+  const number = Number(typeof value === 'string' ? value.replace(/,/g, '') : value ?? 0)
+  return Number.isFinite(number) && number > 0 ? roundMoney(number) : 0
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100
 }
 
 function normalizePaymentStatus(value: string | null | undefined): PurchasePaymentStatus {
@@ -1152,6 +1272,85 @@ export async function updatePurchaseRequestPlanFields(input: {
     }
 
     return { ...row, excludedRecommendationCount }
+  })
+}
+
+export async function updatePurchaseRequestBulkPaymentDeposit(input: {
+  userId: string
+  id: string
+  depositCny: number
+  depositPaidAt: string | null
+  depositMemo: string | null
+}) {
+  await ensurePurchasePaymentTrackingSchema()
+  if (!Number.isFinite(input.depositCny) || input.depositCny < 0) {
+    throw new Error('선금은 0 이상의 숫자로 입력해주세요.')
+  }
+
+  const depositCny = roundMoney(input.depositCny)
+  const exchangeRateReference = await getLatestCnyKrwReferenceRate()
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`ecount-purchasing-sync:${input.userId}`}))`)
+    const [current] = await tx
+      .select({
+        id: purchaseRequestItems.id,
+        bulkPaymentPending: purchaseRequestItems.bulkPaymentPending,
+        requestedQuantity: purchaseRequestItems.requestedQuantity,
+        actualPurchaseQuantity: purchaseRequestItems.actualPurchaseQuantity,
+        costExchangeRateKrw: purchaseRequestItems.costExchangeRateKrw,
+        specialPriceCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'특가(元)', '')`,
+        newCostCny: sql<string | null>`NULLIF(${products.metadata}->'esa009m'->>'신규원가(元)', '')`,
+      })
+      .from(purchaseRequestItems)
+      .leftJoin(products, and(
+        eq(products.userId, purchaseRequestItems.userId),
+        eq(products.internalSku, purchaseRequestItems.sku),
+      ))
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        eq(purchaseRequestItems.id, input.id),
+      ))
+      .limit(1)
+
+    if (!current || !current.bulkPaymentPending) return null
+
+    const costs = calculatePurchaseCosts({
+      requestedQuantity: purchaseCostQuantity(current),
+      specialPriceCny: current.specialPriceCny,
+      newCostCny: current.newCostCny,
+      exchangeRateKrw: current.costExchangeRateKrw ?? exchangeRateReference.rate,
+    })
+    if (costs.totalCostYuan === null || costs.totalCostKrw === null) {
+      throw new Error('상품 원가와 적용환율을 확인한 뒤 선금을 입력해주세요.')
+    }
+    if (depositCny > costs.totalCostYuan + 0.001) {
+      throw new Error(`선금은 현재 발주금액 ${costs.totalCostYuan.toLocaleString('ko-KR')}元을 넘을 수 없습니다.`)
+    }
+
+    const appliedExchangeRate = calculateAppliedPurchaseExchangeRateKrw(
+      current.costExchangeRateKrw ?? exchangeRateReference.rate,
+    )
+    if (depositCny > 0 && appliedExchangeRate === null) {
+      throw new Error('적용환율을 확인한 뒤 선금을 입력해주세요.')
+    }
+
+    const isClearing = depositCny === 0
+    const [row] = await tx
+      .update(purchaseRequestItems)
+      .set({
+        bulkPaymentDepositCny: String(depositCny),
+        bulkPaymentDepositKrw: String(isClearing ? 0 : Math.round(depositCny * appliedExchangeRate!)),
+        bulkPaymentDepositPaidAt: isClearing ? null : input.depositPaidAt || todayKstDate(),
+        bulkPaymentDepositMemo: isClearing ? null : emptyToNull(input.depositMemo),
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(purchaseRequestItems.userId, input.userId),
+        eq(purchaseRequestItems.id, input.id),
+      ))
+      .returning({ id: purchaseRequestItems.id })
+
+    return row ?? null
   })
 }
 

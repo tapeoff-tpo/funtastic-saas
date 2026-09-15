@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  calculateBulkPaymentBalance,
   getPurchasePaymentFlowViewSummary,
   isPurchasePaymentFlowViewItem,
   getOutboundRequestedQuantity,
@@ -216,6 +217,34 @@ describe('purchase payment flow views', () => {
     expect(getPurchasePaymentFlowViewSummary(summary, 'purchase_completed').itemCount).toBe(3)
     expect(getPurchasePaymentFlowViewSummary(summary, 'outstanding').itemCount).toBe(4)
     expect(getPurchasePaymentFlowViewSummary(summary, 'bulk_pending').itemCount).toBe(5)
+  })
+})
+
+describe('bulk payment deposit balance', () => {
+  it('subtracts a cumulative deposit from the bulk-payment balance in both currencies', () => {
+    expect(calculateBulkPaymentBalance({
+      totalCostYuan: 1_000,
+      totalCostKrw: 210_000,
+      bulkPaymentDepositCny: '300.5',
+      bulkPaymentDepositKrw: '63,105',
+    })).toEqual({
+      depositCny: 300.5,
+      depositKrw: 63_105,
+      remainingCny: 699.5,
+      remainingKrw: 146_895,
+    })
+  })
+
+  it('does not show a negative balance if a later quantity edit makes an old deposit larger than the order', () => {
+    expect(calculateBulkPaymentBalance({
+      totalCostYuan: 100,
+      totalCostKrw: 21_000,
+      bulkPaymentDepositCny: 120,
+      bulkPaymentDepositKrw: 25_200,
+    })).toMatchObject({
+      remainingCny: 0,
+      remainingKrw: 0,
+    })
   })
 })
 

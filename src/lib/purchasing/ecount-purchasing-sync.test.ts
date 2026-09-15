@@ -21,6 +21,10 @@ describe('bulk payment override persistence', () => {
       supplierOrderNumber: null,
       bulkPaymentPending: true,
       bulkPaymentDueDate: '2026-10-15',
+      bulkPaymentDepositCny: '350.5',
+      bulkPaymentDepositKrw: 73_600,
+      bulkPaymentDepositPaidAt: '2026-09-15',
+      bulkPaymentDepositMemo: '30% 선금 지급',
     }])
     const next = applyBulkPaymentOverride({
       userId: 'workspace-user',
@@ -35,6 +39,10 @@ describe('bulk payment override persistence', () => {
 
     expect(next.bulkPaymentPending).toBe(true)
     expect(next.bulkPaymentDueDate).toBe('2026-10-15')
+    expect(next.bulkPaymentDepositCny).toBe('350.5')
+    expect(next.bulkPaymentDepositKrw).toBe('73600')
+    expect(next.bulkPaymentDepositPaidAt).toBe('2026-09-15')
+    expect(next.bulkPaymentDepositMemo).toBe('30% 선금 지급')
   })
 
   it('does not carry ordinary payment rows into the bulk-payment list', () => {

@@ -35,7 +35,7 @@ export function PurchasePaymentFlowSummaryPanel({
         <PurchaseFlowCard label="발주요청" view="purchase_before" summary={summary.purchaseBefore} description="구매 전 단계의 발주요청 건" active={activeView === 'purchase_before'} search={search} pageSize={pageSize} sort={sort} order={order} />
         <PurchaseFlowCard label="결제 대기 (미결제 잔액)" view="outstanding" summary={summary.outstanding} description="대량결제대기를 제외한 주문서번호 미등록 건" active={activeView === 'outstanding'} search={search} pageSize={pageSize} sort={sort} order={order} />
         <PurchaseFlowCard label="구매 완료" view="purchase_completed" summary={summary.purchaseCompleted} description="주문서번호 등록 완료" active={activeView === 'purchase_completed'} search={search} pageSize={pageSize} sort={sort} order={order} />
-        <PurchaseFlowCard label="대량결제대기" view="bulk_pending" summary={summary.bulkPending} description="수동 지정한 날짜형 대량 주문" active={activeView === 'bulk_pending'} search={search} pageSize={pageSize} sort={sort} order={order} />
+        <PurchaseFlowCard label="대량결제대기 잔금" view="bulk_pending" summary={summary.bulkPending} description="누적 선금을 제외한 남은 결제액" active={activeView === 'bulk_pending'} search={search} pageSize={pageSize} sort={sort} order={order} />
       </div>
 
       {search ? (

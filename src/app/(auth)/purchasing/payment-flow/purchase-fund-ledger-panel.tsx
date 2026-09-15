@@ -348,7 +348,7 @@ export function PurchaseFundLedgerPanel({
           </table>
         </div>
         <p className="mt-3 text-xs text-muted-foreground">
-          주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 자동 차감 내역은 원본 발주가 2개월 후 정리되어도 장부에 계속 남으며, 기초잔액은 해당 날짜부터 잔액 계산을 다시 시작합니다.
+          주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 선금과 잔금은 바로 위 대량결제대기 목록에서 별도로 관리하며, 자동 차감 내역은 원본 발주가 2개월 후 정리되어도 장부에 계속 남습니다.
         </p>
       </details>
     </section>

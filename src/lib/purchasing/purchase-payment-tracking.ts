@@ -11,6 +11,10 @@ export function ensurePurchasePaymentTrackingSchema() {
         ADD COLUMN IF NOT EXISTS payment_paid_at timestamp with time zone,
         ADD COLUMN IF NOT EXISTS bulk_payment_pending boolean NOT NULL DEFAULT false,
         ADD COLUMN IF NOT EXISTS bulk_payment_due_date date,
+        ADD COLUMN IF NOT EXISTS bulk_payment_deposit_cny numeric(16, 2) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS bulk_payment_deposit_krw numeric(16, 2) NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS bulk_payment_deposit_paid_at date,
+        ADD COLUMN IF NOT EXISTS bulk_payment_deposit_memo text,
         ADD COLUMN IF NOT EXISTS cost_exchange_rate_krw numeric(12, 4),
         ADD COLUMN IF NOT EXISTS cost_exchange_rate_date date
     `)

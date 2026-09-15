@@ -7,6 +7,7 @@ import {
 } from '@/lib/purchasing/purchase-requests'
 import { PaymentFlowPendingLink } from './payment-flow-pending-link'
 import { PaymentFlowProductSearch } from './payment-flow-product-search'
+import { BulkPaymentDepositDialog } from './bulk-payment-deposit-dialog'
 import {
   PurchaseBulkPaymentDialog,
   PurchaseBulkSelectionProvider,
@@ -104,7 +105,7 @@ export function PurchasePaymentFlowDetailList({
         <p className="px-3 py-10 text-center text-sm text-muted-foreground">{search ? '검색 결과가 없습니다.' : '해당 금액에 포함된 주문 건이 없습니다.'}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1350px] table-fixed text-center text-sm">
+          <table className="w-full min-w-[1535px] table-fixed text-center text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
                 <th className="w-[42px] whitespace-nowrap px-3 py-2 text-center font-medium">
@@ -113,6 +114,7 @@ export function PurchasePaymentFlowDetailList({
                 <th className="w-[44px] whitespace-nowrap px-3 py-2 text-center font-medium">No.</th>
                 <th className="w-[96px] whitespace-nowrap px-3 py-2 text-center font-medium">금액 구분</th>
                 <th className="w-[112px] whitespace-nowrap px-3 py-2 text-center font-medium">대량결제</th>
+                <th className="w-[175px] whitespace-nowrap px-3 py-2 text-center font-medium">선금 / 잔금</th>
                 <th className="w-[250px] max-w-[250px] px-3 py-2 text-center font-medium">
                   <PaymentFlowSortHeader label="상품" column="productName" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
                 </th>
@@ -152,6 +154,17 @@ export function PurchasePaymentFlowDetailList({
                       <div>
                         <div className="font-medium text-amber-700">대량결제대기</div>
                         <div className="mt-0.5 text-muted-foreground">{item.bulkPaymentDueDate ?? '날짜 미지정'}</div>
+                      </div>
+                    ) : '-'}
+                  </td>
+                  <td className="px-3 py-2 text-center text-xs whitespace-nowrap">
+                    {item.bulkPaymentPending ? (
+                      <div>
+                        <div className="tabular-nums text-emerald-700">선금 ¥ {formatCost(item.bulkPaymentDepositCny, 2)}</div>
+                        <div className="mt-0.5 tabular-nums text-muted-foreground">₩ {formatCost(item.bulkPaymentDepositKrw, 0)}</div>
+                        <div className="mt-1 tabular-nums font-medium text-amber-700">잔금 ¥ {formatCost(item.bulkPaymentRemainingCny, 2)}</div>
+                        <div className="mt-0.5 tabular-nums text-muted-foreground">₩ {formatCost(item.bulkPaymentRemainingKrw, 0)}</div>
+                        <BulkPaymentDepositDialog item={item} />
                       </div>
                     ) : '-'}
                   </td>

@@ -774,6 +774,72 @@ describe('parseEcountPurchasingSnapshot', () => {
     ])
   })
 
+  it('reserves management-code outbound before an earlier supplier-only outbound', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260901-1', '112194-0001', '관리코드 A', '화이트', '', 50, '', 'PO-A', 'P-A', '확인', '3316362603001063951'],
+        ['20260901-2', '112194-0001', '관리코드 B', '화이트', '', 100, '', 'PO-B', 'P-B', '확인', '3316362603001063951'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['112194-0001', '20260902-1', '공급처만 있는 출고', '화이트', 50, '2026-09-02', '', '3316362603001063951', 'OUT-SUPPLIER'],
+        ['112194-0001', '20260903-1', '관리코드 A 출고', '화이트', 50, '2026-09-03', 'P-A', '3316362603001063951', 'OUT-A'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-03',
+      asOfDate: '2026-09-03',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        purchaseManagementCode: 'P-B',
+        quantity: 50,
+      }),
+    ])
+  })
+
+  it('matches a management-code outbound to its managed history before supplier fallback', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260901-1', '112194-0001', '관리코드 없음', '화이트', '', 50, '', 'PO-OLD', '', '확인', '3316362603001063951'],
+        ['20260901-2', '112194-0001', '관리코드 A', '화이트', '', 50, '', 'PO-A', 'P-A', '확인', '3316362603001063952'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['112194-0001', '20260902-1', '관리코드 A 출고', '화이트', 50, '2026-09-02', 'P-A', '3316362603001063951', 'OUT-A'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-02',
+      asOfDate: '2026-09-02',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        purchaseManagementCode: null,
+        supplierOrderNumber: '3316362603001063951',
+        quantity: 50,
+      }),
+    ])
+  })
+
   it('reports a supplier-order mismatch within a matching management-code group', async () => {
     const files = await Promise.all([
       makeUpload('purchase-plan.xlsx', [
@@ -1008,6 +1074,388 @@ describe('parseEcountPurchasingSnapshot', () => {
         sku: '100001-0001',
         supplierOrderNumber: 'wechat',
         fallbackMatchKey: 'outbound:OUT-WECHAT:100001-0001',
+      }),
+    ])
+  })
+
+  it('FIFO-consumes only the two past mini-stepper arrivals while preserving a newer plan', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-plan.xlsx', [
+        '일자-No.', '입고창고명', '품목코드', '품목명', '규격', '실 구매 수량(C)',
+        '주문서번호 (C)', '구매진행여부 (C)', '구입관리코드', '현재상태',
+      ], [
+        ['20260701-1', '중국창고', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', 400, '웨이신', '', '20260625-110151-17', '발주계획'],
+        ['20260807-1', '중국창고', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', 400, '위챗', '', '20260729-110151-9', '발주계획'],
+        ['20260903-1', '중국창고', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', 400, 'wechat', '', '20260828-5-227', '발주계획'],
+      ]),
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260720-22', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', '', 400, '', 'PO-OLD-1', '20260625-110151-17', '확인', '웨이신'],
+        ['20260821-11', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', '', 400, '', 'PO-OLD-2', '20260729-110151-9', '확인', 'wechat'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], []),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+      ], [
+        ['101542-0001', '20260722-1', 'CABOSS 미니스텝퍼', '블랙', 150, '2026-07-22', 'wechat', 'OUT-OLD-1A'],
+        ['101542-0001', '20260722-2', 'CABOSS 미니스텝퍼', '블랙', 250, '2026-07-22', '웨이신', 'OUT-OLD-1B'],
+        ['101542-0001', '20260824-1', 'CABOSS 미니스텝퍼', '블랙', 125, '2026-08-24', '위챗', 'OUT-OLD-2A'],
+        ['101542-0001', '20260824-2', 'CABOSS 미니스텝퍼', '블랙', 275, '2026-08-24', 'wechat', 'OUT-OLD-2B'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-14',
+      asOfDate: '2026-09-14',
+      allowMissingReports: true,
+      purchasePlanConfirmedSince: '2026-07-01',
+    })
+
+    expect(snapshot.chinaArrived).toEqual([])
+    expect(snapshot.purchaseCompleted).toEqual([
+      expect.objectContaining({
+        sku: '101542-0001',
+        quantity: 400,
+        purchaseManagementCode: '20260828-5-227',
+        supplierOrderNumber: 'wechat',
+      }),
+    ])
+  })
+
+  it('never FIFO-consumes a different SKU and still matches when the option label changed', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260901-1', '101542-0001', 'CABOSS 미니스텝퍼', '블랙(구표기)', '', 400, '', 'PO-1', 'P-1', '확인', '웨이신'],
+        ['20260901-2', '101543-0001', '다른 SKU', '블랙', '', 300, '', 'PO-2', 'P-2', '확인', '웨이신'],
+        ['20260901-3', '101542-0001', '다른 옵션', '화이트', '', 200, '', 'PO-3', 'P-3', '확인', '웨이신'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+      ], [
+        ['101542-0001', '20260902-1', 'CABOSS 미니스텝퍼', '블랙', 400, '2026-09-02', 'wechat', 'OUT-1'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-02',
+      asOfDate: '2026-09-02',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual(expect.arrayContaining([
+      expect.objectContaining({ sku: '101543-0001', optionName: '블랙', quantity: 300 }),
+      expect.objectContaining({ sku: '101542-0001', optionName: '화이트', quantity: 200 }),
+    ]))
+    expect(snapshot.chinaArrived).not.toContainEqual(expect.objectContaining({
+      sku: '101542-0001',
+      optionName: '블랙(구표기)',
+    }))
+  })
+
+  it('does not FIFO-consume a purchase-history row dated after the outbound', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260903-1', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', '', 400, '', 'PO-FUTURE', 'P-FUTURE', '확인', '웨이신'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드',
+      ], [
+        ['101542-0001', '20260902-1', 'CABOSS 미니스텝퍼', '블랙', 400, '2026-09-02', 'wechat', 'OUT-1'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-02',
+      asOfDate: '2026-09-03',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({ sourceDateNo: '20260903-1', quantity: 400 }),
+    ])
+  })
+
+  it('does not consume a future purchase-history row through a matching management code', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260903-1', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', '', 400, '', 'PO-FUTURE', 'P-FUTURE', '확인', '웨이신'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['101542-0001', '20260902-1', 'CABOSS 미니스텝퍼', '블랙', 400, '2026-09-02', 'P-FUTURE', 'wechat', 'OUT-1'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-02',
+      asOfDate: '2026-09-03',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sourceDateNo: '20260903-1',
+        purchaseManagementCode: 'P-FUTURE',
+        quantity: 400,
+      }),
+    ])
+  })
+
+  it('does not consume a future purchase-history row through a matching unique supplier order', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260903-1', '101542-0001', 'CABOSS 미니스텝퍼', '블랙', '', 400, '', 'PO-FUTURE', '', '확인', '3316362603001063953'],
+      ]),
+      makeUpload('china-outbound.xlsx', [
+        '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+        '구입관리코드', '주문서번호', '출고관리코드',
+      ], [
+        ['101542-0001', '20260902-1', 'CABOSS 미니스텝퍼', '블랙', 400, '2026-09-02', '', '3316362603001063953', 'OUT-1'],
+      ]),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-02',
+      asOfDate: '2026-09-03',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sourceDateNo: '20260903-1',
+        supplierOrderNumber: '3316362603001063953',
+        quantity: 400,
+      }),
+    ])
+  })
+
+  it('uses a dated China-inventory snapshot for the newest arrivals and protects later arrivals', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260820-1', '100001-0001', '재고 귀속 상품', '구 옵션명', '', 100, '', 'PO-OLD', 'P-OLD', '확인', '웨이신'],
+        ['20260905-1', '100001-0001', '재고 귀속 상품', '신 옵션명', '', 100, '', 'PO-NEW', 'P-NEW', '확인', 'wechat'],
+        ['20260912-1', '100001-0001', '스냅샷 이후 상품', '최신 옵션명', '', 70, '', 'PO-LATER', 'P-LATER', '확인', '위챗'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], [
+        ['100001-0001', '재고 귀속 상품', '현재 옵션명', '상품', 100, 100],
+      ], '회사명 : 테이포프 / 20260910'),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-10',
+      asOfDate: '2026-09-14',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sourceDateNo: '20260905-1',
+        quantity: 100,
+        pendingChinaInventoryQuantity: 0,
+      }),
+      expect.objectContaining({ sourceDateNo: '20260912-1', quantity: 70 }),
+    ])
+  })
+
+  it('counts a post-snapshot 웨이신 arrival without order identifiers as pending', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260909-1', '100001-0001', '과거 약한 식별자 상품', '기본', '', 80, '', '', '', '확인', '웨이신'],
+        ['20260911-1', '100002-0001', '신규 약한 식별자 상품', '기본', '', 120, '', '', '', '확인', '웨이신'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], [
+        ['100003-0001', '다른 재고 상품', '기본', '상품', 10, 10],
+      ], '회사명 : 테이포프 / 20260910'),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-10',
+      asOfDate: '2026-09-11',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sourceDateNo: '20260911-1',
+        sku: '100002-0001',
+        purchaseManagementCode: null,
+        purchaseOrderNumber: null,
+        supplierOrderNumber: '웨이신',
+        quantity: 120,
+        pendingChinaInventoryQuantity: 120,
+      }),
+    ])
+  })
+
+  it('removes snapshot-eligible purchase history when that SKU has no China stock', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260901-1', '100001-0001', '중국재고 없음', '기본', '', 100, '', 'PO-1', 'P-1', '확인', '웨이신'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], [
+        ['100002-0001', '다른 재고 상품', '기본', '상품', 10, 10],
+      ], '회사명 : 테이포프 / 20260910'),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-10',
+      asOfDate: '2026-09-14',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([])
+  })
+
+  it('does not infer shipment from an empty or same-day China inventory snapshot', async () => {
+    const history = await makeUpload('purchase-history.xlsx', [
+      '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+      '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+    ], [
+      ['20260910-1', '100001-0001', '당일 도착 상품', '기본', '', 100, '', 'PO-1', 'P-1', '확인', '웨이신'],
+    ])
+    const emptyInventory = await makeUpload('china-inventory-empty.xlsx', [
+      '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+    ], [], '회사명 : 테이포프 / 20260911')
+    const validInventory = await makeUpload('china-inventory-valid.xlsx', [
+      '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+    ], [
+      ['100002-0001', '다른 재고 상품', '기본', '상품', 10, 10],
+    ], '회사명 : 테이포프 / 20260910')
+
+    const [emptySnapshot, sameDaySnapshot] = await Promise.all([
+      parseEcountPurchasingSnapshot({
+        files: [history, emptyInventory],
+        domesticInventoryReflectedThrough: '2026-09-11',
+        asOfDate: '2026-09-11',
+        allowMissingReports: true,
+      }),
+      parseEcountPurchasingSnapshot({
+        files: [history, validInventory],
+        domesticInventoryReflectedThrough: '2026-09-10',
+        asOfDate: '2026-09-10',
+        allowMissingReports: true,
+      }),
+    ])
+
+    expect(emptySnapshot.chinaArrived).toEqual([
+      expect.objectContaining({ sku: '100001-0001', quantity: 100 }),
+    ])
+    expect(sameDaySnapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sku: '100001-0001',
+        quantity: 100,
+        pendingChinaInventoryQuantity: 100,
+      }),
+    ])
+  })
+
+  it('does not double-count a same-day arrival already covered by China inventory', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260910-1', '100001-0001', '당일 도착 상품', '기본', '', 100, '', 'PO-1', 'P-1', '확인', '웨이신'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], [
+        ['100001-0001', '당일 도착 상품', '신 옵션명', '상품', 100, 100],
+      ], '회사명 : 테이포프 / 20260910'),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-10',
+      asOfDate: '2026-09-10',
+      allowMissingReports: true,
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sku: '100001-0001',
+        quantity: 100,
+        pendingChinaInventoryQuantity: 0,
+      }),
+    ])
+  })
+
+  it('waits for domestic inventory to catch up before completing an absent China item', async () => {
+    const files = await Promise.all([
+      makeUpload('purchase-history.xlsx', [
+        '일자-No.', '품목코드', '품목명', '규격', '발주계획일자', '구매수량(EA)',
+        '중국창고 도착요청일', '발주서-no', '구입관리코드', '진행상태', '주문서번호 (C)',
+      ], [
+        ['20260901-1', '100001-0001', '이동 중 상품', '기본', '', 100, '', 'PO-1', 'P-1', '확인', '웨이신'],
+      ]),
+      makeUpload('china-inventory.xlsx', [
+        '품목코드', '품목명', '규격', '품목구분', '합계', '중국창고',
+      ], [
+        ['100001-0001', '이동 중 상품', '신 옵션명', '상품', 50, 50],
+      ], '회사명 : 테이포프 / 20260910'),
+    ])
+
+    const snapshot = await parseEcountPurchasingSnapshot({
+      files,
+      domesticInventoryReflectedThrough: '2026-09-09',
+      asOfDate: '2026-09-10',
+      allowMissingReports: true,
+      purchaseHistoryBridgeKeys: [getPurchaseHistoryBridgeKey({
+        sourceDateNo: '20260901-1',
+        sku: '100001-0001',
+        optionName: '기본',
+        purchaseManagementCode: 'P-1',
+        purchaseOrderNumber: 'PO-1',
+        supplierOrderNumber: '웨이신',
+      })],
+    })
+
+    expect(snapshot.chinaArrived).toEqual([
+      expect.objectContaining({
+        sku: '100001-0001',
+        quantity: 100,
+        pendingChinaInventoryQuantity: 50,
       }),
     ])
   })

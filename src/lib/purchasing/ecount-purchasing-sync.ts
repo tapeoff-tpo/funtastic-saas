@@ -577,13 +577,26 @@ export async function parseEcountPurchasingSnapshot(input: {
     historyItems,
   )
   const purchaseHistoryBridgeKeys = new Set(input.purchaseHistoryBridgeKeys ?? [])
-  // China-arrival is an order-level current state. Subtract any outbound
-  // quantities by the existing strong identifier matching before rendering it,
-  // so fully shipped purchases do not remain in this stage.
-  const outstandingChinaArrivals = remainingPurchaseHistoryBridgeItems(
+  // China-arrival is an order-level current state. Subtract outbound quantities
+  // by strong identifiers first. Reports without a purchase-management code or
+  // unique supplier order then use a SKU/date FIFO bridge, because cells
+  // such as "웨이신" identify a payment channel rather than one global order.
+  const historyRemainingAfterOutbound = remainingPurchaseHistoryBridgeItems(
     historyItems,
     rawChinaOutboundItems,
   )
+  // China inventory is an aggregate current-state snapshot rather than an
+  // order-level report. Attribute that stock to the newest eligible arrivals,
+  // so older purchase-history rows disappear first. Purchases newer than the
+  // printed snapshot date are deliberately protected: that inventory file
+  // could not have included them yet.
+  const chinaInventoryReconciliation = reconcilePurchaseHistoryWithChinaInventory(
+    historyRemainingAfterOutbound,
+    chinaInventoryItems,
+    chinaInventory.fileName ? chinaInventorySnapshotAsOfDate : null,
+    reflectedThrough,
+  )
+  const outstandingChinaArrivals = chinaInventoryReconciliation.items
   // 구매현황 is the source of the China-arrival stage. A recent arrival can be
   // newer than the latest China-inventory snapshot, so retain just its
   // globally unmatched quantity as a pipeline marker on the same
@@ -593,12 +606,25 @@ export async function parseEcountPurchasingSnapshot(input: {
   // the order in the UI and collide with the management-code/SKU unique key.
   const chinaArrived: EcountChinaArrivedItem[] = outstandingChinaArrivals.map((item) => ({
     ...item,
-    pendingChinaInventoryQuantity: (
-      purchaseHistoryBridgeKeys.has(getPurchaseHistoryBridgeKey(item))
-      && hasReliablePurchaseIdentity(item)
-    )
-      ? item.quantity
-      : 0,
+    pendingChinaInventoryQuantity: (() => {
+      const historyKey = getPurchaseHistoryBridgeKey(item)
+      if (chinaInventoryReconciliation.pendingQuantityByHistoryKey.has(historyKey)) {
+        return chinaInventoryReconciliation.pendingQuantityByHistoryKey.get(historyKey) ?? 0
+      }
+      const arrivedAfterInventorySnapshot = Boolean(
+        item.purchaseDate
+        && chinaInventorySnapshotAsOfDate
+        && item.purchaseDate > chinaInventorySnapshotAsOfDate,
+      )
+      // A history row newer than the inventory snapshot cannot be represented
+      // by that snapshot, even when its only order reference is a reusable
+      // payment-channel label such as "웨이신". Older weak rows still require a
+      // reliable order identity before a carried bridge can affect purchasing.
+      return arrivedAfterInventorySnapshot
+        || (purchaseHistoryBridgeKeys.has(historyKey) && hasReliablePurchaseIdentity(item))
+        ? item.quantity
+        : 0
+    })(),
   }))
   const purchaseCompleted = purchaseCompletedFromPlan
 
@@ -648,7 +674,7 @@ export async function parseEcountPurchasingSnapshot(input: {
   if (activeRequests.length === 0) warnings.push('진행중 발주요청이 없습니다.')
   if (chinaInventoryItems.length === 0) warnings.push('중국창고 재고가 0건입니다.')
   if (outboundRowsWithoutPurchaseReference > 0) {
-    warnings.push(`중국출고 ${outboundRowsWithoutPurchaseReference.toLocaleString('ko-KR')}건은 주문서번호와 구입관리코드가 없어 출고관리코드 또는 행 기준 보조키로 보관합니다.`)
+    warnings.push(`중국출고 ${outboundRowsWithoutPurchaseReference.toLocaleString('ko-KR')}건은 강한 주문 추적키가 없어 동일 품목코드와 출고일 기준 FIFO로 구매현황에 보조 연결합니다.`)
   }
   if (outboundRowsWithPurchaseReference.length !== outboundRowsMatchedToPurchase) {
     warnings.push(`중국출고 구매 대조 ${outboundRowsMatchedToPurchase.toLocaleString('ko-KR')}/${outboundRowsWithPurchaseReference.length.toLocaleString('ko-KR')}건이 구매현황과 일치합니다.`)
@@ -965,30 +991,231 @@ function remainingPurchaseHistoryBridgeItems(
       || left.index - right.index
     ))
 
-  // Allocate each physical outbound row once. A supplier-order fallback can
-  // legitimately match more than one management-code group when the outbound
-  // report omits its management code; subtracting it independently from every
-  // group would understate the outstanding China stock.
-  const orderedOutboundItems = [...outboundItems].sort((left, right) => (
-    left.effectiveDate.localeCompare(right.effectiveDate)
-    || left.sourceRowNumber - right.sourceRowNumber
-  ))
-  for (const outbound of orderedOutboundItems) {
-    let remainingOutboundQuantity = outbound.quantity
-    for (const history of remainingHistoryItems) {
-      if (remainingOutboundQuantity === 0) break
-      if (history.remainingQuantity === 0 || !purchaseHistoryMatchesChinaOutbound(history.item, outbound)) {
-        continue
+  // Allocate every physical outbound row once. Strong references are processed
+  // globally before a weak FIFO row, otherwise an earlier unkeyed outbound could
+  // consume the purchase reserved for a later, explicitly identified shipment.
+  const orderedOutboundItems = [...outboundItems]
+    .map((item, index) => ({ item, index, remainingQuantity: item.quantity }))
+    .sort((left, right) => (
+      left.item.effectiveDate.localeCompare(right.item.effectiveDate)
+      || left.item.sourceRowNumber - right.item.sourceRowNumber
+      || left.index - right.index
+    ))
+
+  const allocateOutbound = (
+    predicate: (outbound: EcountOutboundPendingItem) => boolean,
+    matches: (
+      history: EcountPurchaseCompletedItem,
+      outbound: EcountOutboundPendingItem,
+    ) => boolean,
+  ) => {
+    for (const outbound of orderedOutboundItems) {
+      if (!predicate(outbound.item)) continue
+      for (const history of remainingHistoryItems) {
+        if (outbound.remainingQuantity === 0) break
+        if (
+          history.remainingQuantity === 0
+          || !purchaseHistoryCanUseStrongOutboundMatch(history.item, outbound.item)
+          || !matches(history.item, outbound.item)
+        ) {
+          continue
+        }
+        const consumed = Math.min(history.remainingQuantity, outbound.remainingQuantity)
+        history.remainingQuantity -= consumed
+        outbound.remainingQuantity -= consumed
       }
-      const consumed = Math.min(history.remainingQuantity, remainingOutboundQuantity)
+    }
+  }
+
+  // A purchase-management code names the workflow row directly. Reserve those
+  // matches before a supplier-order-only row, since one supplier order number
+  // can legitimately be reused across multiple management-code groups.
+  allocateOutbound(
+    (outbound) => Boolean(outbound.purchaseManagementCode),
+    purchaseManagementMatch,
+  )
+  allocateOutbound(
+    (outbound) => supplierKey(outbound.supplierOrderNumber, outbound.sku) !== null,
+    purchaseHistoryMatchesChinaOutbound,
+  )
+
+  for (const outbound of orderedOutboundItems) {
+    if (
+      outbound.remainingQuantity === 0
+      || outbound.item.purchaseManagementCode
+      || supplierKey(outbound.item.supplierOrderNumber, outbound.item.sku)
+    ) continue
+
+    const candidates = remainingHistoryItems
+      .filter((history) => (
+        history.remainingQuantity > 0
+        && purchaseHistoryCanUseOutboundFifo(history.item, outbound.item)
+      ))
+      .sort((left, right) => (
+        (left.item.purchaseDate ?? '9999-12-31').localeCompare(right.item.purchaseDate ?? '9999-12-31')
+        || comparePurchaseOptionHint(left.item, right.item, outbound.item)
+        || comparePurchaseChannelHint(left.item, right.item, outbound.item)
+        || left.item.sourceRowNumber - right.item.sourceRowNumber
+        || left.index - right.index
+      ))
+
+    for (const history of candidates) {
+      if (outbound.remainingQuantity === 0) break
+      const consumed = Math.min(history.remainingQuantity, outbound.remainingQuantity)
       history.remainingQuantity -= consumed
-      remainingOutboundQuantity -= consumed
+      outbound.remainingQuantity -= consumed
     }
   }
 
   return remainingHistoryItems.flatMap(({ item, remainingQuantity }) => (
     remainingQuantity > 0 ? [{ ...item, quantity: remainingQuantity }] : []
   ))
+}
+
+function purchaseHistoryCanUseStrongOutboundMatch(
+  purchase: EcountPurchaseCompletedItem,
+  outbound: EcountOutboundPendingItem,
+) {
+  // Even an exact workflow/order identifier cannot describe a shipment that
+  // predates the purchase-history arrival. Keep undated legacy rows eligible,
+  // but never use a known future arrival to complete an older outbound.
+  return !purchase.purchaseDate || purchase.purchaseDate <= outbound.effectiveDate
+}
+
+function purchaseHistoryCanUseOutboundFifo(
+  purchase: EcountPurchaseCompletedItem,
+  outbound: EcountOutboundPendingItem,
+) {
+  if (purchase.sku !== outbound.sku) return false
+  // Unknown/future arrival dates cannot safely be consumed by a dated shipment.
+  return Boolean(purchase.purchaseDate && purchase.purchaseDate <= outbound.effectiveDate)
+}
+
+function comparePurchaseOptionHint(
+  left: EcountPurchaseCompletedItem,
+  right: EcountPurchaseCompletedItem,
+  outbound: EcountOutboundPendingItem,
+) {
+  const outboundOption = normalizePurchaseOption(outbound.optionName)
+  if (!outboundOption) return 0
+  const leftMatches = normalizePurchaseOption(left.optionName) === outboundOption
+  const rightMatches = normalizePurchaseOption(right.optionName) === outboundOption
+  return Number(rightMatches) - Number(leftMatches)
+}
+
+function comparePurchaseChannelHint(
+  left: EcountPurchaseCompletedItem,
+  right: EcountPurchaseCompletedItem,
+  outbound: EcountOutboundPendingItem,
+) {
+  const outboundHint = purchaseChannelHint(outbound.supplierOrderNumber)
+  if (!outboundHint) return 0
+  const leftMatches = purchaseChannelHint(left.supplierOrderNumber) === outboundHint
+  const rightMatches = purchaseChannelHint(right.supplierOrderNumber) === outboundHint
+  return Number(rightMatches) - Number(leftMatches)
+}
+
+function purchaseChannelHint(value: string | null) {
+  const normalized = value?.normalize('NFKC').trim().toLocaleLowerCase() ?? ''
+  if (!normalized || isUniqueSupplierOrderIdentifier(normalized)) return null
+  if (/(?:웨이신|위챗|wechat|weixin)/i.test(normalized)) return 'wechat'
+  if (/(?:알리페이|alipay)/i.test(normalized)) return 'alipay'
+  if (/(?:ssj|신성진)/i.test(normalized)) return 'ssj'
+  if (/(?:핀둬둬|pinduoduo)/i.test(normalized)) return 'pinduoduo'
+  return normalized
+}
+
+function reconcilePurchaseHistoryWithChinaInventory(
+  historyItems: EcountPurchaseCompletedItem[],
+  inventoryItems: EcountChinaInventoryItem[],
+  inventorySnapshotDate: string | null,
+  domesticInventoryReflectedThrough: string,
+) {
+  // A dated but empty workbook can be an incomplete/incorrect export. Never
+  // infer that every China arrival shipped from an empty snapshot. Likewise,
+  // if domestic inventory has not caught up to this China snapshot, an absent
+  // item may still be in transit and must remain in the recommendation bridge.
+  if (!inventorySnapshotDate || inventoryItems.length === 0) {
+    return {
+      items: historyItems,
+      pendingQuantityByHistoryKey: new Map<string, number>(),
+    }
+  }
+  const canCompleteDomesticArrival = domesticInventoryReflectedThrough >= inventorySnapshotDate
+
+  const inventoryBySku = new Map<string, number>()
+  for (const item of inventoryItems) {
+    const key = purchaseSkuKey(item.sku)
+    inventoryBySku.set(key, (inventoryBySku.get(key) ?? 0) + item.quantity)
+  }
+
+  const retainedQuantityByIndex = new Map<number, number>()
+  const inventoryBackedQuantityByIndex = new Map<number, number>()
+  const eligibleBySku = new Map<string, Array<{
+    item: EcountPurchaseCompletedItem
+    index: number
+  }>>()
+
+  historyItems.forEach((item, index) => {
+    if (!item.purchaseDate || item.purchaseDate > inventorySnapshotDate) {
+      retainedQuantityByIndex.set(index, item.quantity)
+      return
+    }
+    const key = purchaseSkuKey(item.sku)
+    const matches = eligibleBySku.get(key) ?? []
+    matches.push({ item, index })
+    eligibleBySku.set(key, matches)
+  })
+
+  for (const [key, items] of eligibleBySku) {
+    let stockRemaining = inventoryBySku.get(key) ?? 0
+    const newestFirst = [...items].sort((left, right) => (
+      (right.item.purchaseDate ?? '').localeCompare(left.item.purchaseDate ?? '')
+      || right.item.sourceRowNumber - left.item.sourceRowNumber
+      || right.index - left.index
+    ))
+    for (const { item, index } of newestFirst) {
+      const retainedQuantity = Math.min(item.quantity, stockRemaining)
+      inventoryBackedQuantityByIndex.set(index, retainedQuantity)
+      if (canCompleteDomesticArrival && retainedQuantity > 0) {
+        retainedQuantityByIndex.set(index, retainedQuantity)
+      }
+      stockRemaining -= retainedQuantity
+    }
+  }
+
+  const items = historyItems.flatMap((item, index) => {
+    // Same-day arrivals may have been recorded after the inventory export, so
+    // keep the order-level row even when no inventory quantity covers it.
+    if (item.purchaseDate === inventorySnapshotDate) return [item]
+    if (!canCompleteDomesticArrival && item.purchaseDate && item.purchaseDate < inventorySnapshotDate) {
+      return [item]
+    }
+    const retainedQuantity = retainedQuantityByIndex.get(index) ?? 0
+    return retainedQuantity > 0 ? [{ ...item, quantity: retainedQuantity }] : []
+  })
+  const pendingQuantityByHistoryKey = new Map<string, number>()
+  historyItems.forEach((item, index) => {
+    if (!item.purchaseDate || item.purchaseDate > inventorySnapshotDate) return
+    const inventoryBackedQuantity = inventoryBackedQuantityByIndex.get(index) ?? 0
+    const pendingQuantity = item.purchaseDate === inventorySnapshotDate || !canCompleteDomesticArrival
+      ? item.quantity - inventoryBackedQuantity
+      : 0
+    // Keep zeroes as an explicit reconciliation result. A late/backfilled
+    // purchase-history upload may also carry a generic bridge key; inventory
+    // allocation is more precise and must override that full-quantity fallback.
+    pendingQuantityByHistoryKey.set(getPurchaseHistoryBridgeKey(item), pendingQuantity)
+  })
+
+  return { items, pendingQuantityByHistoryKey }
+}
+
+function purchaseSkuKey(sku: string) {
+  return sku.trim().toLocaleLowerCase()
+}
+
+function normalizePurchaseOption(value: string | null) {
+  return value?.normalize('NFKC').replace(/\s+/g, ' ').trim().toLocaleLowerCase() ?? ''
 }
 
 function reconcilePlanWithPurchaseHistory(

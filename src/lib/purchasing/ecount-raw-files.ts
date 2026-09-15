@@ -56,13 +56,13 @@ export async function mergeEcountRawFiles(
     if (existingReport.kind !== incoming.kind || incomingReport.kind !== incoming.kind) return incoming
 
     const headers = mergeHeaders(existingReport.headers, incomingReport.headers)
-    const rowsByIdentity = new Map<string, Record<string, string>>()
-    for (const row of existingReport.rows) rowsByIdentity.set(getEcountRawRowIdentity(incoming.kind, row), row)
-    for (const row of incomingReport.rows) rowsByIdentity.set(getEcountRawRowIdentity(incoming.kind, row), row)
+    const rows = incoming.kind === 'chinaOutbound'
+      ? mergeChinaOutboundRows(existingReport.rows, incomingReport.rows)
+      : mergeRowsByIdentity(incoming.kind, existingReport.rows, incomingReport.rows)
 
     return {
       ...incoming,
-      fileBuffer: await buildWorkbookBuffer(headers, [...rowsByIdentity.values()]),
+      fileBuffer: await buildWorkbookBuffer(headers, rows),
     }
   }))
 }
@@ -86,11 +86,12 @@ export async function getNewIncrementalEcountRawRows(
   if (!stored || !isIncrementalEcountRawFile(kind)) return incomingReport.rows
 
   const storedReport = await readEcountPurchasingRawFileRows(stored)
-  const storedIdentities = new Set(
-    storedReport.rows.map((row) => getEcountRawRowIdentity(kind, row)),
-  )
+  const identity = kind === 'chinaOutbound'
+    ? getChinaOutboundStableGroupIdentity
+    : (row: Record<string, string>) => getEcountRawRowIdentity(kind, row)
+  const storedIdentities = new Set(storedReport.rows.map(identity))
   return incomingReport.rows.filter((row) => (
-    !storedIdentities.has(getEcountRawRowIdentity(kind, row))
+    !storedIdentities.has(identity(row))
   ))
 }
 
@@ -194,25 +195,174 @@ function mergeHeaders(existing: string[], incoming: string[]) {
   return headers
 }
 
+function mergeRowsByIdentity(
+  kind: EcountReportKind,
+  existingRows: Array<Record<string, string>>,
+  incomingRows: Array<Record<string, string>>,
+) {
+  const rowsByIdentity = new Map<string, Record<string, string>>()
+  for (const row of existingRows) rowsByIdentity.set(getEcountRawRowIdentity(kind, row), row)
+  for (const row of incomingRows) rowsByIdentity.set(getEcountRawRowIdentity(kind, row), row)
+  return [...rowsByIdentity.values()]
+}
+
+/**
+ * A China-outbound voucher can legitimately contain more than one physical
+ * line for the same SKU (for example split quantities or different options).
+ * Treating the voucher+SKU itself as a row identity would silently discard
+ * those lines. Instead, an incoming voucher group replaces the complete
+ * stored group, and only canonical formatting twins inside the selected group
+ * are collapsed by the more detailed physical-row identity.
+ */
+function mergeChinaOutboundRows(
+  existingRows: Array<Record<string, string>>,
+  incomingRows: Array<Record<string, string>>,
+) {
+  const groups = groupChinaOutboundRows(existingRows)
+  for (const [groupIdentity, rows] of groupChinaOutboundRows(incomingRows)) {
+    groups.set(groupIdentity, rows)
+  }
+  return [...groups.values()].flatMap((rows) => (
+    mergeRowsByIdentity('chinaOutbound', [], rows)
+  ))
+}
+
+function groupChinaOutboundRows(rows: Array<Record<string, string>>) {
+  const groups = new Map<string, Array<Record<string, string>>>()
+  for (const row of rows) {
+    const identity = getChinaOutboundStableGroupIdentity(row)
+    const group = groups.get(identity) ?? []
+    group.push(row)
+    groups.set(identity, group)
+  }
+  return groups
+}
+
+function getChinaOutboundStableGroupIdentity(row: Record<string, string>) {
+  const value = (...headers: string[]) => (
+    headers.map((header) => row[header]?.trim() ?? '').find((candidate) => candidate !== '') ?? ''
+  )
+  const sku = canonicalIdentifier(value('품목코드'))
+  const outboundCode = canonicalEcountCode(value('출고관리코드'))
+  if (outboundCode && sku) return `chinaOutbound:outbound-group:${outboundCode}:${sku}`
+
+  const dateNo = canonicalEcountDateNo(value('일자-No.'))
+  if (dateNo && sku) return `chinaOutbound:date-no-group:${dateNo}:${sku}`
+
+  // Malformed/footer rows without a voucher key must not all replace each
+  // other. Their physical identity is the safest available group boundary.
+  return `chinaOutbound:physical-group:${getEcountRawRowIdentity('chinaOutbound', row)}`
+}
+
 export function getEcountRawRowIdentity(kind: EcountReportKind, row: Record<string, string>) {
   const value = (...headers: string[]) => (
     headers.map((header) => row[header]?.trim() ?? '').find((candidate) => candidate !== '') ?? ''
   )
-  const sku = value('품목코드')
-  const dateNo = value('일자-No.')
-  const option = value('규격', '옵션명')
+  const sku = canonicalIdentifier(value('품목코드'))
+  const dateNo = canonicalEcountDateNo(value('일자-No.'))
+  const option = canonicalText(value('규격', '옵션명'))
 
   if (kind === 'chinaOutbound') {
-    const outboundCode = value('출고관리코드')
-    if (outboundCode && sku) return `${kind}:outbound:${outboundCode}:${sku}:${option}`
-    return `${kind}:row:${[dateNo, sku, option, value('주문서번호'), value('유효기간'), value('출고수량(EA)')].join('\u001f')}`
+    const outboundCode = canonicalEcountCode(value('출고관리코드'))
+    if (outboundCode && sku) return `${kind}:outbound:${[
+      outboundCode,
+      dateNo,
+      sku,
+      option,
+      canonicalIdentifier(value('구입관리코드')),
+      canonicalIdentifier(value('주문서번호')),
+      canonicalEcountDate(value('유효기간')),
+      canonicalNumericValue(value('출고수량(EA)')),
+    ].join('\u001f')}`
+    return `${kind}:row:${[
+      dateNo,
+      sku,
+      option,
+      canonicalIdentifier(value('구입관리코드')),
+      canonicalIdentifier(value('주문서번호')),
+      canonicalEcountDate(value('유효기간')),
+      canonicalNumericValue(value('출고수량(EA)')),
+    ].join('\u001f')}`
   }
 
   if (kind === 'purchaseHistory') {
-    return `${kind}:row:${[dateNo, sku, option, value('구입관리코드'), value('발주서-no'), value('주문서번호 (C)')].join('\u001f')}`
+    return `${kind}:row:${[
+      dateNo,
+      sku,
+      option,
+      canonicalIdentifier(value('구입관리코드')),
+      canonicalIdentifier(value('발주서-no')),
+      canonicalIdentifier(value('주문서번호 (C)')),
+    ].join('\u001f')}`
   }
 
-  return `${kind}:row:${[dateNo, sku, option, value('구입관리코드')].join('\u001f')}`
+  return `${kind}:row:${[
+    dateNo,
+    sku,
+    option,
+    canonicalIdentifier(value('구입관리코드')),
+  ].join('\u001f')}`
+}
+
+/**
+ * Ecount exports the same identifier with harmless display differences (for
+ * example `20260721-2` and `20260721 -2`). Identities are canonicalized only
+ * for comparison; the newest original row is still retained in the workbook.
+ */
+function canonicalIdentifier(value: string) {
+  return canonicalText(value)
+    .replace(/[‐‑‒–—−]/g, '-')
+    .replace(/[\s\u200B-\u200D\uFEFF]+/g, '')
+    .toUpperCase()
+}
+
+function canonicalText(value: string) {
+  return value
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function canonicalEcountDateNo(value: string) {
+  const compact = canonicalIdentifier(value)
+  const matched = compact.match(/^(20\d{2})[-./]?(\d{2})[-./]?(\d{2})(?:[-.:/#]0*(\d+))?$/)
+  if (!matched) return compact
+  const [, year, month, day, sequence] = matched
+  if (!isValidDateParts(year, month, day)) return compact
+  return `${year}${month}${day}${sequence ? `-${Number(sequence)}` : ''}`
+}
+
+function canonicalEcountCode(value: string) {
+  return canonicalEcountDateNo(value)
+}
+
+function canonicalEcountDate(value: string) {
+  const normalized = canonicalText(value)
+  const matched = normalized.match(/^(20\d{2})\D*(\d{1,2})\D*(\d{1,2})(?:\D.*)?$/)
+  if (!matched) return canonicalIdentifier(value)
+  const [, year, rawMonth, rawDay] = matched
+  const month = rawMonth.padStart(2, '0')
+  const day = rawDay.padStart(2, '0')
+  return isValidDateParts(year, month, day)
+    ? `${year}-${month}-${day}`
+    : canonicalIdentifier(value)
+}
+
+function canonicalNumericValue(value: string) {
+  const normalized = canonicalText(value).replace(/[\s,]/g, '')
+  if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(normalized)) {
+    return canonicalIdentifier(value)
+  }
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? String(Object.is(parsed, -0) ? 0 : parsed) : canonicalIdentifier(value)
+}
+
+function isValidDateParts(year: string, month: string, day: string) {
+  const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)))
+  return parsed.getUTCFullYear() === Number(year)
+    && parsed.getUTCMonth() === Number(month) - 1
+    && parsed.getUTCDate() === Number(day)
 }
 
 async function buildWorkbookBuffer(headers: string[], rows: Array<Record<string, string>>): Promise<ArrayBuffer> {

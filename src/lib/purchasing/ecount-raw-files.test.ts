@@ -59,6 +59,141 @@ describe('mergeEcountRawFiles', () => {
     ]))
   })
 
+  it('replaces a corrected outbound voucher group without retaining its stored version', async () => {
+    const headers = ['품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드']
+    const legacy = await makeUpload('중국출고-기존.xlsx', headers, [
+      ['101542-0001', '20260721-2', '미니스텝퍼', '블랙', '400.00', '2026.07.22', '웨이신', '20260721-2'],
+    ])
+    const next = await makeUpload('중국출고-수정.xlsx', headers, [
+      ['101542-0001', '20260721 - 02', '미니스텝퍼', '블랙(신표기)', '400', '2026-07-22', '웨이신', '20260721 - 02'],
+      ['100001-0001', '20260901-1', '새 상품', '화이트', 10, '2026-09-02', '', '20260901-1'],
+    ])
+
+    const [merged] = await mergeEcountRawFiles(
+      [stored('chinaOutbound', legacy)],
+      [stored('chinaOutbound', next)],
+    )
+    const report = await readEcountPurchasingRawFileRows(merged)
+
+    expect(report.rows).toHaveLength(2)
+    expect(report.rows.filter((row) => row['품목코드'] === '101542-0001')).toEqual([
+      expect.objectContaining({
+        '일자-No.': '20260721 - 02',
+        규격: '블랙(신표기)',
+        '출고수량(EA)': '400',
+        '출고관리코드': '20260721 - 02',
+      }),
+    ])
+  })
+
+  it('preserves separate quantities in one orderless voucher while collapsing formatting twins', async () => {
+    const headers = ['품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드']
+    const accumulated = await makeUpload('중국출고-누적.xlsx', headers, [
+      ['111972-0001', '20260824-7', '상품', '기본', '40.0000000000', '2026.08.24', '웨이신', ''],
+      ['111972-0001', '20260824 - 07', '상품', '기본', '40', '2026-08-24', '웨이신', ''],
+      ['111972-0001', '20260824-7', '상품', '기본', '50.0000000000', '2026.08.24', '웨이신', ''],
+      ['111972-0001', '20260824 - 07', '상품', '기본', '50', '2026-08-24', '웨이신', ''],
+    ])
+
+    const [merged] = await mergeEcountRawFiles(
+      [stored('chinaOutbound', accumulated)],
+      [stored('chinaOutbound', accumulated)],
+    )
+    const report = await readEcountPurchasingRawFileRows(merged)
+
+    expect(report.rows).toHaveLength(2)
+    expect(report.rows.map((row) => row['출고수량(EA)']).sort()).toEqual(['40', '50'])
+  })
+
+  it('preserves separate option lines in one outbound-management-code group', async () => {
+    const headers = ['품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드']
+    const accumulated = await makeUpload('중국출고-누적.xlsx', headers, [
+      ['112386-0001', '20260824-8', '상품', '화이트', '20.0', '2026.08.24', '', 'OUT-008'],
+      ['112386-0001', '20260824 - 08', '상품', '화이트', '20', '2026-08-24', '', 'OUT - 008'],
+      ['112386-0001', '20260824-8', '상품', '블랙', '20.0', '2026.08.24', '', 'OUT-008'],
+      ['112386-0001', '20260824 - 08', '상품', '블랙', '20', '2026-08-24', '', 'OUT - 008'],
+    ])
+
+    const [merged] = await mergeEcountRawFiles(
+      [stored('chinaOutbound', accumulated)],
+      [stored('chinaOutbound', accumulated)],
+    )
+    const report = await readEcountPurchasingRawFileRows(merged)
+
+    expect(report.rows).toHaveLength(2)
+    expect(report.rows.map((row) => row['규격']).sort()).toEqual(['블랙', '화이트'])
+  })
+
+  it('preserves separate quantities for the same option in one outbound-management-code group', async () => {
+    const headers = ['품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드']
+    const accumulated = await makeUpload('중국출고-누적.xlsx', headers, [
+      ['112386-0001', '20260824-8', '상품', '화이트', '40.0', '2026.08.24', '', 'OUT-008'],
+      ['112386-0001', '20260824 - 08', '상품', '화이트', '40', '2026-08-24', '', 'OUT - 008'],
+      ['112386-0001', '20260824-8', '상품', '화이트', '50.0', '2026.08.24', '', 'OUT-008'],
+      ['112386-0001', '20260824 - 08', '상품', '화이트', '50', '2026-08-24', '', 'OUT - 008'],
+    ])
+
+    const [merged] = await mergeEcountRawFiles(
+      [stored('chinaOutbound', accumulated)],
+      [stored('chinaOutbound', accumulated)],
+    )
+    const report = await readEcountPurchasingRawFileRows(merged)
+
+    expect(report.rows).toHaveLength(2)
+    expect(report.rows.map((row) => row['출고수량(EA)']).sort()).toEqual(['40', '50'])
+  })
+
+  it('preserves rows that differ only by purchase-management code inside one outbound group', async () => {
+    const headers = [
+      '품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간',
+      '구입관리코드', '주문서번호', '출고관리코드',
+    ]
+    const accumulated = await makeUpload('중국출고-누적.xlsx', headers, [
+      ['112386-0001', '20260824-8', '상품', '화이트', '20.0', '2026.08.24', 'BUY-001', '웨이신', 'OUT-008'],
+      ['112386-0001', '20260824 - 08', '상품', '화이트', '20', '2026-08-24', 'BUY - 001', '웨이신', 'OUT - 008'],
+      ['112386-0001', '20260824-8', '상품', '화이트', '20.0', '2026.08.24', 'BUY-002', '웨이신', 'OUT-008'],
+      ['112386-0001', '20260824 - 08', '상품', '화이트', '20', '2026-08-24', 'BUY - 002', '웨이신', 'OUT - 008'],
+    ])
+
+    const [merged] = await mergeEcountRawFiles(
+      [stored('chinaOutbound', accumulated)],
+      [stored('chinaOutbound', accumulated)],
+    )
+    const report = await readEcountPurchasingRawFileRows(merged)
+
+    expect(report.rows).toHaveLength(2)
+    expect(report.rows.map((row) => row['구입관리코드']).sort()).toEqual(['BUY - 001', 'BUY - 002'])
+  })
+
+  it('refreshes a corrected orderless outbound row instead of treating it as new', async () => {
+    const headers = ['품목코드', '일자-No.', '품목명', '규격', '출고수량(EA)', '유효기간', '주문서번호', '출고관리코드']
+    const storedOutbound = await makeUpload('중국출고-기존.xlsx', headers, [
+      ['101542-0001', '20260721 -2', '미니스텝퍼', '블랙', '1,200.0', '2026. 07. 22', '웨이신', ''],
+    ])
+    const incomingOutbound = await makeUpload('중국출고-재업로드.xlsx', headers, [
+      ['101542-0001', '20260721-02', '미니스텝퍼', '블랙(신표기)', 1250, '2026-07-23', '웨이신', ''],
+    ])
+
+    const newRows = await getNewIncrementalEcountRawRows(
+      [stored('chinaOutbound', storedOutbound)],
+      [stored('chinaOutbound', incomingOutbound)],
+      'chinaOutbound',
+    )
+    const [merged] = await mergeEcountRawFiles(
+      [stored('chinaOutbound', storedOutbound)],
+      [stored('chinaOutbound', incomingOutbound)],
+    )
+    const report = await readEcountPurchasingRawFileRows(merged)
+
+    expect(newRows).toEqual([])
+    expect(report.rows).toHaveLength(1)
+    expect(report.rows[0]).toEqual(expect.objectContaining({
+      '일자-No.': '20260721-02',
+      '출고수량(EA)': '1250',
+      '유효기간': '2026-07-23',
+    }))
+  })
+
   it('keeps china inventory as a current snapshot instead of accumulating it', async () => {
     const headers = ['품목코드', '품목명', '규격', '품목구분', '합계', '중국창고']
     const first = await makeUpload('중국재고-기존.xlsx', headers, [
@@ -106,7 +241,7 @@ describe('mergeEcountRawFiles', () => {
     const currentPlan = await makeUpload('ESG002M.xlsx', purchasePlanQueryHeaders, [[
       '20260902 -16', '', '', 'P-QUERY', '100001-0001', '조회 상품', '블랙', 20,
       '2026-09-09', '', '', '', '', '', '3316379631024009579', '',
-      '개인', '', '', '', '', '종결', '조회', '20260902 -1',
+      '개인', '', '', '', '', '', '조회', '20260902 -1',
     ]])
 
     const [merged] = await mergeEcountRawFiles(

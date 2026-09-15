@@ -104,10 +104,10 @@ export function PurchasePaymentFlowDetailList({
         <p className="px-3 py-10 text-center text-sm text-muted-foreground">{search ? '검색 결과가 없습니다.' : '해당 금액에 포함된 주문 건이 없습니다.'}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="min-w-[1350px] text-left text-sm">
+          <table className="w-full min-w-[1350px] table-fixed text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
-                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">
+                <th className="w-[42px] whitespace-nowrap px-3 py-2 text-center font-medium">
                   <PurchaseSelectAllCheckbox />
                 </th>
                 <th className="w-[44px] whitespace-nowrap px-3 py-2 text-center font-medium">No.</th>

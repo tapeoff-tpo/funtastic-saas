@@ -337,7 +337,7 @@ export function isPurchasePaymentFlowViewItem(
   if (view === 'purchase_completed') return hasSupplierOrderNumber
   if (view === 'purchase_before') return item.status === 'purchased' && !hasSupplierOrderNumber
   if (view === 'bulk_pending') return item.bulkPaymentPending === true
-  return !hasSupplierOrderNumber
+  return !hasSupplierOrderNumber && item.bulkPaymentPending !== true
 }
 
 export function filterPurchasePaymentFlowItems(
@@ -477,6 +477,7 @@ function paymentFlowDetailWhere(userId: string, view: PurchasePaymentFlowView, s
     conditions.push(hasSupplierOrderNumber)
   } else if (view === 'outstanding') {
     conditions.push(sql`NOT (${hasSupplierOrderNumber})`)
+    conditions.push(sql`${purchaseRequestItems.bulkPaymentPending} IS NOT TRUE`)
   } else if (view === 'bulk_pending') {
     conditions.push(eq(purchaseRequestItems.bulkPaymentPending, true))
   }

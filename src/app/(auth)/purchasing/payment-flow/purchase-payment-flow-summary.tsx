@@ -32,8 +32,8 @@ export function PurchasePaymentFlowSummaryPanel({
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="발주금액 분류">
         <PurchaseFlowCard label="발주금액 총액" view="total" summary={summary.total} description="현재 진행 중 발주" active={activeView === 'total'} search={search} pageSize={pageSize} sort={sort} order={order} />
-        <PurchaseFlowCard label="발주요청" view="purchase_before" summary={summary.purchaseBefore} description="결제 대기 금액에 포함되는 구매요청 단계" active={activeView === 'purchase_before'} search={search} pageSize={pageSize} sort={sort} order={order} />
-        <PurchaseFlowCard label="결제 대기 (미결제 잔액)" view="outstanding" summary={summary.outstanding} description="주문서번호가 아직 없는 전체 건" emphasized active={activeView === 'outstanding'} search={search} pageSize={pageSize} sort={sort} order={order} />
+        <PurchaseFlowCard label="발주요청" view="purchase_before" summary={summary.purchaseBefore} description="구매 전 단계의 발주요청 건" active={activeView === 'purchase_before'} search={search} pageSize={pageSize} sort={sort} order={order} />
+        <PurchaseFlowCard label="결제 대기 (미결제 잔액)" view="outstanding" summary={summary.outstanding} description="대량결제대기를 제외한 주문서번호 미등록 건" active={activeView === 'outstanding'} search={search} pageSize={pageSize} sort={sort} order={order} />
         <PurchaseFlowCard label="구매 완료" view="purchase_completed" summary={summary.purchaseCompleted} description="주문서번호 등록 완료" active={activeView === 'purchase_completed'} search={search} pageSize={pageSize} sort={sort} order={order} />
         <PurchaseFlowCard label="대량결제대기" view="bulk_pending" summary={summary.bulkPending} description="수동 지정한 날짜형 대량 주문" active={activeView === 'bulk_pending'} search={search} pageSize={pageSize} sort={sort} order={order} />
       </div>
@@ -43,7 +43,7 @@ export function PurchasePaymentFlowSummaryPanel({
       ) : null}
 
       <p className="text-xs text-muted-foreground">
-        주문서번호가 없으면 결제 대기(미결제 잔액), 있으면 구매 완료입니다. 발주요청은 결제 대기의 일부이고, 수동 지정한 대량결제대기는 다른 분류와 겹칠 수 있어 카드 금액을 서로 더하면 안 됩니다. 장부의 누적 차감액과도 집계 범위가 다릅니다.
+        결제 대기와 대량결제대기는 서로 겹치지 않습니다. 발주요청과 구매 완료는 진행 단계 기준이라 결제 구분과는 별도로 확인하며, 장부의 누적 차감액과도 집계 범위가 다릅니다.
       </p>
     </section>
   )
@@ -54,7 +54,6 @@ function PurchaseFlowCard({
   view,
   summary,
   description,
-  emphasized = false,
   active = false,
   search,
   pageSize,
@@ -65,7 +64,6 @@ function PurchaseFlowCard({
   view: PurchasePaymentFlowView
   summary: PurchaseCostSummary
   description: string
-  emphasized?: boolean
   active?: boolean
   search: string
   pageSize: number
@@ -86,13 +84,18 @@ function PurchaseFlowCard({
       href={`/purchasing/payment-flow?${params.toString()}`}
       scroll={false}
       aria-current={active ? 'page' : undefined}
-      className={`rounded-md border px-3 py-2 text-left transition-colors hover:border-foreground hover:bg-muted ${
-        active || emphasized ? 'border-foreground bg-background' : 'bg-muted/20'
+      className={`rounded-md border px-3 py-2 text-left transition-colors hover:border-primary hover:bg-muted ${
+        active
+          ? 'border-primary bg-primary/10 shadow-sm ring-1 ring-primary/20'
+          : 'border-border bg-muted/20'
       }`}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{label}</span>
-        <span className="whitespace-nowrap text-xs text-muted-foreground">{summary.itemCount.toLocaleString('ko-KR')}건</span>
+        <div className="flex items-center gap-1.5 whitespace-nowrap">
+          {active ? <span className="rounded-sm bg-primary px-1.5 py-0.5 text-[10px] font-semibold text-primary-foreground">선택됨</span> : null}
+          <span className="text-xs text-muted-foreground">{summary.itemCount.toLocaleString('ko-KR')}건</span>
+        </div>
       </div>
       <div className="mt-2 text-xl font-semibold tabular-nums">
         ₩ {formatCost(summary.totalCostKrw, 0)}

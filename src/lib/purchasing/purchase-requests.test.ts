@@ -117,7 +117,7 @@ describe('purchase payment flow views', () => {
     expect(isPurchasePaymentFlowViewItem(purchaseBefore, 'purchase_completed')).toBe(false)
   })
 
-  it('classifies every active status solely by whether an order number exists', () => {
+  it('classifies ordinary non-bulk active statuses by whether an order number exists', () => {
     const activeStatuses = [
       'purchased',
       'purchase_completed',
@@ -168,7 +168,7 @@ describe('purchase payment flow views', () => {
     }, 'purchase_completed')).toBe(true)
   })
 
-  it('shows manually marked bulk payments independently of the order-number category', () => {
+  it('keeps manually marked bulk payments out of ordinary outstanding', () => {
     const withoutOrder = {
       status: 'purchase_completed' as const,
       supplierOrderNumber: null,
@@ -180,7 +180,7 @@ describe('purchase payment flow views', () => {
       bulkPaymentPending: true,
     }
 
-    expect(isPurchasePaymentFlowViewItem(withoutOrder, 'outstanding')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem(withoutOrder, 'outstanding')).toBe(false)
     expect(isPurchasePaymentFlowViewItem(withoutOrder, 'bulk_pending')).toBe(true)
     expect(isPurchasePaymentFlowViewItem(withOrder, 'purchase_completed')).toBe(true)
     expect(isPurchasePaymentFlowViewItem(withOrder, 'bulk_pending')).toBe(true)
@@ -195,6 +195,11 @@ describe('purchase payment flow views', () => {
       status: 'purchase_completed',
       hasSupplierOrderNumber: false,
     }, 'outstanding')).toBe(true)
+    expect(isPurchasePaymentFlowViewItem({
+      status: 'purchase_completed',
+      hasSupplierOrderNumber: false,
+      bulkPaymentPending: true,
+    }, 'outstanding')).toBe(false)
   })
 
   it('uses the matching summary total for each money view', () => {

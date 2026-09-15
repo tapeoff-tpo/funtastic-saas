@@ -2018,11 +2018,15 @@ export async function syncEcountPurchasingSnapshot(input: {
       }
     }
 
-    // Snapshot the debit before retention removes historical source rows. The
-    // fund ledger remains intact after source-row replacement or cleanup.
+    // Raw-data refreshes replace lifecycle copies and can legitimately remove
+    // rows that have already reached Korea. Insert newly discovered orders,
+    // but never recalculate an existing historical debit from that reduced
+    // logistics snapshot. A deliberately invoked ledger reconciliation can
+    // still recalculate entries when a separate adjustment workflow needs it.
     await reconcilePurchaseFundDebitsInTransaction(tx, {
       userId: input.userId,
       fallbackExchangeRateKrw: exchangeRateReference.rate,
+      existingEntryMode: 'preserve',
     })
 
     // Keep replacement and retention atomic so stale order rows never become

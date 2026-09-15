@@ -68,6 +68,7 @@ export async function reflectSelectedOutboundItems(input: {
     await reconcilePurchaseFundDebitsInTransaction(tx, {
       userId: input.userId,
       fallbackExchangeRateKrw: exchangeRateReference.rate,
+      existingEntryMode: 'preserve',
     })
     const outboundDates = selectedOutboundDates(input)
     const selection = outboundDates.length > 0
@@ -138,6 +139,7 @@ export async function cleanupExpiredCompletedOutboundItems(input: {
     await reconcilePurchaseFundDebitsInTransaction(tx, {
       userId: input.userId,
       fallbackExchangeRateKrw,
+      existingEntryMode: 'preserve',
     })
 
     const rows = await tx

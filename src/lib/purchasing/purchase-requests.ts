@@ -1013,6 +1013,7 @@ export async function updatePurchaseRequestPlanFields(input: {
       await reconcilePurchaseFundDebitsInTransaction(tx, {
         userId: input.userId,
         fallbackExchangeRateKrw: exchangeRateReference?.rate ?? 200,
+        existingEntryMode: 'preserve',
       })
     }
 
@@ -1196,6 +1197,7 @@ export async function deletePurchaseRequestItem(input: {
     await reconcilePurchaseFundDebitsInTransaction(tx, {
       userId: input.userId,
       fallbackExchangeRateKrw: exchangeRateReference.rate,
+      existingEntryMode: 'preserve',
     })
     const [item] = await tx
       .select({ id: purchaseRequestItems.id })

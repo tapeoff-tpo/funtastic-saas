@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   buildPurchaseDebitSnapshots,
+  reconcilePurchaseFundDebitsInTransaction,
   type PurchaseFundDebitSourceRow,
 } from './purchase-fund-ledger'
 
@@ -160,5 +161,53 @@ describe('purchase fund debit snapshots', () => {
       amountCny: 1_000,
       amountKrw: 210_000,
     })
+  })
+})
+
+describe('purchase fund debit persistence', () => {
+  function transactionWith(sourceRows: PurchaseFundDebitSourceRow[]) {
+    const onConflictDoNothing = vi.fn().mockResolvedValue(undefined)
+    const onConflictDoUpdate = vi.fn().mockResolvedValue(undefined)
+    const tx = {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          leftJoin: vi.fn(() => ({
+            where: vi.fn().mockResolvedValue(sourceRows),
+          })),
+        })),
+      })),
+      insert: vi.fn(() => ({
+        values: vi.fn(() => ({
+          onConflictDoNothing,
+          onConflictDoUpdate,
+        })),
+      })),
+    }
+    return { tx, onConflictDoNothing, onConflictDoUpdate }
+  }
+
+  it('preserves an existing historical debit by default', async () => {
+    const { tx, onConflictDoNothing, onConflictDoUpdate } = transactionWith([row()])
+
+    await reconcilePurchaseFundDebitsInTransaction(tx as never, {
+      userId: '00000000-0000-4000-8000-000000000001',
+      fallbackExchangeRateKrw: 200,
+    })
+
+    expect(onConflictDoNothing).toHaveBeenCalledOnce()
+    expect(onConflictDoUpdate).not.toHaveBeenCalled()
+  })
+
+  it('keeps recalculation available only when it is deliberately requested', async () => {
+    const { tx, onConflictDoNothing, onConflictDoUpdate } = transactionWith([row()])
+
+    await reconcilePurchaseFundDebitsInTransaction(tx as never, {
+      userId: '00000000-0000-4000-8000-000000000001',
+      fallbackExchangeRateKrw: 200,
+      existingEntryMode: 'recalculate',
+    })
+
+    expect(onConflictDoUpdate).toHaveBeenCalledOnce()
+    expect(onConflictDoNothing).not.toHaveBeenCalled()
   })
 })

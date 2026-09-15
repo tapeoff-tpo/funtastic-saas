@@ -79,6 +79,7 @@ export async function cleanupExpiredEcountPurchaseOrderRows(input: {
     await reconcilePurchaseFundDebitsInTransaction(tx, {
       userId: input.userId,
       fallbackExchangeRateKrw: exchangeRateReference.rate,
+      existingEntryMode: 'preserve',
     })
     return cleanupExpiredEcountPurchaseOrderRowsInTransaction(tx, input)
   })

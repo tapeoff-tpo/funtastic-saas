@@ -18,6 +18,7 @@ export const PURCHASE_FUND_MANUAL_ENTRY_TYPES = ['deposit', 'opening_balance'] a
 
 export type PurchaseFundManualEntryType = (typeof PURCHASE_FUND_MANUAL_ENTRY_TYPES)[number]
 export type PurchaseFundEntryType = PurchaseFundManualEntryType | 'purchase_debit'
+export type PurchaseFundDebitExistingEntryMode = 'recalculate' | 'preserve'
 
 export type PurchaseFundDebitSourceRow = {
   id: string
@@ -271,6 +272,7 @@ function purchaseDebitOrderGroupKey(row: PurchaseFundDebitSourceRow) {
 export async function reconcilePurchaseFundDebits(input: {
   userId: string
   fallbackExchangeRateKrw: number
+  existingEntryMode?: PurchaseFundDebitExistingEntryMode
 }) {
   await ensurePurchaseFundLedgerSchema()
   return db.transaction(async (tx) => {
@@ -302,13 +304,17 @@ export async function ensurePurchaseFundDebitBackfill(input: {
 
 export async function reconcilePurchaseFundDebitsInTransaction(
   tx: DbTransaction,
-  input: { userId: string; fallbackExchangeRateKrw: number },
+  input: {
+    userId: string
+    fallbackExchangeRateKrw: number
+    existingEntryMode?: PurchaseFundDebitExistingEntryMode
+  },
 ) {
   const rows = await loadPurchaseDebitSourceRows(tx, input.userId)
   const snapshots = buildPurchaseDebitSnapshots(rows, input.fallbackExchangeRateKrw)
 
   for (const values of chunks(snapshots, 250)) {
-    await tx
+    const insertQuery = tx
       .insert(purchaseFundEntries)
       .values(values.map((snapshot) => ({
         userId: input.userId,
@@ -324,6 +330,15 @@ export async function reconcilePurchaseFundDebitsInTransaction(
         details: snapshot.details,
         updatedAt: new Date(),
       })))
+
+    if (input.existingEntryMode !== 'recalculate') {
+      await insertQuery.onConflictDoNothing({
+        target: [purchaseFundEntries.userId, purchaseFundEntries.sourceKey],
+      })
+      continue
+    }
+
+    await insertQuery
       .onConflictDoUpdate({
         target: [purchaseFundEntries.userId, purchaseFundEntries.sourceKey],
         set: {

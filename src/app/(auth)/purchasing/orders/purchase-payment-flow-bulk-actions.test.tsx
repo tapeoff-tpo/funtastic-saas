@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PurchaseBulkSelectionProvider,
   PurchasePaymentFlowBulkActions,
+  PurchaseQuantityField,
   PurchaseRowCheckbox,
 } from './purchase-request-actions'
 
@@ -78,6 +79,30 @@ describe('PurchasePaymentFlowBulkActions', () => {
       expect.objectContaining({
         method: 'DELETE',
         body: JSON.stringify({ ids: [itemId] }),
+      }),
+    ))
+    await waitFor(() => expect(refresh).toHaveBeenCalledOnce())
+  })
+
+  it('saves an edited purchase quantity and refreshes the payment totals', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response)
+    render(
+      <PurchaseQuantityField
+        id={itemId}
+        field="actualPurchaseQuantity"
+        quantity={12}
+      />,
+    )
+
+    const quantity = screen.getByRole('spinbutton', { name: '수량' })
+    fireEvent.change(quantity, { target: { value: '15' } })
+    fireEvent.blur(quantity)
+
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      `/api/purchasing/purchase-requests/${itemId}`,
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ actualPurchaseQuantity: 15 }),
       }),
     ))
     await waitFor(() => expect(refresh).toHaveBeenCalledOnce())

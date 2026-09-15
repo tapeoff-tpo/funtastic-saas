@@ -1315,6 +1315,7 @@ export function PurchaseQuantityField({
     unitCostKrw: number | null
   }
 }) {
+  const router = useRouter()
   const [value, setValue] = useState(String(quantity))
   const [savedValue, setSavedValue] = useState(String(quantity))
   const [message, setMessage] = useState<string | null>(null)
@@ -1351,6 +1352,7 @@ export function PurchaseQuantityField({
         setSavedValue(nextValue)
         setValue(nextValue)
         setMessage(null)
+        router.refresh()
         return
       }
       setMessage('저장 실패')

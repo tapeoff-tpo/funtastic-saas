@@ -11,6 +11,7 @@ import {
   PurchaseBulkPaymentDialog,
   PurchaseBulkSelectionProvider,
   PurchasePaymentFlowBulkActions,
+  PurchaseQuantityField,
   PurchaseRowCheckbox,
   PurchaseSelectAllCheckbox,
 } from '../orders/purchase-request-actions'
@@ -103,7 +104,7 @@ export function PurchasePaymentFlowDetailList({
         <p className="px-3 py-10 text-center text-sm text-muted-foreground">{search ? '검색 결과가 없습니다.' : '해당 금액에 포함된 주문 건이 없습니다.'}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] text-left text-sm">
+          <table className="w-full min-w-[1300px] table-fixed text-left text-sm">
             <thead className="bg-muted/60 text-xs text-muted-foreground">
               <tr>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">
@@ -112,14 +113,16 @@ export function PurchasePaymentFlowDetailList({
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">No.</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">금액 구분</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">대량결제</th>
-                <th className="min-w-[290px] px-3 py-2 font-medium">상품</th>
-                <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">구매수량</th>
+                <th className="w-[250px] px-3 py-2 font-medium">상품</th>
+                <th className="w-[116px] whitespace-nowrap px-3 py-2 text-center font-medium">구매수량</th>
+                <th className="w-[112px] whitespace-nowrap px-3 py-2 text-right font-medium">개당단가(元)</th>
+                <th className="w-[124px] whitespace-nowrap px-3 py-2 text-right font-medium">개당단가(₩)</th>
                 <th className="min-w-[130px] px-3 py-2 font-medium">주문서번호</th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                  <PaymentFlowSortHeader label="금액(元)" column="totalCostYuan" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                  <PaymentFlowSortHeader label="합계(元)" column="totalCostYuan" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
                 </th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-right font-medium">
-                  <PaymentFlowSortHeader label="금액(₩)" column="totalCostKrw" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                  <PaymentFlowSortHeader label="합계(₩)" column="totalCostKrw" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
                 </th>
                 <th className="w-px whitespace-nowrap px-3 py-2 text-center font-medium">발주</th>
               </tr>
@@ -143,12 +146,20 @@ export function PurchasePaymentFlowDetailList({
                     ) : '-'}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="font-medium text-foreground">{item.productName}</div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">
+                    <div className="break-words font-medium text-foreground">{item.productName}</div>
+                    <div className="mt-0.5 break-words text-xs text-muted-foreground">
                       {item.sku}{item.optionName ? ` · ${item.optionName}` : ''}
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-center tabular-nums">{item.quantity.toLocaleString('ko-KR')}</td>
+                  <td className="px-2 py-2 text-center align-middle">
+                    <PurchaseQuantityField
+                      id={item.id}
+                      field="actualPurchaseQuantity"
+                      quantity={item.quantity}
+                    />
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums">{formatCost(item.unitCostYuan, 2)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{formatCost(item.unitCostKrw, 0)}</td>
                   <td className="px-3 py-2 text-xs">
                     <div>{item.supplierOrderNumber ?? '-'}</div>
                     {item.purchaseManagementCode ? <div className="mt-0.5 text-muted-foreground">{item.purchaseManagementCode}</div> : null}

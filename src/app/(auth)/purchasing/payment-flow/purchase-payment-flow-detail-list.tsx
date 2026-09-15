@@ -113,11 +113,21 @@ export function PurchasePaymentFlowDetailList({
                 <th className="w-[44px] whitespace-nowrap px-3 py-2 text-center font-medium">No.</th>
                 <th className="w-[96px] whitespace-nowrap px-3 py-2 text-center font-medium">금액 구분</th>
                 <th className="w-[112px] whitespace-nowrap px-3 py-2 text-center font-medium">대량결제</th>
-                <th className="w-[250px] max-w-[250px] px-3 py-2 text-center font-medium">상품</th>
-                <th className="w-[116px] whitespace-nowrap px-3 py-2 text-center font-medium">구매수량</th>
-                <th className="w-[112px] whitespace-nowrap px-3 py-2 text-center font-medium">개당단가(元)</th>
-                <th className="w-[124px] whitespace-nowrap px-3 py-2 text-center font-medium">개당단가(₩)</th>
-                <th className="w-[180px] px-3 py-2 text-center font-medium">주문서번호</th>
+                <th className="w-[250px] max-w-[250px] px-3 py-2 text-center font-medium">
+                  <PaymentFlowSortHeader label="상품" column="productName" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                </th>
+                <th className="w-[116px] whitespace-nowrap px-3 py-2 text-center font-medium">
+                  <PaymentFlowSortHeader label="구매수량" column="quantity" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                </th>
+                <th className="w-[112px] whitespace-nowrap px-3 py-2 text-center font-medium">
+                  <PaymentFlowSortHeader label="개당단가(元)" column="unitCostYuan" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                </th>
+                <th className="w-[124px] whitespace-nowrap px-3 py-2 text-center font-medium">
+                  <PaymentFlowSortHeader label="개당단가(₩)" column="unitCostKrw" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                </th>
+                <th className="w-[180px] px-3 py-2 text-center font-medium">
+                  <PaymentFlowSortHeader label="주문서번호" column="supplierOrderNumber" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
+                </th>
                 <th className="w-[108px] whitespace-nowrap px-3 py-2 text-center font-medium">
                   <PaymentFlowSortHeader label="합계(元)" column="totalCostYuan" view={view} search={search} pageSize={pageSize} currentSort={sort} currentOrder={order} />
                 </th>

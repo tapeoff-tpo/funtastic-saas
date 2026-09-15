@@ -221,15 +221,67 @@ describe('purchase payment flow views', () => {
 
 describe('purchase payment flow ordering', () => {
   const paymentFlowItems = [
-    { id: 'first', sku: '100001-0001', totalCostYuan: 30, totalCostKrw: 5_000 },
-    { id: 'missing', sku: '100002-0001', totalCostYuan: null, totalCostKrw: null },
-    { id: 'last', sku: '100003-0001', totalCostYuan: 10, totalCostKrw: 2_000 },
+    {
+      id: 'first',
+      sku: '100001-0001',
+      productName: '다람쥐 수납장',
+      optionName: '화이트',
+      quantity: 30,
+      unitCostYuan: 3,
+      unitCostKrw: 500,
+      supplierOrderNumber: 'ORDER-2',
+      outboundExpectedDate: '2026-09-15',
+      requestDate: null,
+      totalCostYuan: 30,
+      totalCostKrw: 5_000,
+    },
+    {
+      id: 'missing',
+      sku: '100002-0001',
+      productName: '가구 정리함',
+      optionName: '그레이',
+      quantity: 5,
+      unitCostYuan: null,
+      unitCostKrw: null,
+      supplierOrderNumber: null,
+      outboundExpectedDate: null,
+      requestDate: null,
+      totalCostYuan: null,
+      totalCostKrw: null,
+    },
+    {
+      id: 'last',
+      sku: '100003-0001',
+      productName: '나무 수납장',
+      optionName: '우드',
+      quantity: 10,
+      unitCostYuan: 1,
+      unitCostKrw: 200,
+      supplierOrderNumber: 'ORDER-1',
+      outboundExpectedDate: '2026-09-14',
+      requestDate: null,
+      totalCostYuan: 10,
+      totalCostKrw: 2_000,
+    },
   ] as Parameters<typeof sortPurchasePaymentFlowItems>[0]
 
   it('sorts total amounts without moving missing costs ahead of known amounts', () => {
     expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'totalCostKrw', 'asc').map((item) => item.id))
       .toEqual(['last', 'first', 'missing'])
     expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'totalCostYuan', 'desc').map((item) => item.id))
+      .toEqual(['first', 'last', 'missing'])
+  })
+
+  it('sorts the product table columns and keeps matching purchase dates together', () => {
+    expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'productName', 'asc').map((item) => item.id))
+      .toEqual(['missing', 'last', 'first'])
+    expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'quantity', 'desc').map((item) => item.id))
+      .toEqual(['first', 'last', 'missing'])
+    expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'unitCostYuan', 'asc').map((item) => item.id))
+      .toEqual(['last', 'first', 'missing'])
+    expect(sortPurchasePaymentFlowItems(paymentFlowItems, 'supplierOrderNumber', 'asc').map((item) => item.id))
+      .toEqual(['last', 'first', 'missing'])
+    expect(sortPurchasePaymentFlowItems(paymentFlowItems, null).map((item) => item.id))
       .toEqual(['first', 'last', 'missing'])
   })
 })

@@ -77,7 +77,15 @@ export const PURCHASE_PAYMENT_FLOW_VIEWS = [
 
 export type PurchasePaymentFlowView = (typeof PURCHASE_PAYMENT_FLOW_VIEWS)[number]
 
-export const PURCHASE_PAYMENT_FLOW_SORTS = ['totalCostYuan', 'totalCostKrw'] as const
+export const PURCHASE_PAYMENT_FLOW_SORTS = [
+  'productName',
+  'quantity',
+  'unitCostYuan',
+  'unitCostKrw',
+  'supplierOrderNumber',
+  'totalCostYuan',
+  'totalCostKrw',
+] as const
 export type PurchasePaymentFlowSort = (typeof PURCHASE_PAYMENT_FLOW_SORTS)[number]
 
 export const PURCHASE_PAYMENT_FLOW_VIEW_LABELS: Record<PurchasePaymentFlowView, string> = {
@@ -352,20 +360,83 @@ export function sortPurchasePaymentFlowItems(
   sort: PurchasePaymentFlowSort | null | undefined,
   order: 'asc' | 'desc' = 'desc',
 ) {
-  if (!sort) return items
-
-  const direction = order === 'asc' ? 1 : -1
   return items
     .map((item, index) => ({ item, index }))
     .sort((left, right) => {
-      const leftCost = left.item[sort]
-      const rightCost = right.item[sort]
-      if (leftCost === null) return rightCost === null ? left.index - right.index : 1
-      if (rightCost === null) return -1
-      const difference = leftCost - rightCost
-      return difference === 0 ? left.index - right.index : difference * direction
+      if (sort) {
+        const sortDifference = comparePurchasePaymentFlowSortValues(
+          purchasePaymentFlowSortValue(left.item, sort),
+          purchasePaymentFlowSortValue(right.item, sort),
+          order,
+        )
+        if (sortDifference !== 0) return sortDifference
+      }
+
+      const purchaseDateDifference = comparePurchasePaymentFlowSortValues(
+        purchasePaymentFlowPurchaseDate(left.item),
+        purchasePaymentFlowPurchaseDate(right.item),
+        'desc',
+      )
+      if (purchaseDateDifference !== 0) return purchaseDateDifference
+
+      const productDifference = comparePurchasePaymentFlowSortValues(
+        left.item.productName,
+        right.item.productName,
+        'asc',
+      )
+      if (productDifference !== 0) return productDifference
+
+      const skuDifference = comparePurchasePaymentFlowSortValues(left.item.sku, right.item.sku, 'asc')
+      if (skuDifference !== 0) return skuDifference
+
+      const optionDifference = comparePurchasePaymentFlowSortValues(left.item.optionName, right.item.optionName, 'asc')
+      return optionDifference === 0 ? left.index - right.index : optionDifference
     })
     .map(({ item }) => item)
+}
+
+function purchasePaymentFlowSortValue(
+  item: PurchasePaymentFlowDetailItem,
+  sort: PurchasePaymentFlowSort,
+) {
+  switch (sort) {
+    case 'productName':
+      return item.productName
+    case 'quantity':
+      return item.quantity
+    case 'unitCostYuan':
+      return item.unitCostYuan
+    case 'unitCostKrw':
+      return item.unitCostKrw
+    case 'supplierOrderNumber':
+      return item.supplierOrderNumber
+    case 'totalCostYuan':
+      return item.totalCostYuan
+    case 'totalCostKrw':
+      return item.totalCostKrw
+  }
+}
+
+function purchasePaymentFlowPurchaseDate(item: PurchasePaymentFlowDetailItem) {
+  return item.outboundExpectedDate ?? item.requestDate
+}
+
+function comparePurchasePaymentFlowSortValues(
+  left: string | number | null,
+  right: string | number | null,
+  order: 'asc' | 'desc',
+) {
+  const leftMissing = left === null || left === ''
+  const rightMissing = right === null || right === ''
+  if (leftMissing) return rightMissing ? 0 : 1
+  if (rightMissing) return -1
+
+  const direction = order === 'asc' ? 1 : -1
+  if (typeof left === 'number' && typeof right === 'number') {
+    return (left - right) * direction
+  }
+
+  return left.localeCompare(right, 'ko-KR') * direction
 }
 
 export function getPurchasePaymentFlowViewSummary(
@@ -501,32 +572,56 @@ function paymentFlowDetailOrderBy(
   order: 'asc' | 'desc',
   fallbackExchangeRateKrw: number,
 ): SQL[] {
-  if (sort) {
-    const costs = purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw)
-    const totalCost = sort === 'totalCostYuan' ? costs.totalCostYuan : costs.totalCostKrw
-    const costOrder = order === 'asc'
-      ? sql`${totalCost} ASC NULLS LAST`
-      : sql`${totalCost} DESC NULLS LAST`
+  const groupedOrder = paymentFlowGroupedOrderBy()
+  if (!sort) return groupedOrder
 
-    return [
-      costOrder,
-      desc(purchaseRequestItems.updatedAt),
-      desc(purchaseRequestItems.createdAt),
-      asc(purchaseRequestItems.sku),
-      asc(purchaseRequestItems.id),
-    ]
-  }
+  const costs = purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw)
+  const sortExpression = (() => {
+    switch (sort) {
+      case 'productName':
+        return purchaseRequestItems.productName
+      case 'quantity':
+        return costs.quantity
+      case 'unitCostYuan':
+        return costs.unitCostYuan
+      case 'unitCostKrw':
+        return costs.unitCostKrw
+      case 'supplierOrderNumber':
+        return normalizedSupplierOrderNumberSql()
+      case 'totalCostYuan':
+        return costs.totalCostYuan
+      case 'totalCostKrw':
+        return costs.totalCostKrw
+    }
+  })()
 
+  const primaryOrder = order === 'asc'
+    ? sql`${sortExpression} ASC NULLS LAST`
+    : sql`${sortExpression} DESC NULLS LAST`
+
+  return [primaryOrder, ...groupedOrder]
+}
+
+function paymentFlowGroupedOrderBy(): SQL[] {
   return [
-    desc(purchaseRequestItems.updatedAt),
-    desc(purchaseRequestItems.createdAt),
+    sql`${paymentFlowPurchaseDateSql()} DESC NULLS LAST`,
+    asc(purchaseRequestItems.productName),
     asc(purchaseRequestItems.sku),
+    asc(purchaseRequestItems.optionName),
     asc(purchaseRequestItems.id),
   ]
 }
 
+function paymentFlowPurchaseDateSql() {
+  return sql<string>`COALESCE(${purchaseRequestItems.outboundExpectedDate}, ${purchaseRequestItems.requestDate})`
+}
+
 function hasSupplierOrderNumberSql() {
-  return sql<boolean>`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '') IS NOT NULL`
+  return sql<boolean>`${normalizedSupplierOrderNumberSql()} IS NOT NULL`
+}
+
+function normalizedSupplierOrderNumberSql() {
+  return sql<string | null>`NULLIF(BTRIM(COALESCE(${purchaseRequestItems.supplierOrderNumber}, '')), '')`
 }
 
 function purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw: number) {
@@ -551,6 +646,12 @@ function purchasePaymentFlowCostSqlExpressions(fallbackExchangeRateKrw: number) 
   END`
 
   return {
+    quantity,
+    unitCostYuan,
+    unitCostKrw: sql<number>`CASE
+      WHEN ${unitCostYuan} IS NULL OR ${appliedExchangeRateKrw} IS NULL THEN NULL
+      ELSE ROUND(${unitCostYuan} * ${appliedExchangeRateKrw})
+    END`,
     totalCostYuan: sql<number>`CASE
       WHEN ${unitCostYuan} IS NULL THEN NULL
       ELSE ${unitCostYuan} * ${quantity}

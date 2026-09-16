@@ -937,7 +937,16 @@ const OwnerSheet = forwardRef<OwnerSheetHandle, OwnerSheetProps>(function OwnerS
                       <Button type="button" variant="outline" size="sm" className="h-7 w-full" onClick={() => addOption(row)}><Plus />옵션 추가</Button>
                     </div>
                   </TableCell>
-                  <TableCell><AutoGrowTextarea value={row.chinaPurchaseUrl} onChange={(value) => updateRow(row.clientId, { chinaPurchaseUrl: value })} placeholder="https://detail.1688.com/..." /></TableCell>
+                  <TableCell>
+                    <Input
+                      type="url"
+                      value={row.chinaPurchaseUrl}
+                      onChange={(event) => updateRow(row.clientId, { chinaPurchaseUrl: event.target.value })}
+                      placeholder="https://detail.1688.com/..."
+                      title={row.chinaPurchaseUrl || undefined}
+                      className="h-8 min-w-0 px-1.5 text-xs"
+                    />
+                  </TableCell>
                   <TableCell>
                     <div className="space-y-1">
                       {row.options.map((option) => <NumericCell key={option.clientId} value={option.chinaUnitPriceCny} onChange={(value) => updateOption(row, option.clientId, { chinaUnitPriceCny: value })} placeholder="¥" decimal />)}

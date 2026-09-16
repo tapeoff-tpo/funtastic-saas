@@ -265,23 +265,6 @@ export function PurchaseFundLedgerPanel({
         />
       </div>
 
-      {summary.totalDepositedKrw === 0 && summary.totalDebitedKrw > 0 ? (
-        <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-          기존 발주 차감만 먼저 불러왔습니다. 지금 실제 잔액부터 관리하려면 `입금내역 추가`에서 `기초잔액`을 한 번 등록해주세요.
-        </div>
-      ) : null}
-
-      {summary.missingCnyDepositCount > 0 || summary.missingCostOrderCount > 0 ? (
-        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-          {summary.missingCnyDepositCount > 0
-            ? `위안화 금액을 입력하지 않은 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 위안화 잔액은 표시하지 않습니다. `
-            : null}
-          {summary.missingCostOrderCount > 0
-            ? `원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건은 확인된 금액만 차감되어 있습니다.`
-            : null}
-        </div>
-      ) : null}
-
       <ChinaFundStatementPanel />
 
       {children}
@@ -351,6 +334,32 @@ export function PurchaseFundLedgerPanel({
           주문서번호가 없는 대량결제대기 상품은 아직 차감하지 않습니다. 선금과 잔금은 바로 위 대량결제대기 목록에서 별도로 관리하며, 자동 차감 내역은 원본 발주가 2개월 후 정리되어도 장부에 계속 남습니다.
         </p>
       </details>
+
+      {(
+        (summary.totalDepositedKrw === 0 && summary.totalDebitedKrw > 0)
+        || summary.missingCnyDepositCount > 0
+        || summary.missingCostOrderCount > 0
+      ) ? (
+        <aside aria-label="정산 참고" className="border-t pt-3">
+          <div className="space-y-1.5 text-[11px] leading-4">
+            {summary.totalDepositedKrw === 0 && summary.totalDebitedKrw > 0 ? (
+              <p className="rounded-sm border border-blue-100 bg-blue-50/50 px-2 py-1.5 text-blue-800">
+                기존 발주 차감만 먼저 불러왔습니다. 실제 잔액부터 관리하려면 `입금내역 추가`에서 `기초잔액`을 한 번 등록해주세요.
+              </p>
+            ) : null}
+            {summary.missingCnyDepositCount > 0 || summary.missingCostOrderCount > 0 ? (
+              <p className="rounded-sm border border-amber-100 bg-amber-50/50 px-2 py-1.5 text-amber-800">
+                {summary.missingCnyDepositCount > 0
+                  ? `위안화 금액을 입력하지 않은 입금 ${summary.missingCnyDepositCount.toLocaleString('ko-KR')}건이 있어 위안화 잔액은 표시하지 않습니다. `
+                  : null}
+                {summary.missingCostOrderCount > 0
+                  ? `원가 미확정 발주 ${summary.missingCostOrderCount.toLocaleString('ko-KR')}건은 확인된 금액만 차감되어 있습니다.`
+                  : null}
+              </p>
+            ) : null}
+          </div>
+        </aside>
+      ) : null}
     </section>
   )
 }

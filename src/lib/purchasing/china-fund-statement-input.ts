@@ -37,6 +37,12 @@ export type ChinaFundStatementSummary = {
   finalBalanceCny: number | null
 }
 
+export type ChinaFundStatementOcrExtraction = {
+  text: string
+  recognizedCount: number
+  ignoredLineCount: number
+}
+
 const BALANCE_TOLERANCE_CNY = 0.01
 
 /**
@@ -181,6 +187,40 @@ export function summarizeChinaFundStatement(
   }
 }
 
+/**
+ * Converts OCR output from a screenshot of the China deposit table into the
+ * same three-column text accepted by the manual paste workflow.
+ */
+export function extractChinaFundStatementTextFromOcr(
+  text: string,
+): ChinaFundStatementOcrExtraction {
+  const rows: ChinaFundStatementRow[] = []
+  let ignoredLineCount = 0
+
+  for (const rawLine of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const row = parseOcrStatementRow(rawLine)
+    if (row) rows.push(row)
+    else if (rawLine.trim()) ignoredLineCount += 1
+  }
+
+  const reverseRows = [...rows].reverse()
+  const dateIsDescending = rows.length > 1 && rows[0]!.occurredOn > rows.at(-1)!.occurredOn
+  const balancesOnlyContinueWhenReversed = rows.length > 1
+    && !hasOcrBalanceContinuity(rows)
+    && hasOcrBalanceContinuity(reverseRows)
+  const orderedRows = dateIsDescending || balancesOnlyContinueWhenReversed
+    ? reverseRows
+    : rows
+
+  return {
+    text: orderedRows
+      .map((row) => `${row.occurredOn}\t${formatOcrAmount(row.signedAmountCny)}\t${formatOcrAmount(row.balanceAfterCny)}`)
+      .join('\n'),
+    recognizedCount: orderedRows.length,
+    ignoredLineCount,
+  }
+}
+
 function splitStatementColumns(line: string) {
   const tabColumns = trimEmptyEdgeColumns(line.split('\t').map((value) => value.trim()))
   if (tabColumns.length > 1) return tabColumns
@@ -192,6 +232,53 @@ function splitStatementColumns(line: string) {
     /^(\d{4}\s*(?:[.\/-]|년)\s*\d{1,2}\s*(?:[.\/-]|월)\s*\d{1,2}(?:\s*일)?\.?)\s+(.+?)\s+([^\s]+)\s*$/,
   )
   return match ? [match[1], match[2], match[3]] : [line]
+}
+
+function parseOcrStatementRow(rawLine: string): ChinaFundStatementRow | null {
+  const line = rawLine.trim()
+  const dateMatch = line.match(/\d{4}\s*(?:[.\/-]|년)\s*\d{1,2}\s*(?:[.\/-]|월)\s*\d{1,2}(?:\s*일)?\.?/)
+  if (!dateMatch) return null
+
+  const occurredOn = parseStatementDate(dateMatch[0])
+  if (!occurredOn) return null
+
+  const rest = line.slice((dateMatch.index ?? 0) + dateMatch[0].length)
+  const amounts = extractOcrAmounts(rest)
+  if (amounts.length < 2) return null
+
+  return {
+    occurredOn,
+    signedAmountCny: amounts[0]!,
+    balanceAfterCny: amounts[1]!,
+  }
+}
+
+function extractOcrAmounts(value: string) {
+  const currencyAmounts = Array.from(value.matchAll(
+    /([+\-−﹣－]?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?)\s*(?:元|￥|¥)/g,
+  ))
+    .map((match) => parseCnyAmount(match[1] ?? ''))
+    .filter((amount): amount is number => amount !== null)
+  if (currencyAmounts.length >= 2) return currencyAmounts
+
+  const withoutDates = value.replace(/\d{4}\s*(?:[.\/-]|년)\s*\d{1,2}\s*(?:[.\/-]|월)\s*\d{1,2}(?:\s*일)?\.?/g, ' ')
+  return Array.from(withoutDates.matchAll(
+    /[+\-−﹣－]?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?/g,
+  ))
+    .map((match) => match[0])
+    .filter((raw) => /[+\-−﹣－,.]|\d{2,}/.test(raw.replace(/\s/g, '')))
+    .map((raw) => parseCnyAmount(raw))
+    .filter((amount): amount is number => amount !== null)
+}
+
+function hasOcrBalanceContinuity(rows: readonly ChinaFundStatementRow[]) {
+  return rows.every((row, index) => {
+    if (index === 0) return true
+    const previous = rows[index - 1]!
+    return Math.abs(
+      roundCny(previous.balanceAfterCny + row.signedAmountCny) - row.balanceAfterCny,
+    ) <= BALANCE_TOLERANCE_CNY + Number.EPSILON
+  })
 }
 
 function trimEmptyEdgeColumns(columns: string[]) {
@@ -238,6 +325,10 @@ function parseCnyAmount(value: string) {
 
   const number = Number(normalized)
   return Number.isFinite(number) ? roundCny(number) : null
+}
+
+function formatOcrAmount(value: number) {
+  return value.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
 
 function roundCny(value: number) {

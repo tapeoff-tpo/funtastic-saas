@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { and, count, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from 'drizzle-orm'
+import { and, count, desc, eq, gte, isNull, lte, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/lib/db'
 import { chinaFundStatementEntries } from '@/lib/db/schema'
+import {
+  recalculateChinaFundStatementBalances,
+  sortChinaFundStatementLedgerRows,
+} from '@/lib/purchasing/china-fund-statement-ledger'
 
 export const CHINA_FUND_STATEMENT_DIRECTIONS = ['china_advance', 'our_remittance'] as const
 
@@ -112,6 +116,7 @@ export async function importChinaFundStatementEntries(input: {
       .digest('hex')}`
 
     return {
+      tuple,
       userId: input.userId,
       importBatchId,
       occurredOn: entry.occurredOn,
@@ -134,16 +139,30 @@ export async function importChinaFundStatementEntries(input: {
     await tx.execute(sql`
       SELECT pg_advisory_xact_lock(hashtext(${`china-fund-statement:${input.userId}`}))
     `)
-    const existingKeys = await tx
-      .select({ sourceKey: chinaFundStatementEntries.sourceKey })
+    const existingEntries = await tx
+      .select({
+        sourceKey: chinaFundStatementEntries.sourceKey,
+        occurredOn: chinaFundStatementEntries.occurredOn,
+        signedAmountCny: chinaFundStatementEntries.signedAmountCny,
+        balanceAfterCny: chinaFundStatementEntries.balanceAfterCny,
+      })
       .from(chinaFundStatementEntries)
       .where(and(
         eq(chinaFundStatementEntries.userId, input.userId),
         isNull(chinaFundStatementEntries.voidedAt),
-        inArray(chinaFundStatementEntries.sourceKey, values.map((value) => value.sourceKey)),
       ))
-    const duplicateKeys = new Set(existingKeys.map((row) => row.sourceKey))
-    const newValues = values.filter((value) => !duplicateKeys.has(value.sourceKey))
+    const existingKeys = new Set(existingEntries.map((row) => row.sourceKey))
+    const existingTuples = new Set(existingEntries.map((row) => statementTuple(
+      row.occurredOn,
+      numericValue(row.signedAmountCny),
+      numericValue(row.balanceAfterCny),
+    )))
+    const newValues = values.filter((value) => {
+      if (existingKeys.has(value.sourceKey) || existingTuples.has(value.tuple)) return false
+      existingKeys.add(value.sourceKey)
+      existingTuples.add(value.tuple)
+      return true
+    })
 
     const [latest] = await tx
       .select({
@@ -166,7 +185,7 @@ export async function importChinaFundStatementEntries(input: {
       const first = newValues[0]!
       if (first.occurredOn < latest.occurredOn) {
         throw new Error(
-          `기존 최신 내역은 ${latest.occurredOn}입니다. 과거 내역을 수정하려면 먼저 가장 최근 입력 묶음을 취소해주세요.`,
+          `기존 최신 내역은 ${latest.occurredOn}입니다. 과거 내역은 목록에서 해당 행을 수정해주세요.`,
         )
       }
       const previousBalance = numericValue(latest.balanceAfterCny)
@@ -180,11 +199,25 @@ export async function importChinaFundStatementEntries(input: {
       }
     }
 
-    const inserted = newValues.length === 0
+    const insertValues = newValues.map((value) => ({
+      userId: value.userId,
+      importBatchId: value.importBatchId,
+      occurredOn: value.occurredOn,
+      sequence: value.sequence,
+      direction: value.direction,
+      signedAmountCny: value.signedAmountCny,
+      balanceAfterCny: value.balanceAfterCny,
+      sourceKey: value.sourceKey,
+      sourceLabel: value.sourceLabel,
+      memo: value.memo,
+      rawData: value.rawData,
+      createdBy: value.createdBy,
+    }))
+    const inserted = insertValues.length === 0
       ? []
       : await tx
         .insert(chinaFundStatementEntries)
-        .values(newValues)
+        .values(insertValues)
         .onConflictDoNothing({
           target: [chinaFundStatementEntries.userId, chinaFundStatementEntries.sourceKey],
           where: sql`${chinaFundStatementEntries.voidedAt} IS NULL`,
@@ -200,50 +233,168 @@ export async function importChinaFundStatementEntries(input: {
   })
 }
 
-export async function voidLatestChinaFundStatementBatch(input: {
+export async function updateChinaFundStatementEntry(input: {
   userId: string
-  voidedBy: string
-  importBatchId: string
+  entryId: string
+  occurredOn: string
+  signedAmountCny: number
+  memo?: string | null
 }) {
   await ensureChinaFundStatementSchema()
+  if (!isCalendarDate(input.occurredOn)) throw new Error('날짜가 올바르지 않습니다.')
+  if (!Number.isFinite(input.signedAmountCny) || input.signedAmountCny === 0) {
+    throw new Error('금액은 0이 아닌 숫자여야 합니다.')
+  }
+
+  const signedAmountCny = roundedCny(input.signedAmountCny)
+  const memo = normalizeText(input.memo, 500)
+
   return db.transaction(async (tx) => {
     await tx.execute(sql`
       SELECT pg_advisory_xact_lock(hashtext(${`china-fund-statement:${input.userId}`}))
     `)
-    const [latest] = await tx
-      .select({ importBatchId: chinaFundStatementEntries.importBatchId })
+    const rows = await tx
+      .select({
+        id: chinaFundStatementEntries.id,
+        occurredOn: chinaFundStatementEntries.occurredOn,
+        sequence: chinaFundStatementEntries.sequence,
+        signedAmountCny: chinaFundStatementEntries.signedAmountCny,
+        balanceAfterCny: chinaFundStatementEntries.balanceAfterCny,
+        createdAt: chinaFundStatementEntries.createdAt,
+      })
       .from(chinaFundStatementEntries)
       .where(and(
         eq(chinaFundStatementEntries.userId, input.userId),
         isNull(chinaFundStatementEntries.voidedAt),
       ))
-      .orderBy(
-        desc(chinaFundStatementEntries.occurredOn),
-        desc(chinaFundStatementEntries.createdAt),
-        desc(chinaFundStatementEntries.sequence),
-      )
-      .limit(1)
 
-    if (!latest) throw new Error('취소할 중국 입금내역이 없습니다.')
-    if (latest.importBatchId !== input.importBatchId) {
-      throw new Error('원장 연결을 보호하기 위해 가장 최근에 입력한 묶음부터 취소할 수 있습니다.')
-    }
+    const currentRows = rows.map((row) => ({
+      ...row,
+      signedAmountCny: numericValue(row.signedAmountCny),
+      balanceAfterCny: numericValue(row.balanceAfterCny),
+    }))
+    const target = currentRows.find((row) => row.id === input.entryId)
+    if (!target) throw new Error('수정할 중국 입금내역을 찾지 못했습니다.')
 
-    const rows = await tx
+    const orderedRows = sortChinaFundStatementLedgerRows(currentRows)
+    const firstRow = orderedRows[0]
+    const openingBalanceCny = firstRow
+      ? roundedCny(firstRow.balanceAfterCny - firstRow.signedAmountCny)
+      : 0
+    const revisedRows = currentRows.map((row) => (
+      row.id === input.entryId
+        ? { ...row, occurredOn: input.occurredOn, signedAmountCny }
+        : row
+    ))
+    const balances = recalculateChinaFundStatementBalances(revisedRows, openingBalanceCny)
+    const updatedAt = new Date()
+
+    await tx
       .update(chinaFundStatementEntries)
       .set({
-        voidedAt: new Date(),
-        voidedBy: input.voidedBy,
-        updatedAt: new Date(),
+        occurredOn: input.occurredOn,
+        signedAmountCny: fixedCny(signedAmountCny),
+        direction: signedAmountCny > 0 ? 'china_advance' : 'our_remittance',
+        memo,
+        updatedAt,
       })
       .where(and(
         eq(chinaFundStatementEntries.userId, input.userId),
-        eq(chinaFundStatementEntries.importBatchId, input.importBatchId),
+        eq(chinaFundStatementEntries.id, input.entryId),
         isNull(chinaFundStatementEntries.voidedAt),
       ))
-      .returning({ id: chinaFundStatementEntries.id })
 
-    return { voidedCount: rows.length }
+    for (const row of balances) {
+      await tx
+        .update(chinaFundStatementEntries)
+        .set({
+          balanceAfterCny: fixedCny(row.balanceAfterCny),
+          updatedAt,
+        })
+        .where(and(
+          eq(chinaFundStatementEntries.userId, input.userId),
+          eq(chinaFundStatementEntries.id, row.id),
+          isNull(chinaFundStatementEntries.voidedAt),
+        ))
+    }
+
+    return { id: input.entryId, recalculatedCount: balances.length }
+  })
+}
+
+export async function voidChinaFundStatementEntry(input: {
+  userId: string
+  voidedBy: string
+  entryId: string
+}) {
+  await ensureChinaFundStatementSchema()
+
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`
+      SELECT pg_advisory_xact_lock(hashtext(${`china-fund-statement:${input.userId}`}))
+    `)
+    const rows = await tx
+      .select({
+        id: chinaFundStatementEntries.id,
+        occurredOn: chinaFundStatementEntries.occurredOn,
+        sequence: chinaFundStatementEntries.sequence,
+        signedAmountCny: chinaFundStatementEntries.signedAmountCny,
+        balanceAfterCny: chinaFundStatementEntries.balanceAfterCny,
+        createdAt: chinaFundStatementEntries.createdAt,
+      })
+      .from(chinaFundStatementEntries)
+      .where(and(
+        eq(chinaFundStatementEntries.userId, input.userId),
+        isNull(chinaFundStatementEntries.voidedAt),
+      ))
+
+    const currentRows = rows.map((row) => ({
+      ...row,
+      signedAmountCny: numericValue(row.signedAmountCny),
+      balanceAfterCny: numericValue(row.balanceAfterCny),
+    }))
+    const target = currentRows.find((row) => row.id === input.entryId)
+    if (!target) throw new Error('삭제할 중국 입금내역을 찾지 못했습니다.')
+
+    const orderedRows = sortChinaFundStatementLedgerRows(currentRows)
+    const firstRow = orderedRows[0]
+    const openingBalanceCny = firstRow
+      ? roundedCny(firstRow.balanceAfterCny - firstRow.signedAmountCny)
+      : 0
+    const balances = recalculateChinaFundStatementBalances(
+      currentRows.filter((row) => row.id !== input.entryId),
+      openingBalanceCny,
+    )
+    const updatedAt = new Date()
+
+    await tx
+      .update(chinaFundStatementEntries)
+      .set({
+        voidedAt: updatedAt,
+        voidedBy: input.voidedBy,
+        updatedAt,
+      })
+      .where(and(
+        eq(chinaFundStatementEntries.userId, input.userId),
+        eq(chinaFundStatementEntries.id, input.entryId),
+        isNull(chinaFundStatementEntries.voidedAt),
+      ))
+
+    for (const row of balances) {
+      await tx
+        .update(chinaFundStatementEntries)
+        .set({
+          balanceAfterCny: fixedCny(row.balanceAfterCny),
+          updatedAt,
+        })
+        .where(and(
+          eq(chinaFundStatementEntries.userId, input.userId),
+          eq(chinaFundStatementEntries.id, row.id),
+          isNull(chinaFundStatementEntries.voidedAt),
+        ))
+    }
+
+    return { id: input.entryId, recalculatedCount: balances.length }
   })
 }
 
@@ -409,6 +560,18 @@ function roundedCny(value: number) {
 
 function fixedCny(value: number) {
   return roundedCny(value).toFixed(2)
+}
+
+function statementTuple(
+  occurredOn: string,
+  signedAmountCny: number,
+  balanceAfterCny: number,
+) {
+  return [
+    occurredOn,
+    fixedCny(signedAmountCny),
+    fixedCny(balanceAfterCny),
+  ].join('|')
 }
 
 function numericValue(value: string | number | null | undefined) {

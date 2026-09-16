@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   chinaFundStatementAmountToInternalBalanceChange,
   chinaFundStatementDirection,
+  extractChinaFundStatementTextFromOcr,
   parseChinaFundStatementText,
   summarizeChinaFundStatement,
 } from './china-fund-statement-input'
@@ -65,6 +66,44 @@ describe('parseChinaFundStatementText', () => {
       { occurredOn: '2026-08-28', signedAmountCny: 30_000, balanceAfterCny: 30_000 },
       { occurredOn: '2026-08-29', signedAmountCny: -1_234.5, balanceAfterCny: 28_765.5 },
     ])
+  })
+
+  it('extracts the three statement columns from a descending OCR screenshot', () => {
+    const extracted = extractChinaFundStatementTextFromOcr([
+      '날짜 구분 중국 기준 금액 거래 후 총합 출처',
+      '2026-09-14 중국 선결제 +1,435.18 元 0 元 중국 입금표 2026-08-28~2026-09-14',
+      '2026-09-14 우리 입금 -98,151.9 元 -1,435.18 元 중국 입금표 2026-08-28~2026-09-14',
+      '2026-09-14 중국 선결제 +30,000 元 96,716.72 元 중국 입금표 2026-08-28~2026-09-14',
+      '2026-09-10 중국 선결제 +30,000 元 66,716.72 元 중국 입금표 2026-08-28~2026-09-14',
+    ].join('\n'))
+
+    expect(extracted).toMatchObject({ recognizedCount: 4, ignoredLineCount: 1 })
+    expect(parseChinaFundStatementText(extracted.text)).toMatchObject({
+      errors: [],
+      entries: [
+        { occurredOn: '2026-09-10', signedAmountCny: 30_000, balanceAfterCny: 66_716.72 },
+        { occurredOn: '2026-09-14', signedAmountCny: 30_000, balanceAfterCny: 96_716.72 },
+        { occurredOn: '2026-09-14', signedAmountCny: -98_151.9, balanceAfterCny: -1_435.18 },
+        { occurredOn: '2026-09-14', signedAmountCny: 1_435.18, balanceAfterCny: 0 },
+      ],
+    })
+  })
+
+  it('uses the running balance to reverse same-day OCR rows shown newest first', () => {
+    const extracted = extractChinaFundStatementTextFromOcr([
+      '2026-09-14 중국 선결제 +1,435.18 元 0 元',
+      '2026-09-14 우리 입금 -98,151.9 元 -1,435.18 元',
+      '2026-09-14 중국 선결제 +30,000 元 96,716.72 元',
+    ].join('\n'))
+
+    expect(parseChinaFundStatementText(extracted.text)).toMatchObject({
+      errors: [],
+      entries: [
+        { occurredOn: '2026-09-14', signedAmountCny: 30_000, balanceAfterCny: 96_716.72 },
+        { occurredOn: '2026-09-14', signedAmountCny: -98_151.9, balanceAfterCny: -1_435.18 },
+        { occurredOn: '2026-09-14', signedAmountCny: 1_435.18, balanceAfterCny: 0 },
+      ],
+    })
   })
 
   it('reports syntax and continuity errors with their original line numbers', () => {

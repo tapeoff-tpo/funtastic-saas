@@ -16,13 +16,43 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  buildChinaFundStatementDraft,
   extractChinaFundStatementTextFromOcr,
   parseChinaFundStatementText,
+  summarizeChinaFundStatement,
 } from '@/lib/purchasing/china-fund-statement-input'
 import type {
   ChinaFundStatementEntry,
   ChinaFundStatementList,
 } from '@/lib/purchasing/china-fund-statement'
+
+type ChinaFundStatementDraftRow = {
+  id: string
+  occurredOn: string
+  signedAmountCny: string
+  memo: string
+}
+
+let nextDraftRowId = 0
+
+function createDraftRow(): ChinaFundStatementDraftRow {
+  nextDraftRowId += 1
+  return {
+    id: 'china-statement-draft-' + nextDraftRowId,
+    occurredOn: '',
+    signedAmountCny: '',
+    memo: '',
+  }
+}
+
+function createDraftRows(count = 5) {
+  return Array.from({ length: count }, () => createDraftRow())
+}
+
+function parseDraftAmount(value: string) {
+  const trimmed = value.trim()
+  return trimmed ? Number(trimmed) : null
+}
 
 export function ChinaFundStatementPanel() {
   const imageInputRef = useRef<HTMLInputElement>(null)
@@ -34,7 +64,8 @@ export function ChinaFundStatementPanel() {
   const [error, setError] = useState<string | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [sourceLabel, setSourceLabel] = useState('중국 입금현황 직접 입력')
-  const [pasteText, setPasteText] = useState('')
+  const [draftRows, setDraftRows] = useState<ChinaFundStatementDraftRow[]>(() => createDraftRows())
+  const [draftOpeningBalanceCny, setDraftOpeningBalanceCny] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [ocrLoading, setOcrLoading] = useState(false)
   const [ocrProgress, setOcrProgress] = useState<number | null>(null)
@@ -44,7 +75,16 @@ export function ChinaFundStatementPanel() {
   const [editSignedAmountCny, setEditSignedAmountCny] = useState('')
   const [editMemo, setEditMemo] = useState('')
   const [entrySaving, setEntrySaving] = useState(false)
-  const parsed = useMemo(() => parseChinaFundStatementText(pasteText), [pasteText])
+  const currentOpeningBalanceCny = draftOpeningBalanceCny ?? data?.currentBalanceCny ?? 0
+  const draft = useMemo(() => buildChinaFundStatementDraft(
+    currentOpeningBalanceCny,
+    draftRows.map((row) => ({
+      occurredOn: row.occurredOn,
+      signedAmountCny: parseDraftAmount(row.signedAmountCny),
+      memo: row.memo,
+    })),
+  ), [currentOpeningBalanceCny, draftRows])
+  const draftSummary = useMemo(() => summarizeChinaFundStatement(draft.entries), [draft.entries])
 
   async function loadEntries(nextFrom = from, nextTo = to, nextPage = 1) {
     if (nextFrom && nextTo && nextFrom > nextTo) {
@@ -77,7 +117,7 @@ export function ChinaFundStatementPanel() {
   }
 
   async function saveEntries() {
-    if (parsed.entries.length === 0 || parsed.errors.length > 0) return
+    if (draft.entries.length === 0 || draft.errors.length > 0) return
     setSaving(true)
     try {
       const response = await fetch('/api/purchasing/payment-flow/china-statement', {
@@ -85,7 +125,7 @@ export function ChinaFundStatementPanel() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sourceLabel: sourceLabel.trim() || null,
-          entries: parsed.entries,
+          entries: draft.entries,
         }),
       })
       const body = await response.json().catch(() => ({}))
@@ -95,10 +135,10 @@ export function ChinaFundStatementPanel() {
       toast.success(
         duplicateCount > 0
           ? Number(body.insertedCount ?? 0).toLocaleString('ko-KR') + '건 저장 · 중복 ' + duplicateCount.toLocaleString('ko-KR') + '건 제외'
-          : Number(body.insertedCount ?? parsed.entries.length).toLocaleString('ko-KR') + '건을 저장했습니다.',
+          : Number(body.insertedCount ?? draft.entries.length).toLocaleString('ko-KR') + '건을 저장했습니다.',
       )
       setImportOpen(false)
-      setPasteText('')
+      resetDraftRows()
       setOcrFileName(null)
       setOcrProgress(null)
       setShowEntries(true)
@@ -138,22 +178,60 @@ export function ChinaFundStatementPanel() {
         const result = await worker.recognize(file)
         const extracted = extractChinaFundStatementTextFromOcr(result.data.text)
         if (extracted.recognizedCount === 0) {
-          throw new Error('이미지에서 날짜·금액·총합 행을 읽지 못했습니다. 직접 붙여넣기로 입력해주세요.')
+          throw new Error('이미지에서 날짜·금액·총합 행을 읽지 못했습니다. 표에 직접 입력해주세요.')
         }
-        setPasteText(extracted.text)
+        const ocrParsed = parseChinaFundStatementText(extracted.text)
+        if (ocrParsed.entries.length === 0 || ocrParsed.errors.length > 0) {
+          throw new Error('이미지에서 읽은 총합 흐름을 확인할 수 없습니다. 표에 직접 입력해주세요.')
+        }
+        setDraftRows(ocrParsed.entries.map((entry) => ({
+          id: createDraftRow().id,
+          occurredOn: entry.occurredOn,
+          signedAmountCny: String(entry.signedAmountCny),
+          memo: '',
+        })))
+        setDraftOpeningBalanceCny(ocrParsed.inferredOpeningBalanceCny)
         toast.success(
-          extracted.recognizedCount.toLocaleString('ko-KR') + '건을 읽어 입력칸에 채웠습니다. 저장 전 계산 결과를 확인해주세요.',
+          extracted.recognizedCount.toLocaleString('ko-KR') + '건을 읽어 입력표에 채웠습니다. 날짜와 금액을 확인해주세요.',
         )
       } finally {
         await worker.terminate()
       }
     } catch (ocrError) {
       setOcrFileName(null)
-      toast.error(ocrError instanceof Error ? ocrError.message : '이미지를 읽지 못했습니다. 직접 붙여넣기로 입력해주세요.')
+      toast.error(ocrError instanceof Error ? ocrError.message : '이미지를 읽지 못했습니다. 표에 직접 입력해주세요.')
     } finally {
       setOcrLoading(false)
       setOcrProgress(null)
     }
+  }
+
+  function resetDraftRows() {
+    setDraftRows(createDraftRows())
+    setDraftOpeningBalanceCny(null)
+    setOcrFileName(null)
+    setOcrProgress(null)
+  }
+
+  function addDraftRow() {
+    setDraftRows((rows) => [...rows, createDraftRow()])
+  }
+
+  function removeDraftRow(id: string) {
+    setDraftRows((rows) => {
+      const nextRows = rows.filter((row) => row.id !== id)
+      return nextRows.length > 0 ? nextRows : [createDraftRow()]
+    })
+  }
+
+  function updateDraftRow(
+    id: string,
+    field: keyof Omit<ChinaFundStatementDraftRow, 'id'>,
+    value: string,
+  ) {
+    setDraftRows((rows) => rows.map((row) => (
+      row.id === id ? { ...row, [field]: value } : row
+    )))
   }
 
   function resetRange() {
@@ -235,7 +313,13 @@ export function ChinaFundStatementPanel() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Dialog.Root open={importOpen} onOpenChange={setImportOpen}>
+          <Dialog.Root
+            open={importOpen}
+            onOpenChange={(open) => {
+              setImportOpen(open)
+              if (open && !loading) void loadEntries()
+            }}
+          >
             <Dialog.Trigger
               render={(props) => (
                 <Button {...props} type="button" size="sm" variant="outline">
@@ -249,7 +333,7 @@ export function ChinaFundStatementPanel() {
               <Dialog.Popup className="fixed left-1/2 top-1/2 z-50 max-h-[calc(100vh-2rem)] w-[min(760px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border bg-background p-5 shadow-xl">
                 <Dialog.Title className="text-base font-semibold">중국 입금내역 입력</Dialog.Title>
                 <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-                  엑셀을 붙여넣거나 이미지를 읽어 날짜·금액·총합을 확인한 뒤 저장하세요. 중복 행은 자동으로 제외됩니다.
+                  표에 날짜와 금액을 입력하세요. 날짜는 달력에서 고르고 거래 후 총합은 자동 계산됩니다. 중복 행은 자동으로 제외됩니다.
                 </Dialog.Description>
                 <div className="mt-4 space-y-4">
                   <div className="space-y-1.5">
@@ -259,7 +343,7 @@ export function ChinaFundStatementPanel() {
                       value={sourceLabel}
                       onChange={(event) => setSourceLabel(event.target.value)}
                       maxLength={200}
-                      disabled={saving || ocrLoading}
+                      disabled={saving || ocrLoading || loading}
                     />
                   </div>
                   <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-3">
@@ -279,7 +363,7 @@ export function ChinaFundStatementPanel() {
                       size="sm"
                       variant="outline"
                       onClick={() => imageInputRef.current?.click()}
-                      disabled={saving || ocrLoading}
+                      disabled={saving || ocrLoading || loading}
                     >
                       {ocrLoading ? <Loader2 className="animate-spin" /> : <ImageUp />}
                       이미지 자동입력
@@ -289,48 +373,82 @@ export function ChinaFundStatementPanel() {
                         ? '이미지 글자를 읽는 중' + (ocrProgress === null ? '' : ' ' + ocrProgress + '%')
                         : ocrFileName
                           ? ocrFileName + ' 읽기 완료'
-                          : '이미지는 서버에 저장되지 않고 입력칸만 채웁니다.'}
+                          : '이미지는 서버에 저장되지 않고 입력표만 채웁니다.'}
                     </p>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="china-statement-paste">입금현황 붙여넣기</Label>
-                    <textarea
-                      id="china-statement-paste"
-                      value={pasteText}
-                      onChange={(event) => setPasteText(event.target.value)}
-                      className="min-h-52 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      placeholder={'날짜\t금액\t총합\n2026. 08. 28\t30000\t30000\n2026. 09. 01\t-95386.34\t14613.66'}
-                      disabled={saving || ocrLoading}
-                    />
-                    <p className="text-xs text-muted-foreground">중국 기준 +와 -를 바꾸지 말고 그대로 입력해주세요. 이미지 자동입력 뒤에도 직접 고칠 수 있습니다.</p>
+                  <div className="overflow-hidden rounded-md border">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
+                      <div>
+                        <p className="text-sm font-medium">입금 입력표</p>
+                        <p className="text-xs text-muted-foreground">+는 중국 선결제, -는 우리 입금입니다. 거래 후 총합은 직접 수정하지 않습니다.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="button" size="sm" variant="ghost" onClick={resetDraftRows} disabled={saving || ocrLoading || loading}>빈 표</Button>
+                        <Button type="button" size="sm" variant="outline" onClick={addDraftRow} disabled={saving || ocrLoading || loading}><Plus />행 추가</Button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[760px] text-sm">
+                        <thead className="bg-muted/60 text-xs text-muted-foreground">
+                          <tr>
+                            <th className="w-12 px-2 py-2 text-center font-medium">No.</th>
+                            <th className="min-w-40 px-2 py-2 text-left font-medium">날짜</th>
+                            <th className="min-w-44 px-2 py-2 text-right font-medium">중국 기준 금액 (元)</th>
+                            <th className="min-w-40 px-2 py-2 text-right font-medium">거래 후 총합</th>
+                            <th className="min-w-52 px-2 py-2 text-left font-medium">비고</th>
+                            <th className="w-12 px-1 py-2"><span className="sr-only">행 삭제</span></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {draftRows.map((row, index) => (
+                            <tr key={row.id} className="border-t">
+                              <td className="px-2 py-1.5 text-center tabular-nums text-muted-foreground">{index + 1}</td>
+                              <td className="px-2 py-1.5">
+                                <Input type="date" value={row.occurredOn} onChange={(event) => updateDraftRow(row.id, 'occurredOn', event.target.value)} disabled={saving || ocrLoading || loading} />
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <Input type="number" step="0.01" value={row.signedAmountCny} onChange={(event) => updateDraftRow(row.id, 'signedAmountCny', event.target.value)} disabled={saving || ocrLoading || loading} className="text-right tabular-nums" placeholder="예: 30000 또는 -95386.34" />
+                              </td>
+                              <td className="px-2 py-1.5 text-right tabular-nums font-medium">{draft.balanceAfterCnyByRow[index] === null ? '-' : formatCny(draft.balanceAfterCnyByRow[index]) + ' 元'}</td>
+                              <td className="px-2 py-1.5">
+                                <Input value={row.memo} onChange={(event) => updateDraftRow(row.id, 'memo', event.target.value)} disabled={saving || ocrLoading || loading} maxLength={500} placeholder="선택 입력" />
+                              </td>
+                              <td className="px-1 py-1.5 text-center">
+                                <Button type="button" size="icon-sm" variant="ghost" onClick={() => removeDraftRow(row.id)} disabled={saving || ocrLoading || loading} aria-label={(index + 1) + '행 삭제'} title="이 행 삭제"><Trash2 /></Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
 
-                  {pasteText.trim() ? (
-                    <div className={'rounded-md border px-3 py-2 text-sm ' + (
-                      parsed.errors.length > 0
-                        ? 'border-red-300 bg-red-50 text-red-900'
-                        : 'border-emerald-300 bg-emerald-50 text-emerald-900'
-                    )}>
-                      {parsed.errors.length > 0 ? (
-                        <div>
-                          <p className="font-medium">확인이 필요한 행 {parsed.errors.length.toLocaleString('ko-KR')}건</p>
-                          <ul className="mt-1 space-y-0.5 text-xs">
-                            {parsed.errors.slice(0, 5).map((item) => (
-                              <li key={String(item.lineNumber) + ':' + item.message}>{item.lineNumber}행 · {item.message}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : (
-                        <div className="grid gap-1 text-xs sm:grid-cols-2">
-                          <p>인식 {parsed.entries.length.toLocaleString('ko-KR')}건</p>
-                          <p>시작잔액 {formatCny(parsed.inferredOpeningBalanceCny)} 元</p>
-                          <p>중국 선결제 +{formatCny(parsed.advanceTotalCny)} 元</p>
-                          <p>우리 입금 -{formatCny(parsed.remittanceTotalCny)} 元</p>
-                          <p className="font-semibold sm:col-span-2">마지막 총합 {formatCny(parsed.finalBalanceCny)} 元 · 계산 일치</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
+                  <div className={'rounded-md border px-3 py-2 text-sm ' + (
+                    draft.errors.length > 0
+                      ? 'border-red-300 bg-red-50 text-red-900'
+                      : 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                  )}>
+                    {loading ? (
+                      <p className="text-xs text-muted-foreground">현재 중국 잔액을 불러오는 중입니다. 완료되면 입력할 수 있습니다.</p>
+                    ) : draft.errors.length > 0 ? (
+                      <div>
+                        <p className="font-medium">확인이 필요한 행 {draft.errors.length.toLocaleString('ko-KR')}건</p>
+                        <ul className="mt-1 space-y-0.5 text-xs">
+                          {draft.errors.slice(0, 5).map((item) => (
+                            <li key={String(item.rowNumber) + ':' + item.message}>{item.rowNumber}행 · {item.message}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : (
+                      <div className="grid gap-1 text-xs sm:grid-cols-2">
+                        <p>입력 {draft.entries.length.toLocaleString('ko-KR')}건</p>
+                        <p>시작잔액 {formatCny(draft.openingBalanceCny)} 元</p>
+                        <p>중국 선결제 +{formatCny(draftSummary.chinaAdvanceCny)} 元</p>
+                        <p>우리 입금 -{formatCny(draftSummary.companyRemittanceCny)} 元</p>
+                        <p className="font-semibold sm:col-span-2">마지막 총합 {formatCny(draft.finalBalanceCny)} 元 · 자동 계산</p>
+                      </div>
+                    )}
+                  </div>
 
                   <div className="flex justify-end gap-2">
                     <Dialog.Close
@@ -339,10 +457,10 @@ export function ChinaFundStatementPanel() {
                     <Button
                       type="button"
                       onClick={() => void saveEntries()}
-                      disabled={saving || ocrLoading || parsed.entries.length === 0 || parsed.errors.length > 0}
+                      disabled={saving || ocrLoading || loading || draft.entries.length === 0 || draft.errors.length > 0}
                     >
                       {saving ? <Loader2 className="animate-spin" /> : null}
-                      {parsed.entries.length.toLocaleString('ko-KR')}건 저장
+                      {draft.entries.length.toLocaleString('ko-KR')}건 저장
                     </Button>
                   </div>
                 </div>

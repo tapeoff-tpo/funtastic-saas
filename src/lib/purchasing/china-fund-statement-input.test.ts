@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildChinaFundStatementDraft,
   chinaFundStatementAmountToInternalBalanceChange,
   chinaFundStatementDirection,
   extractChinaFundStatementTextFromOcr,
@@ -150,6 +151,37 @@ describe('parseChinaFundStatementText', () => {
     expect(result.errors.map(({ lineNumber, code }) => ({ lineNumber, code }))).toEqual([
       { lineNumber: 3, code: 'invalid_amount' },
       { lineNumber: 2, code: 'date_order' },
+    ])
+  })
+})
+
+describe('buildChinaFundStatementDraft', () => {
+  it('calculates running balances from the current balance and preserves row memos', () => {
+    const result = buildChinaFundStatementDraft(1_200.5, [
+      { occurredOn: '2026-09-15', signedAmountCny: 300, memo: '선결제' },
+      { occurredOn: '2026-09-16', signedAmountCny: -50.25, memo: '  우리 입금  ' },
+      { occurredOn: '', signedAmountCny: null },
+    ])
+
+    expect(result.errors).toEqual([])
+    expect(result.entries).toEqual([
+      { occurredOn: '2026-09-15', signedAmountCny: 300, balanceAfterCny: 1_500.5, memo: '선결제' },
+      { occurredOn: '2026-09-16', signedAmountCny: -50.25, balanceAfterCny: 1_450.25, memo: '우리 입금' },
+    ])
+    expect(result.balanceAfterCnyByRow).toEqual([1_500.5, 1_450.25, null])
+    expect(result.finalBalanceCny).toBe(1_450.25)
+  })
+
+  it('requires complete rows and date order before saving', () => {
+    const result = buildChinaFundStatementDraft(0, [
+      { occurredOn: '2026-09-16', signedAmountCny: 100 },
+      { occurredOn: '2026-09-15', signedAmountCny: -20 },
+      { occurredOn: '', signedAmountCny: 30 },
+    ])
+
+    expect(result.errors).toEqual([
+      { rowNumber: 2, message: '날짜가 앞 행보다 이전입니다. 날짜순으로 입력해주세요.' },
+      { rowNumber: 3, message: '날짜를 선택해주세요.' },
     ])
   })
 })

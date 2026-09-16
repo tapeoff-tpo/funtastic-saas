@@ -30,6 +30,25 @@ export type ChinaFundStatementParseResult = {
   finalBalanceCny: number | null
 }
 
+export type ChinaFundStatementDraftInputRow = {
+  occurredOn: string
+  signedAmountCny: number | null
+  memo?: string | null
+}
+
+export type ChinaFundStatementDraftError = {
+  rowNumber: number
+  message: string
+}
+
+export type ChinaFundStatementDraftResult = {
+  entries: Array<ChinaFundStatementRow & { memo: string | null }>
+  errors: ChinaFundStatementDraftError[]
+  balanceAfterCnyByRow: Array<number | null>
+  openingBalanceCny: number
+  finalBalanceCny: number
+}
+
 export type ChinaFundStatementSummary = {
   chinaAdvanceCny: number
   companyRemittanceCny: number
@@ -156,6 +175,76 @@ export function parseChinaFundStatementText(text: string): ChinaFundStatementPar
   }
 }
 
+/** Builds the server-ready rows and running balances for the manual input table. */
+export function buildChinaFundStatementDraft(
+  openingBalanceCny: number,
+  rows: readonly ChinaFundStatementDraftInputRow[],
+): ChinaFundStatementDraftResult {
+  const safeOpeningBalanceCny = Number.isFinite(openingBalanceCny)
+    ? roundCny(openingBalanceCny)
+    : 0
+  const entries: Array<ChinaFundStatementRow & { memo: string | null }> = []
+  const errors: ChinaFundStatementDraftError[] = []
+  const balanceAfterCnyByRow: Array<number | null> = rows.map(() => null)
+  let runningBalanceCny = safeOpeningBalanceCny
+  let previousOccurredOn: string | null = null
+
+  for (const [index, row] of rows.entries()) {
+    const rowNumber = index + 1
+    const occurredOnInput = row.occurredOn.trim()
+    const hasDate = occurredOnInput.length > 0
+    const hasAmount = row.signedAmountCny !== null
+
+    if (!hasDate && !hasAmount) continue
+
+    if (!hasDate || !hasAmount) {
+      errors.push({
+        rowNumber,
+        message: !hasDate ? '날짜를 선택해주세요.' : '중국 기준 금액을 입력해주세요.',
+      })
+      continue
+    }
+
+    const occurredOn = parseStatementDate(occurredOnInput)
+    if (!occurredOn) {
+      errors.push({ rowNumber, message: '날짜를 확인해주세요.' })
+      continue
+    }
+
+    const signedAmountCny = row.signedAmountCny
+    if (!Number.isFinite(signedAmountCny) || signedAmountCny === 0) {
+      errors.push({ rowNumber, message: '금액은 0이 아닌 숫자여야 합니다.' })
+      continue
+    }
+    if (Math.abs(roundCny(signedAmountCny) - signedAmountCny) > Number.EPSILON) {
+      errors.push({ rowNumber, message: '금액은 소수점 둘째 자리까지만 입력해주세요.' })
+      continue
+    }
+    if (previousOccurredOn && occurredOn < previousOccurredOn) {
+      errors.push({ rowNumber, message: '날짜가 앞 행보다 이전입니다. 날짜순으로 입력해주세요.' })
+    }
+
+    const roundedAmountCny = roundCny(signedAmountCny)
+    runningBalanceCny = roundCny(runningBalanceCny + roundedAmountCny)
+    balanceAfterCnyByRow[index] = runningBalanceCny
+    entries.push({
+      occurredOn,
+      signedAmountCny: roundedAmountCny,
+      balanceAfterCny: runningBalanceCny,
+      memo: row.memo?.trim() || null,
+    })
+    previousOccurredOn = occurredOn
+  }
+
+  return {
+    entries,
+    errors,
+    balanceAfterCnyByRow,
+    openingBalanceCny: safeOpeningBalanceCny,
+    finalBalanceCny: runningBalanceCny,
+  }
+}
+
 export function chinaFundStatementDirection(
   signedAmountCny: number,
 ): ChinaFundStatementDirection {
@@ -189,7 +278,7 @@ export function summarizeChinaFundStatement(
 
 /**
  * Converts OCR output from a screenshot of the China deposit table into the
- * same three-column text accepted by the manual paste workflow.
+ * same three-column text used to populate the manual input table.
  */
 export function extractChinaFundStatementTextFromOcr(
   text: string,
